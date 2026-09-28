@@ -2,6 +2,17 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-8b review round 2 addressed: the poller
+  owns one admission cache shared with the explicit user actions, the explicit
+  probe records its outcome, and the runtime fence stamps the bundled manifest
+  too
+- **Last updated:** 2026-09-28, G-8b review round 1 addressed: the poll
+  republishes the fence's uptime, reuses only an admission whose ping identity
+  still matches, realigns the windowed Tailscale ping to the poll alone, and the
+  row returns to Claimed until the app-level cadence measurement runs
+
+- **Last updated:** 2026-09-28, G-7 (final review round addressed: an unchanged catalog answer rebuilds the row projection, a cleared automation marker moves the catalog token)
+
 - **Last updated:** 2026-09-28, C-1 review round addressed and its E2E re-run passed (Done)
 
 - **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
@@ -22,6 +33,12 @@
 - **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
 
 - **Last updated:** 2026-09-28, G-1b catalog watcher (review round 2: spurious whole-folder passes, true `catalog.changed` bound, O-6a evidence)
+
+- **Last updated:** 2026-09-28, E-2c blocked and review-addressed: the profiler refuses a host-wide `time-profiler` trace whose export is projected over its 2 GiB budget and names the trace's size, so no traced scenario's export is projected above 2 GiB; a device capture is not held to that ratio, the shorter-window half and a passing `--scenario all` run remain
+
+- **Last updated:** 2026-09-28, T-2 review round 1 addressed: the kill is another worktree's run on the same default-lane simulator, and T-3 tracks the lease that did not serialize them
+
+- **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes the session state a newer snapshot re-states with the one `session.rebaseline` that covers it, fencing one-shot frames a snapshot cannot restore (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -545,9 +562,9 @@ rows are in priority order.
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
 | O-1 | Done | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-6a | Blocked | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 (second review response) |
-| E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
+| E-2 | Done | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2b | Done | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| E-2c | Claimed | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-2c | Done | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28; the export of a host-wide recording is now refused above its budget (measured on real traces), the shorter-window half and a passing `--scenario all` run remain (see handoff) |
 | O-2 | Done | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
@@ -557,7 +574,7 @@ rows are in priority order.
 | C-1 | Done | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (review round addressed; E2E re-run passed, run `20260928T193255Z-run.E6rrDl`) |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
-| G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
+| G-1c | Claimed | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
@@ -567,14 +584,14 @@ rows are in priority order.
 | G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| C-6 | Ready | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | |
+| C-6 | Claimed | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
-| G-4 | Claimed | Outbound queue coalescing of superseded snapshots and keyed events | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-5 | Claimed | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence; round 3 after merging `hardening/integration`: the replacement path's client is asserted on the authority it installs, covered `session.snapshot`/`session.rebaseline` alike, and the round's fixtures speak protocol 6); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
+| G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3a | Ready | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | |
 | E-3b | Ready | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
@@ -583,11 +600,12 @@ rows are in priority order.
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8a | Ready | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | |
 | G-8d | Ready | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | |
-| G-8b | Claimed | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-8b | Done | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed; back to Claimed because the app-level cadence measurement the row asks for is still owed (see handoff) |
 | G-8c | Ready | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
-| E-1 | Claimed | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-1 | Done | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
-| T-2 | Claimed | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
+| T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-7 | Ready | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | |
 
 ### Phase 2 — Release and one evaluation day
@@ -1352,12 +1370,19 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Goal:** a slow link never fills the queue with superseded state.
 - **Owning files:** `packages/gateway/src/transport/server.ts`
   (`OrderedOutboundQueue`, send paths).
-- **Do:** per connection, a newer `session.snapshot` for a session replaces an
-  unsent older one; keyed events (summaries per session, process activity per
-  process) replace unsent predecessors with the same key. Order relative to
-  other events and synchronization barriers is preserved. The 8 MiB cap stays
-  as the backstop; `connection.outbound-capacity` names the topics of the
-  oldest and next frames.
+- **Do:** per connection, a newer `session.summary` replaces the unsent summary
+  of its session, and a newer `session.snapshot` supersedes the unsent sequenced
+  state of its own runtime generation that its own state fully re-states, up to
+  its own `eventSequence`, sent as the `session.rebaseline` that covers them and
+  carries the connection's installed `subscriptionToken`; a superseded sequence
+  is never left uncovered, and a sequenced frame whose effect installing a
+  snapshot does not perform (a failure receipt, a revision bump, an editor
+  directive), or one of another runtime generation, is a fence the queue never
+  drops across. Order
+  relative to other events and synchronization barriers is preserved and the
+  frame `ws` is already writing is never recalled. The 8 MiB cap stays as the
+  backstop; `connection.outbound-capacity` names the topics of the oldest and
+  next frames.
 - **Failure modes to write first:** snapshot superseded while its sequence is
   pending in a barrier; replacement larger than the cap; coalescing a frame
   already being written; interleaved progress and snapshot frames.
@@ -1377,7 +1402,11 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
      factor from the data.
   2. Byte budget `LIVE_RUNTIME_BYTE_BUDGET` (initial 1.5 GB) for admission and
      pressure eviction, largest idle runtime first; protected runtimes stay
-     protected. Record `runtime.loaded` and `runtime.evicted` with bytes.
+     protected. Record `runtime.loaded` and `runtime.evicted` with bytes. As
+     implemented, the budget is **eviction pressure only**: an admission it
+     cannot fit is served over budget and named on its `runtime.loaded` record
+     (G-12 owns refusal under the real heap limit), and nothing is retired when
+     retiring could not help — see the G-5 entry below.
   3. Set `--max-old-space-size` explicitly (initial 4,096 MB) with the budget
      below it.
 - **Checks:** `packages/gateway/src/sessions/runtime-registry.integration.test.ts`.
@@ -2310,6 +2339,125 @@ Read the numbers as one sample per case.
   retained evidence folder renamed the Python `simattach.sh` to `simattach.py`,
   added the host positive-control probe (`e2b-probe.py`), and describes
   `verdict.py`.
+
+### E-2c · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the refusal half is implemented on this branch. `scripts/tron_profile_attribution.py`
+  refuses a host-wide `time-profiler` trace whose `xcrun xctrace export` cannot
+  stay inside a 2 GiB budget (`EXPORT_PEAK_BUDGET_BYTES`), names the trace's own
+  size and its projected tree peak, and starts no export; `attribution.json` and
+  `attribution.md` carry the trace's bytes, projected peak and budget. Only
+  host-wide recordings are checked: `attribute()` takes `host_wide`, which
+  `scripts/tron-profile-ios` sets from the template's recording target and
+  `scripts/tron-profile-device` passes false, because a capture of one attached
+  process has no measured export-to-trace-size ratio. The default scenario
+  windows were **not** shortened: measured on real default traces, the recorded
+  span — not the window length — is what the budget binds, so shortening the
+  defaults would degrade every untraced report to serve the traced path. The row
+  stays Blocked because "under 2 GB for `--scenario all`" is not demonstrated as
+  a passing run: the retained product-scenario traces were recorded with
+  `--iterations 3` and project 5.5-6.6 GiB, and at the inferred cost of one
+  warm-up plus one measured window `--iterations 1` still projects 2.8-3.3 GiB
+  and is refused, so a passing traced product run needs a window short enough to
+  change what the scenario measures. A real `--scenario all` traced run also needs the lane's
+  DevicePerformance build plus ten scenarios, which did not fit this task's
+  budget on a host at load average 15-40 with the lane leased elsewhere.
+  Simulator-device recording was not re-probed: E-2b established it never starts
+  (180 s without returning, then the recorder's 300 s abort).
+- Evidence:
+  - Accepted (real trace, real CLI):
+    `python3 scripts/tron_profile_attribution.py <75.3 MiB control-cpu
+    --iterations 5 trace> --template time-profiler --pid 33246 --windows
+    .../windows.jsonl` exits 0 in 44 s; tree-RSS peak 1,308 MiB (xctrace child
+    1,277 MiB) measured with `files/hardening/e-2/peak.py`; `attribution.json`
+    holds `export {traceBytes 78,976,785, projectedPeakBytes 1,579,535,700,
+    budgetBytes 2,147,483,648}` with 233 measured samples over 5 windows;
+    artifacts `~/.tron/workspace/files/hardening/e-2c/control-cpu-accepted-attribution.{json,md}`.
+  - Refused (real trace): the same CLI on E-2's 338.7 MiB idle-dashboard trace
+    exits 2 in 0.3 s with a 6 MiB peak (no export started): "refusing to export
+    idle-dashboard.trace: the trace is 339 MiB and its xctrace export is
+    projected at 6.6 GiB, over the 2.0 GiB budget (20 bytes of tree peak per
+    trace byte measured on host-wide recordings); record a shorter trace (a
+    smaller --window-seconds or --iterations) on a quieter host".
+  - Scoping (real trace): the 131.7 MiB streaming-reply trace is refused as
+    host-wide (exit 2) and exported with the CLI's `--device-capture` (exit 0,
+    98 s, tree peak 2,434 MiB) into a document with no `export` block; that
+    2.38 GiB measured peak also confirms the refusal of that trace was right.
+  - Calibration (whole-tree peak per trace byte, host-wide Time Profiler, all
+    from `peak.py`): 55.5 MiB -> 998 MiB (18.0), four runs of 75.3 MiB ->
+    1,308-1,370 MiB (17.4-18.2), 131.7 MiB -> 2,434 MiB (18.5), 338.7 MiB ->
+    4,637 MiB (13.7). The constant 20 rounds the worst up with ~8% headroom; the
+    parser's own peak never overlapped the export's, so the tree is what the
+    budget has to cover. (E-2's and E-2b's handoffs label the last trace 342 MB
+    and the first 57 MB; these are the same traces in MiB.)
+  - Why a refusal is the only bound (each tested here):
+    `--xpath '.../table[@schema="time-profile"]/row[position()<5]'` returned 0
+    rows and still peaked at 1,231 MiB, so the export child builds the whole
+    table whatever `--xpath` selects; `ulimit -v` and `ulimit -d` are rejected
+    by the shell and `resource.setrlimit(RLIMIT_AS)` fails on macOS, so the
+    child cannot be capped either.
+  - What sizes the trace (toc duration + the run's `windows.jsonl`), all
+    `--iterations 3` except control-cpu (5): idle-dashboard 4x30 s -> 131.0 s /
+    338.7 MiB (2.59 MiB/s); streaming-reply 4x12 s -> 106.8 s / 302.8 MiB
+    (2.83); tool-loop 4x15 s -> 80.6 s / 282.9 MiB (3.51); control-cpu 6x2 s ->
+    13.6 s / 55.5 MiB (4.09). Host-wide rate 2.6-4.4 MiB/s (a fresh 15 s
+    host-wide recording was 62.8 MiB at 3.8 MiB/s,
+    `~/.tron/workspace/files/hardening/e-2c/host-trace-rate.json`). The budget
+    admits a 102 MiB trace, i.e. a 25-40 s recorded span; `--iterations 1`
+    records the discarded warm-up window as well, so the default windows do not
+    fit even then (inferred from those traces' spans: 2.8-3.3 GiB projected),
+    while the 2 s control windows do (55.5 MiB measured).
+  - `python3 scripts/test-tron-profile-attribution.py` 12/12 (failure mode 10:
+    the budget boundary refuses one byte over and accepts at it, no export is
+    started on a refused trace, the refusal names the trace's size, and a
+    device capture over the budget still exports without an `export` block);
+    `python3 scripts/test-tron-profile-ios.py` 7/7.
+- Changes: `fix(ios): refuse a time-profiler export that cannot fit the profiler's memory budget (E-2c)`
+  — `scripts/tron_profile_attribution.py`, `scripts/tron-profile-ios`,
+  `scripts/tron-profile-device`, `scripts/test-tron-profile-attribution.py`,
+  `packages/ios-app/docs/development.md` and this plan; the review response
+  below adds `fix(ios): scope the profiler export budget to host-wide recordings (E-2c)`
+  over the same files.
+- Tasks added: none.
+- Kept on purpose: `--all-processes` recording, `attribution.TEMPLATES`, the
+  default scenario windows and `--iterations` default 5 (see Result); the
+  owning doc's "keep traced runs short (1-3)" advice is replaced by the budget
+  the refusal enforces.
+- Deviations: no simulator run and no new trace recorded. The measurements use
+  real existing traces and the real CLI, the same route E-2 used; the recorded
+  rate is from a fresh host-wide recording taken for this task. The device
+  capture's exemption was measured on a real trace through the CLI's
+  `--device-capture`, not through `tron-profile device`, which needs a phone.
+- For the next agent: to close the row, run `scripts/tron-profile ios
+  --no-build --scenario all --trace time-profiler --iterations 1` on a quiet
+  host after the lane's build, expecting the six product scenarios to be
+  refused at their default windows (a refusal keeps the trace and costs only
+  that scenario's simulator time) and the four 2 s control scenarios to fit.
+  Then decide whether a traced product window short enough to fit
+  (`--window-seconds <n>`, so warm-up plus one window plus setup stay under a
+  ~25-40 s recorded span) is still a measurement worth taking, or whether the
+  row's goal moves to a simulator-device recording that samples the app alone;
+  the measurements say the recorded span, not the window, is the budget's
+  driver.
+- Review response (the follow-up commit on this branch): the sizing evidence is
+  relabeled as `--iterations 3` (four window lines, warm-up included) and the
+  "`--iterations 1` fits" claim is replaced by the inferred warm-up-inclusive
+  numbers (finding 1); the doc's example command is now the fitting control
+  self-test, its "1-3" advice is replaced by the budget it is bounded by, and
+  the refusal's remedy names `--window-seconds`/`--iterations` instead of
+  `--iterations 1`; the check is scoped to host-wide recordings through
+  `attribute(..., host_wide=)`, with `tron-profile device` exempt, the CLI given
+  `--device-capture` for a re-summarized device trace, and the device section of
+  the owning doc saying so (finding 2, measured on a real trace); the constant is
+  20 on the measured whole-tree peak with the comment's wording corrected and its
+  bound stated as observed (finding 3); the header line says "no traced
+  scenario's export is projected above 2 GiB" (finding 4); the test keeps the
+  refusal-before-export, the boundary and the size in the message and drops the
+  constant-and-remedy literals, with the device exemption added (finding 5); the
+  message, docs, handoff and evidence README use MiB/GiB only (finding 6); the
+  post-recording timing is stated where a user decides `--iterations` and
+  `--window-seconds` (finding 7); and this handoff's `Changes` line names the
+  files both commits touch (finding 8).
 
 ### O-3 · Done · 2026-09-28 · worker session (branch `hardening/o-3`)
 
@@ -5412,6 +5560,198 @@ events; widen them to name the pool owner in the same change.
   leg reaches a pong miss or a capacity close inside 30 s is part of that
   baseline; the leg is not tuned for it.
 
+### G-5 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-5`)
+
+- Result: live runtimes are bounded by bytes as well as by count.
+  `LIVE_RUNTIME_BYTE_BUDGET` (1.5 GiB) in
+  `packages/gateway/src/sessions/runtime-registry.ts` charges each live runtime
+  `LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` (3) times its canonical transcript bytes,
+  measured at admission from the same one-`stat`-per-runtime inventory the
+  resource sample reads (`resourceInventory`, now documented as shared by the
+  sampler and the budget, and skipping a slot that is already disposed). The
+  budget is **eviction pressure, not an admission gate**: an admission that does
+  not fit retires idle runtimes **largest first** (the largest reclaims the most),
+  under the existing protections (subscriber, run, lease, blocked ownership) and
+  only when the runtime can be reloaded, until the projected total fits. Nothing
+  is retired when retiring could not help — the opening charge is larger than the
+  whole budget, or the excess is larger than every eligible runtime together —
+  and an admission the retired set still cannot fit is served anyway, with its
+  `runtime.loaded` record carrying `overBudget: true`. The projected total counts
+  the starts already reserved for except the requested session's own reservation,
+  which the opening charge already is; a start already pending for the requested
+  session retires nothing at all. No admission is ever refused on this budget
+  (G-12 owns refusal under the real heap limit); the runtime count and the
+  explicit heap limit stay the backstop. Each transition writes one record from
+  the registry: `runtime.loaded` at publication and `runtime.evicted` where the
+  slot stops being live, both with `sessionId`, a `reason` (`open` | `create` |
+  `automation` | `import` | `oversize` for a load; `bytes` | `idle` | `capacity`
+  | `closed` | `disposed` | `deleted` | `shutdown` for an eviction),
+  `transcriptBytes` and the `estimatedHeapBytes` the budget charged, as named
+  `counts`, and `overBudget` on an over-budget load (the log line carries it in
+  `counts` as `overBudget = 1`).
+  `packages/mac-app/scripts/tron-gateway-launcher.c` passes
+  `--max-old-space-size=4096` before the entrypoint, so the budget is under an
+  explicit limit instead of Node's default.
+- Failure modes written before the code (all covered by
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts`): (1) a
+  live runtime that grew past the budget is never reclaimed, because admission
+  checks only the runtime count; (2) the smallest idle runtime is retired when
+  the largest would have been enough, so extra sessions lose their state; (3) an
+  opening session whose bytes fit nowhere is refused on the budget, so a loaded
+  session it cannot reclaim makes every later open of a non-empty transcript
+  unopenable; (4) a protected runtime (an audience) is retired under byte
+  pressure; (5) the transitions are counted but never named, so no record says
+  which session was loaded or evicted, what the budget charged it or why it went
+  away; (6) two opens of one session at once charge it twice, so the pass evicts
+  idle runtimes for room the first open had already taken; (7) a transcript
+  larger than the whole budget evicts every idle runtime and can then never
+  open; (8) an eviction is recorded for nothing, because retiring every eligible
+  runtime still could not make the admission fit; (9) an evicted runtime
+  reports the size it was loaded with instead of the bytes it gave back; (10) a
+  slot disposed outside the registry is recorded as an extension-requested
+  close.
+- Tests (seven added, one existing; all in the owning integration file):
+  largest-first retirement and the over-budget admission use a **real**
+  transcript grown with a sparse `truncate` (the previous mocks fed the budget
+  sizes production never supplies), the small session is acquired first so a
+  smallest-first, iteration-order or least-recently-used pass all fail, the
+  same-session race is driven through a `resourceInventory` spy plus a held
+  `RuntimeSlot.create` mock so the second pass runs while the first open's
+  reservation exists, and the live set is asserted through the public
+  `resourceInventory()` instead of a private `slots` cast. Each new test was
+  shown failing on the source without its fix:
+  - same-session double charge: `AssertionError: expected true to be false //
+    Object.is equality` on the previous registry source (the second pass retired
+    the 470 MiB idle runtime).
+  - nothing retired when retiring cannot help: the same `expected true to be
+    false` on `idleSlot.isDisposed` with the eligible-set check removed.
+  - the eviction's reclaimed bytes: `AssertionError: expected 645 to be
+    838860800 // Object.is equality` with the pass's charge refresh removed.
+  - `disposed` not `closed`: the reason mismatch for a slot disposed outside the
+    registry.
+- Evidence:
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
+    "budget"` passes 9/9 (six budget cases) in ~2 s on the changed tree, and the
+    whole owning file passes 257/257 in 51 s.
+  - `npx tsc --noEmit` is clean on the changed tree.
+  - Launcher: the compiled launcher plus
+    `packages/mac-app/scripts/test-tron-gateway-launcher.sh` (fixture asserts
+    `$1 = --max-old-space-size=4096` before the entrypoint, exit 13 otherwise)
+    pass end to end with the pinned Node 22.22.0 on `PATH`, so the flag reaches
+    the child argv in every launch case. It stays the check for the launcher half
+    of this task.
+- Checks: `runtime-registry.integration.test.ts` (the row's named owner) covers
+  the budget, the largest-first order, the protected-runtime case, the
+  over-budget admission and its record, the same-session double charge, the
+  no-pointless-eviction case, the charged-zero admission and the records.
+- Docs: `packages/gateway/README.md` (Session invariants) states the budget as
+  eviction pressure, the factor, the largest-first order, the cases that retire
+  nothing, the admitted-over-budget load, the same-session reservation
+  exclusion, the explicit `--max-old-space-size` and the records;
+  `packages/gateway/docs/observability.md` has rows for `runtime.loaded` and
+  `runtime.evicted` with their levels, triggers, `reason` values, `overBudget`,
+  `counts` and rationale.
+- Volume: the two records are per transition (one per session load and one per
+  eviction — tens a day on a normal day, a few hundred worst case), far inside
+  the 1 MB/day budget; the per-minute `gateway.resources` volume is unchanged.
+- Review round 2 (2026-09-28, changes-required, 2 major + 3 minor + 2 nits;
+  all addressed):
+  - **Same-session double charge.** The second open's byte pass charged the
+    requested session twice — its reservation and its opening charge. The
+    projected total now leaves out the requested session's own reservation, and
+    a pass whose requested session already has a start pending retires nothing;
+    the mutation test above pins it.
+  - **The budget refuses an open.** Removed by orchestrator decision: the budget
+    is eviction pressure, G-12 owns refusal under the real heap limit. Nothing
+    is retired when retiring cannot help, an admission it cannot fit is served
+    and its `runtime.loaded` record carries `overBudget: true`, and the whole
+    refusal path (`requireRuntimeByteBudget`, `byteBudgetFits`) is deleted with
+    its `busy` message. README, observability rows and this entry say so.
+  - **Pointless eviction.** Before retiring anything, the pass sums the eligible
+    candidates and retires nothing when the excess is larger than that sum; the
+    eligibility closure re-checks that room is still needed (`projectedBytes() >
+    LIVE_RUNTIME_BYTE_BUDGET`), like `evictIdle`'s `needsCapacity()`. Only the
+    eligible-set check has a negative control; the closure's re-check is
+    defensive (it can only be reached through a concurrent pass) and has no test
+    of its own.
+  - **Bytes the eviction actually reclaimed.** The pass refreshes
+    `publishedRuntimeBytes` from its own stat, so a runtime that grew after its
+    load is recorded with what it gave back (the records test asserts 800 MiB,
+    not the few KB it was loaded with).
+  - **Dead budget calls.** The `create` and automation paths no longer call the
+    byte pass or a budget check with `incomingBytes: 0`; a session with no
+    transcript adds no bytes, so the pass is only reached by an admission with a
+    real charge (open, import), and the rule lives in the pass's comment.
+  - **Attribution nits.** The slot cleared on the next open after some other
+    owner disposed it is recorded as `disposed` instead of claiming `closed`. The
+    rekey double count went away with the pass's covered set: no pass adds the
+    charge of a runtime published after its inventory read, because the budget no
+    longer refuses on that snapshot.
+  - **Handoff evidence.** The garbled budget-message failure text is replaced by
+    the real negative-control outputs above.
+- Review round 1 (2026-09-28, changes-required → fixed; superseded where round 2
+  removed what it protected): (1) the publication race was closed by the
+  per-runtime charge and its mutex add-back, with the concurrent-publication
+  case — round 2 deleted the refusal that made the gated snapshot necessary, and
+  with it that case; (2) the oversize admission is passed through
+  before any eviction, with the oversize case; (4) a zero-charge admission is
+  passed through too — the supervisor chose A1 + B1 (preserve the product; the
+  explicit heap limit is the hard backstop; name the oversize load). (5) the
+  tests now use real sizes and public accessors. (6) `resourceInventory` skips a
+  disposed slot and the pass excludes the requested session, which also makes
+  the old `break`/`continue` check unreachable and it was deleted rather than
+  replaced. (7) the records carry `reason` and put their bytes in `counts`.
+  (8) the `runtime-slot.ts` edit (an out-of-scope extra `await stat()` in the
+  Slot conflict zone) is reverted; the registry owns the eviction record from
+  its own charge. (9) the pass is wrapped in the `session.runtime-budget` stage.
+  (10) the private `slots` cast is gone; the assertion uses
+  `resourceInventory()`, not `activeSessionIds()`, which reports only busy slots
+  and cannot name two idle-or-live runtimes.
+- "Done when" (a sequence of large idle sessions in O-6a never exceeds the
+  budget): O-6a confirmation and the factor measurement are owed by the
+  orchestrator with the quiet-host runs; factor 3 is provisional. The budget is
+  enforced on the admission path and proven by the integration cases above; if a
+  quiet-host O-6a run shows the real heap-per-transcript-byte figure is off, the
+  factor is the one number to move.
+- Kept on purpose: the budget is a named constant next to its only user rather
+  than a config surface (the plan names `LIVE_RUNTIME_BYTE_BUDGET`; a deployment
+  override would be speculative); the count still caps the runtime number while
+  the budget caps bytes, so both checks stay where each belongs; `resourceInventory`
+  stayed the one place that stats live runtimes, so the sampler and the budget
+  cannot disagree about a runtime's size; `importFromJsonl` is charged the source
+  transcript's bytes, which is what the fork copies.
+- Deviations: `runtime-registry.ts` kept the retirement body of `evictIdle` as a
+  new private `retireIdleRuntime` so the byte pass reuses the same commit logic
+  (mutex check, slot eligibility fence, bookkeeping) instead of a second copy,
+  and now threads an eviction `reason` through it; `gateway-main.ts` gained the
+  log wiring. No new files. `runtime-slot.ts` is untouched by the final change.
+- Withdrawn: the `runtimeEvicted(sessionId, transcriptBytes)` dependency on
+  `RuntimeSlot` — the record moved to the registry with finding 8. The slot no
+  longer stats its transcript at disposal; the registry records the size the
+  budget charged at publication, refreshed by the byte pass from the stat it read
+  before an eviction it makes (documented in the observability row).
+- For the next agent: G-12 (heap-pressure shedding) owns refusal under the real
+  heap limit, which this task deliberately does not do: the byte budget retires
+  idle runtimes and admits an over-budget load with `overBudget` on its
+  `runtime.loaded` record. G-12 should reuse `LIVE_RUNTIME_BYTE_BUDGET`, the
+  projected total and the `busy` shape the runtime count uses rather than a
+  second budget; the pass is `acquireMissing` and `importFromJsonl` only.
+- Open risks (residual, for the orchestrator's review): (a) the estimate is
+  linear in transcript bytes, so a session whose heap is dominated by something
+  other than its transcript (a huge single entry, an image-heavy compaction)
+  can be charged less than it holds; (b) with the refusal gone, nothing holds the
+  live set under the budget when every eligible runtime is protected, so an
+  over-budget set persists until an idle runtime becomes eligible — the
+  `overBudget` load record is what makes that visible; (c) a real
+  oversize transcript cannot be built in the fixture without a >512 MiB
+  parseable file, so the `oversize` load reason is proven by inspection of the
+  same condition the oversize case exercises, and an O-6a run with a real 2 GB
+  catalog is where it would be seen; (d) `makeRoomForRuntimeBytes` reaches the
+  whole live set with one `stat` per runtime per admission (bounded by the
+  runtime count, 128), which is the same cost `gateway.resources` already pays
+  once a minute.
+
+
 ### G-10a · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-10a`)
 
 - Result: the last read-triggered durable write left the read path.
@@ -5515,6 +5855,274 @@ events; widen them to name the pool owner in the same change.
   keeping: `stateRevision` on an instance is not a liveness heartbeat anywhere in
   the Gateway or iOS (iOS only validates `stateRevision >= 0`), and
   `markRuntimeReady` is MCP-only, so no other owner depends on this write.
+
+### G-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-4`)
+
+- Result: a connection's outbound queue is bounded by the state still worth
+  sending, not by how long the link took, and the client can still accept what
+  arrives. `OrderedOutboundQueue` carries a per-frame wire `topic` plus either a
+  coalescing `key` (a `session.summary`, which states its own revision and
+  carries no sequence) or the `sessionId` and per-session `eventSequence` of a
+  sequenced frame. A newer summary removes the newest unsent summary of its
+  session. A newer `session.snapshot` supersedes **every** unsent sequenced
+  frame of its session up to its own `eventSequence` — snapshots, progress,
+  process activity, messages — and only together with the frame that covers
+  them: the survivor is re-encoded as `session.rebaseline` carrying the whole
+  snapshot and the connection's installed `subscriptionToken`, which
+  `SessionRebaselineAdmission` installs as fresh authority across the dropped
+  sequences. A snapshot for a session this connection holds no token for, or a
+  sequenced frame with no replacement, supersedes nothing, so the queue never
+  creates a sequence gap it cannot cover. The replacement takes the survivor's
+  place at the queue's tail, so what a client receives is a subsequence of what
+  was enqueued in enqueue order, and the frame `ws` is already writing is never
+  recalled. Dropped frames release their payload and byte reservation at the
+  completed-frame boundary and are decremented from `acceptedFrames`, so the
+  `connection.closed`/`connection.write-error` completed/accepted counts keep
+  describing frames the connection owed its peer. The 8 MiB/4,096-frame backstop
+  is unchanged, and `connection.outbound-capacity` names `oldestTopic` (the
+  frame the socket was writing or waiting on) and `nextTopic`/`nextBytes` (the
+  frame that did not fit). `gateway.resources` gained
+  `outboundCoalescedFrames`/`outboundCoalescedBytes`, reported where each
+  superseded frame is dropped.
+- Review round 1 (construction: `changes-required`) addressed:
+  - Blocker — the first version dropped sequenced frames and left an
+    `eventSequence` gap, which `SessionSnapshotEventAdmission`/
+    `SessionPresentationStore.admitEnvelope` reject with a resynchronization;
+    the tests asserted the gap (`[1, 2, 8]`, `progress 5, snapshot 6`) instead of
+    what the client accepts. The orchestrator chose the rebaseline-carrying
+    construction above over narrowing G-4 to unsequenced frames; the queue now
+    sends the survivor as `session.rebaseline`, and only with the installed
+    token.
+  - Blocker — process activity was keyed by `processId`, so a later activity for
+    the same process dropped a frame whose `removedProcessIds` no later frame
+    carries. `session.processActivity` is no longer keyed at all; a mixed
+    frame's removals survive, and the seq-1-per-activity fixture that hid this is
+    gone.
+  - Major — the row's only "Done when" item had no evidence. The transport-owner
+    cases below are the evidence this row owns; the orchestrator's O-6b
+    `bandwidth-stream` before/after numbers (0 `connection.outbound-capacity`
+    records on the capped leg, `outboundCoalescedFrames` > 0 in the capped
+    window) are owed by the orchestrator's quiet-host runs, not by this branch.
+  - Minors — invariant 4 and the outbound paragraph of `packages/gateway/README.md`
+    now state the coverage rule; `connection.closed`/`connection.write-error`
+    counters exclude superseded frames (`packages/gateway/docs/observability.md`); `outboundBytes`
+    is documented as bytes accepted into a connection queue (bytes actually
+    handed to a socket are accepted minus `outboundCoalescedBytes`); the new test
+    blocks carry no `any` casts; the "8 MiB backstop" comment in the capacity
+    fixture now names the connection's own backstop (64 KiB there).
+- Failure modes written before the code (queue level): a superseded frame whose
+  sequence is pending behind a synchronization barrier; a replacement larger
+  than the remaining budget and a replacement larger than the cap; coalescing a
+  frame already being written; interleaved progress and snapshot frames; a frame
+  that supersedes nothing queued (backstop must still fire); a sequenced frame
+  with no covering replacement; a session's frames never dropped by another
+  session's snapshot.
+- Evidence:
+  - `npx vitest run src/transport/server-capacity.integration.test.ts
+    src/transport/sync-protocol.integration.test.ts` passes 36/36 (focused run
+    of the two named check files). Queue level: the newest unsent summary is
+    replaced and the frame being written never is; a snapshot supersedes its
+    session's unsent sequenced frames only when it carries a rebaseline and
+    never another session's; a replacement that only fits because the state it
+    supersedes is dropped is accepted; the backstop still fires for state
+    nothing supersedes; a replacement larger than the queue fails closed.
+  - Real-broadcast evidence with a held socket (the shape O-6b's cap produces):
+    6 × 24 KiB `session.snapshot` broadcasts plus a progress frame and a process
+    activity against a 64 KiB `maximumOutboundBytes` deliver exactly
+    `[session.snapshot(seq 1), session.rebaseline(snapshot seq 8)]` — the
+    in-flight frame is never recalled, the survivor carries
+    `subscriptionToken: "token"` and the snapshot whose `eventSequence` covers
+    every dropped sequence, `queuedFrames: 2`, no
+    `connection.outbound-capacity` record, the socket still OPEN, and 6 frames /
+    ~5 × 24 KiB coalesced. Without coalescing the fourth 24 KiB snapshot closes
+    the peer.
+  - Keyed/summary case: only the unsent superseded summary revision is dropped
+    (`outboundCoalescedFrames: 2` for two supersessions of one session);
+    sequenced frames no queued snapshot covers, including the removal-carrying
+    activity, are all delivered in order.
+  - Backstop case: three distinct sessions' 24 KiB snapshots against the same
+    64 KiB cap still produce one `connection.outbound-capacity` record with
+    `oldestTopic=session.snapshot nextTopic=session.snapshot nextBytes=…`, a 1013
+    close, `closeInitiated`, and no further admission.
+  - Barrier case (`sync-protocol.integration.test.ts`): with the open response
+    held, three quarantined 24 KiB snapshots and a progress frame flush after
+    response + ack; the queue holds the two responses plus the one
+    `session.rebaseline` instead of overflowing the 48 KiB cap,
+    `synchronizationBytes` is 0, no capacity record is written, and the suffix
+    arrives as the rebaseline carrying `opened.result.syncToken` and snapshot
+    `eventSequence: 6`.
+  - Phone side (`packages/ios-app/Tests/Gateway/SessionPresentationStoreTests.swift`,
+    "a coalesced session rebaseline installs the state a gap would
+    resynchronize"): the store is fed exactly the frames the coalescing queue
+    emits — the in-flight `session.snapshot` then the `session.rebaseline` with
+    the live token and the survivor snapshot six sequences later. It installs
+    the survivor (the branches that cannot reconcile keep the previous authority
+    and schedule a resynchronization instead of assigning it), and a second
+    store fed the same state one exact-next frame at a time reaches the same
+    authoritative snapshot, the same `visibleTranscript` and the same
+    `mountedTranscriptCoverage`, and the control that sends the same newer
+    snapshot as the plain exact-next topic installs nothing at all — that gap is
+    what the rebaseline form replaces. (`scripts/tron-ios-test run
+    --only-testing TronMobileTests/SessionPresentationStoreTests`: 66/66.)
+  - Negative control (`~/.tron/workspace/files/hardening/g-4/negative-control.txt`):
+    the coalescing identity removed from `outboundFrameIdentity`, then restored;
+    both new integration cases fail with `queuedFrames: 0` — the queue retired on
+    its backstop, which is the capacity close G-4 prevents.
+  - `npm run build` clean; `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Review round 2 (construction: `changes-required`) addressed:
+  - Blocker — the rebaseline dropped every unsent sequenced frame of its session,
+    including frames whose effect no snapshot installation performs: the phone's
+    `session.operationFailed` receipt (`ComposerDraftCoordinator.failOperation`
+    restores the draft and retires the submission), `session.extensionError`,
+    the `session.closed` notice, the `session.resourcesChanged`/
+    `structureChanged`/`contextChanged` revision bumps that reload commands, and
+    extension editor directives. The queue now supersedes only topics a snapshot
+    restates (`SNAPSHOT_STATED_TOPICS` in `server.ts`) and only the run of that
+    session's frames after the newest fence: dropping stops at the first frame
+    whose effect installing a snapshot does not perform, and that frame and
+    everything behind it are delivered in order.
+  - Minor — the sequence comparison ignored `runtimeGeneration`, so a
+    generation-2 snapshot could drop generation-1 frames and leave a gap the
+    phone resynchronizes over. Frame identity now carries
+    `runtimeGeneration` (read from the payload) and only frames of the
+    snapshot's own generation are superseded; frames of another generation are
+    fences.
+  - Minor — `recordOutboundBytes` counted the original snapshot's bytes, not the
+    `session.rebaseline` the queue queued. `OrderedOutboundQueue` now reports the
+    bytes it accepts (new `accepted` callback), so accepted minus coalesced is
+    exactly what reached the socket; the per-connection rebaseline encode is
+    stated in `packages/gateway/README.md` (only the connection's installed
+    `subscriptionToken` differs).
+  - Nit — the observability row, the `outboundCoalesced*` doc comment and the
+    `gateway.resources` row no longer say "same key" (supersession is by session
+    and sequence).
+  - Evidence: `server-capacity.integration.test.ts` 34/34, the round's focused
+    set (`server-capacity` + `sync-protocol.integration` + `stall-diagnostics` +
+    `server-compression` + `server-live-view` + `session-sync`) 84/84 and
+    `server-connection-memory` + `server-heartbeat` + `server-revocation` +
+    `server-frame` 37/37; `npm run build` clean. New cases: "keeps a one-shot
+    receipt and everything behind it when its snapshot covers the run after it"
+    (a stalled link broadcasting snapshot 1, progress 2,
+    `session.operationFailed` 3, progress 4, snapshot 5 delivers
+    `session.snapshot:1`, `session.progress:2`, `session.operationFailed:3`,
+    `rebaseline:5` with the receipt's own `data.message`, `outboundCoalescedFrames: 1`,
+    and accepted minus coalesced equal to the bytes handed to the socket) and
+    "supersedes only the frames of the surviving snapshot's own runtime
+    generation" (delivers `session.snapshot:1`, `session.progress:2`,
+    `session.toolProgress:3`, `session.snapshot:4`). Negative controls, each run
+    alone and reverted: disabling the fence drops the receipt (`queuedFrames` 4 →
+    2 and the delivered-frame assertion fails); disabling the generation check
+    delivers `[session.snapshot:1, rebaseline:4]`; recording the original
+    snapshot's bytes for the rebaseline fails the byte identity (99936 accepted
+    against 49926 handed to the socket). Phone side: `SessionPresentationStoreTests`
+    67/67 with "a coalesced rebaseline still carries the one-shot receipt its
+    snapshot cannot restore" (the receipt's
+    `sessionPresentationStoreDidFailOperation` fires, the rebaseline installs the
+    same authority, visible transcript and coverage as the exact-next path, and
+    the control without the receipt installs the same authority with no failure).
+- Review round 3 (orchestrator merge check, after merging
+  `hardening/integration`) addressed:
+  - Blocker (reproduced, 3/3) — `session-archive.integration.test.ts` ›
+    "settles a forking command in its origin" failed with a `running`
+    `tron.chat-invocation.v1` entry. Mechanism, measured at the enqueue: the
+    forking replacement's first snapshot (seq 3) is already being written when
+    the replacement publishes seq 4 and seq 5, so the queue supersedes the
+    unsent seq 4 and delivers the survivor — snapshot seq 5, the settled state —
+    as the `session.rebaseline` that covers the dropped sequence, exactly the
+    round-1 construction. The case read only `session.snapshot` frames, so it
+    asserted on the *stale* seq 3 and could not see the state the client
+    installs. Fix at the reading owner, not by relaxing it: a new
+    `deliveredAuthorityFrames` helper returns the authoritative state the client
+    received however the queue delivered it (its own `session.snapshot`, or the
+    snapshot nested in the `session.rebaseline` covering the superseded
+    sequence), and both the delivery wait and the "no running invocation"
+    assertion now use it. The assertion is unchanged and still bites: with it
+    reading the *oldest* delivered authority instead of the newest, the case
+    fails on the same `running` entry, and with the coalescing disabled
+    (`G4_DEBUG_NO_COALESCE`) the same case passes over plain snapshots 3/4/5 —
+    no sequence gap is hidden, because the covered form is what makes the
+    dropped sequence admissible to the client at all. Measured at that point in
+    the case: with coalescing the client holds 1 plain snapshot (seq 3, still
+    running) and 2 authority states, the second the rebaseline's settled seq 5;
+    without it, 3 plain snapshots (seq 3/4/5).
+  - Blocker — the round's new fixtures still spoke protocol 5 after `G-7`
+    bumped the lockstep protocol to 6, so their hello was refused and six cases
+    timed out. `server-capacity.integration.test.ts`'s `info()`/hello and
+    `sync-protocol.integration.test.ts`'s `info()`/hello now advertise and send
+    6; both files pass.
+  - Evidence: the round's seven required files green in one run on the merged
+    branch (`npx vitest run` of all seven, default timeouts): 388/388 —
+    `session-archive.integration` 41, `server-capacity.integration` 34,
+    `sync-protocol.integration` 4, `stall-diagnostics` 22,
+    `server-heartbeat.integration` 10, `server-http-lifecycle.integration` 20,
+    `runtime-registry.integration` 257. During the round the last two files
+    timed out on single cases under this host's load (load average 20-57 from
+    parallel workers) at vitest's 5 s default, against the Gateway's own 5 s
+    hello deadline and against 5 s of pinned-runtime work; both are byte-for-byte
+    `hardening/integration` files and pass unmodified once the host is quiet, so
+    that was the host, not G-4. `npm run build` clean.
+- Changes: `perf(gateway): coalesce superseded outbound frames (G-4)` and its
+  review-round commits on `hardening/g-4`.
+- "Done when" items: (1) "O-6b's bandwidth-cap case never closes a socket for
+  capacity" — proved at the transport owner with a real Gateway, a real socket
+  and the broadcast paths, where the same bytes close the peer without
+  coalescing and do not with it; the O-6b `bandwidth-stream` qualification run
+  itself is the orchestrator's quiet-host measurement (the fixture-level
+  signals are `connection.outbound-capacity` = 0 for the capped mobile
+  connection and `outboundCoalescedFrames`/`outboundCoalescedBytes` > 0 in the
+  capped window's `gateway.resources` record). (2) The queue stays bounded and
+  the record names topics — met by the cases above.
+- Kept on purpose: the 8 MiB/4,096-frame backstop, the one-frame-at-a-time
+  writer, the per-broadcast prepared encoding, the barrier quarantine (coalescing
+  never touches quarantined events; it acts only on the queue), the revocation
+  fence and the `whenIdle` close path, and the Gateway's own overflow
+  `session.rebaseline` (which carries no `payload.eventSequence` and is therefore
+  never superseded). Frames of the session state a snapshot re-states (progress,
+  tool progress, process/extension activity, compaction, an earlier rebaseline)
+  are dropped only by a newer snapshot of the same runtime generation that covers
+  their sequence; one-shot frames (failure receipts, resource/structure/context
+  revision bumps, extension editor directives, close/error notices) are fences,
+  and the queue keeps them and everything behind them in order, which is what
+  makes a dropped delta reconstructible and a dropped effect impossible.
+- Deviations:
+  - `OrderedOutboundQueue.enqueue` takes `OutboundFrame`
+    (`{encoded, bytes, topic, key?, sessionId?, sequence?, runtimeGeneration?,
+    rebaseline?}`); the
+    queue's unit cases use `queuedFrame()`/`sequencedFrame()` helpers.
+  - `outboundFrameIdentity(connection, value, prepared, maximumBytes)` needs the
+    connection for the installed `subscriptionToken` and re-encodes the survivor
+    through `prepareOutboundFrame` inside `stage("frame.serialize")`, so the
+    rebaseline's bytes are measured where they are serialized. The per-topic
+    `gateway.resources` block still attributes the frame to the topic that
+    published it, not to the wire topic of the superseded survivor.
+  - `OrderedOutboundQueue` gained an `accepted(bytes)` callback, so the
+    `outboundBytes` counter is recorded where the queue accepts a frame instead
+    of in `sendOutcome`; the value is the bytes actually queued, which for a
+    coalescing replacement is the rebaseline's own.
+  - `server-capacity.integration.test.ts`'s fanout case was renamed and its
+    expectation changed: it used to require that every `session.summary`
+    revision reaches every client in global order. G-4 supersedes that
+    expectation (the plan names summaries as coalescing candidates), and the
+    phone's catalog admission is revision-monotonic per session
+    (`DashboardStateOwners.apply` returns `.stale` when
+    `summaryRevision <= current`, so a dropped intermediate revision leaves no
+    stale row). The case asserts the properties that remain: what a client
+    receives is a subsequence of the broadcast order, each session's revisions
+    never go backwards, every session's last revision (8) is delivered, and the
+    fence response still follows every frame.
+- Tasks added: none. R-1/R-4 should still watch for a phone-side consequence,
+  but the gap this row used to create is gone: a superseded sequence now arrives
+  covered by a rebaseline the phone installs.
+- For the next agent: the `bandwidth-stream` O-6b case is the acceptance run
+  for this row; read `connection.outbound-capacity` counts and
+  `outboundCoalesced*` from the fixture's `gateway.jsonl`. The coalescing
+  identity lives in `outboundFrameIdentity` in
+  `packages/gateway/src/transport/server.ts`: a new whole-state topic added
+  later needs one row in `SNAPSHOT_STATED_TOPICS`, not a second queue feature,
+  and anything sequenced is superseded only through a replacement that covers
+  it. A new sequenced topic whose effect installing a snapshot does not perform
+  needs no change: the queue fences it by default.
 
 ### Orchestrator · 2026-09-28 · G-3 merged
 
@@ -6527,6 +7135,158 @@ wait).
   `gateway-stall` episode is the correct reading, not a defect. Episode count
   (121 vs 77) is the tool splitting outages at background blips by design.
   R-4 confirms on the evaluation day's O-1-keyed exports.
+### G-8b · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-8b`)
+
+- Result: the Mac app status poll no longer pays the fail-closed Stable
+  admission or the Tailscale CLI per 30 s cycle. The poll stream reuses one
+  admission while a runtime fence is unchanged — launchd's live pid plus that
+  process's start identity, plus the payload selection stamps
+  (`PayloadSelectionStamp`, promoted out of the native capture peer's private
+  `CaptureSelectionStamp` into `GatewayPayloadStore.swift`, which both the app
+  and the native host target already compile). A changed pid, a changed start
+  identity, a changed `payloads/stable/current.json`, or a changed active
+  manifest re-runs the full probe. Only an admission is reusable: a refusal is
+  re-proved on the next cycle, and a fence that cannot stamp an existing
+  selection pointer or manifest re-probes, so one transient listener/`ps`
+  failure or an update restart landing between the ping and the fence read
+  cannot pin `needsRepair` for the process's lifetime. A reuse also requires the
+  same authenticated ping identity and republishes the fence's own elapsed time,
+  so the menu's uptime keeps moving instead of freezing at the first probe's
+  value. The per-cycle authenticated ping stays: it is the liveness probe that
+  decides Running. Explicit user actions still run the full probe:
+  `singleSnapshot(setup:)` is
+  unchanged for menu presentation, the restart wait and startup, and pairing
+  keeps its own ping/admission pair. The poll's ping closure
+  (`statusPollPingServer`) reuses one live Tailscale resolution for a bounded
+  window (300 s, `TailscaleHostResolution`) and refreshes the owner-only
+  `network.json` cache only when the resolved address changed; a failed ping
+  re-resolves after 30 s and never sooner. `pingServer` itself stays the live
+  `resolveHost` path, so pairing, restart, update, log/feedback capture, the
+  health wait, install and startup resolve live.
+- Failure modes recorded before the tests were written:
+  - poll admission reuse: (1) reuse outlives a new pid or a new start identity;
+    (2) reuse outlives a selection or manifest change; (3) an unreadable fence
+    authorizes reuse; (4) reuse skips the per-cycle ping; (5) reuse outlives the
+    authenticated ping identity it was proved against; (6) a transient refusal
+    is reused; (7) a reuse freezes the displayed uptime.
+  - Tailscale window: (8) the window reuses past its interval; (9) a failed ping
+    never re-resolves, or re-resolves every cycle; (10) an address the disposable
+    cache cannot answer is reused without a probe; (11) a newly resolved address
+    is not persisted, so the menu would present a different host than the poll
+    pings.
+  - explicit recording and poll wiring (review round 2): (12) a failure an
+    explicit check finds is overwritten by the next cycle's reused admission;
+    (13) the poll stream uses the live ping or a fresh probe per cycle.
+- Review round 1 (2026-09-28) addressed: the fence read now carries `ps
+  -o etime=,lstart=` in one spawn and the poll republishes that elapsed time
+  instead of the cached admission's (the menu's uptime no longer freezes and
+  jumps back); a refusal is never reused and the fence returns `nil` when an
+  existing selection pointer or active manifest cannot be stamped; a reuse also
+  requires the same authenticated ping identity; the windowed Tailscale ping
+  moved from `pingServer` onto the poll's own `statusPollPingServer`, which is
+  what the row requires — before it, menu-open and pairing inherited the window;
+  `RuntimeFence.read` is now exercised against a real temporary payload store.
+- Review round 2 (2026-09-28) addressed: one `StableProbeCache` now belongs to
+  the `ServerStatusPoller` instance and is shared by its 30 s stream and its
+  explicit probes; `explicitSnapshot()` always runs the full probe and records
+  the outcome (admission stored, refusal cleared), and `menuWillOpen` and
+  `MenuBarActionHandler.refreshStatus` go through it, so a failure an explicit
+  check finds is no longer overwritten by the next cycle's reused admission.
+  Negative control: with the record step removed, the new poll-cycle test saw the
+  cycle after the explicit refusal report Running from the cache (captured before
+  the fix). The poll stream's own wiring is now driven by a test (one cache per
+  poller, the bounded ping only, one full probe across two cycles), and
+  `RuntimeFence` stamps the bundled manifest unconditionally alongside the active
+  one, so replacing the app bundle moves the fence even when the selection names
+  a version whose payload does not validate and `GatewayPayloadResolver` admits
+  the bundled payload.
+- Evidence:
+  - Suites: `TronMacTests/ServerStatusPollerBoundedAdmissionTests` (10 tests,
+    was `SingleInstance`-free and deterministic),
+    `TronMacTests/StableGatewayObserverTests` (10 tests) and
+    `TronMacTests/TailscaleHostResolutionTests` (5 tests) pass with the three
+    neighbouring suites on the Debug test host. Review round 2 re-ran
+    `build-for-testing` then `test-without-building -only-testing:`
+    `ServerStatusPollerBoundedAdmissionTests`, `StableGatewayObserverTests`,
+    `ServerStatusPollerTests`, `TailscaleHostResolutionTests` and
+    `MenuBarControllerTests` on the tree with `hardening/integration` already
+    merged → `Test run with 34 tests in 5 suites passed`,
+    `TEST EXECUTE SUCCEEDED`. Negative controls were executed, not inferred:
+    with the record step removed the new poll-cycle test saw the cycle after the
+    explicit refusal report `.running` from the cache, and with the bundled
+    stamp frozen the fence test saw the fence stay equal while the bundled
+    manifest was replaced. Review round 1 re-ran:
+    `xcodebuild build-for-testing … -derivedDataPath build/DerivedData` (3m13s,
+    TEST BUILD SUCCEEDED; the first attempt failed on an unwrapped optional and
+    the re-run succeeded) then `test-without-building -only-testing:` the six
+    suites → `Test run with 45 tests in 6 suites passed after 185.851 seconds`,
+    0 failures. The suites map one-to-one onto failure modes 1–11.
+  - Children per 30 s cycle: **5 → 2**, from the code's spawn sites — the
+    app-level confirmation (a running app's `ps` CPU delta per cycle and the
+    unified-log Tailscale attach cadence) is still owed, see below. Measured on
+    this host against the live
+    `com.tron.server` job (read-only) with a harness around the production
+    readers: the new fence read (`launchctl print` + one `ps -o etime=,lstart=`)
+    takes
+    11.6 ms median over 10 reads, while the launchd read, two `ps` display reads
+    and `lsof` the old cycle also ran take 95.9 ms. Child CPU for ten fence
+    reads plus both primitive reads was 0.08 s (≈7 ms per cycle). The Tailscale
+    CLI goes from one spawn per cycle (≈2,880/day at 30 s; ≈2,490/day at the
+    audit's measured 34.7 s cadence) to one per 300 s window (≈288/day). A
+    changed fence costs one extra full probe (6 children) on that cycle only.
+  - Per-cycle CPU removed: one `validateSelection` on the user's real selected
+    payload (588 MB) measured 12.09 s wall / 11.47 s CPU in the same harness;
+    the G-8 audit attributed ≈4.0 s of per-poll CPU to both trees with `sample`
+    on a quieter host. What remains per cycle is two spawns, one ping socket,
+    one launchd read and one small cache read.
+  - Window behaviour executed, not inferred: a harness compiling the production
+    `TailscaleHostResolution` with production wiring prints probe counts
+    1 / 1 / 2 / 2 / 3 across t0, t0+10s, t0+301s, a failed ping at t0+311s and a
+    failed ping at t0+341s, two probes over two cycles when the cache cannot
+    answer, and `resolveLive` preferring live over cache while rejecting
+    loopback.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+  - Commands and raw numbers retained at
+    `~/.tron/workspace/files/hardening/g-8b-status-poll-bound.md`.
+- Changes: `packages/mac-app/Sources/Server/Health/ServerStatusPoller.swift`
+  (`StableProbe`, `StableProbeCache`, the bounded cycle, the runtime fence
+  closure, and `statusPollPingServer` as the cycle's own ping), new
+  `TailscaleHostResolution.swift`, `RuntimeFence` in
+  `StableGatewayObserver.swift` (non-optional stamps; `read` returns `nil` when
+  an existing selection pointer or manifest cannot be stamped),
+  `LaunchAgentProcessFence`/`readProcessFence` in
+  `LaunchAgentRuntimeReader.swift`, `ProcessFenceRead` in `ServerProcessProbe.swift`
+  (start identity and elapsed time in one `ps` read),
+  `PayloadSelectionStamp` in
+  `GatewayPayloadStore.swift` (replacing the peer's private copy in
+  `NativeCapturePeer.swift`), `EnvironmentSetup.swift` (windowed poll ping,
+  shared `resolveLive`), `packages/mac-app/docs/architecture.md`, the two new
+  test files, `ServerStatusPollerTests.swift` (override seams for the new
+  suites), `StableGatewayObserverTests.swift` (the fence read against a real
+  temporary payload store, and the one-spawn `ps` fence read), and this plan.
+- Kept on purpose: the per-cycle authenticated ping (the liveness probe that
+  decides Running); `singleSnapshot(setup:)` as the unconditional full probe for
+  user actions, so no unowned file changes; the owner-only `network.json` cache
+  as the only place the address lives, with the window holding only the last
+  probe time; `resolveHost`'s live probe for restart, update and command status.
+- Deviations: the stamp lives in `GatewayPayloadStore.swift` rather than a new
+  file because that file is already in both targets, so the shared type needs no
+  `project.yml` change. The 300 s reuse window and the 30 s failed-ping interval
+  are the named constants chosen here; the user approved the reuse and the plan
+  asked for the windows to be named. Building the Debug test host needed a
+  locally staged payload (`bundle-gateway.sh --allow-unconfigured-push
+  --skip-install`); no `npm ci` ran and the shared node_modules install was not
+  touched.
+- For the next agent: the app-level confirmation is still owed and is what
+  keeps this row out of Done — a running debug app's `ps` CPU delta per 30 s
+  cycle and the unified log's Tailscale client-attach cadence, before and after.
+  It needs the app to run, which this session must not do; run it once these
+  fixes are on integration, then set the row Done. `packages/mac-app/build/DerivedData` and the staged
+  payload are in place, so `scripts/tron mac generate` plus
+  `xcodebuild build-for-testing` and `test-without-building` reproduce the
+  focused run cheaply. G-8d remains the other half of the ambient discovery
+  cost.
 
 ### G-1b · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1b`)
 
@@ -6885,6 +7645,212 @@ wait).
   conflicts only in this plan file (integration has newer rows/entries);
   integration's `session-catalog.ts` is unchanged from the merge base, so the
   source merge is clean.
+
+### Orchestrator · 2026-09-28 · E-2 and E-2c closed
+
+- Result: the iOS profiler can no longer take 10 GB: the parser is bounded
+  (E-2), host `--attach` cannot sample simulator processes (E-2b), and a
+  host-wide time-profiler trace whose export would exceed 2 GiB is refused
+  before export with its size and the remedy (E-2c). A traced product scenario
+  must use a short `--window-seconds` to fit; that is the accepted cost. E-2
+  and E-2c set to Done.
+
+### E-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-1`)
+
+- Result: `packages/gateway/docs/connection-resilience.md` gains a "Tailscale
+  flaps" section: the Gateway records a flap leaves (`connection.inbound-silent`
+  at `peerPath=relay`/`offline` with `peerRelay`, paired with
+  `connection.inbound-resumed` and its `silentMs` when the socket survives the
+  flap and unpaired when it does not, joined by the O-1 key), the
+  triage tool's reading (`scripts/tron-triage` reports the `path` cause from the
+  Gateway's silent record, from an attempt's `transport-open` timeout that never
+  reached the Mac, or — with `--tailscale-window --tailscale-peer NODEKEY` for
+  logs predating those records — from the covering relay window, while a window
+  that closed before the outage ended stays `[context]`), the incident's worked
+  example, and the user-side checks (iPhone Tailscale app and settings, Wi-Fi
+  private address, router client steering). Docs only: no code, record or test
+  changed, so no observability row is owed.
+- Evidence: `python3 scripts/test-tron-triage.py` passes 51/51 in 4.8 s
+  (`TRON_TRIAGE_TEST_REPORT`); the run and its table are retained at
+  `~/.tron/workspace/files/hardening/e-1/e1-triage-report.json{,.txt}`; the cases
+  behind the documented shapes are `test_relay_silence_joined_by_key_is_the_path`
+  (Gateway `peerPath=relay` evidence, `silentMs=68000`),
+  `test_relay_window_classifies_a_path_episode` (`relay path window` cause
+  evidence) and `test_a_relay_window_that_closed_before_the_episode_ended_is_context`
+  (the "does not cover this episode" context wording). The worked example's
+  numbers are Context's measurements and O-7's real incident-export run (14
+  `path` episodes with the capture against 5 without; both silent gaps `unknown`
+  with their windows named as context). `scripts/tron-triage` also run read-only
+  against `~/.tron/logs/device-exports/…2026-09-28T07-37-42-420Z.jsonl` (kept,
+  device id elided, at
+  `~/.tron/workspace/files/hardening/e-1/device-export-tailscale-run.txt`): 24
+  episodes, `path=0`, and with `--tailscale-window` the header reads `captured,
+  12 path line(s)` with no window covering an episode — the context behavior the
+  section describes. `python3 scripts/check-documentation-policy.py` (46 authored
+  files) and `scripts/personal-info-guard.sh` pass.
+- Changes: `docs(gateway): document Tailscale flap diagnosis (E-1)`;
+  `docs(gateway): correct Tailscale flap timing (E-1 review round 1)`.
+- Tasks added: none.
+- Kept on purpose: the existing `connection.inbound-silent` row in the
+  diagnostics table keeps its shape and gains the pointer to the new section
+  (round 1 changed only its closing "repeated …" clause); the records
+  themselves, their observability row and the triage tool are O-2's and O-7's
+  and were not re-documented.
+- Deviations: none.
+- For the next agent: R-4 counts the evaluation day's flaps with
+  `scripts/tron-triage … --tailscale-window --tailscale-peer NODEKEY` (the
+  section says what to read); E-3 is what removes the effect at home.
+- Review round 1 (changes required; all findings addressed in the follow-up
+  commit): the flap section now states the phone drops the socket within about
+  18 s of the path going quiet and the Gateway only after three missed 25 s
+  heartbeats, names the disconnecting shape (unpaired
+  `connection.inbound-silent`, then the phone's close as `connection.closed` or
+  the Gateway's `connection.heartbeat-timeout` at ~75–100 s, with the phone's
+  liveness `ping_timeout`), gives the silent record's 12–37 s detection window,
+  says "repeated silences at `peerPath=relay`/`offline`" in the diagnostics row,
+  and replaces the stale-app→`relay` claim with the disabled-extension symptom
+  (`transport-open` timeouts, no Gateway `http.upgrade`). Minor: deleted the
+  paired-record claim from `observability.md`'s budget paragraph (a silence that
+  ends in the socket's close leaves only its silent record) and dropped the
+  "keeps its wording" line above. Checks re-run: `test-tron-triage.py` 51/51
+  (14.2 s), `check-documentation-policy.py` (46 files), `personal-info-guard.sh`
+  — pass. The disconnecting shape is read from the code and the contract
+  constants (phone liveness retirement, the 25 s heartbeat tick and the close
+  path), not reproduced: O-2's blackhole test uses a client that never gives up.
+
+### T-2 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/t-2`)
+
+- Result: no hosted-test watchdog kills a synchronously blocked main thread. A
+  probe test that blocked it 5 s, then 10 s, then 20 s in one test passed after
+  35 s, and the only watchdog in this tree is the repo's own `withTestWatchdog`
+  (`packages/ios-app/Tests/Support/TestWatchdog.swift`), which this test does not
+  use and whose expiry is the "Test exceeded its 5.0 seconds watchdog" text seen
+  in other suites. The kill came from another worktree's run launching the same
+  host app on the same simulator: `20260928T160853Z-run.0UFrCv` (worktree
+  `tron-hardening`, default lane) recorded `owner.json` at 1790611733 and ran its
+  tests 1790611737.6–1790611779.1, and `20260928T160908Z-run.Y9hYTh` (worktree
+  `tron-hardening-g-7`, default lane, same simulator) started its tests at
+  1790611753.8 inside that window. The killed attempt is the stall test's, which
+  starts ~10.8 s into its suites and so lands within a second of the second app's
+  launch. The test's block is the named constant `mainStallTestBlock` (5 s) in
+  both phases.
+- Evidence: combined set (5 suites, 161 tests) green 5× before the change
+  (`20260928T170751Z-run.KpSLNJ`, `20260928T171235Z-run.d1TwFp`,
+  `20260928T171323Z-run.yMiBKP`, `20260928T171429Z-run.T3Ig4q`,
+  `20260928T171524Z-run.dKkmIF`; stall test 8.02 s) and green twice on the final
+  block (`20260928T182458Z-run.tPLyAI`, `20260928T182539Z-run.DhgWVH`: 5/5 in the
+  suite, stall test 10.52 s; the intermediate 4 s form also ran 4× green —
+  `20260928T173926Z-run.QJjdCa`, `20260928T174026Z-run.TuYhxq`,
+  `20260928T174123Z-run.KvlTxr`, `20260928T174222Z-run.Ri2Zsd`). Probe:
+  `20260928T171741Z-run.FF4ms5`. The killed run is
+  `~/Library/Developer/Tron/ios/test-runs/20260928T160853Z-run.0UFrCv`
+  (`summary.json`: "Test crashed with signal kill.", 160 passed of 161;
+  `test.log`: the run restarts at 09:09:37.574). Two more pairs have the same
+  shape: g-7's `20260928T160029Z-run.9dbW2W` (tests 1790611233.8–1790611262.0,
+  "Test crashed with signal kill before establishing connection") with c-4's
+  `20260928T160033Z-run.13mFm5` (1790611236.9–1790611241.9), and g-7's
+  `20260928T164851Z-run.Yqb7gv` (1790614134.9–1790614194.9, includes "Test
+  crashed with signal kill.") with g-4's `20260928T164907Z-run.EmmlGW`
+  (1790614150.0–1790614154.6). All six runs name lane `default` and simulator
+  `E816D194…`, and the locker refuses a second holder of one lock path (checked
+  by hand: exit 73), so at least one run in each pair never took the lane's
+  lease. Those three pairs are the only overlaps in all 87 recorded runs of
+  2026-09-28, and in each pair the later run survived while the one already
+  running failed. T-2's own post-change runs do not overlap any other run's
+  window.
+- Changes: the commit on this branch touches only
+  `packages/ios-app/Tests/Support/GatewayConnectionEpisodeRecorderTests.swift`
+  besides this plan.
+- Tasks added: T-3 (after T-2: default-lane runs across worktrees shared one
+  simulator despite the lease).
+- Kept on purpose: the production ping and production clocks (the test exists to
+  prove the off-main-actor watchdog measures a real block), and the assertion
+  that the record's `durationMs` is at least `blockedMs - 2 × watchdogInterval`.
+- Deviations: the second phase's block grows 2.5 s → 5 s while the first keeps
+  its 5 s, so the test blocks 10 s instead of 7.5 s. A 2.5 s block gives a
+  would-be surviving watchdog only a ~50% chance of a tick inside the window it
+  needs, so that negative control could pass vacuously; at the same constant it
+  always lands one. The first phase keeps the third interval on purpose: two
+  intervals are the derivation (`mainStallBound` + the tick grid + the loop's
+  first wake-up) and the third is the margin the literal 5 s always had, because
+  that wake-up delay is not interval-bounded under CPU starvation.
+- For the next agent: the lease that should have serialized these runs is T-3's.
+  Until it is fixed, a lone "Test crashed with signal kill" (or "…before
+  establishing connection") is contention first: compare the run's
+  `owner.json`/`summary.json` window with every other run's on the same
+  simulator before blaming the code under test.
+
+### T-3 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/t-3`)
+
+- Result: the lease was bypassed by argument loss, not by the inherited
+  `TRON_IOS_TEST_LOCK_HELD`. `scripts/tron-ios-test` consumed `--lane NAME` when
+  selecting the lane and then re-executed itself through the lease holder as
+  `$0 $command ${selectors}`, without the lane. The child re-derives every lane
+  path from its own arguments, so it leased `<lane root>/ios-test-NAME/lease.lock`
+  and then provisioned, ran and released the **default** lane's simulator: a
+  named-lane run never serialized with the runs on the simulator it used. The
+  five `~/.tron/internal/ios-test-G7*` lanes left behind by one worktree hold a
+  `lease.lock` and no `simulator.json` at all, which is that signature; the
+  `G7R2` lease's release second (16:09:25 UTC) is 1 s after the overlapping run
+  `20260928T160908Z-run.Y9hYTh` finished its tests (16:09:23.8), and that run's
+  `owner.json` says `lane: default` although it was started with `--lane G7R2`.
+- Changes: `scripts/tron-ios-test` passes `--lane "$LANE_LABEL"` into the command
+  the holder starts, and refuses (74) a command whose inherited lease
+  (`TRON_IOS_TEST_LEASE_LOCK`, exported by `scripts/ios-test-lock.py` beside the
+  existing lease descriptor) is not this lane's own lock, so a descendant that
+  inherits `TRON_IOS_TEST_LOCK_HELD=1` can no longer run on another lane's
+  simulator. `packages/ios-app/docs/development.md` says both.
+- Follow-up after review round 1 (same branch, second commit): the guard compared
+  the two lock paths as strings, and the locker tidies `--lock` through
+  `pathlib`, so a state directory spelled with a trailing slash, `//` or `./`
+  (the common macOS `$TMPDIR` shape) was refused 74 for every leased command. It
+  now compares the files with `-ef`. The regression case
+  `RunnerFixture.test_a_state_directory_spelled_differently_is_still_this_lanes_lease`
+  covers all three spellings and fails 3/3 against the string comparison.
+- Evidence: pre-fix reproduction (2026-09-28 11:47 local, while a default-lane
+  `build` held `~/.tron/internal/ios-test/lease.lock`, pid 84994):
+  `scripts/tron-ios-test run --lane CT22 --only-testing …` leased
+  `ios-test-CT22/lease.lock` (pid 85645) while its child ran
+  `bash scripts/tron-ios-test run --only-testing:…` with no `--lane` and
+  provisioned `--marker ~/.tron/internal/ios-test/simulator.json --name`
+  `Tron iOS Tests`; the default marker's mtime moved 11:46:37 → 11:47:36 while
+  `ios-test-CT22/simulator.json` stayed at 01:09:39, and the run's `owner.json`
+  said `lane: default` (`20260928T184738Z-run.clWKCo`, exit 74 "test products are
+  missing", no products in the probe's derived-data dir). Post-fix, the same
+  command: child argv carries `--lane CT22`, provision uses
+  `--marker ~/.tron/internal/ios-test-CT22/simulator.json`, the CT22 marker moves
+  to 11:51:19 while the default marker stays at 11:47:36, `owner.json` says
+  `lane: CT22` (`20260928T185125Z-run.HJ8Zmj`), and both devices are `Shutdown`
+  afterwards. Logs: `~/.tron/workspace/files/hardening/t-3-evidence/`.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py
+  RunnerFixture.test_a_lane_named_on_the_command_line_is_the_lane_that_provisions
+  RunnerFixture.test_an_inherited_lease_that_covers_another_lane_is_refused
+  RunnerFixture.test_a_state_directory_spelled_differently_is_still_this_lanes_lease`
+  — 3/3 pass; each fails without its fix (with the lane not forwarded, the guard
+  refuses 74 naming both locks; the string comparison refuses all three
+  spellings). The existing `RunnerFixture` cases are the guard's positive
+  control: every normal `run` there goes through the holder and now proves its
+  inherited lease. Whole file after the follow-up: 89 tests, 179 s, OK.
+- Tasks added: none.
+- Deviations: the guard is a new env contract (`TRON_IOS_TEST_LEASE_LOCK`); it
+  was added because the row named `TRON_IOS_TEST_LOCK_HELD` inheritance as a
+  candidate bypass, and the guard closes that class as well as the found one.
+- Open: the same `--lane`-argument-loss shape is *not* present in the two other
+  re-exec sites (`scripts/ios-gateway-e2e-test`, `scripts/tron-profile-ios`
+  pass `"$0" "$@"` and use `TRON_IOS_TEST_STATE_DIR`). For pairs 1 and 3 of the
+  three recorded overlaps the named-lane artifact is missing (only `G7R`, `G7R2`,
+  `G7RV`, `G7F` and `G7N` exist, and none matches 16:00:29 or 16:48:51 UTC), so
+  the mechanism above is proven for pair 2 and sufficient for the class; the
+  guard now refuses that run whether the lane was lost by argument or by
+  inheritance.
+- Note for future reproductions: the first pre-fix reproduction above ran on the
+  shared default-lane simulator while another session's `build` held that lease,
+  so it moved the default marker's mtime. Use `RunnerFixture` or a throwaway
+  named lane instead.
+- For the next agent: a `~/.tron/internal/ios-test-NAME` directory holding only
+  `lease.lock` means a named-lane command ran in the default lane; treat it as
+  evidence of a lane/lease mismatch, and check `TRON_IOS_TEST_LEASE_LOCK` when a
+  command is refused (74) with "inherited iOS test lease covers".
 
 ### C-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-1`)
 

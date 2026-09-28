@@ -19,6 +19,19 @@ import Testing
 @MainActor
 @Suite("Phone connection episode recorder", .serialized)
 struct GatewayConnectionEpisodeRecorderTests {
+    /// The synchronous main-thread block the main-stall test serves, in both
+    /// phases. Part of it is always lost before the watchdog measures anything:
+    /// up to one interval to where the 1 s tick grid sits when the block starts,
+    /// and up to one more to the detached loop reaching that tick. So
+    /// `mainStallBound` plus two intervals (4 s) is the shortest block that still
+    /// proves the record, and the third interval keeps a second of slack for the
+    /// wake-up delay, which CPU starvation can stretch past one interval on a
+    /// loaded Mac (T-2).
+    static let mainStallTestBlock = GatewayConnectionEpisodeRecorder.mainStallBound
+        + GatewayConnectionEpisodeRecorder.watchdogInterval
+        + GatewayConnectionEpisodeRecorder.watchdogInterval
+        + GatewayConnectionEpisodeRecorder.watchdogInterval
+
     @Test("a background transition ends the episode and stops both watchdogs")
     func backgroundEndsEpisodeAndStopsWatchdogs() async throws {
         let clock = ManualClock()
@@ -177,12 +190,12 @@ struct GatewayConnectionEpisodeRecorderTests {
         recorder.noteDisconnected(profileID: "gateway", lifecycleGeneration: 1, foreground: true)
 
         // The block starts inside the same main-actor stretch that opened the
-        // episode, so the ticks that fire while it is held are served by it. The
-        // tick grid can consume one interval of the block and the detached loop's
-        // first wake-up a further one; everything else in the record is the block
-        // itself, which a stalled main actor could not have produced.
+        // episode, so the ticks that fire while it is held are served by it.
+        // `mainStallTestBlock` already allows for the tick grid and for the
+        // detached loop reaching its first tick; everything left in the record is
+        // the block itself, which a stalled main actor could not have produced.
         let blockedFrom = ContinuousClock().now
-        blockMainThread(for: .seconds(5))
+        blockMainThread(for: Self.mainStallTestBlock)
         let blockedMs = diagnosticMilliseconds(blockedFrom.duration(to: ContinuousClock().now))
         let intervalMs = diagnosticMilliseconds(GatewayConnectionEpisodeRecorder.watchdogInterval)
         let boundMs = diagnosticMilliseconds(GatewayConnectionEpisodeRecorder.mainStallBound)
@@ -203,7 +216,10 @@ struct GatewayConnectionEpisodeRecorderTests {
         // before counting.
         recorder.endEpisode(.background, profileID: "gateway", lifecycleGeneration: 1)
         await Task.yield()
-        blockMainThread(for: .seconds(2.5))
+        // The same block, so a watchdog that survived the end of the episode is
+        // guaranteed a record it could land, not one that only a tick landing in
+        // a short window would produce.
+        blockMainThread(for: Self.mainStallTestBlock)
         try await Task.sleep(for: .milliseconds(500))
         #expect(await recordCount(log, event: "app.main-stall") == 1)
     }

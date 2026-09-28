@@ -323,8 +323,11 @@ final class MenuBarActionHandler {
     private func refreshStatus() async {
         // Triggers an immediate snapshot via the poller so the menu
         // re-renders within ~100ms instead of waiting for the next 30s tick.
+        // The probe is explicit: it always runs and records its outcome in the
+        // poller's cache, so a failure it finds is not overwritten by a cached
+        // admission on the next cycle.
         guard let controller = menuBarController else { return }
-        let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
+        let snapshot = await controller.explicitStatusSnapshot()
         controller.applySnapshot(snapshot)
         controller.refreshDebugGatewayState()
     }
