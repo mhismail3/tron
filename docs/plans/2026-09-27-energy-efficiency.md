@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, T2-FONTS, T2-COLORS and T2-PULSE claimed
+- **Last updated:** 2026-09-27, P-6 and R-FOLLOW added
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -152,6 +152,8 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | P-3 | Done | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | energy-efficiency supervisor, worker lane p3, 2026-09-27 |
 | P-4 | Done | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | energy-efficiency supervisor, 2026-09-27 |
 | P-5 | Blocked | Simulator-device Instruments (SwiftUI view-body counts, app signposts) never starts from agent sessions on this Mac ("Device disconnected while trying to set tap configuration", also on a fresh iOS 27 simulator); the user checks from their own Terminal, and `device --attach` capture is verified on a user-launched app | P-3 | |
+| P-6 | Ready | Make every iOS scenario's workload deterministic: an iteration whose workload did not actually render (for example streaming-reply's pinned tail not followed, `chat.lease.repair-exhausted`) is detected, retried within a bound and otherwise fails the run; the mode is exposed as a scenario counter so `compare` never mixes modes | P-1 | |
+| R-FOLLOW | Needs scoping | In about half of streaming-reply iterations on `main` the pinned chat does not follow the live stream (lease repair exhausted, reply off screen); determine whether this is a hosted-window artifact or a real following bug, and route a real bug to the chat transcript stability plan | none | |
 | T1-GW | Done | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
 | T1-CACHE | Done | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-DRAFTS | Done | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
