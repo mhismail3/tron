@@ -532,7 +532,7 @@ rows are in priority order.
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Ready | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | |
 | C-2 | Ready | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | |
-| C-5 | Claimed | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-5 | Done | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Claimed | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
 | C-4 | Claimed | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -552,6 +552,7 @@ rows are in priority order.
 | G-8 | Claimed | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-1 | Ready | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
+| C-7 | Ready | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | |
 
 ### Phase 2 — Release and one evaluation day
 
@@ -3039,3 +3040,88 @@ events; widen them to name the pool owner in the same change.
   `files/hardening/t-1-investigation.md`.
 - Tasks added: T-1 (after G-1a, which holds the Registry zone and edits the
   same test file).
+
+
+### C-5 · Done · 2026-09-28 · worker session (branch `hardening/c-5`)
+
+- Result: a background profile the pool cannot reach backs off to one attempt
+  every five minutes instead of retrying on the 15-second curve forever, and the
+  pool now records its own attempts and episodes with O-4's recorder (one
+  recorder per entry, the same one the selected profile's lifecycle uses). The
+  user sees the existing **No path to this Mac** presentation for a profile that
+  never opens a transport; no new state was added.
+- Evidence:
+  - `scripts/tron-ios-test build` succeeds; `scripts/tron-ios-test run
+    --only-testing TronMobileTests/DashboardStateOwnerTests` passes 53/53 in
+    about 12 s, retained as
+    `$HOME/Library/Developer/Tron/ios/test-runs/20260928T133032Z-run.bsekbk`, and
+    `…/20260928T133058Z-run.X9c4bw` passes 19/19 for `SessionSearchTransportTests`,
+    `SessionSearchCoordinatorTests` and `GatewayConnectionEpisodeRecorderTests`
+    (the pool's other owners).
+  - The done-when case, on the pool's injected manual clock:
+    `unreachableSecondaryProfileBacksOff` drives a profile whose every attempt
+    gets a socket whose hello write fails, and measures the wait before each
+    attempt: `[1, 2, 2, 8, 32, 128, 300, 300, 300]` seconds. The first three
+    consecutive never-opened attempts retry at the 2-second base interval, every
+    later wait is strictly longer than the one before it, and from the cap each
+    attempt is 300 s (`POOL_MAX_RETRY`) apart — nine attempts over about twenty
+    simulated minutes, where the previous 15-second curve made about seventy.
+    The same test asserts the profile's published states include the
+    **No path to this Mac** label.
+  - `unreachableSecondaryProfileRetriesAtOnce` parks an escalated entry and shows
+    a foreground `reconcile` (the pool's activation boundary, which AppModel
+    calls from `becameActive`) and a satisfied path hint each start the next
+    attempt without the clock advancing.
+  - The recorder evidence, with an injected `AppLog`:
+    `poolAttemptsAndEpisodesAreRecorded` requires `gateway.attempt` records
+    `profile=remote attemptId=initial stageReached=transport-open reason=timeout
+    foreground=true`, then `stageReached=connected delayBeforeMs=3000
+    gatewayConnectionId=5bf6a9a2-0000-4000-8000-0000000000c5`, and exactly one
+    `connection.episode attempts=2 causes=timeout endedBy=connected
+    foregroundMs=3000 maxGapBetweenAttemptsMs=3000`.
+    `retiringPoolEndsOpenEpisode` requires `endedBy=background attempts=1
+    causes=timeout` at scene retirement. `parkedPoolEntryNamesItsStallGuard`
+    requires one `reconnect.stalled` with `guard=pathUnsatisfied`.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: `feat(ios): back off unreachable pool profiles and record their
+  attempts (C-5)` and this plan commit.
+- Tasks added: C-7 (below).
+- Kept on purpose:
+  - "Show the profile as unreachable" reuses the existing `.noPath`
+    presentation: `packages/ios-app/docs/architecture.md` and
+    `development.md` define Offline as "recovery is stopped", which this profile
+    is not, and the plan's "What must not change" allows no new visible state.
+    The unreachable threshold reads the entry's existing
+    `GatewayConnectionFailureClassifier.consecutiveNeverOpened` counter, so the
+    profile that backs off is the profile the dashboard already labels no-path
+    and no second counter exists.
+  - The pool's curve is not jittered (`jitterFraction: 0`): the cap has to be a
+    floor on spacing for "at most one attempt per 5 minutes" to hold, and pool
+    profiles are few. The selected profile's lifecycle keeps its 80–120% jitter.
+  - `retire()` is the pool's background boundary, so it ends episodes as
+    `.background`; profile switches, removals and explicit Retry end them as
+    `.stopped`.
+- Deviations: the initial connect now uses `connectForLifecycle` +
+  `activateEvents` (the pair the lifecycle already uses) instead of `connect`,
+  so the first attempt's record carries the hello's `gatewayConnectionId`.
+  `reconcile` additionally resumes a parked retry, which is how "retry at once on
+  foreground" reaches a pool entry without adding a call site in AppModel
+  (Phone lifecycle zone). `secondaryReconnectHasNoAttemptBudget` was rewritten
+  to pump the clock through the new curve; it now fails each of its first eleven
+  sockets by write so its attempts are driven by the same helper.
+- For the next agent:
+  1. C-7: after a *failed initial connect*, the `start` task's
+     `for await delivery in client.events` loop has already exited, and the
+     reconnect loop only re-establishes the socket. A successful reconnect
+     therefore brings a live socket that consumes no events, so that pool entry
+     stops seeing `session.summary`, `system.stopping` and
+     `transport.disconnected` until it is recreated. This is pre-existing (not
+     introduced by C-5) and it is why the drop-and-record leg of
+     `poolAttemptsAndEpisodesAreRecorded` was replaced by
+     `retiringPoolEndsOpenEpisode`: the pool's `noteDisconnected` calls in
+     `handle("transport.disconnected")` and in the catalog-lease failure path
+     are correct but cannot be exercised from a pool whose first connect failed.
+  2. The pool's `stop()` ends an episode only when one is open; a profile removed
+     while connected writes no episode, which is intended (the connection turned
+     out to be fine).
