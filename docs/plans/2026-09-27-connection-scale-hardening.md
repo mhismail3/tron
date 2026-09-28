@@ -6944,6 +6944,15 @@ wait).
   - `reconnectStallGuard`'s `pathUnsatisfied`/`reconnectTaskBusy` cases are no
     longer reachable for a park (the pool still uses `pathUnsatisfied`); the enum
     is C-5's owning file.
+  - Two of the plan's five failure modes have no new C-1 test: "background during
+    an in-flight attempt" is covered by
+    `AppModelReconnectTests.backgroundBeforeFirstHelloResumesSelectedProfile`
+    (the scene backgrounds while the startup attempt's hello is in flight, its
+    late cache completion is fenced and foreground resumes once), and the single
+    `enteredBackground` cancellation owner means a reconnect-loop attempt adds no
+    new path; "two profiles" belongs to the dashboard pool's owner (C-5,
+    `DashboardStateOwnerTests`) because C-1's reconnect admits only the selected
+    profile.
   - `beginRestarting` (pre-existing) still publishes `.restarting` and then
     `.reconnecting` from its 90 s watchdog before `requestReconnect` can refuse
     on a non-retryable stop, which leaves the same "no Retry" state the review's
