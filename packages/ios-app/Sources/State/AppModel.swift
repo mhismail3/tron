@@ -5351,7 +5351,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
 
         invalidateProfileScopedLoads()
-        dashboardConnections.retire()
+        // A profile switch, pairing or teardown retires the pool's projections
+        // because the transition stopped them, not because the scene did.
+        dashboardConnections.retire(endedBy: .stopped)
         notificationInbox.cancelRefreshes()
         await dashboardConnections.waitForRetirement()
         invalidateSessionConnectionOwnership()
