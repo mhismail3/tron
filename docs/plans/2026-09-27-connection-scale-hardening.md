@@ -4410,7 +4410,8 @@ events; widen them to name the pool owner in the same change.
   - **"Done when", run against the live Gateway log (read-only) plus a synthetic
     export**: `scripts/tron-triage ~/.tron/workspace/files/hardening/o-7/synthetic-phone-export.jsonl
     --gateway-logs ~/.tron/logs --out ~/.tron/workspace/files/hardening/o-7/triage-report.json`
-    exits 0 in 0.32 s over 10,767 Gateway records and 31 phone records and
+    exits 0 in 0.32 s over 10,769 Gateway records and 31 phone records (the live
+    log grows while it runs: 10,767 on the first run, 10,769 on the third) and
     reports 8 episodes: `unknown=1, gateway-capacity=1, phone-background=1,
     gateway-stall=3, phone-stall=1, path=1`, joined `key=4 window=2 none=2`. The
     artifacts are `triage-report.json` and `triage-report.txt` in that directory.
@@ -4428,8 +4429,11 @@ events; widen them to name the pool owner in the same change.
     that window) without touching the input.
   - `python3 scripts/check-documentation-policy.py` (46 authored files) and
     `scripts/personal-info-guard.sh` pass.
-- Changes: `feat(triage): add the incident triage tool (O-7)` and the plan and
-  docs commit on `hardening/o-7`.
+- Changes: `feat(triage): add the incident triage tool (O-7)`,
+  `docs(triage): name the triage command first, close label windows at scene and
+  episode boundaries (O-7)` and
+  `feat(triage): pair the inbound-silence evidence with its resume record (O-7)`
+  on `hardening/o-7`.
 - Failure modes written before the code (one test each): a relay-path outage
   attributed to the phone because the Gateway's silent-socket record was not
   joined; a transport-open timeout read as a Gateway stall, and a live main

@@ -813,6 +813,19 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
                 "gateway", record, "cause",
                 f"peerPath={record.field('peerPath')} peerRelay={record.field('peerRelay', '-')} "
                 f"joinedBy={mode} {record.message}"))
+            # `connection.inbound-resumed` closes the same episode and carries
+            # its measured length, so the pair reads as one outage.
+            connection_id = record.field("connectionId")
+            if connection_id is None:
+                continue
+            resumed = next((candidate for candidate in gateway.connection(connection_id)
+                            if candidate.event == "connection.inbound-resumed"
+                            and candidate.timestamp is not None
+                            and candidate.timestamp > record.timestamp), None)
+            if resumed is not None:
+                evidence.append(evidence_entry(
+                    "gateway", resumed, "context",
+                    f"silentMs={resumed.field('silentMs', '-')} {resumed.message}"))
     if episode.cause != CAUSE_PATH and parked is None:
         unanswered: List[Attempt] = []
         for attempt in episode.attempt_records:

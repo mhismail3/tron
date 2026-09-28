@@ -175,6 +175,7 @@ class PathOutageTests(TriageFixture):
         self.assertEqual(found["joinedBy"], "key")
         self.assertIn("peerPath=relay", self.causes_text(found))
         self.assertIn("peerRelay=sfo", self.causes_text(found))
+        self.assertIn("silentMs=68000", self.causes_text(found))
 
     def test_transport_open_timeout_that_never_reached_the_mac_is_the_path(self):
         phone = self.write("phone.jsonl", [
