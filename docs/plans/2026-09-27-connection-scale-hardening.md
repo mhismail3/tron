@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, G-8 background work audit corrected against the live log (review response)
+- **Last updated:** 2026-09-28, G-8 background work audit: second review round corrected the poll's dominant cost and the ambient discovery scan
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -119,10 +119,16 @@ These are settled; tasks implement them without asking again.
 
 Decisions still open (tasks marked Needs scoping carry them): moving work to a
 worker thread (G-11, only if chunking cannot meet the bound), a host budget
-for agent child processes (G-14), viewing sessions without a runtime (G-6), and
+for agent child processes (G-14), viewing sessions without a runtime (G-6),
 whether session search keeps a persisted index keyed by `fileIdentity` (new
 durable state, new owner) or is rebuilt in bounded slices inside G-9's
-scheduler with incomplete coverage until it catches up (G-8c).
+scheduler with incomplete coverage until it catches up (G-8c), and whether the
+Mac app may stop re-hashing an unchanged, already-admitted Gateway payload on
+every status poll (G-8b): the fail-closed checks that the payload tree is
+immutable and still matches its manifest fingerprint
+(`GatewayPayloadStore.swift:274–283`, `:381`) would then run when the selection
+fence or the pinged runtime identity changes and on explicit user actions, not
+once per 30 s poll.
 
 ## Context
 
@@ -2560,9 +2566,10 @@ a latency percentile.
 
 - Result: background work audit. Every item in the row's "Do" list has a cause
   read from the code and measured from the live Gateway log
-  (`~/.tron/logs/gateway.jsonl`) and the unified log, both read only. Three
-  items become new rows (G-8a, G-8b, G-8c); one is already bounded and needs no
-  change. No running Gateway, app, state or process was touched. The "Do" names
+  (`~/.tron/logs/gateway.jsonl`) and the unified log, both read only. Four
+  items become new rows (G-8a, G-8b, G-8c, G-8d); one is already bounded and
+  needs no change. No running Gateway, app, state or process was touched. The
+  "Do" names
   O-6a runs as a source; O-6a is Blocked on a quiet-host repeat, so no O-6a run
   exists yet and this audit used the live log and the code instead.
 - Evidence:
@@ -2591,8 +2598,19 @@ a latency percentile.
     the grace. The row's "why five owners retry replacement" is answered as
     "they do not retry it": five is the count of distinct live bindings warned
     in a busy minute, each for a momentarily unreadable artifact. 359 B per
-    record is about 100 KB/day (1,118 × 359 B over 4.1 days) of the 1 MB/day
-    budget.
+    record is about 100 KB/day (359 B × ≈1,150 records over 4.2 days) of the
+    1 MB/day budget. Re-measured 2026-09-28T13Z: 1,180 records of 6,357 (18.6%;
+    16.6% by bytes), 133 owners, 1,047 per-owner gaps p25 86 s / median 147 s /
+    p75 287 s, 3.8% in 60–62 s, worst hour 2026-09-28T12 with 70. **The cause is
+    inferred**, not reproduced: no code reproduces the race, and the same
+    `artifact-replacement-in-progress` string is also emitted for any
+    unclassified error thrown in the refresh body (`extensionArtifactReadFailureReason`
+    default, `runtime-slot.ts:287–292`, used at `:4576`) and for a `status.json`
+    that does not exist yet before its first write (`realpathSync` ENOENT →
+    `undefined`, `:4018–4024`, warned in the discovery lane at `:4377`). The log
+    cannot tell these apart, and every one of the 1,180 records carries this
+    reason. The evidence for the race is the gap distribution plus the code,
+    and G-8a must prove it by reproducing it (below).
   - **Tailscale CLI every ~37 s: the Mac app's menu-bar status poll.**
     `log show` over `nesessionmanager` client attaches: 15 samples from
     05:26:05.957 to 05:35:23.317, deltas 29.1–36.3 s (mean 34.7 s; 12 of 15
@@ -2606,11 +2624,12 @@ a latency percentile.
     → `Subprocess.run` of
     `/Applications/Tailscale.app/Contents/MacOS/Tailscale status --peers=false --json`,
     and `MenuBarController.install` runs `ServerStatusPoller` (interval 30 s),
-    which calls `setup.pingServer` on every cycle. One CLI spawn per poll
-    (30 s + ~4.7 s of poll work). `log show` shows each spawn makes Tailscale
-    re-add its network-extension configuration ("Clearing/Adding C4C66EAF-… to
-    the loaded configurations", "Adding a connection for client
-    tailscale[pid]") — about 2,500 spawns a day.
+    which calls `setup.pingServer` on every cycle. One CLI spawn per poll (a
+    30 s sleep plus the ≈4.0 s of per-cycle CPU work measured below). `log show`
+    shows each spawn makes Tailscale re-add its network-extension configuration
+    ("Clearing/Adding C4C66EAF-… to the loaded configurations", "Adding a
+    connection for client tailscale[pid]") — ≈2,490 spawns a day at the
+    measured 34.7 s cadence.
   - **The same poll also runs the runtime admission check: four more children,
     which the first audit missed.** On every successful ping,
     `ServerStatusPoller.singleSnapshot` calls `admitStableRuntime` →
@@ -2618,11 +2637,32 @@ a latency percentile.
     which spawns `/bin/launchctl print` (`LaunchAgentRuntimeReader.swift:46`),
     `/bin/ps` twice (`ServerProcessProbe.swift:20`, `:42`) and `/usr/sbin/lsof`
     (`ServerProcessProbe.swift:8`). One 30 s cycle therefore starts **five**
-    child processes (about 14,000 a day), not one. The `lsof` and `ps` reads
-    are the admission evidence (exact listener owner, command line, start
-    identity), but they re-run on every poll even when the pinged pid and
-    payload fingerprint have not changed; `lsof` is most of the ~4.7 s
-    per-cycle "poll work".
+    child processes, not one: ≈12,450 a day at the measured 34.7 s cadence
+    (5 × 2,490). The largest per-cycle cost is not a child at all: `observe`
+    calls `activePayload()` (`StableGatewayObserver.swift:59–72`) first, which
+    runs `GatewayPayloadValidator.validateSelection` on the selected payload and
+    `validate` on the bundled one, and each of those walks the whole tree
+    (`immutableTree`) and SHA-256s every file (`payloadFingerprint` /
+    `digestFile`, `GatewayPayloadStore.swift:381`, `:668–716`). Measured
+    2026-09-28: the selected payload is 588 MB / 36,232 files and the bundled
+    one 588 MB / 36,245 files, so every poll reads ≈1.2 GB off disk. `sample
+    71837 15` (the Tron app process, never the Gateway) puts 5,311 of the
+    process's 15,000 samples inside `StableGatewayObserver.observe` on the
+    poll's cooperative thread (`ServerStatusPoller.snapshots` →
+    `singleSnapshot` → `EnvironmentSetup.makeLive` closure #5); 2,956 of those
+    sit in the selected payload's `validateSelection` (2,083 → `validate` →
+    1,751 → `payloadFingerprint` → `digestFile`, reading files), 73 in
+    `ExistingInstallDetector.serviceStatus`, and **1** in
+    `ServerProcessProbe.listenerPIDs` (the `lsof` spawn). The `launchctl` read
+    and the two `ps` spawns did not appear in the sample at all. `ps` CPU time
+    on the same pid rose 7.98 s over 70 s (two cycles) ≈ 4.0 s of CPU per poll ≈
+    2.7 CPU-hours a day — essentially all of the excess by which a ~34.7 s cycle
+    exceeds its 30 s sleep. So the
+    first audit's attribution of the poll work to `lsof` was wrong: the five
+    children are the admission evidence and are cheap, while the redundant
+    payload re-validation is the dominant cost. When admission fails,
+    `singleSnapshot` runs `validateSelection` a second time on the
+    `updateIncomplete` branch (`ServerStatusPoller.swift:72–78`).
   - **Mac app local probe connections: the same poll.** `ServerPing.ping` opens
     an authenticated WebSocket to `/v1/socket`, sends `system::ping` and closes
     it about 2 ms later. The 2026-09-24 08:57–10:59 window has 159 local
@@ -2634,8 +2674,9 @@ a latency percentile.
     debug is a constraint on O-2, not a budget G-8b can reclaim; the poll's cost
     here is the per-cycle authenticated socket, not its log volume.
   - **Session search: `session-search.warm` 21 records, 111,866–273,680 ms**
-    (mean ≈ 164 s), one per Gateway start, against 26 `gateway.started` records
-    in the same log. `SessionSearchService.rebuild()` walks
+    (mean ≈ 164 s), against 26 `gateway.started` records in the same log — so
+    the warm-up does not run on every start (21 of 26).
+    `SessionSearchService.rebuild()` walks
     `sessions.catalog("user")` and `loadDocument()` parses every canonical
     session in full (225 sessions, 2.8 GB); `indexSemanticCorpus()`
     (`session-search-service.ts:387–412`) then loads every document again and
@@ -2651,57 +2692,107 @@ a latency percentile.
     resource sampler (`server.ts:642`, `:690`), slot activity heartbeat 10 s
     (`runtime-slot.ts:5299`), idle eviction 60 s (`runtime-registry.ts:595`),
     enrollment 60 s (`gateway-main.ts:583`), notification drain 2 s
-    (`notification-service.ts:222`), storage maintenance 10 min
+    (`notifications/notification-service.ts:222`), storage maintenance 10 min
     (`gateway-main.ts:655`), browser live-view expiry 1 s
-    (`browser-live-view.ts:256`), the automation scheduler's next-scan timer
-    (`automations/automation-scheduler.ts:764`), and the two Mac observers the
-    poll drives: the admission check above and `DebugGatewayObserver`'s
+    (`display/browser-live-view.ts:256`), the automation scheduler's next-scan
+    timer (`automations/automation-scheduler.ts:764`), and the two Mac observers
+    the poll drives: the admission check above and `DebugGatewayObserver`'s
     Tailscale probe on every debug snapshot (`DebugGatewayObserver.swift:64`),
     which runs only in the debug profile. The two drain-only loops
     (`gateway-main.ts:485`, `:487`) run only while a restart drain waits. One
-    `storage.maintenance-failed` record and no recurrence. Once the discovery
-    race is retried (G-8a) and the poll is bounded (G-8b), no audited job
-    recurs uninvited.
-- Changes: this file only (row status and this handoff); the review-response
-  commit adds the corrected figures and the three rows below. No code change:
-  the two Gateway findings sit in `runtime-slot.ts` / `runtime-registry.ts`,
-  and the Mac app poll needs a bounded-cadence decision. The repeatable
-  commands and raw numbers are retained at
+    `storage.maintenance-failed` record and no recurrence. This list is every
+    Gateway `setInterval`, so the ambient artifact discovery pass below is the
+    only other recurring job of consequence; once the discovery race is retried
+    (G-8a), the ambient scan is bounded (G-8d) and the poll is bounded (G-8b),
+    no audited job recurs uninvited.
+  - **The 750 ms ambient artifact discovery pass is itself a large recurring
+    job, and it silently truncates.** `RuntimeRegistry.discoverExtensionArtifacts`
+    (`runtime-registry.ts:3675–3800`, timer at `:597`) runs every 750 ms. Each
+    pass refreshes exact live bindings, then in the ambient phase `opendir`s the
+    delegated provider root (`~/.tron/internal/subagents/async-subagent-runs`:
+    2,462 run directories and 516 `status.json` files measured 2026-09-28),
+    makes up to `MAX_EXTENSION_DISCOVERY_WORK` = 1,024 `open(status.json)`
+    attempts (`:3741`; the counter increments per directory entry *before* the
+    open, so an absent file still spends budget), reads and parses every file it
+    opens (a legacy document up to `MAX_EXTENSION_ARTIFACT_BYTES`), and routes
+    up to `rootBudget` candidates to every live slot (`:3789–3794`), where each
+    routed read opens the file again (`RuntimeSlot.discoverExtensionArtifact`,
+    `:4331` → `refreshSubagentActivityFromArtifact`). With 2,462 directories the
+    1,024 cap is always reached, so the pass attempts ≈1,365 opens a second
+    (≈118 million a day) around the clock, and the `break` at `:3741` stops the
+    `opendir` walk there: the remaining ~1,438 directories are never examined by
+    ambient discovery, in `readdir` order, and nothing logs or measures that
+    truncation. Cause and counts are read from the code and the host, not
+    profiled (the Gateway is not sampled; rule 9). New row **G-8d**. For context
+    the Gateway process had used 373 CPU-minutes over 11.7 h, including all
+    agent work, and its `resource.sample` records do not separate this pass.
+- Changes: this file only (row status and this handoff); the two
+  review-response commits add the corrected figures and the four rows below. No
+  code change: the Gateway findings sit in `runtime-slot.ts` /
+  `runtime-registry.ts`, and the Mac app poll needs a bounded-cadence decision.
+  The repeatable commands and raw numbers are retained at
   `~/.tron/workspace/files/hardening/g-8-background-work-audit.md`.
 - **Tasks added** (orchestrator adds them to the table with these conflict
   zones):
   - **G-8a — Retry the discovery read so an atomic replace is not a warning.**
     Conflict zones: **Registry** and **Slot** (holds both). Depends on G-1c.
     Owning files `packages/gateway/src/sessions/runtime-registry.ts` and
-    `packages/gateway/src/sessions/runtime-slot.ts`. Give the discovery lane
-    the watcher lane's bounded retry for a racing read (three retries, then the
-    warning), or skip a directory that already has a live watcher so one owner
-    is not re-read unretried every 750 ms; keep the 60 s per-(owner, reason)
-    dedup for a genuine replacement. Check: while the real discovery timer
-    runs, atomically replace `status.json` in a loop (write a temp file, rename
-    it over the target) and assert no `artifact-replacement-in-progress`
-    warning and no lost live activity — do not hand-set
+    `packages/gateway/src/sessions/runtime-slot.ts`. Cause: inferred from the
+    code and the per-owner gap distribution, because the same
+    `artifact-replacement-in-progress` reason also covers an unclassified read
+    error and a not-yet-written `status.json` (`runtime-slot.ts:287–292`,
+    `:4018–4024`). Give the discovery lane the watcher lane's bounded retry for
+    a racing read (three retries, then the warning); keep the 60 s
+    per-(owner, reason) dedup for a genuine replacement. Do not skip a directory
+    that already has a live watcher: the 750 ms discovery pass is the backstop
+    for a rename event the watcher missed, so skipping it could leave a stale
+    running projection; if that option is taken anyway, the row must add a check
+    that a deliberately missed watcher event is still caught by discovery.
+    Check, as the negative control, with the real discovery timer: atomically
+    replace `status.json` in a loop (write a temp file, rename it over the
+    target) and assert no `artifact-replacement-in-progress` warning and no lost
+    live activity — this check must **fail on current code** before the fix and
+    pass after it, which is what proves the cause. Do not hand-set
     `extensionArtifactMissingSince` as
     `runtime-registry.integration.test.ts:5602` does, since production never
-    supplies it.
-  - **G-8b — Bound the Mac app status poll's five children and its socket.**
-    Conflict zone: none of the Gateway zones; owns
-    `packages/mac-app/Sources/Server/Health/`,
+    supplies it. After the fix reaches the running app, confirm from the live
+    log that the reason no longer appears; if residue remains, attribute it to
+    the other two sources (unclassified read error, pre-first-write
+    `status.json`) rather than assuming they are absent.
+  - **G-8b — Bound the Mac app status poll's children, its payload re-hash and
+    its socket.** Conflict zone: none of the Gateway zones; owns
+    `packages/mac-app/Sources/Server/Health/` (including
+    `StableGatewayObserver.activePayload`),
+    `packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift`,
     `packages/mac-app/Sources/Server/LaunchAgent/LaunchAgentRuntimeReader.swift`,
     `packages/mac-app/Sources/Server/ProcessControl/ServerProcessProbe.swift`
     and `packages/mac-app/Sources/App/EnvironmentSetup.swift`. One 30 s poll
-    spawns five children (~14,000 a day): the Tailscale CLI (~2,500/day, each a
-    network-extension reload) plus `launchctl print`, two `ps` and `lsof` from
-    the admission check, and opens a fresh authenticated WebSocket (~2,880
-    sockets/day). Bound both: reuse a resolved Tailscale address for a named
+    spawns five children (≈12,450 a day at the measured 34.7 s cadence): the
+    Tailscale CLI (≈2,490/day, each a network-extension reload) plus
+    `launchctl print`, two `ps` and `lsof` from the admission check, and opens a
+    fresh authenticated WebSocket (≈2,490 sockets/day). It also re-validates and
+    re-hashes both payload trees (588 MB + 588 MB, ≈1.2 GB read per cycle, ≈4.0 s
+    CPU, `sample`-measured), which is the poll's dominant cost. Bound all three:
+    reuse a resolved Tailscale address for a named
     window through the existing `network.json` cache
     (`readTailscaleIPFromSettings` / `cacheTailscaleIP`,
     `EnvironmentSetup.swift:219–221`), not a second cache, with explicit user
-    actions keeping the live probe; and re-admit only when the pinged pid or
-    build fingerprint changes, otherwise reuse the previous admission. Both
-    windows change what the menu bar can report during the window, so decide
-    their length with the user. Evidence to keep: every child process per
-    cycle, before and after, and the unified-log attach cadence.
+    actions keeping the live probe; and re-admit only when the pinged runtime
+    identity changes, using data the ping actually carries — `buildFingerprint`
+    and `runtimeEpoch` (`ServerPingInfo`, `OnboardingModels.swift:118–123`;
+    there is no pinged pid, so a pid check is a cheap `launchctl`/`ps` read or
+    the previous `Admission.processID`) — plus a cheap selection fence
+    (mtime/inode of `payloads/stable/current.json`, the resolved version root and
+    the bundled payload root) so a changed on-disk selection still runs the full
+    validation, and every explicit user action (pairing invite, menu-bar
+    refresh, restart wait) still re-validates. Gating the ≈1.2 GB re-hash behind
+    that fence is a **user/security decision** recorded in "Decisions still
+    open", because it makes the fail-closed immutable-tree and fingerprint check
+    (`GatewayPayloadStore.swift:274–283`, `:381`) run less often; take the other
+    two bounds regardless. Both windows change what the menu bar can report
+    during the window, so decide their length with the user. Evidence to keep:
+    every child process per cycle, per-cycle CPU time from `ps`/`sample`, and the
+    unified-log attach cadence, all before and after.
   - **G-8c — Bound the session-search warm-up; coordinate with G-9.** Conflict
     zones: **Catalog** and the G-9 scheduler files (holds both); depends on G-9
     (which moves session-search indexing into the scheduler) and G-1c (same
@@ -2720,10 +2811,29 @@ a latency percentile.
     "Decisions still open". Done when a start warms the index without a
     full-corpus parse and within a stated time bound, and the search coverage
     digest is unchanged.
-- For the next agent: R-4's O-5 records should show G-8a and G-8c gone. G-8b is
+  - **G-8d — Bound the ambient artifact discovery pass by change, and make its
+    truncation impossible or visible.** Conflict zone: **Registry**, the same
+    file and timer as G-8a, so the two cannot run side by side; if the
+    orchestrator prefers one dispatch, fold this scope into G-8a. Depends on
+    G-1c. Owning file `packages/gateway/src/sessions/runtime-registry.ts`
+    (`discoverExtensionArtifacts` and the 750 ms timer at `:597`). Scope: stop
+    re-opening every provider-run `status.json` on a fixed 750 ms cadence when
+    nothing changed — bound the ambient scan by change (directory or
+    `status.json` mtime/identity from the `opendir` entry, or a provider feed)
+    instead of a fixed rescan — and make the hard cap visible or impossible,
+    since today the pass silently examines only the first entries of `opendir`
+    order (`runtime-registry.ts:3741`) while the root keeps growing (2,462 run
+    directories, 516 `status.json`, cap 1,024). Keep the exact-binding refresh
+    first and the drain lane unaffected. Evidence: count `open`/`opendir` calls
+    per pass before and after, and a check that every run directory with a
+    `status.json` is examined within a bounded number of passes, or that the
+    truncation is reported rather than silent.
+- For the next agent: R-4's O-5 records should show G-8a and G-8c gone, and
+  G-8d's file-open volume dropped with no silent truncation. G-8b is
   a Mac app change and cannot be seen in Gateway records alone — check it with
   the unified log's Tailscale client-attach cadence (about one per poll today)
-  and a per-cycle child-process count.
+  and a per-cycle child-process count, plus per-cycle CPU time from `ps`/`sample`
+  (≈4.0 s before, payload re-hash measured).
 - Review response (the follow-up commit on this branch): the item-1 cause is
   re-diagnosed from the per-owner gap distribution above (the old "warns once a
   minute for as long as its binding lives" is contradicted by the log) and G-8a
@@ -2735,3 +2845,23 @@ a latency percentile.
   stated and the retained artifact gains the per-owner gap command (finding 6);
   the recurring-job list is complete (finding 7); the header and the rows'
   conflict zones are refreshed (finding 8).
+- Second review response (this commit): the poll work is re-attributed from a
+  fresh `sample` of the Tron app and a `ps` CPU delta — the ≈1.2 GB payload
+  re-hash per cycle is the dominant cost and `lsof` is one sampled frame — in
+  the handoff, in the retained artifact and in G-8b, whose scope now owns
+  `GatewayPayloadStore.swift` and `StableGatewayObserver.activePayload`, keys
+  re-admission on `buildFingerprint` + `runtimeEpoch` (there is no pinged pid)
+  plus a selection fence, and records the skip-the-re-hash decision (finding 1,
+  majors). The 750 ms ambient discovery pass is added as a measured recurring
+  job with its silent 1,024-entry truncation, and becomes row G-8d (finding 2,
+  major). The item-1 cause is now labelled inferred, names the other two sources
+  of the same reason string, and G-8a requires the atomic-replace check to fail
+  on current code first and a post-fix log confirmation (finding 3, minor).
+  G-8a drops "skip a directory that already has a live watcher" as the default
+  and requires a missed-watcher check if it is taken (finding 4, minor). The
+  cadence arithmetic is corrected to ≈12,450 children/day at 34.7 s, the warm-up
+  is stated as 21 of 26 starts, and the two Gateway file paths gain their
+  directories (`notifications/`, `display/`) (finding 5, nits). The log figures
+  were re-measured for this round (1,180 records as of 2026-09-28T13Z, matching
+  the reviewer's read) and are stated beside the original snapshot rather than
+  replacing it.
