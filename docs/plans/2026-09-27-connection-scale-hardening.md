@@ -5112,17 +5112,28 @@ events; widen them to name the pool owner in the same change.
   `LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` (3) times its canonical transcript bytes,
   measured at admission from the same one-`stat`-per-runtime inventory the
   resource sample reads (`resourceInventory`, now documented as shared by the
-  sampler and the budget). An admission that cannot fit retires idle runtimes
-  **largest first** (the largest reclaims the most), under the existing
-  protections (subscriber, run, lease, blocked ownership) and only when the
-  runtime can be reloaded; if the set still cannot fit, the admission is refused
-  with the retryable `busy` the runtime count already uses. Concurrent starts
-  reserve their bytes in the same mutex section that checks the count, so two
-  opens cannot both find room only one of them has. Each transition writes one
-  record: `runtime.loaded` at publication and `runtime.evicted` at the slot's
-  disposal, both with the session, its transcript bytes and the heap the budget
-  charged (`estimatedHeapBytes`), logged by `gateway-main.ts` at info.
-  `packages/mac-app/scripts/tron-gateway-launcher.c` now passes
+  sampler and the budget, and skipping a slot that is already disposed). An
+  admission that cannot fit retires idle runtimes **largest first** (the largest
+  reclaims the most), under the existing protections (subscriber, run, lease,
+  blocked ownership) and only when the runtime can be reloaded. Each published
+  runtime also keeps a synchronous byte charge (`publishedRuntimeBytes`, written
+  in `publishRuntime` and cleared where the slot leaves `slots`), and the
+  admission mutex adds back the charge of every runtime the byte pass did not
+  see; with the per-start reservations taken in that same mutex section, two
+  concurrent opens can no longer both find room only one of them has. Two
+  admissions are charged nothing and never refused on this budget: a session
+  that has not written a transcript yet, and a transcript whose own estimate
+  already exceeds the whole budget (no retirement could make it fit, and
+  refusing it would make a large canonical session unopenable) — the runtime
+  count and the explicit heap limit stay their backstop. Any other admission
+  that still cannot fit is refused with the retryable `busy` the runtime count
+  already uses. Each transition writes one record from the registry:
+  `runtime.loaded` at publication and `runtime.evicted` where the slot stops
+  being live, both with `sessionId`, a `reason` (`open` | `create` |
+  `automation` | `import` | `oversize` for a load; `bytes` | `idle` | `capacity`
+  | `closed` | `deleted` | `shutdown` for an eviction), `transcriptBytes` and
+  the `estimatedHeapBytes` the budget charged, as named `counts`.
+  `packages/mac-app/scripts/tron-gateway-launcher.c` passes
   `--max-old-space-size=4096` before the entrypoint, so the budget is under an
   explicit limit instead of Node's default.
 - Failure modes written before the code (all covered by
@@ -5133,86 +5144,90 @@ events; widen them to name the pool owner in the same change.
   opening session is admitted although no idle runtime can be retired for it, so
   loaded sessions push the heap toward the limit; (4) a protected runtime (an
   audience) is retired under byte pressure; (5) the transitions are counted but
-  never named, so no record says which session was loaded or evicted or what the
-  budget charged it.
-  Three tests were added (failure modes 1+2, 3+4, 5) and each was shown failing
-  on the previous source with a distinct failure: `expected false to be true`
-  (no eviction happened), `promise resolved "RuntimeSlot{…}" instead of
-  rejecting` (the over-budget open was admitted), and `expected undefined to
-  match object { Object (sessionId) }` (no lifecycle record).
+  never named, so no record says which session was loaded or evicted, what the
+  budget charged it or why it went away; (6) two opens at once both find room
+  only one of them has, because the pass reads its inventory before the mutex;
+  (7) a transcript larger than the whole budget evicts every idle runtime and
+  can then never open; (8) a session that has not written a transcript yet is
+  refused although it cannot raise the total.
+- Tests (six added, one existing): largest-first retirement and the refusal use
+  a **real** transcript grown with a sparse `truncate` (the previous mocks fed
+  the budget sizes production never supplies), the small session is acquired
+  first so a smallest-first, iteration-order or least-recently-used pass all
+  fail, the concurrent-publication case drives the race through a
+  `resourceInventory` spy that delegates to the real method and only orders the
+  two starts, and the live set is asserted through the public
+  `resourceInventory()` instead of a private `slots` cast. Each new test was
+  shown failing on the source without its fix: `expected true to be false`
+  (smallest-first retired the small session), `expected true to be true`-shaped
+  budget-message mismatch plus a 53 s over-budget open (the delta removed), the
+  budget refusal where the append fence was expected (the oversize pass-through
+  removed), and the budget refusal where admission was expected (the zero-charge
+  pass-through removed).
 - Evidence:
-  - `npx vitest run src/sessions/runtime-registry.integration.test.ts` passes
-    252/252 (249 before this change; 3 added) on the changed tree.
   - `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
-    "budget"` passes 6/6 (the three new tests plus three matching existing
-    ones); on the previous source the same filter fails 3/3 with the failures
-    quoted above.
-  - `npx vitest run src/transport/stall-diagnostics.test.ts` passes 22/22 (the
-    sampler and the shared inventory seam), `npm run build` is clean, and
+    "budget"` passes 7/7 in ~0.3 s on the changed tree.
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts` and
+    `src/transport/stall-diagnostics.test.ts` pass on the changed tree;
     `npx tsc --noEmit` is clean.
-  - Launcher: `xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror
-    -Wno-deprecated-declarations -arch arm64 -mmacosx-version-min=15.0
-    packages/mac-app/scripts/tron-gateway-launcher.c` compiles clean, and the
-    launcher fixture's fake Node now asserts `$1 = --max-old-space-size=4096`
-    before the entrypoint (exit 13 otherwise), so the whole
-    `packages/mac-app/scripts/test-tron-gateway-launcher.sh` fixture covers the
-    flag. The fixture was run with the pinned Node 22.22.0 on `PATH` and passes
-    end to end (exit 0, its closing "pass" line), so the flag reaches the child
-    argv in every launch case.
-  - Heap-per-runtime measurement (Do item 1). Method: a temporary focused
-    integration measurement in the registry fixture (real SDK runtime, one
-    transcript written by `SessionManager.appendMessage`, `heapUsed` delta and a
-    10 ms-sampled peak across `RuntimeRegistry.acquire`), then deleted. Result:
-    a 48 MiB transcript (50,576,622 B) with a heap delta of 52,455,056 B
-    (1.04x) and a 150 MiB transcript (157,926,944 B) with 130,789,816 B (0.83x)
-    for plain repeated ASCII, which has no projection duplication; the plan's
-    own live-Gateway measurement (2026-09-27) is 108 MB of session for about
-    310 MB of heap (2.9x) on real content. The factor is set from the larger,
-    real-content figure rounded up to 3, and the constant says so; the
-    fixture's own figure is recorded here as the floor it is.
+  - Launcher: the compiled launcher plus
+    `packages/mac-app/scripts/test-tron-gateway-launcher.sh` (fixture asserts
+    `$1 = --max-old-space-size=4096` before the entrypoint, exit 13 otherwise)
+    pass end to end with the pinned Node 22.22.0 on `PATH`, so the flag reaches
+    the child argv in every launch case. Unchanged by the review round, and it
+    stays the check for the launcher half of this task.
 - Checks: `runtime-registry.integration.test.ts` (the row's named owner) covers
-  the budget, the largest-first order, the protected-runtime case, the refusal
-  and the two records.
+  the budget, the largest-first order, the protected-runtime case, the refusal,
+  the two pass-through admissions, the concurrent-publication charge and the
+  records.
 - Docs: `packages/gateway/README.md` (Session invariants) states the budget, the
-  factor, the largest-first order, the refusal, the explicit `--max-old-space-size`
-  and the records; `packages/gateway/docs/observability.md` has rows for
-  `runtime.loaded` and `runtime.evicted` with their levels, triggers, fields and
-  reason.
+  factor, the largest-first order, the two pass-through admissions, the
+  concurrent-publication charge, the refusal, the explicit
+  `--max-old-space-size` and the records; `packages/gateway/docs/observability.md`
+  has rows for `runtime.loaded` and `runtime.evicted` with their levels,
+  triggers, `reason` values, `counts` and rationale.
 - Volume: the two records are per transition (one per session load and one per
   eviction — tens a day on a normal day, a few hundred worst case), far inside
   the 1 MB/day budget; the per-minute `gateway.resources` volume is unchanged.
+- Review round (2026-09-28, changes-required → fixed): (1) the publication race
+  is closed by the per-runtime charge and its mutex add-back, with the
+  concurrent-publication case; (2) the oversize admission is passed through
+  before any eviction, with the oversize case; (4) a zero-charge admission is
+  passed through too — the supervisor chose A1 + B1 (preserve the product; the
+  explicit heap limit is the hard backstop; name the oversize load). (5) the
+  tests now use real sizes and public accessors. (6) `resourceInventory` skips a
+  disposed slot and the pass excludes the requested session, which also makes
+  the old `break`/`continue` check unreachable and it was deleted rather than
+  replaced. (7) the records carry `reason` and put their bytes in `counts`.
+  (8) the `runtime-slot.ts` edit (an out-of-scope extra `await stat()` in the
+  Slot conflict zone) is reverted; the registry owns the eviction record from
+  its own charge. (9) the pass is wrapped in the `session.runtime-budget` stage.
+  (10) the private `slots` cast is gone; the assertion uses
+  `resourceInventory()`, not `activeSessionIds()`, which reports only busy slots
+  and cannot name two idle-or-live runtimes.
 - "Done when" (a sequence of large idle sessions in O-6a never exceeds the
-  budget): **not run in this session.** The budget is enforced on the admission
-  path and proven by the integration cases above, but the O-6a multi-session
-  scenario (a 2 GB catalog with five 100–200 MB sessions and 8 running sessions)
-  was not run here: the host is shared with several parallel hardening workers
-  and a 15-minute default run would both spoil their measurements and be
-  refused by O-6a's own memory/swap guard on a busy host. What a quiet-host
-  O-6a run has to show: with the four large sessions open at once, the total
-  charge stays at or under `LIVE_RUNTIME_BYTE_BUDGET`, the fifth either retires
-  an idle one or is refused with `busy`, and the `runtime.loaded`/`runtime.evicted`
-  records in the fixture Gateway's `gateway.jsonl` name the sessions and their
-  bytes. The row is Done on the orchestrator's usual terms for a scenario-run
-  criterion (like O-3's and O-5's cross-checks); if the run shows the real heap
-  2.9x figure is too low for the fixture's content mix, the factor is the one
-  number to move.
+  budget): O-6a confirmation and the factor measurement are owed by the
+  orchestrator with the quiet-host runs; factor 3 is provisional. The budget is
+  enforced on the admission path and proven by the integration cases above; if a
+  quiet-host O-6a run shows the real heap-per-transcript-byte figure is off, the
+  factor is the one number to move.
 - Kept on purpose: the budget is a named constant next to its only user rather
   than a config surface (the plan names `LIVE_RUNTIME_BYTE_BUDGET`; a deployment
   override would be speculative); the count still caps the runtime number while
   the budget caps bytes, so both checks stay where each belongs; `resourceInventory`
   stayed the one place that stats live runtimes, so the sampler and the budget
-  cannot disagree about a runtime's size; new sessions (`create`, an automation
-  start) are charged nothing because they have not written a transcript yet, so
-  they only have to fit beside the runtimes already loaded; `importFromJsonl` is
-  charged the source transcript's bytes, which is what the fork copies.
+  cannot disagree about a runtime's size; `importFromJsonl` is charged the source
+  transcript's bytes, which is what the fork copies.
 - Deviations: `runtime-registry.ts` kept the retirement body of `evictIdle` as a
   new private `retireIdleRuntime` so the byte pass reuses the same commit logic
-  (mutex check, slot eligibility fence, bookkeeping) instead of a second copy;
-  `runtime-slot.ts` gained one optional dependency
-  (`runtimeEvicted(sessionId, transcriptBytes)`) so the eviction is recorded
-  where it happens, as its counter already is; `gateway-main.ts` gained the log
-  wiring. No new files.
-- Withdrawn: none.
+  (mutex check, slot eligibility fence, bookkeeping) instead of a second copy,
+  and now threads an eviction `reason` through it; `gateway-main.ts` gained the
+  log wiring. No new files. `runtime-slot.ts` is untouched by the final change.
+- Withdrawn: the `runtimeEvicted(sessionId, transcriptBytes)` dependency on
+  `RuntimeSlot` — the record moved to the registry with finding 8, so the slot no
+  longer stats its transcript at disposal and the record's `transcriptBytes` is
+  the size the budget charged when the runtime was published (documented in the
+  observability row).
 - For the next agent: G-12 (heap-pressure shedding) reuses
   `LIVE_RUNTIME_BYTE_BUDGET`, `byteBudgetFits` and the `busy` refusal this task
   added — it should add the retry hint and the shed record rather than a second
@@ -5222,13 +5237,17 @@ events; widen them to name the pool owner in the same change.
 - Open risks (residual, for the orchestrator's review): (a) the estimate is
   linear in transcript bytes, so a session whose heap is dominated by something
   other than its transcript (a huge single entry, an image-heavy compaction)
-  can be charged less than it holds; (b) the live estimate is a snapshot taken
-  just before the admission mutex, so a runtime published in that window is
-  charged from the next inventory read — reservations cover the starts, not a
-  publication that raced the read; (c) `makeRoomForRuntimeBytes` reaches the
+  can be charged less than it holds; (b) the mutex adds a runtime the byte pass
+  missed back at its **publish-time** charge, so a runtime that published and
+  then grew inside that window is charged its older, smaller size; (c) a real
+  oversize transcript cannot be built in the fixture without a >512 MiB
+  parseable file, so the `oversize` load reason is proven by inspection of the
+  same condition the oversize case exercises, and an O-6a run with a real 2 GB
+  catalog is where it would be seen; (d) `makeRoomForRuntimeBytes` reaches the
   whole live set with one `stat` per runtime per admission (bounded by the
   runtime count, 128), which is the same cost `gateway.resources` already pays
   once a minute.
+
 
 ### G-10a · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-10a`)
 

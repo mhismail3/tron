@@ -224,13 +224,15 @@ const sessions = new RuntimeRegistry({
     }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   // Load and eviction are transitions at info: the byte budget's decisions have
-  // to be attributable to one session from the log alone.
+  // to be attributable to one session from the log alone, and the reason has to
+  // separate a budget eviction from an idle or requested one.
   runtimeLifecycleRecord: (record) => logger.log("info",
-    // The bytes ride in the message, as `gateway.resources` keeps its measurements, rather than widening `LogMetadata`.
-    `Session runtime ${record.event === "runtime.loaded" ? "loaded" : "evicted"} (transcriptBytes=${record.transcriptBytes} estimatedHeapBytes=${record.estimatedHeapBytes})`, {
+    `Session runtime ${record.event === "runtime.loaded" ? "loaded" : "evicted"} (${record.reason})`, {
       event: record.event,
       source: "sessions",
       sessionId: record.sessionId,
+      reason: record.reason,
+      counts: { transcriptBytes: record.transcriptBytes, estimatedHeapBytes: record.estimatedHeapBytes },
     }),
   compactionDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "failure" ? "error" : "info",

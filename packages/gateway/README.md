@@ -2152,14 +2152,22 @@ charged `LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` (3) times its canonical JSONL bytes,
 measured at admission from the same one-`stat`-per-runtime inventory the
 resource sample already reads. When the total plus the opening session's charge
 exceeds the budget, the largest reloadable idle runtime is retired first (the
-one whose retirement reclaims the most), under the protections above; an
-admission that still cannot fit is refused with the retryable `busy` the runtime
-count uses. A session that has not written a transcript yet is charged nothing,
-so `session.create` and an automation start only have to fit beside the runtimes
-already loaded. The launcher passes `--max-old-space-size=4096` to the Gateway's
-Node process (`packages/mac-app/scripts/tron-gateway-launcher.c`), and the
-budget is sized below that limit. `runtime.loaded` and `runtime.evicted` record
-each transition with the session, its transcript bytes and the charge.
+one whose retirement reclaims the most), under the protections above. Each
+published runtime keeps a synchronous charge that the admission mutex adds back
+when the byte pass did not see it, so a runtime published while another session
+is opening cannot be left out of both the live total and the reservations. Two
+admissions are charged nothing and never refused on this budget: a session that
+has not written a transcript yet (`session.create`, an automation start), because
+it cannot raise the total, and a transcript whose own estimate already exceeds
+the whole budget, because no retirement could make it fit and refusing it would
+make a large canonical session unopenable — the runtime count and the heap limit
+below stay its backstop. Any other admission that still cannot fit is refused
+with the retryable `busy` the runtime count uses. The launcher passes
+`--max-old-space-size=4096` to the Gateway's Node process
+(`packages/mac-app/scripts/tron-gateway-launcher.c`), and the budget is sized
+below that limit. `runtime.loaded` and `runtime.evicted` record each transition
+with the session, its reason, its transcript bytes and the charge, as named
+`counts`.
 
 Catalog acquisition generations share one physical predecessor and coalesce its
 successor after settlement, including failure. Invalidations cannot multiply
