@@ -193,7 +193,8 @@ class ExportParsing(unittest.TestCase):
                 _, peak = tracemalloc.get_traced_memory()
             finally:
                 tracemalloc.stop()
-        # Kept per reference, the references alone take ~120 MB here.
+        # Kept per reference, this export peaked at 174 MB (166 MiB); each
+        # reference resolved to its shared definition once, 6.9 MB (6.6 MiB).
         self.assertLess(peak, 24 * 1024 * 1024)
         self.assertEqual(summary["samples"], 2_000)
         # Every shared frame, reached only through references, is in every sample.

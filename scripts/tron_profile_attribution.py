@@ -13,8 +13,8 @@ iterations never enter the attribution. Frames Instruments could not
 symbolicate are named as unresolved addresses per image, never dropped.
 
 Exports are streamed: a host-wide Time Profiler export of a loaded Mac runs to
-gigabytes, so rows are read one at a time and only values defined once (and
-referenced later) are retained, each once, however often later rows repeat it.
+gigabytes, so rows are read one at a time and every value carrying an `id` is
+kept once, however often later rows repeat it by reference.
 """
 
 from __future__ import annotations
@@ -74,10 +74,10 @@ class AttributionError(Exception):
 # ------------------------------------------------------------------ export ---
 
 class Table:
-    """One exported xctrace table: column mnemonics by position.
+    """One exported xctrace table: the column mnemonics, indexed by position.
 
-    Rows reach callers with every reference already replaced by its defining
-    element (`iter_rows`). A `<sentinel/>` cell (no value) reads as None.
+    `iter_rows` hands rows to callers with every reference already replaced by
+    its defining element. A `<sentinel/>` cell (no value) reads as None.
     """
 
     def __init__(self, schema: str, columns: list[str]) -> None:
@@ -86,14 +86,15 @@ class Table:
         self._index = {name: position for position, name in enumerate(columns)}
 
     @staticmethod
-    def resolve(element: ElementTree.Element | None) -> ElementTree.Element | None:
+    def value(element: ElementTree.Element | None) -> ElementTree.Element | None:
+        """The element itself, or None for an absent or `<sentinel/>` cell."""
         return None if element is None or element.tag == "sentinel" else element
 
     def cell(self, row: list[ElementTree.Element], column: str) -> ElementTree.Element | None:
         position = self._index.get(column)
         if position is None or position >= len(row):
             return None
-        return self.resolve(row[position])
+        return self.value(row[position])
 
     def has(self, *columns: str) -> bool:
         return all(column in self._index for column in columns)
@@ -259,7 +260,7 @@ def _pid(table: Table, row: list[ElementTree.Element], column: str) -> int | Non
     process = table.cell(row, column)
     if process is None:
         return None
-    pid = table.resolve(process.find("pid"))
+    pid = table.value(process.find("pid"))
     value = number(pid)
     return int(value) if value is not None else None
 
@@ -289,7 +290,7 @@ def frame_symbol(frame: ElementTree.Element, table: Table) -> tuple[str, str, bo
     unresolved app or test frames stay visible in the ranking instead of
     vanishing.
     """
-    binary = table.resolve(frame.find("binary"))
+    binary = table.value(frame.find("binary"))
     image = binary.get("name") if binary is not None and binary.get("name") else "unknown image"
     name = frame.get("name") or ""
     if not name or UNRESOLVED_ADDRESS.match(name):
@@ -409,10 +410,10 @@ def summarize_time_profile(rows: Rows, windows: list[tuple[float, float]] | None
 def _frames(table: Table, stack: ElementTree.Element | None) -> list[ElementTree.Element]:
     if stack is None:
         return []
-    backtrace = stack if stack.tag == "backtrace" else table.resolve(stack.find("backtrace"))
+    backtrace = stack if stack.tag == "backtrace" else table.value(stack.find("backtrace"))
     if backtrace is None:
         return []
-    return [frame for frame in (table.resolve(child) for child in backtrace.findall("frame")) if frame is not None]
+    return [frame for frame in (table.value(child) for child in backtrace.findall("frame")) if frame is not None]
 
 
 # -------------------------------------------------------------- signposts ---
