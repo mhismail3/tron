@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import Callable
 import urllib.error
 import urllib.request
 
@@ -503,7 +504,11 @@ class FixtureGateway:
             # interrupt aborted a wait above, so no child is left running.
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(process.pid, signal.SIGKILL)
-            with contextlib.suppress(BaseException):
+            # Only the timeout is suppressed: a first Ctrl-C arriving in this
+            # wait is `Interrupted`, a BaseException that must reach the caller
+            # (every later signal is ignored, so swallowing it would leave the
+            # run unstoppable). The group is already SIGKILLed either way.
+            with contextlib.suppress(subprocess.TimeoutExpired):
                 process.wait(timeout=10)
 
     def retain_logs(self) -> None:
@@ -512,15 +517,34 @@ class FixtureGateway:
             data = source.read_bytes()
             (self.evidence / "gateway.jsonl").write_bytes(data[-8 * 1024 * 1024:])
 
-    def remove(self) -> None:
-        if (self.root / FIXTURE_MARKER).is_file() and self.root.name.startswith("tron-profile-gateway-"):
-            shutil.rmtree(self.root, ignore_errors=True)
+    def owned(self) -> bool:
+        """Proof that `root` is a fixture home this profiler created."""
+        return self.root.name.startswith("tron-profile-gateway-") and (self.root / FIXTURE_MARKER).is_file()
+
+    def removals(self) -> list[Callable[[], None]]:
+        """Removal actions for `removal_to_completion`, in order.
+
+        Ownership is proved once, here, before any removal runs: an action that
+        `removal_to_completion` retries after a Ctrl-C must not re-check a
+        marker that `rmtree` has already deleted, or the resumed removal would
+        no-op and leave a half-deleted home behind. A child that could not be
+        stopped keeps its home (removing it would delete state under a live
+        process); the generated catalog never outlives the run either way."""
+        if not self.owned():
+            return []
+        actions: list[Callable[[], None]] = [self.remove_catalog]
+        if self.process is None or self.process.poll() is not None:
+            actions.append(self.remove_home)
+        return actions
 
     def remove_catalog(self) -> None:
         """The generated catalog (up to gigabytes) never outlives the run, even
         when a surviving process keeps the rest of the home as evidence."""
-        if (self.root / FIXTURE_MARKER).is_file():
-            shutil.rmtree(self.catalog, ignore_errors=True)
+        shutil.rmtree(self.catalog, ignore_errors=True)
+
+    def remove_home(self) -> None:
+        """Only reachable from `removals()`, which proved ownership."""
+        shutil.rmtree(self.root, ignore_errors=True)
 
 
 # --- Scenario execution --------------------------------------------------------
@@ -730,8 +754,7 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
                     fixture.retain_logs()
                     # A child that could not be stopped keeps its home; the
                     # failure names it instead of deleting state under it.
-                    if fixture.process is None or fixture.process.poll() is not None:
-                        removal_to_completion(fixture.remove)
+                    removal_to_completion(*fixture.removals())
         effective_prompt = prompt if prompt is not None else scenario.prompt
         problems, validation_warnings = validate(result, scenario, args.iterations, effective_prompt)
         if problems:
@@ -802,7 +825,10 @@ def removal_to_completion(*actions) -> None:
     A first Ctrl-C arrives as Interrupted wherever the handler fires, so each
     action is resumed past an interrupt and the interrupt is re-raised only
     once every action finished: a half-deleted catalog or fixture home is never
-    left behind, and the caller still exits 130."""
+    left behind, and the caller still exits 130. An action must therefore be
+    safe to run again from any partial state and must not use a proof it
+    destroys mid-removal to decide whether it still has work to do (see
+    FixtureGateway.removals)."""
     deferred: Interrupted | None = None
     for action in actions:
         while True:
@@ -986,10 +1012,7 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
                     fixture.retain_logs()
                     # The generated catalog never outlives the run; a child that
                     # could not be stopped keeps its home as evidence.
-                    removals = [fixture.remove_catalog]
-                    if fixture.process is None or fixture.process.poll() is not None:
-                        removals.append(fixture.remove)
-                    removal_to_completion(*removals)
+                    removal_to_completion(*fixture.removals())
         if fixture.root.exists():
             raise ProfileFailure(f"fixture home {fixture.root} was not removed", EXIT_FIXTURE, fixture.root)
         problems, warnings = validate_multi(results)

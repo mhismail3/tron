@@ -66,6 +66,15 @@ async function withDeadline(promise, ms, what) {
   }
 }
 
+/** A sleep whose timer can be cancelled. An un-cleared `setTimeout` keeps the
+ * whole driver process alive for its full delay, so every bounded wait cancels
+ * its timer as soon as the wait ends. */
+function cancellableSleep(ms) {
+  let timer;
+  const done = new Promise((resolveSleep) => { timer = setTimeout(resolveSleep, ms); });
+  return { done, cancel: () => clearTimeout(timer) };
+}
+
 // Deterministic text for seeded history; independent of the faux model text.
 function generator(seed) {
   let state = seed >>> 0;
@@ -881,7 +890,9 @@ async function probeSnapshot() {
  * In-flight operations then get `tailGraceSeconds` to finish outside the
  * window: their latency still counts, and whatever is left is censored by
  * `abandonInflight` so one slow operation can neither stretch the window nor
- * the run.
+ * the run. A lane that fails inside the window is thrown here at once, so the
+ * caller's `finally` still stops the appender, closes the clients and flushes
+ * the timeline.
  */
 async function measuredWindow(label, connected, recorded, body, options = {}) {
   const { fixedSeconds = null, tailGraceSeconds = null, abandonInflight = null } = options;
@@ -894,7 +905,14 @@ async function measuredWindow(label, connected, recorded, body, options = {}) {
     await body(start);
   } else {
     lanes = body(start);
-    await sleep(Math.max(0, start + fixedSeconds * 1000 - now()));
+    // The handler is attached with the lanes, not after the deadline: a lane
+    // that rejects inside the window must surface as this function's failure
+    // instead of as an unhandled rejection that kills the process before any
+    // cleanup runs.
+    const laneFailure = lanes.then(() => null, (error) => ({ error }));
+    const settled = await Promise.race([
+      sleep(Math.max(0, start + fixedSeconds * 1000 - now())).then(() => null), laneFailure]);
+    if (settled !== null) throw settled.error;
   }
   // The window closes before any sample is read: frames, bytes, CPU time and
   // catalog walks of work that outlives the deadline belong to the tail.
@@ -918,11 +936,18 @@ async function measuredWindow(label, connected, recorded, body, options = {}) {
   };
   if (lanes !== null) {
     const tailStart = now();
+    // Cancelled in `finally`: the timer must not outlive the tail, or the
+    // driver would idle (and keep its parent waiting) for the full grace
+    // period after every iteration.
+    const tail = cancellableSleep(tailGraceSeconds * 1000);
     let expired = false;
-    // A lane that fails before the tail expires stays fatal; one that only
-    // settles afterwards is consumed here and changes nothing.
-    await Promise.race([lanes,
-      sleep(tailGraceSeconds * 1000).then(() => { expired = true; })]);
+    try {
+      // A lane that fails after the deadline is still fatal: its rejection
+      // ends the race and reaches the caller's `finally` like any other.
+      await Promise.race([lanes, tail.done.then(() => { expired = true; })]);
+    } finally {
+      tail.cancel();
+    }
     window.tail = {
       seconds: (now() - tailStart) / 1000, outcome: expired ? "abandoned" : "complete",
       abandoned: expired && abandonInflight ? abandonInflight() : [],
@@ -977,12 +1002,16 @@ async function multi() {
     // with one of them in flight on a slow fixture, so each one is censored
     // (its elapsed time is the sample) instead of holding the run open.
     const inflight = new Set();
+    // Set once the mixed window's tail has ended: an operation a lane finishes
+    // after that is no longer measured, so the sample set cannot change while
+    // the run winds down (and cannot gain a post-window sample).
+    let measuring = true;
     const timed = async (kind, operation) => {
       const entry = { kind, startedAt: now(), censored: false };
       inflight.add(entry);
       try {
         const value = await operation();
-        if (!entry.censored) samples[kind].push(now() - entry.startedAt);
+        if (measuring && !entry.censored) samples[kind].push(now() - entry.startedAt);
         return value;
       } finally {
         inflight.delete(entry);
@@ -1046,9 +1075,11 @@ async function multi() {
     await sleep(config.settleBeforeMs);
 
     const reconnectMs = config.reconnectIntervalSeconds * 1000;
-    // The first reconnect must land inside the window whatever `--mixed-seconds`
-    // is (the dashboard's 50 s offset is longer than the shortest window), and
-    // the mobile's stays earlier so the two clients never reconnect together.
+    // The dashboard's offset is clamped so its first reconnect lands inside the
+    // window whatever `--mixed-seconds` is; the mobile keeps its own offset,
+    // which is earlier than the dashboard's for a window of 40 s or more. A
+    // `--mixed-seconds` too short for the mobile to reconnect at all (20 s or
+    // less) is rejected by the orchestrator's validation, not hidden here.
     const dashboardReconnectOffsetMs = Math.min(config.dashboardReconnectOffsetSeconds, config.mixedSeconds / 2) * 1000;
     const pause = (intervalMs, cycleStart, deadline) => sleep(Math.max(0, Math.min(intervalMs - (now() - cycleStart), deadline - now())));
     // Lists and reconnects run on separate devices. The Gateway admits one
@@ -1106,8 +1137,16 @@ async function multi() {
         if (now() >= deadline) break;
         const cycleStart = now();
         const opened = await timed("sessionOpenCold", () => retrying(driver, "session.open", { sessionId }));
-        await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model" });
-        await timed("promptAdmission", () => mutation(driver, "session.prompt", { sessionId, text: config.coldPrompt }));
+        // The model selection and the prompt admission are measured workload
+        // too: started after the deadline the prompt would be timed while every
+        // other lane has stopped (biased low) and censored with an elapsed time
+        // under the tail, not the tail's own length.
+        if (now() < deadline) {
+          await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model" });
+          if (now() < deadline) {
+            await timed("promptAdmission", () => mutation(driver, "session.prompt", { sessionId, text: config.coldPrompt }));
+          }
+        }
         await driver.request("session.close", { sessionId, subscriptionToken: opened.subscriptionToken }, measured);
         await pause(config.proberIntervalMs, cycleStart, deadline);
       }
@@ -1125,7 +1164,11 @@ async function multi() {
           mobileLoop(start, deadline), largeLane(start, deadline), warmLane(start, deadline),
           coldLane(start, deadline)]);
       }, { fixedSeconds: config.mixedSeconds, tailGraceSeconds: config.tailGraceMs / 1000, abandonInflight });
-    result.samples = samples;
+    // The tail is the last moment an operation may be censored into the
+    // samples: from here on a lane that settles late is no longer measured, and
+    // the copy below fixes the set the result reports.
+    measuring = false;
+    result.samples = Object.fromEntries(Object.entries(samples).map(([kind, values]) => [kind, [...values]]));
     result.runningPhases = config.running.map(({ sessionId }) => phases.get(sessionId) ?? null);
     result.mobileOutcome = chat.outcome();
     result.appendedEntries = await appender.stop();

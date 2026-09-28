@@ -2434,9 +2434,12 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   lands in the samples. Whatever the tail outlasts is censored: its elapsed
   time becomes the sample (so it counts in `requests.over_phone_deadline`) and
   `requests.censored_tail` counts it. The no-subscriber window is fixed by its
-  sleep alone. A lane whose device is retired by a reconnect keeps its own
-  scheduled work: the reconnect lane cannot be starved by a list that outlasts
-  the window.
+  sleep alone. Every lane that can starve another runs on its own device and
+  keeps its own schedule: a `session.list` that outlasts the window cannot
+  delay the reconnect lane's next reconnect of its own client. Operations that
+  are not in flight when the window closes are not started: the cold lane skips
+  its prompt once the deadline has passed, so no sample is timed after the
+  other lanes stopped.
 
 Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so
 p99 is the maximum below 100 samples) for `session_list`,

@@ -440,6 +440,281 @@ class InterruptibleRemoval(unittest.TestCase):
         self.assertEqual(order, ["catalog", "catalog", "home"])
 
 
+class InterruptibleStop(unittest.TestCase):
+    """A first Ctrl-C must reach the caller instead of being swallowed.
+
+    `stop()` ignores every later SIGINT/SIGTERM/SIGHUP, so an `Interrupted`
+    lost inside its `finally` leaves the run unstoppable."""
+
+    def setUp(self) -> None:
+        self.profiler = load_gateway_profiler()
+
+    def test_an_interrupt_during_the_post_kill_wait_is_reraised(self) -> None:
+        profiler = self.profiler
+        interrupt = profiler.Interrupted(signal.SIGINT)
+
+        class Process:
+            """A live child whose post-SIGKILL wait receives the Ctrl-C."""
+            pid = 424242
+
+            def __init__(self) -> None:
+                self.waits = 0
+                self.killed = False
+
+            def poll(self):
+                return None
+
+            def send_signal(self, number: int) -> None:
+                pass
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def wait(self, timeout=None):
+                self.waits += 1
+                if self.waits == 2:
+                    raise interrupt
+                return 0
+
+        fixture = profiler.FixtureGateway(tempfile.mkdtemp(), 0, None)
+        self.addCleanup(shutil.rmtree, fixture.root, True)
+        process = Process()
+        fixture.process = process
+        groups: list[int] = []
+        matched, killpg = profiler.FixtureGateway.command_matches, profiler.os.killpg
+        profiler.FixtureGateway.command_matches = lambda self: True
+        profiler.os.killpg = lambda pid, number: groups.append((pid, number))
+        try:
+            with self.assertRaises(profiler.Interrupted):
+                fixture.stop()
+        finally:
+            profiler.FixtureGateway.command_matches, profiler.os.killpg = matched, killpg
+        # The group kill still ran, so the interrupt did not skip the cleanup it
+        # was passed through the `finally` for.
+        self.assertEqual(groups, [(process.pid, signal.SIGKILL)])
+
+
+class InterruptedHomeRemoval(unittest.TestCase):
+    """A Ctrl-C inside the home removal must not leave a half-deleted home.
+
+    `rmtree` deletes the ownership marker on its way through the home, so a
+    resumed removal that re-checked the marker would find nothing to do and
+    leave the rest behind."""
+
+    def setUp(self) -> None:
+        self.profiler = load_gateway_profiler()
+
+    def test_a_home_removal_interrupted_after_its_marker_is_gone_still_finishes(self) -> None:
+        profiler = self.profiler
+        fixture = profiler.FixtureGateway(tempfile.mkdtemp(), 0, None)
+        self.addCleanup(shutil.rmtree, fixture.root, True)
+        (fixture.catalog / "child").mkdir(parents=True)
+        (fixture.catalog / "a.jsonl").write_text("{}\n")
+        (fixture.root / "leftover").write_text("x")
+        fixture.process = None  # a dead child: the home may be removed
+        rmtree, calls = profiler.shutil.rmtree, []
+
+        def interrupted(path, *args, **kwargs):
+            if not calls and Path(path) == fixture.root:
+                calls.append(Path(path))
+                # What an interrupt inside rmtree(root) leaves: some entries
+                # gone, the ownership marker among them, the rest still there.
+                (fixture.root / profiler.FIXTURE_MARKER).unlink()
+                (fixture.root / "leftover").unlink()
+                raise profiler.Interrupted(signal.SIGINT)
+            return rmtree(path, *args, **kwargs)
+
+        profiler.shutil.rmtree = interrupted
+        try:
+            with self.assertRaises(profiler.Interrupted):
+                profiler.removal_to_completion(*fixture.removals())
+        finally:
+            profiler.shutil.rmtree = rmtree
+        self.assertEqual(len(calls), 1, "the injected interrupt landed in the home removal")
+        self.assertFalse(fixture.root.exists(), "the resumed removal finished the half-deleted home")
+
+    def test_a_home_that_is_not_this_profiler_s_fixture_is_never_removed(self) -> None:
+        profiler = self.profiler
+        fixture = profiler.FixtureGateway(tempfile.mkdtemp(), 0, None)
+        self.addCleanup(shutil.rmtree, fixture.root, True)
+        (fixture.root / profiler.FIXTURE_MARKER).unlink()
+        self.assertEqual(fixture.removals(), [], "ownership must be proved before any removal runs")
+        self.assertTrue(fixture.root.exists())
+
+
+# A stand-in for the fixture Gateway's WebSocket surface, used only by
+# MultiDriverWindows: it answers the multi-session driver's requests, journals
+# how every connection closed, and can fail the dashboard's list or hold one
+# session open past the window's deadline on demand.
+STUB_GATEWAY = """
+import { createRequire } from "node:module";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+const [gatewayDir, configPath] = process.argv.slice(2);
+const config = JSON.parse(readFileSync(configPath, "utf8"));
+const { WebSocketServer } = createRequire(join(gatewayDir, "package.json"))("ws");
+let sequence = 0;
+let lists = 0;
+const server = new WebSocketServer({ port: 0, perMessageDeflate: false });
+server.on("listening", () => writeFileSync(config.portFile, String(server.address().port)));
+process.on("SIGTERM", () => process.exit(0));
+process.on("SIGUSR2", () => {
+  sequence += 1;
+  writeFileSync(config.probeOutput, JSON.stringify({
+    sequence, catalogWalks: sequence, eventLoopDelay: { p99Ms: 0, maxMs: 0 },
+    heapUsedPeakBytes: 1024, heapLimitBytes: 4096, rssPeakBytes: 2048,
+  }));
+});
+server.on("connection", (socket) => {
+  socket.on("error", () => {});
+  socket.on("close", (code, reason) => appendFileSync(config.journal, `${JSON.stringify({ code, reason: reason.toString() })}\\n`));
+  socket.on("message", (data) => {
+    let frame;
+    try { frame = JSON.parse(data.toString("utf8")); } catch { return; }
+    if (frame.type === "hello") {
+      return socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, gatewayVersion: "stub" }));
+    }
+    if (frame.type !== "request") return;
+    const reply = (result) => socket.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result }));
+    if (frame.method === "session.list") {
+      lists += 1;
+      if (config.failListAfter !== null && lists > config.failListAfter) {
+        return socket.send(JSON.stringify({ type: "response", id: frame.id, ok: false,
+          error: { code: "internal", message: "stub: injected list failure", retryable: false } }));
+      }
+      return reply({ sessions: [] });
+    }
+    if (frame.method === "session.open") {
+      const sessionId = frame.params.sessionId;
+      const opened = () => reply({ subscriptionToken: `sub-${sessionId}`, syncToken: `sync-${sessionId}`,
+        session: { sessionId, runtimeGeneration: "stub-generation", eventSequence: 1, transcript: [], transcriptTotal: 0 } });
+      if (config.delayOpenSessionId === sessionId) return setTimeout(opened, config.delayMs);
+      return opened();
+    }
+    if (frame.method === "session.sync") return reply({ synchronized: true });
+    return reply({});
+  });
+});
+"""
+
+
+class MultiDriverWindows(unittest.TestCase):
+    """The multi-session driver's fixed window, its tail and its cleanup.
+
+    Failure modes written down before this harness: a lane that fails inside
+    the window must not become an unhandled rejection, which kills the process
+    before `multi`'s `finally` (the appender is never stopped, the clients are
+    never closed and `timeline.jsonl` is never flushed); and the tail's timer
+    must not keep the driver (and its parent) alive for its full grace period
+    after a window that closed on its deadline.
+    """
+
+    def setUp(self) -> None:
+        self.profiler = load_gateway_profiler()
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name).resolve()
+        (self.root / "stub-gateway.mjs").write_text(STUB_GATEWAY)
+        (self.root / "child.jsonl").write_text(json.dumps({"type": "message", "id": "seed-0"}) + "\n")
+        (self.root / "devices.json").write_text(json.dumps(
+            {name: "stub-token" for name in ("mobile", "dashboard", "dashboard-reconnect", "driver", "warm", "large")}))
+        self.stubs: list[subprocess.Popen[str]] = []
+
+    def tearDown(self) -> None:
+        for stub in self.stubs:
+            if stub.poll() is None:
+                stub.terminate()
+                try:
+                    stub.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    stub.kill()
+                    stub.wait(timeout=10)
+            if stub.stdout is not None:
+                stub.stdout.close()
+        self.temporary.cleanup()
+
+    def start_stub(self, fail_list_after: int | None, delay_open_session_id: str | None = None,
+                   delay_ms: int = 0) -> subprocess.Popen[str]:
+        config = {"journal": str(self.root / "closes.jsonl"), "portFile": str(self.root / "port"),
+                  "probeOutput": str(self.root / "probe.json"), "failListAfter": fail_list_after,
+                  "delayOpenSessionId": delay_open_session_id, "delayMs": delay_ms}
+        (self.root / "stub-config.json").write_text(json.dumps(config))
+        stub = subprocess.Popen([NODE, str(self.root / "stub-gateway.mjs"), str(ROOT / "packages/gateway"),
+                                 str(self.root / "stub-config.json")], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True)
+        self.stubs.append(stub)
+        deadline = time.monotonic() + 30
+        while not (self.root / "port").exists():
+            self.assertIsNone(stub.poll(), "the stub Gateway exited before it listened")
+            self.assertLess(time.monotonic(), deadline, "the stub Gateway never listened")
+            time.sleep(0.02)
+        return stub
+
+    def run_driver(self, fail_list_after: int | None = None, seconds: float = 10, cold: tuple[str, ...] = (),
+                   delay_open_ms: int | None = None,
+                   timeout: float = 90) -> tuple[int, str, float]:
+        delayed = cold[0] if cold and delay_open_ms else None
+        stub = self.start_stub(fail_list_after, delayed, delay_open_ms or 0)
+        run_dir = self.root / "run"
+        run_dir.mkdir(exist_ok=True)
+        config = {**self.profiler.MULTI, "gatewayDir": str(ROOT / "packages/gateway"),
+                  "orchestrator": str(GATEWAY_PROFILER), "gatewayPid": stub.pid, "port": int((self.root / "port").read_text()),
+                  "tronHome": str(self.root / "tron"), "outputDir": str(run_dir), "phase": "iteration", "label": "stub",
+                  "devicesPath": str(self.root / "devices.json"), "probeOutput": str(self.root / "probe.json"),
+                  "mixedSeconds": seconds, "noSubscriberSeconds": 2, "settleBeforeMs": 200,
+                  "running": [{"sessionId": "stub-run-1"}], "cold": [{"sessionId": name} for name in cold], "large": [],
+                  "appendTargets": [str(self.root / "child.jsonl")], "listIntervalMs": 500, "proberIntervalMs": 500}
+        config_path = self.root / "driver-config.json"
+        config_path.write_text(json.dumps(config, indent=2))
+        environment = {**os.environ, "PATH": f"{Path(NODE).parent}{os.pathsep}{os.environ.get('PATH', '')}"}
+        started = time.monotonic()
+        driver = subprocess.Popen([NODE, str(DRIVER), "multi", str(config_path)], stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True, env=environment)
+        try:
+            output, _ = driver.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            driver.kill()
+            output, _ = driver.communicate()
+            self.fail(f"the driver did not exit within {timeout} s:\n{output[-2_000:]}")
+        return driver.returncode, output, round(time.monotonic() - started, 1)
+
+    def closes(self, expected: str) -> list[dict]:
+        deadline = time.monotonic() + 5
+        journal = self.root / "closes.jsonl"
+        while True:
+            records = [json.loads(line) for line in journal.read_text().splitlines()] if journal.is_file() else []
+            if any(record["reason"] == expected for record in records) or time.monotonic() > deadline:
+                return records
+            time.sleep(0.05)
+
+    def test_a_lane_that_fails_inside_the_window_still_closes_the_clients(self) -> None:
+        status, output, _ = self.run_driver(fail_list_after=1)
+        self.assertNotEqual(status, 0, "a failing lane is fatal")
+        self.assertIn("stub: injected list failure", output)
+        records = self.closes("profile complete")
+        self.assertTrue(any(record["reason"] == "profile complete" for record in records),
+                        f"the driver's finally did not close its clients: {records}")
+
+    def test_the_tail_timer_does_not_outlive_the_window(self) -> None:
+        status, output, seconds = self.run_driver()
+        self.assertEqual(status, 0, output)
+        self.assertTrue((self.root / "run/result-stub.json").is_file(), "the iteration did not finish")
+        self.assertLess(seconds, 40, f"the driver idled {seconds} s after a {self.profiler.MULTI['tailGraceMs'] / 1000:.0f} s "
+                                     "tail; the tail's timer was not cleared")
+
+    def test_an_operation_that_cannot_start_inside_the_window_is_not_measured(self) -> None:
+        # The cold lane's open finishes only after the 10 s window has closed:
+        # its prompt must not be timed then (the other lanes have stopped), and
+        # the result must hold the sample set the window's tail froze.
+        status, output, _ = self.run_driver(seconds=10, cold=("stub-cold-1",), delay_open_ms=12_000)
+        self.assertEqual(status, 0, output)
+        result = json.loads((self.root / "run/result-stub.json").read_text())
+        self.assertEqual(len(result["samples"]["sessionOpenCold"]), 1, "the cold open was measured")
+        self.assertGreater(result["samples"]["sessionOpenCold"][0], 10_000, "the cold open outlasted the window")
+        self.assertEqual(result["samples"]["promptAdmission"], [],
+                         "a prompt started after the deadline was measured")
+
+
 PROBE_CLIENT = """
 import { opendir } from "node:fs/promises";
 import { readFileSync } from "node:fs";

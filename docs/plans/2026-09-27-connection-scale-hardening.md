@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat
+- **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -513,7 +513,7 @@ rows are in priority order.
 | --- | --- | --- | --- | --- |
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
 | O-1 | Claimed | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
-| O-6a | Blocked | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 |
+| O-6a | Blocked | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 (second review response) |
 | E-2 | Claimed | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Ready | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | |
@@ -1575,6 +1575,17 @@ window now closes at 120 s and in-flight operations get a bounded 45 s tail —
 but the quiet-host repeat that replaces this column is still outstanding, so
 read it as the shape of `main`, not as a target.
 
+Read the quiet-host repeat metric by metric. Some metrics vary with how many
+operations fit in the fixed window rather than with the Gateway's per-request
+cost, so a `compare` verdict on them is window volume, not a latency change:
+the dashboard's `session.list` frames and bytes (a whole number of lists per
+window, 8 against 9 is about 12%), `catalog.walks` (one per list and per open),
+and the fixture's CPU and wakeup totals. `session_open_cold_large` p99 rests on
+1–5 samples per iteration, one of which a tail may censor. The exit criterion is
+the latency percentiles; the volume metrics above are expected to move with
+list latency and need no fix. Open work if a quiet-host pair still disagrees on
+a latency percentile.
+
 | Metric | `main` baseline (provisional) | Release candidate (R-1) | Evaluation day (R-4) |
 | --- | --- | --- | --- |
 | `session.list` p99 | 46.5 s (p50 27.5 s) | | |
@@ -1791,3 +1802,84 @@ read it as the shape of `main`, not as a target.
   from spans. O-6b adds its cases to `multi-session`. Once O-1 is merged, the
   driver's hello needs O-1's `diagnostics {clientId, attemptId, epoch}` to stay
   phone-faithful (`GatewayClient.establishConnection`).
+
+### O-6a · Blocked · 2026-09-28 · orchestrator-dispatched worker (second review response)
+
+- Result: the second review's eight findings are addressed in the scenario's own
+  files. The row stays Blocked on the orchestrator's two quiet-host runs.
+  - A lane that fails inside the fixed window is now thrown through the normal
+    path as soon as it fails. The window used to keep the lanes' promise
+    unhandled until the tail, so a non-retryable Gateway error (or an unexpected
+    socket close) became an unhandled rejection: the process died without
+    `finally`, leaving the appender running and `timeline.jsonl` unflushed.
+  - The tail's timer is cancelled in `finally`. An un-cleared `setTimeout` held
+    the driver process alive for the whole 45 s grace period after a window that
+    closed on its deadline (the review's smoke run had a 0 s tail and still
+    lingered about 47 s; a default three-iteration run lost about 2.25 minutes).
+  - `stop()` suppresses only `subprocess.TimeoutExpired` around its post-SIGKILL
+    wait: `contextlib.suppress(BaseException)` also swallowed `Interrupted` (a
+    `BaseException`), losing the user's first Ctrl-C while every later signal was
+    already ignored.
+  - The cold lane checks the deadline before `session.setModel` and before the
+    prompt, so no sample is timed after the window closed (a post-deadline
+    prompt was biased low and, when the tail censored it, recorded an elapsed
+    time under the tail instead of the tail's length). The sample set is frozen
+    when the tail ends: `timed` stops recording, so a lane that settles during
+    cleanup can no longer append to `result.samples`.
+  - Home removal proves ownership once, in the new `FixtureGateway.removals()`,
+    and the retried actions no longer re-check the marker: `rmtree` deletes the
+    marker on its way through the home, so a resumed removal that re-checked it
+    no-opped and left a half-deleted home. The wire-traffic scenarios now use the
+    same rule as the multi-session one: the generated catalog is removed on every
+    path, the home only when the child is dead.
+  - The driver comment about the reconnect offsets now says what the code does
+    (the dashboard's offset is clamped to half the window, so for
+    `--mixed-seconds` under 40 s it comes before the mobile's 20 s, and a window
+    of 20 s or less is rejected by validation), and the README sentence about a
+    "device retired by a reconnect" is replaced by the owning rule (each lane
+    that can starve another runs on its own device and keeps its schedule; a
+    prompt is not started after the deadline).
+  - Findings now names the metrics whose quiet-host spread is window volume
+    rather than latency (the dashboard's list frames and bytes,
+    `catalog.walks`, fixture CPU and wakeups, large-open p99 from 1–5 samples).
+    Rejected as a fix: converting those to per-operation or per-second rates.
+    The report's schema is shared with the other scenarios, `bytes_per_second`
+    already exists, and a rate does not remove the sample-count variance that
+    causes the spread.
+- Failure modes written before the isolated tests: a lane that fails inside the
+  window must not become an unhandled rejection that skips `finally`; the tail's
+  timer must not outlive the window; an operation that cannot start inside the
+  window (a cold open that outlasts it) must not be measured afterwards;
+  `stop()` must not swallow the first Ctrl-C; a removal interrupted after its
+  ownership marker is already gone must still finish; and a directory that is not
+  this profiler's fixture must never be removed.
+- Evidence: `python3 scripts/test-tron-profile.py` passes 27 tests (6 new: a
+  lane that fails inside the window still closes its clients (clean close 1000
+  against the stub's 1006 before the fix, run both ways); the tail timer does not
+  outlive the window (a 30 s window took 77.8 s before the fix and about 36 s
+  after it, and the test's own 10 s window must finish under 40 s); a cold open
+  that outlasts the window leaves no prompt sample (the pre-fix driver measured a
+  0.2 ms prompt there); an interrupt in `stop()`'s post-SIGKILL wait is re-raised
+  with the group kill still done; a home removal interrupted after the marker is
+  gone still finishes; a home without the marker is never removed). The three
+  driver cases run the real driver against a stub Gateway surface (a test fixture
+  in `scripts/test-tron-profile.py`, like the probe client) because a lane
+  failure, a lingering timer and a post-deadline operation cannot be produced
+  reliably inside a qualification run.
+  A smoke run
+  (`--iterations 1 --catalog-files 200 --catalog-mib 32 --mixed-seconds 30
+  --no-build`) exits 0 in 1.3 minutes as
+  `20260928T111159Z-multi-session-5d3bb8`: both windows 30.00 s, tail complete in
+  0 s, no censored operations, every latency kind sampled, and no
+  `tron-profile-gateway-*` directory or fixture process left behind (the same
+  command took 2.0 minutes before the tail timer was cleared).
+- Changes: `scripts/tron-profile-gateway`,
+  `scripts/tron-profile-gateway-driver.mjs`, `scripts/test-tron-profile.py`, the
+  multi-session qualification section of `packages/gateway/README.md`, and this
+  plan (Findings, this entry).
+- Blocked on: unchanged — "two consecutive runs on a quiet host agree within the
+  report's noise bound". To unblock, run
+  `scripts/tron-profile gateway --scenario multi-session` twice on an idle host
+  and `scripts/tron-profile compare <run-1> <run-2>`; read a verdict on the
+  window-volume metrics listed in Findings as spread, not regression.
+- For the next agent: unchanged from the previous entry.
