@@ -449,27 +449,40 @@ def label_windows(records: Sequence[Record]) -> List[Tuple[Record, datetime, dat
 
     This is the evidence a protocol-5 export has for a loss, and it is how an
     episode with no attempt of its own (a silent recovery gap, or a label over a
-    socket that never dropped) is found at all. Each window carries the record
-    that opened it, which is the boundary evidence an episode with no attempt
-    has.
+    socket that never dropped) is found at all. A window opens on a transition
+    into an outage state and closes on the first of: a transition out of one, a
+    scene entering the background (which retires recovery without publishing a
+    new state), or the end of a `connection.episode` record. Without those two
+    extra closers, an outage that ended in the background would swallow every
+    later one into a single window.
     """
     windows: List[Tuple[Record, datetime, datetime]] = []
     opened: Optional[Tuple[Record, datetime]] = None
     last: Optional[datetime] = None
+
+    def close(at: datetime) -> None:
+        nonlocal opened
+        if opened is not None and at >= opened[1]:
+            windows.append((opened[0], opened[1], at))
+        opened = None
+
     for record in records:
         if record.timestamp is None:
             continue
         last = record.timestamp if last is None else max(last, record.timestamp)
-        if record.event != "connection.state-changed":
-            continue
-        state = record.field("new") or record.field("outcome") or ""
-        if state in OUTAGE_STATES and opened is None:
-            opened = (record, record.timestamp)
-        elif state == "connected" and opened is not None:
-            windows.append((opened[0], opened[1], record.timestamp))
-            opened = None
-    if opened is not None and last is not None and last > opened[1]:
-        windows.append((opened[0], opened[1], last))
+        if record.event == "connection.state-changed":
+            state = record.field("new") or record.field("outcome") or ""
+            if state in OUTAGE_STATES:
+                if opened is None:
+                    opened = (record, record.timestamp)
+            else:
+                close(record.timestamp)
+        elif record.event == "scene.background":
+            close(record.timestamp)
+        elif record.event == "connection.episode":
+            close(record.timestamp)
+    if opened is not None and last is not None:
+        close(last)
     return windows
 
 

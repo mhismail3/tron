@@ -190,20 +190,35 @@ keeps today's uncompressed frames.
 
 ## Collect evidence before recovery
 
-1. Export iOS Logs. Keep its capture time, represented time range, app build,
-   source freshness, profile labels/aliases, and available Gateway identity.
-   Retained/offline records are not a live Gateway health check. If the initial
-   fault predates the represented range, it is missing evidence.
-2. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
-   bounded `.1` rotation. Join the two sides by the O-1 key: a phone record's
-   `gatewayConnectionId` is the Gateway record's `connectionId`, and its
-   `clientId`/`attemptId`/`epoch` are the Gateway's `peerClientId`,
+1. Run `scripts/tron-triage PHONE-EXPORT...` first. It reads the export(s) and
+   `<tronHome>/logs` (`gateway.jsonl` with its rotations; `--gateway-logs DIR`
+   for another home) read-only and prints one row per outage with its cause and
+   the records behind it: `path`, `phone-background`, `phone-stall`,
+   `gateway-stall`, `gateway-capacity` or `unknown`, decided by the first
+   matching rule in `scripts/tron_triage.py`. `--json` prints the report and
+   `--out PATH` writes it; `--tailscale-window` captures the Tailscale network
+   extension's own log with `log show` over the export's range and uses it as
+   path evidence for logs written before O-2. Start there, then read the
+   evidence lines it prints.
+2. Export iOS Logs if `tron-triage` was given no export yet. Keep its capture
+   time, represented time range, app build, source freshness, profile
+   labels/aliases, and available Gateway identity. Retained/offline records are
+   not a live Gateway health check. If the initial fault predates the
+   represented range, it is missing evidence.
+3. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
+   bounded `.1` rotation. The tool joins the two sides by the O-1 key: a phone
+   record's `gatewayConnectionId` is the Gateway record's `connectionId`, and
+   its `clientId`/`attemptId`/`epoch` are the Gateway's `peerClientId`,
    `peerAttemptId` and `peerEpoch`. Only logs from before the correlation key
-   shipped (protocol 5) have to be matched by time window instead.
-3. Use existing local Mac status/health observations to distinguish a responsive
+   shipped (protocol 5) have to be matched by time window instead, and the
+   report says which join each episode used (`joinedBy`). A cause is only as
+   good as its evidence line: an `unknown` episode lists what the records did
+   contain, and an `unknown` for a foreground silent gap is the measured silent
+   recovery gap until C-1 removes it.
+4. Use existing local Mac status/health observations to distinguish a responsive
    Gateway from an unreachable mobile path. An OS network path of `satisfied`
    proves neither Tailscale tunnel health nor reachability of the selected Mac.
-4. Preserve the first fault and the source/payload revisions used to reproduce it.
+5. Preserve the first fault and the source/payload revisions used to reproduce it.
    Do not clear app data, Keychain, canonical sessions, or credentials. Gateway
    transitions remain explicit user/maintainer actions.
 

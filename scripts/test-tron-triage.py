@@ -282,6 +282,7 @@ class BackgroundTests(TriageFixture):
 
     def test_background_parked_episode_is_not_the_path(self):
         phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T02:00:00.000Z", "connected", "reconnecting"),
             attempt("2026-09-28T02:00:05.000Z", 15000, "failure", "transport-open", "background",
                     foreground=False),
             episode("2026-09-28T02:00:00.000Z", "2026-09-28T02:00:30.000Z", 1, "background",
@@ -290,6 +291,25 @@ class BackgroundTests(TriageFixture):
         found = self.only_episode(self.run_tool(phone))
         self.assertEqual(found["cause"], "phone-background")
         self.assertIn("endedBy=background", self.causes_text(found))
+
+    def test_a_gap_after_a_background_episode_is_its_own_episode(self):
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T02:00:00.000Z", "connected", "reconnecting"),
+            episode("2026-09-28T02:00:00.000Z", "2026-09-28T02:00:30.000Z", 1, "background",
+                    "background"),
+            app_record("2026-09-28T02:00:30.000Z", "scene.background",
+                       "sceneAt=2026-09-28T02:00:30.000Z from=active"),
+            app_record("2026-09-28T02:15:00.000Z", "scene.foreground",
+                       "sceneAt=2026-09-28T02:15:00.000Z from=background"),
+            state_change("2026-09-28T02:15:01.000Z", "connected", "connecting"),
+            state_change("2026-09-28T02:15:05.000Z", "connecting", "reconnecting"),
+            state_change("2026-09-28T02:17:00.000Z", "reconnecting", "connected"),
+        ])
+        report = self.run_tool(phone)
+        self.assertEqual(report["summary"]["episodes"], 2, report["episodes"])
+        self.assertEqual([item["cause"] for item in report["episodes"]],
+                         ["phone-background", "unknown"])
+        self.assertEqual(report["episodes"][1]["start"], "2026-09-28T02:15:05.000Z")
 
     def test_scene_background_at_the_end_is_phone_background(self):
         phone = self.write("phone.jsonl", [

@@ -2,6 +2,8 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, O-7 incident triage tool Done
+
 - **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
 
 - **Last updated:** 2026-09-28, O-4 (review round 4 addressed)
@@ -543,7 +545,7 @@ rows are in priority order.
 | O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
 | O-6b | Claimed | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-7 | Claimed | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-7 | Done | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Claimed | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -4388,3 +4390,112 @@ events; widen them to name the pool owner in the same change.
   (finding 4, nit). The ≈1,365 ambient opens a second is labelled an upper bound
   on ambient opens that excludes routed re-opens and assumes the pass keeps the
   750 ms cadence (finding 5, nit); the retained artifact's figure matches.
+
+### O-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-7`)
+
+- Result: `scripts/tron-triage` (front door) and `scripts/tron_triage.py` read
+  one or more phone exports and the Gateway log with its rotations, join the two
+  sides by the O-1 key (a time window when the logs predate protocol 6), and
+  print one row per outage with its cause and the records behind it. `--json`
+  prints the `tron.triage-report.v1` report and `--out PATH` writes it.
+  `--tailscale-window` captures the Tailscale network-extension log with
+  `log show` over the export's range as extra path evidence. Inputs are opened
+  read-only; the only write is the `--out` report.
+- Evidence:
+  - `python3 scripts/test-tron-triage.py` passes 22/22 in 2.4 s (Homebrew
+    Python 3.14) and 22/22 under `/usr/bin/python3` 3.9. Each test runs the real
+    front door against sanitized fixtures that reproduce one cause from Context,
+    and the combined run keeps its report at `TRON_TRIAGE_TEST_REPORT`
+    (default `$TMPDIR/tron-triage-report.json` plus a `.txt` of the table).
+  - **"Done when", run against the live Gateway log (read-only) plus a synthetic
+    export**: `scripts/tron-triage ~/.tron/workspace/files/hardening/o-7/synthetic-phone-export.jsonl
+    --gateway-logs ~/.tron/logs --out ~/.tron/workspace/files/hardening/o-7/triage-report.json`
+    exits 0 in 0.32 s over 10,767 Gateway records and 31 phone records and
+    reports 8 episodes: `unknown=1, gateway-capacity=1, phone-background=1,
+    gateway-stall=3, phone-stall=1, path=1`, joined `key=4 window=2 none=2`. The
+    artifacts are `triage-report.json` and `triage-report.txt` in that directory.
+    The Gateway side is the live log's real records: the 2026-09-27T22:20:37.619Z
+    `connection.outbound-capacity` that closed socket `3d9b80a0…`
+    (`queuedFrames=282 queuedBytes=8368863 nextBytes=638554` — the record in
+    Context), the 12,339 ms `push.registration.upsert` and 14,987 ms
+    `session.list` on `b7dacfd8…`, the still-open socket `ea33c149…` that
+    answered 1,249 ms and 1,855 ms RPCs, and the pool attempt with no accept
+    behind it. Periods reproduce Context: the two measured silent gaps
+    (345 s = 03:24:45–03:30:30 and 135 s = 04:56:31–04:58:46) appear as
+    zero-attempt windows with the gap statement in their evidence.
+  - `scripts/tron-triage /tmp/export --gateway-logs ~/.tron/logs --tailscale-window`
+    ran the real `/usr/bin/log show` (1.9 s, `captured: true`, 0 path lines in
+    that window) without touching the input.
+  - `python3 scripts/check-documentation-policy.py` (46 authored files) and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: `feat(triage): add the incident triage tool (O-7)` and the plan and
+  docs commit on `hardening/o-7`.
+- Failure modes written before the code (one test each): a relay-path outage
+  attributed to the phone because the Gateway's silent-socket record was not
+  joined; a transport-open timeout read as a Gateway stall, and a live main
+  connection or the retry that followed read as that attempt's arrival;
+  "reconnecting" over a live socket reported as `unknown` or as a real loss;
+  a silent gap with no attempt dropped or attributed to the path; a
+  background-parked episode attributed to the path; a slow span and a capacity
+  refusal reported as `unknown`; a protocol-5 export reported as unjoined
+  instead of joined by window; a phone-only artifact reporting zero Gateway
+  records; a run that writes to an input; an unreadable line crashing the run.
+  Two more came out of building the incident run: an outage that ended in the
+  background swallowing every later outage into one window (fixed: a scene
+  entering the background and a `connection.episode` record both close a
+  label window), and a neighbouring episode swallowed by the 60 s join
+  tolerance (fixed: episode coverage uses a 5 s pad, the join tolerance only
+  joins).
+- Tasks added: none.
+- Kept on purpose:
+  - The report's cause is the plan's rule order, not a vote: `path` first, so a
+    transport-open timeout wins over a background or Gateway cause unless the
+    episode is parked in the background. A backgrounded phone parks recovery,
+    and its own timeouts are `reason=background`; the path clause is skipped
+    there, which is the only place the rules as written would have called a
+    designed suspension a path fault.
+  - `unknown` is a real outcome and is reported with the gap statement, not
+    silently reclassified: in the live-log run the two measured silent gaps
+    classify `gateway-stall` because the log's own slow `session.list` records
+    land inside the padded evidence window (the socket that ended the gap opened
+    3.5 s later and then took 8.7 s and 11.7 s). Both the gap line and the slow
+    spans are in the evidence, and the durations match Context.
+  - The 60 s join tolerance is the documented fallback for protocol-5 logs and
+    is a flag; key joins always win and the report says which join each episode
+    used.
+  - A phone-only artifact is still triaged: when no log directory exists the
+    export's own embedded Gateway rows are used and the report says
+    `source: "export-projection"`.
+- Deviations:
+  - The rule order in the task text was read to mean `path` first, with the
+    transport-open clause limited to a foreground (not background-parked)
+    episode; see "Kept on purpose" for why, and the test that pins it.
+  - The transport-open clause needs the Gateway record's peer key to decide
+    whether an accept was this attempt's: a Gateway record whose key contradicts
+    the attempt, or that has no key at all while the attempt has one, is not
+    this attempt's arrival. Against an O-1 Gateway log this is exact; against a
+    protocol-5 Gateway log it deliberately treats "no evidence this attempt
+    arrived" as the path's fault, which is what the phone's own transport-open
+    failure says.
+  - `--tailscale-window` reads the extension log as text and is a heuristic
+    (a relay line opens a window, a direct line closes it) that is reported as
+    evidence, not as proof; the authoritative path signal is O-2's `peerPath`.
+  - The task named `new tron-triage in scripts/` as an owning file: the command's
+    only other entry point, `scripts/tron`, was left unchanged, so the command is
+    `scripts/tron-triage` (like `scripts/tron-profile`).
+- For the next agent (owed by the orchestrator / R-4):
+  1. Run the tool on the incident's real exports. Both files named in the Draft
+     handoff exist (`tron-diagnostics.jsonl` and `tron-diagnostics-3.jsonl` in
+     `~/Library/CloudStorage/SynologyDrive-SynologyDrive/`) but every read fails
+     with `EDEADLK` and `ls -lO` reports the `dataless` flag: they are cloud
+     placeholders whose content was not downloaded, so they could not be used
+     read-only, copied, or attributed. Nothing in the tool depends on them: R-4
+     should run it on the evaluation day's export and the Gateway log, and the
+     "at least 95% of episodes attributed to one cause" exit criterion is
+     measured there.
+  2. If R-4 finds the two silent gaps being reported `gateway-stall` because of
+     the evidence pad, that is a rule-order question (should a zero-attempt
+     foreground gap with a slow Gateway in the window be `unknown`,
+     `phone-stall` or `gateway-stall`?) — C-1 and O-4's `reconnect.stalled`
+     should make it `phone-stall` before the release; decide it there rather
+     than silently widening the pad.
