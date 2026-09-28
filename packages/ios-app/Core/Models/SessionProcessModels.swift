@@ -1,11 +1,11 @@
 import Foundation
 import TronMobileCore
 
-enum SessionProcessKind: String, Codable, CaseIterable, Sendable { case command, subagent }
+package enum SessionProcessKind: String, Codable, CaseIterable, Sendable { case command, subagent }
 
-enum SessionProcessExecutionMode: String, Codable, CaseIterable, Sendable {
+package enum SessionProcessExecutionMode: String, Codable, CaseIterable, Sendable {
     case foreground, background, synchronous, asynchronous, unknown
-    var displayName: String {
+    package var displayName: String {
         switch self {
         case .foreground: "Foreground"
         case .background: "Background"
@@ -16,38 +16,38 @@ enum SessionProcessExecutionMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum SessionProcessSource: String, Codable, CaseIterable, Sendable {
+package enum SessionProcessSource: String, Codable, CaseIterable, Sendable {
     case mainAssistant, delegatedAgent, admittedExtension
 }
 
-enum SessionProcessLifecycleState: String, Codable, CaseIterable, Sendable {
+package enum SessionProcessLifecycleState: String, Codable, CaseIterable, Sendable {
     case queued, running, paused, completed, failed, stopped, rejected, interrupted, unknown
 
-    var isActive: Bool { switch self { case .queued, .running, .paused: true; default: false } }
-    var isTerminal: Bool { switch self { case .completed, .failed, .stopped, .rejected, .interrupted: true; default: false } }
+    package var isActive: Bool { switch self { case .queued, .running, .paused: true; default: false } }
+    package var isTerminal: Bool { switch self { case .completed, .failed, .stopped, .rejected, .interrupted: true; default: false } }
     var isProblem: Bool { switch self { case .failed, .rejected, .interrupted: true; default: false } }
-    var displayName: String { rawValue == "unknown" ? "Unknown" : rawValue.capitalized }
+    package var displayName: String { rawValue == "unknown" ? "Unknown" : rawValue.capitalized }
 }
 
-enum SessionProcessAttention: String, Codable, CaseIterable, Sendable {
+package enum SessionProcessAttention: String, Codable, CaseIterable, Sendable {
     case none, activeLongRunning, needsAttention
 }
 
-enum SessionProcessVisibility: String, Codable, CaseIterable, Sendable {
+package enum SessionProcessVisibility: String, Codable, CaseIterable, Sendable {
     case active, recent, historical, unknown
 }
 
-struct SessionProcessLifecycle: Codable, Hashable, Sendable {
+package struct SessionProcessLifecycle: Codable, Hashable, Sendable {
     let version: Int
-    let state: SessionProcessLifecycleState
+    package let state: SessionProcessLifecycleState
     let attention: SessionProcessAttention
-    let sequence: Int
+    package let sequence: Int
     let observedAt: String
     let producerUpdatedAt: String?
-    let terminalAt: String?
-    let recentUntil: String?
+    package let terminalAt: String?
+    package let recentUntil: String?
 
-    init(
+    package init(
         version: Int = 1,
         state: SessionProcessLifecycleState,
         attention: SessionProcessAttention = .none,
@@ -70,38 +70,38 @@ struct SessionProcessLifecycle: Codable, Hashable, Sendable {
 
 /// Exact additive Gateway DTO. Optional fields remain optional so old history
 /// and rows from different existing producers decode without fabrication.
-struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
+package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
     let version: Int
-    let processId: String
-    let kind: SessionProcessKind
-    let executionMode: SessionProcessExecutionMode
+    package let processId: String
+    package let kind: SessionProcessKind
+    package let executionMode: SessionProcessExecutionMode
     let source: SessionProcessSource
     let parentProcessId: String?
-    let lifecycle: SessionProcessLifecycle
-    let visibility: SessionProcessVisibility
-    let startedAt: String?
-    let title: String
+    package let lifecycle: SessionProcessLifecycle
+    package let visibility: SessionProcessVisibility
+    package let startedAt: String?
+    package let title: String
     let command: String?
-    let currentTool: String?
-    let currentPathBasename: String?
-    let model: String?
-    let thinking: String?
-    let outputTail: String?
-    let outputTruncated: Bool
-    let durationMs: Int?
+    package let currentTool: String?
+    package let currentPathBasename: String?
+    package let model: String?
+    package let thinking: String?
+    package let outputTail: String?
+    package let outputTruncated: Bool
+    package let durationMs: Int?
     // Receipt-local presentation time, never encoded or part of value identity.
     // Keeping it with the sample prevents sheet/row remounts restarting the clock.
-    private(set) var durationSampleAnchor = ToolDurationSampleAnchor(uptime: ProcessInfo.processInfo.systemUptime)
-    let toolCount: Int?
-    let turnCount: Int?
-    let childCount: Int?
-    let toolCallId: String?
-    let runId: String?
-    let childSessionRef: String?
+    package private(set) var durationSampleAnchor = ToolDurationSampleAnchor(uptime: ProcessInfo.processInfo.systemUptime)
+    package let toolCount: Int?
+    package let turnCount: Int?
+    package let childCount: Int?
+    package let toolCallId: String?
+    package let runId: String?
+    package let childSessionRef: String?
 
-    var id: String { processId }
+    package var id: String { processId }
 
-    init(
+    package init(
         version: Int = 1,
         processId: String,
         kind: SessionProcessKind,
@@ -157,7 +157,7 @@ struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
 
     /// Progress/output changes may repeat the same duration sample. Such frames
     /// must not move its receipt anchor forward and make the counter restart.
-    func retainingDurationSample(from previous: Self?) -> Self {
+    package func retainingDurationSample(from previous: Self?) -> Self {
         guard let previous,
               processId == previous.processId, runId == previous.runId, startedAt == previous.startedAt,
               lifecycle.state == .running, previous.lifecycle.state == .running,
@@ -174,24 +174,24 @@ struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct SessionProcessOmissions: Codable, Hashable, Sendable {
-    let count: Int
-    let bytes: Int
-    let reason: String
+package struct SessionProcessOmissions: Codable, Hashable, Sendable {
+    package let count: Int
+    package let bytes: Int
+    package let reason: String
 }
 
-enum SessionProcessOverviewVisibility: String, Codable, CaseIterable, Sendable {
+package enum SessionProcessOverviewVisibility: String, Codable, CaseIterable, Sendable {
     case hidden, active, recent
 }
 
-struct SessionProcessOverview: Codable, Hashable, Sendable {
+package struct SessionProcessOverview: Codable, Hashable, Sendable {
     let version: Int
-    let revision: Int
+    package let revision: Int
     let asOf: String
-    let activeCount: Int
-    let recentCount: Int
+    package let activeCount: Int
+    package let recentCount: Int
     let problemCount: Int
-    let visibility: SessionProcessOverviewVisibility
+    package let visibility: SessionProcessOverviewVisibility
     let nearestExpiry: String?
     let omissions: SessionProcessOmissions?
 
@@ -218,38 +218,51 @@ struct SessionProcessOverview: Codable, Hashable, Sendable {
     }
 }
 
-struct SessionProcessDelta: Codable, Hashable, Sendable {
-    let activity: SessionProcessActivity?
-    let removedProcessIds: [String]?
-    let processRevision: Int
+package struct SessionProcessDelta: Codable, Hashable, Sendable {
+    package let activity: SessionProcessActivity?
+    package let removedProcessIds: [String]?
+    package let processRevision: Int
     let processAsOf: String
-    let overview: SessionProcessOverview
+    package let overview: SessionProcessOverview
 }
 
 /// Lease invalidations are deliberately outside the mounted parent session
 /// sequence. A close notification has no revision and is still admitted.
-struct ProcessTranscriptChanged: Codable, Hashable, Sendable {
-    let leaseId: String
+package struct ProcessTranscriptChanged: Codable, Hashable, Sendable {
+    package let leaseId: String
     let processId: String?
-    let revision: String?
+    package let revision: String?
     let total: Int?
     let leafEntryId: String?
-    let closed: Bool?
+    package let closed: Bool?
     let reason: String?
+
+    package init(
+        leaseId: String, processId: String?, revision: String?, total: Int?,
+        leafEntryId: String?, closed: Bool?, reason: String?
+    ) {
+        self.leaseId = leaseId
+        self.processId = processId
+        self.revision = revision
+        self.total = total
+        self.leafEntryId = leafEntryId
+        self.closed = closed
+        self.reason = reason
+    }
 }
 
-enum SessionProcessAdmissionPolicy {
-    static let historyCapability = "process-history.v1"
-    static let transcriptCapability = "process-transcript.v2"
-    static let transcriptAbortCapability = "process-transcript-abort.v1"
+package enum SessionProcessAdmissionPolicy {
+    package static let historyCapability = "process-history.v1"
+    package static let transcriptCapability = "process-transcript.v2"
+    package static let transcriptAbortCapability = "process-transcript-abort.v1"
     static let maximumActivities = 32
     static let maximumRemovedProcessIDs = 32
     static let maximumOverviewCount = 2_080
     static let maximumStringBytes = 2_048
     static let maximumOutputBytes = 32 * 1_024
-    static let maximumEncodedBytes = 256 * 1_024
+    package static let maximumEncodedBytes = 256 * 1_024
 
-    static func admits(_ process: SessionProcessActivity) -> Bool {
+    package static func admits(_ process: SessionProcessActivity) -> Bool {
         guard process.version == 1,
               boundedNonempty(process.processId, 512),
               process.parentProcessId.map({ boundedNonempty($0, 512) }) ?? true,
@@ -285,7 +298,7 @@ enum SessionProcessAdmissionPolicy {
         return true
     }
 
-    static func admitted(_ processes: [SessionProcessActivity]) -> [SessionProcessActivity] {
+    package static func admitted(_ processes: [SessionProcessActivity]) -> [SessionProcessActivity] {
         var seen = Set<String>()
         return Array(processes
             .filter { $0.kind == .subagent && admits($0) && seen.insert($0.processId).inserted }
@@ -293,7 +306,7 @@ enum SessionProcessAdmissionPolicy {
             .prefix(maximumActivities))
     }
 
-    static func admits(_ overview: SessionProcessOverview) -> Bool {
+    package static func admits(_ overview: SessionProcessOverview) -> Bool {
         guard overview.version == 1,
               overview.revision >= 0,
               validTimestamp(overview.asOf),
@@ -314,7 +327,7 @@ enum SessionProcessAdmissionPolicy {
         }
     }
 
-    static func admits(_ delta: SessionProcessDelta) -> Bool {
+    package static func admits(_ delta: SessionProcessDelta) -> Bool {
         let removals = delta.removedProcessIds ?? []
         guard delta.processRevision >= 0,
               validTimestamp(delta.processAsOf),
@@ -337,7 +350,7 @@ enum SessionProcessAdmissionPolicy {
         }
     }
 
-    static func admitsMountedSubset(
+    package static func admitsMountedSubset(
         _ activities: [SessionProcessActivity],
         overview: SessionProcessOverview
     ) -> Bool {
@@ -359,7 +372,7 @@ enum SessionProcessAdmissionPolicy {
         return true
     }
 
-    static func admitsSnapshotFacts(_ snapshot: SessionSnapshot) -> Bool {
+    package static func admitsSnapshotFacts(_ snapshot: SessionSnapshot) -> Bool {
         guard let overview = snapshot.processOverview else {
             return snapshot.processActivities == nil // Legacy Gateway omits the projection entirely.
         }
@@ -384,7 +397,7 @@ enum SessionProcessAdmissionPolicy {
         return true
     }
 
-    static func admits(_ change: ProcessTranscriptChanged) -> Bool {
+    package static func admits(_ change: ProcessTranscriptChanged) -> Bool {
         guard boundedNonempty(change.leaseId, 256),
               change.processId.map({ boundedNonempty($0, 512) }) ?? true,
               change.revision.map({ boundedNonempty($0, 256) }) ?? true,
@@ -446,13 +459,13 @@ enum SessionProcessAdmissionPolicy {
     }
 }
 
-enum SessionProcessProjection {
-    struct Sections: Equatable, Sendable {
-        let active: [SessionProcessActivity]
-        let recent: [SessionProcessActivity]
+package enum SessionProcessProjection {
+    package struct Sections: Equatable, Sendable {
+        package let active: [SessionProcessActivity]
+        package let recent: [SessionProcessActivity]
     }
 
-    static func sections(_ activities: [SessionProcessActivity]) -> Sections {
+    package static func sections(_ activities: [SessionProcessActivity]) -> Sections {
         let admitted = SessionProcessAdmissionPolicy.admitted(activities)
         return Sections(
             active: admitted.filter { $0.visibility == .active },
@@ -463,7 +476,7 @@ enum SessionProcessProjection {
     /// Keep an already-presented single-run sheet attached when Gateway replaces
     /// a temporary aggregate with its exact child row. Multiple matching
     /// children are intentionally ambiguous and fail closed.
-    static func mountedActivity(
+    package static func mountedActivity(
         selected: SessionProcessActivity,
         activities: [SessionProcessActivity]
     ) -> SessionProcessActivity? {
@@ -481,7 +494,7 @@ enum SessionProcessProjection {
         return successors.count == 1 ? successors[0] : nil
     }
 
-    static func precedes(_ lhs: SessionProcessActivity, _ rhs: SessionProcessActivity) -> Bool {
+    package static func precedes(_ lhs: SessionProcessActivity, _ rhs: SessionProcessActivity) -> Bool {
         let lhsBucket = lhs.visibility == .active ? 0 : 1
         let rhsBucket = rhs.visibility == .active ? 0 : 1
         if lhsBucket != rhsBucket { return lhsBucket < rhsBucket }

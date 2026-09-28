@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 @testable import TronMobile
 
 @Suite("Read-only subagent viewer ownership", .serialized)

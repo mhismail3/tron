@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct ReconnectDelayPolicy: Sendable {
     static let standard = ReconnectDelayPolicy(

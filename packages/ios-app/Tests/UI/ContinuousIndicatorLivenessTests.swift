@@ -1,5 +1,5 @@
 import SwiftUI
-import TronMobileCore
+@testable import TronMobileCore
 import XCTest
 @testable import TronMobile
 

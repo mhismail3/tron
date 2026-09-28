@@ -1,6 +1,6 @@
 import SwiftUI
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 @testable import TronMobile
 
 /// Failure modes: a Gateway module list this client cannot decode would leave

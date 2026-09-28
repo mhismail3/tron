@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import Synchronization
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 import UIKit
 @testable import TronMobile
 

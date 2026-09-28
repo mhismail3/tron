@@ -1,3 +1,5 @@
+import TronMobileCore
+
 enum ToolExecutionStatePolicy {
     static func newest(
         _ current: ToolExecutionState,

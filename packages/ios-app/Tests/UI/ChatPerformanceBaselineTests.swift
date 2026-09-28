@@ -1,5 +1,5 @@
 import Darwin
-import TronMobileCore
+@testable import TronMobileCore
 import UIKit
 import XCTest
 @testable import TronMobile

@@ -1,5 +1,5 @@
 import Foundation
-import TronMobileCore
+@testable import TronMobileCore
 @testable import TronMobile
 
 /// Real GatewayClient request/response admission, with no network or canonical runtime.

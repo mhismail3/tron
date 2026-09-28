@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct ChatTextPreparationIdentity: Hashable, Sendable {
     enum Kind: Hashable, Sendable {

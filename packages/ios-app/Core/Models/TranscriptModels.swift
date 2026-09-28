@@ -1,36 +1,42 @@
 import Foundation
 import TronMobileCore
 
-struct ContentPart: Codable, Hashable, Sendable, Identifiable {
-    struct Attachment: Codable, Hashable, Sendable {
-        let name: String
-        let mimeType: String
-        let size: Int
+package struct ContentPart: Codable, Hashable, Sendable, Identifiable {
+    package struct Attachment: Codable, Hashable, Sendable {
+        package let name: String
+        package let mimeType: String
+        package let size: Int
+
+        package init(name: String, mimeType: String, size: Int) {
+            self.name = name
+            self.mimeType = mimeType
+            self.size = size
+        }
     }
 
-    enum Kind: String, Codable, Sendable { case text, thinking, image, toolCall }
-    let id: String
-    let ordinal: Int
-    let thinkingRunOrdinal: Int?
-    let type: Kind
-    let text: String?
-    let attachment: Attachment?
+    package enum Kind: String, Codable, Sendable { case text, thinking, image, toolCall }
+    package let id: String
+    package let ordinal: Int
+    package let thinkingRunOrdinal: Int?
+    package let type: Kind
+    package let text: String?
+    package let attachment: Attachment?
     let redacted: Bool?
-    let mimeType: String?
-    let blobId: String?
-    let toolCallId: String?
-    let name: String?
-    let label: String?
-    let arguments: JSONValue?
-    let toolSegmentId: String?
-    let groupId: String?
-    let groupIndex: Int?
-    let groupCount: Int?
-    let groupFinalized: Bool?
+    package let mimeType: String?
+    package let blobId: String?
+    package let toolCallId: String?
+    package let name: String?
+    package let label: String?
+    package let arguments: JSONValue?
+    package let toolSegmentId: String?
+    package let groupId: String?
+    package let groupIndex: Int?
+    package let groupCount: Int?
+    package let groupFinalized: Bool?
 }
 
 extension ContentPart {
-    init(
+    package init(
         id: String,
         ordinal: Int,
         thinkingRunOrdinal: Int?,
@@ -70,7 +76,7 @@ extension ContentPart {
              toolSegmentId, groupId, groupIndex, groupCount, groupFinalized
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
         ordinal = try values.decode(Int.self, forKey: .ordinal)
@@ -129,7 +135,7 @@ extension ContentPart {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(id, forKey: .id)
         try values.encode(ordinal, forKey: .ordinal)
@@ -158,11 +164,11 @@ private protocol TranscriptPayload: Codable, Hashable, Sendable {
     var timestamp: String { get }
 }
 
-struct TranscriptForkBoundary: Codable, Hashable, Sendable {
-    enum Kind: String, Codable, Hashable, Sendable { case sessionFork, subagentFork }
-    let kind: Kind
-    let inheritedAnchorId: String
-    let gapOrdinal: Int
+package struct TranscriptForkBoundary: Codable, Hashable, Sendable {
+    package enum Kind: String, Codable, Hashable, Sendable { case sessionFork, subagentFork }
+    package let kind: Kind
+    package let inheritedAnchorId: String
+    package let gapOrdinal: Int
 
     init(kind: Kind, inheritedAnchorId: String, gapOrdinal: Int) throws {
         guard !inheritedAnchorId.isEmpty, inheritedAnchorId.utf8.count <= 512,
@@ -172,7 +178,7 @@ struct TranscriptForkBoundary: Codable, Hashable, Sendable {
         self.kind = kind; self.inheritedAnchorId = inheritedAnchorId; self.gapOrdinal = gapOrdinal
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let kind = try values.decode(Kind.self, forKey: .kind)
         let inheritedAnchorId = try values.decode(String.self, forKey: .inheritedAnchorId)
@@ -187,21 +193,21 @@ struct TranscriptForkBoundary: Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey { case kind, inheritedAnchorId, gapOrdinal }
 }
 
-struct ExtensionToolOrigin: Codable, Hashable, Sendable {
+package struct ExtensionToolOrigin: Codable, Hashable, Sendable {
     /// Legacy public source fallback. It is never a filesystem path or grouping
     /// key when more than one admitted owner claims it.
     let source: String
     /// Exact opaque owner identity, when supplied by the Gateway.
-    let owner: ExtensionOwner?
+    package let owner: ExtensionOwner?
 
-    init(source: String, owner: ExtensionOwner? = nil) {
+    package init(source: String, owner: ExtensionOwner? = nil) {
         self.source = source
         self.owner = owner
     }
 
     private enum CodingKeys: String, CodingKey { case source, owner }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         source = try values.decode(String.self, forKey: .source)
         guard !source.isEmpty, source.utf8.count <= 8_192,
@@ -216,40 +222,40 @@ struct ExtensionToolOrigin: Codable, Hashable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(source, forKey: .source)
         try values.encodeIfPresent(owner, forKey: .owner)
     }
 }
 
-enum ChatDirection: String, Codable, Sendable { case inboundContext, agentOutput, agentInvocation, ambientStatus, hiddenInternal }
-enum ChatContextEffect: String, Codable, Sendable { case none, modelInput, hiddenModelInput, toolResult }
-enum ChatDelivery: String, Codable, Sendable { case stored, nextTurn, steer, followUp, triggeredTurn, continuedTurn, beforeAgentStart, toolResult, unknown }
-enum ChatOriginKind: String, Codable, Sendable { case user, subagent, `extension`, process, gateway, assistant, unknown }
-enum ChatSemanticKind: String, Codable, Sendable { case prompt, resourcePrompt, command, message, tool, status, state, unknown }
-enum ChatSemanticVisibility: String, Codable, Sendable { case visible, hidden }
+package enum ChatDirection: String, Codable, Sendable { case inboundContext, agentOutput, agentInvocation, ambientStatus, hiddenInternal }
+package enum ChatContextEffect: String, Codable, Sendable { case none, modelInput, hiddenModelInput, toolResult }
+package enum ChatDelivery: String, Codable, Sendable { case stored, nextTurn, steer, followUp, triggeredTurn, continuedTurn, beforeAgentStart, toolResult, unknown }
+package enum ChatOriginKind: String, Codable, Sendable { case user, subagent, `extension`, process, gateway, assistant, unknown }
+package enum ChatSemanticKind: String, Codable, Sendable { case prompt, resourcePrompt, command, message, tool, status, state, unknown }
+package enum ChatSemanticVisibility: String, Codable, Sendable { case visible, hidden }
 
-enum ChatOriginConfidence: String, Codable, Sendable { case boundary, receipt, adapter, unknown }
+package enum ChatOriginConfidence: String, Codable, Sendable { case boundary, receipt, adapter, unknown }
 
 private func admitsSemanticString(_ value: String, maximumBytes: Int) -> Bool {
     !value.isEmpty && value.utf8.count <= maximumBytes
         && !value.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f }
 }
 
-struct ChatOrigin: Codable, Hashable, Sendable {
-    let kind: ChatOriginKind
-    let ownerId: String?
-    let title: String?
-    let confidence: ChatOriginConfidence
+package struct ChatOrigin: Codable, Hashable, Sendable {
+    package let kind: ChatOriginKind
+    package let ownerId: String?
+    package let title: String?
+    package let confidence: ChatOriginConfidence
 
     private enum CodingKeys: String, CodingKey { case kind, ownerId, title, confidence }
 
-    init(kind: ChatOriginKind, ownerId: String? = nil, title: String? = nil, confidence: ChatOriginConfidence) {
+    package init(kind: ChatOriginKind, ownerId: String? = nil, title: String? = nil, confidence: ChatOriginConfidence) {
         self.kind = kind; self.ownerId = ownerId; self.title = title; self.confidence = confidence
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         kind = try values.decode(ChatOriginKind.self, forKey: .kind)
         ownerId = try values.decodeIfPresent(String.self, forKey: .ownerId)
@@ -266,27 +272,27 @@ struct ChatOrigin: Codable, Hashable, Sendable {
     }
 }
 
-struct ChatSemanticMetadata: Codable, Hashable, Sendable {
+package struct ChatSemanticMetadata: Codable, Hashable, Sendable {
     let version: Int
-    let direction: ChatDirection
-    let contextEffect: ChatContextEffect
-    let delivery: ChatDelivery
-    let visibility: ChatSemanticVisibility
-    let kind: ChatSemanticKind
-    let origin: ChatOrigin
-    let invocationId: String?
-    let operationId: String?
+    package let direction: ChatDirection
+    package let contextEffect: ChatContextEffect
+    package let delivery: ChatDelivery
+    package let visibility: ChatSemanticVisibility
+    package let kind: ChatSemanticKind
+    package let origin: ChatOrigin
+    package let invocationId: String?
+    package let operationId: String?
     let sequence: Int
-    let lifecycle: InvocationLifecycle?
-    let resourceInvocation: ComposerResourceInvocation?
-    let submittedText: String?
+    package let lifecycle: InvocationLifecycle?
+    package let resourceInvocation: ComposerResourceInvocation?
+    package let submittedText: String?
 
     private enum CodingKeys: String, CodingKey {
         case version, direction, contextEffect, delivery, visibility, kind, origin,
              invocationId, operationId, sequence, lifecycle, resourceInvocation, submittedText
     }
 
-    init(
+    package init(
         version: Int = 1,
         direction: ChatDirection,
         contextEffect: ChatContextEffect,
@@ -307,7 +313,7 @@ struct ChatSemanticMetadata: Codable, Hashable, Sendable {
         self.lifecycle = lifecycle; self.resourceInvocation = resourceInvocation; self.submittedText = submittedText
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         version = try values.decode(Int.self, forKey: .version)
         direction = try values.decode(ChatDirection.self, forKey: .direction)
@@ -336,19 +342,19 @@ struct ChatSemanticMetadata: Codable, Hashable, Sendable {
     }
 }
 
-struct MessageTranscriptItem: TranscriptPayload {
+package struct MessageTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
     let timestamp: String
     let kind: TranscriptItem.Kind
-    let role: TranscriptItem.Role
+    package let role: TranscriptItem.Role
     let presentationId: String
-    let content: [ContentPart]
+    package let content: [ContentPart]
     let provider: String?
     let modelId: String?
     let stopReason: String?
     let errorMessage: String?
-    let toolCallId: String?
+    package let toolCallId: String?
     let toolName: String?
     let toolLabel: String?
     let isError: Bool?
@@ -370,7 +376,7 @@ struct MessageTranscriptItem: TranscriptPayload {
              completedAt, durationMs, lastProgressAt, progressSequence, toolSegmentId, semantic, extensionOrigin
     }
 
-    init(
+    package init(
         id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind, role: TranscriptItem.Role,
         presentationId: String, content: [ContentPart], provider: String? = nil, modelId: String? = nil,
         stopReason: String? = nil, errorMessage: String? = nil, toolCallId: String? = nil, toolName: String? = nil,
@@ -392,7 +398,7 @@ struct MessageTranscriptItem: TranscriptPayload {
         self.extensionOrigin = extensionOrigin
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
         parentId = try values.decodeIfPresent(String.self, forKey: .parentId)
@@ -458,7 +464,7 @@ struct MessageTranscriptItem: TranscriptPayload {
     }
 }
 
-struct BashTranscriptItem: TranscriptPayload {
+package struct BashTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
     let timestamp: String
@@ -473,9 +479,31 @@ struct BashTranscriptItem: TranscriptPayload {
     let startedAt: String?
     let completedAt: String?
     let durationMs: Int?
+
+    package init(
+        id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind,
+        command: String, output: String, exitCode: Int?, cancelled: Bool, truncated: Bool,
+        fullOutputPath: String?, excludeFromContext: Bool?, startedAt: String?, completedAt: String?,
+        durationMs: Int?
+    ) {
+        self.id = id
+        self.parentId = parentId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.command = command
+        self.output = output
+        self.exitCode = exitCode
+        self.cancelled = cancelled
+        self.truncated = truncated
+        self.fullOutputPath = fullOutputPath
+        self.excludeFromContext = excludeFromContext
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.durationMs = durationMs
+    }
 }
 
-struct CustomMessageTranscriptItem: TranscriptPayload {
+package struct CustomMessageTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
     let timestamp: String
@@ -486,7 +514,7 @@ struct CustomMessageTranscriptItem: TranscriptPayload {
     let semantic: ChatSemanticMetadata?
 }
 
-struct CustomEntryTranscriptItem: TranscriptPayload {
+package struct CustomEntryTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
     let timestamp: String
@@ -496,7 +524,7 @@ struct CustomEntryTranscriptItem: TranscriptPayload {
     let semantic: ChatSemanticMetadata?
 }
 
-struct SummaryTranscriptItem: TranscriptPayload {
+package struct SummaryTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
     let timestamp: String
@@ -507,9 +535,26 @@ struct SummaryTranscriptItem: TranscriptPayload {
     let details: JSONValue?
     let usage: JSONValue?
     let fromHook: Bool?
+
+    package init(
+        id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind,
+        presentationId: String?, summary: String, tokensBefore: Int?, details: JSONValue?,
+        usage: JSONValue?, fromHook: Bool?
+    ) {
+        self.id = id
+        self.parentId = parentId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.presentationId = presentationId
+        self.summary = summary
+        self.tokensBefore = tokensBefore
+        self.details = details
+        self.usage = usage
+        self.fromHook = fromHook
+    }
 }
 
-struct ModelChangeTranscriptItem: TranscriptPayload {
+package struct ModelChangeTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
     let timestamp: String
@@ -517,30 +562,50 @@ struct ModelChangeTranscriptItem: TranscriptPayload {
     let modelRef: ModelRef
 }
 
-struct ThinkingChangeTranscriptItem: TranscriptPayload {
+package struct ThinkingChangeTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
     let timestamp: String
     let kind: TranscriptItem.Kind
     let level: String
+
+    package init(id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind, level: String) {
+        self.id = id
+        self.parentId = parentId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.level = level
+    }
 }
 
-struct LabelTranscriptItem: TranscriptPayload {
+package struct LabelTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
     let timestamp: String
     let kind: TranscriptItem.Kind
     let targetId: String
     let label: String?
+
+    package init(
+        id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind,
+        targetId: String, label: String?
+    ) {
+        self.id = id
+        self.parentId = parentId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.targetId = targetId
+        self.label = label
+    }
 }
 
 /// A discriminated Gateway transcript value. Each Pi entry kind decodes into
 /// a shape that cannot accidentally accept fields belonging to another kind.
-enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
-    enum Kind: String, Codable, Sendable {
+package enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
+    package enum Kind: String, Codable, Sendable {
         case message, bash, customMessage, customEntry, compaction, branchSummary, modelChange, thinkingChange, label
     }
-    enum Role: String, Codable, Sendable { case user, assistant, toolResult }
+    package enum Role: String, Codable, Sendable { case user, assistant, toolResult }
 
     case message(MessageTranscriptItem)
     case bash(BashTranscriptItem)
@@ -553,7 +618,7 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case kind }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(Kind.self, forKey: .kind) {
         case .message:
@@ -623,7 +688,7 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         return true
     }
 
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         switch self {
         case .message(let value): try value.encode(to: encoder)
         case .bash(let value): try value.encode(to: encoder)
@@ -636,10 +701,10 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         }
     }
 
-    var id: String { payload.id }
-    var parentId: String? { payload.parentId }
-    var timestamp: String { payload.timestamp }
-    var kind: Kind {
+    package var id: String { payload.id }
+    package var parentId: String? { payload.parentId }
+    package var timestamp: String { payload.timestamp }
+    package var kind: Kind {
         switch self {
         case .message: .message
         case .bash: .bash
@@ -651,33 +716,33 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         case .label: .label
         }
     }
-    var role: Role? { if case .message(let value) = self { value.role } else { nil } }
-    var presentationId: String {
+    package var role: Role? { if case .message(let value) = self { value.role } else { nil } }
+    package var presentationId: String {
         switch self {
         case .message(let value): value.presentationId
         case .summary(let value): value.presentationId ?? value.id
         default: id
         }
     }
-    var content: [ContentPart]? {
+    package var content: [ContentPart]? {
         switch self {
         case .message(let value): value.content
         case .customMessage(let value): value.content
         default: nil
         }
     }
-    var provider: String? { if case .message(let value) = self { value.provider } else { nil } }
-    var modelId: String? { if case .message(let value) = self { value.modelId } else { nil } }
+    package var provider: String? { if case .message(let value) = self { value.provider } else { nil } }
+    package var modelId: String? { if case .message(let value) = self { value.modelId } else { nil } }
     var stopReason: String? { if case .message(let value) = self { value.stopReason } else { nil } }
-    var errorMessage: String? { if case .message(let value) = self { value.errorMessage } else { nil } }
-    var toolCallId: String? { if case .message(let value) = self { value.toolCallId } else { nil } }
-    var toolName: String? { if case .message(let value) = self { value.toolName } else { nil } }
-    var toolLabel: String? { if case .message(let value) = self { value.toolLabel } else { nil } }
-    var extensionOrigin: ExtensionToolOrigin? { if case .message(let value) = self { value.extensionOrigin } else { nil } }
-    var toolSegmentId: String? { if case .message(let value) = self { value.toolSegmentId } else { nil } }
-    var isError: Bool? { if case .message(let value) = self { value.isError } else { nil } }
-    var display: DisplayProjection? { if case .message(let value) = self { value.display } else { nil } }
-    var details: JSONValue? {
+    package var errorMessage: String? { if case .message(let value) = self { value.errorMessage } else { nil } }
+    package var toolCallId: String? { if case .message(let value) = self { value.toolCallId } else { nil } }
+    package var toolName: String? { if case .message(let value) = self { value.toolName } else { nil } }
+    package var toolLabel: String? { if case .message(let value) = self { value.toolLabel } else { nil } }
+    package var extensionOrigin: ExtensionToolOrigin? { if case .message(let value) = self { value.extensionOrigin } else { nil } }
+    package var toolSegmentId: String? { if case .message(let value) = self { value.toolSegmentId } else { nil } }
+    package var isError: Bool? { if case .message(let value) = self { value.isError } else { nil } }
+    package var display: DisplayProjection? { if case .message(let value) = self { value.display } else { nil } }
+    package var details: JSONValue? {
         switch self {
         case .message(let value): value.details
         case .customMessage(let value): value.details
@@ -692,43 +757,43 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         default: nil
         }
     }
-    var startedAt: String? {
+    package var startedAt: String? {
         switch self {
         case .message(let value): value.startedAt
         case .bash(let value): value.startedAt
         default: nil
         }
     }
-    var completedAt: String? {
+    package var completedAt: String? {
         switch self {
         case .message(let value): value.completedAt
         case .bash(let value): value.completedAt
         default: nil
         }
     }
-    var durationMs: Int? {
+    package var durationMs: Int? {
         switch self {
         case .message(let value): value.durationMs
         case .bash(let value): value.durationMs
         default: nil
         }
     }
-    var lastProgressAt: String? { if case .message(let value) = self { value.lastProgressAt } else { nil } }
-    var progressSequence: Int? { if case .message(let value) = self { value.progressSequence } else { nil } }
-    var command: String? { if case .bash(let value) = self { value.command } else { nil } }
-    var output: String? { if case .bash(let value) = self { value.output } else { nil } }
-    var exitCode: Int? { if case .bash(let value) = self { value.exitCode } else { nil } }
-    var cancelled: Bool? { if case .bash(let value) = self { value.cancelled } else { nil } }
-    var truncated: Bool? { if case .bash(let value) = self { value.truncated } else { nil } }
+    package var lastProgressAt: String? { if case .message(let value) = self { value.lastProgressAt } else { nil } }
+    package var progressSequence: Int? { if case .message(let value) = self { value.progressSequence } else { nil } }
+    package var command: String? { if case .bash(let value) = self { value.command } else { nil } }
+    package var output: String? { if case .bash(let value) = self { value.output } else { nil } }
+    package var exitCode: Int? { if case .bash(let value) = self { value.exitCode } else { nil } }
+    package var cancelled: Bool? { if case .bash(let value) = self { value.cancelled } else { nil } }
+    package var truncated: Bool? { if case .bash(let value) = self { value.truncated } else { nil } }
     var fullOutputPath: String? { if case .bash(let value) = self { value.fullOutputPath } else { nil } }
-    var customType: String? {
+    package var customType: String? {
         switch self {
         case .customMessage(let value): value.customType
         case .customEntry(let value): value.customType
         default: nil
         }
     }
-    var semantic: ChatSemanticMetadata? {
+    package var semantic: ChatSemanticMetadata? {
         switch self {
         case .message(let value): value.semantic
         case .customMessage(let value): value.semantic
@@ -736,15 +801,15 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         default: nil
         }
     }
-    var customData: JSONValue? { if case .customEntry(let value) = self { value.data } else { nil } }
-    var summary: String? { if case .summary(let value) = self { value.summary } else { nil } }
-    var tokensBefore: Int? { if case .summary(let value) = self { value.tokensBefore } else { nil } }
-    var modelRef: ModelRef? { if case .modelChange(let value) = self { value.modelRef } else { nil } }
-    var level: String? { if case .thinkingChange(let value) = self { value.level } else { nil } }
+    package var customData: JSONValue? { if case .customEntry(let value) = self { value.data } else { nil } }
+    package var summary: String? { if case .summary(let value) = self { value.summary } else { nil } }
+    package var tokensBefore: Int? { if case .summary(let value) = self { value.tokensBefore } else { nil } }
+    package var modelRef: ModelRef? { if case .modelChange(let value) = self { value.modelRef } else { nil } }
+    package var level: String? { if case .thinkingChange(let value) = self { value.level } else { nil } }
     var targetId: String? { if case .label(let value) = self { value.targetId } else { nil } }
-    var label: String? { if case .label(let value) = self { value.label } else { nil } }
+    package var label: String? { if case .label(let value) = self { value.label } else { nil } }
 
-    var text: String {
+    package var text: String {
         content?.compactMap { part in
             part.type == .text && part.attachment == nil ? part.text : nil
         }.joined() ?? summary ?? output ?? ""

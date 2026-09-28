@@ -10,9 +10,9 @@ private struct AutomationCodingKey: CodingKey {
 
 // Gateway-owned automation projections. These are disposable iOS values; the
 // Gateway remains the authority for definitions, occurrences, and run state.
-enum AutomationActivation: String, Codable, Hashable, Sendable, CaseIterable {
+package enum AutomationActivation: String, Codable, Hashable, Sendable, CaseIterable {
     case draft, enabled, paused, completed, blocked
-    var label: String {
+    package var label: String {
         switch self {
         case .draft: "Draft"
         case .enabled: "Active"
@@ -23,11 +23,11 @@ enum AutomationActivation: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
-enum AutomationRunState: String, Codable, Hashable, Sendable {
+package enum AutomationRunState: String, Codable, Hashable, Sendable {
     case queued, waiting, admitting, running, cancelling
     case succeeded, failed, cancelled, skipped, outcomeUnknown
     var isTerminal: Bool { ["succeeded", "failed", "cancelled", "skipped", "outcomeUnknown"].contains(rawValue) }
-    var label: String {
+    package var label: String {
         switch self {
         case .queued, .waiting: "Waiting"
         case .admitting: "Starting"
@@ -42,31 +42,31 @@ enum AutomationRunState: String, Codable, Hashable, Sendable {
     }
 }
 
-enum AutomationActionKind: String, Codable, Hashable, Sendable, CaseIterable {
+package enum AutomationActionKind: String, Codable, Hashable, Sendable, CaseIterable {
     case sessionPrompt, notification
-    var label: String { self == .sessionPrompt ? "Prompt" : "Notification" }
-    var icon: String { self == .sessionPrompt ? "text.bubble" : "bell" }
+    package var label: String { self == .sessionPrompt ? "Prompt" : "Notification" }
+    package var icon: String { self == .sessionPrompt ? "text.bubble" : "bell" }
 }
 
-enum AutomationTriggerKind: String, Codable, Hashable, Sendable, CaseIterable {
+package enum AutomationTriggerKind: String, Codable, Hashable, Sendable, CaseIterable {
     case once, interval, calendar
-    var label: String { rawValue.capitalized }
+    package var label: String { rawValue.capitalized }
 }
 
-struct GatewayAutomationTrigger: Codable, Hashable, Sendable {
-    let kind: String
-    let at: String?
-    let everySeconds: Int?
-    let anchorAt: String?
-    let timezone: String?
-    let localTime: String?
-    let weekdays: [Int]?
+package struct GatewayAutomationTrigger: Codable, Hashable, Sendable {
+    package let kind: String
+    package let at: String?
+    package let everySeconds: Int?
+    package let anchorAt: String?
+    package let timezone: String?
+    package let localTime: String?
+    package let weekdays: [Int]?
 
-    var typedKind: AutomationTriggerKind? { AutomationTriggerKind(rawValue: kind) }
-    init(kind: String, at: String? = nil, everySeconds: Int? = nil, anchorAt: String? = nil, timezone: String? = nil, localTime: String? = nil, weekdays: [Int]? = nil) {
+    package var typedKind: AutomationTriggerKind? { AutomationTriggerKind(rawValue: kind) }
+    package init(kind: String, at: String? = nil, everySeconds: Int? = nil, anchorAt: String? = nil, timezone: String? = nil, localTime: String? = nil, weekdays: [Int]? = nil) {
         self.kind = kind; self.at = at; self.everySeconds = everySeconds; self.anchorAt = anchorAt; self.timezone = timezone; self.localTime = localTime; self.weekdays = weekdays
     }
-    var summary: String {
+    package var summary: String {
         switch kind {
         case "once":
             guard let at, let date = GatewayTimestamp.parse(at) else { return "Once" }
@@ -95,8 +95,8 @@ struct GatewayAutomationTrigger: Codable, Hashable, Sendable {
     }
 }
 
-enum GatewayAutomationTarget: Codable, Hashable, Sendable {
-    enum SessionPolicy: String, Codable, Hashable, Sendable { case newPerRun }
+package enum GatewayAutomationTarget: Codable, Hashable, Sendable {
+    package enum SessionPolicy: String, Codable, Hashable, Sendable { case newPerRun }
 
     case existingSession(sessionID: String)
     case workspace(cwd: String, sessionPolicy: SessionPolicy)
@@ -116,9 +116,9 @@ enum GatewayAutomationTarget: Codable, Hashable, Sendable {
         return nil
     }
 
-    var isWorkspace: Bool { if case .workspace = self { return true }; return false }
+    package var isWorkspace: Bool { if case .workspace = self { return true }; return false }
 
-    var displayName: String {
+    package var displayName: String {
         switch self {
         case let .existingSession(sessionID): return "Session \(sessionID)"
         case let .workspace(cwd, _):
@@ -127,7 +127,7 @@ enum GatewayAutomationTarget: Codable, Hashable, Sendable {
         }
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: AutomationCodingKey.self)
         let keys = Set(values.allKeys.map(\.stringValue))
         let kind = try values.decode(String.self, forKey: AutomationCodingKey(stringValue: "kind")!)
@@ -148,7 +148,7 @@ enum GatewayAutomationTarget: Codable, Hashable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case let .existingSession(sessionID):
@@ -168,80 +168,80 @@ enum GatewayAutomationTarget: Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey { case kind, sessionId, cwd, sessionPolicy }
 }
 
-struct GatewayAutomationRunSummary: Codable, Hashable, Identifiable, Sendable {
-    let runId: String
-    let state: AutomationRunState
-    let scheduledFor: String
-    let startedAt: String?
-    let terminalAt: String?
+package struct GatewayAutomationRunSummary: Codable, Hashable, Identifiable, Sendable {
+    package let runId: String
+    package let state: AutomationRunState
+    package let scheduledFor: String
+    package let startedAt: String?
+    package let terminalAt: String?
     let reason: String?
     let preAdmissionAttemptCount: Int?
     let notificationAdmissionStatus: String?
-    var id: String { runId }
+    package var id: String { runId }
 }
 
-struct GatewayAutomationSummary: Codable, Hashable, Identifiable, Sendable {
-    let id: String
-    let revision: Int
-    let stateRevision: Int
-    let name: String
-    let activation: AutomationActivation
+package struct GatewayAutomationSummary: Codable, Hashable, Identifiable, Sendable {
+    package let id: String
+    package let revision: Int
+    package let stateRevision: Int
+    package let name: String
+    package let activation: AutomationActivation
     let actionKind: String
-    let target: GatewayAutomationTarget
-    let trigger: GatewayAutomationTrigger
-    let nextOccurrenceAt: String?
-    let currentRun: GatewayAutomationRunSummary?
-    let lastRun: GatewayAutomationRunSummary?
-    let consecutiveFailureCount: Int
-    let blockedReason: String?
+    package let target: GatewayAutomationTarget
+    package let trigger: GatewayAutomationTrigger
+    package let nextOccurrenceAt: String?
+    package let currentRun: GatewayAutomationRunSummary?
+    package let lastRun: GatewayAutomationRunSummary?
+    package let consecutiveFailureCount: Int
+    package let blockedReason: String?
     let createdAt: String
-    let updatedAt: String
+    package let updatedAt: String
 
-    var typedActionKind: AutomationActionKind? { AutomationActionKind(rawValue: actionKind) }
-    var isAttentionRequired: Bool { activation == .blocked || currentRun?.state == .outcomeUnknown || consecutiveFailureCount > 0 }
+    package var typedActionKind: AutomationActionKind? { AutomationActionKind(rawValue: actionKind) }
+    package var isAttentionRequired: Bool { activation == .blocked || currentRun?.state == .outcomeUnknown || consecutiveFailureCount > 0 }
 }
 
-struct GatewayAutomationAction: Codable, Hashable, Sendable {
-    init(kind: String, text: String? = nil, message: String? = nil, resourceInvocation: ComposerResourceInvocation? = nil) {
+package struct GatewayAutomationAction: Codable, Hashable, Sendable {
+    package init(kind: String, text: String? = nil, message: String? = nil, resourceInvocation: ComposerResourceInvocation? = nil) {
         self.kind = kind; self.text = text; self.message = message; self.resourceInvocation = resourceInvocation
     }
-    let kind: String
+    package let kind: String
     let text: String?
     let message: String?
-    let resourceInvocation: ComposerResourceInvocation?
+    package let resourceInvocation: ComposerResourceInvocation?
 
-    var typedKind: AutomationActionKind? { AutomationActionKind(rawValue: kind) }
-    var content: String { text ?? message ?? "" }
+    package var typedKind: AutomationActionKind? { AutomationActionKind(rawValue: kind) }
+    package var content: String { text ?? message ?? "" }
 }
 
-struct GatewayAutomationRecord: Codable, Hashable, Identifiable, Sendable {
+package struct GatewayAutomationRecord: Codable, Hashable, Identifiable, Sendable {
     let schemaVersion: Int
-    let id: String
-    let revision: Int
+    package let id: String
+    package let revision: Int
     let stateRevision: Int
-    let name: String
-    let description: String?
-    let activation: AutomationActivation
-    let createdAt: String
-    let updatedAt: String
-    let provenance: GatewayAutomationProvenance
-    let target: GatewayAutomationTarget
-    let trigger: GatewayAutomationTrigger
-    let misfirePolicy: String
-    let overlapPolicy: String
-    let executionDeadlineSeconds: Int
-    let action: GatewayAutomationAction
-    let nextOccurrenceAt: String?
-    let currentRun: GatewayAutomationRun?
-    let lastRun: GatewayAutomationRun?
-    let consecutiveFailureCount: Int
-    let blockedReason: String?
-    let history: [GatewayAutomationRun]
+    package let name: String
+    package let description: String?
+    package let activation: AutomationActivation
+    package let createdAt: String
+    package let updatedAt: String
+    package let provenance: GatewayAutomationProvenance
+    package let target: GatewayAutomationTarget
+    package let trigger: GatewayAutomationTrigger
+    package let misfirePolicy: String
+    package let overlapPolicy: String
+    package let executionDeadlineSeconds: Int
+    package let action: GatewayAutomationAction
+    package let nextOccurrenceAt: String?
+    package let currentRun: GatewayAutomationRun?
+    package let lastRun: GatewayAutomationRun?
+    package let consecutiveFailureCount: Int
+    package let blockedReason: String?
+    package let history: [GatewayAutomationRun]
 }
 
 extension GatewayAutomationTrigger {
     enum CodingKeys: String, CodingKey { case kind, at, everySeconds, anchorAt, timezone, localTime, weekdays }
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self); try values.encode(kind, forKey: .kind)
         switch kind { case "once": try values.encodeIfPresent(at, forKey: .at); case "interval": try values.encodeIfPresent(everySeconds, forKey: .everySeconds); try values.encodeIfPresent(anchorAt, forKey: .anchorAt); case "calendar": try values.encodeIfPresent(timezone, forKey: .timezone); try values.encodeIfPresent(localTime, forKey: .localTime); try values.encodeIfPresent(weekdays, forKey: .weekdays); default: break }
     }
@@ -249,7 +249,7 @@ extension GatewayAutomationTrigger {
 extension GatewayAutomationAction {
     enum CodingKeys: String, CodingKey { case kind, text, message, resourceInvocation }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: AutomationCodingKey.self)
         let kind = try values.decode(String.self, forKey: AutomationCodingKey(stringValue: "kind")!)
         let keys = Set(values.allKeys.map(\.stringValue))
@@ -265,7 +265,7 @@ extension GatewayAutomationAction {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self); try values.encode(kind, forKey: .kind)
         if kind == "sessionPrompt" { try values.encodeIfPresent(text, forKey: .text); try values.encodeIfPresent(resourceInvocation, forKey: .resourceInvocation) }
         else { try values.encodeIfPresent(message, forKey: .message) }
@@ -276,50 +276,56 @@ extension GatewayAutomationAction {
     }
 }
 
-struct GatewayAutomationProvenance: Codable, Hashable, Sendable {
-    let kind: String
+package struct GatewayAutomationProvenance: Codable, Hashable, Sendable {
+    package let kind: String
     let sessionId: String?
     let sourceId: String?
+
+    package init(kind: String, sessionId: String?, sourceId: String?) {
+        self.kind = kind
+        self.sessionId = sessionId
+        self.sourceId = sourceId
+    }
 }
 
-struct GatewayAutomationRun: Codable, Hashable, Identifiable, Sendable {
-    let runId: String
+package struct GatewayAutomationRun: Codable, Hashable, Identifiable, Sendable {
+    package let runId: String
     let occurrenceId: String
-    let manual: Bool?
-    let automationRevision: Int
-    let scheduledFor: String
-    let triggerSnapshot: GatewayAutomationTrigger
-    let actionSnapshot: GatewayAutomationAction
-    let state: AutomationRunState
-    let createdAt: String
-    let reason: String?
-    let claimedAt: String?
-    let startedAt: String?
-    let terminalAt: String?
+    package let manual: Bool?
+    package let automationRevision: Int
+    package let scheduledFor: String
+    package let triggerSnapshot: GatewayAutomationTrigger
+    package let actionSnapshot: GatewayAutomationAction
+    package let state: AutomationRunState
+    package let createdAt: String
+    package let reason: String?
+    package let claimedAt: String?
+    package let startedAt: String?
+    package let terminalAt: String?
     let retryAt: String?
-    let preAdmissionAttemptCount: Int
-    let hostEpoch: String?
+    package let preAdmissionAttemptCount: Int
+    package let hostEpoch: String?
     let claimId: String?
-    let operationId: String?
-    let invocationId: String?
-    let assistantCompletionId: String?
-    let notificationAdmissionStatus: String?
-    let targetSnapshot: GatewayAutomationTarget
-    let executionSessionId: String
-    let error: GatewayAutomationError?
-    let resolution: GatewayAutomationResolution?
-    var id: String { runId }
+    package let operationId: String?
+    package let invocationId: String?
+    package let assistantCompletionId: String?
+    package let notificationAdmissionStatus: String?
+    package let targetSnapshot: GatewayAutomationTarget
+    package let executionSessionId: String
+    package let error: GatewayAutomationError?
+    package let resolution: GatewayAutomationResolution?
+    package var id: String { runId }
 }
 
-struct GatewayAutomationError: Codable, Hashable, Sendable { let code: String; let message: String; let retryable: Bool }
-struct GatewayAutomationResolution: Codable, Hashable, Sendable { let outcome: String; let resolvedAt: String; let provenance: GatewayAutomationProvenance }
+package struct GatewayAutomationError: Codable, Hashable, Sendable { package let code: String; package let message: String; package let retryable: Bool }
+package struct GatewayAutomationResolution: Codable, Hashable, Sendable { package let outcome: String; package let resolvedAt: String; package let provenance: GatewayAutomationProvenance }
 
-struct GatewayAutomationPage: Decodable, Sendable {
-    let catalogRevision: Int
-    let items: [GatewayAutomationSummary]
-    let nextCursor: String?
+package struct GatewayAutomationPage: Decodable, Sendable {
+    package let catalogRevision: Int
+    package let items: [GatewayAutomationSummary]
+    package let nextCursor: String?
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         catalogRevision = try values.decode(Int.self, forKey: .catalogRevision)
         items = try values.decode([GatewayAutomationSummary].self, forKey: .items)
@@ -334,11 +340,11 @@ struct GatewayAutomationPage: Decodable, Sendable {
     private enum CodingKeys: String, CodingKey { case catalogRevision, items, nextCursor }
 }
 
-struct AutomationChanged: Decodable, Hashable, Sendable {
+package struct AutomationChanged: Decodable, Hashable, Sendable {
     let catalogRevision: Int
     let automationId: String?
     private enum CodingKeys: String, CodingKey { case catalogRevision, automationId }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         catalogRevision = try values.decode(Int.self, forKey: .catalogRevision)
         automationId = try values.decodeIfPresent(String.self, forKey: .automationId)
@@ -353,34 +359,49 @@ struct AutomationChanged: Decodable, Hashable, Sendable {
     }
 }
 
-struct GatewayAutomationStatus: Codable, Hashable, Sendable {
-    let ready: Bool
-    let degraded: Bool
-    let automationCount: Int
-    let aggregateBytes: Int
-    let malformedRecordCount: Int
-    let catalogRevision: Int
+package struct GatewayAutomationStatus: Codable, Hashable, Sendable {
+    package let ready: Bool
+    package let degraded: Bool
+    package let automationCount: Int
+    package let aggregateBytes: Int
+    package let malformedRecordCount: Int
+    package let catalogRevision: Int
 }
 
-struct GatewayAutomationOccurrence: Decodable, Hashable, Identifiable, Sendable {
-    enum Kind: String, Decodable, Sendable { case occurrence, series }
+package struct GatewayAutomationOccurrence: Decodable, Hashable, Identifiable, Sendable {
+    package enum Kind: String, Decodable, Sendable { case occurrence, series }
 
-    let kind: Kind
-    let automationId: String
-    let automationRevision: Int
-    let occurrenceId: String?
-    let scheduledFor: String?
+    package let kind: Kind
+    package let automationId: String
+    package let automationRevision: Int
+    package let occurrenceId: String?
+    package let scheduledFor: String?
     let dayStart: String?
-    let firstAt: String?
-    let lastAt: String?
-    let count: Int?
+    package let firstAt: String?
+    package let lastAt: String?
+    package let count: Int?
 
-    var id: String {
+    package init(
+        kind: Kind, automationId: String, automationRevision: Int, occurrenceId: String?,
+        scheduledFor: String?
+    ) {
+        self.kind = kind
+        self.automationId = automationId
+        self.automationRevision = automationRevision
+        self.occurrenceId = occurrenceId
+        self.scheduledFor = scheduledFor
+        self.dayStart = nil
+        self.firstAt = nil
+        self.lastAt = nil
+        self.count = nil
+    }
+
+    package var id: String {
         if let occurrenceId { return occurrenceId }
         return "series:\(automationId):\(dayStart ?? firstAt ?? "invalid")"
     }
-    var isSeries: Bool { kind == .series }
-    var presentationTimestamp: String { scheduledFor ?? firstAt ?? "" }
+    package var isSeries: Bool { kind == .series }
+    package var presentationTimestamp: String { scheduledFor ?? firstAt ?? "" }
 
     init(
         kind: Kind,
@@ -404,7 +425,7 @@ struct GatewayAutomationOccurrence: Decodable, Hashable, Identifiable, Sendable 
         self.count = count
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let kind = try values.decode(Kind.self, forKey: .kind)
         let automationId = try values.decode(String.self, forKey: .automationId)
@@ -455,12 +476,12 @@ struct GatewayAutomationOccurrence: Decodable, Hashable, Identifiable, Sendable 
     }
 }
 
-struct GatewayAutomationTimelinePage: Decodable, Hashable, Sendable {
-    let catalogRevision: Int
-    let items: [GatewayAutomationOccurrence]
-    let nextCursor: String?
+package struct GatewayAutomationTimelinePage: Decodable, Hashable, Sendable {
+    package let catalogRevision: Int
+    package let items: [GatewayAutomationOccurrence]
+    package let nextCursor: String?
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         catalogRevision = try values.decode(Int.self, forKey: .catalogRevision)
         items = try values.decode([GatewayAutomationOccurrence].self, forKey: .items)
@@ -480,10 +501,10 @@ struct GatewayAutomationTimelinePage: Decodable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey { case catalogRevision, items, nextCursor }
 }
 
-struct GatewayAutomationPreview: Decodable, Hashable, Sendable {
-    let occurrences: [String]
+package struct GatewayAutomationPreview: Decodable, Hashable, Sendable {
+    package let occurrences: [String]
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         occurrences = try values.decode([String].self, forKey: .occurrences)
         guard (0...20).contains(occurrences.count),
@@ -500,23 +521,23 @@ struct GatewayAutomationPreview: Decodable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case occurrences }
 }
-struct GatewayAutomationRuns: Codable, Hashable, Sendable { let runs: [GatewayAutomationRunSummary] }
-struct GatewayAutomationDeleteResponse: Codable, Hashable, Sendable {
-    let automationId: String
-    let deleted: Bool
+package struct GatewayAutomationRuns: Codable, Hashable, Sendable { package let runs: [GatewayAutomationRunSummary] }
+package struct GatewayAutomationDeleteResponse: Codable, Hashable, Sendable {
+    package let automationId: String
+    package let deleted: Bool
 }
 
-enum AutomationAdmissionPolicy {
-    static let capability = "automations.v2"
+package enum AutomationAdmissionPolicy {
+    package static let capability = "automations.v2"
     static let minimumNewSessionIntervalSeconds = 86_400
-    static let timelineCapability = "automations.timeline.v1"
+    package static let timelineCapability = "automations.timeline.v1"
     static let maximumPageCount = 100
     static let maximumTimelinePageCount = 200
-    static let maximumRetainedCount = 1_024
-    static let maximumTimelineRetainedCount = 8_192
-    static let maximumAggregateBytes = 2 * 1_048_576
+    package static let maximumRetainedCount = 1_024
+    package static let maximumTimelineRetainedCount = 8_192
+    package static let maximumAggregateBytes = 2 * 1_048_576
 
-    static func admits(_ summary: GatewayAutomationSummary) -> Bool {
+    package static func admits(_ summary: GatewayAutomationSummary) -> Bool {
         opaqueID(summary.id)
             && summary.revision >= 1 && summary.stateRevision >= 1
             && bounded(summary.name, maximum: 256)
@@ -533,7 +554,7 @@ enum AutomationAdmissionPolicy {
             && (summary.lastRun.map(admits) ?? true)
     }
 
-    static func admits(_ trigger: GatewayAutomationTrigger) -> Bool {
+    package static func admits(_ trigger: GatewayAutomationTrigger) -> Bool {
         switch trigger.kind {
         case "once":
             return trigger.at.flatMap(GatewayTimestamp.parse) != nil
@@ -560,7 +581,7 @@ enum AutomationAdmissionPolicy {
         }
     }
 
-    static func admits(_ run: GatewayAutomationRunSummary) -> Bool {
+    package static func admits(_ run: GatewayAutomationRunSummary) -> Bool {
         opaqueID(run.runId)
             && GatewayTimestamp.parse(run.scheduledFor) != nil
             && (run.startedAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
@@ -569,19 +590,19 @@ enum AutomationAdmissionPolicy {
             && (run.preAdmissionAttemptCount.map({ $0 >= 0 }) ?? true)
     }
 
-    static func admits(_ target: GatewayAutomationTarget) -> Bool {
+    package static func admits(_ target: GatewayAutomationTarget) -> Bool {
         switch target {
         case let .existingSession(sessionID): return validSessionID(sessionID)
         case let .workspace(cwd, policy): return validWorkspacePath(cwd) && policy == .newPerRun
         }
     }
 
-    static func admitsActionTarget(actionKind: AutomationActionKind?, target: GatewayAutomationTarget) -> Bool {
+    package static func admitsActionTarget(actionKind: AutomationActionKind?, target: GatewayAutomationTarget) -> Bool {
         guard let actionKind else { return false }
         return actionKind == .sessionPrompt || !target.isWorkspace
     }
 
-    static func admits(_ action: GatewayAutomationAction) -> Bool {
+    package static func admits(_ action: GatewayAutomationAction) -> Bool {
         switch action.typedKind {
         case .sessionPrompt:
             guard let text = action.text,
@@ -608,7 +629,7 @@ enum AutomationAdmissionPolicy {
         }
     }
 
-    static func admits(_ provenance: GatewayAutomationProvenance) -> Bool {
+    package static func admits(_ provenance: GatewayAutomationProvenance) -> Bool {
         switch provenance.kind {
         case "mobile", "local":
             return provenance.sessionId == nil && provenance.sourceId == nil
@@ -620,7 +641,7 @@ enum AutomationAdmissionPolicy {
         }
     }
 
-    static func admits(_ run: GatewayAutomationRun) -> Bool {
+    package static func admits(_ run: GatewayAutomationRun) -> Bool {
         opaqueID(run.runId)
             && opaqueID(run.occurrenceId)
             && run.automationRevision >= 1
@@ -648,7 +669,7 @@ enum AutomationAdmissionPolicy {
             }) ?? true)
     }
 
-    static func admits(_ record: GatewayAutomationRecord) -> Bool {
+    package static func admits(_ record: GatewayAutomationRecord) -> Bool {
         record.schemaVersion == 2
             && opaqueID(record.id)
             && record.revision >= 1 && record.stateRevision >= 1
@@ -680,22 +701,22 @@ enum AutomationAdmissionPolicy {
         }
     }
 
-    static func validSessionID(_ value: String) -> Bool {
+    package static func validSessionID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 200 && value.unicodeScalars.allSatisfy {
             CharacterSet.alphanumerics.contains($0) || "-_:".unicodeScalars.contains($0)
         }
     }
 
-    static func validGeneratedSessionID(_ value: String) -> Bool {
+    package static func validGeneratedSessionID(_ value: String) -> Bool {
         value.utf8.count == 36 && UUID(uuidString: value) != nil
     }
 
-    static func validWorkspacePath(_ value: String) -> Bool {
+    package static func validWorkspacePath(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 4_096 && value.hasPrefix("/")
             && !value.unicodeScalars.contains(where: { $0.value == 0 || CharacterSet.controlCharacters.contains($0) })
     }
 
-    static func admitsNewSessionInterval(_ trigger: GatewayAutomationTrigger) -> Bool {
+    package static func admitsNewSessionInterval(_ trigger: GatewayAutomationTrigger) -> Bool {
         trigger.kind != "interval" || (trigger.everySeconds ?? 0) >= minimumNewSessionIntervalSeconds
     }
 
@@ -710,17 +731,17 @@ enum AutomationAdmissionPolicy {
     }
 }
 
-struct AutomationDashboardProfile: Identifiable, Hashable, Sendable {
-    let id: String
-    let label: String
-    let state: DashboardServerConnectionState
-    let capabilities: Set<String>
+package struct AutomationDashboardProfile: Identifiable, Hashable, Sendable {
+    package let id: String
+    package let label: String
+    package let state: DashboardServerConnectionState
+    package let capabilities: Set<String>
     /// Connection identity is part of timeline admission. A reconnect with
     /// the same profile must not allow a prior timeline task to be treated as
     /// current merely because its capabilities are unchanged.
-    let connectionID: Int?
+    package let connectionID: Int?
 
-    init(id: String, label: String, state: DashboardServerConnectionState, capabilities: Set<String>, connectionID: Int? = nil) {
+    package init(id: String, label: String, state: DashboardServerConnectionState, capabilities: Set<String>, connectionID: Int? = nil) {
         self.id = id
         self.label = label
         self.state = state
@@ -729,36 +750,53 @@ struct AutomationDashboardProfile: Identifiable, Hashable, Sendable {
     }
 }
 
-enum AutomationEndpointAdmissionPolicy {
-    static func admits(_ profile: AutomationDashboardProfile) -> Bool {
+package enum AutomationEndpointAdmissionPolicy {
+    package static func admits(_ profile: AutomationDashboardProfile) -> Bool {
         profile.state == .connected
             && profile.capabilities.contains(AutomationAdmissionPolicy.capability)
     }
 
-    static func admitsTimeline(_ profile: AutomationDashboardProfile) -> Bool {
+    package static func admitsTimeline(_ profile: AutomationDashboardProfile) -> Bool {
         admits(profile)
             && profile.capabilities.contains(AutomationAdmissionPolicy.timelineCapability)
     }
 }
 
-struct AutomationProfileCatalog: Identifiable, Hashable, Sendable {
-    let profile: AutomationDashboardProfile
-    var catalogRevision: Int = 0
-    var summaries: [GatewayAutomationSummary] = []
-    var failure: String?
+package struct AutomationProfileCatalog: Identifiable, Hashable, Sendable {
+    package let profile: AutomationDashboardProfile
+    package var catalogRevision: Int = 0
+    package var summaries: [GatewayAutomationSummary] = []
+    package var failure: String?
     var isStale: Bool { state != .connected }
     var state: DashboardServerConnectionState { profile.state }
-    var id: String { profile.id }
+    package var id: String { profile.id }
+
+    package init(profile: AutomationDashboardProfile, catalogRevision: Int = 0, summaries: [GatewayAutomationSummary] = [], failure: String? = nil) {
+        self.profile = profile
+        self.catalogRevision = catalogRevision
+        self.summaries = summaries
+        self.failure = failure
+    }
 }
 
-struct AutomationTimelineItem: Identifiable, Hashable, Sendable {
-    let profileID: String
-    let occurrence: GatewayAutomationOccurrence
-    var id: String { "\(profileID):\(occurrence.id)" }
+package struct AutomationTimelineItem: Identifiable, Hashable, Sendable {
+    package let profileID: String
+    package let occurrence: GatewayAutomationOccurrence
+    package var id: String { "\(profileID):\(occurrence.id)" }
+
+    package init(profileID: String, occurrence: GatewayAutomationOccurrence) {
+        self.profileID = profileID
+        self.occurrence = occurrence
+    }
 }
 
-struct AutomationAgendaDay: Identifiable, Hashable, Sendable {
-    let date: Date
-    let items: [AutomationTimelineItem]
-    var id: Date { date }
+package struct AutomationAgendaDay: Identifiable, Hashable, Sendable {
+    package let date: Date
+    package let items: [AutomationTimelineItem]
+    package var id: Date { date }
+
+    package init(date: Date, items: [AutomationTimelineItem]) {
+        self.date = date
+        self.items = items
+    }
 }

@@ -1,3 +1,5 @@
+import TronMobileCore
+
 enum SessionRebaselineAdmission: Equatable, Sendable {
     case install
     case ignore

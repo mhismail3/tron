@@ -1,47 +1,70 @@
 import Foundation
 import TronMobileCore
 
-struct GatewayRequest: Encodable, Sendable {
+package struct GatewayRequest: Encodable, Sendable {
     let type = "request"
     let id: String
     let method: String
     let params: JSONValue
+
+    package init(id: String, method: String, params: JSONValue) {
+        self.id = id
+        self.method = method
+        self.params = params
+    }
 }
 
-struct GatewayResponse: Decodable, Sendable, Equatable {
+package struct GatewayResponse: Decodable, Sendable, Equatable {
     let type: String
-    let id: String
-    let ok: Bool
-    let result: JSONValue?
-    let error: GatewayFailure?
+    package let id: String
+    package let ok: Bool
+    package let result: JSONValue?
+    package let error: GatewayFailure?
 }
 
 /// Local transport provenance for an operation whose bytes definitely did not
 /// leave the client's queued state. This type is intentionally not Codable and
 /// cannot be forged by a Gateway application-error response.
-struct GatewayDefinitelyNotSentError: Error, Hashable, Sendable, LocalizedError {
-    let failure: GatewayFailure
-    var errorDescription: String? { failure.message }
+package struct GatewayDefinitelyNotSentError: Error, Hashable, Sendable, LocalizedError {
+    package let failure: GatewayFailure
+
+    package init(failure: GatewayFailure) {
+        self.failure = failure
+    }
+
+    package var errorDescription: String? { failure.message }
 }
 
 /// Local transport provenance for an operation whose bytes may have reached the
 /// Gateway. This type is intentionally not Codable and cannot be forged by a
 /// Gateway application-error response.
-struct GatewayPossiblySentError: Error, Hashable, Sendable, LocalizedError {
-    let failure: GatewayFailure
-    var errorDescription: String? { failure.message }
+package struct GatewayPossiblySentError: Error, Hashable, Sendable, LocalizedError {
+    package let failure: GatewayFailure
+
+    package init(failure: GatewayFailure) {
+        self.failure = failure
+    }
+
+    package var errorDescription: String? { failure.message }
 }
 
-struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedError {
-    let code: String
-    let message: String
-    let retryable: Bool
-    let details: JSONValue?
+package struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedError {
+    package let code: String
+    package let message: String
+    package let retryable: Bool
+    package let details: JSONValue?
 
-    var errorDescription: String? { message }
+    package init(code: String, message: String, retryable: Bool, details: JSONValue?) {
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.details = details
+    }
+
+    package var errorDescription: String? { message }
 }
 
-enum PreparedSessionEventData: Sendable, Equatable {
+package enum PreparedSessionEventData: Sendable, Equatable {
     case progress(TranscriptItem)
     case compaction(TranscriptItem)
     case toolProgress(ToolExecutionState)
@@ -52,39 +75,56 @@ enum PreparedSessionEventData: Sendable, Equatable {
     case invalid
 }
 
-struct PreparedSessionEvent: Sendable, Equatable {
-    let envelope: SessionEventEnvelope
-    let data: PreparedSessionEventData
+package struct PreparedSessionEvent: Sendable, Equatable {
+    package let envelope: SessionEventEnvelope
+    package let data: PreparedSessionEventData
 }
 
-struct PreparedSessionRebaseline: Sendable, Equatable {
-    let snapshot: SessionSnapshot
-    let subscriptionToken: String
+package struct PreparedSessionRebaseline: Sendable, Equatable {
+    package let snapshot: SessionSnapshot
+    package let subscriptionToken: String
 }
 
-struct GatewayEventCursor: Sendable, Equatable {
-    let runtimeGeneration: String
-    let eventSequence: Int
+package struct GatewayEventCursor: Sendable, Equatable {
+    package let runtimeGeneration: String
+    package let eventSequence: Int
+
+    package init(runtimeGeneration: String, eventSequence: Int) {
+        self.runtimeGeneration = runtimeGeneration
+        self.eventSequence = eventSequence
+    }
 }
 
-struct PreparedTerminalOutputEvent: Decodable, Sendable, Equatable {
-    let terminalId: String
-    let sequence: Int
-    let data: String
+package struct PreparedTerminalOutputEvent: Decodable, Sendable, Equatable {
+    package let terminalId: String
+    package let sequence: Int
+    package let data: String
+
+    package init(terminalId: String, sequence: Int, data: String) {
+        self.terminalId = terminalId
+        self.sequence = sequence
+        self.data = data
+    }
 }
 
-struct PreparedTerminalExitEvent: Decodable, Sendable, Equatable {
-    let terminalId: String
-    let sequence: Int?
-    let exitCode: Int?
+package struct PreparedTerminalExitEvent: Decodable, Sendable, Equatable {
+    package let terminalId: String
+    package let sequence: Int?
+    package let exitCode: Int?
+
+    package init(terminalId: String, sequence: Int?, exitCode: Int?) {
+        self.terminalId = terminalId
+        self.sequence = sequence
+        self.exitCode = exitCode
+    }
 }
 
-enum PreparedTerminalEvent: Sendable, Equatable {
+package enum PreparedTerminalEvent: Sendable, Equatable {
     case output(PreparedTerminalOutputEvent)
     case exit(PreparedTerminalExitEvent)
 }
 
-enum GatewayEventPreparation: Sendable, Equatable {
+package enum GatewayEventPreparation: Sendable, Equatable {
     case none
     case sessionSummary(SessionSummaryUpdate)
     case sessionSnapshot(SessionSnapshot)
@@ -96,20 +136,20 @@ enum GatewayEventPreparation: Sendable, Equatable {
     case terminalEvent(PreparedTerminalEvent)
 }
 
-struct GatewayEvent: Decodable, Sendable, Equatable {
+package struct GatewayEvent: Decodable, Sendable, Equatable {
     let type: String
-    let topic: String
-    let sessionId: String?
-    let payload: JSONValue
+    package let topic: String
+    package let sessionId: String?
+    package let payload: JSONValue
     /// Trusted encoded frame size supplied before synchronization admission.
-    let admittedBytes: Int
-    let preparation: GatewayEventPreparation
+    package let admittedBytes: Int
+    package let preparation: GatewayEventPreparation
 
     private enum CodingKeys: String, CodingKey {
         case type, topic, sessionId, payload
     }
 
-    init(type: String, topic: String, sessionId: String?, payload: JSONValue, admittedBytes: Int = 0) {
+    package init(type: String, topic: String, sessionId: String?, payload: JSONValue, admittedBytes: Int = 0) {
         self.type = type
         self.topic = topic
         self.sessionId = sessionId
@@ -122,7 +162,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
     /// network decoder has already prepared typed session data from the original
     /// Decoder; rebuilding through JSONValue here would repeat expensive work and
     /// can lose decoder-specific numeric/date representation.
-    func withAdmittedBytes(_ bytes: Int) -> Self {
+    package func withAdmittedBytes(_ bytes: Int) -> Self {
         Self(
             type: type,
             topic: topic,
@@ -149,7 +189,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         self.preparation = preparation
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         type = try container.decode(String.self, forKey: .type)
         topic = try container.decode(String.self, forKey: .topic)
@@ -160,17 +200,17 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         preparation = Self.prepare(topic: topic, adapter: DecoderPayloadAdapter(decoder: payloadDecoder))
     }
 
-    var preparedSessionEvent: PreparedSessionEvent? {
+    package var preparedSessionEvent: PreparedSessionEvent? {
         guard case .sessionEvent(let event) = preparation else { return nil }
         return event
     }
 
-    var preparedNotificationInboxChanged: NotificationInboxChanged? {
+    package var preparedNotificationInboxChanged: NotificationInboxChanged? {
         guard case .notificationInboxChanged(let change) = preparation else { return nil }
         return change
     }
 
-    var sessionCursor: GatewayEventCursor? {
+    package var sessionCursor: GatewayEventCursor? {
         switch preparation {
         case .sessionSnapshot(let snapshot):
             return .init(
@@ -193,7 +233,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         }
     }
 
-    var isConsumableSessionReplay: Bool {
+    package var isConsumableSessionReplay: Bool {
         switch preparation {
         case .sessionSnapshot(let snapshot):
             return sessionId != nil && sessionId == snapshot.sessionId
@@ -307,14 +347,14 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
     }
 }
 
-enum GatewayInboundFrame: Decodable, Sendable, Equatable {
+package enum GatewayInboundFrame: Decodable, Sendable, Equatable {
     case response(GatewayResponse)
     case event(GatewayEvent)
     case unsupported
 
     private enum CodingKeys: String, CodingKey { case type }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         guard let container = try? decoder.container(keyedBy: CodingKeys.self),
               let type = try? container.decode(String.self, forKey: .type) else {
             self = .unsupported
@@ -328,10 +368,10 @@ enum GatewayInboundFrame: Decodable, Sendable, Equatable {
     }
 }
 
-enum GatewayFramePolicy {
-    static let maximumInboundBytes = 1_048_576
+package enum GatewayFramePolicy {
+    package static let maximumInboundBytes = 1_048_576
 
-    static func validateInboundBytes(_ data: Data) throws {
+    package static func validateInboundBytes(_ data: Data) throws {
         guard data.count <= maximumInboundBytes else {
             throw GatewayFailure(
                 code: "frame_too_large",
@@ -343,10 +383,10 @@ enum GatewayFramePolicy {
     }
 }
 
-enum GatewayTokenAdmissionPolicy {
+package enum GatewayTokenAdmissionPolicy {
     static let maximumUTF8Bytes = 200
 
-    static func admit(_ token: String) -> Bool {
+    package static func admit(_ token: String) -> Bool {
         // Keep scalar membership explicit: Xcode 27's optimized app build
         // miscompiles the bound CharacterSet.contains predicate and rejects
         // valid tokens, preventing both sync acknowledgement and cleanup.
@@ -355,36 +395,46 @@ enum GatewayTokenAdmissionPolicy {
             && !token.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
     }
 }
-struct GatewayFrameDecoder: Sendable {
-    let decode: @Sendable (Data) throws -> GatewayInboundFrame
+package struct GatewayFrameDecoder: Sendable {
+    package let decode: @Sendable (Data) throws -> GatewayInboundFrame
 
-    static let gateway = GatewayFrameDecoder { data in
+    package static let gateway = GatewayFrameDecoder { data in
         try GatewayFramePolicy.validateInboundBytes(data)
         return try JSONDecoder.gateway.decode(GatewayInboundFrame.self, from: data)
     }
 }
 
-struct GatewayEventDelivery: Sendable, Equatable {
-    let connectionID: Int
-    let event: GatewayEvent
+package struct GatewayEventDelivery: Sendable, Equatable {
+    package let connectionID: Int
+    package let event: GatewayEvent
+
+    package init(connectionID: Int, event: GatewayEvent) {
+        self.connectionID = connectionID
+        self.event = event
+    }
 }
 
-struct GatewayConnectionIdentity: Sendable, Equatable {
-    let id: Int
-    let info: GatewayInfo
+package struct GatewayConnectionIdentity: Sendable, Equatable {
+    package let id: Int
+    package let info: GatewayInfo
+
+    package init(id: Int, info: GatewayInfo) {
+        self.id = id
+        self.info = info
+    }
 }
 
-struct GatewayHello: Decodable, Sendable {
-    let type: String
-    let gatewayVersion: String
-    let piVersion: String
-    let protocolVersion: Int
-    let minProtocolVersion: Int
+package struct GatewayHello: Decodable, Sendable {
+    package let type: String
+    package let gatewayVersion: String
+    package let piVersion: String
+    package let protocolVersion: Int
+    package let minProtocolVersion: Int
     let machineId: String
     let machineGroupID: String?
     let machineName: String
     let capabilities: [String]
-    let gatewayChannel: String
+    package let gatewayChannel: String
     let sourceRevision: String?
     let buildFingerprint: String?
     let runtimeEpoch: String?
@@ -395,7 +445,7 @@ struct GatewayHello: Decodable, Sendable {
              sourceRevision, buildFingerprint, runtimeEpoch
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         type = try values.decode(String.self, forKey: .type)
         gatewayVersion = try values.decode(String.self, forKey: .gatewayVersion)
@@ -412,7 +462,7 @@ struct GatewayHello: Decodable, Sendable {
         runtimeEpoch = try values.decodeIfPresent(String.self, forKey: .runtimeEpoch)
     }
 
-    var info: GatewayInfo {
+    package var info: GatewayInfo {
         GatewayInfo(
             gatewayVersion: gatewayVersion,
             piVersion: piVersion,
@@ -430,4 +480,6 @@ struct GatewayHello: Decodable, Sendable {
     }
 }
 
-struct EmptyParams: Codable, Sendable {}
+package struct EmptyParams: Codable, Sendable {
+    package init() {}
+}

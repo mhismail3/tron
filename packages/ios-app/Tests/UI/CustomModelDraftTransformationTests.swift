@@ -1,5 +1,5 @@
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 @testable import TronMobile
 
 @Suite("Custom-model guided draft transformation")

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 @testable import TronMobile
 
 struct DisplayPresentationTests {

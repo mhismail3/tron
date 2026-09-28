@@ -3,34 +3,34 @@ import TronMobileCore
 
 /// Additive Gateway lifecycle facts. The coarse tool status remains available
 /// for old Gateways, while this record owns native admission and recency.
-enum ExtensionActivityLifecycleState: String, Codable, CaseIterable, Sendable {
+package enum ExtensionActivityLifecycleState: String, Codable, CaseIterable, Sendable {
     case queued, running, paused, completed, failed, stopped, rejected, unknown
     var isTerminal: Bool { switch self { case .completed, .failed, .stopped, .rejected: true; default: false } }
     var isCurrent: Bool { switch self { case .queued, .running, .paused: true; default: false } }
     var displayName: String { rawValue == "unknown" ? "Unknown" : rawValue.capitalized }
 }
 
-enum ExtensionActivityAttention: String, Codable, CaseIterable, Sendable {
+package enum ExtensionActivityAttention: String, Codable, CaseIterable, Sendable {
     case none, activeLongRunning, needsAttention
 }
 
-enum ExtensionActivityVisibility: String, Codable, CaseIterable, Sendable {
+package enum ExtensionActivityVisibility: String, Codable, CaseIterable, Sendable {
     case current, recent, historical, unknown
 }
 
-struct ExtensionActivityLifecycle: Codable, Hashable, Sendable {
+package struct ExtensionActivityLifecycle: Codable, Hashable, Sendable {
     let version: Int
-    let state: ExtensionActivityLifecycleState
+    package let state: ExtensionActivityLifecycleState
     let attention: ExtensionActivityAttention
-    let sequence: Int
+    package let sequence: Int
     let observedAt: String
     let producerUpdatedAt: String?
-    let terminalAt: String?
+    package let terminalAt: String?
     let recentUntil: String?
     let visibility: ExtensionActivityVisibility?
     let remainingMs: Int?
 
-    init(version: Int = 1, state: ExtensionActivityLifecycleState,
+    package init(version: Int = 1, state: ExtensionActivityLifecycleState,
          attention: ExtensionActivityAttention = .none, sequence: Int,
          observedAt: String, producerUpdatedAt: String? = nil,
          terminalAt: String? = nil, recentUntil: String? = nil,
@@ -42,10 +42,10 @@ struct ExtensionActivityLifecycle: Codable, Hashable, Sendable {
         self.remainingMs = remainingMs
     }
 
-    var isTerminal: Bool { state.isTerminal }
+    package var isTerminal: Bool { state.isTerminal }
 }
 
-struct ExtensionActivityOmissions: Codable, Hashable, Sendable {
+package struct ExtensionActivityOmissions: Codable, Hashable, Sendable {
     let count: Int
     let bytes: Int
     let reason: String
@@ -53,7 +53,7 @@ struct ExtensionActivityOmissions: Codable, Hashable, Sendable {
 
 /// Strict, bounded admission is separate from Codable so optional malformed
 /// activity rows can be omitted without rejecting the entire session snapshot.
-enum ExtensionActivityAdmissionPolicy {
+package enum ExtensionActivityAdmissionPolicy {
     static let capability = "extension-activity-history.v1"
     static let maximumActivities = 32
     static let maximumChildren = 32
@@ -63,7 +63,7 @@ enum ExtensionActivityAdmissionPolicy {
     static let maximumEncodedBytes = 256 * 1_024
     static let terminalStates: Set<ExtensionActivityLifecycleState> = [.completed, .failed, .stopped, .rejected]
 
-    static func admits(_ activity: ExtensionRunActivity) -> Bool {
+    package static func admits(_ activity: ExtensionRunActivity) -> Bool {
         var descendantBudget = maximumDescendants
         guard validID(activity.id, maximum: 512),
               activity.activityId.map({ validID($0, maximum: 512) }) ?? true,
@@ -108,7 +108,7 @@ enum ExtensionActivityAdmissionPolicy {
         return true
     }
 
-    static func admitted(_ activities: [ExtensionRunActivity], preserving protectedIDs: Set<String> = []) -> [ExtensionRunActivity] {
+    package static func admitted(_ activities: [ExtensionRunActivity], preserving protectedIDs: Set<String> = []) -> [ExtensionRunActivity] {
         var seen = Set<String>()
         var result = activities.filter { activity in
             admits(activity) && seen.insert(activity.stableID).inserted
@@ -135,7 +135,7 @@ enum ExtensionActivityAdmissionPolicy {
         return tool.extensionActivity != nil || (tool.liveActivityRevision == nil && tool.extensionActivityAsOf == nil)
     }
 
-    static func admitsSnapshotFacts(_ snapshot: SessionSnapshot) -> Bool {
+    package static func admitsSnapshotFacts(_ snapshot: SessionSnapshot) -> Bool {
         if let revision = snapshot.liveActivityRevision, revision < 0 { return false }
         if let asOf = snapshot.extensionActivityAsOf,
            !validTimestamp(asOf) { return false }

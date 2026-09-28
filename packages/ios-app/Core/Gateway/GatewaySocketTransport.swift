@@ -30,18 +30,25 @@ final class GatewayPingCompletion: @unchecked Sendable {
     func cancel() { settle(.failure(CancellationError())) }
 }
 
-struct GatewaySocketMetadata: Sendable, Equatable {
-    let closeCode: Int?
-    let httpStatusCode: Int?
+package struct GatewaySocketMetadata: Sendable, Equatable {
+    package let closeCode: Int?
+    package let httpStatusCode: Int?
+
+    package init(closeCode: Int?, httpStatusCode: Int?, transportOpenMilliseconds: Int? = nil, waitedForConnectivity: Bool = false) {
+        self.closeCode = closeCode
+        self.httpStatusCode = httpStatusCode
+        self.transportOpenMilliseconds = transportOpenMilliseconds
+        self.waitedForConnectivity = waitedForConnectivity
+    }
     /// Milliseconds from task start until the WebSocket opened; nil when it
     /// never opened. Distinguishes a path that never reached the Mac from a
     /// Mac that accepted the socket but did not answer.
-    var transportOpenMilliseconds: Int? = nil
+    package var transportOpenMilliseconds: Int? = nil
     /// URLSession reported waiting for connectivity during this task.
-    var waitedForConnectivity = false
+    package var waitedForConnectivity = false
 }
 
-protocol GatewaySocketConnection: Sendable {
+package protocol GatewaySocketConnection: Sendable {
     func send(_ data: Data) async throws
     func ping() async throws
     func receive() async throws -> Data
@@ -50,14 +57,18 @@ protocol GatewaySocketConnection: Sendable {
 }
 
 extension GatewaySocketConnection {
-    func metadata() async -> GatewaySocketMetadata { GatewaySocketMetadata(closeCode: nil, httpStatusCode: nil) }
+    package func metadata() async -> GatewaySocketMetadata { GatewaySocketMetadata(closeCode: nil, httpStatusCode: nil) }
 }
 
 
-struct GatewaySocketFactory: Sendable {
-    let makeConnection: @Sendable (URLRequest) -> any GatewaySocketConnection
+package struct GatewaySocketFactory: Sendable {
+    package let makeConnection: @Sendable (URLRequest) -> any GatewaySocketConnection
 
-    static let urlSession = GatewaySocketFactory { request in
+    package init(makeConnection: @escaping @Sendable (URLRequest) -> any GatewaySocketConnection) {
+        self.makeConnection = makeConnection
+    }
+
+    package static let urlSession = GatewaySocketFactory { request in
         URLSessionGatewaySocketConnection(request: request)
     }
 }

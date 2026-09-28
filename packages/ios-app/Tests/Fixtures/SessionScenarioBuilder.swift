@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
-import TronMobileCore
+@testable import TronMobileCore
 import UniformTypeIdentifiers
 @testable import TronMobile
 

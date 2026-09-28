@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 enum SessionImportPolicy {
     static let maximumBytes = 25 * 1_048_576

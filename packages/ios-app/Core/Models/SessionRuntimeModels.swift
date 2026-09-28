@@ -1,23 +1,28 @@
 import Foundation
 import TronMobileCore
 
-struct ModelRef: Codable, Hashable, Sendable, Identifiable {
-    let provider: String
-    let id: String
-    var contextWindowKey: String { "\(provider)/\(id)" }
+package struct ModelRef: Codable, Hashable, Sendable, Identifiable {
+    package let provider: String
+    package let id: String
+    package var contextWindowKey: String { "\(provider)/\(id)" }
+
+    package init(provider: String, id: String) {
+        self.provider = provider
+        self.id = id
+    }
 }
 
-struct ContextUsage: Codable, Hashable, Sendable {
-    let tokens: Int?
-    let contextWindow: Int
-    let percent: Double?
+package struct ContextUsage: Codable, Hashable, Sendable {
+    package let tokens: Int?
+    package let contextWindow: Int
+    package let percent: Double?
 }
 
-struct ExtensionRunChild: Codable, Hashable, Identifiable, Sendable {
-    enum Status: String, Codable, Sendable { case running, completed, failed }
-    let id: String
-    let label: String
-    let status: Status
+package struct ExtensionRunChild: Codable, Hashable, Identifiable, Sendable {
+    package enum Status: String, Codable, Sendable { case running, completed, failed }
+    package let id: String
+    package let label: String
+    package let status: Status
     let lifecycle: ExtensionActivityLifecycleState?
     let attention: ExtensionActivityAttention?
     let task: String?
@@ -29,7 +34,7 @@ struct ExtensionRunChild: Codable, Hashable, Identifiable, Sendable {
     let turnCount: Int?
     let durationMs: Int?
     let output: String?
-    let children: [ExtensionRunChild]?
+    package let children: [ExtensionRunChild]?
 
     var displayStateName: String {
         if let lifecycle { return lifecycle.displayName }
@@ -40,7 +45,7 @@ struct ExtensionRunChild: Codable, Hashable, Identifiable, Sendable {
         }
     }
 
-    init(id: String, label: String, status: Status, lifecycle: ExtensionActivityLifecycleState? = nil,
+    package init(id: String, label: String, status: Status, lifecycle: ExtensionActivityLifecycleState? = nil,
          attention: ExtensionActivityAttention? = nil, task: String? = nil, lastActivityAt: String? = nil,
          currentTool: String? = nil, currentToolStartedAt: String? = nil, currentPath: String? = nil,
          toolCount: Int? = nil, turnCount: Int? = nil, durationMs: Int? = nil, output: String? = nil,
@@ -52,9 +57,9 @@ struct ExtensionRunChild: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct ExtensionRunActivity: Codable, Hashable, Identifiable, Sendable {
-    enum Status: String, Codable, Sendable { case running, completed, failed }
-    let id: String
+package struct ExtensionRunActivity: Codable, Hashable, Identifiable, Sendable {
+    package enum Status: String, Codable, Sendable { case running, completed, failed }
+    package let id: String
     /// Gateway-owned deterministic presentation identity. `id` remains for
     /// rolling compatibility with older snapshots.
     let activityId: String?
@@ -76,10 +81,10 @@ struct ExtensionRunActivity: Codable, Hashable, Identifiable, Sendable {
     let durationMs: Int?
     let output: String?
     let children: [ExtensionRunChild]
-    let lifecycle: ExtensionActivityLifecycle?
+    package let lifecycle: ExtensionActivityLifecycle?
 
-    var stableID: String { activityId ?? id }
-    var isLive: Bool { lifecycle?.state.isCurrent ?? (status == .running) }
+    package var stableID: String { activityId ?? id }
+    package var isLive: Bool { lifecycle?.state.isCurrent ?? (status == .running) }
     var displayStateName: String {
         if let lifecycle { return lifecycle.state.displayName }
         return switch status {
@@ -89,7 +94,7 @@ struct ExtensionRunActivity: Codable, Hashable, Identifiable, Sendable {
         }
     }
 
-    init(
+    package init(
         id: String, activityId: String? = nil, runId: String? = nil,
         toolCallId: String, source: ExtensionToolOrigin, title: String,
         mode: String? = nil, status: Status, startedAt: String, updatedAt: String,
@@ -115,7 +120,7 @@ struct ExtensionRunActivity: Codable, Hashable, Identifiable, Sendable {
              output, children, lifecycle
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
         activityId = try values.decodeIfPresent(String.self, forKey: .activityId)
@@ -140,7 +145,7 @@ struct ExtensionRunActivity: Codable, Hashable, Identifiable, Sendable {
         lifecycle = try values.decodeIfPresent(ExtensionActivityLifecycle.self, forKey: .lifecycle)
     }
 
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(id, forKey: .id); try values.encodeIfPresent(activityId, forKey: .activityId)
         try values.encodeIfPresent(runId, forKey: .runId); try values.encode(toolCallId, forKey: .toolCallId)
@@ -156,19 +161,23 @@ struct ExtensionRunActivity: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct ExtensionActivityDelta: Codable, Hashable, Sendable {
-    let activity: ExtensionRunActivity
-    let liveActivityRevision: Int
-    let extensionActivityAsOf: String
+package struct ExtensionActivityDelta: Codable, Hashable, Sendable {
+    package let activity: ExtensionRunActivity
+    package let liveActivityRevision: Int
+    package let extensionActivityAsOf: String
 }
 
 /// Device-local receipt time for a Gateway duration sample. It deliberately has
 /// no value identity and is excluded from Codable so authoritative snapshots,
 /// caches, and protocol round trips remain unchanged.
-struct ToolDurationSampleAnchor: Hashable, Sendable {
-    let uptime: TimeInterval
+package struct ToolDurationSampleAnchor: Hashable, Sendable {
+    package let uptime: TimeInterval
 
-    func advancing(_ milliseconds: Int, toUptime currentUptime: TimeInterval) -> Int {
+    package init(uptime: TimeInterval) {
+        self.uptime = uptime
+    }
+
+    package func advancing(_ milliseconds: Int, toUptime currentUptime: TimeInterval) -> Int {
         let baseline = max(0, milliseconds)
         let delta = (currentUptime - uptime) * 1_000
         guard delta.isFinite, delta > 0 else { return baseline }
@@ -177,42 +186,42 @@ struct ToolDurationSampleAnchor: Hashable, Sendable {
         return baseline + Int(rounded)
     }
 
-    static func == (_: Self, _: Self) -> Bool { true }
-    func hash(into _: inout Hasher) {}
+    package static func == (_: Self, _: Self) -> Bool { true }
+    package func hash(into _: inout Hasher) {}
 }
 
-struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
-    enum Status: String, Codable, Sendable { case running, completed, failed }
-    let toolCallId: String
-    let toolName: String
-    let toolLabel: String?
-    let order: Int?
-    let status: Status
-    let arguments: JSONValue
-    let partialResult: JSONValue?
-    let result: JSONValue?
-    let output: String?
-    let outputTruncated: Bool?
-    let isError: Bool
-    let startedAt: String
-    let updatedAt: String
-    let lastProgressAt: String?
-    let completedAt: String?
-    let durationMs: Int?
-    let durationSampleAnchor: ToolDurationSampleAnchor
-    let progressSequence: Int?
-    let extensionOrigin: ExtensionToolOrigin?
-    let extensionActivity: ExtensionRunActivity?
-    let liveActivityRevision: Int?
-    let extensionActivityAsOf: String?
-    let toolSegmentId: String?
-    let groupId: String?
-    let groupIndex: Int?
-    let groupCount: Int?
-    let groupFinalized: Bool?
-    var id: String { toolCallId }
+package struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
+    package enum Status: String, Codable, Sendable { case running, completed, failed }
+    package let toolCallId: String
+    package let toolName: String
+    package let toolLabel: String?
+    package let order: Int?
+    package let status: Status
+    package let arguments: JSONValue
+    package let partialResult: JSONValue?
+    package let result: JSONValue?
+    package let output: String?
+    package let outputTruncated: Bool?
+    package let isError: Bool
+    package let startedAt: String
+    package let updatedAt: String
+    package let lastProgressAt: String?
+    package let completedAt: String?
+    package let durationMs: Int?
+    package let durationSampleAnchor: ToolDurationSampleAnchor
+    package let progressSequence: Int?
+    package let extensionOrigin: ExtensionToolOrigin?
+    package let extensionActivity: ExtensionRunActivity?
+    package let liveActivityRevision: Int?
+    package let extensionActivityAsOf: String?
+    package let toolSegmentId: String?
+    package let groupId: String?
+    package let groupIndex: Int?
+    package let groupCount: Int?
+    package let groupFinalized: Bool?
+    package var id: String { toolCallId }
 
-    init(
+    package init(
         toolCallId: String, toolName: String, toolLabel: String? = nil, order: Int? = nil, status: Status,
         arguments: JSONValue, partialResult: JSONValue?, result: JSONValue?,
         output: String? = nil, outputTruncated: Bool? = nil,
@@ -265,7 +274,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
              groupId, groupIndex, groupCount, groupFinalized
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         toolCallId = try values.decode(String.self, forKey: .toolCallId)
         toolName = try values.decode(String.self, forKey: .toolName)
@@ -318,7 +327,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(toolCallId, forKey: .toolCallId)
         try values.encode(toolName, forKey: .toolName)
@@ -349,7 +358,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct RetryState: Codable, Hashable, Sendable {
+package struct RetryState: Codable, Hashable, Sendable {
     enum Source: String, Codable, Sendable { case agent, compaction, branchSummary }
     let source: Source
     let attempt: Int
@@ -358,13 +367,13 @@ struct RetryState: Codable, Hashable, Sendable {
     let errorMessage: String?
 }
 
-enum InvocationLifecycle: String, Codable, Sendable {
+package enum InvocationLifecycle: String, Codable, Sendable {
     case staged, accepted, running, waitingForInput, queued, retrying, settling, completed, failed, interrupted, outcomeUnknown
 }
-struct SessionOperationState: Codable, Hashable, Sendable {
-    enum Kind: String, Codable, Sendable { case prompt, command, compaction, branchSummary, bash, retry }
-    let id: String?
-    let kind: Kind
+package struct SessionOperationState: Codable, Hashable, Sendable {
+    package enum Kind: String, Codable, Sendable { case prompt, command, compaction, branchSummary, bash, retry }
+    package let id: String?
+    package let kind: Kind
     let startedAt: String
     let reason: String?
     let invocationId: String?
@@ -375,51 +384,87 @@ struct SessionOperationState: Codable, Hashable, Sendable {
     }
 }
 
-struct RuntimeDiagnostic: Codable, Hashable, Sendable {
-    let type: String
-    let message: String
+package struct RuntimeDiagnostic: Codable, Hashable, Sendable {
+    package let type: String
+    package let message: String
 }
 
-struct SessionStats: Codable, Hashable, Sendable {
-    struct Tokens: Codable, Hashable, Sendable {
-        let input: Int
-        let output: Int
-        let cacheRead: Int
-        let cacheWrite: Int
+package struct SessionStats: Codable, Hashable, Sendable {
+    package struct Tokens: Codable, Hashable, Sendable {
+        package let input: Int
+        package let output: Int
+        package let cacheRead: Int
+        package let cacheWrite: Int
         let total: Int
+
+        package init(input: Int, output: Int, cacheRead: Int, cacheWrite: Int, total: Int) {
+            self.input = input
+            self.output = output
+            self.cacheRead = cacheRead
+            self.cacheWrite = cacheWrite
+            self.total = total
+        }
     }
     let userMessages: Int
-    let assistantMessages: Int
-    let toolCalls: Int
+    package let assistantMessages: Int
+    package let toolCalls: Int
     let toolResults: Int
-    let totalMessages: Int
-    let tokens: Tokens
-    let latestCacheHitRate: Double?
-    let cost: Double
+    package let totalMessages: Int
+    package let tokens: Tokens
+    package let latestCacheHitRate: Double?
+    package let cost: Double
+
+    package init(userMessages: Int, assistantMessages: Int, toolCalls: Int, toolResults: Int, totalMessages: Int, tokens: Tokens, latestCacheHitRate: Double?, cost: Double) {
+        self.userMessages = userMessages
+        self.assistantMessages = assistantMessages
+        self.toolCalls = toolCalls
+        self.toolResults = toolResults
+        self.totalMessages = totalMessages
+        self.tokens = tokens
+        self.latestCacheHitRate = latestCacheHitRate
+        self.cost = cost
+    }
 }
 
-struct ContextWindowPolicy: Codable, Hashable, Sendable {
-    let model: ModelRef
-    let minimum: Int
-    let maximum: Int
-    let `default`: Int
-    let effective: Int
-    let override: Int?
-    let source: String
-    let warning: String?
+package struct ContextWindowPolicy: Codable, Hashable, Sendable {
+    package let model: ModelRef
+    package let minimum: Int
+    package let maximum: Int
+    package let `default`: Int
+    package let effective: Int
+    package let override: Int?
+    package let source: String
+    package let warning: String?
 }
 
-struct CompactionConfiguration: Codable, Hashable, Sendable {
+package struct CompactionConfiguration: Codable, Hashable, Sendable {
     let enabled: Bool
-    let reserveTokens: Int
-    let keepRecentTokens: Int
+    package let reserveTokens: Int
+    package let keepRecentTokens: Int
     let thinkingLevel: String
-    let instructions: String
+    package let instructions: String
     let source: [String: String]
-    let model: ModelRef?
-    let requestedThinkingLevel: String
-    let effectiveThinkingLevel: String?
+    package let model: ModelRef?
+    package let requestedThinkingLevel: String
+    package let effectiveThinkingLevel: String?
     let reason: String?
+
+    package init(
+        enabled: Bool, reserveTokens: Int, keepRecentTokens: Int, thinkingLevel: String,
+        instructions: String, source: [String: String], model: ModelRef?, requestedThinkingLevel: String,
+        effectiveThinkingLevel: String?, reason: String?
+    ) {
+        self.enabled = enabled
+        self.reserveTokens = reserveTokens
+        self.keepRecentTokens = keepRecentTokens
+        self.thinkingLevel = thinkingLevel
+        self.instructions = instructions
+        self.source = source
+        self.model = model
+        self.requestedThinkingLevel = requestedThinkingLevel
+        self.effectiveThinkingLevel = effectiveThinkingLevel
+        self.reason = reason
+    }
 
     var isValid: Bool {
         let levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -434,30 +479,53 @@ struct CompactionConfiguration: Codable, Hashable, Sendable {
     }
 }
 
-struct CompactionPolicyProjection: Codable, Hashable, Sendable {
-    struct Budgets: Codable, Hashable, Sendable {
-        let enabled: Bool
-        let reserveTokens: Int
-        let keepRecentTokens: Int
+package struct CompactionPolicyProjection: Codable, Hashable, Sendable {
+    package struct Budgets: Codable, Hashable, Sendable {
+        package let enabled: Bool
+        package let reserveTokens: Int
+        package let keepRecentTokens: Int
+
+        package init(enabled: Bool, reserveTokens: Int, keepRecentTokens: Int) {
+            self.enabled = enabled
+            self.reserveTokens = reserveTokens
+            self.keepRecentTokens = keepRecentTokens
+        }
     }
-    let next: CompactionConfiguration
-    let currentBudgets: Budgets
-    let active: CompactionConfiguration?
-    let extensionMayOverride: Bool
-    let warning: String?
+    package let next: CompactionConfiguration
+    package let currentBudgets: Budgets
+    package let active: CompactionConfiguration?
+    package let extensionMayOverride: Bool
+    package let warning: String?
+
+    package init(
+        next: CompactionConfiguration, currentBudgets: Budgets, active: CompactionConfiguration?,
+        extensionMayOverride: Bool, warning: String?
+    ) {
+        self.next = next
+        self.currentBudgets = currentBudgets
+        self.active = active
+        self.extensionMayOverride = extensionMayOverride
+        self.warning = warning
+    }
 }
 
-struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendable {
-    enum Source: String, Codable, Sendable { case skill, prompt, `extension` }
+package struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendable {
+    package enum Source: String, Codable, Sendable { case skill, prompt, `extension` }
     static let maximumNameBytes = 512
-    static let maximumArgumentBytes = 5_000
+    package static let maximumArgumentBytes = 5_000
 
-    let source: Source
-    let name: String
-    let arguments: String
+    package let source: Source
+    package let name: String
+    package let arguments: String
 
-    var isExtensionCommand: Bool { source == .extension }
-    var isTransportValid: Bool {
+    package var isExtensionCommand: Bool { source == .extension }
+
+    package init(source: Source, name: String, arguments: String) {
+        self.source = source
+        self.name = name
+        self.arguments = arguments
+    }
+    package var isTransportValid: Bool {
         !name.isEmpty
             && name.utf8.count <= Self.maximumNameBytes
             && !name.contains(where: \.isWhitespace)
@@ -469,112 +537,210 @@ struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-struct SessionSnapshot: Codable, Hashable, Sendable {
+package struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Gateway's bounded authoritative queue capacity. Rich queue projections
     /// exceeding this limit are invalid and must not reach row rendering.
-    static let maximumQueuedMessages = 32
+    package static let maximumQueuedMessages = 32
     /// Gateway's canonical count bound for one authoritative transcript tail.
-    static let maximumTranscriptItems = 512
-    var sessionId: String
-    var runtimeGeneration: String
-    var revision: Int
-    var eventSequence: Int
-    var phase: SessionPhase
+    package static let maximumTranscriptItems = 512
+    package var sessionId: String
+    package var runtimeGeneration: String
+    package var revision: Int
+    package var eventSequence: Int
+    package var phase: SessionPhase
     /// Exact Gateway/Pi admission capability. Older compatible snapshots omit
     /// it and use the conservative running-phase fallback at presentation.
-    var acceptsQueuedPrompts: Bool? = nil
+    package var acceptsQueuedPrompts: Bool? = nil
     /// Disposable Gateway annotation for the inherited-to-child transition.
-    var forkBoundary: TranscriptForkBoundary? = nil
-    var name: String?
-    var cwd: String
+    package var forkBoundary: TranscriptForkBoundary? = nil
+    package var name: String?
+    package var cwd: String
     var parentSessionId: String?
-    var model: ModelRef?
-    var thinkingLevel: String
-    var availableThinkingLevels: [String]
-    var contextUsage: ContextUsage?
-    var stats: SessionStats
-    var queueRevision: Int
-    var queuedItems: [QueuedMessage]
-    var pendingPrompt: PendingPrompt? = nil
-    var compactionQueued: Bool? = nil
+    package var model: ModelRef?
+    package var thinkingLevel: String
+    package var availableThinkingLevels: [String]
+    package var contextUsage: ContextUsage?
+    package var stats: SessionStats
+    package var queueRevision: Int
+    package var queuedItems: [QueuedMessage]
+    package var pendingPrompt: PendingPrompt? = nil
+    package var compactionQueued: Bool? = nil
     var automaticCompactionEnabled: Bool
-    var transcript: [TranscriptItem]
-    var transcriptStart: Int?
-    var transcriptTotal: Int?
-    var streaming: TranscriptItem?
-    var leafEntryId: String?
-    var operation: SessionOperationState?
+    package var transcript: [TranscriptItem]
+    package var transcriptStart: Int?
+    package var transcriptTotal: Int?
+    package var streaming: TranscriptItem?
+    package var leafEntryId: String?
+    package var operation: SessionOperationState?
     var retry: RetryState?
     /// Exact Gateway-owned segment authority for the running streaming agent;
     /// a barrier generation may match no declaration yet. Older compatible
     /// Gateways omit it and retain phase-based presentation.
-    var activeToolSegmentId: String? = nil
-    var toolExecutions: [ToolExecutionState]
-    var extensionActivities: [ExtensionRunActivity]? = nil
+    package var activeToolSegmentId: String? = nil
+    package var toolExecutions: [ToolExecutionState]
+    package var extensionActivities: [ExtensionRunActivity]? = nil
     var extensionActivityOmissions: ExtensionActivityOmissions? = nil
     /// Monotonic Gateway facts for the disposable current/recent projection.
-    var liveActivityRevision: Int? = nil
-    var extensionActivityAsOf: String? = nil
+    package var liveActivityRevision: Int? = nil
+    package var extensionActivityAsOf: String? = nil
     /// Atomic, disposable process projection.
-    var processOverview: SessionProcessOverview? = nil
-    var processActivities: [SessionProcessActivity]? = nil
-    var extensionPresentation: ExtensionPresentationState
+    package var processOverview: SessionProcessOverview? = nil
+    package var processActivities: [SessionProcessActivity]? = nil
+    package var extensionPresentation: ExtensionPresentationState
     var diagnostics: [RuntimeDiagnostic]
     /// Set only on the disposable offline cache projection. Gateway snapshots
     /// leave this absent so canonical runtime state remains authoritative.
-    var isCachedProjection: Bool? = nil
+    package var isCachedProjection: Bool? = nil
     /// Optional on rolling gateways that do not advertise context-window.v1.
-    var contextWindowPolicy: ContextWindowPolicy? = nil
-    var compactionPolicy: CompactionPolicyProjection? = nil
+    package var contextWindowPolicy: ContextWindowPolicy? = nil
+    package var compactionPolicy: CompactionPolicyProjection? = nil
     /// Gateway archive projection for this exact session: present while it is
     /// archived, absent while it is visible. The Gateway republishes the
     /// snapshot on an archive change, so an open chat never infers it.
     var archivedAt: String? = nil
 
-    struct PromptAttachment: Codable, Hashable, Identifiable, Sendable {
-        let id: String
-        let name: String
-        let mimeType: String
-        let size: Int
+    package init(
+        sessionId: String, runtimeGeneration: String, revision: Int, eventSequence: Int, phase: SessionPhase,
+        acceptsQueuedPrompts: Bool? = nil, forkBoundary: TranscriptForkBoundary? = nil, name: String?,
+        cwd: String, parentSessionId: String?, model: ModelRef?, thinkingLevel: String,
+        availableThinkingLevels: [String], contextUsage: ContextUsage?, stats: SessionStats,
+        queueRevision: Int, queuedItems: [QueuedMessage], pendingPrompt: PendingPrompt? = nil,
+        compactionQueued: Bool? = nil, automaticCompactionEnabled: Bool, transcript: [TranscriptItem],
+        transcriptStart: Int?, transcriptTotal: Int?, streaming: TranscriptItem?, leafEntryId: String?,
+        operation: SessionOperationState?, retry: RetryState?, activeToolSegmentId: String? = nil,
+        toolExecutions: [ToolExecutionState], extensionActivities: [ExtensionRunActivity]? = nil,
+        extensionActivityOmissions: ExtensionActivityOmissions? = nil, liveActivityRevision: Int? = nil,
+        extensionActivityAsOf: String? = nil, processOverview: SessionProcessOverview? = nil,
+        processActivities: [SessionProcessActivity]? = nil, extensionPresentation: ExtensionPresentationState,
+        diagnostics: [RuntimeDiagnostic], isCachedProjection: Bool? = nil,
+        contextWindowPolicy: ContextWindowPolicy? = nil, compactionPolicy: CompactionPolicyProjection? = nil,
+        archivedAt: String? = nil
+    ) {
+        self.sessionId = sessionId
+        self.runtimeGeneration = runtimeGeneration
+        self.revision = revision
+        self.eventSequence = eventSequence
+        self.phase = phase
+        self.acceptsQueuedPrompts = acceptsQueuedPrompts
+        self.forkBoundary = forkBoundary
+        self.name = name
+        self.cwd = cwd
+        self.parentSessionId = parentSessionId
+        self.model = model
+        self.thinkingLevel = thinkingLevel
+        self.availableThinkingLevels = availableThinkingLevels
+        self.contextUsage = contextUsage
+        self.stats = stats
+        self.queueRevision = queueRevision
+        self.queuedItems = queuedItems
+        self.pendingPrompt = pendingPrompt
+        self.compactionQueued = compactionQueued
+        self.automaticCompactionEnabled = automaticCompactionEnabled
+        self.transcript = transcript
+        self.transcriptStart = transcriptStart
+        self.transcriptTotal = transcriptTotal
+        self.streaming = streaming
+        self.leafEntryId = leafEntryId
+        self.operation = operation
+        self.retry = retry
+        self.activeToolSegmentId = activeToolSegmentId
+        self.toolExecutions = toolExecutions
+        self.extensionActivities = extensionActivities
+        self.extensionActivityOmissions = extensionActivityOmissions
+        self.liveActivityRevision = liveActivityRevision
+        self.extensionActivityAsOf = extensionActivityAsOf
+        self.processOverview = processOverview
+        self.processActivities = processActivities
+        self.extensionPresentation = extensionPresentation
+        self.diagnostics = diagnostics
+        self.isCachedProjection = isCachedProjection
+        self.contextWindowPolicy = contextWindowPolicy
+        self.compactionPolicy = compactionPolicy
+        self.archivedAt = archivedAt
     }
 
-    struct QueuedMessage: Codable, Hashable, Identifiable, Sendable {
-        enum Behavior: String, Codable, Hashable, Sendable {
+    package struct PromptAttachment: Codable, Hashable, Identifiable, Sendable {
+        package let id: String
+        package let name: String
+        package let mimeType: String
+        package let size: Int
+
+        package init(id: String, name: String, mimeType: String, size: Int) {
+            self.id = id
+            self.name = name
+            self.mimeType = mimeType
+            self.size = size
+        }
+    }
+
+    package struct QueuedMessage: Codable, Hashable, Identifiable, Sendable {
+        package enum Behavior: String, Codable, Hashable, Sendable {
             case steer, followUp
         }
 
-        let id: String
-        var behavior: Behavior
-        var text: String
+        package let id: String
+        package var behavior: Behavior
+        package var text: String
         /// Total uploaded items represented by this queued prompt.
-        let attachmentCount: Int
-        var photoCount: Int? = nil
-        var fileAttachmentCount: Int? = nil
+        package let attachmentCount: Int
+        package var photoCount: Int? = nil
+        package var fileAttachmentCount: Int? = nil
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
-        var attachments: [PromptAttachment]? = nil
-        var resourceInvocation: ComposerResourceInvocation? = nil
+        package var attachments: [PromptAttachment]? = nil
+        package var resourceInvocation: ComposerResourceInvocation? = nil
+
+        package init(
+            id: String, behavior: Behavior, text: String, attachmentCount: Int,
+            photoCount: Int? = nil, fileAttachmentCount: Int? = nil, attachments: [PromptAttachment]? = nil,
+            resourceInvocation: ComposerResourceInvocation? = nil
+        ) {
+            self.id = id
+            self.behavior = behavior
+            self.text = text
+            self.attachmentCount = attachmentCount
+            self.photoCount = photoCount
+            self.fileAttachmentCount = fileAttachmentCount
+            self.attachments = attachments
+            self.resourceInvocation = resourceInvocation
+        }
     }
 
-    struct PendingPrompt: Codable, Hashable, Identifiable, Sendable {
-        let id: String
-        let createdAt: String?
-        let behavior: QueuedMessage.Behavior?
-        let text: String
-        let attachmentCount: Int
-        var photoCount: Int? = nil
-        var fileAttachmentCount: Int? = nil
+    package struct PendingPrompt: Codable, Hashable, Identifiable, Sendable {
+        package let id: String
+        package let createdAt: String?
+        package let behavior: QueuedMessage.Behavior?
+        package let text: String
+        package let attachmentCount: Int
+        package var photoCount: Int? = nil
+        package var fileAttachmentCount: Int? = nil
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
-        var attachments: [PromptAttachment]? = nil
-        var resourceInvocation: ComposerResourceInvocation? = nil
+        package var attachments: [PromptAttachment]? = nil
+        package var resourceInvocation: ComposerResourceInvocation? = nil
+
+        package init(
+            id: String, createdAt: String?, behavior: QueuedMessage.Behavior?, text: String,
+            attachmentCount: Int, photoCount: Int? = nil, fileAttachmentCount: Int? = nil,
+            attachments: [PromptAttachment]? = nil, resourceInvocation: ComposerResourceInvocation? = nil
+        ) {
+            self.id = id
+            self.createdAt = createdAt
+            self.behavior = behavior
+            self.text = text
+            self.attachmentCount = attachmentCount
+            self.photoCount = photoCount
+            self.fileAttachmentCount = fileAttachmentCount
+            self.attachments = attachments
+            self.resourceInvocation = resourceInvocation
+        }
     }
 
-    var displayedQueuedMessages: [QueuedMessage] { queuedItems }
+    package var displayedQueuedMessages: [QueuedMessage] { queuedItems }
 }
 
-enum SessionSnapshotTranscriptAdmissionPolicy {
+package enum SessionSnapshotTranscriptAdmissionPolicy {
     static let maximumItemIdentityUTF8Bytes = 512
 
-    static func admit(_ snapshot: SessionSnapshot) -> Bool {
+    package static func admit(_ snapshot: SessionSnapshot) -> Bool {
         guard admitsContextWindowPolicy(snapshot),
               admitsCompactionPolicy(snapshot),
               admitsItems(snapshot.transcript),
@@ -598,11 +764,11 @@ enum SessionSnapshotTranscriptAdmissionPolicy {
         }
     }
 
-    static func admitsPage(_ items: [TranscriptItem]) -> Bool {
+    package static func admitsPage(_ items: [TranscriptItem]) -> Bool {
         admitsItems(items)
     }
 
-    static func admitsItem(_ item: TranscriptItem) -> Bool {
+    package static func admitsItem(_ item: TranscriptItem) -> Bool {
         !item.id.isEmpty && item.id.utf8.count <= maximumItemIdentityUTF8Bytes
     }
 
@@ -647,8 +813,8 @@ enum SessionSnapshotTranscriptAdmissionPolicy {
     }
 }
 
-enum SessionSnapshotQueueAdmissionPolicy {
-    static func admit(_ snapshot: SessionSnapshot) -> Bool {
+package enum SessionSnapshotQueueAdmissionPolicy {
+    package static func admit(_ snapshot: SessionSnapshot) -> Bool {
         let displayed = snapshot.displayedQueuedMessages
         guard displayed.count <= SessionSnapshot.maximumQueuedMessages else { return false }
         let ids = displayed.map(\.id)
@@ -683,28 +849,28 @@ enum SessionSnapshotQueueAdmissionPolicy {
 
 /// Narrow, immutable facts used by Manage Session. Streaming transcript content
 /// is deliberately absent so its publication cannot invalidate that surface.
-struct SessionContextPresentation: Hashable, Sendable {
-    let runtimeGeneration: String
-    let sessionID: String
-    let phase: SessionPhase
-    let operationKind: SessionOperationState.Kind?
-    let compactionQueued: Bool
-    let contextUsage: ContextUsage?
-    let stats: SessionStats
-    let lastTranscriptKind: TranscriptItem.Kind?
-    let automaticCompactionEnabled: Bool
-    let processOverview: SessionProcessOverview?
-    let model: ModelRef?
-    let thinkingLevel: String
-    let availableThinkingLevels: [String]
-    let name: String?
-    let cwd: String
-    let diagnostics: [RuntimeDiagnostic]
-    let contextWindowPolicy: ContextWindowPolicy?
+package struct SessionContextPresentation: Hashable, Sendable {
+    package let runtimeGeneration: String
+    package let sessionID: String
+    package let phase: SessionPhase
+    package let operationKind: SessionOperationState.Kind?
+    package let compactionQueued: Bool
+    package let contextUsage: ContextUsage?
+    package let stats: SessionStats
+    package let lastTranscriptKind: TranscriptItem.Kind?
+    package let automaticCompactionEnabled: Bool
+    package let processOverview: SessionProcessOverview?
+    package let model: ModelRef?
+    package let thinkingLevel: String
+    package let availableThinkingLevels: [String]
+    package let name: String?
+    package let cwd: String
+    package let diagnostics: [RuntimeDiagnostic]
+    package let contextWindowPolicy: ContextWindowPolicy?
     /// Gateway-owned archive state, so Manage Session needs no second read.
-    let archivedAt: String?
+    package let archivedAt: String?
 
-    init(_ snapshot: SessionSnapshot) {
+    package init(_ snapshot: SessionSnapshot) {
         runtimeGeneration = snapshot.runtimeGeneration
         sessionID = snapshot.sessionId
         phase = snapshot.phase
@@ -726,34 +892,52 @@ struct SessionContextPresentation: Hashable, Sendable {
     }
 }
 
-struct SessionEventEnvelope: Codable, Hashable, Sendable {
-    let runtimeGeneration: String
-    let eventSequence: Int
-    let revision: Int
-    let data: JSONValue
+package struct SessionEventEnvelope: Codable, Hashable, Sendable {
+    package let runtimeGeneration: String
+    package let eventSequence: Int
+    package let revision: Int
+    package let data: JSONValue
 }
 
-struct SessionTreeNode: Codable, Hashable, Identifiable, Sendable {
-    var bookmarkTargetId: String? = nil
-    let id: String
+package struct SessionTreeNode: Codable, Hashable, Identifiable, Sendable {
+    package var bookmarkTargetId: String? = nil
+    package let id: String
     let parentId: String?
-    let timestamp: String
-    let kind: String
-    let label: String?
-    let preview: String
-    let role: TranscriptItem.Role?
+    package let timestamp: String
+    package let kind: String
+    package let label: String?
+    package let preview: String
+    package let role: TranscriptItem.Role?
     let depth: Int
-    let childCount: Int
-    let isCurrentPath: Bool
+    package let childCount: Int
+    package let isCurrentPath: Bool
+
+    package init(
+        bookmarkTargetId: String? = nil, id: String, parentId: String?, timestamp: String,
+        kind: String, label: String?, preview: String, role: TranscriptItem.Role?, depth: Int,
+        childCount: Int, isCurrentPath: Bool
+    ) {
+        self.bookmarkTargetId = bookmarkTargetId
+        self.id = id
+        self.parentId = parentId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.label = label
+        self.preview = preview
+        self.role = role
+        self.depth = depth
+        self.childCount = childCount
+        self.isCurrentPath = isCurrentPath
+    }
 }
 
-enum SessionTreePolicy {
+package enum SessionTreePolicy {
     static let maximumNodes = 1_000
     static let maximumStringBytes = 8_192
     static let maximumTimestampBytes = 64
     static let maximumEncodedBytes = 700_000
 
-    static func admit(_ nodes: [SessionTreeNode]) throws -> [SessionTreeNode] {
+    package static func admit(_ nodes: [SessionTreeNode]) throws -> [SessionTreeNode] {
         guard nodes.count <= maximumNodes else { throw invalidTree() }
         var identities = Set<String>()
         identities.reserveCapacity(nodes.count)

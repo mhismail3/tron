@@ -1,6 +1,6 @@
 import SwiftUI
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 import UIKit
 @testable import TronMobile
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct AutomationRunDetailView: View {
     let automation: AutomationSummarySelection

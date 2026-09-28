@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 enum GatewayErrorPresentationPolicy {
     enum Disposition: Equatable {

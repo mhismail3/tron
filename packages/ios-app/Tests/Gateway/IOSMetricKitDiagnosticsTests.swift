@@ -1,7 +1,7 @@
 import Foundation
 import MetricKit
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 @testable import TronMobile
 
 struct IOSMetricKitDiagnosticsTests {

@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct SessionSearchAnchorRevision: Codable, Hashable, Sendable {
     let indexRevision: String

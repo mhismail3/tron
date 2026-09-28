@@ -2,7 +2,7 @@ import CryptoKit
 import DeviceCheck
 import Foundation
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 
 private final class PushFixtureBundleMarker {}
 @testable import TronMobile

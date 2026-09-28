@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct PairedDeviceDetailView: View {
     @Environment(AppModel.self) private var model

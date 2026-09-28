@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 @testable import TronMobile
 
 @MainActor @Suite("Session History read ownership")

@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct QueuedMessageEditorRoute: Identifiable, Hashable {
     let id: String

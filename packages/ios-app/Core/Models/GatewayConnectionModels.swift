@@ -7,15 +7,23 @@ struct GatewayRuntimeIdentity: Codable, Hashable, Sendable {
     let runtimeEpoch: String?
 }
 
-struct GatewayUpdateIdentity: Codable, Hashable, Sendable {
+package struct GatewayUpdateIdentity: Codable, Hashable, Sendable {
     let version: String?
     let gatewayVersion: String?
-    let sourceRevision: String?
-    let runtimeEpoch: String?
-    let payloadFingerprint: String?
+    package let sourceRevision: String?
+    package let runtimeEpoch: String?
+    package let payloadFingerprint: String?
+
+    package init(version: String?, gatewayVersion: String?, sourceRevision: String?, runtimeEpoch: String?, payloadFingerprint: String?) {
+        self.version = version
+        self.gatewayVersion = gatewayVersion
+        self.sourceRevision = sourceRevision
+        self.runtimeEpoch = runtimeEpoch
+        self.payloadFingerprint = payloadFingerprint
+    }
 }
 
-struct GatewayDebugCandidateProvenance: Codable, Hashable, Sendable {
+package struct GatewayDebugCandidateProvenance: Codable, Hashable, Sendable {
     let origin: String
     let version: String
     let payloadFingerprint: String
@@ -24,12 +32,12 @@ struct GatewayDebugCandidateProvenance: Codable, Hashable, Sendable {
     let candidateRuntimeEpoch: String
 }
 
-struct GatewayDebugPromotionCandidate: Hashable, Sendable {
-    let version: String
-    let payloadFingerprint: String
-    let sourceRevision: String
-    let testedRuntimeEpoch: String
-    let candidateRuntimeEpoch: String
+package struct GatewayDebugPromotionCandidate: Hashable, Sendable {
+    package let version: String
+    package let payloadFingerprint: String
+    package let sourceRevision: String
+    package let testedRuntimeEpoch: String
+    package let candidateRuntimeEpoch: String
 
     init?(identity: GatewayUpdateIdentity?, provenance: GatewayDebugCandidateProvenance?) {
         guard let identity, let provenance,
@@ -77,11 +85,11 @@ struct GatewayDebugPromotionCandidate: Hashable, Sendable {
     }
 }
 
-enum GatewayUpdateConfigPolicy {
-    static let maximumPathBytes = 4_096
+package enum GatewayUpdateConfigPolicy {
+    package static let maximumPathBytes = 4_096
     static let maximumTimestampBytes = 64
 
-    static func admitPath(_ path: String, name: String) throws -> String {
+    package static func admitPath(_ path: String, name: String) throws -> String {
         guard !path.isEmpty,
               path.utf8.count <= maximumPathBytes,
               path.first == "/",
@@ -111,18 +119,18 @@ enum GatewayUpdateConfigPolicy {
     }
 }
 
-struct GatewayUpdateConfig: Codable, Hashable, Sendable {
+package struct GatewayUpdateConfig: Codable, Hashable, Sendable {
     let schema: Int
     let kind: String
-    let sourceRoot: String
-    let artifactRoot: String?
+    package let sourceRoot: String
+    package let artifactRoot: String?
     let updatedAt: String
 
     private enum CodingKeys: String, CodingKey {
         case schema, kind, sourceRoot, artifactRoot, updatedAt
     }
 
-    init(schema: Int = 1, kind: String = "tron-gateway-update-config", sourceRoot: String, artifactRoot: String? = nil, updatedAt: String) throws {
+    package init(schema: Int = 1, kind: String = "tron-gateway-update-config", sourceRoot: String, artifactRoot: String? = nil, updatedAt: String) throws {
         guard schema == 1, kind == "tron-gateway-update-config" else {
             throw GatewayFailure(code: "invalid_response", message: "The Gateway update configuration is unsupported.", retryable: true, details: nil)
         }
@@ -137,7 +145,7 @@ struct GatewayUpdateConfig: Codable, Hashable, Sendable {
         self.updatedAt = try GatewayUpdateConfigPolicy.admitTimestamp(updatedAt)
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         self = try Self(
             schema: try values.decode(Int.self, forKey: .schema),
@@ -149,20 +157,20 @@ struct GatewayUpdateConfig: Codable, Hashable, Sendable {
     }
 }
 
-struct GatewayUpdateStatus: Codable, Hashable, Sendable {
-    let state: String
-    let channel: String
-    let currentIdentity: GatewayUpdateIdentity?
-    let candidateIdentity: GatewayUpdateIdentity?
-    let candidateAvailable: Bool
-    let error: String?
+package struct GatewayUpdateStatus: Codable, Hashable, Sendable {
+    package let state: String
+    package let channel: String
+    package let currentIdentity: GatewayUpdateIdentity?
+    package let candidateIdentity: GatewayUpdateIdentity?
+    package let candidateAvailable: Bool
+    package let error: String?
     let updatedAt: String?
-    let commandId: String?
-    let rollbackAvailable: Bool
-    let candidateOrigin: String?
+    package let commandId: String?
+    package let rollbackAvailable: Bool
+    package let candidateOrigin: String?
     let candidateProvenance: GatewayDebugCandidateProvenance?
 
-    init(
+    package init(
         state: String, channel: String, currentIdentity: GatewayUpdateIdentity?,
         candidateIdentity: GatewayUpdateIdentity?, candidateAvailable: Bool,
         error: String?, updatedAt: String?, commandId: String? = nil,
@@ -186,7 +194,7 @@ struct GatewayUpdateStatus: Codable, Hashable, Sendable {
         case state, channel, currentIdentity, candidateIdentity, candidateAvailable, error, updatedAt, commandId, rollbackAvailable, candidateOrigin, candidateProvenance
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let candidateOrigin = try values.decodeIfPresent(String.self, forKey: .candidateOrigin)
         guard candidateOrigin == nil || candidateOrigin == "debug" else {
@@ -229,16 +237,16 @@ struct GatewayUpdateStatus: Codable, Hashable, Sendable {
         )
     }
 
-    var debugPromotionCandidate: GatewayDebugPromotionCandidate? {
+    package var debugPromotionCandidate: GatewayDebugPromotionCandidate? {
         guard candidateOrigin == "debug", channel == "stable", candidateAvailable else { return nil }
         return GatewayDebugPromotionCandidate(identity: candidateIdentity, provenance: candidateProvenance)
     }
 
-    var isActive: Bool {
+    package var isActive: Bool {
         ["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].contains(state)
     }
 
-    var presentationTitle: String {
+    package var presentationTitle: String {
         switch state {
         case "failed", "failure": return "Update failed"
         case "rolled-back": return "Rolled back"
@@ -251,13 +259,13 @@ struct GatewayUpdateStatus: Codable, Hashable, Sendable {
     }
 }
 
-enum AdministrativeDrainPhase: String, Codable, Hashable, Sendable {
+package enum AdministrativeDrainPhase: String, Codable, Hashable, Sendable {
     case idle, preparing, waiting, complete, failed
 
-    var isTerminal: Bool { self == .complete || self == .failed }
+    package var isTerminal: Bool { self == .complete || self == .failed }
 }
 
-enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Sendable, CaseIterable {
+package enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Sendable, CaseIterable {
     case slotAdmission = "slot-admission"
     case promptPreflight = "prompt-preflight"
     case foregroundAgentOperation = "foreground-agent-operation"
@@ -275,39 +283,52 @@ enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Sendable, Ca
     case mcpToolCall = "mcp-tool-call"
 }
 
-struct AdministrativeDrainSnapshot: Codable, Hashable, Sendable {
-    let drainId: String
+package struct AdministrativeDrainSnapshot: Codable, Hashable, Sendable {
+    package let drainId: String
     let revision: Int
-    let phase: AdministrativeDrainPhase
-    let blockerCount: Int
-    let blockerCounts: [String: Int]
-    let omittedCount: Int
-    let suspectProjectionCount: Int
+    package let phase: AdministrativeDrainPhase
+    package let blockerCount: Int
+    package let blockerCounts: [String: Int]
+    package let omittedCount: Int
+    package let suspectProjectionCount: Int
+
+    package init(
+        drainId: String, revision: Int, phase: AdministrativeDrainPhase, blockerCount: Int,
+        blockerCounts: [String: Int], omittedCount: Int, suspectProjectionCount: Int
+    ) {
+        self.drainId = drainId
+        self.revision = revision
+        self.phase = phase
+        self.blockerCount = blockerCount
+        self.blockerCounts = blockerCounts
+        self.omittedCount = omittedCount
+        self.suspectProjectionCount = suspectProjectionCount
+    }
 }
 
-struct GatewayRestartResponse: Codable, Hashable, Sendable {
-    let restarting: Bool
-    let scheduled: Bool
+package struct GatewayRestartResponse: Codable, Hashable, Sendable {
+    package let restarting: Bool
+    package let scheduled: Bool
     let activeSessionIds: [String]?
     let restartNow: Bool?
-    let drain: AdministrativeDrainSnapshot?
+    package let drain: AdministrativeDrainSnapshot?
 }
 
-struct GatewayInfo: Codable, Hashable, Sendable {
-    let gatewayVersion: String
-    let piVersion: String
-    let protocolVersion: Int
+package struct GatewayInfo: Codable, Hashable, Sendable {
+    package let gatewayVersion: String
+    package let piVersion: String
+    package let protocolVersion: Int
     let minProtocolVersion: Int
-    let machineId: String
-    let machineGroupID: String
-    let machineName: String
-    let capabilities: [String]
-    let gatewayChannel: String
-    let sourceRevision: String?
+    package let machineId: String
+    package let machineGroupID: String
+    package let machineName: String
+    package let capabilities: [String]
+    package let gatewayChannel: String
+    package let sourceRevision: String?
     let buildFingerprint: String?
-    let runtimeEpoch: String?
+    package let runtimeEpoch: String?
 
-    init(gatewayVersion: String, piVersion: String, protocolVersion: Int, minProtocolVersion: Int,
+    package init(gatewayVersion: String, piVersion: String, protocolVersion: Int, minProtocolVersion: Int,
          machineId: String, machineGroupID: String? = nil, machineName: String, capabilities: [String],
          gatewayChannel: String = "stable", sourceRevision: String? = nil,
          buildFingerprint: String? = nil, runtimeEpoch: String? = nil) {
@@ -328,7 +349,7 @@ struct GatewayInfo: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case gatewayVersion, piVersion, protocolVersion, minProtocolVersion, machineId, machineGroupID, machineName, capabilities, gatewayChannel, sourceRevision, buildFingerprint, runtimeEpoch }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             gatewayVersion: try values.decode(String.self, forKey: .gatewayVersion),
@@ -347,13 +368,13 @@ struct GatewayInfo: Codable, Hashable, Sendable {
     }
 }
 
-struct PairedDevice: Codable, Hashable, Identifiable, Sendable {
-    let id: String
-    let name: String
-    let customLabel: String?
-    let createdAt: String
+package struct PairedDevice: Codable, Hashable, Identifiable, Sendable {
+    package let id: String
+    package let name: String
+    package let customLabel: String?
+    package let createdAt: String
 
-    init(id: String, name: String, customLabel: String? = nil, createdAt: String) {
+    package init(id: String, name: String, customLabel: String? = nil, createdAt: String) {
         self.id = id
         self.name = name
         self.customLabel = customLabel
@@ -361,31 +382,37 @@ struct PairedDevice: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct GatewayAuthorizedDevice: Hashable, Identifiable, Sendable {
-    let profileID: String
-    let profileLabel: String
-    let device: PairedDevice
+package struct GatewayAuthorizedDevice: Hashable, Identifiable, Sendable {
+    package let profileID: String
+    package let profileLabel: String
+    package let device: PairedDevice
 
-    var id: String { "\(profileID):\(device.id)" }
+    package init(profileID: String, profileLabel: String, device: PairedDevice) {
+        self.profileID = profileID
+        self.profileLabel = profileLabel
+        self.device = device
+    }
+
+    package var id: String { "\(profileID):\(device.id)" }
 }
 
-struct IosDeviceInstallConfiguredTarget: Codable, Hashable, Sendable {
+package struct IosDeviceInstallConfiguredTarget: Codable, Hashable, Sendable {
     let name: String
     let deviceType: String
     let connectionState: String
     let developerModeEnabled: Bool
 }
 
-struct IosDeviceInstallConfig: Codable, Hashable, Sendable {
+package struct IosDeviceInstallConfig: Codable, Hashable, Sendable {
     let schema: Int
     let kind: String
-    let deviceId: String
+    package let deviceId: String
     let gatewayChannel: String
-    let sourceRoot: String?
-    let target: IosDeviceInstallConfiguredTarget?
+    package let sourceRoot: String?
+    package let target: IosDeviceInstallConfiguredTarget?
     let updatedAt: String
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         schema = try values.decode(Int.self, forKey: .schema)
         kind = try values.decode(String.self, forKey: .kind)
@@ -398,31 +425,31 @@ struct IosDeviceInstallConfig: Codable, Hashable, Sendable {
     }
 }
 
-enum IosDeviceInstallBuildMode: String, Codable, Hashable, Sendable {
+package enum IosDeviceInstallBuildMode: String, Codable, Hashable, Sendable {
     case fastDebug = "fast-debug"
     case optimized
 
-    var label: String { self == .fastDebug ? "Fast debug" : "Optimized" }
+    package var label: String { self == .fastDebug ? "Fast debug" : "Optimized" }
 }
 
-struct IosDeviceInstallStatus: Codable, Hashable, Sendable {
-    enum State: String, Codable, Hashable, Sendable {
+package struct IosDeviceInstallStatus: Codable, Hashable, Sendable {
+    package enum State: String, Codable, Hashable, Sendable {
         case requested, running, succeeded, failed
-        var isActive: Bool { self == .requested || self == .running }
+        package var isActive: Bool { self == .requested || self == .running }
     }
 
     let schema: Int
     let kind: String
-    let deviceId: String
-    let buildMode: IosDeviceInstallBuildMode
-    let state: State
-    let commandId: String
-    let targetName: String
+    package let deviceId: String
+    package let buildMode: IosDeviceInstallBuildMode
+    package let state: State
+    package let commandId: String
+    package let targetName: String
     let startedAt: String
     let updatedAt: String
-    let error: String?
+    package let error: String?
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         schema = try values.decode(Int.self, forKey: .schema)
         kind = try values.decode(String.self, forKey: .kind)
@@ -438,12 +465,12 @@ struct IosDeviceInstallStatus: Codable, Hashable, Sendable {
     }
 }
 
-struct IosDeviceInstallAcknowledgement: Codable, Hashable, Sendable {
+package struct IosDeviceInstallAcknowledgement: Codable, Hashable, Sendable {
     let accepted: Bool
     let commandId: String
     let state: String
 
-    func require(commandID: String) throws {
+    package func require(commandID: String) throws {
         guard accepted, commandId == commandID, state == "install-requested" else {
             throw GatewayFailure(
                 code: "invalid_response",
@@ -500,13 +527,13 @@ enum IosDeviceInstallProjectionPolicy {
 }
 
 
-enum PairedDeviceCatalogPolicy {
-    static let maximumDevices = 256
+package enum PairedDeviceCatalogPolicy {
+    package static let maximumDevices = 256
     static let maximumIDBytes = 100
-    static let maximumNameBytes = 320
+    package static let maximumNameBytes = 320
     static let maximumTimestampBytes = 64
 
-    static func admit(_ devices: [PairedDevice]) throws -> [PairedDevice] {
+    package static func admit(_ devices: [PairedDevice]) throws -> [PairedDevice] {
         guard devices.count <= maximumDevices else { throw invalidCatalog() }
         var identities = Set<String>()
         identities.reserveCapacity(devices.count)
@@ -539,7 +566,7 @@ enum PairedDeviceCatalogPolicy {
     }
 }
 
-enum DashboardServerConnectionState: Hashable, Sendable {
+package enum DashboardServerConnectionState: Hashable, Sendable {
     case connecting
     case reconnecting
     case noPath(String?)
@@ -552,7 +579,7 @@ enum DashboardServerConnectionState: Hashable, Sendable {
     case needsVerification
     case disabled
 
-    var label: String {
+    package var label: String {
         switch self {
         case .connecting: "Connecting"
         case .reconnecting: "Reconnecting"
@@ -569,15 +596,19 @@ enum DashboardServerConnectionState: Hashable, Sendable {
     }
 }
 
-struct GatewayNoPathPresentation: Equatable, Sendable {
-    let interface: String?
+package struct GatewayNoPathPresentation: Equatable, Sendable {
+    package let interface: String?
 
-    var label: String {
+    package init(interface: String?) {
+        self.interface = interface
+    }
+
+    package var label: String {
         guard let interface else { return "No path to this Mac" }
         return "No path to this Mac over \(interface)"
     }
 
-    static func interfaceLabel(from interfaces: String?) -> String? {
+    package static func interfaceLabel(from interfaces: String?) -> String? {
         guard let interfaces else { return nil }
         let names = interfaces.split(separator: ",").map(String.init)
         if names.contains("wifi") { return "Wi-Fi" }

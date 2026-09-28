@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 struct ProcessTranscriptPage: Codable, Hashable, Sendable {
     let items: [TranscriptItem]

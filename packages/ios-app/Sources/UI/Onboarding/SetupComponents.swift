@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum ProviderConfigurationPresentation {
     static func isLoginMethod(_ method: String) -> Bool {

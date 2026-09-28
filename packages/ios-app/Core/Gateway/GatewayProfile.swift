@@ -1,16 +1,16 @@
 import Foundation
 
-struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
-    let id: String
-    var label: String
-    let host: String
-    let port: Int
-    let machineId: String
-    var machineGroupID: String
-    var deviceId: String? = nil
-    var isEnabled: Bool = true
+package struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
+    package let id: String
+    package var label: String
+    package let host: String
+    package let port: Int
+    package let machineId: String
+    package var machineGroupID: String
+    package var deviceId: String? = nil
+    package var isEnabled: Bool = true
 
-    init(id: String, label: String, host: String, port: Int, machineId: String,
+    package init(id: String, label: String, host: String, port: Int, machineId: String,
          machineGroupID: String? = nil, deviceId: String? = nil, isEnabled: Bool = true) {
         self.id = id; self.label = label; self.host = host; self.port = port
         self.machineId = machineId; self.machineGroupID = machineGroupID ?? machineId
@@ -19,7 +19,7 @@ struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
 
     private enum CodingKeys: String, CodingKey { case id, label, host, port, machineId, machineGroupID, deviceId, isEnabled }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             id: try values.decode(String.self, forKey: .id),
@@ -33,14 +33,14 @@ struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
         )
     }
 
-    var hasValidEndpoint: Bool {
+    package var hasValidEndpoint: Bool {
         PairingInvitationParser.canonicalHost(host) != nil
             && (1...65_535).contains(port)
             && httpURL() != nil
             && socketURL != nil
     }
 
-    func httpURL(path: String = "", queryItems: [URLQueryItem] = []) -> URL? {
+    package func httpURL(path: String = "", queryItems: [URLQueryItem] = []) -> URL? {
         var components = URLComponents()
         components.scheme = "http"
         components.host = host
@@ -53,9 +53,9 @@ struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
     /// The endpoint selects which authenticated channel identity this saved
     /// profile will admit. The Gateway must still assert that identity in its
     /// pairing response, hello, and system.info projection.
-    var gatewayChannel: String { port == 9848 ? "dev" : "stable" }
+    package var gatewayChannel: String { port == 9848 ? "dev" : "stable" }
 
-    var socketURL: URL? {
+    package var socketURL: URL? {
         var components = URLComponents()
         components.scheme = "ws"
         components.host = host
@@ -65,16 +65,24 @@ struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct PairingInvitation: Equatable, Sendable {
-    let host: String
+package struct PairingInvitation: Equatable, Sendable {
+    package let host: String
     let port: Int
-    let code: String
+    package let code: String
     let machineId: String?
     let label: String?
+
+    package init(host: String, port: Int, code: String, machineId: String?, label: String?) {
+        self.host = host
+        self.port = port
+        self.code = code
+        self.machineId = machineId
+        self.label = label
+    }
 }
 
-enum PairingInvitationParser {
-    static func parse(_ url: URL) -> PairingInvitation? {
+package enum PairingInvitationParser {
+    package static func parse(_ url: URL) -> PairingInvitation? {
         guard url.scheme == "tron", url.host == "pair",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         var values: [String: String] = [:]
@@ -96,7 +104,7 @@ enum PairingInvitationParser {
         )
     }
 
-    static func canonicalHost(_ raw: String?) -> String? {
+    package static func canonicalHost(_ raw: String?) -> String? {
         guard var host = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !host.isEmpty,
               !host.contains("://"), !host.contains("/"), !host.contains("?"), !host.contains("#"),
               !host.contains("@"), !host.contains("[") else { return nil }
@@ -116,8 +124,8 @@ enum PairingInvitationParser {
     }
 }
 
-enum GatewayChannelPolicy {
-    static func admit(_ value: String) throws -> String {
+package enum GatewayChannelPolicy {
+    package static func admit(_ value: String) throws -> String {
         guard value == "stable" || value == "dev" else {
             throw GatewayFailure(
                 code: "invalid_response",
@@ -153,11 +161,11 @@ struct PairingResponse: Decodable, Sendable {
     }
 }
 
-enum GatewayPairingPolicy {
+package enum GatewayPairingPolicy {
     static let maximumResponseBytes = 64 * 1_024
 }
 
-struct GatewayPairer: Sendable {
+package struct GatewayPairer: Sendable {
     private let uuidSource: @Sendable () -> String
     private struct PairingRequest: Encodable {
         let code: String
@@ -168,12 +176,12 @@ struct GatewayPairer: Sendable {
 
     private let transport: HTTPDataTransport
 
-    init(transport: HTTPDataTransport = .urlSession, uuidSource: @escaping @Sendable () -> String = { UUID().uuidString }) {
+    package init(transport: HTTPDataTransport = .urlSession, uuidSource: @escaping @Sendable () -> String = { UUID().uuidString }) {
         self.transport = transport
         self.uuidSource = uuidSource
     }
 
-    func pair(_ invitation: PairingInvitation, deviceName: String) async throws -> (GatewayProfile, String) {
+    package func pair(_ invitation: PairingInvitation, deviceName: String) async throws -> (GatewayProfile, String) {
         var components = URLComponents()
         components.scheme = "http"
         components.host = invitation.host

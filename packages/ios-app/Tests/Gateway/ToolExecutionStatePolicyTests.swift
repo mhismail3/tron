@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import TronMobileCore
 @testable import TronMobile
 
 @Suite("Shared tool execution state policy")

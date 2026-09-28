@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 private struct ChatMessageGrowthIdentity: Equatable, Sendable {
     let partCount: Int

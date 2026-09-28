@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// A value projection only: inventory uses its catalog summary, while the open
 /// detail uses the authoritative record read. Neither surface caches the other.

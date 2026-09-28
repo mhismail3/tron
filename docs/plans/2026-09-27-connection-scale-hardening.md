@@ -360,7 +360,7 @@ At most one in-flight task per zone. Tasks listed in order.
 | Slot | `packages/gateway/src/sessions/runtime-slot.ts` | O-3, O-5, G-3, G-11 |
 | Catalog | `packages/gateway/src/sessions/catalog-discovery.ts`, `packages/gateway/src/sessions/catalog-metadata-index.ts` | G-1a, G-1b, G-1c |
 | Phone lifecycle | `packages/ios-app/Sources/State/GatewayLifecycleCoordinator.swift`, `packages/ios-app/Sources/State/AppModel.swift` | O-4, C-1, C-2, C-3, G-7, E-3c |
-| Phone client | `packages/ios-app/Sources/Gateway/GatewayClient.swift`, `packages/ios-app/Sources/Gateway/GatewaySocketTransport.swift` | O-1, O-4, C-3, C-4, C-6, G-12, E-3c |
+| Phone client | `packages/ios-app/Sources/Gateway/GatewayClient.swift`, `packages/ios-app/Core/Gateway/GatewaySocketTransport.swift` | O-1, O-4, C-3, C-4, C-6, G-12, E-3c |
 | Phone pool | `packages/ios-app/Sources/State/DashboardGatewayConnectionPool.swift` | C-5 |
 | Launcher | `packages/mac-app/scripts/tron-gateway-launcher.c` | G-9, G-5 |
 | Profiler | `scripts/tron-profile-gateway`, `scripts/tron-profile-gateway-driver.mjs` | O-6a, O-6b, G-13 |
@@ -1335,7 +1335,7 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Goal:** the phone learns LAN endpoints and the pin only over an already
   authenticated channel.
 - **Owning files:** `packages/gateway/src/transport/server.ts` (pairing and
-  hello), `packages/ios-app/Sources/Gateway/GatewayProfile.swift`,
+  hello), `packages/ios-app/Core/Gateway/GatewayProfile.swift`,
   `packages/ios-app/Sources/Gateway/GatewayProfileStore.swift`.
 - **Do:** pairing response and hello include `lanEndpoints: [{ host, port }]`
   and `lanPin` (SHA-256 of the certificate's public key). The phone stores them
@@ -1350,7 +1350,7 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Goal:** at home the phone connects over LAN; any leg's loss costs at most
   one liveness interval.
 - **Owning files:** `packages/ios-app/Sources/Gateway/GatewayClient.swift`,
-  `packages/ios-app/Sources/Gateway/GatewaySocketTransport.swift` (pin check in
+  `packages/ios-app/Core/Gateway/GatewaySocketTransport.swift` (pin check in
   the URLSession delegate), `packages/ios-app/Sources/State/GatewayLifecycleCoordinator.swift`,
   `packages/ios-app/Sources/Info.plist` (`NSLocalNetworkUsageDescription`).
 - **Do:**

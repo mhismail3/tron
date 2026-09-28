@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Local type adjustments for Manage Session; headings retain the established
 /// reading-family scale and other sheets keep their ordinary metadata sizes.

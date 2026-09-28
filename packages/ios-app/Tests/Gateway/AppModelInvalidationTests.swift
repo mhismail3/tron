@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 import Testing
-import TronMobileCore
+@testable import TronMobileCore
 @testable import TronMobile
 
 @MainActor

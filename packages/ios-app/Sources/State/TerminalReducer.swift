@@ -1,3 +1,5 @@
+import TronMobileCore
+
 struct TerminalPresentationTarget: Hashable, Sendable {
     let sessionID: String
     let generation: Int

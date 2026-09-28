@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import TronMobileCore
 @testable import TronMobile
 
 /// Shared model picker: the search filter and the Recent / Latest / provider

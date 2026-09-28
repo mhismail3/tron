@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// The composer is one permanently mounted inset owner. Editor-only height
 /// changes remain atomic for UIKit caret ownership. Accessory insertion and
