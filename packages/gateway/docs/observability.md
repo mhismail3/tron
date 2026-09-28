@@ -299,7 +299,7 @@ duration is at or above `slowOperationThresholdMilliseconds` (250 ms), else info
 | `gateway.response.invalid` | error | `packages/ios-app/Sources/State/GatewayDiagnosticsService.swift` | an `invalid_response` failure is admitted | `code=invalid_response` only | Keeps the typed code at the storage boundary without storing the response |
 | `gateway.rpc` | info on success, warning otherwise | `packages/ios-app/Sources/State/GatewayDiagnosticsService.swift` | an RPC diagnostic is admitted into incident history | method, requestID, outcome, `durationMs`, `code` | A failed RPC that produces an incident needs its own row rather than a device-log entry |
 | `gateway.lifecycle` | info | `packages/ios-app/Sources/State/AppModel.swift` | an admitted lifecycle event: `scene.foreground`, `scene.background`, `reconnect.scheduled`, `reconnect.attempt`, `reconnect.failure`, `reconnect.delay`, `reconnect.connected`, `reconnect.exhausted`, `reconnect.stopped`, `path.changed`, `detail.tap`, `detail.preparation` | `kind` and the recovery detail in the message; `profileID` | Reconnect history has to survive a relaunch, independently of the always-on app log |
-| `ios.metrickit` | info | `packages/ios-app/Sources/Support/IOSMetricKitDiagnostics.swift` | a MetricKit metric or diagnostic payload is recorded | the bounded metric/diagnostic fields in the message | OS-level hangs and termination metrics explain a slow or killed app |
+| `ios.metrickit` | info | `packages/ios-app/Sources/State/IOSMetricKitDiagnostics.swift` | a MetricKit metric or diagnostic payload is recorded | the bounded metric/diagnostic fields in the message | OS-level hangs and termination metrics explain a slow or killed app |
 
 ### iOS — the chat interaction trace (`ChatInteractionTrace`)
 

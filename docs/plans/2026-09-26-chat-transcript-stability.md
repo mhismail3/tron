@@ -329,7 +329,7 @@ pass only through eager-only repairs, stop and report.
     `scripts/personal-info-guard.sh` pass. This plan entry was appended after the
     two runs above, so by CT-1's rule the products stamped before it are stale
     until the next build; the code they measured is this commit's.
-- Changes: this commit (`packages/ios-app/Sources/Support/ChatHostedProbe.swift`,
+- Changes: this commit (`packages/ios-app/Sources/UI/Chat/ChatHostedProbe.swift`,
   `packages/ios-app/Tests/UI/ChatViewScrollHarnessTests.swift`,
   `packages/ios-app/docs/development.md`, this plan).
 - Tasks added: none.
