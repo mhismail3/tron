@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Disposable, independently observable facts for descendants of a frozen chat.
 /// Neither transport revisions nor ordinary assistant text belong in these values.

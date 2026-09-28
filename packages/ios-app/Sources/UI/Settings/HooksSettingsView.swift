@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum HookViewMode: String, CaseIterable, Identifiable {
     case byEvent

@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum SessionDashboardPresentationPolicy {
     static let initialLoadingPulseSize: CGFloat = 44

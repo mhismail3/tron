@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct CompactionSettingsDraft: Equatable {
     var enabled = true

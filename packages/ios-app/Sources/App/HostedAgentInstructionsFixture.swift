@@ -1,5 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
+import TronMobileCore
 
 /// Deterministic, test-only host for the Agent Instructions sheet. It installs a
 /// bounded `instructions` projection in the Gateway's wire shape so the real

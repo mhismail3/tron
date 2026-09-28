@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Additive Gateway lifecycle facts. The coarse tool status remains available
 /// for old Gateways, while this record owns native admission and recency.

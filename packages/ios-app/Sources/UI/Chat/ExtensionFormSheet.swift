@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Native projection of one bounded semantic form. The Gateway owns the
 /// interaction and lifecycle; this view edits a bounded device-local, ID-keyed draft.

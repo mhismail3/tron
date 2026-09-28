@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Display-only names from the resource projection. Raw names, paths, package
 /// sources, and invocations stay intact in the detail sheet and canonical data.

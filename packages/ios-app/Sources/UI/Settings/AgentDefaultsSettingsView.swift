@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct AgentDefaultsDraft: Equatable {
     var transport = "auto"

@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
     // Declaration order is the sheet's section order.

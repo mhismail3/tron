@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 struct ConfigurationEditValidationError: LocalizedError {
     let message: String

@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct TerminalSummary: Codable, Hashable, Identifiable, Sendable {
     let id: String

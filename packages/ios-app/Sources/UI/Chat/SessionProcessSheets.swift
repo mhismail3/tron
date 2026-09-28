@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import TronMobileCore
 
 struct ProcessHistorySheet: View {
     let sessionID: String

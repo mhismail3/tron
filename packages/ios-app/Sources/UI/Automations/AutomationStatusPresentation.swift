@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum AutomationStatusPresentation {
     static func color(_ activation: AutomationActivation, run: AutomationRunState? = nil) -> Color {

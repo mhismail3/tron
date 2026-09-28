@@ -1,5 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
+import TronMobileCore
 
 /// Real production surfaces inspected by the out-of-process accessibility client.
 /// Fixture controls change inputs, never duplicate the surfaces' AX descriptions.

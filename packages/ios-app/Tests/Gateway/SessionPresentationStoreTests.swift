@@ -3,6 +3,7 @@ import Foundation
 import Observation
 import Synchronization
 import Testing
+import TronMobileCore
 @testable import TronMobile
 
 @MainActor

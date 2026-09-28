@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct ExtensionFormQuestionDraft: Codable, Equatable, Sendable {
     var optionIDs: Set<String> = []

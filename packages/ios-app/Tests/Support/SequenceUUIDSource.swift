@@ -1,5 +1,6 @@
 import Foundation
 import Synchronization
+import TronMobileCore
 @testable import TronMobile
 
 final class SequenceUUIDSource: Sendable {

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 /// The sheet filter and the server window it renders. `unread` is a real
 /// `notification.inbox.list` filter, so the Unread list is never a client-side

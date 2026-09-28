@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 import UIKit
 import ImageIO
 

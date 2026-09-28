@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct HTTPDataTransport: Sendable {
     let dataForRequest: @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)

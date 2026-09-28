@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct ToolDetailSheet: View {
     let tool: ChatToolPresentation

@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import TronMobileCore
 import UniformTypeIdentifiers
 
 struct ChatForkNavigationOwner {

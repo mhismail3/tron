@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import TronMobileCore
 
 enum SnapshotCachePolicy {
     static let maximumEncodedBytes = 8 * 1_024 * 1_024

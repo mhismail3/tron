@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct ModelRef: Codable, Hashable, Sendable, Identifiable {
     let provider: String

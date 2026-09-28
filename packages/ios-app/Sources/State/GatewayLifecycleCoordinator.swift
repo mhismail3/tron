@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 import UIKit
 
 enum GatewayConnectionState: Equatable {

@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 enum ConfirmedMutationConnectionPolicy {
     /// Pre-transmission waiting preserves single-send ownership during a short

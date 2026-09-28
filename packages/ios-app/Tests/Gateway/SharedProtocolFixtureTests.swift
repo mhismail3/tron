@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TronMobileCore
 @testable import TronMobile
 
 private final class FixtureBundleMarker {}

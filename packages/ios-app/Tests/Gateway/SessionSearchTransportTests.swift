@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 import XCTest
 @testable import TronMobile
 

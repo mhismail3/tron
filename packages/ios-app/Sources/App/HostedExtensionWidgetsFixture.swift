@@ -1,5 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
+import TronMobileCore
 
 /// Deterministic, test-only host for the rendered general extension-content
 /// sheet. It supplies bounded retained content of all three kinds — a string

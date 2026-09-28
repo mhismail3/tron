@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct GatewayLogCaptureMetadata: Equatable, Sendable {
     let capturedAt: String

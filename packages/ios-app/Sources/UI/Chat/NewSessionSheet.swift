@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct NewSessionSheet: View {
     @Environment(AppModel.self) private var model

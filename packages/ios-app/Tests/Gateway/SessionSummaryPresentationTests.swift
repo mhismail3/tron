@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Testing
+import TronMobileCore
 @testable import TronMobile
 
 @Suite("Session summary presentation")

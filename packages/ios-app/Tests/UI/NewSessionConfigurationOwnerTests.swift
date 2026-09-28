@@ -1,4 +1,5 @@
 import Testing
+import TronMobileCore
 @testable import TronMobile
 
 @Suite("New session configuration ownership")

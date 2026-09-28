@@ -3,11 +3,11 @@ import Foundation
 // The Gateway's notification inbox wire projections and their admission
 // bounds. The inbox coordinator that presents them stays in Notifications.
 
-enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
+package enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
     case explicit, ask
     case agentFinished = "agent_finished"
 
-    var label: String {
+    package var label: String {
         switch self {
         case .explicit: "Agent alert"
         case .ask: "Input needed"
@@ -15,7 +15,7 @@ enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    var icon: String {
+    package var icon: String {
         switch self {
         case .explicit: "bell.fill"
         case .ask: "questionmark.bubble.fill"
@@ -25,12 +25,12 @@ enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum NotificationInboxOutcome: String, Codable, CaseIterable, Sendable {
+package enum NotificationInboxOutcome: String, Codable, CaseIterable, Sendable {
     case queued
     case acceptedByAPNs = "accepted_by_apns"
     case failed, ambiguous, expired
 
-    var label: String {
+    package var label: String {
         switch self {
         case .queued: "Sending"
         case .acceptedByAPNs: "Sent"
@@ -41,26 +41,50 @@ enum NotificationInboxOutcome: String, Codable, CaseIterable, Sendable {
     }
 }
 
-struct GatewayNotificationInboxItem: Codable, Hashable, Identifiable, Sendable {
-    let version: Int
-    let id: String
-    let kind: NotificationInboxKind
-    let createdAt: String
-    let updatedAt: String
-    let title: String
-    let message: String
-    let sessionId: String
-    let isUnread: Bool
-    let outcome: NotificationInboxOutcome
+package struct GatewayNotificationInboxItem: Codable, Hashable, Identifiable, Sendable {
+    package let version: Int
+    package let id: String
+    package let kind: NotificationInboxKind
+    package let createdAt: String
+    package let updatedAt: String
+    package let title: String
+    package let message: String
+    package let sessionId: String
+    package let isUnread: Bool
+    package let outcome: NotificationInboxOutcome
+
+    package init(
+        version: Int,
+        id: String,
+        kind: NotificationInboxKind,
+        createdAt: String,
+        updatedAt: String,
+        title: String,
+        message: String,
+        sessionId: String,
+        isUnread: Bool,
+        outcome: NotificationInboxOutcome
+    ) {
+        self.version = version
+        self.id = id
+        self.kind = kind
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.title = title
+        self.message = message
+        self.sessionId = sessionId
+        self.isUnread = isUnread
+        self.outcome = outcome
+    }
 }
 
-struct GatewayNotificationInboxPage: Decodable, Sendable {
-    let notifications: [GatewayNotificationInboxItem]
-    let revision: String
-    let unreadCount: Int
-    let nextCursor: String?
+package struct GatewayNotificationInboxPage: Decodable, Sendable {
+    package let notifications: [GatewayNotificationInboxItem]
+    package let revision: String
+    package let unreadCount: Int
+    package let nextCursor: String?
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let notifications = try values.decode([GatewayNotificationInboxItem].self, forKey: .notifications)
         let revision = try values.decode(String.self, forKey: .revision)
@@ -91,20 +115,25 @@ struct GatewayNotificationInboxPage: Decodable, Sendable {
 /// revision and its total unread count. The count is projected onto the bell
 /// immediately; a refetch happens only when the revision is newer than the
 /// projection's.
-struct NotificationInboxChanged: Decodable, Sendable, Equatable {
-    let revision: String
-    let unreadCount: Int
+package struct NotificationInboxChanged: Decodable, Sendable, Equatable {
+    package let revision: String
+    package let unreadCount: Int
+
+    package init(revision: String, unreadCount: Int) {
+        self.revision = revision
+        self.unreadCount = unreadCount
+    }
 }
 
-enum NotificationInboxAdmissionPolicy {
+package enum NotificationInboxAdmissionPolicy {
     // Match the Gateway page limit so one scroll request cannot over-read.
-    static let maximumPageCount = 50
+    package static let maximumPageCount = 50
     // Bound aggregate retained rows across profile buckets and windows.
-    static let maximumRetainedCount = 512
+    package static let maximumRetainedCount = 512
     // Cap encoded projection size while retaining bounded history.
-    static let maximumAggregateBytes = 512 * 1_024
+    package static let maximumAggregateBytes = 512 * 1_024
 
-    static func admits(_ item: GatewayNotificationInboxItem) -> Bool {
+    package static func admits(_ item: GatewayNotificationInboxItem) -> Bool {
         guard item.version == 1,
               opaqueID(item.id, 160),
               bounded(item.title, 256),
@@ -115,7 +144,7 @@ enum NotificationInboxAdmissionPolicy {
         return updatedAt >= createdAt
     }
 
-    static func admits(_ change: NotificationInboxChanged) -> Bool {
+    package static func admits(_ change: NotificationInboxChanged) -> Bool {
         !change.revision.isEmpty && change.revision.utf8.count <= 128
             && (0...maximumRetainedCount).contains(change.unreadCount)
     }

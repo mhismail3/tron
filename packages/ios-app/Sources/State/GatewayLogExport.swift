@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Copy is a bounded diagnostic projection, never a transcript or credential
 /// export. Profile labels are user-entered text, so use per-copy opaque aliases.

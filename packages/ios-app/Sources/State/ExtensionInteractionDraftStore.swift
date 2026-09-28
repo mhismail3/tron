@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct StoredExtensionInteractionScope: Codable, Hashable, Sendable {
     let sessionID: String

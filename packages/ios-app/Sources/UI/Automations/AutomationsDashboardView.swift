@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct AutomationSummarySelection: Hashable, Identifiable {
     let profileID: String

@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct ChatSemanticAnchor: Equatable, Sendable {
     let semanticID: String

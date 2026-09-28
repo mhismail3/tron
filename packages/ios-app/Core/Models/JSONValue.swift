@@ -1,13 +1,27 @@
 import Foundation
 
-struct JSONValueDecodingLimits: Sendable, Equatable {
-    let maximumDepth: Int
-    let maximumNodes: Int
-    let maximumCollectionMembers: Int
-    let maximumStringBytes: Int
-    let maximumTotalStringBytes: Int
+package struct JSONValueDecodingLimits: Sendable, Equatable {
+    package let maximumDepth: Int
+    package let maximumNodes: Int
+    package let maximumCollectionMembers: Int
+    package let maximumStringBytes: Int
+    package let maximumTotalStringBytes: Int
 
-    static let gateway = JSONValueDecodingLimits(
+    package init(
+        maximumDepth: Int,
+        maximumNodes: Int,
+        maximumCollectionMembers: Int,
+        maximumStringBytes: Int,
+        maximumTotalStringBytes: Int
+    ) {
+        self.maximumDepth = maximumDepth
+        self.maximumNodes = maximumNodes
+        self.maximumCollectionMembers = maximumCollectionMembers
+        self.maximumStringBytes = maximumStringBytes
+        self.maximumTotalStringBytes = maximumTotalStringBytes
+    }
+
+    package static let gateway = JSONValueDecodingLimits(
         maximumDepth: 64,
         maximumNodes: 32_768,
         maximumCollectionMembers: 8_192,
@@ -16,7 +30,7 @@ struct JSONValueDecodingLimits: Sendable, Equatable {
     )
 }
 
-enum JSONValueDecodingLimitKind: String, Sendable, Equatable {
+package enum JSONValueDecodingLimitKind: String, Sendable, Equatable {
     case depth
     case nodes
     case collectionMembers = "collection_members"
@@ -27,13 +41,13 @@ enum JSONValueDecodingLimitKind: String, Sendable, Equatable {
 /// Typed evidence for a bounded dynamic JSON rejection. The coding path is
 /// reduced to source-owned keys and fixed placeholders before it leaves the
 /// decoder; response-owned dictionary keys never cross this boundary.
-struct JSONValueDecodingLimitViolation: Error, Sendable, Equatable, LocalizedError {
-    let kind: JSONValueDecodingLimitKind
-    let actual: Int
-    let maximum: Int
-    let codingPath: String
+package struct JSONValueDecodingLimitViolation: Error, Sendable, Equatable, LocalizedError {
+    package let kind: JSONValueDecodingLimitKind
+    package let actual: Int
+    package let maximum: Int
+    package let codingPath: String
 
-    var errorDescription: String? {
+    package var errorDescription: String? {
         "Dynamic JSON exceeds its \(kind.rawValue) budget"
     }
 }
@@ -45,15 +59,15 @@ private extension CodingUserInfoKey {
 }
 
 private struct DynamicJSONCodingKey: CodingKey {
-    let stringValue: String
-    let intValue: Int?
+    package let stringValue: String
+    package let intValue: Int?
 
-    init?(stringValue: String) {
+    package init?(stringValue: String) {
         self.stringValue = stringValue
         intValue = nil
     }
 
-    init?(intValue: Int) {
+    package init?(intValue: Int) {
         stringValue = String(intValue)
         self.intValue = intValue
     }
@@ -61,7 +75,7 @@ private struct DynamicJSONCodingKey: CodingKey {
 
 /// Bounded dynamic JSON used only at protocol extension points such as tool
 /// details. Stable gateway fields remain strongly typed.
-enum JSONValue: Codable, Hashable, Sendable {
+package enum JSONValue: Codable, Hashable, Sendable {
     case string(String)
     case number(Double)
     case bool(Bool)
@@ -69,7 +83,7 @@ enum JSONValue: Codable, Hashable, Sendable {
     case array([JSONValue])
     case null
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let limits = decoder.userInfo[.jsonValueDecodingLimits] as? JSONValueDecodingLimits ?? .gateway
         guard decoder.codingPath.count <= limits.maximumDepth else {
             throw Self.limitViolation(
@@ -158,7 +172,7 @@ enum JSONValue: Codable, Hashable, Sendable {
         self = decoded
     }
 
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .string(let value): try container.encode(value)
@@ -271,47 +285,47 @@ enum JSONValue: Codable, Hashable, Sendable {
         )
     }
 
-    var objectValue: [String: JSONValue]? {
+    package var objectValue: [String: JSONValue]? {
         guard case .object(let value) = self else { return nil }
         return value
     }
 
-    var arrayValue: [JSONValue]? {
+    package var arrayValue: [JSONValue]? {
         guard case .array(let value) = self else { return nil }
         return value
     }
 
-    var stringValue: String? {
+    package var stringValue: String? {
         guard case .string(let value) = self else { return nil }
         return value
     }
 
-    var boolValue: Bool? {
+    package var boolValue: Bool? {
         guard case .bool(let value) = self else { return nil }
         return value
     }
 
-    var intValue: Int? {
+    package var intValue: Int? {
         guard case .number(let value) = self else { return nil }
         return Int(exactly: value)
     }
 
-    static func encode<T: Encodable>(_ value: T) throws -> JSONValue {
+    package static func encode<T: Encodable>(_ value: T) throws -> JSONValue {
         try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(value))
     }
 
-    func decode<T: Decodable>(_ type: T.Type) throws -> T {
+    package func decode<T: Decodable>(_ type: T.Type) throws -> T {
         try JSONDecoder.gateway.decode(type, from: JSONEncoder.gateway.encode(self))
     }
 
-    var prettyPrinted: String {
+    package var prettyPrinted: String {
         guard let data = try? JSONEncoder.pretty.encode(self) else { return "" }
         return String(decoding: data, as: UTF8.self)
     }
 }
 
 extension JSONEncoder {
-    static var gateway: JSONEncoder {
+    package static var gateway: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
         return encoder
@@ -325,11 +339,11 @@ extension JSONEncoder {
 }
 
 extension JSONDecoder {
-    static var gateway: JSONDecoder {
+    package static var gateway: JSONDecoder {
         gateway(jsonValueLimits: .gateway)
     }
 
-    static func gateway(jsonValueLimits: JSONValueDecodingLimits) -> JSONDecoder {
+    package static func gateway(jsonValueLimits: JSONValueDecodingLimits) -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.userInfo[.jsonValueDecodingLimits] = jsonValueLimits
         return decoder

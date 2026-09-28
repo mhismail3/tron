@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 // The typed diagnostics the Gateway client reports: connection stages, RPC
 // outcomes, the failure-code classifier, and the event consumer's work window.

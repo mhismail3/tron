@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct ContentPart: Codable, Hashable, Sendable, Identifiable {
     struct Attachment: Codable, Hashable, Sendable {

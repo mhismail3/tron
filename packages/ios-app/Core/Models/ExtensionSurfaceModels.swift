@@ -1,10 +1,10 @@
 import Foundation
 
 private struct ExtensionDynamicCodingKey: CodingKey {
-    let stringValue: String
-    let intValue: Int? = nil
-    init?(stringValue: String) { self.stringValue = stringValue }
-    init?(intValue: Int) { return nil }
+    package let stringValue: String
+    package let intValue: Int? = nil
+    package init?(stringValue: String) { self.stringValue = stringValue }
+    package init?(intValue: Int) { return nil }
 }
 
 private extension KeyedDecodingContainer {
@@ -53,16 +53,16 @@ private extension KeyedDecodingContainer {
     }
 }
 
-struct ExtensionFormOption: Codable, Hashable, Sendable, Identifiable {
-    let id: String
-    let label: String
-    let description: String?
+package struct ExtensionFormOption: Codable, Hashable, Sendable, Identifiable {
+    package let id: String
+    package let label: String
+    package let description: String?
 
     private enum CodingKeys: String, CodingKey { case id, label, description }
-    init(id: String, label: String, description: String? = nil) {
+    package init(id: String, label: String, description: String? = nil) {
         self.id = id; self.label = label; self.description = description
     }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeBoundedString(forKey: .id, maximumBytes: 256)
         label = try container.decodeBoundedString(forKey: .label, maximumBytes: 2 * 1_024)
@@ -70,21 +70,21 @@ struct ExtensionFormOption: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-struct ExtensionFormQuestion: Codable, Hashable, Sendable, Identifiable {
-    let id: String
-    let header: String?
-    let question: String
-    let context: String?
-    let options: [ExtensionFormOption]
-    let multiSelect: Bool
-    let allowOther: Bool
+package struct ExtensionFormQuestion: Codable, Hashable, Sendable, Identifiable {
+    package let id: String
+    package let header: String?
+    package let question: String
+    package let context: String?
+    package let options: [ExtensionFormOption]
+    package let multiSelect: Bool
+    package let allowOther: Bool
 
     private enum CodingKeys: String, CodingKey { case id, header, question, context, options, multiSelect, allowOther }
-    init(id: String, header: String? = nil, question: String, context: String? = nil, options: [ExtensionFormOption], multiSelect: Bool, allowOther: Bool) {
+    package init(id: String, header: String? = nil, question: String, context: String? = nil, options: [ExtensionFormOption], multiSelect: Bool, allowOther: Bool) {
         self.id = id; self.header = header; self.question = question; self.context = context
         self.options = options; self.multiSelect = multiSelect; self.allowOther = allowOther
     }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeBoundedString(forKey: .id, maximumBytes: 256)
         header = try container.decodeBoundedStringIfPresent(forKey: .header, maximumBytes: 256)
@@ -96,17 +96,17 @@ struct ExtensionFormQuestion: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-struct ExtensionFormDescriptor: Codable, Hashable, Sendable {
-    let version: Int
-    let title: String
-    let questions: [ExtensionFormQuestion]
-    let allowCancel: Bool
+package struct ExtensionFormDescriptor: Codable, Hashable, Sendable {
+    package let version: Int
+    package let title: String
+    package let questions: [ExtensionFormQuestion]
+    package let allowCancel: Bool
 
     private enum CodingKeys: String, CodingKey { case version, title, questions, allowCancel }
-    init(version: Int, title: String, questions: [ExtensionFormQuestion], allowCancel: Bool) {
+    package init(version: Int, title: String, questions: [ExtensionFormQuestion], allowCancel: Bool) {
         self.version = version; self.title = title; self.questions = questions; self.allowCancel = allowCancel
     }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
         title = try container.decodeBoundedString(forKey: .title, maximumBytes: 4 * 1_024)
@@ -115,26 +115,44 @@ struct ExtensionFormDescriptor: Codable, Hashable, Sendable {
     }
 }
 
-struct ExtensionFormQuestionAnswer: Codable, Hashable, Sendable {
-    let questionId: String
-    let optionIds: [String]
-    let other: String?
+package struct ExtensionFormQuestionAnswer: Codable, Hashable, Sendable {
+    package let questionId: String
+    package let optionIds: [String]
+    package let other: String?
+    package init(
+        questionId: String,
+        optionIds: [String],
+        other: String?
+    ) {
+        self.questionId = questionId
+        self.optionIds = optionIds
+        self.other = other
+    }
+
 }
 
-struct ExtensionFormAnswer: Codable, Hashable, Sendable {
-    let version: Int
-    let answers: [ExtensionFormQuestionAnswer]
+package struct ExtensionFormAnswer: Codable, Hashable, Sendable {
+    package let version: Int
+    package let answers: [ExtensionFormQuestionAnswer]
+    package init(
+        version: Int,
+        answers: [ExtensionFormQuestionAnswer]
+    ) {
+        self.version = version
+        self.answers = answers
+    }
+
 }
 
-enum ExtensionInteractionResponsePolicy {
-    static let maximumResponseBytes = 192 * 1_024
-    static let maximumOtherBytes = 32 * 1_024
+package enum ExtensionInteractionResponsePolicy {
+    package static let maximumResponseBytes = 192 * 1_024
+    package static let maximumOtherBytes = 32 * 1_024
 
-    static func primitiveTextError(_ text: String) -> String? {
+    package static func primitiveTextError(_ text: String) -> String? {
         text.utf8.count <= maximumResponseBytes ? nil : "Response is too large (maximum 192 KiB)."
     }
 
-    static func formError(_ answer: ExtensionFormAnswer, descriptor: ExtensionFormDescriptor) -> String? {
+    package static func formError(_ answer: ExtensionFormAnswer, descriptor: ExtensionFormDescriptor) -> String? {
         guard answer.version == 1, answer.answers.count == descriptor.questions.count else {
             return "Every question needs an answer."
         }
@@ -183,30 +201,30 @@ enum ExtensionInteractionResponsePolicy {
     }
 }
 
-struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
-    enum Method: String, Codable, Sendable { case select, confirm, input, editor, form }
-    let id: String
-    let hostEpoch: String
-    let presentationRevision: Int
-    let method: Method
-    let title: String
-    let message: String?
-    let options: [String]?
-    let placeholder: String?
-    let prefill: String?
-    let expiresAt: String?
-    let form: ExtensionFormDescriptor?
-    let owner: ExtensionOwner?
-    let invocationId: String?
-    let operationId: String?
+package struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
+    package enum Method: String, Codable, Sendable { case select, confirm, input, editor, form }
+    package let id: String
+    package let hostEpoch: String
+    package let presentationRevision: Int
+    package let method: Method
+    package let title: String
+    package let message: String?
+    package let options: [String]?
+    package let placeholder: String?
+    package let prefill: String?
+    package let expiresAt: String?
+    package let form: ExtensionFormDescriptor?
+    package let owner: ExtensionOwner?
+    package let invocationId: String?
+    package let operationId: String?
 
-    init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil, form: ExtensionFormDescriptor? = nil, owner: ExtensionOwner? = nil, invocationId: String? = nil, operationId: String? = nil) {
+    package init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil, form: ExtensionFormDescriptor? = nil, owner: ExtensionOwner? = nil, invocationId: String? = nil, operationId: String? = nil) {
         self.id = id; self.hostEpoch = hostEpoch; self.presentationRevision = presentationRevision; self.method = method
         self.title = title; self.message = message; self.options = options; self.placeholder = placeholder; self.prefill = prefill; self.expiresAt = expiresAt; self.form = form
         self.owner = owner; self.invocationId = invocationId; self.operationId = operationId
     }
     private enum CodingKeys: String, CodingKey { case id, hostEpoch, presentationRevision, method, title, message, options, placeholder, prefill, expiresAt, form, owner, invocationId, operationId }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         hostEpoch = try container.decode(String.self, forKey: .hostEpoch)
@@ -233,26 +251,36 @@ struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct ExtensionOwner: Codable, Hashable, Sendable {
-    let id: String
-    let title: String
-    let source: String
+package struct ExtensionOwner: Codable, Hashable, Sendable {
+    package let id: String
+    package let title: String
+    package let source: String
+    package init(
+        id: String,
+        title: String,
+        source: String
+    ) {
+        self.id = id
+        self.title = title
+        self.source = source
+    }
+
 }
 
-struct ExtensionWidget: Codable, Hashable, Identifiable, Sendable {
-    enum Placement: String, Codable, Sendable { case aboveEditor, belowEditor }
-    let key: String
-    var revision: Int? = nil
-    let lines: [String]
-    let placement: Placement
-    let owner: ExtensionOwner?
-    var id: String { key }
+package struct ExtensionWidget: Codable, Hashable, Identifiable, Sendable {
+    package enum Placement: String, Codable, Sendable { case aboveEditor, belowEditor }
+    package let key: String
+    package var revision: Int? = nil
+    package let lines: [String]
+    package let placement: Placement
+    package let owner: ExtensionOwner?
+    package var id: String { key }
 
-    init(key: String, revision: Int? = nil, lines: [String], placement: Placement, owner: ExtensionOwner? = nil) {
+    package init(key: String, revision: Int? = nil, lines: [String], placement: Placement, owner: ExtensionOwner? = nil) {
         self.key = key; self.revision = revision; self.lines = lines; self.placement = placement; self.owner = owner
     }
     private enum CodingKeys: String, CodingKey { case key, revision, lines, placement, owner }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         key = try container.decode(String.self, forKey: .key)
         revision = try container.decodeIfPresent(Int.self, forKey: .revision)
@@ -262,50 +290,56 @@ struct ExtensionWidget: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct ExtensionPresentationDiagnostic: Codable, Hashable, Sendable {
-    var code: String
-    var message: String
+package struct ExtensionPresentationDiagnostic: Codable, Hashable, Sendable {
+    package var code: String
+    package var message: String
 }
 
-struct ExtensionSemanticState: Codable, Hashable, Sendable {
-    struct Working: Codable, Hashable, Sendable {
-        struct Indicator: Codable, Hashable, Sendable {
-            enum Kind: String, Codable, Sendable { case `default`, hidden, `static`, animated }
-            var kind: Kind
-            var frames: [String]
+package struct ExtensionSemanticState: Codable, Hashable, Sendable {
+    package struct Working: Codable, Hashable, Sendable {
+        package struct Indicator: Codable, Hashable, Sendable {
+            package enum Kind: String, Codable, Sendable { case `default`, hidden, `static`, animated }
+            package var kind: Kind
+            package var frames: [String]
             var intervalMs: Int?
 
-            init(kind: Kind, frames: [String], intervalMs: Int? = nil) {
+            package init(kind: Kind, frames: [String], intervalMs: Int? = nil) {
                 self.kind = kind; self.frames = frames; self.intervalMs = intervalMs
             }
             private enum CodingKeys: String, CodingKey { case kind, frames, intervalMs }
-            init(from decoder: Decoder) throws {
+            package init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 kind = try container.decode(Kind.self, forKey: .kind)
                 frames = try container.decodeBoundedArray(String.self, forKey: .frames, maximum: 32)
                 intervalMs = try container.decodeIfPresent(Int.self, forKey: .intervalMs)
             }
         }
-        var message: String?
-        var visible: Bool
-        var indicator: Indicator? = nil
-    }
-    var statuses: [String: String]
-    var statusOwners: [String: ExtensionOwner]
-    var working: Working
-    var hiddenThinkingLabel: String?
-    var widgets: [ExtensionWidget]
-    var title: String?
-    var toolsExpanded: Bool
-    var editorRevision: Int
-    var editorText: String
+        package var message: String?
+        package var visible: Bool
+        package var indicator: Indicator? = nil
 
-    init(statuses: [String: String], statusOwners: [String: ExtensionOwner] = [:], working: Working, hiddenThinkingLabel: String? = nil, widgets: [ExtensionWidget], title: String? = nil, toolsExpanded: Bool, editorRevision: Int, editorText: String) {
+        package init(message: String? = nil, visible: Bool, indicator: Indicator? = nil) {
+            self.message = message
+            self.visible = visible
+            self.indicator = indicator
+        }
+    }
+    package var statuses: [String: String]
+    package var statusOwners: [String: ExtensionOwner]
+    package var working: Working
+    package var hiddenThinkingLabel: String?
+    package var widgets: [ExtensionWidget]
+    package var title: String?
+    package var toolsExpanded: Bool
+    package var editorRevision: Int
+    package var editorText: String
+
+    package init(statuses: [String: String], statusOwners: [String: ExtensionOwner] = [:], working: Working, hiddenThinkingLabel: String? = nil, widgets: [ExtensionWidget], title: String? = nil, toolsExpanded: Bool, editorRevision: Int, editorText: String) {
         self.statuses = statuses; self.statusOwners = statusOwners; self.working = working; self.hiddenThinkingLabel = hiddenThinkingLabel; self.widgets = widgets
         self.title = title; self.toolsExpanded = toolsExpanded; self.editorRevision = editorRevision; self.editorText = editorText
     }
     private enum CodingKeys: String, CodingKey { case statuses, statusOwners, working, hiddenThinkingLabel, widgets, title, toolsExpanded, editorRevision, editorText }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         statuses = try container.decodeBoundedStringDictionary(forKey: .statuses, maximum: 32)
         statusOwners = try container.decodeIfPresent([String: ExtensionOwner].self, forKey: .statusOwners) ?? [:]
@@ -319,41 +353,71 @@ struct ExtensionSemanticState: Codable, Hashable, Sendable {
     }
 }
 
-struct ExtensionFrameStyle: Codable, Hashable, Sendable {
-    var bold: Bool? = nil
-    var dim: Bool? = nil
-    var italic: Bool? = nil
-    var underline: Bool? = nil
-    var inverse: Bool? = nil
-    var strike: Bool? = nil
-    var foreground: String? = nil
-    var background: String? = nil
-    var link: String? = nil
+package struct ExtensionFrameStyle: Codable, Hashable, Sendable {
+    package var bold: Bool? = nil
+    package var dim: Bool? = nil
+    package var italic: Bool? = nil
+    package var underline: Bool? = nil
+    package var inverse: Bool? = nil
+    package var strike: Bool? = nil
+    package var foreground: String? = nil
+    package var background: String? = nil
+    package var link: String? = nil
+
+    package init(
+        bold: Bool? = nil,
+        dim: Bool? = nil,
+        italic: Bool? = nil,
+        underline: Bool? = nil,
+        inverse: Bool? = nil,
+        strike: Bool? = nil,
+        foreground: String? = nil,
+        background: String? = nil,
+        link: String? = nil
+    ) {
+        self.bold = bold
+        self.dim = dim
+        self.italic = italic
+        self.underline = underline
+        self.inverse = inverse
+        self.strike = strike
+        self.foreground = foreground
+        self.background = background
+        self.link = link
+    }
 }
-struct ExtensionFrameRun: Codable, Hashable, Sendable { var text: String; var style: ExtensionFrameStyle }
-struct ExtensionFrameLine: Codable, Hashable, Sendable {
-    var plainText: String
-    var runs: [ExtensionFrameRun]
-    init(plainText: String, runs: [ExtensionFrameRun]) { self.plainText = plainText; self.runs = runs }
+package struct ExtensionFrameRun: Codable, Hashable, Sendable {
+    package var text: String
+    package var style: ExtensionFrameStyle
+
+    package init(text: String, style: ExtensionFrameStyle) {
+        self.text = text
+        self.style = style
+    }
+}
+package struct ExtensionFrameLine: Codable, Hashable, Sendable {
+    package var plainText: String
+    package var runs: [ExtensionFrameRun]
+    package init(plainText: String, runs: [ExtensionFrameRun]) { self.plainText = plainText; self.runs = runs }
     private enum CodingKeys: String, CodingKey { case plainText, runs }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         plainText = try container.decode(String.self, forKey: .plainText)
         runs = try container.decodeBoundedArray(ExtensionFrameRun.self, forKey: .runs, maximum: 4_096)
     }
 }
-struct ExtensionFrameCursor: Codable, Hashable, Sendable { var row: Int; var column: Int }
-struct ExtensionFrame: Codable, Hashable, Sendable {
-    var width: Int
-    var height: Int
-    var lines: [ExtensionFrameLine]
-    var plainText: String
-    var cursor: ExtensionFrameCursor?
-    init(width: Int, height: Int, lines: [ExtensionFrameLine], plainText: String, cursor: ExtensionFrameCursor? = nil) {
+package struct ExtensionFrameCursor: Codable, Hashable, Sendable { var row: Int; var column: Int }
+package struct ExtensionFrame: Codable, Hashable, Sendable {
+    package var width: Int
+    package var height: Int
+    package var lines: [ExtensionFrameLine]
+    package var plainText: String
+    package var cursor: ExtensionFrameCursor?
+    package init(width: Int, height: Int, lines: [ExtensionFrameLine], plainText: String, cursor: ExtensionFrameCursor? = nil) {
         self.width = width; self.height = height; self.lines = lines; self.plainText = plainText; self.cursor = cursor
     }
     private enum CodingKeys: String, CodingKey { case width, height, lines, plainText, cursor }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         width = try container.decode(Int.self, forKey: .width)
         height = try container.decode(Int.self, forKey: .height)
@@ -363,71 +427,125 @@ struct ExtensionFrame: Codable, Hashable, Sendable {
     }
 }
 
-struct ExtensionSurface: Codable, Hashable, Identifiable, Sendable {
-    enum Kind: String, Codable, Sendable {
+package struct ExtensionSurface: Codable, Hashable, Identifiable, Sendable {
+    package enum Kind: String, Codable, Sendable {
         case header, footer, widget, custom, overlay, editor, toolRenderer, messageRenderer, entryRenderer, markdown, unknown
-        init(from decoder: Decoder) throws {
+        package init(from decoder: Decoder) throws {
             let raw = try decoder.singleValueContainer().decode(String.self)
             self = Kind(rawValue: raw) ?? .unknown
         }
     }
-    enum Placement: String, Codable, Sendable { case header, footer, aboveEditor, belowEditor, transcript, overlay, fullscreen }
-    enum Lifecycle: String, Codable, Sendable { case retained, blocking, transient, restored }
-    enum InputMode: String, Codable, Sendable { case none, keys, textAndKeys }
-    struct Provenance: Codable, Hashable, Sendable { var source: String?; var path: String? }
-    let id: String
-    var kind: Kind
-    var placement: Placement
-    var lifecycle: Lifecycle
-    var targetId: String?
-    var provenance: Provenance?
-    var revision: Int
-    var focused: Bool
-    var inputMode: InputMode
-    var frame: ExtensionFrame
+    package enum Placement: String, Codable, Sendable { case header, footer, aboveEditor, belowEditor, transcript, overlay, fullscreen }
+    package enum Lifecycle: String, Codable, Sendable { case retained, blocking, transient, restored }
+    package enum InputMode: String, Codable, Sendable { case none, keys, textAndKeys }
+    package struct Provenance: Codable, Hashable, Sendable {
+        package var source: String?
+        package var path: String?
+
+        package init(source: String? = nil, path: String? = nil) {
+            self.source = source
+            self.path = path
+        }
+    }
+    package let id: String
+    package var kind: Kind
+    package var placement: Placement
+    package var lifecycle: Lifecycle
+    package var targetId: String?
+    package var provenance: Provenance?
+    package var revision: Int
+    package var focused: Bool
+    package var inputMode: InputMode
+    package var frame: ExtensionFrame
+    package init(
+        id: String,
+        kind: Kind,
+        placement: Placement,
+        lifecycle: Lifecycle,
+        targetId: String? = nil,
+        provenance: Provenance? = nil,
+        revision: Int,
+        focused: Bool,
+        inputMode: InputMode,
+        frame: ExtensionFrame
+    ) {
+        self.id = id
+        self.kind = kind
+        self.placement = placement
+        self.lifecycle = lifecycle
+        self.targetId = targetId
+        self.provenance = provenance
+        self.revision = revision
+        self.focused = focused
+        self.inputMode = inputMode
+        self.frame = frame
+    }
+
 }
 
-struct ExtensionInputLease: Codable, Hashable, Sendable {
-    var id: String
-    var connectionId: String
-    var surfaceId: String
-    var surfaceRevision: Int
-    var acquiredAt: String
+package struct ExtensionInputLease: Codable, Hashable, Sendable {
+    package var id: String
+    package var connectionId: String
+    package var surfaceId: String
+    package var surfaceRevision: Int
+    package var acquiredAt: String
+
+    package init(
+        id: String,
+        connectionId: String,
+        surfaceId: String,
+        surfaceRevision: Int,
+        acquiredAt: String
+    ) {
+        self.id = id
+        self.connectionId = connectionId
+        self.surfaceId = surfaceId
+        self.surfaceRevision = surfaceRevision
+        self.acquiredAt = acquiredAt
+    }
 }
 
-struct ExtensionPresentationState: Codable, Hashable, Sendable {
-    struct Projection: Codable, Hashable, Sendable {
-        struct OmittedSurface: Codable, Hashable, Sendable { var id: String; var revision: Int }
-        var complete: Bool
-        var omitted: [String]
-        var omittedSurfaces: [OmittedSurface]?
-        init(complete: Bool, omitted: [String], omittedSurfaces: [OmittedSurface]? = nil) {
+package struct ExtensionPresentationState: Codable, Hashable, Sendable {
+    package struct Projection: Codable, Hashable, Sendable {
+        package struct OmittedSurface: Codable, Hashable, Sendable {
+            package var id: String
+            package var revision: Int
+
+            package init(id: String, revision: Int) {
+                self.id = id
+                self.revision = revision
+            }
+        }
+        package var complete: Bool
+        package var omitted: [String]
+        package var omittedSurfaces: [OmittedSurface]?
+        package init(complete: Bool, omitted: [String], omittedSurfaces: [OmittedSurface]? = nil) {
             self.complete = complete; self.omitted = omitted; self.omittedSurfaces = omittedSurfaces
         }
         private enum CodingKeys: String, CodingKey { case complete, omitted, omittedSurfaces }
-        init(from decoder: Decoder) throws {
+        package init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             complete = try container.decode(Bool.self, forKey: .complete)
             omitted = try container.decodeBoundedArray(String.self, forKey: .omitted, maximum: 16)
             omittedSurfaces = try container.decodeBoundedArrayIfPresent(OmittedSurface.self, forKey: .omittedSurfaces, maximum: 64)
         }
     }
-    var version: Int
-    var hostEpoch: String
-    var revision: Int
-    var capabilities: [String]
-    var diagnostics: [ExtensionPresentationDiagnostic]
-    var semanticState: ExtensionSemanticState
-    var surfaces: [ExtensionSurface]
-    var pendingInteractions: [ExtensionInteraction]
-    var inputLease: ExtensionInputLease?
-    var projection: Projection?
-    init(version: Int, hostEpoch: String, revision: Int, capabilities: [String], diagnostics: [ExtensionPresentationDiagnostic], semanticState: ExtensionSemanticState, surfaces: [ExtensionSurface], pendingInteractions: [ExtensionInteraction], inputLease: ExtensionInputLease? = nil, projection: Projection? = nil) {
+    package var version: Int
+    package var hostEpoch: String
+    package var revision: Int
+    package var capabilities: [String]
+    package var diagnostics: [ExtensionPresentationDiagnostic]
+    package var semanticState: ExtensionSemanticState
+    package var surfaces: [ExtensionSurface]
+    package var pendingInteractions: [ExtensionInteraction]
+    package var inputLease: ExtensionInputLease?
+    package var projection: Projection?
+    package init(version: Int, hostEpoch: String, revision: Int, capabilities: [String], diagnostics: [ExtensionPresentationDiagnostic], semanticState: ExtensionSemanticState, surfaces: [ExtensionSurface], pendingInteractions: [ExtensionInteraction], inputLease: ExtensionInputLease? = nil, projection: Projection? = nil) {
         self.version = version; self.hostEpoch = hostEpoch; self.revision = revision; self.capabilities = capabilities; self.diagnostics = diagnostics
         self.semanticState = semanticState; self.surfaces = surfaces; self.pendingInteractions = pendingInteractions; self.inputLease = inputLease; self.projection = projection
     }
     private enum CodingKeys: String, CodingKey { case version, hostEpoch, revision, capabilities, diagnostics, semanticState, surfaces, pendingInteractions, inputLease, projection }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
         hostEpoch = try container.decode(String.self, forKey: .hostEpoch)
@@ -442,25 +560,25 @@ struct ExtensionPresentationState: Codable, Hashable, Sendable {
     }
 }
 
-struct ExtensionSemanticPatch: Codable, Hashable, Sendable {
-    var statuses: [String: String]?
-    var statusOwners: [String: ExtensionOwner]?
-    var working: ExtensionSemanticState.Working?
-    var hiddenThinkingLabel: JSONValue?
-    var widgets: [ExtensionWidget]?
-    var title: JSONValue?
-    var toolsExpanded: Bool?
-    var editorRevision: Int?
-    var editorText: String?
-    var editorAction: String?
-    var editorDelta: String?
-    var editorOperationId: String?
+package struct ExtensionSemanticPatch: Codable, Hashable, Sendable {
+    package var statuses: [String: String]?
+    package var statusOwners: [String: ExtensionOwner]?
+    package var working: ExtensionSemanticState.Working?
+    package var hiddenThinkingLabel: JSONValue?
+    package var widgets: [ExtensionWidget]?
+    package var title: JSONValue?
+    package var toolsExpanded: Bool?
+    package var editorRevision: Int?
+    package var editorText: String?
+    package var editorAction: String?
+    package var editorDelta: String?
+    package var editorOperationId: String?
 
     private enum CodingKeys: String, CodingKey {
         case statuses, statusOwners, working, hiddenThinkingLabel, widgets, title, toolsExpanded
         case editorRevision, editorText, editorAction, editorDelta, editorOperationId
     }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         statuses = try container.decodeBoundedStringDictionaryIfPresent(forKey: .statuses, maximum: 32)
         statusOwners = try container.decodeIfPresent([String: ExtensionOwner].self, forKey: .statusOwners)
@@ -476,7 +594,7 @@ struct ExtensionSemanticPatch: Codable, Hashable, Sendable {
         editorDelta = try container.decodeIfPresent(String.self, forKey: .editorDelta)
         editorOperationId = try container.decodeIfPresent(String.self, forKey: .editorOperationId)
     }
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(statuses, forKey: .statuses)
         try container.encodeIfPresent(statusOwners, forKey: .statusOwners)
@@ -493,24 +611,24 @@ struct ExtensionSemanticPatch: Codable, Hashable, Sendable {
     }
 }
 
-struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
-    var version: Int
-    var hostEpoch: String
-    var revision: Int
-    var semantic: ExtensionSemanticPatch?
-    var interactionList: [ExtensionInteraction]?
-    var surfaceUpserts: [ExtensionSurface]?
-    var surfaceRemovals: [String]?
-    var inputLease: JSONValue?
-    var inputLeasePresent: Bool
-    var capabilities: [String]?
-    var diagnostics: [ExtensionPresentationDiagnostic]?
+package struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
+    package var version: Int
+    package var hostEpoch: String
+    package var revision: Int
+    package var semantic: ExtensionSemanticPatch?
+    package var interactionList: [ExtensionInteraction]?
+    package var surfaceUpserts: [ExtensionSurface]?
+    package var surfaceRemovals: [String]?
+    package var inputLease: JSONValue?
+    package var inputLeasePresent: Bool
+    package var capabilities: [String]?
+    package var diagnostics: [ExtensionPresentationDiagnostic]?
 
     private enum CodingKeys: String, CodingKey {
         case version, hostEpoch, revision, semantic, interactionList, surfaceUpserts
         case surfaceRemovals, inputLease, capabilities, diagnostics
     }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
         hostEpoch = try container.decode(String.self, forKey: .hostEpoch)
@@ -524,7 +642,7 @@ struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
         capabilities = try container.decodeBoundedArrayIfPresent(String.self, forKey: .capabilities, maximum: 128)
         diagnostics = try container.decodeBoundedArrayIfPresent(ExtensionPresentationDiagnostic.self, forKey: .diagnostics, maximum: 64)
     }
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(version, forKey: .version)
         try container.encode(hostEpoch, forKey: .hostEpoch)
@@ -539,18 +657,18 @@ struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
     }
 }
 
-enum ExtensionPresentationPolicy {
+package enum ExtensionPresentationPolicy {
     static let maximumSurfaces = 64
     private static let maximumLeaseIDBytes = 512
     // JSON numbers admitted by the Gateway must remain exactly representable.
     private static let maximumSafeRevision = 9_007_199_254_740_991
     static let maximumColumns = 160
-    static let maximumLines = 120
+    package static let maximumLines = 120
     static let maximumRuns = 4_096
-    static let maximumFrameBytes = 256 * 1_024
+    package static let maximumFrameBytes = 256 * 1_024
     static let maximumPresentationBytes = 700 * 1_024
 
-    static func admit(_ state: ExtensionPresentationState) -> Bool {
+    package static func admit(_ state: ExtensionPresentationState) -> Bool {
         guard state.version == 3,
               !state.hostEpoch.isEmpty,
               state.revision >= 0, state.revision <= maximumSafeRevision,
@@ -578,7 +696,7 @@ enum ExtensionPresentationPolicy {
         return true
     }
 
-    static func admit(_ mutation: ExtensionPresentationMutation) -> Bool {
+    package static func admit(_ mutation: ExtensionPresentationMutation) -> Bool {
         guard mutation.version == 3, !mutation.hostEpoch.isEmpty,
               mutation.revision > 0, mutation.revision <= maximumSafeRevision,
               (mutation.surfaceUpserts ?? []).count <= maximumSurfaces,
@@ -679,7 +797,7 @@ enum ExtensionPresentationPolicy {
         }
     }
 
-    static func admit(_ surface: ExtensionSurface) -> Bool {
+    package static func admit(_ surface: ExtensionSurface) -> Bool {
         let runs = surface.frame.lines.reduce(0) { $0 + $1.runs.count }
         guard !surface.id.isEmpty, boundedSafe(surface.id, 512), surface.revision > 0,
               surface.revision <= maximumSafeRevision,

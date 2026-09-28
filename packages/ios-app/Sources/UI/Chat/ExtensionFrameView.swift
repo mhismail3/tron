@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Resolves one admitted extension frame run into native attributes. Styles are
 /// applied from the sanitized wire fields; colors pass through the contrast

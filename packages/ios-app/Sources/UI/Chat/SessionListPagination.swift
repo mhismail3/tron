@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// A dashboard workspace section with the sessions already ordered for display.
 /// The gateway catalog remains canonical; this is only a lightweight UI grouping.

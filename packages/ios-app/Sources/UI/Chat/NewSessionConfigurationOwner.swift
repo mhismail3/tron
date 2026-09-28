@@ -1,3 +1,4 @@
+import TronMobileCore
 struct NewSessionConfigurationLoadID: Hashable {
     let profileID: String?
     let workspace: String

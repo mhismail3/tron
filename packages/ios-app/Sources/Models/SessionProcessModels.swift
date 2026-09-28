@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 enum SessionProcessKind: String, Codable, CaseIterable, Sendable { case command, subagent }
 

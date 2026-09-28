@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-enum PerformanceOperation: CaseIterable, Sendable {
+package enum PerformanceOperation: CaseIterable, Sendable {
     case gatewayConnect
     case sessionOpen
     case sessionSync
@@ -18,35 +18,35 @@ enum PerformanceOperation: CaseIterable, Sendable {
     case configurationSliderCollapse
 }
 
-enum PerformanceResult: Int, Sendable {
+package enum PerformanceResult: Int, Sendable {
     case success = 0
     case failure = 1
     case cancelled = 2
     case discarded = 3
 
-    static func forFailure(_ error: Error) -> PerformanceResult {
+    package static func forFailure(_ error: Error) -> PerformanceResult {
         Task.isCancelled || error is CancellationError ? .cancelled : .failure
     }
 }
 
-struct PerformanceMetrics: Equatable, Sendable {
-    let itemCount: Int
-    let byteCount: Int
+package struct PerformanceMetrics: Equatable, Sendable {
+    package let itemCount: Int
+    package let byteCount: Int
 
-    init(itemCount: Int = 0, byteCount: Int = 0) {
+    package init(itemCount: Int = 0, byteCount: Int = 0) {
         self.itemCount = max(0, itemCount)
         self.byteCount = max(0, byteCount)
     }
 
-    static let none = PerformanceMetrics()
+    package static let none = PerformanceMetrics()
 }
 
-struct PerformanceInterval: Sendable {
-    let operation: PerformanceOperation
-    let state: OSSignpostIntervalState?
-    let measuredStart: ContinuousClock.Instant?
+package struct PerformanceInterval: Sendable {
+    package let operation: PerformanceOperation
+    package let state: OSSignpostIntervalState?
+    package let measuredStart: ContinuousClock.Instant?
 
-    init(
+    package init(
         operation: PerformanceOperation,
         state: OSSignpostIntervalState? = nil,
         measuredStart: ContinuousClock.Instant? = nil
@@ -57,7 +57,7 @@ struct PerformanceInterval: Sendable {
     }
 }
 
-protocol PerformanceSignposting: Sendable {
+package protocol PerformanceSignposting: Sendable {
     func begin(_ operation: PerformanceOperation) -> PerformanceInterval
     func end(
         _ interval: PerformanceInterval,
@@ -66,8 +66,8 @@ protocol PerformanceSignposting: Sendable {
     )
 }
 
-struct SystemPerformanceSignposts: PerformanceSignposting {
-    static let shared = SystemPerformanceSignposts()
+package struct SystemPerformanceSignposts: PerformanceSignposting {
+    package static let shared = SystemPerformanceSignposts()
 
     private let gateway = OSSignposter(subsystem: "com.tron.mobile", category: "Gateway")
     private let sessions = OSSignposter(subsystem: "com.tron.mobile", category: "Sessions")
@@ -75,7 +75,7 @@ struct SystemPerformanceSignposts: PerformanceSignposting {
     private let chat = OSSignposter(subsystem: "com.tron.mobile", category: "Chat")
     private let terminal = OSSignposter(subsystem: "com.tron.mobile", category: "Terminal")
 
-    func begin(_ operation: PerformanceOperation) -> PerformanceInterval {
+    package func begin(_ operation: PerformanceOperation) -> PerformanceInterval {
         let signposter = signposter(for: operation)
         guard signposter.isEnabled else { return PerformanceInterval(operation: operation) }
         let id = signposter.makeSignpostID()
@@ -113,7 +113,7 @@ struct SystemPerformanceSignposts: PerformanceSignposting {
         return PerformanceInterval(operation: operation, state: state)
     }
 
-    func end(
+    package func end(
         _ interval: PerformanceInterval,
         result: PerformanceResult,
         metrics: PerformanceMetrics = .none

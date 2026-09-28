@@ -1,17 +1,17 @@
 import Foundation
 
-enum DisplaySurface: String, Codable, Hashable, Sendable {
+package enum DisplaySurface: String, Codable, Hashable, Sendable {
     case sheet
     case inline
     case floating
 }
 
-enum DisplayInlineTapAction: String, Codable, Hashable, Sendable {
+package enum DisplayInlineTapAction: String, Codable, Hashable, Sendable {
     case sheet
     case none
 }
 
-enum DisplayKind: String, Codable, Hashable, Sendable {
+package enum DisplayKind: String, Codable, Hashable, Sendable {
     case image
     case markdown
     case text
@@ -26,9 +26,9 @@ enum DisplayKind: String, Codable, Hashable, Sendable {
     case browserLive = "browser_live"
     case nativeLive = "native_live"
 
-    var isLive: Bool { liveViewSchema != nil }
+    package var isLive: Bool { liveViewSchema != nil }
 
-    var liveViewSchema: String? {
+    package var liveViewSchema: String? {
         switch self {
         case .browserLive: "tron.browser-live-view.v1"
         case .nativeLive: "tron.native-live-view.v1"
@@ -36,7 +36,7 @@ enum DisplayKind: String, Codable, Hashable, Sendable {
         }
     }
 
-    var liveViewCapability: String? {
+    package var liveViewCapability: String? {
         switch self {
         case .browserLive: "browser-live-view.v1"
         case .nativeLive: "native-live-view.v1"
@@ -45,19 +45,32 @@ enum DisplayKind: String, Codable, Hashable, Sendable {
     }
 }
 
-struct DisplayPresentationPreference: Codable, Hashable, Sendable {
-    let requestedSurface: DisplaySurface
-    let inlineTapAction: DisplayInlineTapAction
+package struct DisplayPresentationPreference: Codable, Hashable, Sendable {
+    package let requestedSurface: DisplaySurface
+    package let inlineTapAction: DisplayInlineTapAction
+
+    package init(requestedSurface: DisplaySurface, inlineTapAction: DisplayInlineTapAction) {
+        self.requestedSurface = requestedSurface
+        self.inlineTapAction = inlineTapAction
+    }
 }
 
-struct LiveViewDescriptor: Codable, Hashable, Sendable {
-    let schema: String
-    let viewId: String
-    let generation: String
-    let title: String
-    let fallbackText: String
+package struct LiveViewDescriptor: Codable, Hashable, Sendable {
+    package let schema: String
+    package let viewId: String
+    package let generation: String
+    package let title: String
+    package let fallbackText: String
 
-    var isValid: Bool {
+    package init(schema: String, viewId: String, generation: String, title: String, fallbackText: String) {
+        self.schema = schema
+        self.viewId = viewId
+        self.generation = generation
+        self.title = title
+        self.fallbackText = fallbackText
+    }
+
+    package var isValid: Bool {
         func bounded(_ value: String, _ maximum: Int) -> Bool {
             !value.isEmpty && value.utf8.count <= maximum
                 && !value.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f }
@@ -68,34 +81,42 @@ struct LiveViewDescriptor: Codable, Hashable, Sendable {
     }
 }
 
-struct DisplayArtifactDescriptor: Codable, Hashable, Sendable {
-    let id: String
-    let name: String
-    let mimeType: String
-    let size: Int
-    let kind: DisplayKind
+package struct DisplayArtifactDescriptor: Codable, Hashable, Sendable {
+    package let id: String
+    package let name: String
+    package let mimeType: String
+    package let size: Int
+    package let kind: DisplayKind
+
+    package init(id: String, name: String, mimeType: String, size: Int, kind: DisplayKind) {
+        self.id = id
+        self.name = name
+        self.mimeType = mimeType
+        self.size = size
+        self.kind = kind
+    }
 }
 
-struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
-    let schema: String
-    let displayId: String
-    let revision: Int
-    let title: String
-    let caption: String?
-    let altText: String
-    let kind: DisplayKind
-    let presentation: DisplayPresentationPreference
-    let eligibleSurfaces: [DisplaySurface]
-    let fallbackText: String
-    let artifact: DisplayArtifactDescriptor?
-    let remoteURL: String?
-    let liveView: LiveViewDescriptor?
+package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
+    package let schema: String
+    package let displayId: String
+    package let revision: Int
+    package let title: String
+    package let caption: String?
+    package let altText: String
+    package let kind: DisplayKind
+    package let presentation: DisplayPresentationPreference
+    package let eligibleSurfaces: [DisplaySurface]
+    package let fallbackText: String
+    package let artifact: DisplayArtifactDescriptor?
+    package let remoteURL: String?
+    package let liveView: LiveViewDescriptor?
 
-    var id: String { displayId }
+    package var id: String { displayId }
 
     /// Tool calls are chat identities; exact producer/view generations own live
     /// presentation. Later actions cannot reopen a manually dismissed window.
-    var presentationIdentity: String {
+    package var presentationIdentity: String {
         if let liveView {
             let producer = kind == .nativeLive ? "native" : "browser"
             return "\(producer):\(liveView.viewId):\(liveView.generation)"
@@ -109,7 +130,7 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
     }
 
     #if HOSTED_TEST
-    init(
+    package init(
         schema: String = "tron.display.v1",
         displayId: String,
         revision: Int = 1,
@@ -140,7 +161,7 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
     }
     #endif
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         schema = try values.decode(String.self, forKey: .schema)
         displayId = try values.decode(String.self, forKey: .displayId)
@@ -213,10 +234,14 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-struct DisplayFloatingCompletionTracker: Equatable, Sendable {
-    private(set) var baseline: [DisplayProjection]?
+package struct DisplayFloatingCompletionTracker: Equatable, Sendable {
+    package private(set) var baseline: [DisplayProjection]?
 
-    mutating func transition(
+    package init(baseline: [DisplayProjection]? = nil) {
+        self.baseline = baseline
+    }
+
+    package mutating func transition(
         to current: [DisplayProjection]?
     ) -> (previous: [DisplayProjection], current: [DisplayProjection])? {
         guard let current else {
@@ -232,14 +257,14 @@ struct DisplayFloatingCompletionTracker: Equatable, Sendable {
     }
 }
 
-enum DisplayFloatingAdmission: Equatable, Sendable {
+package enum DisplayFloatingAdmission: Equatable, Sendable {
     case none
     case deferred(DisplayProjection)
     case present(DisplayProjection)
 }
 
-enum DisplayFloatingAdmissionPolicy {
-    static func admission(
+package enum DisplayFloatingAdmissionPolicy {
+    package static func admission(
         previous: [DisplayProjection],
         current: [DisplayProjection],
         sceneActive: Bool,
@@ -260,11 +285,11 @@ enum DisplayFloatingAdmissionPolicy {
     }
 }
 
-enum DisplayPresentationPolicy {
+package enum DisplayPresentationPolicy {
     static let maximumArtifactBytes = 2 * 1_024 * 1_024 * 1_024
-    static let maximumEmbeddedMediaBytes = 50 * 1_024 * 1_024
+    package static let maximumEmbeddedMediaBytes = 50 * 1_024 * 1_024
 
-    static func eligibleSurfaces(
+    package static func eligibleSurfaces(
         for kind: DisplayKind,
         artifactSize: Int? = nil
     ) -> [DisplaySurface] {
@@ -288,7 +313,7 @@ enum DisplayPresentationPolicy {
         }
     }
 
-    static func effectiveSurface(for display: DisplayProjection) -> DisplaySurface {
+    package static func effectiveSurface(for display: DisplayProjection) -> DisplaySurface {
         display.eligibleSurfaces.contains(display.presentation.requestedSurface)
             ? display.presentation.requestedSurface
             : .sheet
@@ -297,7 +322,7 @@ enum DisplayPresentationPolicy {
     /// Large local media remains ineligible for automatic inline/floating
     /// presentation, but an explicit tap on a requested floating result is
     /// sufficient user intent to begin bounded file staging in the panel.
-    static func activationSurface(for display: DisplayProjection) -> DisplaySurface {
+    package static func activationSurface(for display: DisplayProjection) -> DisplaySurface {
         // Live tool taps reopen the small window; its expand control owns the
         // sheet route, including for retained descriptors created as sheets.
         if display.kind.isLive { return .floating }
@@ -309,7 +334,7 @@ enum DisplayPresentationPolicy {
         return effectiveSurface(for: display)
     }
 
-    static func invocationSurface(toolName: String?, request: JSONValue?) -> DisplaySurface? {
+    package static func invocationSurface(toolName: String?, request: JSONValue?) -> DisplaySurface? {
         guard toolName == "display", let object = request?.objectValue else { return nil }
         guard let presentation = object["presentation"]?.objectValue,
               let raw = presentation["surface"]?.stringValue else {
@@ -321,8 +346,8 @@ enum DisplayPresentationPolicy {
     }
 }
 
-enum DisplayRemoteURLPolicy {
-    static func admits(_ value: String) -> Bool {
+package enum DisplayRemoteURLPolicy {
+    package static func admits(_ value: String) -> Bool {
         guard value.utf8.count >= 1, value.utf8.count <= 8_192,
               let url = URL(string: value),
               url.scheme?.lowercased() == "https",

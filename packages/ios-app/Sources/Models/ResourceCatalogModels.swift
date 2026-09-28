@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Where an available resource comes from, derived by the Gateway from Pi
 /// sourceInfo. Pi built-ins carry no distribution, and `origin` keeps Pi's own

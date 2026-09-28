@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import TronMobileCore
 import XCTest
 @testable import TronMobile
 

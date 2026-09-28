@@ -1,25 +1,25 @@
 import Foundation
 
-enum SessionPhase: String, Codable, Hashable, Sendable {
+package enum SessionPhase: String, Codable, Hashable, Sendable {
     case idle, running, compacting, retrying, interrupted
 
-    var isActive: Bool { self == .running || self == .compacting || self == .retrying }
+    package var isActive: Bool { self == .running || self == .compacting || self == .retrying }
 }
 
-struct SessionCreationOrigin: Codable, Hashable, Sendable {
-    enum Kind: String, Codable, Hashable, Sendable { case automation }
+package struct SessionCreationOrigin: Codable, Hashable, Sendable {
+    package enum Kind: String, Codable, Hashable, Sendable { case automation }
 
-    let kind: Kind
-    let automationId: String
+    package let kind: Kind
+    package let automationId: String
 
-    init(kind: Kind, automationId: String) {
+    package init(kind: Kind, automationId: String) {
         self.kind = kind
         self.automationId = automationId
     }
 
     private enum CodingKeys: String, CodingKey { case kind, automationId }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         kind = try container.decode(Kind.self, forKey: .kind)
         automationId = try container.decode(String.self, forKey: .automationId)
@@ -41,52 +41,52 @@ struct SessionCreationOrigin: Codable, Hashable, Sendable {
 
 /// Gateway contract that owns archived-session display state. Archive controls
 /// stay hidden for a profile that does not advertise it.
-enum SessionArchiveCapability {
-    static let name = "session-archive.v1"
+package enum SessionArchiveCapability {
+    package static let name = "session-archive.v1"
 }
 
 /// Authoritative `session.archive.set` response. Archive membership is
 /// Gateway-owned display state; iOS never derives it from a local row.
-struct SessionArchiveState: Codable, Sendable {
-    let archived: Bool
-    let archivedAt: String?
+package struct SessionArchiveState: Codable, Sendable {
+    package let archived: Bool
+    package let archivedAt: String?
 }
 
-struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
-    enum Kind: String, Codable, Hashable, Sendable { case user, subagent }
+package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
+    package enum Kind: String, Codable, Hashable, Sendable { case user, subagent }
 
-    let id: String
-    let name: String?
-    let cwd: String
-    let kind: Kind
-    let parentSessionId: String?
-    let creationOrigin: SessionCreationOrigin?
-    let createdAt: String
-    let updatedAt: String
+    package let id: String
+    package let name: String?
+    package let cwd: String
+    package let kind: Kind
+    package let parentSessionId: String?
+    package let creationOrigin: SessionCreationOrigin?
+    package let createdAt: String
+    package let updatedAt: String
     /// Stable Gateway-observed start of the current active dashboard period.
-    let activeSince: String?
-    let messageCount: Int
-    let firstMessage: String
-    let phase: SessionPhase
+    package let activeSince: String?
+    package let messageCount: Int
+    package let firstMessage: String
+    package let phase: SessionPhase
     /// Narrow foreground phase. A settled value while `phase` remains active
     /// means detached subagents are the only remaining dashboard work.
-    let foregroundPhase: SessionPhase?
-    let hasActiveSubagents: Bool
+    package let foregroundPhase: SessionPhase?
+    package let hasActiveSubagents: Bool
     /// Gateway truth that a semantic interaction is awaiting a user response.
-    let waitingForUser: Bool
-    let summaryRevision: Int?
-    let completionRevision: Int
-    let attentionRevision: Int
-    let isUnread: Bool
+    package let waitingForUser: Bool
+    package let summaryRevision: Int?
+    package let completionRevision: Int
+    package let attentionRevision: Int
+    package let isUnread: Bool
     /// Set only on a row from the Gateway's `archived: "only"` projection. The
     /// dashboard's default list projection omits archived sessions entirely, so
     /// a row carrying this field can never come from the dashboard read.
-    let archivedAt: String?
+    package let archivedAt: String?
     /// Dashboard-only ownership metadata. Gateway payloads omit these fields.
-    let gatewayProfileID: String?
-    let gatewayProfileLabel: String?
+    package let gatewayProfileID: String?
+    package let gatewayProfileLabel: String?
 
-    init(
+    package init(
         id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
         creationOrigin: SessionCreationOrigin? = nil,
         createdAt: String, updatedAt: String, activeSince: String? = nil, messageCount: Int,
@@ -125,7 +125,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         case completionRevision, attentionRevision, isUnread, archivedAt
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name)
@@ -159,7 +159,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         gatewayProfileLabel = nil
     }
 
-    func withGatewaySource(id profileID: String, label: String) -> SessionSummary {
+    package func withGatewaySource(id profileID: String, label: String) -> SessionSummary {
         SessionSummary(
             id: id,
             name: name,
@@ -186,34 +186,34 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         )
     }
 
-    var isArchived: Bool { archivedAt != nil }
+    package var isArchived: Bool { archivedAt != nil }
 
-    var dashboardID: String {
+    package var dashboardID: String {
         gatewayProfileID.map { "\($0):\(id)" } ?? id
     }
 
-    var hasOnlyActiveSubagents: Bool {
+    package var hasOnlyActiveSubagents: Bool {
         phase.isActive && hasActiveSubagents && foregroundPhase == .idle
     }
 
-    var isFork: Bool { parentSessionId != nil }
-    var isAutomationCreated: Bool { creationOrigin?.kind == .automation }
+    package var isFork: Bool { parentSessionId != nil }
+    package var isAutomationCreated: Bool { creationOrigin?.kind == .automation }
 
-    var title: String {
+    package var title: String {
         if let name, !name.isEmpty { return name }
         let first = firstMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         return first.isEmpty ? "New session" : String(first.prefix(80))
     }
 
-    var workspaceName: String {
+    package var workspaceName: String {
         URL(fileURLWithPath: cwd).lastPathComponent.isEmpty ? cwd : URL(fileURLWithPath: cwd).lastPathComponent
     }
 
-    static func dashboardSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
+    package static func dashboardSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
         sessions.filter { $0.kind == .user }
     }
 
-    static func orderedForDashboard(_ sessions: [SessionSummary]) -> [SessionSummary] {
+    package static func orderedForDashboard(_ sessions: [SessionSummary]) -> [SessionSummary] {
         sessions
             .map { summary in
                 let orderingTimestamp = summary.phase.isActive ? summary.activeSince : summary.updatedAt
@@ -243,12 +243,12 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct SessionAttentionProjection: Codable, Hashable, Sendable {
-    let completionRevision: Int
-    let attentionRevision: Int
-    let isUnread: Bool
+package struct SessionAttentionProjection: Codable, Hashable, Sendable {
+    package let completionRevision: Int
+    package let attentionRevision: Int
+    package let isUnread: Bool
 
-    init(completionRevision: Int, attentionRevision: Int, isUnread: Bool) {
+    package init(completionRevision: Int, attentionRevision: Int, isUnread: Bool) {
         self.completionRevision = completionRevision
         self.attentionRevision = attentionRevision
         self.isUnread = isUnread
@@ -258,7 +258,7 @@ struct SessionAttentionProjection: Codable, Hashable, Sendable {
         case completionRevision, attentionRevision, isUnread
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let completion = try container.decode(Int.self, forKey: .completionRevision)
         let attention = try container.decode(Int.self, forKey: .attentionRevision)
@@ -275,24 +275,24 @@ struct SessionAttentionProjection: Codable, Hashable, Sendable {
     }
 }
 
-struct SessionSummaryUpdate: Codable, Hashable, Sendable {
-    let sessionId: String
-    let summaryRevision: Int
-    let phase: SessionPhase
-    let foregroundPhase: SessionPhase?
-    let hasActiveSubagents: Bool
+package struct SessionSummaryUpdate: Codable, Hashable, Sendable {
+    package let sessionId: String
+    package let summaryRevision: Int
+    package let phase: SessionPhase
+    package let foregroundPhase: SessionPhase?
+    package let hasActiveSubagents: Bool
     /// Gateway truth that a semantic interaction is awaiting a user response.
-    let waitingForUser: Bool
-    let name: String?
-    let updatedAt: String
-    let activeSince: String?
-    let messageCount: Int
-    let firstMessage: String
-    let completionRevision: Int
-    let attentionRevision: Int
-    let isUnread: Bool
+    package let waitingForUser: Bool
+    package let name: String?
+    package let updatedAt: String
+    package let activeSince: String?
+    package let messageCount: Int
+    package let firstMessage: String
+    package let completionRevision: Int
+    package let attentionRevision: Int
+    package let isUnread: Bool
 
-    init(
+    package init(
         sessionId: String, summaryRevision: Int, phase: SessionPhase,
         foregroundPhase: SessionPhase? = nil, hasActiveSubagents: Bool = false,
         waitingForUser: Bool = false, name: String?, updatedAt: String, activeSince: String? = nil,
@@ -320,7 +320,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
         case completionRevision, attentionRevision, isUnread
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         sessionId = try container.decode(String.self, forKey: .sessionId)
         summaryRevision = try container.decode(Int.self, forKey: .summaryRevision)

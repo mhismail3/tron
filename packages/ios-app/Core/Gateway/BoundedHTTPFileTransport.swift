@@ -1,15 +1,27 @@
 import Foundation
 
-struct BoundedHTTPDownloadedFile: Sendable {
-    let url: URL
-    let response: HTTPURLResponse
-    let byteCount: Int64
+package struct BoundedHTTPDownloadedFile: Sendable {
+    package let url: URL
+    package let response: HTTPURLResponse
+    package let byteCount: Int64
+
+    package init(url: URL, response: HTTPURLResponse, byteCount: Int64) {
+        self.url = url
+        self.response = response
+        self.byteCount = byteCount
+    }
 }
 
-struct BoundedHTTPFileTransport: Sendable {
+package struct BoundedHTTPFileTransport: Sendable {
     let downloadForRequest: @Sendable (URLRequest, Int) async throws -> BoundedHTTPDownloadedFile
 
-    func download(
+    package init(
+        downloadForRequest: @escaping @Sendable (URLRequest, Int) async throws -> BoundedHTTPDownloadedFile
+    ) {
+        self.downloadForRequest = downloadForRequest
+    }
+
+    package func download(
         for request: URLRequest,
         maximumBytes: Int
     ) async throws -> BoundedHTTPDownloadedFile {
@@ -17,9 +29,9 @@ struct BoundedHTTPFileTransport: Sendable {
         return try await downloadForRequest(request, maximumBytes)
     }
 
-    static let urlSession = urlSession(configuration: .ephemeral)
+    package static let urlSession = urlSession(configuration: .ephemeral)
 
-    static func urlSession(configuration: URLSessionConfiguration) -> BoundedHTTPFileTransport {
+    package static func urlSession(configuration: URLSessionConfiguration) -> BoundedHTTPFileTransport {
         let sessions = BoundedHTTPFileSessions(configuration: configuration)
         return BoundedHTTPFileTransport { request, maximumBytes in
             try await BoundedURLSessionFileLoader.load(
@@ -34,21 +46,21 @@ struct BoundedHTTPFileTransport: Sendable {
 /// The sessions one bounded file transport configuration runs on (see
 /// `BoundedHTTPReadSession`).
 struct BoundedHTTPFileSessions: Sendable {
-    let configuration: URLSessionConfiguration
+    package let configuration: URLSessionConfiguration
     let readSession: URLSession
 
     /// Fresh sessions made from one configuration object share its cookie
     /// storage and cache, and a configuration copy keeps those same storage
     /// objects, so the shared read session sees exactly what a fresh one
     /// would. Downloads are never answered from the cache.
-    init(configuration: URLSessionConfiguration) {
+    package init(configuration: URLSessionConfiguration) {
         self.configuration = configuration
         readSession = URLSession(configuration: BoundedHTTPReadSession.configured(configuration))
     }
 }
 
-final class BoundedHTTPFileStaging: @unchecked Sendable {
-    static let shared = BoundedHTTPFileStaging()
+package final class BoundedHTTPFileStaging: @unchecked Sendable {
+    package static let shared = BoundedHTTPFileStaging()
 
     private let lock = NSLock()
     private let maximumFiles: Int
@@ -58,7 +70,7 @@ final class BoundedHTTPFileStaging: @unchecked Sendable {
     private var active: [URL: Int64] = [:]
     private let root: URL
 
-    init(
+    package init(
         root: URL = FileManager.default.temporaryDirectory.appending(
             path: "TronHTTPDownloads",
             directoryHint: .isDirectory
@@ -76,7 +88,7 @@ final class BoundedHTTPFileStaging: @unchecked Sendable {
         self.maximumAge = maximumAge
     }
 
-    func reserveDestination(incomingBytes: Int64 = 0, now: Date = Date()) throws -> URL {
+    package func reserveDestination(incomingBytes: Int64 = 0, now: Date = Date()) throws -> URL {
         lock.lock()
         defer { lock.unlock() }
         guard incomingBytes >= 0, incomingBytes <= maximumTotalBytes else {
@@ -161,7 +173,7 @@ final class BoundedHTTPFileStaging: @unchecked Sendable {
         return overflow || increment < 0 || sum > limit
     }
 
-    func discard(_ url: URL) {
+    package func discard(_ url: URL) {
         lock.lock()
         active.removeValue(forKey: url)
         lock.unlock()
@@ -169,21 +181,21 @@ final class BoundedHTTPFileStaging: @unchecked Sendable {
     }
 }
 
-struct BoundedHTTPFileAdmission {
-    let maximumBytes: Int64
+package struct BoundedHTTPFileAdmission {
+    package let maximumBytes: Int64
 
-    init(maximumBytes: Int) {
+    package init(maximumBytes: Int) {
         precondition(maximumBytes >= 0)
         self.maximumBytes = Int64(maximumBytes)
     }
 
-    func admitExpectedLength(_ expectedLength: Int64) throws {
+    package func admitExpectedLength(_ expectedLength: Int64) throws {
         guard expectedLength < 0 || expectedLength <= maximumBytes else {
             throw URLError(.dataLengthExceedsMaximum)
         }
     }
 
-    func admitProgress(_ totalBytesWritten: Int64) throws {
+    package func admitProgress(_ totalBytesWritten: Int64) throws {
         guard totalBytesWritten >= 0, totalBytesWritten <= maximumBytes else {
             throw URLError(.dataLengthExceedsMaximum)
         }
@@ -214,7 +226,7 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         self.stagedURL = stagedURL
     }
 
-    static func load(
+    package static func load(
         _ request: URLRequest,
         maximumBytes: Int,
         sessions: BoundedHTTPFileSessions
@@ -273,7 +285,7 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         finish(.failure(CancellationError()))
     }
 
-    func urlSession(
+    package func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
         didWriteData bytesWritten: Int64,
@@ -289,7 +301,7 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         }
     }
 
-    func urlSession(
+    package func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
@@ -333,7 +345,7 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         }
     }
 
-    func urlSession(
+    package func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
         didCompleteWithError error: Error?

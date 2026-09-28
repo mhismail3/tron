@@ -1,9 +1,13 @@
 import Foundation
 
-struct BoundedHTTPDataTransport: Sendable {
-    let dataForRequest: @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)
+package struct BoundedHTTPDataTransport: Sendable {
+    package let dataForRequest: @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)
 
-    func data(
+    package init(dataForRequest: @escaping @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)) {
+        self.dataForRequest = dataForRequest
+    }
+
+    package func data(
         for request: URLRequest,
         maximumBytes: Int
     ) async throws -> (Data, HTTPURLResponse) {
@@ -11,12 +15,12 @@ struct BoundedHTTPDataTransport: Sendable {
         return try await dataForRequest(request, maximumBytes)
     }
 
-    static let urlSession = BoundedHTTPDataTransport { request, maximumBytes in
+    package static let urlSession = BoundedHTTPDataTransport { request, maximumBytes in
         try await BoundedURLSessionDataLoader.load(request, maximumBytes: maximumBytes)
     }
 
     /// Credential-bearing capability requests never follow redirects.
-    static let noRedirects = BoundedHTTPDataTransport { request, maximumBytes in
+    package static let noRedirects = BoundedHTTPDataTransport { request, maximumBytes in
         try await BoundedURLSessionDataLoader.load(
             request,
             maximumBytes: maximumBytes,
@@ -25,10 +29,16 @@ struct BoundedHTTPDataTransport: Sendable {
     }
 }
 
-struct BoundedHTTPUploadTransport: Sendable {
+package struct BoundedHTTPUploadTransport: Sendable {
     let dataForFileRequest: @Sendable (URLRequest, URL, Int) async throws -> (Data, HTTPURLResponse)
 
-    func data(
+    package init(
+        dataForFileRequest: @escaping @Sendable (URLRequest, URL, Int) async throws -> (Data, HTTPURLResponse)
+    ) {
+        self.dataForFileRequest = dataForFileRequest
+    }
+
+    package func data(
         for request: URLRequest,
         fileURL: URL,
         maximumBytes: Int
@@ -37,7 +47,7 @@ struct BoundedHTTPUploadTransport: Sendable {
         return try await dataForFileRequest(request, fileURL, maximumBytes)
     }
 
-    static let urlSession = BoundedHTTPUploadTransport { request, fileURL, maximumBytes in
+    package static let urlSession = BoundedHTTPUploadTransport { request, fileURL, maximumBytes in
         try await BoundedURLSessionDataLoader.load(
             request,
             uploadFileURL: fileURL,
@@ -46,16 +56,16 @@ struct BoundedHTTPUploadTransport: Sendable {
     }
 }
 
-struct BoundedHTTPBodyAccumulator {
-    let maximumBytes: Int
-    private(set) var data = Data()
+package struct BoundedHTTPBodyAccumulator {
+    package let maximumBytes: Int
+    package private(set) var data = Data()
 
-    init(maximumBytes: Int) {
+    package init(maximumBytes: Int) {
         precondition(maximumBytes >= 0)
         self.maximumBytes = maximumBytes
     }
 
-    mutating func admit(response: URLResponse) throws {
+    package mutating func admit(response: URLResponse) throws {
         let expected = response.expectedContentLength
         guard expected < 0 || expected <= Int64(maximumBytes) else {
             throw URLError(.dataLengthExceedsMaximum)
@@ -65,7 +75,7 @@ struct BoundedHTTPBodyAccumulator {
         }
     }
 
-    mutating func append(_ chunk: Data) throws {
+    package mutating func append(_ chunk: Data) throws {
         guard chunk.count <= maximumBytes - data.count else {
             throw URLError(.dataLengthExceedsMaximum)
         }
@@ -82,7 +92,7 @@ struct BoundedHTTPBodyAccumulator {
 /// how CFNetwork recovers a reused connection the server already closed, which
 /// can surface as `networkConnectionLost`.
 enum BoundedHTTPReadSession {
-    static func admits(_ request: URLRequest, uploadFileURL: URL? = nil) -> Bool {
+    package static func admits(_ request: URLRequest, uploadFileURL: URL? = nil) -> Bool {
         guard uploadFileURL == nil, request.httpBody == nil, request.httpBodyStream == nil else { return false }
         return request.httpMethod == "GET" || request.httpMethod == "HEAD"
     }
@@ -91,7 +101,7 @@ enum BoundedHTTPReadSession {
     /// per request. CFNetwork otherwise queues requests beyond a small
     /// per-host connection count; this is its widest working value (larger
     /// values stop requests from starting).
-    static func configured(_ configuration: URLSessionConfiguration) -> URLSessionConfiguration {
+    package static func configured(_ configuration: URLSessionConfiguration) -> URLSessionConfiguration {
         let shared = configuration.copy() as! URLSessionConfiguration
         shared.httpMaximumConnectionsPerHost = Int(Int32.max)
         return shared
@@ -99,13 +109,13 @@ enum BoundedHTTPReadSession {
 }
 
 /// The sessions one bounded data transport configuration runs on.
-struct BoundedHTTPDataSessions: Sendable {
+package struct BoundedHTTPDataSessions: Sendable {
     let freshConfiguration: @Sendable () -> URLSessionConfiguration
     let readSession: URLSession
 
     /// `configuration` returns a new configuration per call, so each fresh
     /// session has private cache, cookie and credential storage.
-    init(configuration: @escaping @Sendable () -> URLSessionConfiguration) {
+    package init(configuration: @escaping @Sendable () -> URLSessionConfiguration) {
         freshConfiguration = configuration
         let read = BoundedHTTPReadSession.configured(configuration())
         // A fresh session per request never carried a cached response, cookie
@@ -116,10 +126,10 @@ struct BoundedHTTPDataSessions: Sendable {
         readSession = URLSession(configuration: read)
     }
 
-    static let ephemeral = BoundedHTTPDataSessions { .ephemeral }
+    package static let ephemeral = BoundedHTTPDataSessions { .ephemeral }
 }
 
-final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+package final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var accumulator: BoundedHTTPBodyAccumulator
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
@@ -142,7 +152,7 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         self.allowsRedirects = allowsRedirects
     }
 
-    static func load(
+    package static func load(
         _ request: URLRequest,
         uploadFileURL: URL? = nil,
         maximumBytes: Int,
@@ -217,7 +227,7 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         task.cancel()
     }
 
-    func urlSession(
+    package func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
         willPerformHTTPRedirection response: HTTPURLResponse,
@@ -227,7 +237,7 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         completionHandler(allowsRedirects ? request : nil)
     }
 
-    func urlSession(
+    package func urlSession(
         _ session: URLSession,
         dataTask: URLSessionDataTask,
         didReceive response: URLResponse,
@@ -255,7 +265,7 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         }
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    package func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         let admissionError: Error? = lock.withLock {
             do {
                 try accumulator.append(data)
@@ -270,7 +280,7 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         }
     }
 
-    func urlSession(
+    package func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
         didCompleteWithError error: Error?

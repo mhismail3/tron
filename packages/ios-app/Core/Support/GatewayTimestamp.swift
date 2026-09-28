@@ -8,34 +8,34 @@ private final class LockedRelativeDateFormatter: @unchecked Sendable {
         return formatter
     }()
 
-    func string(for date: Date, relativeTo reference: Date) -> String {
+    package func string(for date: Date, relativeTo reference: Date) -> String {
         lock.lock()
         defer { lock.unlock() }
         return formatter.localizedString(for: date, relativeTo: reference)
     }
 }
 
-enum GatewayTimestamp {
+package enum GatewayTimestamp {
     private static let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
     private static let wholeSeconds = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
     private static let relative = LockedRelativeDateFormatter()
 
-    static func parse(_ value: String) -> Date? {
+    package static func parse(_ value: String) -> Date? {
         if let date = try? fractional.parse(value) { return date }
         return try? wholeSeconds.parse(value)
     }
 
-    static func string(from date: Date) -> String {
+    package static func string(from date: Date) -> String {
         date.formatted(wholeSeconds)
     }
 
-    static func preciseString(from date: Date) -> String {
+    package static func preciseString(from date: Date) -> String {
         date.formatted(fractional)
     }
 
     /// Compare parsed instants rather than ISO text. The textual tie-breaker
     /// keeps retention deterministic for equal instants and malformed input.
-    static func isNewer(_ lhs: String, than rhs: String) -> Bool {
+    package static func isNewer(_ lhs: String, than rhs: String) -> Bool {
         if let left = parse(lhs), let right = parse(rhs), left != right {
             return left > right
         }
@@ -44,12 +44,12 @@ enum GatewayTimestamp {
         return lhs > rhs
     }
 
-    static func relativeDescription(_ value: String, relativeTo reference: Date) -> String {
+    package static func relativeDescription(_ value: String, relativeTo reference: Date) -> String {
         guard let date = parse(value) else { return "" }
         return relativeDescription(date, relativeTo: reference)
     }
 
-    static func relativeDescription(_ date: Date, relativeTo reference: Date) -> String {
+    package static func relativeDescription(_ date: Date, relativeTo reference: Date) -> String {
         relative.string(for: date, relativeTo: reference)
     }
 }
@@ -57,12 +57,12 @@ enum GatewayTimestamp {
 /// Presentation-only copy for an invocation boundary. It intentionally accepts
 /// only the producer's start timestamp: progress, result, and completion times
 /// must never make a tool look newly invoked.
-enum ToolInvocationTimestamp {
-    static func date(_ value: String?) -> Date? {
+package enum ToolInvocationTimestamp {
+    package static func date(_ value: String?) -> Date? {
         value.flatMap(GatewayTimestamp.parse)
     }
 
-    static func text(
+    package static func text(
         for value: String?,
         relativeTo reference: Date = .now,
         locale: Locale = .current,
@@ -82,7 +82,7 @@ enum ToolInvocationTimestamp {
         return date.formatted(style)
     }
 
-    static func accessibilityText(
+    package static func accessibilityText(
         for value: String?,
         relativeTo reference: Date = .now,
         locale: Locale = .current,

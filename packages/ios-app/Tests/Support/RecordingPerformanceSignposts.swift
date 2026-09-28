@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 @testable import TronMobile
 
 final class RecordingPerformanceSignposts: PerformanceSignposting, @unchecked Sendable {

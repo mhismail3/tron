@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Narrow typed client for Gateway-owned Automations. It never stores response
 /// content; callers own the lifetime of definitions and run details.

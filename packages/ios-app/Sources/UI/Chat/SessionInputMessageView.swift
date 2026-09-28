@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum InboundProducerPresentationPolicy {
     static func title(for origin: ChatOrigin?) -> String {

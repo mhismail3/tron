@@ -1,5 +1,6 @@
 import Compression
 import Foundation
+import TronMobileCore
 @testable import TronMobile
 
 private final class GatewayRealBurstFixtureBundleToken: NSObject {}

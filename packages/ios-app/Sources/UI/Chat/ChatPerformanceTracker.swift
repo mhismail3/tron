@@ -1,4 +1,5 @@
 import CoreGraphics
+import TronMobileCore
 
 @MainActor
 final class ChatPerformanceTracker {

@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import QuartzCore
 import Testing
+import TronMobileCore
 import UIKit
 @testable import TronMobile
 
