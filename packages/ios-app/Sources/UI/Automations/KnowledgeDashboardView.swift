@@ -965,6 +965,7 @@ struct KnowledgeDetailView: View {
     @State private var detailPreviewImage: UIImage?
     @State private var detailPreviewTicket = UUID()
     @State private var externalPageURL: URL?
+    @State private var headerTextHeight: CGFloat = 64
     private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin && activity.allowsPresentationPublication }
     private var observationPresentation: KnowledgeObservationPresentation? { KnowledgeObservationPresentation(record: currentRecord) }
 
@@ -1166,10 +1167,13 @@ struct KnowledgeDetailView: View {
         }
     }
     private func sourceDetailHeader(_ source: KnowledgeSourceContent) -> some View {
-        HStack(alignment: .center, spacing: TronSpacing.lg) {
+        // The preview spans exactly the title-plus-pill block: its top meets the
+        // title's first line and its bottom meets the visible pill capsule.
+        let side = min(max(headerTextHeight, 44), 120)
+        return HStack(alignment: .top, spacing: TronSpacing.lg) {
             Group {
-                if let detailPreviewImage { Image(uiImage: detailPreviewImage).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)) }
-                else { KnowledgeSourceThumbnail(source: source, size: 64) }
+                if let detailPreviewImage { Image(uiImage: detailPreviewImage).resizable().scaledToFill().frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)) }
+                else { KnowledgeSourceThumbnail(source: source, size: side) }
             }
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: TronSpacing.md) {
@@ -1182,19 +1186,20 @@ struct KnowledgeDetailView: View {
                 // The pill names the destination, so the domain is not repeated
                 // as a separate caption. The original link is the source of truth.
                 if let url = KnowledgeSourcePresentationPolicy.originalURL(source) {
-                    HStack {
-                        Spacer(minLength: 0)
-                        Button { externalPageURL = url } label: {
-                            TronInlineActionLabel(KnowledgeSourcePresentationPolicy.domain(source.uri) ?? url.host ?? "Open original", icon: "arrow.up.right", accent: .tronKnowledge)
-                        }
-                        .buttonStyle(.plain)
-                        .controlSize(.small)
-                        .accessibilityLabel("Open original")
-                        .accessibilityHint("Opens the page in the in-app browser")
+                    Button { externalPageURL = url } label: {
+                        TronInlineActionLabel(KnowledgeSourcePresentationPolicy.domain(source.uri) ?? url.host ?? "Open original", icon: "arrow.up.right", accent: .tronKnowledge)
                     }
+                    .buttonStyle(.plain)
+                    .controlSize(.small)
+                    // Lay out the visible capsule, not its taller transparent
+                    // hit target; the 44-point target still overhangs into padding.
+                    .padding(.vertical, -(TronSettingsLayoutPolicy.compactPillTargetHeight - TronSettingsLayoutPolicy.compactPillHeight) / 2)
+                    .accessibilityLabel("Open original")
+                    .accessibilityHint("Opens the page in the in-app browser")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerTextHeight = $0 }
         }
         .padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
         .tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.06)

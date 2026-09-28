@@ -16,8 +16,9 @@ safe JPEG, PNG, or WebP page preview or X Article cover image; sources without
 one use a deterministic domain/title fallback. Summaries, intake assessments,
 and routine capture/admission state are not shown in rows.
 
-The **Entry Detail** sheet leads with one header container: preview and title,
-with a right-aligned pill naming the original link's domain. The pill opens the
+The **Entry Detail** sheet leads with one compact header container: the title
+with a pill naming the original link's domain directly beneath it, and a square
+preview that spans exactly from the title's top to the pill's bottom. The pill opens the
 page in the in-app browser (`TronSafariView`, the same full-bleed
 `SFSafariViewController` sheet public webpage displays use). The original link
 is the source of truth. The Gateway keeps the captured bytes and readable
