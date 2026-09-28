@@ -1810,7 +1810,8 @@ the day cannot measure a synthetic case).
   control: with the folded `stallGuard` closure restored, the new coordinator
   test fails (`reconnect.stalled` count 1) and the fix makes it pass.
   `scripts/ios-gateway-e2e-test prepare|build|run` passes
-  `RealGatewayPiBoundaryTests` (1 test, 0 failures, 28.6 s).
+  `RealGatewayPiBoundaryTests` (round 1: 1 test, 0 failures, 28.6 s; round 2
+  added the foreground leg and ran 1 test, 0 failures, 44.6 s).
   `python3 scripts/check-documentation-policy.py` and
   `scripts/personal-info-guard.sh` pass.
 - Changes: `feat(ios): phone connection records, stall watchdogs and exact scene
@@ -1906,20 +1907,26 @@ the day cannot measure a synthetic case).
     and `gatewayCode` carries what the Gateway itself answered, read from the
     presentation owner that rewords it. The orchestrator decided this on review
     round 2; the public failure mapping is unchanged.
-  - `Tests/Gateway/RealGatewayPiBoundaryTests.swift` carries the blackhole E2E
-    case; O-1 extended the same file for its correlation join.
+  - `Tests/Gateway/RealGatewayPiBoundaryTests.swift` carries the two blackhole
+    E2E legs (a forced scene cycle and a foreground blackhole of a live socket);
+    O-1 extended the same file for its correlation join.
 - For the next agent (the remaining work is C-5's, not O-4's):
   1. O-4 is Done. The E2E evidence, run on 2026-09-28 with
      `scripts/ios-gateway-e2e-test prepare` then `build` then `run` (plain Node
      22.22.0, after `npm run build` in `packages/gateway`), is the
      `phone-connection-records` attachment of `RealGatewayPiBoundaryTests`
-     (1 test, 0 failures, 28.6 s). The records are retained at
+     (1 test, 0 failures, 44.6 s; round 2, run `20260928T111132Z-run.rCfJ0r`).
+     Both blackhole legs are retained at
      `~/.tron/workspace/files/hardening/o-4-blackhole-phone-connection-records.txt`:
-     the forward attempt, the blackholed failure
-     (`stageReached=hello-receive reason=transport durationMs=5078`), the recovery
-     attempt (`delayBeforeMs=1975`) and exactly one
-     `connection.episode ... attempts=2 causes=transport foregroundMs=7135
-     maxGapBetweenAttemptsMs=7053 endedBy=connected`.
+     the scene-cycle leg's forward attempt, blackholed failure
+     (`stageReached=hello-receive reason=transport durationMs=5042`), recovery
+     attempt (`delayBeforeMs=1770`) and one `connection.episode ... attempts=2
+     causes=transport maxGapBetweenAttemptsMs=6812 endedBy=connected`; and the
+     foreground leg's episode opened at the loss the phone saw
+     (`startedAt=2026-09-28T11:12:15.838Z`), the first attempt recorded 5.0 s
+     later, and one `connection.episode ... attempts=2
+     causes=pong_timeout,transport maxGapBetweenAttemptsMs=7021
+     endedBy=connected`.
   2. C-5 owns the pool's records; its API is in the "For C-5" note below.
   3. If the recorder tests pass but the coordinator-level expectations move
      (for example an extra `gateway.attempt` for a cold start), check
