@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
+- **Last updated:** 2026-09-28, O-6b Done (impairment cases run and report; the full-length baseline is the orchestrator's quiet-host run)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -520,7 +520,7 @@ rows are in priority order.
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-6b | Claimed | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-6b | Done | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-5 | Claimed | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
@@ -1601,11 +1601,38 @@ a latency percentile.
 | snapshots built without an audience | | | |
 | Gateway CPU, 8 running, no subscriber | 57% of one core | | n/a |
 | Gateway heap peak (% of limit) / RSS peak | 1.98 GiB (49%) / 2.00 GiB | | |
-| reconnect after path return p95 | | | |
+| reconnect after path return p95 | 28 ms and 43 ms in two short impairment smoke runs (one attempt each; also 3 pong-deadline misses under the 2 Mbit/s cap and 0 sockets closed) | | |
+| Gateway restart with 3 clients | all three ready 220–341 ms after the new Gateway was healthy; 0 and 6 of 15 storm requests over 1 s in two short smoke runs | | n/a |
 | requests / bytes per reconnect | | | |
 | episodes by cause (triage) | n/a | n/a | |
 | visible disconnects during Tailscale flaps | n/a | n/a | |
 | persisted log volume per day | | (estimate) | |
+
+### Impairment cases (O-6b)
+
+Two short smoke runs prove every case runs and reports; the full-length default
+baseline is the orchestrator's quiet-host run.
+
+- Command: `scripts/tron-profile gateway --scenario multi-session --iterations 1
+  --catalog-files 200 --catalog-mib 32 --mixed-seconds 30 --blackhole-seconds 20
+  --no-build` (reports under `~/Library/Developer/Tron/profiles/gateway/`,
+  `20260928T115207Z-multi-session-fc6061` and `20260928T120150Z-multi-session-a08ca8`).
+- Blackhole (mobile path delivers nothing): the client kept its socket open and
+  silent for 11.0 s and 18.0 s, made 1 reconnect attempt during the outage (each
+  attempt costs the phone's 15 s transport-open deadline), and reached a ready
+  mounted chat 43 ms and 28 ms after the path returned.
+- Bandwidth cap (2 Mbit/s): the meter carried 249,782 B/s against a 250,000 B/s
+  cap, added 100 s of queueing, never dropped a frame and closed no socket; the
+  mounted chat plus a dashboard list took 5.4 s, 25.2 s and 37.7–45.3 s, and 3–4
+  pong deadlines were missed while that backlog was in flight (C-4's target is
+  zero).
+- Restart (3 connected clients): all three were ready 220–341 ms after the new
+  Gateway answered, with no failed attempt, and 0 or 6 of 15 storm requests took
+  over 1 s (the second run's over-1 s requests are the host at 1-minute load 20).
+- Read these as the shape of `main` on a busy host: with `--blackhole-seconds`
+  20 the client gets one attempt before the path returns, so the p95 above is
+  one sample. `main` also has no `connection.outbound-capacity` records in any
+  run (`impairment.gateway_outbound_capacity_records: 0`).
 
 ## Handoff log
 
@@ -2283,3 +2310,77 @@ a latency percentile.
   O-5 merges.
 - Also cleaned: stray `|||||||` merge-base marker lines that two earlier
   handoff-log merges left in this file.
+
+### O-6b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the multi-session qualification run now has three impairment cases,
+  selected with `--cases` (default `blackhole,bandwidth,restart`; `none` runs
+  none), after each iteration's mixed window and on the clients it already
+  connected:
+  - **blackhole** (`--blackhole-seconds`, default 90): the mobile path stops
+    delivering frames in both directions. The client keeps its open socket until
+    one liveness window passes with no inbound frame (the Gateway sees silence),
+    abandons it, and retries like the phone; when the path returns the case
+    times the recovery to a ready mounted chat and counts the attempts the
+    outage cost.
+  - **bandwidth** (`--bandwidth-mbps`, default 2): every frame on the mobile
+    path — control frames included — is metered through one ordered queue, so a
+    queued pong waits behind the data in flight. The workload moves full bounded
+    transcript pages over it and reports the delivered rate against the cap,
+    metering delay, dropped frames, pong-deadline misses and unexpected closes.
+  - **restart**: the driver asks the profiler (its parent, which owns the
+    fixture) for a Gateway restart while three clients are connected; the
+    profiler stops the child and starts a fresh one on the same port, and tells
+    the driver when the new Gateway was healthy. The case reports each client's
+    reconnect from that moment, failed attempts, and every request in the storm.
+- Failure modes written before the isolated tests: a blackhole that is not
+  counted (no attempt during the outage) or that reports recovery without a
+  ready chat; a shaper that forwards a frame it should have dropped (the
+  blackhole is only a case if the client's hello never lands) or drops one it
+  should have forwarded; a bandwidth leg whose meter never delays a frame (the
+  cap is untested) or that loses a pong it should not; a restart case that
+  treats the Gateway's own close as a failure, reports a reconnect before the
+  new Gateway was listening, or waits forever for the profiler's answer; a case
+  that reports nothing being read as a pass.
+- Evidence: `python3 scripts/test-tron-profile.py` passes 34 tests (7 new: the
+  blackhole counts its attempts and recovers to a ready chat; the cap meters the
+  path without losing the socket; the restart case reconnects all three clients
+  after the profiler's answer, with a stub Gateway replaced on a fixed port;
+  `--cases` selection and order, refusal of an unknown case or an out-of-range
+  bound, rejection of a case that reported nothing, and each case's metrics).
+  Two short smoke runs (`--iterations 1 --catalog-files 200 --catalog-mib 32
+  --mixed-seconds 30 --blackhole-seconds 20 --no-build`, exit 0, 3.6 and 3.3
+  min) report every case; the numbers are in Findings.
+- Changes: `scripts/tron-profile-gateway`, `scripts/tron-profile-gateway-driver.mjs`,
+  `scripts/test-tron-profile.py`, the multi-session qualification section of
+  `packages/gateway/README.md`, this plan (Findings, this entry).
+- Kept on purpose: `scripts/ios-gateway-fault-proxy.mjs` is unchanged. Its
+  blackhole is a process the E2E harness owns and its restart spawns a Gateway
+  without the profile's probe, faux-model rate or retained log, so O-6b shapes
+  the path in the driver (which is also what lets one client be impaired while
+  the others stay honest) and the profiler owns the restart. The file is an
+  owning file only because a later case may need it.
+- Deviations: the meter queue's only bound is memory (256 MiB) — a WebSocket is
+  reliable, so a dropped response would hang the request waiting for it, and the
+  Gateway's own outbound queue is the real capacity backstop. Control frames are
+  metered with data: a queued pong is the C-4 failure mode, and exempting them
+  would make "zero pong-deadline misses" structurally true.
+- For the next agent: the full-length baseline ("the baseline for each is in
+  Findings") is owed by the orchestrator on a quiet host —
+  `scripts/tron-profile gateway --scenario multi-session` (defaults: 3,000 files,
+  2 GiB, 120 s mixed window, 90 s blackhole, 2 Mbit/s cap, restart) — because
+  this host stayed at 1-minute load ~20 from other sessions' builds, and the
+  short runs above give one blackhole attempt each. C-4's
+  `impairment.bandwidth.pong_deadline_misses` (3–4 in these runs) and G-13's
+  `impairment.restart.requests_over_1s` (0–6 of 15) are the numbers those tasks
+  must move; G-12's capacity evidence is
+  `impairment.bandwidth.unexpected_closes` plus
+  `impairment.gateway_outbound_capacity_records` in the report context.
+- Incident (reported for the orchestrator): the first smoke run was started
+  without `--no-build`, so the profiler's `build_gateway` ran `npm ci` through
+  this worktree's `packages/gateway/node_modules` symlink and emptied the target
+  — the `hardening/o-1` worktree's modules, which `o-3`, `o-4` and `o-5` also
+  symlink to. It was restored immediately with the repository-pinned Node
+  (`npm ci` in `tron-hardening-o-1/packages/gateway`, 186 entries, matching
+  `package-lock.json`); those worktrees were not otherwise touched. Later runs
+  used `--no-build`.

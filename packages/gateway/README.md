@@ -2452,6 +2452,41 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   its prompt once the deadline has passed, so no sample is timed after the
   other lanes stopped.
 
+- **Impairment cases (`--cases`, default `blackhole,bandwidth,restart`):** they
+  run after the mixed window, on the clients it already connected, and measure
+  recovery rather than throughput. `--cases none` runs none.
+  - **blackhole** (`--blackhole-seconds`, default 90): the mobile path stops
+    delivering frames in both directions (the driver shapes the client's own
+    socket, so the Gateway sees a silent connection and the other clients stay
+    honest). The client keeps its socket open until one liveness window (18 s:
+    its ping interval plus its pong deadline) passes with no inbound frame,
+    abandons it and retries like the phone; when the path returns, the case
+    times the recovery to a ready mounted chat.
+  - **bandwidth** (`--bandwidth-mbps`, default 2): every frame on the mobile
+    path, control frames included, is metered through one ordered queue, so a
+    queued pong waits behind the data in flight as on a saturated link. The
+    workload moves full bounded transcript pages over it. The meter's queue is
+    bounded only by memory (a WebSocket is reliable; a dropped response would
+    hang its request) and the Gateway's own outbound queue is the real capacity
+    backstop.
+  - **restart:** the driver asks the profiler — its parent, which owns the
+    fixture process — for a Gateway restart while three clients are connected
+    (a mounted phone, a listing dashboard, one more pair, as the exit criterion
+    counts them). The profiler stops the child and starts a fresh one on the
+    same port, and tells the driver the epoch millisecond at which the new
+    Gateway was healthy; the driver times each client from there.
+- **Impairment metrics:** `impairment.blackhole.attempts_during_outage`,
+  `.silence_ms`, `.recovery_ready_ms` (C-3's target: p95 ≤ 5 s),
+  `.attempt_ms_max`; `impairment.bandwidth.cap_bits_per_second`,
+  `.delivered_bytes_per_second`, `.operation_ms_p99`, `.pong_deadline_misses`
+  (C-4's target: zero), `.unexpected_closes` (G-12: zero for capacity),
+  `.metered_ms`, `.dropped_frames`; `impairment.restart.reconnect_ms_max`
+  (G-13: ≤ 10 s), `.clients_ready`, `.failed_attempts`, `.requests`,
+  `.requests_over_1s` (G-13: zero) and `.request_ms_p99`. The report context
+  carries each case's attempts and per-client details, and
+  `impairment.gateway_outbound_capacity_records` from the retained log. A run is
+  rejected when a selected case reported nothing.
+
 Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so
 p99 is the maximum below 100 samples) for `session_list`,
 `session_open_warm|cold|cold_large`, `prompt_admission` and
