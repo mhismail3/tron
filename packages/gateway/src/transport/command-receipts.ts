@@ -81,6 +81,14 @@ export class CommandReceiptStore {
     mutex: AsyncMutex;
     users: number;
     preserveReceiptUntilDrain: boolean;
+    /** True from the start of a receipt write until that write's accounting has
+     * run, so a concurrent rebuild knows the disk state of this receipt is not
+     * yet authoritative. */
+    unaccountedWrite: boolean;
+    /** Bytes this lane's receipt contributes to `inventory`; `undefined` until
+     * the pending write's accounting has run. A rebuild credits this value
+     * instead of the file while `unaccountedWrite` holds. */
+    creditedBytes: number | undefined;
   }>();
   private readonly inventoryMutex = new AsyncMutex();
   private readonly maximumEntries: number;
@@ -88,7 +96,6 @@ export class CommandReceiptStore {
   private readonly maximumAgeMs: number;
   private reservedCompletionBytes = 0;
   private inventory: CommandReceiptUsage | undefined;
-  private inventoryRebuilds = 0;
   private nextPruneAt = 0;
 
   constructor(
@@ -159,6 +166,24 @@ export class CommandReceiptStore {
     let entries = 0;
     for (const name of names) {
       if (!isCanonicalReceiptName(name)) continue;
+      // A receipt write runs outside the mutex, so the disk may already carry
+      // its result while its accounting step has not run yet. Credit what that
+      // step will account for instead of the file, so its change lands on a
+      // total that has not counted the receipt yet: the pending size once the
+      // lane has recorded one, and nothing at all before that (the pending
+      // receipt, if already renamed, is not evidence the accounting has seen).
+      // Reading the file here would count it twice, and discarding these totals
+      // instead would make every writing command force the next admission to
+      // rescan this directory. The first 43 characters are the command key both
+      // receipt name patterns are built from (`isOwnedTemporaryReceiptName`).
+      const lane = this.lanes.get(name.slice(0, 43));
+      if (lane?.unaccountedWrite) {
+        if (lane.creditedBytes !== undefined) {
+          entries += 1;
+          bytes += lane.creditedBytes;
+        }
+        continue;
+      }
       try {
         const metadata = await lstat(join(this.directory, name));
         if (!metadata.isFile()) continue;
@@ -169,11 +194,6 @@ export class CommandReceiptStore {
       }
     }
     this.inventory = { entries, bytes };
-    // One more rebuild of these totals. A receipt write happens outside the
-    // mutex, so a rebuild can land between a write and its accounting below and
-    // already include the receipt that write published; that accounting then
-    // discards the totals (see `execute`) instead of adding it twice.
-    this.inventoryRebuilds += 1;
     return this.inventory;
   }
 
@@ -243,7 +263,9 @@ export class CommandReceiptStore {
       }
     }
     // A prune may remove arbitrary pre-existing evidence. Rebuild once on the
-    // next admission instead of carrying a potentially stale cached total.
+    // next admission instead of carrying a potentially stale cached total. It
+    // is the only step that invalidates the cache, so a rebuild can only be
+    // caused by a prune that removed something, never by a write in flight.
     if (changed) this.inventory = undefined;
   }
 
@@ -262,6 +284,8 @@ export class CommandReceiptStore {
       mutex: new AsyncMutex(),
       users: 0,
       preserveReceiptUntilDrain: false,
+      unaccountedWrite: false,
+      creditedBytes: undefined,
     };
     lane.users += 1;
     this.lanes.set(key, lane);
@@ -319,13 +343,16 @@ export class CommandReceiptStore {
           return { exists: false } as const;
         });
         if (admission.exists) return admission.result;
-        // Captured after admission: a rebuild that completes later, while this
-        // write is in flight, may or may not have seen the published receipt.
-        const rebuildsAtAdmission = this.inventoryRebuilds;
+        // This write's accounting is the only step that adds its bytes to the
+        // totals, so the lane reports it as unaccounted before the publication
+        // can be seen by a concurrent admission's rebuild. A failed write
+        // clears that again: whatever reached the disk is then the truth.
+        lane.unaccountedWrite = true;
         try {
           await this.writeReceipt(path, pending);
         } catch (error) {
           await this.inventoryMutex.run(async () => {
+            lane.unaccountedWrite = false;
             if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
             reserved = false;
           });
@@ -338,8 +365,9 @@ export class CommandReceiptStore {
         // preserve.
         lane.preserveReceiptUntilDrain = true;
         await this.inventoryMutex.run(async () => {
-          if (this.inventoryRebuilds === rebuildsAtAdmission) this.recordNewReceipt(pendingBytes);
-          else this.inventory = undefined;
+          lane.creditedBytes = pendingBytes;
+          lane.unaccountedWrite = false;
+          this.recordNewReceipt(pendingBytes);
         });
 
         let result: JsonValue;
@@ -374,11 +402,12 @@ export class CommandReceiptStore {
           });
           throw outcomeUnknown("Successful command receipt exceeds its bounded capacity; refresh authoritative state instead of replaying");
         }
-        const rebuildsAtCompletion = this.inventoryRebuilds;
+        lane.unaccountedWrite = true;
         try {
           await this.writeReceipt(path, completed);
         } catch (error) {
           await this.inventoryMutex.run(async () => {
+            lane.unaccountedWrite = false;
             if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
             reserved = false;
           });
@@ -387,11 +416,12 @@ export class CommandReceiptStore {
         await this.inventoryMutex.run(async () => {
           // The exact persisted size replaces the pending estimate in the same
           // step that releases the reservation that covered it. A rebuild that
-          // landed during the write owns the totals instead: it read the
-          // directory, so the next admission rescans it rather than trusting a
-          // total this step could count twice.
-          if (this.inventoryRebuilds === rebuildsAtCompletion) this.replaceReceiptBytes(pendingBytes, completedBytes);
-          else this.inventory = undefined;
+          // landed during the write credited this lane's pending size rather
+          // than the file (see `inventoryUsage`), so that difference is exactly
+          // what is left to apply here.
+          lane.creditedBytes = completedBytes;
+          lane.unaccountedWrite = false;
+          this.replaceReceiptBytes(pendingBytes, completedBytes);
           if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
           reserved = false;
         });

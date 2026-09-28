@@ -6,6 +6,20 @@ import { GatewayError, asUncertainOutcome } from "../errors.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 
+// How often an admission listed the receipt directory. The store caches its
+// totals between prunes, so a regression that makes every writing command force
+// the next admission to rescan is only observable here; the store gets no
+// production hook for it.
+const directoryScans = vi.hoisted(() => ({ readdir: 0 }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const countReaddir = async (...args: unknown[]) => {
+    directoryScans.readdir += 1;
+    return (actual.readdir as (...callArgs: unknown[]) => Promise<unknown>)(...args);
+  };
+  return { ...actual, readdir: countReaddir as unknown as typeof actual.readdir };
+});
+
 // Every case owns one temporary tron home; release them all so a long-lived
 // suite cannot accumulate receipt evidence in the shared temporary root.
 const temporaryRoots: string[] = [];
@@ -24,8 +38,7 @@ afterEach(async () => {
  * explicit `prune(0)` reclaims it. A prune that changes the directory discards
  * the cached totals, which is how a concurrent admission comes to rescan the
  * inventory. The seeder store is separate so its capacity and lanes never
- * affect the case that uses the seed. */
-async function seededBackdatedReceipt(root: string, commandId: string): Promise<void> {
+ * affect the case that uses the seed. */async function seededBackdatedReceipt(root: string, commandId: string): Promise<void> {
   const seeder = new CommandReceiptStore(root);
   await seeder.execute("seed", "session.prompt", commandId, async () => ({ accepted: true }));
   const [path] = await receiptFiles(root);
@@ -109,11 +122,17 @@ describe("CommandReceiptStore", () => {
     let writers = 0;
     let signalFirstWriter!: () => void;
     const firstWriter = new Promise<void>((resolve) => { signalFirstWriter = resolve; });
+    let signalSecondSettled!: () => void;
+    const secondSettled = new Promise<void>((resolve) => { signalSecondSettled = resolve; });
     const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
       writers += 1;
       if (writers === 1) {
         signalFirstWriter();
-        await new Promise((resolve) => { setTimeout(resolve, 100); });
+        // Hold the first pending write until the second admission settles,
+        // rather than for a fixed delay: on a loaded host a fixed hold lets the
+        // second admission arrive after this write, and the case would then
+        // also pass on a store that released the reservation at admission.
+        await secondSettled;
       }
       await durableAtomicWriteJson(path, value, mode);
     };
@@ -130,6 +149,7 @@ describe("CommandReceiptStore", () => {
     const first = store.execute("device", "session.prompt", "reserved-one", operation);
     await firstWriter;
     const second = store.execute("device", "session.prompt", "reserved-two", operation);
+    second.then(signalSecondSettled, signalSecondSettled);
     const outcomes = await Promise.allSettled([first, second]);
 
     expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(["fulfilled", "rejected"]);
@@ -183,7 +203,7 @@ describe("CommandReceiptStore", () => {
     expect(await receiptFiles(root)).toHaveLength(1);
   });
 
-  it("does not double-count a receipt rebuilt from disk during its pending write", async () => {
+  it("does not double-count a receipt whose pending write spans a directory rescan", async () => {
     const root = await temporaryRoot("tron-receipts-pending-rebuild-");
     await seededBackdatedReceipt(root, "backdated-seed");
     let signalPublished!: () => void;
@@ -197,7 +217,7 @@ describe("CommandReceiptStore", () => {
     const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
       if (commandIdOf(value) === "pending-rebuild-first" && statusOf(value) === "pending") {
         // Publish the pending receipt, then hold before reporting success so
-        // the second admission's rescan counts this receipt on disk.
+        // the second admission's rescan meets this receipt on disk.
         await durableAtomicWriteJson(path, value, mode, {
           mkdir,
           open,
@@ -235,6 +255,60 @@ describe("CommandReceiptStore", () => {
     await expect(store.execute("device", "session.prompt", "pending-rebuild-third", third))
       .resolves.toEqual({ accepted: true });
     expect(third).toHaveBeenCalledTimes(1);
+  });
+
+  it("rescans the receipt directory once per prune invalidation while writes overlap", async () => {
+    const root = await temporaryRoot("tron-receipts-single-rescan-");
+    await mkdir(join(root, "gateway", "command-receipts"), { recursive: true });
+
+    const overlapping = ["overlap-one", "overlap-two", "overlap-three", "overlap-four"];
+    let held = 0;
+    let releaseHeld!: () => void;
+    const heldWritesReleased = new Promise<void>((resolve) => { releaseHeld = resolve; });
+    let signalAllHeld!: () => void;
+    const allHeld = new Promise<void>((resolve) => { signalAllHeld = resolve; });
+    const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
+      // Hold the pending writes of the overlapping commands, so their receipt
+      // publications all span the rescan below. The warm-up command's own
+      // pending write is released immediately.
+      const status = (value as { status: string }).status;
+      if (status === "pending" && overlapping.includes((value as { commandId: string }).commandId)) {
+        held += 1;
+        if (held === overlapping.length) signalAllHeld();
+        await heldWritesReleased;
+      }
+      await durableAtomicWriteJson(path, value, mode);
+    };
+    const store = new CommandReceiptStore(root, writeReceipt);
+    const operation = async () => ({ accepted: true });
+
+    // Warm the cache. The first admission also runs the interval prune, so the
+    // crash leftover below is planted after it and then survives every
+    // admission until the explicit prune, because those return early until the
+    // interval passes.
+    await store.execute("device", "session.prompt", "overlap-warm", operation);
+    // A crash leftover whose command key holds no lane. Removing it is the one
+    // change that discards the cached totals.
+    await writeFile(
+      join(root, "gateway", "command-receipts", `${"z".repeat(43)}.json.123.123456789abc.tmp`),
+      "interrupted write",
+    );
+    const writes = overlapping.map((commandId) => store.execute("device", "session.prompt", commandId, operation));
+    await allHeld;
+
+    await store.prune();
+    const scansBefore = directoryScans.readdir;
+
+    // The first admission after the invalidation reconciles the totals while
+    // all four writes are in flight. Those writes then land their accounting on
+    // the reconciled totals; a store that discarded them instead would make
+    // this admission and the next one scan the directory again.
+    await store.execute("device", "session.prompt", "overlap-five", operation);
+    releaseHeld();
+    await Promise.all(writes);
+    await store.execute("device", "session.prompt", "overlap-six", operation);
+
+    expect(directoryScans.readdir - scansBefore).toBe(1);
   });
 
   it("serializes duplicates of the same command and returns the recorded response", async () => {
