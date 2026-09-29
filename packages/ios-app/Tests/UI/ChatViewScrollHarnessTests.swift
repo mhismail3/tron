@@ -1740,6 +1740,30 @@ struct ChatViewScrollHarnessTests {
                         resolving.count == 1 && resolving.first?.contains("display") == true,
                         "\(orientation): the card's menu resolves at \(resolving)"
                     )
+                    guard let display = rows.first(where: { $0.isOnScreen && $0.semanticID.contains("display") }) else {
+                        Issue.record("\(orientation): the display card's source frame must be mounted")
+                        continue
+                    }
+                    guard let preview = delegate.contextMenuInteraction(
+                        bridge.interaction,
+                        previewForHighlightingForItemWithIdentifier: display.semanticID as NSString
+                    ) else {
+                        Issue.record("\(orientation): SwiftUI's display-card preview must be available")
+                        continue
+                    }
+                    guard let container = preview.target.container as? UIView else {
+                        Issue.record("\(orientation): SwiftUI's preview must identify its source container")
+                        continue
+                    }
+                    let failure = ContextMenuPreviewPlacement.failure(
+                        sourceWindowFrame: display.windowFrame,
+                        targetTransform: preview.target.transform,
+                        containerCenterInWindow: container.convert(preview.target.center, to: nil),
+                        previewSize: preview.view.bounds.size,
+                        containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
+                        previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
+                    )
+                    #expect(failure == nil, "\(orientation): \(failure ?? "")")
                 }
             }
         }
