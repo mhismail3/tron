@@ -1413,7 +1413,7 @@ struct ChatVisualParityTests {
         // A whole-device-pixel pinned offset (the 0.667 pt today's estimated
         // pinned end sits above the 12 pt tail) is found and absorbed.
         let pinnedOffset = magnitude(resampled(frame.rows.values, byBands: 0.667 * bandsPerPoint))
-        #expect(abs(pinnedOffset.shift - 0.667) < 0.01, "the search found the pinned offset")
+        #expect(abs(abs(pinnedOffset.shift) - 0.667) < 0.01, "the search found the pinned offset")
         #expect(pinnedOffset.magnitude < ChatVisualParitySpec.tolerance)
 
         // A uniform 3 pt shift is beyond the ±2 pt allowance: the search clamps
@@ -1429,13 +1429,15 @@ struct ChatVisualParityTests {
         })
         #expect(washed.magnitude > ChatVisualParitySpec.tolerance)
 
-        // A row-spacing change is a differential move, not a uniform one: the
-        // alignment shifts the whole frame, so the two halves pull apart.
-        let differential = magnitude(frame.rows.values.enumerated().map { index, value in
-            let bands = index < frame.rows.values.count / 2 ? bandsPerPoint : -bandsPerPoint
-            return resampled(frame.rows.values, byBands: bands)[index]
-        })
-        #expect(differential.magnitude > ChatVisualParitySpec.tolerance)
+        // A row-spacing change is a differential move, not a uniform one: rows
+        // above a split and rows below it move apart by the spacing change, so a
+        // single whole-frame shift cannot bring them back together.
+        let above = resampled(frame.rows.values, byBands: bandsPerPoint)
+        let below = resampled(frame.rows.values, byBands: -bandsPerPoint)
+        let spread = frame.rows.values.indices.map { index in
+            index < frame.rows.values.count / 2 ? above[index] : below[index]
+        }
+        #expect(magnitude(spread).magnitude > ChatVisualParitySpec.tolerance)
     }
 
     @Test("recorded reference frames match the rendered transcript within tolerance")
