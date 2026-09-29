@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -6,10 +5,10 @@ import type {
   KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeRaindropReadRequest,
   KnowledgeCurationCode, KnowledgeCurationJobRequest, KnowledgeCurationJobResponse, KnowledgeCurationOutcome,
   KnowledgeCurationRequest, KnowledgeCurationResponse, KnowledgeSourceSummaryStart, ObservationCoverageDisposition,
-  SourceAssessment, SourceContent, SourceCurationProducer,
+  SourceAssessment, SourceCurationProducer,
 } from "./knowledge-contract.js";
 import { KNOWLEDGE_CURATION_MAX_ITEMS, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS, KnowledgeCurationRefusal } from "./knowledge-contract.js";
-import { curationCommandId, curationFailureOutcome, curationItemRefusal, curationToolText, KnowledgeCurationJobs, validateCurationRequest, type KnowledgeCurationRunner } from "./knowledge-curation.js";
+import { curationCommandId, curationFailureOutcome, curationItemRefusal, curationToolText, KnowledgeCurationJobs, validateCurationRequest } from "./knowledge-curation.js";
 import { curationStored, sourceEvidenceDigest, type KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";

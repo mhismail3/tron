@@ -3,7 +3,7 @@ import {
   KNOWLEDGE_CURATION_MAX_BATCH_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_ITEMS, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS,
   KnowledgeCurationRefusal,
   type KnowledgeCurationItem, type KnowledgeCurationJob, type KnowledgeCurationJobRequest, type KnowledgeCurationJobResponse,
-  type KnowledgeCurationOperation, type KnowledgeCurationOutcome, type KnowledgeCurationRequest, type KnowledgeCurationResponse, type SourceCurationProducer,
+  type KnowledgeCurationCode, type KnowledgeCurationOperation, type KnowledgeCurationOutcome, type KnowledgeCurationRequest, type KnowledgeCurationResponse, type SourceCurationProducer,
 } from "./knowledge-contract.js";
 
 /** A curation item's own command identity. It is stable for one batch command
@@ -72,7 +72,7 @@ export function curationFailureOutcome(item: KnowledgeCurationItem, error: unkno
 }
 
 /** Terminal reason for a job that failed, kept typed for the caller. */
-export function curationJobFailure(error: unknown, aborted: boolean, cancellationReason?: unknown): { code: KnowledgeCurationOutcome["code"] & string; reason: string } {
+export function curationJobFailure(error: unknown, aborted: boolean, cancellationReason?: unknown): { code: KnowledgeCurationCode; reason: string } {
   if (error instanceof KnowledgeCurationRefusal) return { code: error.code, reason: error.message };
   if (aborted) return { code: "cancelled", reason: cancellationReason instanceof Error ? cancellationReason.message : "Knowledge curation job was cancelled" };
   return { code: "unavailable", reason: error instanceof Error ? error.message : "Knowledge curation job failed" };

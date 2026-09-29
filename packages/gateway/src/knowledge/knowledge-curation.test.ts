@@ -142,6 +142,22 @@ describe("Knowledge curation", () => {
     expect((await store.read(excluded.id, undefined, true, true, true))?.content.verdict).toBeUndefined();
   });
 
+  it("produces one winner and one clean conflict when two writers race on one entry", async () => {
+    const { store, service } = await fixture();
+    const record = await capture(store, 20);
+    // Distinct batch command IDs: two independent writers, not a duplicate.
+    const racing = (name: string, tag: string) => curate(service, "tags", other(name), [{ id: record.id, revisionId: record.revisionId, tagIds: [tag] }]);
+    const [left, right] = await Promise.all([racing("batch-race-left", "memory"), racing("batch-race-right", "evaluation")]);
+    const outcomes = [...left.outcomes, ...right.outcomes];
+    expect(outcomes.filter(outcome => outcome.status === "applied")).toHaveLength(1);
+    expect(outcomes.filter(outcome => outcome.status === "conflict" && outcome.code === "stale-revision")).toHaveLength(1);
+    // Neither writer lost the other's revision: exactly one curation landed.
+    const committed = await store.read(record.id);
+    expect(committed?.content.tags?.tagIds).toHaveLength(1);
+    const revisions = (await store.read(record.id, undefined, true, true, true))!;
+    expect(revisions.revisionId).toBe(outcomes.find(outcome => outcome.status === "applied")?.revisionId);
+  });
+
   it("refuses an unknown tag and reports the empty-vocabulary seam honestly", async () => {
     const { store, service } = await fixture();
     const record = await capture(store, 9);

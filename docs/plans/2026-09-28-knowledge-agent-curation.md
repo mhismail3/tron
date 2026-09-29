@@ -285,7 +285,7 @@ session only after the user confirms the schedule.
   background work with a queryable job (`knowledge.curation.jobs`, tool
   `summarize`/`curationJob`). Free-form summary tags were replaced by the
   vocabulary selection so one taxonomy owns tagging.
-- Evidence: `npx vitest run src/knowledge/` — 288 passed, 20 files. The
+- Evidence: `npx vitest run src/knowledge/` — 289 passed, 20 files. The
   acceptance case in `knowledge-curation.test.ts` drives the real agent tool
   through a 25-entry batch with an injected conflict, a replay, a budget stop and
   a restarted owner instance, and writes `knowledge-curation-outcome.json` under
