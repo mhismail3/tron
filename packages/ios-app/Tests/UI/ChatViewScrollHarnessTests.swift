@@ -1276,197 +1276,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    // TEMPORARY (CT-23 stage 2 diagnosis): one line per display boundary of the
-    // CT-24 field shapes' tall insertion, with the on-screen rows' window frames
-    // and heights, so an "inserted row is a sliver while the viewport is bare"
-    // transient would be visible frame by frame. Removed with the stage-2
-    // handoff.
-    @Test("CT-23 diagnosis: the CT-24 tall insertion boundary by boundary", .enabled(if: UIValidationTier.isActive))
-    func ct23TallInsertionBoundaries() async throws {
-        try await withTestWatchdog(timeout: .seconds(180)) {
-            for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
-                let label = orientation.presentsNewestRowFirst ? "origin" : "end"
-                let resyncShape = try ct24TallNewestHistory(
-                    rowCount: 250, tallCount: 6, appendedTallCount: 4, seed: 1_269
-                )
-                try await withHarness(snapshot: resyncShape.opened, orientation: orientation) { harness in
-                    _ = try await harness.recorder.waitUntil {
-                        $0.observation.isReady && $0.nativeRows.contains {
-                            $0.semanticID == "ct24-turn-\(250 - 1)" && $0.isOnScreen
-                        }
-                    }
-                    for boundary in 0..<10 {
-                        try await harness.driveFrameBoundary()
-                        let sample = try harness.ct23BoundaryRowFrames()
-                        print("CT23-RESYNC orientation=\(label) index=\(boundary)"
-                            + " fraction=\(String(format: "%.3f", Double(sample.fraction)))"
-                            + " rows=\(sample.rows)")
-                    }
-                    harness.replaceAuthoritativeSnapshot(resyncShape.resynced)
-                    for boundary in 0..<40 {
-                        try await harness.driveFrameBoundary()
-                        let sample = try harness.ct23BoundaryRowFrames()
-                        print("CT23-RESYNC orientation=\(label) index=\(boundary + 10)"
-                            + " fraction=\(String(format: "%.3f", Double(sample.fraction)))"
-                            + " rows=\(sample.rows)")
-                    }
-                }
-                let shape = try ct24TallNewestHistory(
-                    rowCount: 250, tallCount: 6, appendedTallCount: 0, seed: 1_269
-                )
-                try await withHarness(snapshot: shape.opened, orientation: orientation) { harness in
-                    _ = try await harness.recorder.waitUntil {
-                        $0.observation.isReady && $0.nativeRows.contains {
-                            $0.semanticID == "ct24-turn-\(250 - 1)" && $0.isOnScreen
-                        }
-                    }
-                    var published = try harnessAcknowledgedSnapshot(
-                        shape.opened, promptIndex: 0, text: "Keep this resumed conversation stable."
-                    )
-                    var publishedReplies = 0
-                    for boundary in 0..<60 {
-                        if boundary.isMultiple(of: 12), publishedReplies < ct24FieldReplyParagraphCounts.count {
-                            published.transcript.append(try harnessRichAssistantMessage(
-                                id: "ct24-reply-\(publishedReplies)",
-                                presentationID: "ct24-reply-turn-\(publishedReplies)",
-                                thinkingLines: [],
-                                text: harnessFieldReplyText(
-                                    index: publishedReplies,
-                                    paragraphs: ct24FieldReplyParagraphCounts[publishedReplies]
-                                )
-                            ))
-                            published.transcriptTotal = published.transcript.count
-                            harness.replaceAuthoritativeSnapshot(published)
-                            publishedReplies += 1
-                        }
-                        try await harness.driveFrameBoundary()
-                        let sample = try harness.ct23BoundaryRowFrames()
-                        print("CT23-BOUNDARY orientation=\(label) index=\(boundary)"
-                            + " fraction=\(String(format: "%.3f", Double(sample.fraction)))"
-                            + " rows=\(sample.rows)")
-                    }
-                }
-            }
-        }
-    }
-
-    // TEMPORARY (CT-23 stage 2 diagnosis): render the same transcript on both
-    // orientations in one run, so the parity wash's mechanism is measurable and
-    // the candidate can be bisected against the crisp today's-path capture in
-    // the same process. Removed with the stage-2 handoff.
-    @MainActor
-    final class CT23RenderDiagnosis {
-        var regions: [String: ChatVisualParityFingerprint] = [:]
-        var navBands: [String: [Double]] = [:]
-    }
-
-    @Test("CT-23 diagnosis: the rendered transcript on both orientations", .enabled(if: UIValidationTier.isActive))
-    func ct23RenderDiagnosis() async throws {
-        try await withTestWatchdog(timeout: .seconds(240)) {
-            let diagnosis = CT23RenderDiagnosis()
-            /// One variant: which of the scroll view's automatic edge effects are hidden.
-            struct Variant {
-                let name: String
-                /// `nil` leaves the product's own edge-effect state alone.
-                let topHidden: Bool?
-                let bottomHidden: Bool?
-                /// Seconds to hold this state for a host-side screenshot.
-                let hold: Double
-            }
-            let variants = [
-                Variant(name: "product", topHidden: nil, bottomHidden: nil, hold: 0),
-                Variant(name: "forced-on", topHidden: false, bottomHidden: false, hold: 0),
-                Variant(name: "no-top-edge", topHidden: true, bottomHidden: false, hold: 0),
-                Variant(name: "no-edge-effect", topHidden: true, bottomHidden: true, hold: 0),
-                Variant(name: "no-bottom-edge", topHidden: false, bottomHidden: true, hold: 0),
-            ]
-            for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
-                let label = orientation.presentsNewestRowFirst ? "origin" : "end"
-                var snapshot = try SessionScenarioBuilder(seed: 1_281).openingTail(targetEncodedBytes: 10_000)
-                snapshot.acceptsQueuedPrompts = false
-                snapshot.transcript = try (0..<40).map { index in
-                    try harnessRichAssistantMessage(
-                        id: "diag-history-\(index)",
-                        presentationID: "diag-turn-\(index)",
-                        thinkingLines: [],
-                        text: index.isMultiple(of: 4)
-                            ? harnessTallEstimateRowText(index)
-                            : "Diagnosis history row \(index) stays one line."
-                    )
-                }
-                snapshot.transcriptStart = 0
-                snapshot.transcriptTotal = snapshot.transcript.count
-                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
-                    _ = try await harness.recorder.waitUntil { $0.observation.isReady }
-                    for _ in 0..<40 { try await harness.driveFrameBoundary() }
-                    try harness.snapNativeTranscriptOffsetToWholePoint()
-                    print("CT23-DIAG orientation=\(label) \(try harness.ct23DiagnosisScrollViewState())")
-                    print("CT23-DIAG orientation=\(label) \(harness.ct23DiagnosisRowPixels())")
-                    for variant in variants {
-                        if let top = variant.topHidden, let bottom = variant.bottomHidden {
-                            try harness.ct23DiagnosisSetEdgeEffectsHidden(top: top, bottom: bottom)
-                            try await harness.driveFrameBoundary()
-                        }
-                        harness.ct23DiagnosisAttachWholeWindow(named: "\(label)-\(variant.name)")
-                        let capture = Self.ct23DiagnosisCapture(
-                            harness, label: label, name: variant.name
-                        )
-                        let key = "\(label)-\(variant.name)"
-                        diagnosis.regions[key] = capture.region
-                        diagnosis.navBands[key] = capture.navigationBand
-                        if variant.hold > 0 {
-                            print("CT23-HOLD begin=\(key) seconds=\(variant.hold)")
-                            try await Task.sleep(for: .seconds(variant.hold))
-                            print("CT23-HOLD end=\(key)")
-                        }
-                    }
-                    try harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
-                    try await harness.driveFrameBoundary()
-                    // The mechanism probe: today's path is at the scroll view's
-                    // maximum offset when it is pinned; the flipped path pins at
-                    // the origin edge. Pull the upright scroll view past its top
-                    // edge so this run says whether "at the origin edge" is what
-                    // the automatic effect treats as a full-viewport wash.
-                    if !orientation.presentsNewestRowFirst {
-                        try harness.ct23DiagnosisShiftOffset(by: -40)
-                        let capture = Self.ct23DiagnosisCapture(
-                            harness, label: label, name: "past-top-edge"
-                        )
-                        diagnosis.regions["\(label)-past-top-edge"] = capture.region
-                        diagnosis.navBands["\(label)-past-top-edge"] = capture.navigationBand
-                        try harness.ct23DiagnosisShiftOffset(by: 40)
-                        try harness.snapNativeTranscriptOffsetToWholePoint()
-                    }
-                    harness.ct23DiagnosisAttachWholeWindow(named: "\(label)-final")
-                }
-            }
-            let measurements = await MainActor.run {
-                (regions: diagnosis.regions, navBands: diagnosis.navBands)
-            }
-            let reference = measurements.regions["end-product"]
-            let referenceNav = measurements.navBands["end-product"] ?? []
-            func navDistance(_ candidate: [Double], _ recorded: [Double]) -> Double {
-                guard candidate.count == recorded.count, !candidate.isEmpty else { return .infinity }
-                let squared = zip(candidate, recorded).reduce(0.0) { partial, pair in
-                    let delta = (pair.0 - pair.1) / 255
-                    return partial + delta * delta
-                }
-                return (squared / Double(candidate.count)).squareRoot()
-            }
-            for key in measurements.regions.keys.sorted() {
-                guard let region = measurements.regions[key] else { continue }
-                let value = ChatVisualParityFingerprint.magnitude(
-                    region, reference!, alignmentPoints: ChatVisualParitySpec.alignmentPoints
-                )
-                let navBand = navDistance(measurements.navBands[key] ?? [], referenceNav)
-                print("CT23-DIAG compare=\(key)-vs-end-product"
-                    + " magnitude=\(String(format: "%.5f", value.magnitude))"
-                    + " shift=\(String(format: "%.1f", value.shift))"
-                    + " navBand=\(String(format: "%.5f", navBand))")
-            }
-        }
-    }
-
     // The keyboard's own input, which no journey drove before: the bottom safe
     // area moves through the keyboard's intermediate positions while the history
     // keeps tall replies in its measured set. `resize(height:)` changes the whole
@@ -4002,27 +3811,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    /// CT-23 stage-2 diagnosis (temporary): render the transcript's parity region
-    /// and the navigation band, retain the PNGs as test attachments and return
-    /// both measurements.
-    @MainActor
-    private static func ct23DiagnosisCapture(
-        _ harness: ChatViewScrollHarness,
-        label: String,
-        name: String
-    ) -> (region: ChatVisualParityFingerprint, navigationBand: [Double]) {
-        let rendered = harness.renderedParityFrame(
-            scale: ChatVisualParitySpec.renderScale,
-            rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
-            columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
-            includingPNG: true
-        )
-        if let png = rendered.png {
-            Attachment.record(png, named: "ct23-\(label)-\(name).png")
-        }
-        return (ChatVisualParityFingerprint(rendered), harness.renderedNavigationBandGrid())
-    }
-
     private func withHarness(
         seed: Int,
         orientation: ChatTranscriptOrientation = .selected,
@@ -5494,88 +5282,6 @@ final class ChatViewScrollHarness {
             && scrollView.panGestureRecognizer.isEnabled
     }
 
-    // MARK: CT-23 stage 2 diagnosis (temporary)
-
-    /// The native transcript view's rendering state, for the flipped path's
-    /// parity-wash bisection.
-    func ct23DiagnosisScrollViewState() throws -> String {
-        let scrollView = try nativeTranscriptScrollView()
-        let layer = scrollView.layer
-        func rect(_ value: CGRect) -> String {
-            String(
-                format: "(%.2f,%.2f,%.2f,%.2f)",
-                Double(value.minX), Double(value.minY),
-                Double(value.width), Double(value.height)
-            )
-        }
-        return "frame=\(rect(scrollView.frame))"
-            + " window=\(rect(scrollView.convert(scrollView.bounds, to: nil)))"
-            + " offset=\(String(format: "%.3f", Double(scrollView.contentOffset.y)))"
-            + " content=\(String(format: "%.2f", Double(scrollView.contentSize.height)))"
-            + " inset=\(String(format: "%.2f/%.2f", Double(scrollView.adjustedContentInset.top), Double(scrollView.adjustedContentInset.bottom)))"
-            + " safeArea=\(String(format: "%.2f/%.2f", Double(scrollView.safeAreaInsets.top), Double(scrollView.safeAreaInsets.bottom)))"
-            + " transform=\(scrollView.layer.transform)"
-            + " sublayer=\(layer.sublayerTransform)"
-            + " geometryFlipped=\(layer.isGeometryFlipped)"
-            + " rasterize=\(layer.shouldRasterize)"
-            + " rasterScale=\(String(format: "%.2f", Double(layer.rasterizationScale)))"
-            + " edgeAntialiasing=\(layer.allowsEdgeAntialiasing)"
-            + " topEdgeHidden=\(scrollView.topEdgeEffect.isHidden)"
-            + " bottomEdgeHidden=\(scrollView.bottomEdgeEffect.isHidden)"
-            + " displayScale=\(String(format: "%.2f", Double(hostingController.view.traitCollection.displayScale)))"
-    }
-
-    /// Every on-screen row's marker position in device pixels, with the fraction
-    /// of a pixel its top edge lands on: what a flipped render would resample.
-    func ct23DiagnosisRowPixels() -> String {
-        let scale = hostingController.view.traitCollection.displayScale
-        let rows = TranscriptWindowOracle.rows(in: hostingController.view).filter(\.isOnScreen)
-        let values = rows.map { row -> String in
-            let top = row.windowFrame.minY * scale
-            let height = row.windowFrame.height * scale
-            let fraction = top - top.rounded(.down)
-            return "\(row.semanticID)@top\(String(format: "%.2f", Double(top)))/h\(String(format: "%.2f", Double(height)))/f\(String(format: "%.3f", Double(fraction)))"
-        }
-        return "count=\(rows.count) " + values.joined(separator: " ")
-    }
-
-    /// Every on-screen row's semantic ID and rendered height at this boundary,
-    /// plus the visible transcript fraction: CT-23's tall-insertion transient
-    /// would appear here as a bare viewport beside a ~1 pt row.
-    func ct23BoundaryRowFrames() throws -> (fraction: CGFloat, rows: String) {
-        let bottom = transcriptBottom()
-        let rows = TranscriptWindowOracle.rows(in: hostingController.view).filter(\.isOnScreen)
-        let values = rows
-            .sorted { $0.windowFrame.minY > $1.windowFrame.minY }
-            .map { "\($0.semanticID)@\(String(format: "%.1f", Double($0.windowFrame.minY)))/h\(String(format: "%.1f", Double($0.windowFrame.height)))" }
-        return (bottom.visibleRowFraction, values.joined(separator: ","))
-    }
-
-    /// One variant of the automatic scroll edge effect's state.
-    func ct23DiagnosisSetEdgeEffectsHidden(top: Bool, bottom: Bool) throws {
-        let scrollView = try nativeTranscriptScrollView()
-        scrollView.topEdgeEffect.isHidden = top
-        scrollView.bottomEdgeEffect.isHidden = bottom
-    }
-
-    /// The whole hosted window as a retained attachment: the navigation band and
-    /// the composer edge are outside the parity gate's own region.
-    func ct23DiagnosisAttachWholeWindow(named name: String) {
-        let image = renderedWindowImage(scale: 1)
-        if let data = image.pngData() { Attachment.record(data, named: "ct23-\(name)-window.png") }
-    }
-
-    /// Shift the native offset by `points` without any product input, for the
-    /// fractional-position bisection.
-    func ct23DiagnosisShiftOffset(by points: CGFloat) throws {
-        let scrollView = try nativeTranscriptScrollView()
-        scrollView.setContentOffset(
-            CGPoint(x: scrollView.contentOffset.x, y: scrollView.contentOffset.y + points),
-            animated: false
-        )
-        scrollView.layoutIfNeeded()
-    }
-
     private func nativeTranscriptScrollView() throws -> UIScrollView {
         guard let value = Self.nativeTranscriptScrollView(in: hostingController.view) else {
             throw HarnessError.missingTranscript
@@ -5663,8 +5369,7 @@ final class ChatViewScrollHarness {
         scale: CGFloat,
         rowBandPixels: Int,
         columnBandPixels: Int,
-        includingPNG: Bool,
-        afterScreenUpdates: Bool = true
+        includingPNG: Bool
     ) -> ParityFrame {
         let view = hostingController.view!
         let top = min(Self.parityTopInset, view.bounds.height)
@@ -5675,7 +5380,7 @@ final class ChatViewScrollHarness {
             width: view.bounds.width,
             height: max(0, view.bounds.height - bottom)
         )
-        let image = renderedImage(in: region, scale: scale, afterScreenUpdates: afterScreenUpdates)
+        let image = renderedImage(in: region, scale: scale, afterScreenUpdates: true)
         let empty = ParityFrame(width: 0, height: 0, rows: [], columns: [], png: nil)
         guard let cgImage = image.cgImage,
               let data = cgImage.dataProvider?.data,
