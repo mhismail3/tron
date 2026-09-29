@@ -1031,3 +1031,46 @@ pass only through eager-only repairs, stop and report.
 - Changes: `ChatCompactPill.swift`, `ChatTranscriptEventViews.swift`,
   `ChatTranscriptScrollView.swift`, `ChatHostedProbe.swift`,
   `ChatRowStabilityTests.swift`.
+
+### CT-27 stage A summary · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: CT-27's row-stability foundation stage A is on `ct-27-rows` in five
+  commits, one per finding, each with its own evidence:
+  `a8e9e3745` F13 (probe record + hosted journey, records today's failure),
+  `e5d6ae642` F1 (one entrance clip structure), `fad397c93` F5 (a settled row
+  owns no pinned height), `60159b86a` F9 (one prompt row structure across the
+  canonical handoff), `c16acbe28` F10 (one notification pill structure).
+- Evidence (lane ct27, all products rebuilt from this worktree; run directories
+  under `~/Library/Developer/Tron/ios/test-runs/`):
+  - `ChatRowStabilityTests` 4/4, 3.6-3.9 s (`…T004453Z-run.p62K3Y`,
+    `…T004149Z-run.7BWDDF`): the journey, the entrance-admission identity gate,
+    the canonical-handoff identity guard and the truncated-notice pill gate.
+  - Parity gate 7/7 in 44.6-47.8 s after every finding
+    (`…T004212Z-run.225ee8` for the last state; `…T235449Z-run.F0UpSn` for the
+    A1 baseline). CT-14's motion evidence is the same suite's transition frames
+    and moved within the recorded bounds each time.
+  - Negative controls: the A1 journey recorded
+    `entranceIdentityStable=false remountedRows=1:stability-entrance` before F1;
+    the F10 pill gate failed with two identity instances when
+    `ChatNotificationView.body` was temporarily restored to its
+    `Group { if showsDetailAction }` form (`…T004043Z-run.Ioaikf`, exit 65).
+  - Regression check: 206 unit tests in the four affected suites pass
+    (`…T004418Z-run.oe3z0V`), and six entrance/growth/replacement harness tests
+    pass (`…T004453Z-run.p62K3Y`).
+- Deviations carried from the per-finding entries: CT-25's real-scroll detach
+  driver is not on this branch (the journey moves the real native scroll view and
+  admits the interaction phase through the coordinator's own path, probe in
+  `.native` callback mode); the collapsed display card is a sheet-surface display
+  because a tap that collapses an inline card cannot be injected; an inline
+  display cannot reach its prepared state without a hosted media source, so the
+  journey reports `inlineDisplaysPrepared=false` and height stability instead;
+  F5 has no hosted height oracle; F9's switch could not be reproduced from the
+  harness (the handoff ID is remembered in the same intake that installs the
+  canonical row), so its test guards the invariant rather than demonstrating the
+  switch.
+- Not in this stage: the rest of CT-27's row list (ThinkingBlock and display-card
+  disclosure `Layout`s, store-owned disclosure state, inline display loads per
+  identity, row-owned sheet routes) is untouched, and the journey's
+  `postMountResizes=0` is the measurement those changes will be judged against.
+- For the next agent: the branch is ready for review; F1's device check for the
+  Liquid Glass press region stays on the CT-7 checklist.
