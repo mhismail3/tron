@@ -326,23 +326,10 @@ private struct ChatTranscriptOrientationModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         if orientation.presentsNewestRowFirst {
-            content.modifier(ChatTranscriptReflectionEffect(scale: orientation.verticalScale))
+            content.scaleEffect(x: 1, y: orientation.verticalScale)
         } else {
             content
         }
-    }
-}
-
-/// Orientation never animates. Preserve the center-anchored reflection while
-/// excluding a constant scale from the row's animation transaction.
-private struct ChatTranscriptReflectionEffect: GeometryEffect {
-    let scale: CGFloat
-
-    func effectValue(size: CGSize) -> ProjectionTransform {
-        ProjectionTransform(CGAffineTransform(
-            a: 1, b: 0, c: 0, d: scale,
-            tx: 0, ty: size.height * (1 - scale) / 2
-        ))
     }
 }
 
