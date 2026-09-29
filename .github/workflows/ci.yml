@@ -242,6 +242,13 @@ jobs:
           set -euo pipefail
           trap 'scripts/ios-gateway-e2e-test stop || true' EXIT
           scripts/ios-gateway-e2e-test all
+      - name: Run hosted iOS Gateway LAN lane boundary
+        # The E-3c two-lane case needs this runner's private address, which the
+        # lane binds; `run-lan` reuses the products the boundary case built.
+        run: |
+          set -euo pipefail
+          trap 'scripts/ios-gateway-e2e-test stop || true' EXIT
+          scripts/ios-gateway-e2e-test run-lan
       - name: Upload Pi boundary evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -556,6 +556,17 @@ not a speculative cache — is what makes that true.
   remote-close metadata, and loss of an accepted response followed by durable
   receipt/canonical exactly-once verification. A skipped boundary case fails the
   runner. CI runs this boundary for source changes, not only SDK upgrades.
+- `scripts/ios-gateway-e2e-test run-lan` renews the same private Gateway with its
+  pinned LAN lane bound to this Mac's private address and runs the E-3c two-lane
+  case: the app pairs over the proxy, races the advertised pinned lane against
+  the saved Tailscale endpoint, and then holds a live LAN connection through a
+  90 s blackhole of the saved lane (WebSocket frames and plain HTTP), where an
+  attachment upload is the route that proves the epoch's HTTP requests followed
+  the winning lane. The same case blocks the lane at a listening socket that
+  never answers TLS, so the saved lane must win after the 250 ms stagger and the
+  losing socket must be retired rather than left dialing. It needs a private
+  address on this host; the lane is off for the boundary case above, which keeps
+  the fault proxy on every leg it drives. CI runs it after the boundary case.
 - Build source, then run `node --expose-gc packages/gateway/scripts/measure-projection.mjs`
   from the repository root (`--extended` adds 25k/100k-entry histories;
   `--baseline /path/to/compiled/dist` enables balanced comparisons). The tool

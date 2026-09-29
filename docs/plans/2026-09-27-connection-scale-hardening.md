@@ -6,7 +6,7 @@
 - **Last updated:** 2026-09-28, G-8a/G-8d/T-1 Done: an unchanged extension artifact costs one `stat` and no read, the ambient pass stays bound and reports a stop, and both read lanes retry a replace before warning (see the handoff)
 - **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
-- **Last updated:** 2026-09-29, E-3c2 Blocked: the two-lane E2E cases pass against the fixture's own pinned LAN lane (LAN carries a Wi-Fi phone through a 90 s blackhole of the saved lane, a blocked LAN lane falls back within the stagger plus one handshake, and a mismatched pin sends no credential); the HTTP routes on the winning lane remain (see the handoff)
+- **Last updated:** 2026-09-29, E-3c2 Done: HTTP routes on the epoch's winning lane (live view, media, uploads, with the lane's pin) and the E-3c two-lane E2E cases both land; the E2E's blocked-lane leg now proves the 250 ms stagger and a retired LAN socket, and its blackhole leg uploads an attachment through a proxied HTTP blackhole
 
 - **Last updated:** 2026-09-29, F-2 Done: the O-6b page leg's refusal was the driver mounting six presentations on one mobile connection (one presentation slot, by contract); the lane now abandons a superseded page with the phone's own `cancel`, the repro is green with zero `session.sync` refusals, and the driver's page leg no longer fails on a mount the connection retired by design (see the handoff)
 - **Last updated:** 2026-09-29, G-3a Done: streaming progress follows the snapshot rule — a `session.progress` frame is projected and serialized only for a session with a subscriber (the O-6a CPU profile's throttled-flush subtree 551.7 → 193.5 ms, the subscriber's wire frames unchanged at 177 → 178; see the handoff)
@@ -634,7 +634,7 @@ rows are in priority order.
 | E-3a | Done | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3b | Done | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3c | Blocked | LAN endpoint, phone side: pin validation, staggered race, seamless fallback (race, pin and denial record land; HTTP routes and the two-leg E2E cases do not - see the handoff) | E-3b, C-3 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
-| E-3c2 | Blocked | Finish E-3c: HTTP routes (live view, media, uploads) use the winning lane's base with the same pin; the two-leg E2E cases (Tailscale leg blackholed 90 s → no visible disconnect; LAN leg blocked → Tailscale wins within stagger + one handshake; pin mismatch sends no credential) in `scripts/ios-gateway-e2e-test` (the three E2E cases land and pass; HTTP routes do not - see the handoff) | E-3c | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| E-3c2 | Done | Finish E-3c: HTTP routes (live view, media, uploads) use the winning lane's base with the same pin; the two-leg E2E cases (Tailscale leg blackholed 90 s → no visible disconnect; LAN leg blocked → Tailscale wins within stagger + one handshake; pin mismatch sends no credential) in `scripts/ios-gateway-e2e-test` (both halves land: the routes follow the winning lane's base and pin, and the E2E's legs — including an upload through the blackhole — pass) | E-3c | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
 | G-13 | Blocked | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`/`.close_to_listening_ms`, read from the new process's own record; the case reports G-13's criterion with its numbers. Blocked, not Done: the criterion is a "Done when" and no run has met it — the measured misses are host-bound plus two named causes (the old process's 2 s `work-settle` grace and the storm upgrades serialized by `DeviceStore`'s credential mutex), which need rows of their own or a quiet-host R-1 run; see the handoff |
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -9563,13 +9563,62 @@ wait).
   `BoundedHTTPDataTransport`/`BoundedHTTPFileTransport` have no pin plumbing, so
   routing them over a LAN-won epoch needs the pin carried into those transports
   and the winning endpoint kept client-side. That is one focused change with
-  `scripts/tron-ios-test run` cases; it is not started here.
+  `scripts/tron-ios-test run` cases; it is not started here (landed in the
+  review-fix entry below).
 - For E-3d: the two E2E cases E-3d's text requires now pass on this evidence
   (`run-lan`), so `lanEndpoint.enabled` default true is defensible for the
   release; the setting stays the kill switch for R-4. No host network or
   installed app was touched by these runs: `run-lan` starts its own fixture
   Gateway (loopback plus this Mac's own LAN address on an ephemeral port) and
   removes it when the command ends.
+
+### E-3c2 · review fixes · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3c2`)
+
+- Result: the review's two majors and three minors are fixed, and E-3c's Do item
+  3 lands, so E-3c2 is Done. An epoch keeps the route it won with; every
+  authenticated HTTP route that connection owns (live view, blob/media reads,
+  staged export files, upload staging and discard) composes its base from the
+  winning lane's own endpoint and passes that lane's pin to the transport
+  instead of addressing `profile.httpURL`, and a request with no epoch or a
+  saved-endpoint epoch keeps the saved endpoint. The three bounded HTTP
+  transports take an optional `pin` (a 2-argument closure still compiles for
+  every fixture), both URLSession loaders answer the server-trust challenge
+  through `GatewayLanPin.answerServerTrustChallenge`, a pinned request owns a
+  fresh session so the pin decides TLS before any credential-bearing byte, and
+  `LiveLease` carries the pin to its frame and close requests. The E2E's
+  blocked-LAN leg is now a listening socket that never accepts — TCP connects
+  and TLS hangs, what a client-isolated network does, not a refused port — and
+  asserts the saved lane wins at or after the 250 ms stagger and within stagger
+  plus one handshake, that the losing LAN socket was accepted and drained to EOF
+  (retired, not left dialing), and that the retired lane records no failure. The
+  90 s leg arms the fault proxy's new opt-in HTTP blackhole and uploads an
+  attachment every 5 s through it: the proxied saved lane cannot answer that
+  POST, so its 18 answers are the proof that HTTP followed the winning lane.
+- Evidence: `scripts/tron-ios-test build` clean;
+  `scripts/tron-ios-test run --only-testing
+  TronMobileTests/GatewayClientLanLaneTests` 17/17 including two new cases (a LAN
+  epoch routes media, the staged export file and an upload to
+  `https://192.168.1.24:9847` with the profile's pin; a saved-endpoint epoch
+  keeps `http://gateway.test:9847` with no pin) with `GatewayClientTransportTests`
+  76/76 (`20260929T091728Z-run.3ZuwEN`). `scripts/ios-gateway-e2e-test build`
+  clean; `scripts/ios-gateway-e2e-test run-lan` green in 112 s (status 0), case
+  passed in 92.1 s, artifact
+  `.../tron-ios-gateway-e2e-501/results/20260929T092123Z-run.w5HPgm/FocusedE2E.xcresult`;
+  that run's fixture logged `lan.listener state=bound port=60445`, one LAN
+  connection opening in 2 ms, and 18 staged uploads while the proxy blackholed
+  the saved lane's HTTP. `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Deviations: the proxy's HTTP blackhole is opt-in (`{"mode":"blackhole",
+  "http":true}`) so the other legs keep reading their fixture through the proxy
+  while a socket is blackholed; `run-lan` is a hosted-CI step after the boundary
+  case (it needs this host's private address, which the lane binds), and
+  `packages/ios-app/docs/development.md`, `packages/ios-app/docs/architecture.md`
+  and `packages/gateway/docs/connection-resilience.md` now describe `run-lan`
+  and the HTTP half.
+- For E-3d: every E-3c E2E leg passes on this evidence, HTTP routes included, so
+  `lanEndpoint.enabled` default true is defensible for the release; the setting
+  stays the kill switch for R-4. E-3c's own row is left for the orchestrator:
+  its Do items 1, 2, 3, 4 and 5 now all land across E-3c/E-3c2.
 
 ### E-3b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
 

@@ -1862,6 +1862,19 @@ scripts/ios-gateway-e2e-test run
 scripts/ios-gateway-e2e-test iterate
 ```
 
+`run-lan` renews that same fixture with the Gateway's pinned LAN lane on
+(`TRON_GATEWAY_LAN_ENDPOINT=on`, kept across the proxy's private restart) and
+then runs `testRacesLanAndTailscaleLanes` — the E-3c two-lane case — instead of
+the boundary test. It needs the Mac to hold a private IPv4/IPv6 address, because
+the lane binds that address (the main listener's port on it) and the case fails
+at the pairing response's missing `lanEndpoints` without one; the case drives
+the app's own path fact, so it runs on this Mac's wired path as a Wi-Fi phone:
+
+```bash
+# After `build`: the LAN lane is on for this fixture only.
+scripts/ios-gateway-e2e-test run-lan
+```
+
 The Gateway uses a fixture-owned home, state directory, agent directory,
 delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly
 bound to that fixture on initial startup and restart so a caller's store cannot
