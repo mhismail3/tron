@@ -3327,14 +3327,14 @@ Generic-device compile commands, from the worktree root:
 
 ```bash
 scripts/tron ios generate
-xcodebuild build -project packages/ios-app/TronMobile.xcodeproj \
+(cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj \
   -scheme 'Tron Device' -configuration LocalDevice \
   -destination 'generic/platform=iOS' \
-  -derivedDataPath "$HOME/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice"
-xcodebuild build -project packages/ios-app/TronMobile.xcodeproj \
+  -derivedDataPath "$HOME/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice")
+(cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj \
   -scheme 'Tron Release' -configuration Release \
   -destination 'generic/platform=iOS' \
-  -derivedDataPath "$HOME/Library/Developer/Tron/ios/ct23-device-evaluation/Release"
+  -derivedDataPath "$HOME/Library/Developer/Tron/ios/ct23-device-evaluation/Release")
 TRON_IOS_TEST_LANE=ct23b scripts/tron-ios-test build
 ```
 
