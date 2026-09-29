@@ -2550,6 +2550,48 @@ pass only through eager-only repairs, stop and report.
   without a harness fake; keep the catch-up journey and the ramp gate where they
   are, and re-run parity both ways before and after.
 
+### CT-23 re-application stage 5 · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: the flipped scroll view now applies the swapped vertical safe-area
+  values as `.scrollContent` and `.scrollIndicators` content margins, and ignores
+  `.container` and `.keyboard` vertical safe areas before the orientation
+  transform. Today's orientation remains the default and bypasses these changes.
+  The first committed form built, but the keyboard gate measured a 166 pt
+  overshoot and was reverted as a mechanism by the next step. The final order
+  eliminated that extra inset: the flipped keyboard journey measured 0/56 blank
+  boundaries, 0 uncovered-band boundaries, settled clearance 12 pt, and ramp
+  worst gap 1.9 pt. The flipped detached journey then failed at keyboard-up:
+  its visible anchor row moved 189.7 pt and changed identity, although streaming,
+  keyboard-down and page-load samples moved 0.0 pt. This does not satisfy the
+  pinned-and-detached contract; stop here, with no persistent anchor or command
+  workaround added. CT-25's explicit fallback remains a real-swipe, real-keyboard
+  XCUITest validating SwiftUI preservation of the user-scrolled item.
+- Diagnostic evidence (the temporary test-only margin/offset/safe-area logging
+  was removed before this handoff): keyboard plus detached run
+  `20260929T171157Z-run.JdS3gS`, built from clean HEAD `a7f2804e3`, lane `ct23b`.
+  At all 24 driven keyboard show/hide boundaries, native `contentOffset.y` equaled
+  `-adjustedContentInset.top`; after the final modifier order the native scroll
+  view's vertical `safeAreaInsets` were 0 at the sampled transitions (one
+  intermediate bottom-only value was 79.3 pt). The keyboard gate passed, but
+  the detached test failed on the keyboard show as noted above. Earlier probes:
+  `20260929T170326Z-run.ja6st1` (initial pinned regression, 166 pt ramp error),
+  `20260929T170656Z-run.CazgbR` (initial inset fix, detached stable 0.0 pt but
+  pinned gap 166 pt), all from their respective clean committed HEADs.
+- Changes: `ChatTranscriptOrientation.swift` owns margin mapping and the two
+  explicit ignored safe-area regions; `ChatTranscriptScrollView.swift` reads the
+  insets from the unflipped `GeometryReader` in the same pass and applies the
+  inset modifier before the orientation transform. The temporary diagnostic
+  edits to `ChatViewScrollHarnessTests.swift` have been removed; its existing
+  keyboard and detach gates remain the behavior oracles.
+- Open: the keyboard safe-area path is now pinned-correct, but the detached
+  keyboard-show journey regresses at 189.7 pt. No final parity, bottom gates, or
+  today's path confirmation was run because the user-directed stop condition
+  (pinned and detached must both hold) was reached.
+- For the next agent: resolve the detached-reader movement without introducing
+  scroll commands or timers; if this margin-based path cannot preserve both
+  contracts, implement only the approved fallback (SwiftUI preservation of a
+  user-scrolled item under an XCUITest with real swipe and real keyboard).
+
 ### CT-23 re-application stage 2 · 2026-09-29 · chat scroll session (worker lane ct23b)
 
 - Result: stage 2's two visible-rendering problems are diagnosed with controls.

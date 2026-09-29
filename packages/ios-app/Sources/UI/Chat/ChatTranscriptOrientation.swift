@@ -318,9 +318,6 @@ private struct ChatTranscriptInsetsModifier: ViewModifier {
     func body(content: Content) -> some View {
         if orientation.presentsNewestRowFirst {
             let margins = orientation.scrollMargins(for: safeAreaInsets)
-            #if HOSTED_TEST
-            let _ = print("CT23-OWNER-MARGIN top=\(margins.top) bottom=\(margins.bottom) sourceTop=\(safeAreaInsets.top) sourceBottom=\(safeAreaInsets.bottom)")
-            #endif
             content
                 .ignoresSafeArea(.container, edges: .vertical)
                 .ignoresSafeArea(.keyboard, edges: .vertical)
