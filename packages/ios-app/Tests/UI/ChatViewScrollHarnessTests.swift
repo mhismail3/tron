@@ -4680,8 +4680,8 @@ enum TranscriptBottomGateExpectation {
 /// What the keyboard's own transition frames expect of the gap between the
 /// newest row and the composer.
 enum KeyboardRampExpectation {
-    /// The origin-anchored transcript applies the keyboard as its own content
-    /// inset, which rides the keyboard's transaction, so the newest row must stay
+    /// The origin-anchored transcript applies the keyboard as a content margin
+    /// before its render transform, so the newest row must stay
     /// within 3 pt of the tail spacing at every driven boundary of both
     /// transitions — not only at their settled ends.
     case ridesTheComposerEdge

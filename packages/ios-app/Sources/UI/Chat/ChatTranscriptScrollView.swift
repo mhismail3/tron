@@ -685,8 +685,19 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let onAutomaticProjectionIntakeAvailable: () -> Void
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
 
+    @ViewBuilder
     var body: some View {
-        GeometryReader { insetReader in
+        if orientation.presentsNewestRowFirst {
+            GeometryReader { insetReader in
+                transcriptBody(safeAreaInsets: insetReader.safeAreaInsets)
+            }
+        } else {
+            transcriptBody(safeAreaInsets: .init())
+        }
+    }
+
+    @ViewBuilder
+    private func transcriptBody(safeAreaInsets: EdgeInsets) -> some View {
         let physicalRows = installed.map {
             ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
@@ -719,12 +730,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             )
         }
         // The flip belongs on the scroll view itself, outside the sheet host and
-        // the observations that read its geometry, and it is the whole inset
-        // mechanism: the flipped view's own vertical safe-area insets arrive
-        // mirrored, so the composer/keyboard inset lands at the content origin
-        // and the navigation inset at the far end as native content insets that
-        // ride the keyboard's own transaction.
-        .chatTranscriptInsets(orientation, safeAreaInsets: insetReader.safeAreaInsets)
+        // geometry observations. On the flipped path, the inset adapter reads
+        // safe areas before this transform and applies them as content margins.
+        .chatTranscriptInsets(orientation, safeAreaInsets: safeAreaInsets)
         .chatTranscriptOrientation(orientation)
         // The sheet a row asked for is presented here, outside the lazy stack, so
         // streaming a row out of realization cannot dismiss it. The resolver is
@@ -936,7 +944,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             }
         }
         .overlay { openingSurface() }
-        }
     }
 
     /// The transcript's scrollable content. The tail affordance and the
@@ -960,17 +967,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // the accessibility tree's own order, which follows the view order: the
         // origin-anchored spine's view order is its visual order reversed, so
         // every element takes the priority the owner computes for its position.
-        // Today's spine needs none, so today's path builds no map and applies no
-        // modifier. The map is bounded by the installed page
-        // (`ChatTranscriptPageRequest.maximumItemCount`) and is built once per
-        // body evaluation on the development path only.
-        let voiceOverSpinePositions: [String: Int] = newestFirst
-            ? Dictionary(
-                uniqueKeysWithValues: physicalRows?.enumerated().map { offset, row in
-                    (row.id, offset)
-                } ?? []
-            )
-            : [:]
+        // Enumerate the installed spine directly rather than building an ID map;
+        // the row ID remains the ForEach identity while its current position
+        // supplies the orientation owner's accessibility order.
         VStack(alignment: .leading, spacing: 0) {
             if newestFirst {
                 tailMarker(terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance)
@@ -984,7 +983,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance
                         )
                     }
-                    ForEach(physicalRows) { row in
+                    ForEach(Array(physicalRows.enumerated()), id: \.element.id) { spinePosition, row in
                         physicalRowHost(
                             row,
                             terminalPhysicalID: terminalPhysicalID,
@@ -996,7 +995,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         .chatTranscriptOrientation(orientation)
                         .chatTranscriptVoiceOverOrder(
                             orientation,
-                            spinePosition: voiceOverSpinePositions[row.id] ?? 0
+                            spinePosition: spinePosition
                         )
                     }
                     if newestFirst, hasEarlierMessages {

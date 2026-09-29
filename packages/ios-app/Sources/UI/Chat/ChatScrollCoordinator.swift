@@ -44,7 +44,8 @@ final class ChatScrollCoordinator {
     private struct SemanticFrameSample: Equatable {
         let layoutEpoch: Int
         let revision: Int
-        let frame: CGRect
+        let rawFrame: CGRect
+        var frame: CGRect { rawFrame }
     }
 
     private struct TailMaterialization {
@@ -223,7 +224,7 @@ final class ChatScrollCoordinator {
     }
 
     private var retainedViewportReconciliationState: RetainedViewportReconciliationState = .idle
-    @ObservationIgnored private var semanticFrames: [String: SemanticFrameSample] = [:]
+    @ObservationIgnored private var rawSemanticFrames: [String: SemanticFrameSample] = [:]
     @ObservationIgnored private var semanticFrameRevision = 0
     private var openingTailPhase: OpeningTailPhase = .idle
     /// Extends opening ownership from physical target release through the
@@ -434,6 +435,18 @@ final class ChatScrollCoordinator {
         )
     }
 
+    private func semanticFrame(for renderedID: String) -> SemanticFrameSample? {
+        guard let sample = rawSemanticFrames[renderedID] else { return nil }
+        return SemanticFrameSample(
+            layoutEpoch: sample.layoutEpoch,
+            revision: sample.revision,
+            rawFrame: orientation.transcriptFrame(
+                sample.rawFrame,
+                containerHeight: geometry.containerHeight
+            )
+        )
+    }
+
     func semanticFrameChanged(renderedID: String, layoutEpoch: Int, frame: CGRect) {
         guard layoutEpoch == self.layoutEpoch else { return }
         // Rows and the tail marker report the scroll view's own frames. On the
@@ -441,12 +454,11 @@ final class ChatScrollCoordinator {
         // every consumer below — the reader's anchor row, the marker's
         // placement against the viewport, a correction's signed residual — is
         // handed the same transcript-relative space today's transcript reports.
-        let frame = orientation.transcriptFrame(frame, containerHeight: geometry.containerHeight)
         // SwiftUI can invoke an observation action again with the same frame
         // while the row tree settles. Such callbacks are inert unless an exact
         // active owner is awaiting later temporal evidence from that row.
-        let previous = semanticFrames[renderedID]
-        let changed = previous?.layoutEpoch != layoutEpoch || previous?.frame != frame
+        let previous = rawSemanticFrames[renderedID]
+        let changed = previous?.layoutEpoch != layoutEpoch || previous?.rawFrame != frame
         let hasOwnedWaiter = layoutRestore != nil
             || prepend != nil
             || openingTailPhase.context?.targetRenderedID == renderedID
@@ -458,15 +470,15 @@ final class ChatScrollCoordinator {
         // its command/layout epoch, even when the frame value is unchanged.
         guard changed || hasOwnedWaiter else { return }
         semanticFrameRevision &+= 1
-        semanticFrames[renderedID] = SemanticFrameSample(
+        rawSemanticFrames[renderedID] = SemanticFrameSample(
             layoutEpoch: layoutEpoch,
             revision: semanticFrameRevision,
-            frame: frame
+            rawFrame: frame
         )
         // Existing samples update in O(1); bounded eviction scans only when a
         // new sample exceeds capacity.
         if renderedID == "transcript-bottom",
-           let marker = semanticFrames[renderedID] {
+           let marker = semanticFrame(for: renderedID) {
             refreshPhysicalTailEvidence(marker: marker)
             reconcileRetainedViewport(with: geometry)
         }
@@ -475,15 +487,15 @@ final class ChatScrollCoordinator {
             tailMaterializationEvidenceChanged()
             retargetTailMaterializationToStableTailIfNeeded()
         }
-        if semanticFrames.count > 256,
-           let oldest = semanticFrames.min(by: { $0.value.revision < $1.value.revision })?.key {
-            semanticFrames[oldest] = nil
+        if rawSemanticFrames.count > 256,
+           let oldest = rawSemanticFrames.min(by: { $0.value.revision < $1.value.revision })?.key {
+            rawSemanticFrames[oldest] = nil
         }
         recordPrependExcursionIfOwned(renderedID: renderedID, layoutEpoch: layoutEpoch, frame: frame)
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
         if openingTailPhase.context?.targetRenderedID == renderedID {
-            updateOpeningTargetSample(semanticFrames[renderedID])
+            updateOpeningTargetSample(semanticFrame(for: renderedID))
             evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
         }
     }
@@ -493,7 +505,7 @@ final class ChatScrollCoordinator {
             -> (index: Int, renderedID: String, semanticID: String, frame: CGRect)? in
             let (index, renderedID) = indexed
             guard let semanticID = timeline.preferredSemanticIDByRenderedID[renderedID],
-                  let sample = semanticFrames[renderedID],
+                  let sample = semanticFrame(for: renderedID),
                   sample.layoutEpoch == layoutEpoch,
                   sample.frame.maxY > 0,
                   sample.frame.minY < geometry.containerHeight else { return nil }
@@ -632,7 +644,7 @@ final class ChatScrollCoordinator {
     /// marker; a cached frame from the prior tree cannot certify an opening.
     func revalidateTailMarkerAfterLayoutEpoch() {
         guard openingTailPhase.context != nil,
-              let marker = semanticFrames["transcript-bottom"],
+              let marker = semanticFrame(for: "transcript-bottom"),
               marker.layoutEpoch == layoutEpoch else { return }
         refreshPhysicalTailEvidence(marker: marker)
         updateOpeningTargetSample(marker)
@@ -648,7 +660,7 @@ final class ChatScrollCoordinator {
             geometry = current
             geometryRevision &+= 1
         }
-        if let marker = semanticFrames["transcript-bottom"], marker.layoutEpoch == layoutEpoch {
+        if let marker = semanticFrame(for: "transcript-bottom"), marker.layoutEpoch == layoutEpoch {
             refreshPhysicalTailEvidence(marker: marker)
         }
     }
@@ -683,7 +695,7 @@ final class ChatScrollCoordinator {
             // waiting for a later native sample after its command/layout epoch.
             guard hasOwnedWaiter else { return }
             geometryRevision &+= 1
-            if let marker = semanticFrames["transcript-bottom"], marker.layoutEpoch == layoutEpoch {
+            if let marker = semanticFrame(for: "transcript-bottom"), marker.layoutEpoch == layoutEpoch {
                 refreshPhysicalTailEvidence(marker: marker)
             }
             reconcileRetainedViewport(with: current)
@@ -735,7 +747,7 @@ final class ChatScrollCoordinator {
         if appliedTargetOrigin == .tailMaterialization {
             tailMaterializationEvidenceChanged()
         }
-        if let marker = semanticFrames["transcript-bottom"], marker.layoutEpoch == layoutEpoch {
+        if let marker = semanticFrame(for: "transcript-bottom"), marker.layoutEpoch == layoutEpoch {
             refreshPhysicalTailEvidence(marker: marker)
         }
         geometryRevision &+= 1
@@ -1089,7 +1101,7 @@ final class ChatScrollCoordinator {
         if let semanticID = semanticIDForPhysicalRow(physicalTargetID) {
             if tailMaterialization?.renderedID != semanticID {
                 tailMaterialization?.renderedID = semanticID
-                tailMaterialization?.requiredRevision = semanticFrames[semanticID].map {
+                tailMaterialization?.requiredRevision = semanticFrame(for: semanticID).map {
                     max(0, $0.revision - 1)
                 } ?? semanticFrameRevision
                 traceLease(.semanticHandoff, token: appliedTargetCommandToken,
@@ -1534,7 +1546,7 @@ final class ChatScrollCoordinator {
         tailMaterializationSettlementTask = nil
         tailMaterializationFallbackTask?.cancel()
         tailMaterializationFallbackTask = nil
-        let requiredRevision = semanticFrames[renderedID].map {
+        let requiredRevision = semanticFrame(for: renderedID).map {
             max(0, $0.revision - 1)
         } ?? semanticFrameRevision
         tailMaterialization = TailMaterialization(
@@ -1632,7 +1644,7 @@ final class ChatScrollCoordinator {
 
     private func admittedPrependAnchor(_ anchor: ChatSemanticAnchor) -> ChatSemanticAnchor? {
         guard anchor.layoutEpoch == layoutEpoch,
-              let sample = semanticFrames[anchor.renderedID],
+              let sample = semanticFrame(for: anchor.renderedID),
               sample.layoutEpoch == anchor.layoutEpoch,
               abs(sample.frame.minY - anchor.viewportOffsetY) <= 0.5,
               sample.frame.maxY > 0,
@@ -1661,7 +1673,7 @@ final class ChatScrollCoordinator {
         if applied.origin == .tailMaterialization,
            let materialization = tailMaterialization,
            let renderedID = materialization.renderedID,
-           let sample = semanticFrames[renderedID],
+           let sample = semanticFrame(for: renderedID),
            sample.layoutEpoch == (materialization.requiredLayoutEpoch ?? layoutEpoch),
            sample.revision > (materialization.requiredRevision ?? -1) {
             // Fresh row evidence proves materialization; layout and stable-frame
@@ -1771,7 +1783,7 @@ final class ChatScrollCoordinator {
             publish(.materialize(renderedID), animation: .smooth(duration: 0.25), origin: .layout)
             return
         }
-        guard let sample = semanticFrames[renderedID],
+        guard let sample = semanticFrame(for: renderedID),
               sample.layoutEpoch == layoutEpoch,
               sample.revision > restore.requiredSampleRevision else { return }
         restore.readyForMeasurement = false
@@ -1796,7 +1808,7 @@ final class ChatScrollCoordinator {
               let anchor = context.anchor,
               let renderedID = context.renderedAnchorID,
               context.expectedLayoutEpoch == layoutEpoch,
-              let sample = semanticFrames[renderedID], sample.layoutEpoch == layoutEpoch,
+              let sample = semanticFrame(for: renderedID), sample.layoutEpoch == layoutEpoch,
               sample.revision > context.requiredSampleRevision,
               geometryRevision > context.requiredGeometryRevision else { return }
         context.readyForMeasurement = false
@@ -1844,7 +1856,7 @@ final class ChatScrollCoordinator {
             token: token,
             targetRenderedID: targetRenderedID,
             physicalTargetID: physicalTargetID,
-            targetSample: semanticFrames[targetRenderedID],
+            targetSample: semanticFrame(for: targetRenderedID),
             presentation: presentation,
             commandToken: nil,
             commandSemanticRevision: nil,
@@ -2424,7 +2436,7 @@ final class ChatScrollCoordinator {
             // Row and marker callbacks are independent native observations; the
             // marker may arrive first. Require both fresh samples, not an
             // artificial ordering between their revisions.
-            guard let sample = semanticFrames[renderedID],
+            guard let sample = semanticFrame(for: renderedID),
                   sample.layoutEpoch == layoutEpoch,
                   sample.revision > (materialization.requiredRevision ?? -1) else { return }
         }
@@ -2469,7 +2481,7 @@ final class ChatScrollCoordinator {
               materialization.layoutSettled,
               !materialization.usesStableTailTarget,
               let renderedID = materialization.renderedID,
-              let sample = semanticFrames[renderedID],
+              let sample = semanticFrame(for: renderedID),
               sample.layoutEpoch == layoutEpoch,
               let evidence = physicalTailEvidence,
               evidence.presentationEpoch == presentation,
@@ -2715,23 +2727,23 @@ final class ChatScrollCoordinator {
                 $0.presentationEpoch == presentation && $0.layoutEpoch == layoutEpoch
             },
             nativeRowEvidence: tailMaterialization?.renderedID.map {
-                semanticFrames[$0]?.layoutEpoch == layoutEpoch
+                semanticFrame(for: $0)?.layoutEpoch == layoutEpoch
             },
             nativeRowEvidenceFresh: tailMaterialization.flatMap { materialization in
                 materialization.renderedID.flatMap { renderedID in
-                    semanticFrames[renderedID].map {
+                    semanticFrame(for: renderedID).map {
                         $0.layoutEpoch == layoutEpoch
                             && $0.revision > (materialization.requiredRevision ?? -1)
                     }
                 }
             },
             pendingRowEvidenceFresh: pendingTailMaterialization.flatMap { pending in
-                semanticFrames[pending.renderedID].map {
+                semanticFrame(for: pending.renderedID).map {
                     $0.layoutEpoch == layoutEpoch
                 }
             },
-            rowMinY: tailMaterialization?.renderedID.flatMap { semanticFrames[$0]?.frame.minY },
-            rowHeight: tailMaterialization?.renderedID.flatMap { semanticFrames[$0]?.frame.height }
+            rowMinY: tailMaterialization?.renderedID.flatMap { semanticFrame(for: $0)?.frame.minY },
+            rowHeight: tailMaterialization?.renderedID.flatMap { semanticFrame(for: $0)?.frame.height }
 
         )
     }
@@ -2826,7 +2838,7 @@ final class ChatScrollCoordinator {
         physicalTailEvidenceOffsetY = nil
         physicalTailEvidenceContentHeight = nil
         terminalPhysicalRowObservedLayoutEpoch = nil
-        semanticFrames.removeAll(keepingCapacity: true)
+        rawSemanticFrames.removeAll(keepingCapacity: true)
     }
 
     private func refreshPhysicalTailEvidence(marker: SemanticFrameSample) {
@@ -3144,7 +3156,7 @@ final class ChatScrollCoordinator {
     }
 
     #if HOSTED_TEST
-    var hostedSemanticFrameCount: Int { semanticFrames.count }
+    var hostedSemanticFrameCount: Int { rawSemanticFrames.count }
 
     func hostedNextCommand() async throws -> ChatScrollCommand {
         if let command { return command }

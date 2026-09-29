@@ -2977,3 +2977,27 @@ pass only through eager-only repairs, stop and report.
   are handoff evidence only; the temporary source-owner menu experiment was
   reverted (`6c6665566`) after it failed to identify one actual display-card
   source in both orientations. No product menu change remains from stage 4.
+
+### CT-23 review fixes · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: review findings F2/F3/F7/F8 and the raw-frame portion of F1 are being
+  addressed before evidence runs. The inset reader is mounted only for the
+  origin-anchored branch; semantic row/marker samples retain raw frames and are
+  reflected using the coordinator's current container height when read. VoiceOver
+  priorities are always applied, and row positions are enumerated without an
+  ID-keyed dictionary. Documentation now records the development orientation
+  switch and the margin-based inset owner.
+- Evidence: pending. Required checks remain parity in today's orientation 10/10,
+  the full harness with the switch off, flipped keyboard-ramp alignment at every
+  boundary, the flipped `ChatRowStabilityTests`, and applicable negative controls.
+- Changes: `ChatScrollCoordinator.swift`, `ChatTranscriptOrientation.swift`,
+  `ChatTranscriptScrollView.swift`, `ChatViewScrollHarnessTests.swift`,
+  `packages/ios-app/docs/architecture.md`, this plan.
+- Adapter contract (supervisor): each reported geometry is derived entirely
+  from one `ScrollGeometry` callback, including container size and the actually
+  applied `contentInsets`; the separate `GeometryReader` values only source the
+  margins and are never mixed into observed geometry. Successive callbacks need
+  no frame fence. Stored raw frames are reflected using that latest observed
+  container height when read. This adapter contract is implemented; F4's
+  keyboard-ramp gate remains pending.
+- Open: evidence and the flipped-reflection negative control remain pending.

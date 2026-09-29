@@ -71,10 +71,9 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// top blur is drawn by the transcript itself and is the same on both paths.
     var suppressesPinnedEndScrollEdgeEffect: Bool { self == .newestAtOrigin }
 
-    /// Whether the pinned end the transcript keeps is the lazy stack's own
-    /// estimate. Every mechanism that materializes, repairs or proves that end
-    /// exists for this case and is gated off while the anchor is the exact
-    /// origin (not deleted: CT-19 removes them).
+    /// Whether the pinned newest end depends on the lazy stack's estimate.
+    /// Materialization and repair mechanisms are retained only on this path
+    /// until CT-19 removes them with their owning regressions.
     var pinsToEstimatedOrigin: Bool { self == .newestAtEnd }
 
     // MARK: The layout the transcript's own ends map to
@@ -221,17 +220,17 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
         return count - 1 - position
     }
 
-    /// The geometry the coordinator reads. Both orientations report one model:
+    /// The geometry the coordinator reads. Every field is derived from this one
+    /// ScrollGeometry sample, so container size and applied insets are coherent
+    /// even when successive callbacks in one frame differ. Both orientations report one model:
     /// `distanceFromBottom` is the distance from the newest row. The flipped
     /// scroll view's content origin is its visual bottom, so the visible rect is
     /// mirrored and the composer/keyboard inset, which the flip moves to the
     /// layout top, becomes the model's bottom inset.
     ///
-    /// The origin inset is the scroll view's own resolved content inset
-    /// (`contentInsets.top`), the same value the scroll view applies: the flipped
-    /// view's safe-area insets are already mirrored by the render transform (see
-    /// `ChatTranscriptOrientationModifier`), so there is one inset source rather
-    /// than a read plus a re-application.
+    /// Container size and insets in this adapter come from the same native
+    /// `ScrollGeometry` value: its `contentInsets` are the margins actually
+    /// applied by the scroll view, not the safe-area values that sourced them.
     ///
     /// `visibleTopY` and `visibleBottomY` are the exact native rect: at the
     /// pinned origin the visible top is the inset above the content start, which
@@ -279,37 +278,22 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     }
 }
 
-/// The CT-23 render transform. A no-op on today's path, so both orientations run
-/// the same view tree, and it is the one modifier both the transcript and each
-/// of its rows apply: the transcript's flip puts the newest row at the exact
-/// origin, and the row's own application of the same value cancels it for the
-/// row's content while leaving the row's position in the origin-anchored order.
-///
-/// On the origin-anchored path the owner reads safe-area insets from an
-/// unflipped `GeometryReader` in the same layout pass, ignores the scroll view's
-/// vertical container and keyboard safe areas, and applies the swapped values as
-/// content and indicator margins. This prevents the changing composer/keyboard
-/// inset from reaching UIKit's overlay-inset adjustment for the flipped scroll
-/// view, which otherwise moves detached readers to the pinned end. Today's path
-/// does not ignore safe areas or add margins.
-/// The CT-23 accessibility order. It is the same decision as the render flip:
-/// today's transcript's view order already is its visual order and the modifier
-/// applies nothing, while the origin-anchored transcript's reversed view order
-/// is put back into the visual order here, through the one owner's priority. A
-/// view that asks the owner for its own priority is the only caller, so no
-/// caller branches on the flip.
+/// The CT-23 accessibility order applies in both orientations. Today's owner
+/// returns priority zero, preserving the default ordering, while the
+/// origin-anchored owner supplies the reversed spine's visual order.
 private struct ChatTranscriptVoiceOverOrderModifier: ViewModifier {
     let priority: Double
 
     func body(content: Content) -> some View {
-        if priority == 0 {
-            content
-        } else {
-            content.accessibilitySortPriority(priority)
-        }
+        content.accessibilitySortPriority(priority)
     }
 }
 
+/// The origin-anchored inset adapter reads safe areas before the render flip,
+/// ignores the scroll view's vertical container and keyboard safe areas, and
+/// applies swapped values as scroll-content and indicator margins. This keeps
+/// the changing keyboard inset out of UIKit's overlay-inset adjustment. Today's
+/// path does not ignore safe areas or add margins.
 private struct ChatTranscriptInsetsModifier: ViewModifier {
     let orientation: ChatTranscriptOrientation
     let safeAreaInsets: EdgeInsets
@@ -331,6 +315,8 @@ private struct ChatTranscriptInsetsModifier: ViewModifier {
     }
 }
 
+/// Applies the transcript flip outside row-local content. Each row applies the
+/// same transform as its outermost modifier to keep its own rendering upright.
 private struct ChatTranscriptOrientationModifier: ViewModifier {
     let orientation: ChatTranscriptOrientation
 
