@@ -1517,6 +1517,314 @@ struct ChatViewScrollHarnessTests {
     // multiply the signs along the layer chain instead of stopping at the first
     // negative `m22`. Reading it as flipped would send `scrollReader`'s newest end
     // and every pinned check the wrong way on exactly that container.
+    // MARK: CT-23 stage 4: accessibility, the status-bar tap and the context menu
+
+    /// Why a context-menu preview is not the source lifted in place, or `nil`
+    /// when it is.
+    ///
+    /// The preview is the source's own view, so its geometry is the source's own
+    /// geometry: the transcript's flip and each row's counter-flip are ancestor
+    /// render transforms, and a preview built from the source's own transform is
+    /// upright by construction. A preview that carried the transcript's flip —
+    /// the failure mode the origin-anchored transcript creates — would lift the
+    /// bubble mirrored, and one built in the flipped container's coordinates
+    /// would lift away from the finger.
+    enum ContextMenuPreviewPlacement {
+        static let tolerance: CGFloat = 0.5
+
+        static func failure(
+            sourceWindowFrame: CGRect,
+            targetTransform: CGAffineTransform,
+            containerCenterInWindow: CGPoint,
+            previewSize: CGSize,
+            containerRendersFlipped: Bool,
+            previewViewRendersFlipped: Bool
+        ) -> String? {
+            guard targetTransform == .identity else {
+                return "the preview target carries a transform \(targetTransform)"
+            }
+            guard !containerRendersFlipped else {
+                return "the preview's container renders flipped"
+            }
+            guard !previewViewRendersFlipped else {
+                return "the preview's view renders flipped"
+            }
+            let expected = CGPoint(x: sourceWindowFrame.midX, y: sourceWindowFrame.midY)
+            guard abs(containerCenterInWindow.x - expected.x) <= tolerance,
+                  abs(containerCenterInWindow.y - expected.y) <= tolerance else {
+                return "the preview is centered at \(containerCenterInWindow), not over the source at \(expected)"
+            }
+            guard abs(previewSize.width - sourceWindowFrame.width) <= tolerance,
+                  abs(previewSize.height - sourceWindowFrame.height) <= tolerance else {
+                return "the preview is \(previewSize), not the source's \(sourceWindowFrame.size)"
+            }
+            return nil
+        }
+    }
+
+    /// Why VoiceOver would not read the transcript's elements in the order the
+    /// reader sees them, or `nil` when it would.
+    ///
+    /// VoiceOver reads a container's elements in the accessibility tree's own
+    /// order, which follows the view order, and a sort priority sorts highest
+    /// first within that container; equal priorities keep the tree order, which
+    /// is what the product does without a priority at all. `priority` is what
+    /// the orientation owner gives each content spine position.
+    func voiceOverOrderFailure(
+        orientation: ChatTranscriptOrientation,
+        count: Int,
+        priority: (Int) -> Double
+    ) -> String? {
+        let spinePositions = Array(0..<count)
+        let ranked = spinePositions.sorted { lhs, rhs in
+            let left = priority(lhs)
+            let right = priority(rhs)
+            if left != right { return left > right }
+            return lhs < rhs
+        }
+        let expected = spinePositions
+            .map { orientation.visualPosition(ofSpinePosition: $0, count: count) }
+            .sorted()
+        let actual = ranked.map { orientation.visualPosition(ofSpinePosition: $0, count: count) }
+        guard actual != expected else { return nil }
+        return "the accessibility order would be \(actual), not the visual order \(expected)"
+    }
+
+    @Test("the accessibility reading order puts the oldest row first on both transcript orientations")
+    func accessibilityReadingOrderFollowsTheVisualOrder() {
+        let count = 24
+        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+            let failure = voiceOverOrderFailure(orientation: orientation, count: count) {
+                orientation.voiceOverSortPriority(forSpinePosition: $0)
+            }
+            #expect(failure == nil, "\(orientation): \(failure ?? "")")
+        }
+        // The failure mode the priority exists for: the same origin-anchored
+        // transcript with no priority applied reads bottom-up, which is what the
+        // tree order gives.
+        let unprioritized = voiceOverOrderFailure(orientation: .newestAtOrigin, count: count) { _ in 0 }
+        #expect(unprioritized != nil, "\(unprioritized ?? "")")
+        // A reversed priority is not a fix, and applying one to today's path
+        // breaks the order today's transcript already has.
+        let reversed = voiceOverOrderFailure(orientation: .newestAtOrigin, count: count) {
+            Double(count - 1 - $0)
+        }
+        #expect(reversed != nil, "\(reversed ?? "")")
+        let appliedToToday = voiceOverOrderFailure(orientation: .newestAtEnd, count: count) {
+            Double($0)
+        }
+        #expect(appliedToToday != nil, "\(appliedToToday ?? "")")
+    }
+
+    @Test("the context-menu preview gate fails a mirrored, displaced or resized preview")
+    func contextMenuPreviewPlacementGateRejectsAMirroredPreview() {
+        let source = CGRect(x: 40, y: 700, width: 231, height: 36)
+        let center = CGPoint(x: source.midX, y: source.midY)
+        func failure(
+            transform: CGAffineTransform = .identity,
+            center: CGPoint = .zero,
+            size: CGSize? = nil,
+            containerFlipped: Bool = false,
+            previewFlipped: Bool = false
+        ) -> String? {
+            ContextMenuPreviewPlacement.failure(
+                sourceWindowFrame: source,
+                targetTransform: transform,
+                containerCenterInWindow: center == .zero ? CGPoint(x: source.midX, y: source.midY) : center,
+                previewSize: size ?? source.size,
+                containerRendersFlipped: containerFlipped,
+                previewViewRendersFlipped: previewFlipped
+            )
+        }
+        #expect(failure() == nil)
+        #expect(failure(transform: CGAffineTransform(scaleX: 1, y: -1)) != nil, "the transcript's flip")
+        #expect(failure(center: CGPoint(x: source.midX, y: source.midY - 1)) != nil, "one point away")
+        #expect(failure(size: CGSize(width: source.width, height: source.height + 1)) != nil, "one point taller")
+        #expect(failure(containerFlipped: true) != nil, "a flipped container")
+        #expect(failure(previewFlipped: true) != nil, "a flipped preview view")
+    }
+
+    @Test("the prompt menu's preview is upright and in place on both transcript orientations")
+    func promptContextMenuPreviewIsUprightAndInPlace() async throws {
+        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
+            ($0, try transcriptMenuSnapshot())
+        }
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            for (orientation, snapshot) in snapshots {
+                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
+                    let ready = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
+                    }
+                    #expect(
+                        ready.observation.visibleRowIDs.contains("menu-prompt"),
+                        "\(orientation): the prompt row's menu surface must be mounted"
+                    )
+                    try await harness.driveFrameBoundary()
+                    let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+                    #expect(
+                        TranscriptWindowOracle.isFlipped(scrollView) == orientation.presentsNewestRowFirst,
+                        "\(orientation): this journey must run on the orientation's own path"
+                    )
+                    let surfaces = harness.promptContextMenuSurfaces()
+                    #expect(!surfaces.isEmpty, "\(orientation): the production menu surface must be mounted")
+                    for surface in surfaces {
+                        let windowFrame = surface.view.convert(surface.view.bounds, to: nil)
+                        let configuration = surface.owner.contextMenuInteraction(
+                            surface.interaction,
+                            configurationForMenuAtLocation: surface.view.convert(
+                                CGPoint(x: windowFrame.midX, y: windowFrame.midY), from: nil
+                            )
+                        )
+                        #expect(configuration != nil, "\(orientation): the menu must open over the prompt")
+                        guard let configuration else { continue }
+                        let identifier: any NSCopying = configuration.identifier ?? ("preview-gate" as NSString)
+                        guard let preview = surface.owner.contextMenuInteraction(
+                            surface.interaction, configuration: configuration,
+                            highlightPreviewForItemWithIdentifier: identifier
+                        ) else {
+                            Issue.record("\(orientation): the production preview must exist")
+                            continue
+                        }
+                        guard let container = preview.target.container as? UIView else {
+                            Issue.record("\(orientation): the preview must name a container view")
+                            continue
+                        }
+                        let failure = ContextMenuPreviewPlacement.failure(
+                            sourceWindowFrame: windowFrame,
+                            targetTransform: preview.target.transform,
+                            containerCenterInWindow: container.convert(preview.target.center, to: nil),
+                            previewSize: preview.view.bounds.size,
+                            containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
+                            previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
+                        )
+                        #expect(failure == nil, "\(orientation): \(failure ?? "")")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test("the display card's context menu resolves at the card on both transcript orientations")
+    func displayCardContextMenuResolvesAtTheCard() async throws {
+        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
+            ($0, try transcriptMenuSnapshot())
+        }
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            for (orientation, snapshot) in snapshots {
+                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
+                    }
+                    try await harness.driveFrameBoundary()
+                    guard let bridge = harness.swiftUIContextMenuBridge(),
+                          let delegate = bridge.interaction.delegate else {
+                        Issue.record("\(orientation): SwiftUI's context-menu bridge must be reachable")
+                        return
+                    }
+                    let root = harness.visibleRootView
+                    let rows = TranscriptWindowOracle.rows(in: root).filter(\.isOnScreen)
+                    var resolving: [String] = []
+                    for row in rows {
+                        let location = CGPoint(x: row.windowFrame.midX, y: row.windowFrame.minY + 12)
+                        if delegate.contextMenuInteraction(
+                            bridge.interaction,
+                            configurationForMenuAtLocation: bridge.view.convert(location, from: nil)
+                        ) != nil {
+                            resolving.append(row.semanticID)
+                        }
+                    }
+                    // The display card is the only row with a SwiftUI
+                    // `.contextMenu`; a bridge that resolved everywhere would
+                    // prove nothing about the card.
+                    #expect(
+                        resolving.count == 1 && resolving.first?.contains("display") == true,
+                        "\(orientation): the card's menu resolves at \(resolving)"
+                    )
+                }
+            }
+        }
+    }
+
+    @Test("the system's scroll-to-top lands on the newest end of the origin-anchored transcript")
+    func scrollToTopLandsOnTheContentTop() async throws {
+        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
+            ($0, try transcriptScrollToTopSnapshot())
+        }
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            for (orientation, snapshot) in snapshots {
+                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
+                    }
+                    try await harness.driveFrameBoundary()
+                    let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+                    let pinnedOffset = scrollView.contentOffset.y
+                    let contentTop = -scrollView.adjustedContentInset.top
+                    let legalMaximum = max(
+                        contentTop,
+                        scrollView.contentSize.height - scrollView.bounds.height
+                            + scrollView.adjustedContentInset.bottom
+                    )
+                    #expect(legalMaximum > contentTop, "\(orientation): the journey needs scroll range")
+                    // The origin-anchored transcript's pinned newest end *is* its
+                    // content top; today's transcript pins at its content end.
+                    #expect(
+                        orientation.presentsNewestRowFirst
+                            ? pinnedOffset == contentTop : pinnedOffset != contentTop,
+                        "\(orientation): the pinned end relative to the content top"
+                    )
+                    // What UIKit's status-bar tap does: the scroll view's
+                    // content top, `-adjustedContentInset.top`. Today's
+                    // transcript pins at its content end, so the tap reaches the
+                    // oldest loaded history; the origin-anchored transcript pins
+                    // at its content origin, so its content top *is* the pinned
+                    // newest end and the tap stays there. The user's requirement
+                    // — the tap reaches the oldest loaded history — is therefore
+                    // unmet on the origin-anchored path, and this gate records
+                    // the landing so that decision has a measured baseline.
+                    scrollView.setContentOffset(
+                        CGPoint(x: scrollView.contentOffset.x, y: contentTop),
+                        animated: false
+                    )
+                    for _ in 0..<3 { try await harness.driveFrameBoundary() }
+                    if orientation.presentsNewestRowFirst {
+                        #expect(
+                            scrollView.contentOffset.y == pinnedOffset,
+                            "\(orientation): the content top is the pinned newest end"
+                        )
+                        #expect(
+                            harness.isPinnedToBottom(),
+                            "\(orientation): the newest row stays at the composer"
+                        )
+                    } else {
+                        let topRow = try #require(harness.visuallyTopmostOnScreenRow())
+                        #expect(
+                            topRow.semanticID == harness.firstTranscriptID,
+                            "\(orientation): the tap reaches the oldest loaded history at \(topRow.semanticID)"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func transcriptMenuSnapshot() throws -> SessionSnapshot {
+        var snapshot = try harnessInlineMarkdownDisplaySnapshot()
+        snapshot.transcript.append(try harnessUserMessage(id: "menu-prompt", text: "A prompt with a context menu."))
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = snapshot.transcript.count
+        return snapshot
+    }
+
+    private func transcriptScrollToTopSnapshot() throws -> SessionSnapshot {
+        var snapshot = try SessionScenarioBuilder(seed: 1_300).openingTail(targetEncodedBytes: 10_000)
+        snapshot.transcript = SessionScenarioBuilder(seed: 1_300).historyPage(count: 15, longRowBytes: 600)
+        snapshot.transcript.append(try harnessUserMessage(id: "scroll-to-top-prompt", text: "A prompt."))
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = snapshot.transcript.count
+        return snapshot
+    }
+
     @Test("the orientation read multiplies the flip along the layer chain")
     func orientationReadMultipliesTheFlipAlongTheChain() {
         let root = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -4725,6 +5033,15 @@ private func harnessCompactionItem(id: String) throws -> TranscriptItem {
     )
 }
 
+func harnessUserMessage(id: String, text: String) throws -> TranscriptItem {
+    try decodeTranscriptFixture(
+        TranscriptItem.self,
+        from: Data("""
+        {"id":"\(id)","parentId":null,"presentationId":"\(id)","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"\(id):text","ordinal":0,"type":"text","text":"\(text)"}]}
+        """.utf8)
+    )
+}
+
 func harnessMessage(id: String) throws -> TranscriptItem {
     try decodeTranscriptFixture(
         TranscriptItem.self,
@@ -5538,6 +5855,48 @@ final class ChatViewScrollHarness {
         scrollView.layoutIfNeeded()
     }
 
+    /// The prompt rows' production context-menu surfaces: the native views that
+    /// carry the interaction, with the owner that builds their preview. The
+    /// prompt menu is the app's own UIKit interaction (the display cards' menus
+    /// are SwiftUI's, see `swiftUIContextMenuBridge`).
+    func promptContextMenuSurfaces() -> [(view: UIView, interaction: UIContextMenuInteraction, owner: ChatMessageContextMenuOwner)] {
+        Self.contextMenuViews(in: hostingController.view).compactMap { view in
+            guard let interaction = view.interactions.compactMap({ $0 as? UIContextMenuInteraction }).first,
+                  let owner = interaction.delegate as? ChatMessageContextMenuOwner else { return nil }
+            return (view, interaction, owner)
+        }
+    }
+
+    /// SwiftUI's own context-menu bridge, which resolves the display cards'
+    /// `.contextMenu` menus. `nil` when this build's SwiftUI presents them
+    /// differently, which fails the journey that needs it rather than passing
+    /// quietly. Its delegate is matched by name because the bridge is internal
+    /// to SwiftUI; the name is the only handle on it, and asking an unrelated
+    /// interaction's delegate for a configuration is not safe.
+    func swiftUIContextMenuBridge() -> (view: UIView, interaction: UIContextMenuInteraction)? {
+        for view in Self.contextMenuViews(in: hostingController.view) {
+            for case let interaction as UIContextMenuInteraction in view.interactions {
+                guard let delegate = interaction.delegate,
+                      String(describing: type(of: delegate)).hasSuffix("ContextMenuBridge") else { continue }
+                return (view, interaction)
+            }
+        }
+        return nil
+    }
+
+    /// The row the reader sees at the top of the transcript, or `nil` when no
+    /// mounted row is on screen.
+    func visuallyTopmostOnScreenRow() -> TranscriptWindowOracle.Row? {
+        TranscriptWindowOracle.rows(in: visibleRootView)
+            .filter(\.isOnScreen)
+            .min { $0.windowFrame.minY < $1.windowFrame.minY }
+    }
+
+    private static func contextMenuViews(in view: UIView) -> [UIView] {
+        let found = view.interactions.contains { $0 is UIContextMenuInteraction } ? [view] : []
+        return found + view.subviews.flatMap(contextMenuViews)
+    }
+
     /// Luminance samples from the top of the chat, where the transcript
     /// scrolls under the navigation bar outside the scroll view's safe frame.
     /// The glass bar buttons are excluded: their material re-renders with
@@ -6319,16 +6678,16 @@ enum TranscriptWindowOracle {
         return State(rows: rows, bottom: bottom, contentHeight: scroll.contentSize.height)
     }
 
-    /// Whether the transcript's scroll view is laid out newest-first (CT-23's
-    /// flip), read from the render tree: a vertical scale of -1 on the scroll
-    /// view's own layer or on one of its ancestors up to the window. The signs
-    /// multiply along the chain, because a flip on the scroll view and another on
-    /// an ancestor renders the content upright — reading the first negative
-    /// `m22` alone would call a doubly flipped container flipped and send every
-    /// orientation-dependent branch (`scrollReader`'s newest end, the pinned
-    /// checks) the wrong way.
-    static func isFlipped(_ scrollView: UIScrollView) -> Bool {
-        var layer: CALayer? = scrollView.layer
+    /// Whether this view renders flipped (CT-23's transcript layout), read from
+    /// the render tree: a vertical scale of -1 on the view's own layer or on one
+    /// of its ancestors up to the window. The signs multiply along the chain,
+    /// because a flip on the scroll view and another on an ancestor renders the
+    /// content upright — reading the first negative `m22` alone would call a
+    /// doubly flipped container flipped and send every orientation-dependent
+    /// branch (`scrollReader`'s newest end, the pinned checks, a context-menu
+    /// preview's uprightness) the wrong way.
+    static func isFlipped(_ view: UIView) -> Bool {
+        var layer: CALayer? = view.layer
         var flipped = false
         while let current = layer {
             if current.transform.m22 < 0 { flipped.toggle() }
