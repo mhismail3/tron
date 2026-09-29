@@ -2431,9 +2431,10 @@ pass only through eager-only repairs, stop and report.
   failing is the parity region's wash, unchanged from the spike: 8 of 10 scenarios
   differ by 0.083-0.096 with every worst frame matching at `shift1.0`.
 
-- Evidence (lane ct23b, products built from this worktree's own source state at
-  `e1f1ff05d`, clean, every run under `~/Library/Developer/Tron/ios/test-runs/`;
-  the orientation is selected with
+- Evidence (lane ct23b, products built from this worktree's own source state,
+  clean: this branch's revisions `e1f1ff05d` (all runs below) and `5648eeba9`
+  (the four-gate confirmation in (1)); every run under
+  `~/Library/Developer/Tron/ios/test-runs/`; the orientation is selected with
   `TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`):
 
   **(1) The four bottom gates with the switch on, three runs each** (each run is
@@ -2489,7 +2490,7 @@ pass only through eager-only repairs, stop and report.
     alone: the inset path it drives passes (3).
 
   **(5) The full `ChatViewScrollHarnessTests`, both orientations.**
-  - Switch **off** (`120258Z.unRrkY`): 64/65 pass, 16.3 s suite; the single
+  - Switch **off** (`120258Z.unRrkY`): 64/65 pass, 110.1 s suite; the single
     failure is `displacedRetainedResume`'s 15 s watchdog under the full suite, the
     load flake CT-9 records (`120921Z.OQ4a2s` passes it in isolation in the same
     lane). So the switch-off restructure is a no-op for the whole harness.
