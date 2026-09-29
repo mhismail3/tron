@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-29, CT-23 re-applied on the CT-25/CT-27 base (stage 3)
+ - **Last updated:** 2026-09-29, CT-23 flip2 detached keyboard root cause and clean remeasurement
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -3005,24 +3005,158 @@ pass only through eager-only repairs, stop and report.
 
 ### CT-23 flip2 status · 2026-09-29 · worker lane ct23b
 
-- In progress: at clean `1712fea02`, today's parity is **10/10** and full
-  harness has only `displacedRetainedResume`'s known watchdog failure
-  (`20260929T180911Z-run.tdxmhW`). Flipped row-stability + keyboard + detached
-  (`20260929T181229Z-run.cFbUB1`) reproduced detached 189.7 pt; row-stability
-  journey fails with an unmeasured thinking fixture and entrance height
-  61.7→62.7; other row-stability cases pass.
-- Root cause at clean `edff9c7b0` (`20260929T181514Z-run.HAyuAc`): KVO
-  records **no offset change**, offset 1213 throughout, commands 0. The native
-  scroll frame shrinks from y=0/h=844 to y=166/h=678 late in keyboard show.
-  The reader row stays at -35.3 but is clipped; the next row at 154.3 becomes
-  the oracle's top row. The earlier overlay-inset offset throw is no longer
-  the cause with margins. SwiftUI's size-change anchor issues no offset move.
-- Declarative fix at `befb6f540`: safe-area exclusion outside the scroll flip
-  as well as inside. Clean `20260929T181708Z-run.oaamdq` passes pinned and
-  detached: keyboard ramp worst gap 0.5 pt; detached streaming/show/hide/page
-  movement 0.0 pt with the same identity, no commands, native frame y=0/h=844.
-  No row target, timer or compensating scroll was added. The temporary KVO
-  diagnostics are removed; per-boundary detached and geometry gates replace
-  them. Reflect-on-arrival and outer-exclusion negative controls are next.
-- All later gates, profile runs, product decisions and device checks remain
-  pending; earlier stage tables are not evidence at this revision.
+**Blocked for cutover.** The detached keyboard defect is fixed declaratively;
+preview orientation, parity and flipped row-stability still block acceptance.
+Today's orientation remains the default. No Gateway lifecycle or device action
+was performed. The final product/test revision is **`448a97b79`**; all final runs
+below have `source.dirty=false` at that revision. Subsequent commits update only
+this handoff. Test artifacts are under `~/Library/Developer/Tron/ios/test-runs/`,
+profile artifacts under `~/Library/Developer/Tron/profiles/ios/`.
+
+#### Root cause and changes
+
+- **F1/F4:** `1712fea02` already implements the supervisor's single-sample
+  adapter contract. Geometry is exclusively one `ScrollGeometry` sample,
+  including actually applied content insets; the unflipped reader only sources
+  margins. Raw semantic frames are reflected when read using the latest
+  container height. The pinned keyboard journey now gates distance-from-newest
+  ≤0.5 pt and `tail=aligned` at all 24 ramp boundaries. The latter samples the
+  newest bounded production tail trace, not a reconstructed classifier.
+- **Detached keyboard show:** the previous overlay-inset offset throw is no
+  longer the cause with margins. Harness-only KVO at clean `edff9c7b0`, run
+  `20260929T181514Z-run.HAyuAc`, records **no offset movement**: offset 1213
+  throughout, commands 0. SwiftUI's `HostingScrollView.updateContext` calls
+  `setContentInset`/`setContentSize` and writes the same offset; no layout-restore
+  or offsetY command moves it. Late in show, the native frame shrinks from
+  y=0/h=844 to y=166/h=678. The original row remains at -35.3 but is clipped;
+  the next row at 154.3 becomes the visible anchor. The reported 189.7 pt was
+  this identity selection, not movement of the original row.
+- **Fix:** the orientation owner excludes vertical safe areas outside the scroll
+  flip as well as inside. Inner exclusion prevents UIKit overlay-inset
+  adjustment; outer exclusion prevents the transformed viewport from shrinking
+  and clipping the reader. `ChatTranscriptViewportModifier` owns margins, flip
+  and both exclusions together; row counter-flips do not inherit viewport
+  modifiers. Today's branch returns content without any of them. No position
+  target, timer, retry or compensating command was added. Clean `befb6f540`
+  (`20260929T181708Z-run.oaamdq`) first measured both pinned and detached holding;
+  the permanent detached gate now checks row ID, instance, <0.5 pt and zero
+  commands at every show/hide boundary as well as settled streaming/page load.
+  The conditional real-swipe XCUITest fallback was not needed: the in-app
+  declarative change holds both contracts in the hosted journey. This is not
+  proof of the physical keyboard's transaction.
+- **Controls:** clean `dc33ef1cc`, `20260929T182311Z-run.lowvrR`, reflects on
+  arrival again and fails the new pinned marker gate at every ramp boundary.
+  Clean `76774af55`, `20260929T182408Z-run.vkd4sQ`, removes only outer exclusion
+  and fails detached row/instance preservation, reproducing 189.7 pt. Both
+  controls are reverted; KVO and per-boundary native dumps are deleted.
+- **Display menu:** clean `64606f008`, `20260929T182722Z-run.J7pAPF`, observes
+  SwiftUI's actual public highlight-preview delegate. Its source is an upright
+  `PortalGroupMarkerView`, 358×214 pt; its target is `HostingScrollView` with
+  identity target transform, whose ancestor chain is flipped only on origin.
+  Public SwiftUI `compositingGroup()` on the card does not change that target
+  (`a86db8b71`, `20260929T182838Z-run.NMq0e4`); the experiment is reverted.
+  The retained gate now judges the preview against **its actual card source**,
+  not the larger row marker, and fails for the flipped container. Its existing
+  negative controls reject a mirrored target/view/container, displacement and
+  wrong size. No preview fix is claimed from this bounded investigation and no
+  substitute card was shipped. SwiftUI's standard context-menu API offers no
+  target-container argument. Options requiring further work/approval: explicit
+  SwiftUI preview content (not the same live card lifted in place), a stable
+  source-owned UIKit menu boundary, or a container without the ancestor flip.
+  Delegate geometry proves the unresolved target transform; it is not an
+  on-device menu-animation capture.
+- **Optimized switch:** contrary to the prior review premise,
+  `DevicePerformance.xcconfig` already compiles `HOSTED_TEST`; no production
+  switch expansion was needed. Both optimized profile logs explicitly report
+  `transcript_orientation=newestAtOrigin`/`newestAtEnd`. Documentation records
+  the existing selection command; CT13 metrics now include orientation.
+
+#### Latest clean gates at `448a97b79`
+
+| Gate | Latest result | Run directories |
+| --- | --- | --- |
+| Four CT-2/CT-24 bottom journeys ×3, origin | All 12 pass: 0 blank and uncovered boundaries, minVisibleRowFraction=1.0, settled clearance 12.0, no materialization/physical/past-end repairs | `20260929T184933Z-run.fMfwd5`, `20260929T185003Z-run.s7k0Ct`, `20260929T185033Z-run.nPnevI` |
+| Same four ×3, today | All known-defect expectations reproduce: minVisibleRowFraction=0.0; blanks 56/72, 61–62/340, 78/90, 26–30/68. Not a claim of covering the bottom | `20260929T185103Z-run.cDNBAI`, `20260929T185136Z-run.UeJKvm`, `20260929T185209Z-run.6W7aR9` |
+| Keyboard + staged catch-up + detached, origin | All pass. Ramp worst gap 3.0 pt from 12; distance and aligned-marker gates pass at every ramp boundary. Detached streaming/show/hide/page movement 0.0, same ID/instance through keyboard, zero commands | `20260929T190558Z-run.BgDdB7` |
+| Same journeys, today | All pass their existing expectations. Detached 0.0 throughout; keyboard reproduces known ramp drop (96,305.2 pt), settles at 12.3 | `20260929T190620Z-run.WopPV5` |
+| Parity, today | **10/10** | `20260929T184532Z-run.firSJ8` |
+| Parity, origin | **7/10 focused**, not the expected 9/10; full checkpoint was 6/10. Latest failures: opened-long-history 0.02704, ordinary-send 0.05690, keyboard 0.06121. Full run additionally failed detached-catch-up at 0.03256; focused passes it at 0.02314 | `20260929T190642Z-run.m896vz`; full `20260929T183920Z-run.pKUJBZ` |
+| Full harness + parity + row stability, origin | 88 tests, 42 issues. Contains retained estimated-end/lease/opening test assumptions, menu gate, row-stability journey and parity failures; **not green**. Additional covered-catalog/prepend watchdogs remain untriaged; not all failures are declared retired mechanisms | `20260929T183920Z-run.pKUJBZ` |
+| Full harness + parity + row stability, today | 88 tests, 3 issues: the menu test explicitly runs origin too and fails there; `displacedRetainedResume` and `unifiedResponseAndNotificationSettlement` watchdogs. Both watchdog cases pass focused at same source | `20260929T184532Z-run.firSJ8`; focused `20260929T190539Z-run.s8qLIk` |
+| ChatRowStabilityTests, origin | 13/14 pass; journey fails: thinking fixture never measured, entrance phase height 60.8–62.7, no thinking measurements. Same failure class already at `1712fea02`. Identity-admission case passes. Do not infer a product thinking-row defect or a clean suite from incomplete fixture traversal | `20260929T183920Z-run.pKUJBZ` |
+| ChatRowStabilityTests, today | 14/14 pass | `20260929T184532Z-run.firSJ8` |
+| Prompt/UIKit preview and preview negative controls | Pass both orientations; display/SwiftUI preview separately fails | Both full runs above |
+| Accessibility / status-bar | Existing priority-model test passes; **no hosted accessibility-tree or scroll-action proof**. Existing content-top test demonstrates origin reaches newest, not required oldest; **requirement unmet**, not a pass | Both full runs above |
+
+The reference's documented 12.667 pt pin versus origin's exact 12.0 pt remains;
+no tolerance was loosened and no reference was re-recorded. The current 7/10
+result is worse than the requested 9/10 and stays open; attributing *all* of the
+new residuals to ink phase would be inference, not established evidence.
+The original `1712fea02` verification is retained separately:
+`20260929T180911Z-run.tdxmhW` (today parity 10/10, harness only known
+`displacedRetainedResume` watchdog); `20260929T181229Z-run.cFbUB1` (origin
+row-stability failures above and detached 189.7 pt).
+
+#### Scale and optimized profiles
+
+Every 150/300/512 shape opened in all three trials in both orientations (the
+prior today's 150-row readiness miss did not reproduce). CT13 opening snapshots
+are still during the reveal (4.0–4.7 pt); the phase-end measurements below are the
+settled evidence. Median values across the three trials:
+
+| Orientation | First ready ms, 150/300/512 | Ready MB | Scroll step ms | Stream interval ms |
+| --- | --- | --- | --- | --- |
+| origin | 207.6 / 136.9 / 158.4 | 497.3 / 570.1 / 579.9 | 1.0 / 0.9 / 1.0 | 16.7 / 22.0 / 30.8 |
+| today | 299.9 / 199.4 / 234.6 | 500.5 / 572.1 / 593.7 | 1.0 / 1.0 / 1.0 | 16.7 / 21.5 / 31.7 |
+
+Origin ends every send phase pinned at 12.0; today ends detached at 387–432 pt,
+as before. Scale is measurement, not proof of a passing send UX. Runs:
+origin `20260929T185250Z-run.C1srBC`, `20260929T185331Z-run.j4Yqf7`,
+`20260929T185411Z-run.J56pem`; today `20260929T185451Z-run.3L0HEh`,
+`20260929T185535Z-run.je9QIa`, `20260929T185621Z-run.TAmXVA`.
+
+`scripts/tron-profile ios --self-test` passed all CPU/disk/wakeup controls
+(`20260929T183718Z-control-37a8c0`, `20260929T183741Z-control-cpu-6a3bd6`,
+`20260929T183801Z-control-disk-2b40cd`, `20260929T183820Z-control-wakeups-6b0ff8`).
+Both product scenarios ran five measured iterations with the optimized build:
+
+| Scenario | Today → origin reports | `scripts/tron-profile compare` |
+| --- | --- | --- |
+| streaming-reply | `20260929T185716Z-streaming-reply-9dd4f3` → `20260929T190107Z-streaming-reply-c97d9a` | CPU 3.984→3.718 s (−6.7%), main thread −7.3%, peak footprint 73.83→69.50 MiB (−5.9%); **interrupt wakeups 2649→2849 (+7.6%) is a flagged regression**, 6 improvements |
+| tool-loop | `20260929T185853Z-tool-loop-d854fd` → `20260929T190243Z-tool-loop-d22961` | CPU within noise (−1.0%), peak footprint 72.53→67.02 MiB (−7.6%); no flagged regressions |
+
+Reports and logs retain clean source identity and actual orientation. Reproduce
+with `TRON_IOS_TEST_LANE=ct23b TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`
+(or `end`) before `scripts/tron-profile ios --scenario streaming-reply --scenario
+tool-loop`, then `scripts/tron-profile compare <today-report-dir> <origin-report-dir>`.
+These are simulator comparisons, not device performance or energy proof.
+
+#### Open items, user decisions and device checklist
+
+1. Fix/validate display preview without replacing the real-card lift; origin
+   parity must meet its agreed bound; diagnose the row-stability fixture/journey
+   failures and the additional full-harness watchdogs. No production cutover.
+2. Investigate the optimized streaming interrupt-wakeup regression and measure
+   per-keyboard-frame body work if making an F3 CPU claim (not measured here).
+3. **Status-bar user decision still required:** keep origin and accept newest
+   (violates the current requirement), add a product-owned oldest-history command
+   (not the same interaction), or adopt a container Tron owns with the public
+   UIKit scroll-to-top delegate. No private reach-in. Existing requirement is
+   oldest loaded history, unchanged by this work.
+4. **Navigation fade decision still required:** keep the approved suppression
+   and chat's own top blur only, or approve transcript-owned replacement chrome.
+   No replica added. Prior effect-band measurements remain 844 pt origin versus
+   170.8 pt today (106 hard style); those are historical, not remeasured here.
+5. Device checklist (user-owned; no install performed): real keyboard show/hide
+   and interactive dismissal while pinned and detached, tall-streaming and
+   insertion slivers, menu lift/selection/links/sheets, overscroll at both ends,
+   VoiceOver traversal and three-finger scrolling, status-bar oldest-history
+   behavior, side-by-side under-navigation fade acceptance, and scroll continuity
+   through reconnect/page load. Hosted stills and driven insets do not prove
+   these interactions. Accessibility tree/scroll-action tests remain owed.
+6. CT-19 deletion list remains deferred until the owning gates and user decisions
+   pass; neither today's path nor its five estimated-end mechanisms were removed.
+
+Lane cleanup: `scripts/tron-ios-test lane-remove ct23b` is the final tooling-owned
+cleanup action; no simulator is released by hand. The retained run/profile roots
+above are separate from the lane's simulator/state.
