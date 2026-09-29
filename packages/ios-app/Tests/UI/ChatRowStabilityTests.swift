@@ -56,41 +56,27 @@ struct ChatRowStabilityTests {
                 try await driveBoundaries(10, harness: harness)
                 report.capture(phase: "entrance", harness: harness)
 
-                // Detach with a real scroll: the native transcript view moves
-                // first, and the reader's own interaction phase is admitted
-                // through the coordinator's real phase path. The native
-                // callbacks stay admitted throughout (`.native` probe mode), so
-                // the geometry the coordinator sees is the real one.
-                try harness.displaceNativeTranscriptFromTail(by: 240)
-                try await driveBoundaries(2, harness: harness)
-                harness.drivePhase(
-                    from: .idle,
-                    to: .interacting,
-                    geometry: harness.probeObservation.geometry
-                )
-                try harness.displaceNativeTranscriptFromTail(by: 900)
-                try await driveBoundaries(3, harness: harness)
-                harness.drivePhase(
-                    from: .interacting,
-                    to: .idle,
-                    geometry: harness.probeObservation.geometry
-                )
-                try await driveBoundaries(2, harness: harness)
+                // Detach with the real scroll driver: the native transcript view
+                // moves to a mid-history viewport first, and the reader's own
+                // interaction phase is admitted through the coordinator's real
+                // phase path. The native callbacks stay admitted throughout
+                // (`.native` probe mode), so the geometry the coordinator sees is
+                // the real one.
+                try await harness.detachReaderMidHistory()
                 #expect(harness.probeObservation.isDetached, "the journey did not detach")
                 report.capture(phase: "detached", harness: harness)
 
                 for round in 1...2 {
-                    try harness.displaceNativeTranscriptFromTail(by: 1_000_000)
+                    try harness.scrollReader(byVisualPoints: 10_000_000)
                     try await driveBoundaries(4, harness: harness)
                     report.capture(phase: "oldest-\(round)", harness: harness)
                     // What is really on screen is the mounted native rows, not
                     // the probe's retained frame bookkeeping.
                     oldestVisibleRowIDs = harness.recorder.samples.last?
-                        .nativeRows.filter(\.isVisible).map(\.semanticID) ?? []
+                        .nativeRows.filter(\.isOnScreen).map(\.semanticID) ?? []
                     oldestOffsetY = harness.probeObservation.geometry.offsetY
 
-                    try harness.displaceNativeTranscriptFromTail(by: 0)
-                    try await driveBoundaries(4, harness: harness)
+                    try await harness.returnReaderToPinnedTail()
                     report.capture(phase: "return-\(round)", harness: harness)
                 }
 
@@ -213,7 +199,7 @@ struct ChatRowStabilityTests {
                 harness.submitPrompt()
                 _ = try await harness.recorder.waitUntil {
                     $0.nativeRows.contains {
-                        $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
+                        $0.physicalID.hasPrefix("outgoing-submission:") && $0.isOnScreen
                     }
                 }
                 var acknowledged = snapshot
@@ -237,7 +223,7 @@ struct ChatRowStabilityTests {
                 acknowledged.transcriptTotal = acknowledged.transcript.count
                 harness.replaceAuthoritativeSnapshot(acknowledged)
                 _ = try await harness.recorder.waitUntil {
-                    $0.nativeRows.contains { $0.semanticID == "canonical-prompt" && $0.isVisible }
+                    $0.nativeRows.contains { $0.semanticID == "canonical-prompt" && $0.isOnScreen }
                 }
                 for _ in 0..<40 { try await harness.driveFrameBoundary() }
                 let observation = harness.probeObservation
@@ -1244,10 +1230,10 @@ private struct RowStabilityReport {
     private mutating func collectNativeHeights(_ harness: ChatViewScrollHarness) {
         for sample in harness.recorder.samples {
             for row in sample.nativeRows where RowStabilityFixture.rowIDs.contains(row.semanticID) {
-                guard row.frame.height.isFinite, row.frame.height > 1 else { continue }
+                guard row.windowFrame.height.isFinite, row.windowFrame.height > 1 else { continue }
                 var mounts = mountHeights[row.semanticID, default: [:]]
                 mounts[row.instance, default: RowMountHeight(frameIndex: sample.frameIndex)]
-                    .record(height: row.frame.height)
+                    .record(height: row.windowFrame.height)
                 mountHeights[row.semanticID] = mounts
             }
         }
@@ -2164,9 +2150,9 @@ private func nativeRowMounts(
     var mounts: [UUID: RowMountHeight] = [:]
     for sample in harness.recorder.samples {
         for row in sample.nativeRows where row.semanticID == semanticID {
-            guard row.frame.height.isFinite, row.frame.height > 1 else { continue }
+            guard row.windowFrame.height.isFinite, row.windowFrame.height > 1 else { continue }
             mounts[row.instance, default: RowMountHeight(frameIndex: sample.frameIndex)]
-                .record(height: row.frame.height)
+                .record(height: row.windowFrame.height)
         }
     }
     return mounts
@@ -2281,28 +2267,12 @@ private func settledHeight(
 }
 
 /// Detach with the real native scroll, drive to the oldest loaded row and come
-/// back to the pinned tail. The reader's interaction phase is admitted through
-/// the coordinator's own path because the harness cannot inject a UIKit drag,
-/// and the probe stays in `.native` callback mode so the geometry is real.
+/// back to the pinned tail. `detachReaderByRealScroll` moves the real view to
+/// the oldest end (the status-bar detach path), so the fixture rows really leave
+/// the lazy range, and `returnReaderToPinnedTail` scrolls the real view back and
+/// waits for the pinned tail the coordinator observes.
 @MainActor
 private func detachToOldestAndReturn(harness: ChatViewScrollHarness) async throws {
-    try harness.displaceNativeTranscriptFromTail(by: 240)
-    try await driveBoundaries(2, harness: harness)
-    harness.drivePhase(
-        from: .idle,
-        to: .interacting,
-        geometry: harness.probeObservation.geometry
-    )
-    try harness.displaceNativeTranscriptFromTail(by: 900)
-    try await driveBoundaries(3, harness: harness)
-    harness.drivePhase(
-        from: .interacting,
-        to: .idle,
-        geometry: harness.probeObservation.geometry
-    )
-    try await driveBoundaries(2, harness: harness)
-    try harness.displaceNativeTranscriptFromTail(by: 1_000_000)
-    try await driveBoundaries(4, harness: harness)
-    try harness.displaceNativeTranscriptFromTail(by: 0)
-    try await driveBoundaries(4, harness: harness)
+    try await harness.detachReaderByRealScroll()
+    try await harness.returnReaderToPinnedTail()
 }
