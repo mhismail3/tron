@@ -22,6 +22,10 @@ final class KnowledgeModelsTests: XCTestCase {
             "content":{"title":"Synthetic article","uri":"https://example.test/article","text":"Saved evidence",
             "captureDisposition":"complete","capturedAt":"2026-01-01T00:00:00Z",
             "preview":{"hash":"\(String(repeating: "a", count: 64))","mediaType":"image/png","bytes":128},
+            "summary":{"text":"Gateway summary","generatedAt":"2026-01-03T00:00:00Z","sourceRevisionId":"revision-fixture","evidenceDigest":"digest","coverage":"full","producer":{"actor":"model","model":"fixture/model"}},
+            "take":{"text":"Keep the API small.","confirmed":true,"producer":{"actor":"user"},"updatedAt":"2026-01-03T00:00:00Z"},
+            "tags":{"tagIds":["systems"],"vocabularyRevision":3,"inputsDigest":"digest","assignedAt":"2026-01-03T00:00:00Z","producer":{"actor":"agent"}},
+            "verdict":{"verdict":"superseded","supersededBy":"replacement-1","decidedAt":"2026-01-03T00:00:00Z","producer":{"actor":"user"}},
             "assessment":{"summary":"Synthetic summary","evidenceQuality":"high","freshness":"current",
             "generatedAt":"2026-01-01T00:00:00Z","usage":{"inputTokens":123,"outputTokens":45,
             "estimatedCostCents":\(cost),"pricing":"synthetic-test-pricing"}}}}],"nextCursor":"next-page","stateRevision":2}
@@ -37,6 +41,11 @@ final class KnowledgeModelsTests: XCTestCase {
             guard case .source(let source) = page.records[0].content else { return XCTFail("Expected source") }
             XCTAssertEqual(source.assessment?.usage?.estimatedCostCents, cost)
             XCTAssertEqual(source.preview?.mediaType, "image/png")
+            XCTAssertEqual(source.summary?.text, "Gateway summary")
+            XCTAssertEqual(source.take?.text, "Keep the API small.")
+            XCTAssertEqual(source.tags?.tagIds, ["systems"])
+            XCTAssertEqual(source.verdict?.verdict, .superseded)
+            XCTAssertEqual(source.verdict?.supersededBy, "replacement-1")
             let roundTrip = try JSONDecoder().decode(KnowledgeListResponse.self, from: JSONEncoder().encode(page))
             XCTAssertEqual(roundTrip, page)
         }
@@ -84,7 +93,7 @@ final class KnowledgeModelsTests: XCTestCase {
         let record = KnowledgeObservationFixture.record()
         let presentation = try XCTUnwrap(KnowledgeObservationPresentation(record: record))
         XCTAssertEqual(presentation.statement, "The user prefers concise explanations.")
-        XCTAssertEqual(presentation.scope, "Personal")
+        XCTAssertEqual(presentation.scope, "Moose's Corner")
         XCTAssertEqual(presentation.date, GatewayTimestamp.parse("2026-01-01T09:30:00Z"))
         XCTAssertNotEqual(presentation.observedAt, record.updatedAt, "Correcting a record must not redate its observation")
         XCTAssertEqual(presentation.sessionID, "fixture-session")
@@ -121,7 +130,7 @@ final class KnowledgeModelsTests: XCTestCase {
         var config = KnowledgeConfig(schemaVersion: 1, revision: 4,
                                      eligibility: KnowledgeEligibility(allSessions: nil, sessionIds: ["selected"], projectIds: ["project"], excludedSessionIds: ["excluded"], excludedProjectIds: []),
                                      observation: KnowledgeObservationLimits(enabled: false, model: "provider/model", maxInputChars: 1_000, maxOutputChars: 100, timeoutMs: 1_000, maxAttempts: 1),
-                                     maximumSearchResults: 50, currentInterests: ["interest"])
+                                     maximumSearchResults: 50, currentInterests: ["interest"], tagVocabulary: KnowledgeTagVocabulary(revision: 0, tags: [], guidelines: ""))
         let loaded = config
         config = KnowledgeObservationConfigurationPolicy.applyingGlobalGrant(config, enabled: true)
         XCTAssertNil(loaded.eligibility.allSessions)
@@ -138,7 +147,7 @@ final class KnowledgeModelsTests: XCTestCase {
         let config = KnowledgeConfig(schemaVersion: 1, revision: 0,
                                      eligibility: KnowledgeEligibility(allSessions: true, sessionIds: [], projectIds: [], excludedSessionIds: [], excludedProjectIds: []),
                                      observation: KnowledgeObservationLimits(enabled: true, model: "fixture/model", maxInputChars: 48_000, maxOutputChars: 8_000, timeoutMs: 30_000, maxAttempts: 1),
-                                     maximumSearchResults: 50, currentInterests: [])
+                                     maximumSearchResults: 50, currentInterests: [], tagVocabulary: KnowledgeTagVocabulary(revision: 0, tags: [], guidelines: ""))
         do {
             _ = try await client.configure(config, capabilities: ["knowledge.v1"])
             XCTFail("Global selection must not be silently ignored by an unsupported Gateway")

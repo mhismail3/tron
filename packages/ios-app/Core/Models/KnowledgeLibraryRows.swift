@@ -26,6 +26,14 @@ package struct KnowledgeSourceRow: Codable, Hashable, Sendable, Identifiable {
     package let admission: KnowledgeSourceAdmission?
     package let sourceSavedAt: String?
     package let sourcePublishedAt: String?
+    package let ageBasis: KnowledgeSourceAgeBasis
+    package let ageDays: Int
+    package let freshness: KnowledgeSourceFreshness
+    package let verdict: KnowledgeSourceVerdict?
+    package let supersededBy: String?
+    package let hasTake: Bool
+    package let tagsStale: Bool
+    package let tags: [KnowledgeTagLabel]?
     package let preview: KnowledgeObjectRef?
     /// The current generated summary only, when its evidence digest still
     /// matches the saved text. Already truncated by the Gateway.

@@ -165,9 +165,42 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let recordId: String; let expectedRevision: String; let record: KnowledgeRecordDraft; let confirmedByUser: Bool }
         return try await mutate("knowledge.note.update", parameters: Params(recordId: id, expectedRevision: expectedRevision, record: record, confirmedByUser: confirmedByUser))
     }
-    func summarize(sourceID: String, expectedRevision: String) async throws -> KnowledgeMutationResult {
+    func curate(sourceID: String, expectedRevision: String, operation: String, verdict: KnowledgeSourceVerdict? = nil, supersededBy: String? = nil, scope: KnowledgeScope? = nil, admission: KnowledgeSourceAdmission? = nil, commandID: String) async throws -> KnowledgeCurationResponse {
+        struct Item: Encodable { let recordId: String; let expectedRevision: String; let verdict: Verdict?; let placement: Placement? }
+        struct Verdict: Encodable { let verdict: KnowledgeSourceVerdict; let supersededBy: String? }
+        struct Placement: Encodable { let scope: KnowledgeScope?; let admission: KnowledgeSourceAdmission? }
+        struct Params: Encodable { let operation: String; let producer: Producer; let items: [Item] }
+        struct Producer: Encodable { let actor: String }
+        let item = Item(recordId: sourceID, expectedRevision: expectedRevision,
+                        verdict: verdict.map { Verdict(verdict: $0, supersededBy: supersededBy) },
+                        placement: scope != nil || admission != nil ? Placement(scope: scope, admission: admission) : nil)
+        let response: KnowledgeCurationResponse = try await mutate("knowledge.source.curate", parameters: Params(operation: operation, producer: Producer(actor: "user"), items: [item]), commandID: commandID)
+        guard response.outcomes.count == 1, response.outcomes[0].recordId == sourceID,
+              ["applied", "unchanged", "conflict", "failed", "skipped"].contains(response.outcomes[0].status) else { throw invalidResponse() }
+        let outcome = response.outcomes[0]
+        guard outcome.status == "applied" || outcome.status == "unchanged" else {
+            let revision = outcome.currentRevision.map(JSONValue.string)
+            throw GatewayFailure(code: outcome.status == "conflict" ? "conflict" : (outcome.code ?? "unavailable"),
+                                 message: outcome.reason ?? "The Knowledge change was not applied.", retryable: outcome.status != "conflict",
+                                 details: .object(revision.map { ["currentRevision": $0] } ?? [:]))
+        }
+        guard outcome.revisionId != nil else { throw invalidResponse() }
+        return response
+    }
+    func saveTake(sourceID: String, expectedRevision: String, text: String, commandID: String) async throws -> KnowledgeMutationResult {
+        struct Params: Encodable { let recordId: String; let expectedRevision: String; let text: String }
+        return try await mutate("knowledge.source.take", parameters: Params(recordId: sourceID, expectedRevision: expectedRevision, text: String(text.prefix(8_000))), commandID: commandID)
+    }
+    func summarize(sourceID: String, expectedRevision: String, commandID: String) async throws -> KnowledgeSourceSummaryStart {
         struct Params: Encodable { let sourceId: String; let expectedRevision: String }
-        return try await mutate("knowledge.source.summarize", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision))
+        return try await mutate("knowledge.source.summarize", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision), commandID: commandID)
+    }
+    func curationJobs(sourceID: String) async throws -> KnowledgeCurationJobsResponse {
+        struct Params: Encodable { let sourceId: String; let limit: Int }
+        let value: KnowledgeCurationJobsResponse = try await request("knowledge.curation.jobs", Params(sourceId: sourceID, limit: 25))
+        guard value.jobs.count <= 25, value.running >= 0, value.failed >= 0,
+              value.jobs.allSatisfy({ $0.sourceId == sourceID && ["summary", "tags"].contains($0.operation) && ["running", "done", "failed"].contains($0.status) }) else { throw invalidResponse() }
+        return value
     }
     func triage(sourceID: String, expectedRevision: String) async throws -> KnowledgeTriageResult {
         struct Params: Encodable { let sourceId: String; let expectedRevision: String }

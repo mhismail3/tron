@@ -5,7 +5,8 @@ import Testing
 
 /// Failure modes these cover, written before the implementation: the Library
 /// asks the Gateway for the wrong projection and receives full records; a row
-/// page is accepted with a stalled cursor or too many rows; a preview batch
+/// page drops freshness, verdict, take, or vocabulary labels; a stalled cursor or
+/// too many rows is accepted; a preview batch
 /// accepts bytes that do not match the reference it answered; a preview outside
 /// the readable bound is fetched anyway; a change event from an older revision
 /// refreshes a page that already has it, or an oversized id list is trusted.
@@ -28,6 +29,13 @@ struct KnowledgeLibraryRowsTests {
         #expect(page.rows.map(\.id) == ["a", "b"])
         #expect(page.rows[0].preview?.hash == KnowledgeRowFixture.hash("a"))
         #expect(page.rows[0].summary == "Current summary")
+        #expect(page.rows[0].ageBasis.rawValue == "sourceSavedAt")
+        #expect(page.rows[0].ageDays == 12)
+        #expect(page.rows[0].freshness.rawValue == "fresh")
+        #expect(page.rows[0].verdict?.rawValue == "evergreen")
+        #expect(page.rows[0].hasTake)
+        #expect(!page.rows[0].tagsStale)
+        #expect(page.rows[0].tags?.first?.label == "Systems")
         #expect(page.rows[1].admission == .pending)
         let requests = await recorder.values
         let sent = try #require(requests.first?.objectValue)

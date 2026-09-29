@@ -17,6 +17,14 @@ enum KnowledgeRowFixture {
         admission: String? = "retained",
         sourceSavedAt: String? = "2026-01-02T00:00:00Z",
         sourcePublishedAt: String? = nil,
+        ageBasis: String = "sourceSavedAt",
+        ageDays: Int = 12,
+        freshness: String = "fresh",
+        verdict: String? = "evergreen",
+        supersededBy: String? = nil,
+        hasTake: Bool = true,
+        tagsStale: Bool = false,
+        tags: [(String, String)] = [("systems", "Systems")],
         preview: (hash: String, mediaType: String, bytes: Int)? = nil,
         summary: String? = nil
     ) -> String {
@@ -36,6 +44,14 @@ enum KnowledgeRowFixture {
         if let admission { fields.append(#""admission":"\#(admission)""#) }
         if let sourceSavedAt { fields.append(#""sourceSavedAt":"\#(sourceSavedAt)""#) }
         if let sourcePublishedAt { fields.append(#""sourcePublishedAt":"\#(sourcePublishedAt)""#) }
+        fields.append(#""ageBasis":"\#(ageBasis)""#)
+        fields.append(#""ageDays":\#(ageDays)"#)
+        fields.append(#""freshness":"\#(freshness)""#)
+        if let verdict { fields.append(#""verdict":"\#(verdict)""#) }
+        if let supersededBy { fields.append(#""supersededBy":"\#(supersededBy)""#) }
+        fields.append(#""hasTake":\#(hasTake)"#)
+        fields.append(#""tagsStale":\#(tagsStale)"#)
+        fields.append("\"tags\":[{" + tags.map { "\"id\":\"\($0.0)\",\"label\":\"\($0.1)\"}" }.joined(separator: ",") + "]")
         if let preview {
             fields.append(#""preview":{"hash":"\#(preview.hash)","mediaType":"\#(preview.mediaType)","bytes":\#(preview.bytes)}"#)
         }

@@ -534,7 +534,7 @@ struct KnowledgeDashboardView: View {
             TronDashboardFilterOption(title: "All scopes", selected: scope == nil, accent: .tronKnowledge,
                                       inactiveAccent: .tronSlate) { setActiveScope(nil) }
             ForEach(KnowledgeScope.allCases, id: \.self) { value in
-                TronDashboardFilterOption(title: value.label, selected: scope == value, accent: .tronKnowledge,
+                TronDashboardFilterOption(title: value == .personal ? "Moose's Corner" : value.label, selected: scope == value, accent: .tronKnowledge,
                                           inactiveAccent: .tronSlate) { setActiveScope(value) }
             }
         }
@@ -1098,7 +1098,7 @@ struct KnowledgeSourceRowView: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
-                Text(KnowledgeSourceRowPresentationPolicy.subtitle(row))
+                Text(KnowledgeSourceRowPresentationPolicy.subtitle(row) + " · " + row.freshness.rawValue.capitalized + (row.verdict.map { " · \($0.label)" } ?? ""))
                     .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
@@ -1273,6 +1273,17 @@ struct KnowledgeEntryLoadView: View {
     }
 }
 
+@MainActor
+private final class KnowledgeTakeDraftRegistry {
+    struct Draft { let text: String; let commandID: String; let expectedRevision: String; let error: String?; let currentText: String? }
+    static let shared = KnowledgeTakeDraftRegistry()
+    private var values: [String: Draft] = [:]
+    func draft(profileID: String?, recordID: String) -> Draft? { values[key(profileID, recordID)] }
+    func set(_ draft: Draft, profileID: String?, recordID: String) { values[key(profileID, recordID)] = draft }
+    func clear(profileID: String?, recordID: String) { values.removeValue(forKey: key(profileID, recordID)) }
+    private func key(_ profileID: String?, _ recordID: String) -> String { "\(profileID ?? "none")|\(recordID)" }
+}
+
 struct KnowledgeDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -1284,6 +1295,28 @@ struct KnowledgeDetailView: View {
     @State private var currentRecord: KnowledgeRecord
     @State private var mutationInFlight = false
     @State private var noteBody = ""
+    @State private var takeDraft: String
+    @State private var takeSaving = false
+    @State private var takeError: String?
+    @State private var takeCurrentText: String?
+    @State private var takeCommandID = UUID().uuidString.lowercased()
+    @State private var takeExpectedRevision: String
+    @State private var summaryJob: KnowledgeCurationJob?
+    @State private var summaryError: String?
+    @State private var summaryCommandID: String?
+    @State private var sourceConfig: KnowledgeConfig?
+    @State private var verdictSaving = false
+    @State private var scopeSaving = false
+    @State private var verdictError: String?
+    @State private var retryVerdict: KnowledgeSourceVerdict?
+    @State private var retryReplacementID: String?
+    @State private var retryScope: KnowledgeScope?
+    @State private var retryAdmission: KnowledgeSourceAdmission?
+    @State private var tagsStale = false
+    @State private var sourceRow: KnowledgeSourceRow?
+    @State private var replacementQuery = ""
+    @State private var replacementRows: [KnowledgeSourceRow] = []
+    @State private var choosingReplacement = false
     private let navigationAncestors: Set<String>
 
     init(record: KnowledgeRecord, origin: KnowledgePresentationIdentity, onChanged: @escaping () async -> Void, onOpenDraft: @escaping (KnowledgeRecord) -> Void, onOpenSession: @escaping (String, String) -> Void, navigationAncestors: Set<String> = []) {
@@ -1293,6 +1326,18 @@ struct KnowledgeDetailView: View {
         self.onOpenDraft = onOpenDraft
         self.onOpenSession = onOpenSession
         _currentRecord = State(initialValue: record)
+        let stored = KnowledgeTakeDraftRegistry.shared.draft(profileID: origin.profileID, recordID: record.id)
+        let take: String
+        if let stored { take = stored.text }
+        else if case .source(let source) = record.content { take = source.take?.text ?? "" }
+        else { take = "" }
+        _takeDraft = State(initialValue: take)
+        _takeExpectedRevision = State(initialValue: stored?.expectedRevision ?? record.revisionId)
+        if let stored {
+            _takeCommandID = State(initialValue: stored.commandID)
+            _takeError = State(initialValue: stored.error)
+            _takeCurrentText = State(initialValue: stored.currentText)
+        }
     }
     @State private var editing = false
     @State private var message: String?
@@ -1325,6 +1370,7 @@ struct KnowledgeDetailView: View {
                 } else if case .source(let source) = currentRecord.content {
                     sourceDetailHeader(source)
                     sourceSummary(source)
+                    sourceCurationControls(source)
                     sourceDetails(source)
                 } else {
                     TronSettingsGroup("Record", accent: .tronKnowledge) {
@@ -1426,6 +1472,24 @@ struct KnowledgeDetailView: View {
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsLayout()
         .task(id: "citations-\(currentRecord.id):\(currentRecord.revisionId)") { await loadCitationTitles() }
+        .task(id: "summary-jobs-\(origin.profileID ?? "none")-\(currentRecord.id)-\(String(describing: model.connectionState))") { await observeSummaryJobs() }
+        .task(id: takeDraft) {
+            guard takeError == nil, case .source(let source) = currentRecord.content, takeDraft != (source.take?.text ?? "") else { return }
+            try? await Task.sleep(for: .milliseconds(650))
+            guard !Task.isCancelled else { return }
+            await saveTakeDraft()
+        }
+        .task(id: "source-config-\(origin.profileID ?? "none")") { await loadSourceConfig() }
+        .task(id: "source-row-\(currentRecord.id)") { await refreshSourceRow() }
+        .onChange(of: takeDraft) { _, value in
+            if case .source(let source) = currentRecord.content, value == (source.take?.text ?? "") { return }
+            let command = UUID().uuidString.lowercased()
+            takeCommandID = command
+            takeCurrentText = nil
+            takeExpectedRevision = currentRecord.revisionId
+            KnowledgeTakeDraftRegistry.shared.set(.init(text: value, commandID: command, expectedRevision: currentRecord.revisionId, error: nil, currentText: nil), profileID: origin.profileID, recordID: currentRecord.id)
+            takeError = nil
+        }
         .tronSettingsVisualTheme(accent: .tronKnowledge)
         .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
             Button("Forget", role: .destructive) { forget() }
@@ -1458,7 +1522,12 @@ struct KnowledgeDetailView: View {
             KnowledgeDetailView(record: linked, origin: origin, onChanged: onChanged,
                                 onOpenDraft: onOpenDraft, onOpenSession: onOpenSession, navigationAncestors: navigationAncestors)
         }
-        .onDisappear { linkedReader.suspend() }
+        .onDisappear {
+            linkedReader.suspend()
+            if case .source(let source) = currentRecord.content, takeDraft != (source.take?.text ?? "") {
+                Task { @MainActor in await saveTakeDraft() }
+            }
+        }
     }
     @ViewBuilder private var recordMetadata: some View {
         TronSettingsGroup("Metadata", accent: .tronKnowledge) {
@@ -1520,29 +1589,138 @@ struct KnowledgeDetailView: View {
                     Text(summary)
                         .font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
                         .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                    if let tags = source.summary?.tags, !tags.isEmpty { KnowledgeSummaryTags(tags: tags) }
                     if source.summary?.coverage == "sampled" {
                         Label("Based on the beginning of the saved text", systemImage: "text.magnifyingglass")
                             .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
                     }
+                    summaryAction(source)
                 }
                 .padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
-            } else if source.text == nil {
-                TronSettingsRow(icon: "text.badge.xmark", title: "No summary available", subtitle: "This entry has no saved readable text to summarize.", accent: .tronKnowledge)
             } else {
-                Button { summarizeSource() } label: {
-                    TronSettingsRow(
-                        icon: "sparkles",
-                        title: source.summary == nil ? "Generate AI summary" : "Regenerate AI summary",
-                        subtitle: source.summary == nil ? "Summarizes the saved text with your Knowledge model; charges may apply." : "The saved text changed since the last summary.",
-                        accent: .tronKnowledge
-                    ) {
-                        if mutationInFlight { TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14) }
+                summaryAction(source)
+            }
+        }
+    }
+
+    @ViewBuilder private func summaryAction(_ source: KnowledgeSourceContent) -> some View {
+        Button { startSummary() } label: {
+            TronSettingsRow(
+                icon: "sparkles",
+                title: source.summary == nil ? "Generate AI summary" : "Regenerate AI summary",
+                subtitle: summaryJob?.status == "running" ? "Summary generation continues in the background." : "Uses saved text with your Knowledge model.",
+                accent: .tronKnowledge
+            ) {
+                if summaryJob?.status == "running" { TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14) }
+            }
+        }.buttonStyle(.plain).disabled(summaryJob?.status == "running" || !admitsOrigin)
+        if let summaryError {
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                Text(summaryError).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError)
+                Button("Retry summary") { startSummary(retry: true) }.buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+            }
+        }
+        if let job = summaryJob, job.status == "failed" {
+            Text(job.reason ?? "Summary failed. Your existing summary is unchanged.")
+                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAmber)
+        }
+    }
+
+    @ViewBuilder private func sourceCurationControls(_ source: KnowledgeSourceContent) -> some View {
+        TronSettingsGroup("Your take", accent: .tronKnowledge) {
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                TextEditor(text: $takeDraft)
+                    .frame(minHeight: 88, maxHeight: 132)
+                    .scrollContentBackground(.hidden)
+                    .font(TronTypography.body)
+                    .accessibilityLabel("Your take")
+                HStack {
+                    Text(takeSaving ? "Saving…" : (source.take == nil ? "Private note · used to guide tagging and retrieval" : "Saved \(humanDate(source.take!.updatedAt))"))
+                        .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                    Spacer()
+                    if tagsStale || takeSaving {
+                        Text("Tags updating")
+                            .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                     }
                 }
-                .buttonStyle(.plain)
-                .disabled(mutationInFlight || !admitsOrigin)
+                if let takeCurrentText {
+                    Text("The current saved take is: \(takeCurrentText.isEmpty ? "(empty)" : takeCurrentText)")
+                        .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAmber)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let failure = takeError {
+                    HStack {
+                        Text(failure).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError)
+                        Spacer()
+                        Button("Retry") { self.takeError = nil; Task { await saveTakeDraft() } }.buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+                    }
+                }
+            }.padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
+        }
+        TronSettingsGroup("Tags and verdict", accent: .tronKnowledge) {
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                sourceTagLabels(source)
+                Menu {
+                    ForEach(KnowledgeSourceVerdict.allCases, id: \.self) { verdict in
+                        Button(verdict.label) {
+                            if verdict == .superseded { choosingReplacement = true }
+                            else { choosingReplacement = false; setVerdict(verdict) }
+                        }
+                    }
+                } label: {
+                    TronSettingsRow(icon: "checkmark.seal", title: "Verdict", subtitle: source.verdict?.verdict.label ?? "Not judged yet", accent: .tronKnowledge) {
+                        if verdictSaving { TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14) }
+                    }
+                }.disabled(verdictSaving || !admitsOrigin)
+                if choosingReplacement || source.verdict?.verdict == .superseded {
+                    TextField("Search replacement", text: $replacementQuery)
+                        .textFieldStyle(.roundedBorder)
+                        .task(id: replacementQuery) { await searchReplacement() }
+                    ForEach(replacementRows.filter { $0.id != currentRecord.id }, id: \.id) { row in
+                        Button("Replaced by: \(row.title)") { choosingReplacement = false; setVerdict(.superseded, replacementID: row.id) }
+                            .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+                    }
+                }
+                Menu {
+                    ForEach(KnowledgeScope.allCases, id: \.self) { target in
+                        Button(target == .personal ? "Moose's Corner" : target.label) { setScope(target) }
+                    }
+                    if source.admission?.status != .archived {
+                        Button("Archive entry", role: .destructive) { setVerdict(.archive) }
+                    } else {
+                        Button("Unarchive entry") { setAdmission(.retained) }
+                    }
+                } label: {
+                    TronSettingsRow(icon: "folder", title: "Scope and archive", subtitle: currentRecord.scope == .personal ? "Moose's Corner" : "Research", accent: .tronKnowledge) {
+                        if scopeSaving { TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14) }
+                    }
+                }.disabled(scopeSaving || !admitsOrigin)
+                if let verdictError {
+                    VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                        TronSettingsCaption(verdictError)
+                        Button("Retry") {
+                            if let retryVerdict { setVerdict(retryVerdict, replacementID: retryReplacementID) }
+                            else if let retryScope { setScope(retryScope) }
+                            else if let retryAdmission { setAdmission(retryAdmission) }
+                        }.buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+                    }
+                }
+            }.padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
+        }
+    }
+
+    @ViewBuilder private func sourceTagLabels(_ source: KnowledgeSourceContent) -> some View {
+        let labels = sourceRow?.tags?.map(\.label) ?? source.tags?.tagIds.compactMap { id in sourceConfig?.tagVocabulary.tags.first(where: { $0.id == id })?.label } ?? []
+        if !labels.isEmpty {
+            ToolChipFlowLayout(spacing: TronSpacing.sm) {
+                ForEach(Array(labels.enumerated()), id: \.offset) { _, label in
+                    Text(label).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronKnowledgeText)
+                        .padding(.horizontal, 10).padding(.vertical, 5).background(Color.tronKnowledge.opacity(0.12), in: Capsule())
+                }
             }
+        } else if source.tags?.tagIds.isEmpty == false {
+            Text("Tags updating").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+        } else if source.tags == nil {
+            Text("Tags not assigned yet").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
         }
     }
 
@@ -1613,6 +1791,10 @@ struct KnowledgeDetailView: View {
         if let published = KnowledgeSourcePresentationPolicy.publishedAt(source) { add("Published", humanDate(published)) }
         if let saved = source.sourceSavedAt { add("Saved in \(source.identity?.provider.capitalized ?? "source")", humanDate(saved)) }
         add("Captured by Tron", humanDate(source.capturedAt))
+        if let sourceRow {
+            add("Freshness", "\(sourceRow.freshness.rawValue.capitalized) · \(sourceRow.ageDays) days since \(sourceRow.ageBasis == .sourceSavedAt ? "saved" : "captured")")
+            if let verdict = sourceRow.verdict { add("Verdict", verdict.label) }
+        }
         add("Capture", source.captureDisposition.rawValue.capitalized)
         if let classification = source.assessment?.classification { add("Intake classification", classification) }
         add("Saved by", source.identity?.provider.capitalized ?? source.origin?.capitalized ?? "Unknown")
@@ -1756,27 +1938,209 @@ struct KnowledgeDetailView: View {
             catch { guard requestGeneration == reflectionRequestGeneration, model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription }
         }
     }
-    private func summarizeSource() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; let revision = currentRecord.revisionId; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; do { let result = try await model.knowledge.summarize(sourceID: currentRecord.id, expectedRevision: revision); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.record; mutationInFlight = false; message = "AI summary generated from the saved evidence."; await onChanged() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
+    private func startSummary(retry: Bool = false) {
+        guard model.knowledgePresentationIdentity == origin else { summaryError = "Gateway changed; reopen this entry."; return }
+        if summaryJob?.status == "running" { return }
+        let commandID = retry || summaryJob?.status == "done" || summaryJob?.status == "failed"
+            ? UUID().uuidString.lowercased() : (summaryCommandID ?? UUID().uuidString.lowercased())
+        summaryCommandID = commandID
+        summaryError = nil
+        let identity = origin
+        let sourceID = currentRecord.id
+        let revision = currentRecord.revisionId
+        Task { @MainActor in
+            do {
+                let started = try await model.knowledge.summarize(sourceID: sourceID, expectedRevision: revision, commandID: commandID)
+                guard model.knowledgePresentationIdentity == identity else { return }
+                summaryJob = started.job
+                if activity.allowsPresentationPublication {
+                    currentRecord = started.record
+                    await onChanged()
+                }
+            } catch {
+                guard model.knowledgePresentationIdentity == identity else { return }
+                summaryError = error.localizedDescription
+                summaryJob = nil
+            }
+        }
+    }
+
+    private func observeSummaryJobs() async {
+        guard model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
+        let identity = origin
+        for _ in 0..<80 {
+            do {
+                let response = try await model.knowledge.curationJobs(sourceID: currentRecord.id)
+                guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+                if let tagJob = response.jobs.first(where: { $0.operation == "tags" }) {
+                    tagsStale = tagJob.status != "done"
+                    if tagJob.status == "done" { await refreshSourceRow() }
+                }
+                if let job = response.jobs.first(where: { $0.operation == "summary" }) {
+                    summaryJob = job
+                    if job.status == "done", let revision = job.revisionId {
+                        let record = try await model.knowledge.read(id: currentRecord.id, revisionID: revision)
+                        guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+                        if let record { currentRecord = record; await onChanged() }
+                        summaryCommandID = nil
+                        return
+                    }
+                    if job.status == "failed" { return }
+                }
+            } catch {
+                guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+            }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+        }
+    }
+
+    private func saveTakeDraft() async {
+        guard !takeSaving, model.knowledgePresentationIdentity == origin,
+              case .source(let source) = currentRecord.content,
+              takeDraft != (source.take?.text ?? "") else { return }
+        takeSaving = true
+        takeError = nil
+        let submitted = takeDraft
+        let commandID = takeCommandID
+        let revision = takeExpectedRevision
+        do {
+            let result = try await model.knowledge.saveTake(sourceID: currentRecord.id, expectedRevision: revision, text: submitted, commandID: commandID)
+            guard model.knowledgePresentationIdentity == origin else { return }
+            if case .source(let saved) = result.record.content {
+                currentRecord = result.record
+                takeExpectedRevision = result.record.revisionId
+                if takeDraft == submitted { takeDraft = saved.take?.text ?? ""; KnowledgeTakeDraftRegistry.shared.clear(profileID: origin.profileID, recordID: currentRecord.id) }
+                tagsStale = true
+            }
+            takeSaving = false
+            await onChanged()
+            await refreshSourceRow()
+        } catch {
+            guard model.knowledgePresentationIdentity == origin else { return }
+            takeSaving = false
+            if let failure = error as? GatewayFailure, failure.code == "conflict",
+               let details = failure.details?.objectValue {
+                takeCurrentText = details["currentTake"]?.stringValue
+                if let latestRevision = details["currentRevision"]?.stringValue,
+                   let latest = try? await model.knowledge.read(id: currentRecord.id, revisionID: latestRevision) {
+                    currentRecord = latest
+                    takeExpectedRevision = latest.revisionId
+                    takeCommandID = UUID().uuidString.lowercased()
+                }
+                takeError = "Your take changed elsewhere. Your draft is kept; the current saved text is shown above. Retry to save your draft over it."
+            } else { takeError = error.localizedDescription }
+            KnowledgeTakeDraftRegistry.shared.set(.init(text: submitted, commandID: takeCommandID, expectedRevision: takeExpectedRevision, error: takeError, currentText: takeCurrentText), profileID: origin.profileID, recordID: currentRecord.id)
+        }
+    }
+
+    private func loadSourceConfig() async {
+        let identity = origin
+        do {
+            let value = try await model.knowledge.status()
+            guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
+            sourceConfig = value.config
+        } catch { return }
+    }
+
+    private func refreshSourceRow() async {
+        let identity = origin
+        do {
+            let page = try await model.knowledge.sourceRows(ids: [currentRecord.id], includeArchived: true, includePending: true)
+            guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
+            sourceRow = page.rows.first
+            tagsStale = page.rows.first?.tagsStale ?? tagsStale
+            if let row = page.rows.first, row.revisionId != currentRecord.revisionId,
+               case .source(let source) = currentRecord.content, takeDraft == (source.take?.text ?? ""),
+               let updated = try await model.knowledge.read(id: row.id, revisionID: row.revisionId, includeArchived: row.admission == .archived, includePending: row.admission == .pending),
+               !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication {
+                currentRecord = updated
+            }
+        } catch { return }
+    }
+
+    private func setVerdict(_ verdict: KnowledgeSourceVerdict, replacementID: String? = nil) {
+        guard admitsOrigin, !verdictSaving else { return }
+        retryVerdict = verdict; retryReplacementID = replacementID; retryScope = nil; retryAdmission = nil
+        verdictSaving = true; verdictError = nil
+        let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
+        Task { @MainActor in
+            do {
+                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "verdict", verdict: verdict, supersededBy: replacementID, commandID: UUID().uuidString.lowercased())
+                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication,
+                      let newRevision = response.outcomes.first?.revisionId else { return }
+                if let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision, includeArchived: verdict == .archive) { currentRecord = updated }
+                verdictSaving = false; verdictError = nil; retryVerdict = nil; await onChanged(); await refreshSourceRow()
+            } catch {
+                guard model.knowledgePresentationIdentity == identity else { return }
+                verdictSaving = false
+                if let failure = error as? GatewayFailure, failure.code == "conflict",
+                   let revision = failure.details?.objectValue?["currentRevision"]?.stringValue,
+                   let latest = try? await model.knowledge.read(id: sourceID, revisionID: revision, includeArchived: true, includePending: true) { currentRecord = latest }
+                verdictError = error.localizedDescription
+            }
+        }
+    }
+
+    private func setScope(_ scope: KnowledgeScope) {
+        guard admitsOrigin, scope != currentRecord.scope, !scopeSaving else { return }
+        retryScope = scope; retryVerdict = nil; retryAdmission = nil
+        scopeSaving = true; verdictError = nil
+        let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
+        Task { @MainActor in
+            do {
+                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "placement", scope: scope, commandID: UUID().uuidString.lowercased())
+                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication,
+                      let newRevision = response.outcomes.first?.revisionId else { return }
+                if let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision) { currentRecord = updated }
+                scopeSaving = false; verdictError = nil; retryScope = nil; await onChanged(); await refreshSourceRow()
+            } catch {
+                guard model.knowledgePresentationIdentity == identity else { return }
+                scopeSaving = false
+                if let failure = error as? GatewayFailure, failure.code == "conflict",
+                   let revision = failure.details?.objectValue?["currentRevision"]?.stringValue,
+                   let latest = try? await model.knowledge.read(id: sourceID, revisionID: revision, includeArchived: true, includePending: true) { currentRecord = latest }
+                verdictError = error.localizedDescription
+            }
+        }
+    }
+
+    private func setAdmission(_ admission: KnowledgeSourceAdmission) {
+        guard admitsOrigin, !scopeSaving else { return }
+        retryAdmission = admission; retryVerdict = nil; retryScope = nil
+        scopeSaving = true; verdictError = nil
+        let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
+        Task { @MainActor in
+            do {
+                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "placement", admission: admission, commandID: UUID().uuidString.lowercased())
+                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication,
+                      let newRevision = response.outcomes.first?.revisionId else { return }
+                if let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision, includeArchived: admission == .archived) { currentRecord = updated }
+                scopeSaving = false; verdictError = nil; retryAdmission = nil; await onChanged(); await refreshSourceRow()
+            } catch {
+                guard model.knowledgePresentationIdentity == identity else { return }
+                scopeSaving = false
+                if let failure = error as? GatewayFailure, failure.code == "conflict",
+                   let revision = failure.details?.objectValue?["currentRevision"]?.stringValue,
+                   let latest = try? await model.knowledge.read(id: sourceID, revisionID: revision, includeArchived: true, includePending: true) { currentRecord = latest }
+                verdictError = error.localizedDescription
+            }
+        }
+    }
+
+    private func searchReplacement() async {
+        guard KnowledgeSearchPolicy.admitsQuery(replacementQuery), admitsOrigin else { replacementRows = []; return }
+        let identity = origin
+        do {
+            let page = try await model.knowledge.searchSourceRows(query: replacementQuery, includeArchived: true, includePending: true, limit: 12)
+            guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
+            replacementRows = page.rows.filter { $0.id != currentRecord.id }
+        } catch { guard !Task.isCancelled else { return }; replacementRows = [] }
+    }
     private func triage() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.triage(sourceID: currentRecord.id, expectedRevision: currentRecord.revisionId); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.source; mutationInFlight = false; message = "Assessment updated (\(result.assessment.freshness.rawValue))." } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func saveNote(_ note: KnowledgeNoteContent) { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.updateNote(id: currentRecord.id, expectedRevision: currentRecord.revisionId, record: KnowledgeRecordDraft(id: currentRecord.id, createdAt: currentRecord.createdAt, updatedAt: nil, kind: .note, scope: currentRecord.scope, provenance: currentRecord.provenance, temporal: currentRecord.temporal, relations: currentRecord.relations, content: .note(KnowledgeNoteContent(title: note.title, body: noteBody, fields: note.fields, role: note.role, confirmed: note.confirmed, contraryEvidence: note.contraryEvidence, freshness: note.freshness, privacyScope: note.privacyScope, usageConstraint: note.usageConstraint))), confirmedByUser: note.confirmed); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.record; mutationInFlight = false; message = "Saved"; await onChanged() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func exclude() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.setExclusion(recordID: currentRecord.id, expectedRevision: currentRecord.revisionId, excluded: true); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func forget() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.forget(id: currentRecord.id, expectedRevision: currentRecord.revisionId, reason: "Forgotten from iOS"); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
-}
-
-/// Grounded tags generated together with a content summary.
-private struct KnowledgeSummaryTags: View {
-    let tags: [KnowledgeSourceSummaryTag]
-
-    var body: some View {
-        ToolChipFlowLayout(spacing: TronSpacing.sm) {
-            ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
-                Label(tag.label, systemImage: tag.kind == "semantic" ? "sparkle" : "number")
-                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronKnowledgeText)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Color.tronKnowledge.opacity(0.12), in: Capsule())
-            }
-        }
-    }
 }
 
 struct KnowledgeConfigurationView: View {

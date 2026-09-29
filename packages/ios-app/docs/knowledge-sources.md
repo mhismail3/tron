@@ -46,12 +46,13 @@ that sends no revision, a changed row while a search filter is active — merges
 fresh first page beneath the rows the reader already reached. Chronicle and
 Syntheses keep full records, and their status read is only performed by the
 Chronicle surfaces that display it.
-Rows are one fixed compact height: a title of at most two lines and one
-domain/type line in the standard settings-row subtext size, beside a bounded
-square preview centered on that text block. The preview is the Gateway-captured
-safe JPEG, PNG, or WebP page preview or X Article cover image; sources without
-one use a deterministic domain/title fallback. Summaries, intake assessments,
-and routine capture/admission state are not shown in rows.
+Rows remain compact: a title of at most two lines and one domain/type line,
+with subtle freshness and verdict text beside a bounded square preview. The row
+projection also carries vocabulary tag labels, save/capture age, `hasTake`, and
+`tagsStale`; no source body is needed to render them. The preview is the
+Gateway-captured safe JPEG, PNG, or WebP page preview or X Article cover image;
+sources without one use a deterministic domain/title fallback. Intake
+assessments and routine capture/admission state are not shown in rows.
 
 The **Entry Detail** sheet opens from the row the reader touched: the header, the
 link, and the current summary the row already carries are presented at once, and
@@ -65,14 +66,15 @@ page in the in-app browser (`TronSafariView`, the same full-bleed
 is the source of truth. The Gateway keeps the captured bytes and readable
 extraction as a backup and as model input, but the sheet does not expose them as
 reading surfaces: a raw HTML object is not readable, and page extraction
-includes site chrome. Everything else is inline in the same sheet, with no
-secondary details sheet: the **Summary** group (a generated summary with its
-grounded tags, or a **Generate AI summary** button row), a **Details** table in
-the standard metadata-table layout (type, publication/save/capture dates,
-capture state, origin, media type, revision), saved notes, related entries that
-open at their current revision — their titles resolved by one bounded rows
-request rather than one read per title — links declared in the entry (in-app
-browser), and capture coverage when the capture is incomplete.
+includes site chrome. Everything else is inline in the same sheet, with no secondary details sheet:
+the **Summary** group (generated summary or Generate/Regenerate action), a
+permanent **Your take** editor, vocabulary-backed tags and their updating
+state, a verdict control, a replacement picker (bounded source search including
+archived entries), Research / Moose's Corner placement and archive controls, and
+a **Details** table with type, publication/save/capture dates, current freshness
+and age basis, capture state, origin, media type, and revision. Saved notes,
+related entries, links and incomplete-capture coverage remain below. Related
+entry titles resolve in one bounded rows request rather than one read per title.
 For redirected connector captures, the original-link pill uses the requested URL
 recorded for that exact saved-item identity in origin provenance; the resolved
 page URI remains capture metadata. Unrelated referral origins are never used as
@@ -82,15 +84,32 @@ date. Historical Raindrop records with the old misfiled `created` timestamp are
 not mislabeled as publication dates; absent origin-save dates stay absent and
 Tron capture time is labeled separately.
 
-Opening a source never invokes model generation. **Generate AI summary** is an
-explicit per-source action using the configured Knowledge model and saved readable
-text only; it never fetches linked pages or implies complete thread/discussion
-coverage. The bounded result is persisted separately from the Jev intake assessment,
-with its source revision, evidence digest, generation time, and full/sampled coverage.
-A stale summary is withheld when its title/text evidence changes, and the button becomes **Regenerate AI summary**. Summaries and
-grounded semantic/keyword tags are generated together and are interpretation, not
-replacements for immutable captured evidence. Partial or bounded excerpts are
+Opening a source never invokes model generation. **Generate AI summary** starts
+the Gateway-owned background job and returns immediately; progress belongs only
+to that action, and the durable job continues after sheet dismissal, app
+backgrounding, or reconnect. Reopening queries `knowledge.curation.jobs`; a
+completed revision is loaded and propagated through `knowledge.changed`. A
+repeated tap while the command is pending shares its command ID. Failure shows
+Retry without clearing an existing summary or tags. Summary generation never
+fetches linked pages or implies complete thread/discussion coverage. The bounded
+result is persisted separately from the Jev intake assessment, with its source
+revision, evidence digest, generation time, and full/sampled coverage. A stale
+summary is withheld when its title/text evidence changes, and the button becomes
+**Regenerate AI summary**. Summary text and controlled tags are separate
+interpretations; tags come from the canonical Knowledge vocabulary, not the
+summary object. Partial or bounded excerpts are
 labeled sampled; linked pages are never inferred as covered.
+Your take autosaves after a short idle pause and when the sheet is dismissed.
+A failed save keeps a process-local draft with Retry; a stale-revision conflict
+shows the Gateway's current take and keeps the draft available for deliberate
+retry against the latest revision. A successful take write marks tags as
+updating until the background tag job and refreshed row projection report the
+new vocabulary selections. Verdict, placement and admission use receipted
+`knowledge.source.curate` operations; free-form tags and client-side summary
+writes are not supported. Each async presentation read is fenced by its
+presentation activity and Gateway identity, while accepted mutations remain
+owned by the Gateway receipt/job authority.
+
 Assessment usage prices are fractional cents (`Double`), matching the Gateway's
 numeric contract; token counts remain integers. The native RPC regression decodes
 a full source page containing both a preview and sub-cent assessment usage.

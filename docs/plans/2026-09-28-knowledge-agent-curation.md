@@ -151,7 +151,7 @@ screenshots of each state. Device validation by the user after K9.
 | K4 | Ready | Jev tagger with monthly budget and re-tag triggers | K1, K3 | — |
 | K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
 | K6 | Done | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1, K3 | luna-worker, 2026-09-29 |
-| K7 | Ready | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | — |
+| K7 | In progress | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | luna-worker, 2026-09-29 |
 | K8 | Ready | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | — |
 | K9 | Ready | Maintainer runtime update and live capability check | K1–K8 | — |
 | K10 | Ready | Seed: agent drafts the vocabulary from the 276 entries; user edits it | K9 | — |

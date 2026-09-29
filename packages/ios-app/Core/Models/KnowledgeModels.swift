@@ -18,7 +18,7 @@ package struct KnowledgePresentationIdentity: Equatable, Sendable {
 }
 
 package enum KnowledgeScope: String, Codable, CaseIterable, Sendable { case personal, research
-    package var label: String { rawValue.capitalized }
+    package var label: String { self == .personal ? "Moose's Corner" : "Research" }
 }
 package enum KnowledgeRecordKind: String, Codable, CaseIterable, Sendable { case source, observation, note
     package var label: String { rawValue.capitalized }
@@ -93,11 +93,26 @@ package struct KnowledgeSourceIdentity: Codable, Hashable, Sendable { package le
 struct KnowledgeSourceOrigin: Codable, Hashable, Sendable { let kind: KnowledgeSourceOriginKind; let capturedAt: String; let annotation: String?; let uri: String?; let identity: KnowledgeSourceIdentity? }
 enum KnowledgeEvidenceQuality: String, Codable, Sendable { case high, medium, low, none, unknown }
 package enum KnowledgeFreshness: String, Codable, Sendable { case current, aging, stale, unknown }
-package enum KnowledgeSourceAdmission: String, Codable, Hashable, Sendable { case pending, retained, archived }
-package struct KnowledgeSourceSummaryTag: Codable, Hashable, Sendable { package let label: String; package let kind: String }
-package struct KnowledgeSourceSummary: Codable, Hashable, Sendable {
-    let text: String; package let tags: [KnowledgeSourceSummaryTag]; let generatedAt: String; let sourceRevisionId: String; let evidenceDigest: String; package let coverage: String
+package enum KnowledgeSourceFreshness: String, Codable, Sendable { case fresh, aging, stale, unknown }
+package enum KnowledgeSourceAgeBasis: String, Codable, Sendable { case sourceSavedAt, capturedAt }
+package enum KnowledgeSourceVerdict: String, Codable, CaseIterable, Sendable { case evergreen, dated, superseded, archive
+    package var label: String { switch self { case .evergreen: "Evergreen"; case .dated: "Dated but useful"; case .superseded: "Superseded"; case .archive: "Archive" } }
 }
+package struct KnowledgeTagLabel: Codable, Hashable, Sendable, Identifiable { package let id: String; package let label: String; package let category: String?; package let decayClass: String?; package let state: String? }
+package struct KnowledgeTagDefinition: Codable, Hashable, Sendable, Identifiable { package let id: String; package let label: String; package let definition: String; package let category: String; package let decayClass: String; package let state: String; package let mergedInto: String? }
+package struct KnowledgeTagVocabulary: Codable, Hashable, Sendable { package let revision: Int; package let tags: [KnowledgeTagDefinition]; package let guidelines: String }
+package enum KnowledgeSourceAdmission: String, Codable, Hashable, Sendable { case pending, retained, archived }
+package struct KnowledgeSourceSummary: Codable, Hashable, Sendable {
+    let text: String; let generatedAt: String; let sourceRevisionId: String; let evidenceDigest: String; package let coverage: String
+}
+package struct KnowledgeSourceTake: Codable, Hashable, Sendable { package let text: String; package let confirmed: Bool; package let updatedAt: String }
+package struct KnowledgeSourceVerdictState: Codable, Hashable, Sendable { package let verdict: KnowledgeSourceVerdict; package let supersededBy: String?; package let reason: String?; package let decidedAt: String }
+package struct KnowledgeSourceTagSelection: Codable, Hashable, Sendable { package let tagIds: [String]; package let vocabularyRevision: Int; package let inputsDigest: String; package let assignedAt: String }
+package struct KnowledgeCurationJob: Codable, Hashable, Sendable, Identifiable { package var id: String { commandId }; package let commandId: String; package let operation: String; package let sourceId: String; package let status: String; package let startedAt: String; package let finishedAt: String?; package let revisionId: String?; package let code: String?; package let reason: String? }
+package struct KnowledgeCurationJobsResponse: Codable, Hashable, Sendable { package let jobs: [KnowledgeCurationJob]; package let running: Int; package let failed: Int }
+package struct KnowledgeCurationOutcome: Codable, Hashable, Sendable { package let recordId: String; package let status: String; package let revisionId: String?; package let currentRevision: String?; package let code: String?; package let reason: String? }
+package struct KnowledgeCurationResponse: Codable, Hashable, Sendable { package let commandId: String; package let operation: String; package let applied: Int; package let outcomes: [KnowledgeCurationOutcome]; package let stateRevision: Int }
+package struct KnowledgeSourceSummaryStart: Codable, Hashable, Sendable { package let job: KnowledgeCurationJob; package let record: KnowledgeRecord }
 struct KnowledgeSourceAssessmentUsage: Codable, Hashable, Sendable {
     // Assessment pricing may be a fraction of one cent; match the Gateway number contract.
     let inputTokens: Int; let outputTokens: Int; let estimatedCostCents: Double; let pricing: String
@@ -123,16 +138,16 @@ struct KnowledgeSourceRetention: Codable, Hashable, Sendable { let sensitivity: 
 package struct KnowledgeSourceContent: Codable, Hashable, Sendable {
     package let title: String; package let uri: String?; var collectionId: String?; package let text: String?; let object: KnowledgeObjectRef?; package let preview: KnowledgeObjectRef?; var representations: [KnowledgeSourceRepresentation]?; package let mediaType: String?; package let linkedUrls: [String]?
     package let captureDisposition: KnowledgeCaptureDisposition; package let captureReason: String?; package let annotations: [KnowledgeSourceAnnotation]?; let sourcePublishedAt: String?; package let sourceSavedAt: String?; package let capturedAt: String; package let origin: String?
-    let origins: [KnowledgeSourceOrigin]?; package let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention?; package let assessment: KnowledgeSourceAssessment?; package let summary: KnowledgeSourceSummary?; package var admission: KnowledgeSourceAdmissionState?
-    init(title: String, uri: String?, collectionId: String? = nil, text: String?, object: KnowledgeObjectRef?, preview: KnowledgeObjectRef? = nil, representations: [KnowledgeSourceRepresentation]? = nil, mediaType: String?, linkedUrls: [String]? = nil, captureDisposition: KnowledgeCaptureDisposition, captureReason: String? = nil, annotations: [KnowledgeSourceAnnotation]?, sourcePublishedAt: String?, sourceSavedAt: String? = nil, capturedAt: String, origin: String?, origins: [KnowledgeSourceOrigin]?, identity: KnowledgeSourceIdentity?, retention: KnowledgeSourceRetention? = nil, assessment: KnowledgeSourceAssessment?, contentSummary: KnowledgeSourceSummary? = nil, admission: KnowledgeSourceAdmissionState? = nil) {
-        self.title = title; self.uri = uri; self.collectionId = collectionId; self.text = text; self.object = object; self.preview = preview; self.representations = representations; self.mediaType = mediaType; self.linkedUrls = linkedUrls; self.captureDisposition = captureDisposition; self.captureReason = captureReason; self.annotations = annotations; self.sourcePublishedAt = sourcePublishedAt; self.sourceSavedAt = sourceSavedAt; self.capturedAt = capturedAt; self.origin = origin; self.origins = origins; self.identity = identity; self.retention = retention; self.assessment = assessment; self.summary = contentSummary; self.admission = admission
+    let origins: [KnowledgeSourceOrigin]?; package let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention?; package let assessment: KnowledgeSourceAssessment?; package let summary: KnowledgeSourceSummary?; package let take: KnowledgeSourceTake?; package let tags: KnowledgeSourceTagSelection?; package let verdict: KnowledgeSourceVerdictState?; package var admission: KnowledgeSourceAdmissionState?
+    init(title: String, uri: String?, collectionId: String? = nil, text: String?, object: KnowledgeObjectRef?, preview: KnowledgeObjectRef? = nil, representations: [KnowledgeSourceRepresentation]? = nil, mediaType: String?, linkedUrls: [String]? = nil, captureDisposition: KnowledgeCaptureDisposition, captureReason: String? = nil, annotations: [KnowledgeSourceAnnotation]?, sourcePublishedAt: String?, sourceSavedAt: String? = nil, capturedAt: String, origin: String?, origins: [KnowledgeSourceOrigin]?, identity: KnowledgeSourceIdentity?, retention: KnowledgeSourceRetention? = nil, assessment: KnowledgeSourceAssessment?, contentSummary: KnowledgeSourceSummary? = nil, admission: KnowledgeSourceAdmissionState? = nil, take: KnowledgeSourceTake? = nil, tags: KnowledgeSourceTagSelection? = nil, verdict: KnowledgeSourceVerdictState? = nil) {
+        self.title = title; self.uri = uri; self.collectionId = collectionId; self.text = text; self.object = object; self.preview = preview; self.representations = representations; self.mediaType = mediaType; self.linkedUrls = linkedUrls; self.captureDisposition = captureDisposition; self.captureReason = captureReason; self.annotations = annotations; self.sourcePublishedAt = sourcePublishedAt; self.sourceSavedAt = sourceSavedAt; self.capturedAt = capturedAt; self.origin = origin; self.origins = origins; self.identity = identity; self.retention = retention; self.assessment = assessment; self.summary = contentSummary; self.take = take; self.tags = tags; self.verdict = verdict; self.admission = admission
     }
-    private enum CodingKeys: String, CodingKey { case title, uri, collectionId, text, object, preview, representations, mediaType, linkedUrls, captureDisposition, captureReason, annotations, sourcePublishedAt, sourceSavedAt, capturedAt, origin, origins, identity, retention, assessment, summary, admission }
+    private enum CodingKeys: String, CodingKey { case title, uri, collectionId, text, object, preview, representations, mediaType, linkedUrls, captureDisposition, captureReason, annotations, sourcePublishedAt, sourceSavedAt, capturedAt, origin, origins, identity, retention, assessment, summary, take, tags, verdict, admission }
     package init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         title = try c.decode(String.self, forKey: .title); uri = try c.decodeIfPresent(String.self, forKey: .uri); collectionId = try c.decodeIfPresent(String.self, forKey: .collectionId); text = try c.decodeIfPresent(String.self, forKey: .text); object = try c.decodeIfPresent(KnowledgeObjectRef.self, forKey: .object); preview = try c.decodeIfPresent(KnowledgeObjectRef.self, forKey: .preview); representations = try c.decodeIfPresent([KnowledgeSourceRepresentation].self, forKey: .representations); mediaType = try c.decodeIfPresent(String.self, forKey: .mediaType); linkedUrls = try c.decodeIfPresent([String].self, forKey: .linkedUrls)
         captureDisposition = try c.decode(KnowledgeCaptureDisposition.self, forKey: .captureDisposition); captureReason = try c.decodeIfPresent(String.self, forKey: .captureReason); annotations = try c.decodeIfPresent([KnowledgeSourceAnnotation].self, forKey: .annotations); sourcePublishedAt = try c.decodeIfPresent(String.self, forKey: .sourcePublishedAt); sourceSavedAt = try c.decodeIfPresent(String.self, forKey: .sourceSavedAt); capturedAt = try c.decode(String.self, forKey: .capturedAt); origin = try c.decodeIfPresent(String.self, forKey: .origin)
-        origins = try c.decodeIfPresent([KnowledgeSourceOrigin].self, forKey: .origins); identity = try c.decodeIfPresent(KnowledgeSourceIdentity.self, forKey: .identity); retention = try c.decodeIfPresent(KnowledgeSourceRetention.self, forKey: .retention); assessment = try c.decodeIfPresent(KnowledgeSourceAssessment.self, forKey: .assessment); summary = try c.decodeIfPresent(KnowledgeSourceSummary.self, forKey: .summary); admission = try c.decodeIfPresent(KnowledgeSourceAdmissionState.self, forKey: .admission)
+        origins = try c.decodeIfPresent([KnowledgeSourceOrigin].self, forKey: .origins); identity = try c.decodeIfPresent(KnowledgeSourceIdentity.self, forKey: .identity); retention = try c.decodeIfPresent(KnowledgeSourceRetention.self, forKey: .retention); assessment = try c.decodeIfPresent(KnowledgeSourceAssessment.self, forKey: .assessment); summary = try c.decodeIfPresent(KnowledgeSourceSummary.self, forKey: .summary); take = try c.decodeIfPresent(KnowledgeSourceTake.self, forKey: .take); tags = try c.decodeIfPresent(KnowledgeSourceTagSelection.self, forKey: .tags); verdict = try c.decodeIfPresent(KnowledgeSourceVerdictState.self, forKey: .verdict); admission = try c.decodeIfPresent(KnowledgeSourceAdmissionState.self, forKey: .admission)
     }
 }
 package struct KnowledgeObservationRange: Codable, Hashable, Sendable {
@@ -207,7 +222,7 @@ package enum KnowledgeObservationConfigurationPolicy {
 }
 
 package struct KnowledgeConfig: Codable, Hashable, Sendable {
-    let schemaVersion: Int; var revision: Int; package var eligibility: KnowledgeEligibility; package var observation: KnowledgeObservationLimits; var maximumSearchResults: Int; package var currentInterests: [String]
+    let schemaVersion: Int; var revision: Int; package var eligibility: KnowledgeEligibility; package var observation: KnowledgeObservationLimits; var maximumSearchResults: Int; package var currentInterests: [String]; package var tagVocabulary: KnowledgeTagVocabulary
 }
 package struct KnowledgeStatus: Codable, Hashable, Sendable {
     let available: Bool; let state: String; package let stateRevision: Int?; package let recordCount: Int; package let coverageCount: Int; package let coverage: KnowledgeCoverageSummary; package let suppressedCount: Int; package let pendingCleanupCount: Int; package let config: KnowledgeConfig; let observationConfigured: Bool; let detail: String?
@@ -477,7 +492,7 @@ package enum KnowledgeCorrectionPolicy {
         case .source(let value):
             var annotations = value.annotations ?? []
             annotations.append(KnowledgeSourceAnnotation(text: "User correction: \(replacementText)", locator: "user-correction", createdAt: nil))
-            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, collectionId: value.collectionId, text: value.text, object: value.object, representations: value.representations, mediaType: value.mediaType, linkedUrls: value.linkedUrls, captureDisposition: value.captureDisposition, captureReason: value.captureReason, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, sourceSavedAt: value.sourceSavedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment, contentSummary: value.summary, admission: value.admission))
+            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, collectionId: value.collectionId, text: value.text, object: value.object, representations: value.representations, mediaType: value.mediaType, linkedUrls: value.linkedUrls, captureDisposition: value.captureDisposition, captureReason: value.captureReason, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, sourceSavedAt: value.sourceSavedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment, contentSummary: value.summary, admission: value.admission, take: value.take, tags: value.tags, verdict: value.verdict))
         case .observation(let value):
             return .observation(KnowledgeObservationContent(range: value.range, items: [KnowledgeObservationItem(text: replacementText, attribution: .user, observedAt: value.items.first?.observedAt ?? record.updatedAt, certainty: .qualified, evidence: value.items.first?.evidence, field: nil)], observer: value.observer))
         case .note(let value):
