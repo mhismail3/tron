@@ -3631,14 +3631,24 @@ struct ChatViewScrollHarnessTests {
                 let installs = harness.probeObservation.projectionInstallCount
                 let work = harness.probeObservation.projectionWorkAdmissionCount
                 let commands = harness.probeObservation.scrollCommandCount
+                let anchor = try #require(
+                    harness.readerAnchor(), "the detached reader had no on-screen row"
+                )
 
                 // The restructure a detached reader can still see: the keyboard's
                 // own inset cycle changes the container the estimate is derived
                 // from. The projection stays frozen while the reader is away, so
-                // nothing may be admitted and nothing may be written.
+                // nothing may be admitted and nothing may be written — and the
+                // reader's own rows may not move.
                 try await harness.driveKeyboardInset(.show())
                 try await harness.driveKeyboardInset(.hide())
                 try await harness.driveFrameBoundary()
+                let held = try #require(try await harness.settleReaderAnchor(to: anchor))
+                #expect(
+                    held.physicalID == anchor.physicalID
+                        && abs(held.windowMinY - anchor.windowMinY) <= 0.5,
+                    "the detached restructure moved the reader by \(ct2Number(held.windowMinY - anchor.windowMinY)) pt"
+                )
                 #expect(
                     harness.probeObservation.projectionWorkAdmissionCount == work,
                     "the detached restructure admitted projection work: \(harness.pinnedDescription())"

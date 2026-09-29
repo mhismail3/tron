@@ -1513,8 +1513,10 @@ pass only through eager-only repairs, stop and report.
     and the tail holds the pinned band (growth clearance 8.0, shrink 12.3).
   - `detachedRestructureAdmitsNoProjectionWork`: the keyboard's own inset cycle
     against a mid-history detached viewport admits no projection work, no
-    projection install and no scroll command, and a reader who takes the viewport
-    back while a catch-up is admitted is still away with their unread state.
+    projection install and no scroll command, and the window oracle holds the
+    reader's anchor row within 0.5 pt of where it was; a reader who takes the
+    viewport back while a catch-up is admitted is still away with their unread
+    state.
   Two measurements recorded rather than hidden: shrinking the terminal row *in
   place* with zero writes leaves the tail 65 pt under the composer (a field-shape
   figure, not a requirement, so the shrink phase restores the baseline content
@@ -1570,7 +1572,8 @@ pass only through eager-only repairs, stop and report.
     passed in the combined run above, so it is the load-related picker RPC-ordering
     flake, not a regression.
   - The new and changed tests, focused: 8 pass in 8.9 s
-    (`20260929T080731Z-run.IgrxxH`), including `CT25-KEYBOARD-METRICS …
+    (`20260929T080731Z-run.IgrxxH`; the detached-restructure test re-run after its
+    anchor assertion was added, `20260929T082904Z-run.KUkGew`), including `CT25-KEYBOARD-METRICS …
     settledClearance=12.7 composerTopSpan=[393.7,791.0]` from the correct-inset
     journey beside the wrong-edge control,
     `CT25-DETACH-METRICS anchor=detach-anchor-turn-43 startY=-35.7
