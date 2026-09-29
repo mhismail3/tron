@@ -1276,6 +1276,120 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // TEMPORARY (CT-23 stage 2 diagnosis): where each automatic scroll edge
+    // effect is drawn on the flipped transcript. One line per (state, variant)
+    // with the navigation band's and the composer band's luminance distance from
+    // the same state with the product's own effect state, plus the parity region's
+    // own magnitude. Removed with the stage-2 handoff.
+    @MainActor
+    final class CT23ChromeDiagnosis {
+        var navBands: [String: [Double]] = [:]
+        var composerBands: [String: [Double]] = [:]
+        var regions: [String: ChatVisualParityFingerprint] = [:]
+    }
+
+    @Test("CT-23 diagnosis: the automatic edge effects on both orientations", .enabled(if: UIValidationTier.isActive))
+    func ct23EdgeEffectPlacement() async throws {
+        try await withTestWatchdog(timeout: .seconds(300)) {
+            struct Variant {
+                let name: String
+                let topHidden: Bool?
+                let bottomHidden: Bool?
+            }
+            let variants = [
+                Variant(name: "product", topHidden: nil, bottomHidden: nil),
+                Variant(name: "no-top", topHidden: true, bottomHidden: false),
+                Variant(name: "no-bottom", topHidden: false, bottomHidden: true),
+                Variant(name: "no-effects", topHidden: true, bottomHidden: true),
+            ]
+            let diagnosis = CT23ChromeDiagnosis()
+            for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+                let label = orientation.presentsNewestRowFirst ? "origin" : "end"
+                for state in ["pinned", "history300"] {
+                    var snapshot = try SessionScenarioBuilder(seed: 1_282).openingTail(targetEncodedBytes: 10_000)
+                    snapshot.acceptsQueuedPrompts = false
+                    snapshot.transcript = try (0..<40).map { index in
+                        try harnessRichAssistantMessage(
+                            id: "chrome-history-\(index)",
+                            presentationID: "chrome-turn-\(index)",
+                            thinkingLines: [],
+                            text: index.isMultiple(of: 4)
+                                ? harnessTallEstimateRowText(index)
+                                : "Chrome history row \(index) stays one line."
+                        )
+                    }
+                    snapshot.transcriptStart = 0
+                    snapshot.transcriptTotal = snapshot.transcript.count
+                    try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
+                        _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                        for _ in 0..<40 { try await harness.driveFrameBoundary() }
+                        try harness.snapNativeTranscriptOffsetToWholePoint()
+                        if state == "history300" {
+                            try harness.scrollReader(byVisualPoints: 300)
+                            for _ in 0..<3 { try await harness.driveFrameBoundary() }
+                        }
+                        for variant in variants {
+                            if let top = variant.topHidden, let bottom = variant.bottomHidden {
+                                try harness.ct23DiagnosisSetEdgeEffectsHidden(top: top, bottom: bottom)
+                                try await harness.driveFrameBoundary()
+                            }
+                            let key = "\(label)-\(state)-\(variant.name)"
+                            diagnosis.navBands[key] = harness.renderedRowLuminance(
+                                in: CGRect(x: 0, y: 0, width: 390, height: 160)
+                            )
+                            diagnosis.composerBands[key] = harness.renderedRowLuminance(
+                                in: CGRect(x: 0, y: 600, width: 390, height: 191)
+                            )
+                            let rendered = harness.renderedParityFrame(
+                                scale: ChatVisualParitySpec.renderScale,
+                                rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
+                                columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
+                                includingPNG: true
+                            )
+                            diagnosis.regions[key] = ChatVisualParityFingerprint(rendered)
+                            if variant.name == "product", let png = rendered.png {
+                                Attachment.record(png, named: "ct23-chrome-\(key).png")
+                            }
+                            if variant.name != "product" {
+                                try? harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
+                                try await harness.driveFrameBoundary()
+                            }
+                        }
+                    }
+                }
+            }
+            let measurements = await MainActor.run {
+                (nav: diagnosis.navBands, composer: diagnosis.composerBands, regions: diagnosis.regions)
+            }
+            func distance(_ first: [Double], _ second: [Double]) -> Double {
+                guard first.count == second.count, !first.isEmpty else { return .infinity }
+                let squared = zip(first, second).reduce(0.0) { partial, pair in
+                    let delta = (pair.0 - pair.1) / 255
+                    return partial + delta * delta
+                }
+                return (squared / Double(first.count)).squareRoot()
+            }
+            for key in measurements.regions.keys.sorted() {
+                let parts = key.split(separator: "-").map(String.init)
+                let own = "\(parts[0])-\(parts[1])-product"
+                let reference = measurements.regions[own]
+                let magnitude = reference.map {
+                    ChatVisualParityFingerprint.magnitude(
+                        measurements.regions[key]!, $0,
+                        alignmentPoints: ChatVisualParitySpec.alignmentPoints
+                    ).magnitude
+                } ?? .infinity
+                let towardEnd = "\(parts[0] == "origin" ? "end" : "end")-\(parts[1])-\(parts[2])"
+                print("CT23-CHROME key=\(key)"
+                    + " navDelta=\(String(format: "%.5f", distance(measurements.nav[key] ?? [], measurements.nav[own] ?? [])))"
+                    + " composerDelta=\(String(format: "%.5f", distance(measurements.composer[key] ?? [], measurements.composer[own] ?? [])))"
+                    + " regionMag=\(String(format: "%.5f", magnitude))"
+                    + " navVsEnd=\(String(format: "%.5f", distance(measurements.nav[key] ?? [], measurements.nav[towardEnd] ?? [])))"
+                    + " composerVsEnd=\(String(format: "%.5f", distance(measurements.composer[key] ?? [], measurements.composer[towardEnd] ?? [])))")
+            }
+        }
+    }
+
     // The keyboard's own input, which no journey drove before: the bottom safe
     // area moves through the keyboard's intermediate positions while the history
     // keeps tall replies in its measured set. `resize(height:)` changes the whole
@@ -5280,6 +5394,14 @@ final class ChatViewScrollHarness {
         let scrollView = try nativeTranscriptScrollView()
         return scrollView.isScrollEnabled && scrollView.isUserInteractionEnabled
             && scrollView.panGestureRecognizer.isEnabled
+    }
+
+    /// TEMPORARY (CT-23 stage 2 diagnosis): force one of the automatic scroll
+    /// edge effects on or off.
+    func ct23DiagnosisSetEdgeEffectsHidden(top: Bool, bottom: Bool) throws {
+        let scrollView = try nativeTranscriptScrollView()
+        scrollView.topEdgeEffect.isHidden = top
+        scrollView.bottomEdgeEffect.isHidden = bottom
     }
 
     private func nativeTranscriptScrollView() throws -> UIScrollView {
