@@ -1286,6 +1286,31 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(180)) {
             for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
                 let label = orientation.presentsNewestRowFirst ? "origin" : "end"
+                let resyncShape = try ct24TallNewestHistory(
+                    rowCount: 250, tallCount: 6, appendedTallCount: 4, seed: 1_269
+                )
+                try await withHarness(snapshot: resyncShape.opened, orientation: orientation) { harness in
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && $0.nativeRows.contains {
+                            $0.semanticID == "ct24-turn-\(250 - 1)" && $0.isOnScreen
+                        }
+                    }
+                    for boundary in 0..<10 {
+                        try await harness.driveFrameBoundary()
+                        let sample = try harness.ct23BoundaryRowFrames()
+                        print("CT23-RESYNC orientation=\(label) index=\(boundary)"
+                            + " fraction=\(String(format: "%.3f", Double(sample.fraction)))"
+                            + " rows=\(sample.rows)")
+                    }
+                    harness.replaceAuthoritativeSnapshot(resyncShape.resynced)
+                    for boundary in 0..<40 {
+                        try await harness.driveFrameBoundary()
+                        let sample = try harness.ct23BoundaryRowFrames()
+                        print("CT23-RESYNC orientation=\(label) index=\(boundary + 10)"
+                            + " fraction=\(String(format: "%.3f", Double(sample.fraction)))"
+                            + " rows=\(sample.rows)")
+                    }
+                }
                 let shape = try ct24TallNewestHistory(
                     rowCount: 250, tallCount: 6, appendedTallCount: 0, seed: 1_269
                 )
