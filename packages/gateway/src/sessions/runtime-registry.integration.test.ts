@@ -93,17 +93,23 @@ function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
  * pass is up to 750 ms away. A test that asserts on an artifact must run a pass
  * of its own instead of treating the awaited call as a barrier, so wait out any
  * in-flight pass and then await one this call starts; `settled` names the state
- * that pass must publish (T-1). */
+ * that pass must publish (T-1). Waiting out a running pass is not bounded by wall
+ * clock: a pass walks a production-shaped root of thousands of directory entries
+ * and a loaded host stretches that past any fixed guess, which reported a pass
+ * that was merely slow as one that would never settle (T-6). The deadline below
+ * bounds only the retries this helper starts, and the test's own timeout reports
+ * a pass that never ends. */
 async function discoverExtensionArtifactsUntil(registry: RuntimeRegistry, settled: () => boolean = () => true): Promise<void> {
   const state = registry as unknown as { artifactDiscoveryInFlight: boolean };
-  const deadline = Date.now() + 5_000;
+  // The budget counts only this helper's own passes: time spent waiting out an
+  // interval pass does not spend it.
+  let ownPassMs = 0;
   do {
-    while (state.artifactDiscoveryInFlight) {
-      if (Date.now() >= deadline) throw new Error("extension artifact discovery stayed in flight");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    while (state.artifactDiscoveryInFlight) await new Promise((resolve) => setTimeout(resolve, 10));
+    const startedAt = Date.now();
     await (registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
-  } while (!settled() && Date.now() < deadline);
+    ownPassMs += Date.now() - startedAt + 10;
+  } while (!settled() && ownPassMs < 5_000);
   if (!settled()) throw new Error("extension artifact discovery did not settle");
 }
 
@@ -6656,7 +6662,11 @@ export default function (pi) {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     const content = "Report line 🦌\\n".repeat(3_000);
     const path = join(cwd, "report.txt");
-    const faux = fauxProvider({ provider: "tron-large-streamed-write", tokensPerSecond: 100_000 });
+    // The write's 51 KB of arguments are what the live frame has to survive, so
+    // they stay; the chunk size only keeps the provider's per-chunk timer yield
+    // from spending seconds of wall clock (3,188 chunks at 100k tokens/s) on a
+    // case that asserts nothing about pacing.
+    const faux = fauxProvider({ provider: "tron-large-streamed-write", tokensPerSecond: 100_000, tokenSize: { min: 32, max: 32 } });
     faux.setResponses([
       fauxAssistantMessage([
         { type: "text", text: "Here is the summary before the report." },
