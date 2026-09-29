@@ -238,7 +238,7 @@ struct DisplayToolView: View {
                 id: .toolDetails,
                 title: "Tool Details",
                 icon: "info.circle",
-                perform: onOpenTechnicalDetails
+                perform: { onOpenTechnicalDetails() }
             )]
         ))
     }
@@ -313,7 +313,7 @@ struct DisplayToolView: View {
                 id: .toolDetails,
                 title: "Tool Details",
                 icon: "info.circle",
-                perform: onOpenTechnicalDetails
+                perform: { onOpenTechnicalDetails() }
             )]
         ))
     }
