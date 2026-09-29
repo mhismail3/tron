@@ -1046,14 +1046,17 @@ struct AppModelReconnectTests {
             try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
         }
         let appLog = AppLog(fileURL: logURL)
-        // The Mac is older than this app, so it refuses the hello and closes
-        // with the typed reason. Retrying cannot fix a build pair, so recovery
-        // must stop and the state must name the side the user can update (F-3).
+        // The Mac refuses the hello with the pair its own refusal sends:
+        // application close 4006 carrying the Gateway's protocol range. Retrying
+        // cannot fix a build pair, so recovery must stop, and the state must
+        // name the update rather than the transport failure underneath the
+        // close (F-3). A Mac that advertises an older range predates the typed
+        // close and stays retryable until it is updated (F-3, Option B).
         let sockets = [
             ScriptedGatewaySocket(metadata: GatewaySocketMetadata(
                 closeCode: GatewayProtocolMismatchClose.closeCode,
                 httpStatusCode: 101,
-                closeReason: #"{"code":"protocol_mismatch","gatewayProtocol":5,"minProtocol":5}"#
+                closeReason: #"{"code":"protocol_mismatch","gatewayProtocol":6,"minProtocol":6}"#
             )),
             ScriptedGatewaySocket(),
         ]
@@ -1066,7 +1069,7 @@ struct AppModelReconnectTests {
                 Issue.record("the mismatch left \(fixture.model.connectionState)")
                 return
             }
-            #expect(reason.contains("Update Tron on the Mac"))
+            #expect(reason.contains("Update Tron on"))
             // A permanent build mismatch must not consume another attempt.
             #expect(fixture.socketFactory.requests.count == 1)
             let records = await fixture.model.loadGatewayLogsResult(limit: 200, includeRemote: false)

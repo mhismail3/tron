@@ -603,6 +603,14 @@ package actor GatewayClient {
             return urlError.code == .notConnectedToInternet
         }
 
+        /// A version or identity mismatch the Mac itself answered with on this
+        /// lane. It is the peer's decision, not a LAN that failed to reach it.
+        var peerAnswerCode: String? {
+            guard let failure = error as? GatewayFailure,
+                  failure.code == "protocol_mismatch" || failure.code == "identity_mismatch" else { return nil }
+            return failure.code
+        }
+
         /// How much this lane's ending is an answer from the Mac rather than a
         /// transport failure (E-3c). The attempt reports the highest-ranked
         /// failure, so a 401 only the LAN lane answered is not thrown away for
@@ -610,8 +618,7 @@ package actor GatewayClient {
         /// the Mac has revoked instead of stopping at `unauthorized`.
         var answerRank: Int {
             if upgradeFailure != nil { return 2 }
-            if let failure = error as? GatewayFailure,
-               failure.code == "protocol_mismatch" || failure.code == "identity_mismatch" { return 2 }
+            if peerAnswerCode != nil { return 2 }
             if metadata.certificatePinRejected { return 2 }
             return 1
         }
@@ -624,8 +631,13 @@ package actor GatewayClient {
             guard route.lane == .lan else {
                 return GatewayClient.diagnosticReason(for: (upgradeFailure ?? GatewayClient.transportFailure(error)).code)
             }
-            guard let upgradeFailure else { return .lanUnreachable }
-            return GatewayClient.diagnosticReason(for: upgradeFailure.code)
+            if let upgradeFailure { return GatewayClient.diagnosticReason(for: upgradeFailure.code) }
+            // The LAN lane is the one dialed at home, so a typed refusal on it
+            // must name itself: recording `lan_unreachable` for a version or
+            // identity mismatch buries the one-step cause the phone reported
+            // (F-3).
+            if let peerAnswerCode { return GatewayClient.diagnosticReason(for: peerAnswerCode) }
+            return .lanUnreachable
         }
     }
 

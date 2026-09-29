@@ -79,6 +79,8 @@
 - **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes the session state a newer snapshot re-states with the one `session.rebaseline` that covers it, fencing one-shot frames a snapshot cannot restore (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
 - **Last updated:** 2026-09-29, F-3 Done: the Gateway's protocol-mismatch refusal is now a typed close (4006 plus `{code, gatewayProtocol, minProtocol}`), so the phone stops retrying that profile instead of looping, and the failure names the older app or the older Mac (see the handoff)
 
+- **Last updated:** 2026-09-29, F-3 review round 1 addressed: no compatibility bridge for a Gateway built before that close (Option B — those Macs keep retrying until they are updated), a background profile's stop message reaches the device detail, the LAN lane names a typed refusal instead of `lan_unreachable`, and the terminal client maps close 4006 to a non-retryable `protocol_mismatch`
+
 - **Last updated:** 2026-09-29, T-6 Done: neither registry load flake was a product race — the large-streamed-write case spent its 5 s `waitUntil` guard on 3,188 provider chunks (its 51 KB arguments and assertions unchanged, chunk size pinned), and the discovery helper capped its wait for a running pass at 5 s (it now waits for the pass to end and keeps the deadline for its own retries); see the handoff
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
@@ -10598,3 +10600,40 @@ recovery gaps; all three were fixed on the same branch.
   future protocol bump keeps `PROTOCOL_VERSION`/`MIN_PROTOCOL_VERSION` in
   `config/GatewayProtocol.json` as the single authority. A real-device check of
   the old-Mac scenario is R-2's install, not this row.
+
+#### F-3 review round 1 · 2026-09-29
+
+- Result: (1) **no compatibility bridge** for a Gateway built before this close
+  (Option B, orchestrator decision): `1008 "protocol version mismatch"` stays a
+  retryable transport failure, every fixture now models the close a shipped
+  Gateway actually sends (4006 carrying the Gateway's own protocol range), and
+  the Gateway README, `connection-resilience.md` and the iOS contract state that
+  a Mac must run an F-3 Gateway before the typed close protects it. (2) A
+  background profile's non-retryable stop keeps its message on the pool entry
+  (`stopReason(for:)`), publishes it with the state, and the device detail reads
+  it for any profile via `AppModel.dashboardConnectionStopReason(for:)`. (3) A
+  protocol/identity mismatch on the LAN lane is reported as its own reason
+  instead of `lan_unreachable`. (4) The terminal client maps close 4006 to a
+  non-retryable `protocol_mismatch` naming the stale side instead of showing the
+  raw JSON reason.
+- Changes: `packages/gateway/src/version.ts` now owns
+  `PROTOCOL_MISMATCH_CLOSE_CODE` (the transport and the terminal client both read
+  it; `server.ts` cannot be imported from a client process),
+  `src/client/gateway-client.ts`, `DashboardGatewayConnectionPool.swift`,
+  `AppModel.swift`, `ConnectionSettingsView.swift`, `GatewayClient.swift`,
+  `GatewayProtocolContract.swift`, the owning tests, the three docs.
+- Evidence: `npx vitest run src/transport/server-http-lifecycle.integration.test.ts`
+  **21/21**, `npx vitest run src/client/gateway-client.test.ts` **5/5**; merge
+  gate on this branch (up to date with `hardening/integration` `adb0887b6`):
+  six-file transport set **135/135** in 15.7 s, `runtime-registry.integration.test.ts`
+  **245/245** in 72.4 s, `npx tsc --noEmit -p .` clean. iOS (lane `F3`): three
+  suites **177/177** (`20260929T102047Z-run.Yl0vZd`) plus `GatewayClientLanLaneTests`
+  **18/18** (`20260929T102149Z-run.HEP2Er`); reverting only the LAN change makes
+  the new LAN test fail (`.lanUnreachable` vs `.protocolMismatch`), so it is not
+  vacuous, and the narrowed range-message assertion re-ran
+  `GatewayClientTransportTests` **61/61**. `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- For the next agent: the Option B residual is real — a phone whose Mac still
+  runs a pre-F-3 Gateway keeps retrying the mismatch until that Mac is updated,
+  and R-2 installs both sides; the close code now lives in
+  `packages/gateway/src/version.ts`.

@@ -17,7 +17,7 @@ import type { GatewayLogger, LogLevel } from "./logger.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { formatHostEvidence, formatStallEvidence, formatResourceSample, ResourceSampler, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler } from "./stall-diagnostics.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
-import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
+import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { bytes, RequestSpan, runInRequestSpan, stage, wait } from "./request-span.js";
@@ -31,10 +31,6 @@ export const MAXIMUM_REKEYED_SESSION_IDS = 64;
 export const MAXIMUM_UNANSWERED_HEARTBEATS = GATEWAY_CONNECTION_POLICY.missedHeartbeatLimit;
 /** Application-defined close code for a socket replaced by its own identity. */
 export const SUPERSEDED_CLOSE_CODE = 4000;
-/** Application-defined close code for a hello whose protocol this Gateway cannot
- * speak. The close reason carries both protocol ranges so the phone can name
- * which build must update (F-3). */
-export const PROTOCOL_MISMATCH_CLOSE_CODE = 4006;
 
 /**
  * permessage-deflate for paired devices, which reach the Gateway over a radio.

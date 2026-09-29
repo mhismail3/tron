@@ -542,14 +542,12 @@ struct GatewayConnectionDetailView: View {
 
     private var statusColor: Color { status.color }
 
-    /// The selected profile's own stop reason. A non-retryable stop carries the
-    /// message that names the build to update (an outdated app or Mac), and the
-    /// transient notice is not a durable place to read it (F-3).
-    private var selectedProfileStopReason: String? {
-        guard currentProfile.id == model.profiles.selected?.id,
-              case .offline(let reason) = model.connectionState,
-              !reason.isEmpty else { return nil }
-        return reason
+    /// This profile's own stop reason, whichever profile it is. A non-retryable
+    /// stop carries the message that names the build to update (an outdated app
+    /// or Mac), and the transient notice is not a durable place to read it
+    /// (F-3).
+    private var profileStopReason: String? {
+        model.dashboardConnectionStopReason(for: currentProfile.id)
     }
 
     private var technicalDetails: [TronTechnicalMetadataItem] {
@@ -569,7 +567,7 @@ struct GatewayConnectionDetailView: View {
                         ) {
                             GatewayConnectionStatusBadge(state: status)
                         }
-                        if let stopReason = selectedProfileStopReason {
+                        if let stopReason = profileStopReason {
                             TronSettingsDivider(accent: .tronError)
                             TronValueRow(
                                 icon: "exclamationmark.triangle.fill",

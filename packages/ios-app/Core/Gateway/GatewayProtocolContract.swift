@@ -14,6 +14,13 @@ package enum TronGatewayProtocolContract {
 /// names the side to update instead of retrying as a generic transport failure
 /// (F-3). Only the version range can name that side, so the Gateway carries it
 /// in the close reason; the close code alone is the fallback signal.
+///
+/// A Gateway built before this close refuses the same hello with
+/// `1008 "protocol version mismatch"`, and that refusal is deliberately not
+/// classified here: it carries no version range, and a Gateway old enough to
+/// send it is the build that must update. Those Macs keep being retried until
+/// they run a Gateway that sends this close (F-3, Option B — no compatibility
+/// bridge for an already-deployed build).
 package enum GatewayProtocolMismatchClose {
     package static let closeCode = 4006
 

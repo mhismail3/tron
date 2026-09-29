@@ -87,29 +87,40 @@ struct GatewayClientTransportTests {
         // The Gateway refuses a hello it cannot speak and closes with a typed
         // reason. Reading that close as the transport failure underneath it
         // retried a permanent build mismatch forever (F-3), so the classification
-        // has to name the side the user can update.
-        let fixtures: [(reason: String, expected: String)] = [
-            (#"{"code":"protocol_mismatch","gatewayProtocol":5,"minProtocol":5}"#, "Update Tron on the Mac"),
-            (#"{"code":"protocol_mismatch","gatewayProtocol":8,"minProtocol":8}"#, "Update Tron on this iPhone"),
-        ]
-        for fixture in fixtures {
-            let socket = ScriptedGatewaySocket(metadata: GatewaySocketMetadata(
-                closeCode: GatewayProtocolMismatchClose.closeCode,
-                httpStatusCode: 101,
-                closeReason: fixture.reason
-            ))
-            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
-            await socket.failPendingReceivers(URLError(.networkConnectionLost))
-            do {
-                _ = try await client.connect(profile: profile, token: "token")
-                Issue.record("a protocol mismatch unexpectedly connected")
-            } catch let error as GatewayFailure {
-                #expect(error.code == "protocol_mismatch")
-                #expect(!error.retryable)
-                #expect(error.message.contains(fixture.expected))
-            }
-            await client.close()
+        // has to name the side the user can update. The fixture is the pair the
+        // Gateway's own refusal sends: application close 4006 carrying this
+        // Gateway's protocol range. A Gateway with an older range cannot send it
+        // (it predates the typed close), which is why an older Mac stays
+        // retryable and needs its own update (F-3, Option B).
+        let socket = ScriptedGatewaySocket(metadata: GatewaySocketMetadata(
+            closeCode: GatewayProtocolMismatchClose.closeCode,
+            httpStatusCode: 101,
+            closeReason: #"{"code":"protocol_mismatch","gatewayProtocol":6,"minProtocol":6}"#
+        ))
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        await socket.failPendingReceivers(URLError(.networkConnectionLost))
+        do {
+            _ = try await client.connect(profile: profile, token: "token")
+            Issue.record("a protocol mismatch unexpectedly connected")
+        } catch let error as GatewayFailure {
+            #expect(error.code == "protocol_mismatch")
+            #expect(!error.retryable)
+            #expect(error.message.contains("Update Tron on"))
         }
+        await client.close()
+    }
+
+    @Test("a Gateway range above this app's protocol names this app")
+    func protocolRangeNamesTheStaleSide() {
+        // The range is the Gateway's own advertised range, and it is the only
+        // fact that says which side can act: a range above this app's protocol
+        // means this app is stale. This is the direction today's app can read:
+        // a Gateway carrying this refusal covers the app only while the app is
+        // inside the Gateway's range. The opposite ordering is what the next
+        // app release reads from the same classifier.
+        let failure = GatewayProtocolMismatchClose.failure(gatewayProtocol: 8, minProtocol: 8)
+        #expect(failure.message.contains("Update Tron on this iPhone"))
+        #expect(!failure.retryable)
     }
 
     @Test("hello requires a bounded channel matching the saved Stable or Debug profile")
@@ -2520,6 +2531,37 @@ struct GatewayClientLanLaneTests {
         #expect(reported.reason == .transport)
         let lanRecord = try #require(await client.diagnostics().first { $0.handshake?.transport == "lan" })
         #expect(lanRecord.reason != .lanUnreachable)
+        await client.close()
+    }
+
+    @Test("a typed refusal on the LAN lane is not reported as an unreachable LAN")
+    func lanProtocolMismatchKeepsItsOwnReason() async throws {
+        // At home the LAN lane is the one that dialed the Mac, so its record is
+        // where the one-step cause has to live: a version mismatch is the Mac's
+        // own answer, not a LAN that could not reach it (F-3).
+        let lan = ScriptedGatewaySocket(metadata: GatewaySocketMetadata(
+            closeCode: GatewayProtocolMismatchClose.closeCode,
+            httpStatusCode: 101,
+            closeReason: #"{"code":"protocol_mismatch","gatewayProtocol":6,"minProtocol":6}"#
+        ))
+        let saved = ScriptedGatewaySocket()
+        await lan.failPendingReceivers(URLError(.networkConnectionLost))
+        await saved.failNextSend(URLError(.timedOut))
+        let factory = HostRoutedGatewaySocketFactory(queued: [Self.lanHost: [lan], Self.savedHost: [saved]])
+        let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())
+
+        var thrown: (any Error)?
+        do {
+            _ = try await client.connectForLifecycle(profile: lanProfile(), token: "token")
+        } catch {
+            thrown = error
+        }
+        let failure = try #require(thrown as? GatewayFailure)
+        #expect(failure.code == "protocol_mismatch")
+        #expect(!failure.retryable)
+        let reported = try #require(await client.latestHandshakeDiagnostic(after: 0))
+        #expect(reported.handshake?.transport == "lan")
+        #expect(reported.reason == .protocolMismatch)
         await client.close()
     }
 
