@@ -542,6 +542,16 @@ struct GatewayConnectionDetailView: View {
 
     private var statusColor: Color { status.color }
 
+    /// The selected profile's own stop reason. A non-retryable stop carries the
+    /// message that names the build to update (an outdated app or Mac), and the
+    /// transient notice is not a durable place to read it (F-3).
+    private var selectedProfileStopReason: String? {
+        guard currentProfile.id == model.profiles.selected?.id,
+              case .offline(let reason) = model.connectionState,
+              !reason.isEmpty else { return nil }
+        return reason
+    }
+
     private var technicalDetails: [TronTechnicalMetadataItem] {
         GatewayConnectionDetailPresentation.technicalDetails(info: info, updateStatus: updateStatus)
     }
@@ -558,6 +568,16 @@ struct GatewayConnectionDetailView: View {
                             accent: statusColor
                         ) {
                             GatewayConnectionStatusBadge(state: status)
+                        }
+                        if let stopReason = selectedProfileStopReason {
+                            TronSettingsDivider(accent: .tronError)
+                            TronValueRow(
+                                icon: "exclamationmark.triangle.fill",
+                                title: "Connection stopped",
+                                detail: stopReason,
+                                accent: .tronError
+                            )
+                            .textSelection(.enabled)
                         }
                         if status == .offline || status == .identityMismatch {
                             TronSettingsDivider(accent: statusColor)

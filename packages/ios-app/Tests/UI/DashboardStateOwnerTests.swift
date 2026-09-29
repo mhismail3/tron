@@ -1372,6 +1372,36 @@ struct DashboardStateOwnerTests {
         }
     }
 
+    @Test("dashboard protocol mismatch stops retrying the background profile")
+    func dashboardProtocolMismatchStopsUntilRetry() async throws {
+        try await withTestWatchdog { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            // The Mac is older than this app: it refuses the hello and closes
+            // with the Gateway's typed protocol-mismatch reason (F-3).
+            let socket = ScriptedGatewaySocket(metadata: GatewaySocketMetadata(
+                closeCode: GatewayProtocolMismatchClose.closeCode,
+                httpStatusCode: 101,
+                closeReason: #"{"code":"protocol_mismatch","gatewayProtocol":5,"minProtocol":5}"#
+            ))
+            let factory = ScriptedGatewaySocketFactory(sockets: [socket, ScriptedGatewaySocket()])
+            let pool = DashboardGatewayConnectionPool(clientFactory: {
+                GatewayClient(socketFactory: factory.factory)
+            })
+            await socket.failPendingReceivers(URLError(.networkConnectionLost))
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            try await Self.waitUntil { pool.state(for: profile.id) == .offline }
+            pool.notePathHint(profileID: profile.id, satisfied: true)
+            for _ in 0..<20 { await Task.yield() }
+            // No retry can fix a permanent build mismatch.
+            #expect(factory.requests.count == 1)
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
     @Test("dashboard retirement barriers are per-profile across an A to B to A handoff")
     func dashboardRetirementIsPerProfile() async throws {
         try await withTestWatchdog { @MainActor in

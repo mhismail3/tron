@@ -31,6 +31,10 @@ export const MAXIMUM_REKEYED_SESSION_IDS = 64;
 export const MAXIMUM_UNANSWERED_HEARTBEATS = GATEWAY_CONNECTION_POLICY.missedHeartbeatLimit;
 /** Application-defined close code for a socket replaced by its own identity. */
 export const SUPERSEDED_CLOSE_CODE = 4000;
+/** Application-defined close code for a hello whose protocol this Gateway cannot
+ * speak. The close reason carries both protocol ranges so the phone can name
+ * which build must update (F-3). */
+export const PROTOCOL_MISMATCH_CLOSE_CODE = 4006;
 
 /**
  * permessage-deflate for paired devices, which reach the Gateway over a radio.
@@ -706,6 +710,14 @@ function isFrameRefusal(error: Error): boolean {
 
 /** The structured ending of one upgrade. `reason` is what triage groups on; the
  * message carries the human detail. */
+/** The wire close reason for a protocol mismatch: the version range is the only
+ * fact that tells the peer whether its own app or this Gateway is the stale
+ * build, and a close code alone cannot carry it (F-3). Fits the WebSocket
+ * control-frame reason bound of 123 bytes. */
+function protocolMismatchCloseReason(): string {
+  return JSON.stringify({ code: "protocol_mismatch", gatewayProtocol: PROTOCOL_VERSION, minProtocol: MIN_PROTOCOL_VERSION });
+}
+
 interface UpgradeEnding {
   reason:
     | "request_capacity" | "unexpected_path" | "warming_up" | "shutting_down"
@@ -2185,7 +2197,8 @@ export class GatewayServer {
         this.finishUpgrade(connection.upgrade, "rejected", "hello",
           `protocol version mismatch: peer ${protocol}, Gateway accepts ${MIN_PROTOCOL_VERSION}-${PROTOCOL_VERSION}`,
           { reason: "protocol_mismatch", peerProtocolVersion: protocol });
-        return this.closeFailedConnection(connection, 1008, "protocol version mismatch");
+        return this.closeFailedConnection(
+          connection, PROTOCOL_MISMATCH_CLOSE_CODE, "protocol version mismatch", undefined, protocolMismatchCloseReason());
       }
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
@@ -3165,7 +3178,14 @@ export class GatewayServer {
     this.options.auth.detachClient(connection.id);
   }
 
-  private closeFailedConnection(connection: Connection, code: number, reason: string, ending?: UpgradeEnding): void {
+  private closeFailedConnection(
+    connection: Connection,
+    code: number,
+    reason: string,
+    ending?: UpgradeEnding,
+    /** The wire close reason, when the peer decodes it rather than the log. */
+    closeReason?: string,
+  ): void {
     if (connection.closeInitiated) return;
     connection.closeInitiated = true;
     // The Gateway is ending this socket, so an attempt that never reached hello
@@ -3182,7 +3202,7 @@ export class GatewayServer {
       if (connection.socket.readyState !== WebSocket.CLOSED) connection.socket.terminate();
     }, 1_000);
     connection.closeDeadline.unref();
-    connection.socket.close(code, reason);
+    connection.socket.close(code, closeReason ?? reason);
   }
 
   /** Any inbound frame proves liveness, and it closes a logged silence episode. */

@@ -1036,6 +1036,47 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a protocol-mismatch close stops recovery and names the stale build")
+    func protocolMismatchStopsRecovery() async throws {
+        let clock = ManualClock()
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "protocol-mismatch-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        // The Mac is older than this app, so it refuses the hello and closes
+        // with the typed reason. Retrying cannot fix a build pair, so recovery
+        // must stop and the state must name the side the user can update (F-3).
+        let sockets = [
+            ScriptedGatewaySocket(metadata: GatewaySocketMetadata(
+                closeCode: GatewayProtocolMismatchClose.closeCode,
+                httpStatusCode: 101,
+                closeReason: #"{"code":"protocol_mismatch","gatewayProtocol":5,"minProtocol":5}"#
+            )),
+            ScriptedGatewaySocket(),
+        ]
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0]), appLog: appLog) { fixture in
+            let start = Task { await fixture.model.start() }
+            try await sockets[0].waitUntilSent(count: 1)
+            await sockets[0].failPendingReceivers(URLError(.networkConnectionLost))
+            await start.value
+            guard case .offline(let reason) = fixture.model.connectionState else {
+                Issue.record("the mismatch left \(fixture.model.connectionState)")
+                return
+            }
+            #expect(reason.contains("Update Tron on the Mac"))
+            // A permanent build mismatch must not consume another attempt.
+            #expect(fixture.socketFactory.requests.count == 1)
+            let records = await fixture.model.loadGatewayLogsResult(limit: 200, includeRemote: false)
+            #expect(records.records.contains {
+                $0.record.message.contains("code=protocol_mismatch")
+                    && $0.record.message.contains("nonRetryable=true")
+            })
+        }
+    }
+
     @Test("a non-retryable stop keeps its Retry surface while the route poll asks again")
     func nonRetryableStopSurvivesTheRoutePoll() async throws {
         let clock = ManualClock()

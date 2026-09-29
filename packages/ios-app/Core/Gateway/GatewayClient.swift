@@ -1371,10 +1371,15 @@ package actor GatewayClient {
                 try GatewayFramePolicy.validateInboundBytes(data)
                 let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
                 try requireGeneration(epochID)
-                guard decoded.type == "hello",
-                      decoded.protocolVersion == TronGatewayProtocolContract.protocolVersion,
+                guard decoded.type == "hello" else {
+                    throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway did not answer this app's hello.", retryable: false, details: nil)
+                }
+                guard decoded.protocolVersion == TronGatewayProtocolContract.protocolVersion,
                       decoded.minProtocolVersion == TronGatewayProtocolContract.minimumProtocolVersion else {
-                    throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway protocol is not compatible with this app.", retryable: false, details: nil)
+                    throw GatewayProtocolMismatchClose.failure(
+                        gatewayProtocol: decoded.protocolVersion,
+                        minProtocol: decoded.minProtocolVersion
+                    )
                 }
                 let admittedChannel = try GatewayChannelPolicy.admit(decoded.gatewayChannel)
                 guard admittedChannel == profile.gatewayChannel else {
@@ -1416,9 +1421,17 @@ package actor GatewayClient {
                     || error is CancellationError
                     || (error as? URLError)?.code == .cancelled
                 if cancelled, resolution.hasWinner { return .abandoned }
+                // A typed close from the Mac is its own answer, and only the
+                // close names a version mismatch. Reading it as the generic
+                // transport failure underneath it would retry a permanent
+                // build mismatch forever (F-3).
+                let mismatch = GatewayProtocolMismatchClose.failure(
+                    closeCode: metadata.closeCode,
+                    closeReason: metadata.closeReason
+                )
                 return .failed(GatewayLegFailure(
                     route: route,
-                    error: error,
+                    error: mismatch ?? error,
                     upgradeFailure: Self.upgradeFailure(error, metadata: metadata),
                     stage: handshakeStage.get(),
                     metadata: metadata,

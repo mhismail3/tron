@@ -34,12 +34,13 @@ package struct GatewaySocketMetadata: Sendable, Equatable {
     let closeCode: Int?
     let httpStatusCode: Int?
 
-    package init(closeCode: Int?, httpStatusCode: Int?, transportOpenMilliseconds: Int? = nil, waitedForConnectivity: Bool = false, certificatePinRejected: Bool = false) {
+    package init(closeCode: Int?, httpStatusCode: Int?, transportOpenMilliseconds: Int? = nil, waitedForConnectivity: Bool = false, certificatePinRejected: Bool = false, closeReason: String? = nil) {
         self.closeCode = closeCode
         self.httpStatusCode = httpStatusCode
         self.transportOpenMilliseconds = transportOpenMilliseconds
         self.waitedForConnectivity = waitedForConnectivity
         self.certificatePinRejected = certificatePinRejected
+        self.closeReason = closeReason
     }
     /// Milliseconds from task start until the WebSocket opened; nil when it
     /// never opened. Distinguishes a path that never reached the Mac from a
@@ -52,6 +53,11 @@ package struct GatewaySocketMetadata: Sendable, Equatable {
     /// certificate are the same fact to the phone: do not use this lane for
     /// this attempt.
     var certificatePinRejected = false
+    /// The peer's own close reason, when URLSession exposed the close frame.
+    /// The Gateway uses it to carry the machine-readable cause and the protocol
+    /// range a version mismatch needs (F-3); URLSession may report 1005/1006
+    /// instead, so its absence stays explicit.
+    var closeReason: String? = nil
 }
 
 package protocol GatewaySocketConnection: Sendable {
@@ -92,6 +98,7 @@ package struct GatewaySocketFactory: Sendable {
 private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var closeCode: Int?
+    private var closeReason: String?
     private var httpStatusCode: Int?
     private let startedAt = ContinuousClock.now
     private var openedAt: ContinuousClock.Instant?
@@ -142,7 +149,10 @@ private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDeleg
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        lock.lock(); self.closeCode = closeCode.rawValue; lock.unlock()
+        lock.lock()
+        self.closeCode = closeCode.rawValue
+        if let reason { self.closeReason = String(decoding: reason, as: UTF8.self) }
+        lock.unlock()
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -158,7 +168,8 @@ private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDeleg
             httpStatusCode: httpStatusCode,
             transportOpenMilliseconds: openedAt.map { Self.milliseconds(startedAt.duration(to: $0)) },
             waitedForConnectivity: waitedForConnectivity,
-            certificatePinRejected: certificatePinRejected
+            certificatePinRejected: certificatePinRejected,
+            closeReason: closeReason
         )
     }
 
@@ -232,7 +243,8 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
             httpStatusCode: observed.httpStatusCode ?? (task.response as? HTTPURLResponse)?.statusCode,
             transportOpenMilliseconds: observed.transportOpenMilliseconds,
             waitedForConnectivity: observed.waitedForConnectivity,
-            certificatePinRejected: observed.certificatePinRejected
+            certificatePinRejected: observed.certificatePinRejected,
+            closeReason: observed.closeReason ?? task.closeReason.map { String(decoding: $0, as: UTF8.self) }
         )
     }
 

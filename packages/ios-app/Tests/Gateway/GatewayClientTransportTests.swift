@@ -82,6 +82,36 @@ struct GatewayClientTransportTests {
         await client.close()
     }
 
+    @Test("a typed protocol-mismatch close names the build that must update")
+    func protocolMismatchCloseNamesTheStaleBuild() async throws {
+        // The Gateway refuses a hello it cannot speak and closes with a typed
+        // reason. Reading that close as the transport failure underneath it
+        // retried a permanent build mismatch forever (F-3), so the classification
+        // has to name the side the user can update.
+        let fixtures: [(reason: String, expected: String)] = [
+            (#"{"code":"protocol_mismatch","gatewayProtocol":5,"minProtocol":5}"#, "Update Tron on the Mac"),
+            (#"{"code":"protocol_mismatch","gatewayProtocol":8,"minProtocol":8}"#, "Update Tron on this iPhone"),
+        ]
+        for fixture in fixtures {
+            let socket = ScriptedGatewaySocket(metadata: GatewaySocketMetadata(
+                closeCode: GatewayProtocolMismatchClose.closeCode,
+                httpStatusCode: 101,
+                closeReason: fixture.reason
+            ))
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            await socket.failPendingReceivers(URLError(.networkConnectionLost))
+            do {
+                _ = try await client.connect(profile: profile, token: "token")
+                Issue.record("a protocol mismatch unexpectedly connected")
+            } catch let error as GatewayFailure {
+                #expect(error.code == "protocol_mismatch")
+                #expect(!error.retryable)
+                #expect(error.message.contains(fixture.expected))
+            }
+            await client.close()
+        }
+    }
+
     @Test("hello requires a bounded channel matching the saved Stable or Debug profile")
     func channelIdentityFailsClosed() async {
         let debug = GatewayProfile(
