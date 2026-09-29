@@ -1351,11 +1351,96 @@ enum ChatVisualParityGate {
     }
 }
 
+// TEMPORARY (CT-23 stage 2 diagnosis): render the parity gate's own
+// opened-long-history shape on both orientations, retain the frames and report
+// the band-by-band difference against the committed reference, so the residual
+// can be located on screen. Removed with the stage-2 handoff.
+@MainActor
+enum ChatVisualParityShapeDiagnosis {
+    static func run() async throws {
+        let manifest = try? ChatVisualParityStore.readManifest()
+        let reference = manifest?.scenarios.first { $0.id == "opened-long-history-at-rest" }
+        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+            let label = orientation.presentsNewestRowFirst ? "origin" : "end"
+            let harness = try ChatViewScrollHarness(
+                snapshot: try parityMixedHistory(rowCount: 140),
+                displayFrameScheduler: .displayLink,
+                orientation: orientation
+            )
+            _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+            for _ in 0..<120 { try await harness.driveFrameBoundary() }
+            try harness.snapNativeTranscriptOffsetToWholePoint()
+            let rows = TranscriptWindowOracle.rows(in: harness.visibleRootView).filter(\.isOnScreen)
+            let scale = harness.visibleRootView.traitCollection.displayScale
+            print("CT23-PARITY-SHAPE orientation=\(label)"
+                + " rows=" + rows.map {
+                    "\($0.semanticID)@\(String(format: "%.3f", Double($0.windowFrame.minY * scale)))"
+                        + "/h\(String(format: "%.3f", Double($0.windowFrame.height * scale)))"
+                }.joined(separator: ","))
+            let rendered = harness.renderedParityFrame(
+                scale: ChatVisualParitySpec.renderScale,
+                rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
+                columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
+                includingPNG: true
+            )
+            if let png = rendered.png {
+                Attachment.record(png, named: "ct23-parity-shape-\(label).png")
+            }
+            if let reference, reference.frames.count == 1 || true {
+                let recorded = reference.frames[0]
+                let candidate = ChatVisualParityFingerprint(rendered)
+                let magnitude = ChatVisualParityFingerprint.magnitude(
+                    candidate, ChatVisualParityFingerprint(
+                        width: recorded.width, height: recorded.height,
+                        rows: recorded.rows.values, columns: recorded.columns.values
+                    ),
+                    alignmentPoints: ChatVisualParitySpec.alignmentPoints
+                )
+                print("CT23-PARITY-SHAPE orientation=\(label) magnitude="
+                    + String(format: "%.5f", magnitude.magnitude)
+                    + " shift=\(String(format: "%.1f", magnitude.shift))")
+                var rowSquared = 0.0
+                for (index, value) in candidate.rows.enumerated() {
+                    let delta = (Double(value) - Double(recorded.rows.values[index])) / 255
+                    rowSquared += delta * delta
+                }
+                var columnSquared = 0.0
+                for (index, value) in candidate.columns.enumerated() {
+                    let delta = (Double(value) - Double(recorded.columns.values[index])) / 255
+                    columnSquared += delta * delta
+                }
+                print("CT23-PARITY-SHAPE orientation=\(label) rowRMS="
+                    + String(format: "%.5f", (rowSquared / Double(candidate.rows.count)).squareRoot())
+                    + " columnRMS="
+                    + String(format: "%.5f", (columnSquared / Double(candidate.columns.count)).squareRoot()))
+                let deltas = candidate.rows.enumerated().map { index, value in
+                    (index: index, delta: Int(value) - Int(recorded.rows.values[index]))
+                }
+                let top = deltas.prefix(44).map { abs($0.delta) }.reduce(0, +) / 44
+                let rest = deltas.dropFirst(44).map { abs($0.delta) }.reduce(0, +) / (deltas.count - 44)
+                print("CT23-PARITY-SHAPE orientation=\(label) meanAbsTop88pt=\(top) meanAbsRest=\(rest)")
+                for worst in deltas.sorted(by: { abs($0.delta) > abs($1.delta) }).prefix(8) {
+                    print("CT23-PARITY-SHAPE orientation=\(label) band=\(worst.index)"
+                        + " y=\(worst.index * ChatVisualParitySpec.rowStep) delta=\(worst.delta)")
+                }
+            }
+            await harness.close()
+        }
+    }
+}
+
 @MainActor
 @Suite("Chat visual parity gate", .serialized, .enabled(if: UIValidationTier.isActive))
 struct ChatVisualParityTests {
     // A measurement, not a unit invariant: it renders the chat hundreds of
     // times, so it runs only in the UIValidation tier (see `UIValidationTier`).
+    @Test("CT-23 diagnosis: the parity shape on both orientations", .enabled(if: UIValidationTier.isActive))
+    func ct23ParityShapeDiagnosis() async throws {
+        try await withTestWatchdog(timeout: .seconds(240)) {
+            try await ChatVisualParityShapeDiagnosis.run()
+        }
+    }
+
     @Test("recorded reference frames match the rendered transcript within tolerance")
     func recordedReferenceFramesMatchRenderedTranscript() async throws {
         try await withTestWatchdog(timeout: .seconds(300)) {
