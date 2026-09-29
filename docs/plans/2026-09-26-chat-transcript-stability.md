@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-29, CT-23 re-applied on the CT-25/CT-27 base (stage 1)
+- **Last updated:** 2026-09-29, CT-23 re-applied on the CT-25/CT-27 base (stage 2)
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -111,7 +111,7 @@ breaks context-menu previews.
 | CT-27 | Done | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | chat scroll session (worker lane ct-27-rows), 2026-09-28 |
 | CT-28 | Ready | Record-only invariant monitor in the product (pinned bottom band uncovered for more than 2 frames, detached anchor moved without input, opening revealed uncovered), deduplicated, reaching device exports and surviving relaunch; delete the noisy tail-edge trace records; write the missing send-choreography device checklist in `development.md` | CT-25 | |
 | CT-24 | Done | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
-| CT-23 | Claimed | Origin-anchored transcript, re-applied on `main`'s post-CT-25/CT-27 structure in stages under the one `ChatTranscriptOrientation` owner: the scroll view's render flip with a counter-flip per content element through the same modifier, newest-first spine order, the owner-mapped edges/anchors/padding, the flip as the whole composer/keyboard inset mechanism, opening as install → one frame → reveal, and the five estimated-end mechanisms gated off. Stage 1 measured: the four bottom gates 3/3 with zero blank and zero uncovered boundaries, the keyboard journey 3/3 at the 12 pt tail, switch off unchanged (parity 10/10); open: the parity region's contrast wash (8/10), the detached reader's row-identity anchor, and the review's other flip-path items | CT-24 | chat scroll session (worker lane ct23b), 2026-09-29 |
+| CT-23 | Claimed | Origin-anchored transcript, re-applied on `main`'s post-CT-25/CT-27 structure in stages under the one `ChatTranscriptOrientation` owner: the scroll view's render flip with a counter-flip per content element through the same modifier, newest-first spine order, the owner-mapped edges/anchors/padding, the flip as the whole composer/keyboard inset mechanism, opening as install → one frame → reveal, and the five estimated-end mechanisms gated off. Stages 1-2 measured: the four bottom gates and the keyboard journey 3/3 and 1/1 with zero blank and zero uncovered boundaries and the newest row at exactly 12.0 pt, switch off unchanged (parity 10/10, field shapes still blank); the parity wash is the system's automatic soft scroll edge effect, now suppressed at the flipped path's pinned end with its own gate (parity 2/10 → 9/10). Open: the reference's own 0.667 pt pinned offset is what still fails the most sensitive parity scenario (the finer device-pixel alignment finds it but the capture's ink phase is not a position), the under-bar chrome the suppression removes (reported for decision), the detached reader's row-identity anchor, and the review's other flip-path items | CT-24 | chat scroll session (worker lane ct23b), 2026-09-29 |
 | CT-22 | Claimed | Exact tail prototype (keep the SwiftUI `ScrollView`, rows and animations): measure two ways of making the pinned bottom exact on a throwaway branch. (a) Previously measured rows keep their last measured height when they leave the viewport. (b) The newest rows render in an eager stack below a `LazyVStack` of older history, so the bottom and everything near it are measured, never estimated; the boundary moves in coarse steps so rows rarely change parent. Judged by the CT-2 fixtures, the parity gate, the harness and CT-10's scale numbers | CT-20 | chat scroll investigation session, 2026-09-27 |
 | CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15, CT-20 | |
 | CT-17 | Needs scoping | Qualification: with the switch on, the CT-12 and CT-14 gates pass against the `main` reference, the CT-2 fixtures and a 512-row blank fixture read zero blank boundaries, every `ChatViewScrollHarnessTests` visible invariant holds, and frame cost, opening time and memory at 150, 300 and 512 heavy rows are no worse than CT-10's baseline | CT-16, CT-14, CT-10 | |
@@ -2402,6 +2402,146 @@ pass only through eager-only repairs, stop and report.
 - For the next agent: CT-27 is complete and green on the merged base on
   `ct-27-rows`; the branch is ready for the supervisor's merge, and CT-23
   resumes against CT-25's gates unchanged.
+
+### CT-23 re-application stage 2 · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: stage 2's two visible-rendering problems are diagnosed with controls.
+  (a) The wash is the system's automatic soft scroll edge effect, and the product
+  now suppresses it at the flipped transcript's pinned end: parity went **2/10 to
+  9/10** on the flipped path, and today's path stays 10/10. (b) The tall-insertion
+  transient is **measured and does not reproduce on this base**: the flipped
+  shapes hold `minVisibleRowFraction` 0.984-1.0 at every boundary while today's
+  path blanks in the same runs. The one frame still failing parity, and the
+  under-bar fade the suppression removes, are both named below with their
+  measurements; the fade's fix needs the supervisor's decision (reported).
+
+  **(a1) The wash is the automatic scroll edge effect, measured on the screen and
+  in one process.** With the flipped transcript pinned, iOS 26's automatic soft
+  edge effect is drawn with a band as tall as the whole scroll view — its effect
+  layer measures 844 pt against the 170.8 pt the unflipped transcript gets (106 pt
+  with the `.hard` style), for every style, scroll position, content size, inset
+  and keyboard state, with the band's *position* (the visual top) unchanged; only
+  hiding it removes its contribution. The simulator's own screen (not just the
+  capture path, so the spike's "capture artifact?" question is closed) shows the
+  whole transcript washed out with the nav bar and composer crisp; suppressing the
+  effect makes it crisp. In one run, the parity region's difference is 0.10458
+  with the effect and 0.01805 with it suppressed at the same state, and
+  re-enabling it brings the wash straight back (`origin-forced-on`). The review's
+  fractional-pixel lead is disproved: every on-screen row's window frame lands on
+  a whole device pixel in both orientations. Product: the owner answers
+  `suppressesPinnedEndScrollEdgeEffect` and the scroll view applies
+  `.scrollEdgeEffectHidden(..., for: newestEdge)`, so today's path keeps the
+  effect it has always drawn (its own product state differs by 0.00058 from the
+  same state with the effect forced on). Its gate is
+  `only the origin-anchored transcript suppresses the pinned end's scroll edge
+  effect`, which fails if the suppression is dropped or applied to the other path.
+
+  **(a2) The one frame still failing parity is the reference's own sub-point
+  pinned offset, and the finer alignment cannot absorb it.** Today's path pins to
+  the lazy stack's *estimated* content height: it settles at a 12.667 pt tail
+  clearance where the contract is 12 pt. An origin-anchored transcript pins
+  exactly (12.000 in the same runs). The same rows land exactly 2 device px apart,
+  integral on both sides, so the difference is a sub-point (0.667 pt) pinned
+  offset — the class of imprecision CT-23 removes. The committed reference was
+  recorded from today's container, so a candidate can only match it by
+  reproducing that offset. The approved device-pixel alignment step was added
+  (`ChatVisualParitySpec.transitionAlignmentStep` for transition frames, one
+  display pixel for stable frames, whole-frame uniform shift only) and it *finds*
+  the offset (the reported shift is 0.333-0.667 pt), but the residual stays
+  0.0277-0.0285 against the 0.025 stable bound for `opened-long-history-at-rest`
+  and 0.025-0.050 on `ordinary-send-keyboard-up`'s stable frames across two runs:
+  the 2-point bands are sensitive to the capture's ink phase, so the difference is
+  rendering rather than position and no shift can absorb it. Today's path reads
+  0.0133 on the same scenario in the same runs. Recorded in
+  `packages/ios-app/docs/development.md`, whose gate section now states the
+  reference's 12.667 pt pin and this limit.
+
+  **(a3) The chrome the suppression removes — reported, not yet fixed.** Today's
+  under-bar fade *is* that effect: hiding it on today's path changes the
+  navigation band by 0.059 and the parity region by 0.008, and the composer band
+  by 0.000. On the flipped path the effect draws as the wash instead, so today's
+  fade cannot be had from it: the system sizes the band to the viewport whatever
+  the style, so no public knob yields a correct band under the flip. Keeping the
+  suppression therefore leaves the flipped path with the chat's own top blur only
+  (a small, real difference under the navigation bar), and a substitute would be
+  transcript-owned chrome rather than the system effect. Reported to the
+  supervisor with the options; nothing hand-drawn was built.
+
+  **(b) The tall-insertion transient is measured and does not reproduce.**
+  A 60-boundary per-frame dump of both CT-24 shapes on the flipped path (the
+  resync shape's insertion included) reads `minVisibleRowFraction` 0.984-0.995 at
+  every boundary, with the previous newest row always adjacent to the inserted
+  rows and never pushed away: the 1 pt rows are the entrance's own measured
+  footprint in the layout, so no boundary leaves the viewport bare, and the
+  insertions grow from that footprint in place (measured heights 1.0 → 200.3 →
+  607.0 → … → 1,854.7 pt over about ten boundaries). The review's 711 pt hole
+  needs an inserted row to reserve an *estimated* slot while rendering its 1 pt
+  footprint; that is not what this base's row structure does. The floor is already
+  the CT-24 journeys' gate (0.5 via `TranscriptBottomGateExpectation`), its unit
+  control covers the "band covered but viewport sparse" case (a 0.2 fraction is
+  rejected), and the hosted control — today's path judged as if it had to cover
+  the bottom — fails both journeys naming `minVisibleRowFraction=0.0`.
+
+- Evidence (lane ct23b, products built from this worktree's own source state,
+  every run under `~/Library/Developer/Tron/ios/test-runs/`; the orientation is
+  selected with `TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`):
+
+  | what | run dirs |
+  | --- | --- |
+  | the six-field-shape gates + keyboard journey, flipped | `135245Z.rKwUsF`: 0/72, 0/340, 0/90, 0/68 blank, 0 uncovered, `minVisibleRowFraction=1.0`, `tailClearanceSettled=12.0`, `repairCommands=materialize:0,physical:0,pastEnd:0`; keyboard journey 0/56, clearance 12.0 |
+  | the same, today's path | `135333Z.2NE9WQ`: 56/72, 62/340, 77/90, 27/68 blank, fraction 0.0, `tailClearanceSettled` 12.7 or none; keyboard journey 1/56 blank, clearance range [-674.2, 96317.3] |
+  | parity, flipped (2 runs) | `134704Z.0UypI0`, `134821Z.JIGDhq`: 9/10 and 8/10; wash gone, `opened-long-history-at-rest` 0.0277/0.0285 at shift 0.667/0.333 |
+  | parity, today's path | `135045Z.CGDglb`: 10/10 (worst stable 0.0133) |
+  | the alignment change's control | `fingerprintAlignmentAbsorbsOnlyADevicePixelPinnedOffset`: a 0.667 pt pinned offset is absorbed, a 3 pt uniform shift is clamped at the allowance edge and fails, a 24% wash fails, a progressive row-spacing change fails |
+  | the edge-effect finding, in one process | `123607Z.1WUHLd` (wash = the top edge effect; hiding it: 0.0181), `124004Z.ClOr38` (per-edge: hiding the bottom changes nothing), `130729Z.ikK5hF` (`origin-product` 0.01805 vs `origin-forced-on` 0.10458), `130335Z.ACJk50`, `132131Z.KJPYbG` (band and position dumps: 844 pt vs 170.8/106 pt; rows integral in device pixels) |
+  | the tall-insertion dump | the same lane's CT-23-boundary probes: flipped 0.984-0.995 across 110 boundaries of both shapes, today's path 0.0 |
+  | the floor gate's hosted control | `130559Z.Ymu2Iu`: today's path judged as covering fails both CT-24 journeys with `minVisibleRowFraction=0.0` |
+  | the on-screen proof | `packages/ios-app/build/ct23-stage2/onscreen-*.png` (simulator screens, git-ignored): today, flipped with the wash, flipped suppressed, flipped with the effect forced back on |
+
+- Changes: `ChatTranscriptOrientation.swift` (`suppressesPinnedEndScrollEdgeEffect`),
+  `ChatTranscriptScrollView.swift` (the suppression at the transcript scroll
+  view), `ChatVisualParityTests.swift` (the per-phase alignment step, the
+  alignment's own failure-mode test), `ChatViewScrollHarnessTests.swift` (the
+  suppression's two-sided gate), `packages/ios-app/docs/development.md` (the
+  alignment step, the reference's 12.667 pt pin and the limit it creates), this
+  plan.
+- Deviations: the probes this stage used (the band dump, the effect-layer dump,
+  the placement probe, the parity-shape diagnosis) were investigation tools and
+  are deleted; the branch carries their runs' evidence and no print-only test.
+- Kept on purpose: all five gated mechanisms with their command origins, traces
+  and harness counters (CT-19 deletes them once the flip passes every gate);
+  `snapNativeTranscriptOffsetToWholePoint`; the CT-2/CT-24 estimate fields.
+- Open, with owners, in the order the evidence supports:
+  1. **The under-bar chrome — decided, and it goes to the user as a product
+     decision.** The system's soft edge effect cannot render its bar-sized band
+     under the flip (measured: viewport-sized — 844 pt — for every style, scroll
+     position, content size and inset, against 170.8 pt soft / 106 pt hard
+     unflipped), and today's under-bar fade is that effect (its contribution:
+     navigation band 0.059, parity region 0.008, composer band 0.000 — there is
+     no separate composer-edge fade). The supervisor's decision (2026-09-29) is to
+     keep the suppression and build no replica; the two options — keep the flipped
+     path on the chat's own top blur alone, or add transcript-owned chrome that
+     replaces the fade — are the user's to weigh on the device, with these
+     measurements and the retained on-screen captures as the evidence.
+  2. **The committed reference's 0.667 pt pinned offset and the capture's ink
+     phase — accepted for this stage (supervisor, 2026-09-29).** The flipped path
+     is 9/10 and that is the documented cause: today's container pins at a
+     12.667 pt tail clearance against the 12.0 contract, the committed reference
+     carries that offset, and the 2-point bands are sensitive to the capture's ink
+     phase, so the finer device-pixel alignment finds the offset but cannot absorb
+     it (0.0277-0.0285 for `opened-long-history-at-rest`; 0.025-0.050 on
+     `ordinary-send-keyboard-up`'s stable frames across two runs; today's path
+     10/10 at 0.0133). No gate is loosened further and the reference is not
+     re-recorded now: it is re-recorded on the flipped path at CT-19's cutover,
+     after the user approves the look on the device, under the existing
+     provenance rules (a reviewed recording revision, never one from the
+     candidate). `packages/ios-app/docs/development.md` states the same limit.
+  3. The review's remaining flip-path items, unchanged from stage 1: the `.offsetY`
+     catch-up mapping (P1-1), adapted or deleted row and marker frames with the
+     anomaly classifier (P1-2), the detached reader's row-identity anchor (P1-3),
+     the status-bar tap (P1-5), context menus, VoiceOver order and scroll
+     direction, and optimized-profiler numbers (P2-6).
+  4. `displacedRetainedResume`'s load flake is CT-9's.
 
 ### CT-23 re-application stage 1 · 2026-09-29 · chat scroll session (worker lane ct23b)
 

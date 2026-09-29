@@ -946,14 +946,34 @@ transition diff of 0.0528, at the send entrance's frame 43. The phases are class
 the scenario's own declaration and every phase not named there is tight by
 default. Sampling is normalized so the compared states reproduce wherever they
 can: the transcript's native offset is snapped to a whole point before a frame
-is rendered, a rendered frame may be re-aligned by up to 2 points vertically in
-half-point steps, a rendered frame may be matched to a recorded frame one
-boundary away, and each scenario settles on the rendered pixels (not the
-recorder's layout sample stream) before its fixed frame sequence begins. CT-25
+is rendered, a rendered frame may be re-aligned by up to 2 points vertically, a
+rendered frame may be matched to a recorded frame one boundary away, and each
+scenario settles on the rendered pixels (not the recorder's layout sample
+stream) before its fixed frame sequence begins. CT-25
 measured removing the offset snap: the gate stayed green in three runs, but the
 opened-long-history reference's stable frames moved to 0.019 of their 0.025
 bound, so the snap still carries that reference's determinism and its removal
 belongs with CT-23's exact origin. The suite runs in about 60 s.
+
+The alignment search's step is per frame (CT-23 stage 2). A frame in a stable
+phase is searched at one display pixel — a third of a point on this lane's
+device — because the harness snaps a pinned transcript's offset and both sides of
+the comparison are pixel-snapped, so two pinned transcripts can only sit a whole
+number of display pixels apart. Transition frames keep the half-point step their
+own bound was measured with. The finer step is not enough on its own, and the
+gate states it: today's container pins to the `LazyVStack`'s own estimated
+content height, so it settles at a 12.667 pt tail clearance where its contract is
+12 pt, while an exactly pinned candidate settles at 12.000. The reference
+therefore carries a 0.667 pt (two display pixel) offset, and the 2-point bands
+are sensitive to the capture's ink phase: the finer search finds that offset
+(the reported shift is 0.333-0.667 pt) but the opened-long-history scenario's
+stable frames still read 0.0277-0.0285 against the 0.025 bound, and
+`ordinary-send-keyboard-up`'s stable frames read 0.025-0.050 across runs. That is
+a property of the committed reference, not of the candidate: today's path stays
+10/10 in the same runs, and a sub-point pinned difference of the same size on
+today's path would read the same 0.028. Closing it needs either a re-record
+(excluded by the CT-12 rule above) or a comparison that is insensitive to the
+capture's ink phase, and CT-12/CT-25's owner owns that decision.
 
 What the gate cannot resolve, measured on this lane: the exact rise and duration
 of a sub-60 ms-phase transition. A frame must force a screen update to carry the
