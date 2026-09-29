@@ -1536,6 +1536,7 @@ struct ChatViewScrollHarnessTests {
             sourceWindowFrame: CGRect,
             targetTransform: CGAffineTransform,
             containerCenterInWindow: CGPoint,
+            previewSize: CGSize,
             containerRendersFlipped: Bool,
             previewViewRendersFlipped: Bool
         ) -> String? {
@@ -1552,6 +1553,10 @@ struct ChatViewScrollHarnessTests {
             guard abs(containerCenterInWindow.x - expected.x) <= tolerance,
                   abs(containerCenterInWindow.y - expected.y) <= tolerance else {
                 return "the preview is centered at \(containerCenterInWindow), not over the source at \(expected)"
+            }
+            guard abs(previewSize.width - sourceWindowFrame.width) <= tolerance,
+                  abs(previewSize.height - sourceWindowFrame.height) <= tolerance else {
+                return "the preview is \(previewSize), not the source's \(sourceWindowFrame.size)"
             }
             return nil
         }
@@ -1618,6 +1623,7 @@ struct ChatViewScrollHarnessTests {
         func failure(
             transform: CGAffineTransform = .identity,
             center: CGPoint = .zero,
+            size: CGSize? = nil,
             containerFlipped: Bool = false,
             previewFlipped: Bool = false
         ) -> String? {
@@ -1625,6 +1631,7 @@ struct ChatViewScrollHarnessTests {
                 sourceWindowFrame: source,
                 targetTransform: transform,
                 containerCenterInWindow: center == .zero ? CGPoint(x: source.midX, y: source.midY) : center,
+                previewSize: size ?? source.size,
                 containerRendersFlipped: containerFlipped,
                 previewViewRendersFlipped: previewFlipped
             )
@@ -1632,6 +1639,7 @@ struct ChatViewScrollHarnessTests {
         #expect(failure() == nil)
         #expect(failure(transform: CGAffineTransform(scaleX: 1, y: -1)) != nil, "the transcript's flip")
         #expect(failure(center: CGPoint(x: source.midX, y: source.midY - 1)) != nil, "one point away")
+        #expect(failure(size: CGSize(width: source.width, height: source.height + 1)) != nil, "one point taller")
         #expect(failure(containerFlipped: true) != nil, "a flipped container")
         #expect(failure(previewFlipped: true) != nil, "a flipped preview view")
     }
@@ -1657,7 +1665,7 @@ struct ChatViewScrollHarnessTests {
                         TranscriptWindowOracle.isFlipped(scrollView) == orientation.presentsNewestRowFirst,
                         "\(orientation): this journey must run on the orientation's own path"
                     )
-                    let surfaces = harness.ownedContextMenuSurfaces()
+                    let surfaces = harness.promptContextMenuSurfaces()
                     #expect(!surfaces.isEmpty, "\(orientation): the production menu surface must be mounted")
                     for surface in surfaces {
                         let windowFrame = surface.view.convert(surface.view.bounds, to: nil)
@@ -1685,6 +1693,7 @@ struct ChatViewScrollHarnessTests {
                             sourceWindowFrame: windowFrame,
                             targetTransform: preview.target.transform,
                             containerCenterInWindow: container.convert(preview.target.center, to: nil),
+                            previewSize: preview.view.bounds.size,
                             containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
                             previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
                         )
@@ -1695,8 +1704,8 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("the display card's UIKit context-menu preview is upright and in place on both orientations")
-    func displayCardContextMenuPreviewIsUprightAndInPlace() async throws {
+    @Test("the display card's context menu resolves at the card on both transcript orientations")
+    func displayCardContextMenuResolvesAtTheCard() async throws {
         let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
             ($0, try transcriptMenuSnapshot())
         }
@@ -1707,46 +1716,30 @@ struct ChatViewScrollHarnessTests {
                         $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
                     }
                     try await harness.driveFrameBoundary()
-                    let rows = TranscriptWindowOracle.rows(in: harness.visibleRootView).filter(\.isOnScreen)
-                    guard let display = rows.first(where: { $0.semanticID.contains("display") }) else {
-                        Issue.record("\(orientation): the display card row must be visible")
+                    guard let bridge = harness.swiftUIContextMenuBridge(),
+                          let delegate = bridge.interaction.delegate else {
+                        Issue.record("\(orientation): SwiftUI's context-menu bridge must be reachable")
                         return
                     }
-                    let candidates = harness.ownedContextMenuSurfaces().filter { surface in
-                        surface.view.convert(surface.view.bounds, to: nil).intersects(display.windowFrame)
-                            && surface.owner.makeMenu()?.children.compactMap { ($0 as? UIAction)?.title } == ["Tool Details"]
+                    let root = harness.visibleRootView
+                    let rows = TranscriptWindowOracle.rows(in: root).filter(\.isOnScreen)
+                    var resolving: [String] = []
+                    for row in rows {
+                        let location = CGPoint(x: row.windowFrame.midX, y: row.windowFrame.minY + 12)
+                        if delegate.contextMenuInteraction(
+                            bridge.interaction,
+                            configurationForMenuAtLocation: bridge.view.convert(location, from: nil)
+                        ) != nil {
+                            resolving.append(row.semanticID)
+                        }
                     }
-                    #expect(candidates.count == 1, "\(orientation): expected one owned card menu, got \(candidates.count)")
-                    guard let surface = candidates.first else { return }
-                    let sourceFrame = surface.view.convert(surface.view.bounds, to: nil).standardized
-                    let location = surface.view.convert(CGPoint(x: surface.view.bounds.midX, y: surface.view.bounds.midY), to: nil)
-                    let configuration = surface.owner.contextMenuInteraction(
-                        surface.interaction,
-                        configurationForMenuAtLocation: surface.view.convert(location, from: nil)
-                    )
-                    #expect(configuration != nil, "\(orientation): the card menu opens on its own surface")
-                    guard let configuration,
-                          let preview = surface.owner.contextMenuInteraction(
-                            surface.interaction,
-                            configuration: configuration,
-                            highlightPreviewForItemWithIdentifier: configuration.identifier ?? ("preview-gate" as NSString)
-                          ),
-                          let container = preview.target.container as? UIView else {
-                        Issue.record("\(orientation): the owned card preview must target its source view")
-                        return
-                    }
+                    // The display card is the only row with a SwiftUI
+                    // `.contextMenu`; a bridge that resolved everywhere would
+                    // prove nothing about the card.
                     #expect(
-                        surface.owner.makeMenu()?.children.compactMap { ($0 as? UIAction)?.title } == ["Tool Details"],
-                        "\(orientation): changing the menu mechanism preserves its one action and title"
+                        resolving.count == 1 && resolving.first?.contains("display") == true,
+                        "\(orientation): the card's menu resolves at \(resolving)"
                     )
-                    let failure = ContextMenuPreviewPlacement.failure(
-                        sourceWindowFrame: sourceFrame,
-                        targetTransform: preview.target.transform,
-                        containerCenterInWindow: container.convert(preview.target.center, to: nil),
-                        containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
-                        previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
-                    )
-                    #expect(failure == nil, "\(orientation): \(failure ?? "")")
                 }
             }
         }
@@ -5862,9 +5855,11 @@ final class ChatViewScrollHarness {
         scrollView.layoutIfNeeded()
     }
 
-    /// Production prompt and display-card context-menu surfaces, with the
-    /// shared owner that builds each source-view preview.
-    func ownedContextMenuSurfaces() -> [(view: UIView, interaction: UIContextMenuInteraction, owner: ChatMessageContextMenuOwner)] {
+    /// The prompt rows' production context-menu surfaces: the native views that
+    /// carry the interaction, with the owner that builds their preview. The
+    /// prompt menu is the app's own UIKit interaction (the display cards' menus
+    /// are SwiftUI's, see `swiftUIContextMenuBridge`).
+    func promptContextMenuSurfaces() -> [(view: UIView, interaction: UIContextMenuInteraction, owner: ChatMessageContextMenuOwner)] {
         Self.contextMenuViews(in: hostingController.view).compactMap { view in
             guard let interaction = view.interactions.compactMap({ $0 as? UIContextMenuInteraction }).first,
                   let owner = interaction.delegate as? ChatMessageContextMenuOwner else { return nil }
@@ -5872,6 +5867,22 @@ final class ChatViewScrollHarness {
         }
     }
 
+    /// SwiftUI's own context-menu bridge, which resolves the display cards'
+    /// `.contextMenu` menus. `nil` when this build's SwiftUI presents them
+    /// differently, which fails the journey that needs it rather than passing
+    /// quietly. Its delegate is matched by name because the bridge is internal
+    /// to SwiftUI; the name is the only handle on it, and asking an unrelated
+    /// interaction's delegate for a configuration is not safe.
+    func swiftUIContextMenuBridge() -> (view: UIView, interaction: UIContextMenuInteraction)? {
+        for view in Self.contextMenuViews(in: hostingController.view) {
+            for case let interaction as UIContextMenuInteraction in view.interactions {
+                guard let delegate = interaction.delegate,
+                      String(describing: type(of: delegate)).hasSuffix("ContextMenuBridge") else { continue }
+                return (view, interaction)
+            }
+        }
+        return nil
+    }
 
     /// The row the reader sees at the top of the transcript, or `nil` when no
     /// mounted row is on screen.
