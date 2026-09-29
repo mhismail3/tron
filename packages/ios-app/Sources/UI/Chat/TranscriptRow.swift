@@ -484,6 +484,7 @@ private struct ThinkingBlock: View {
     let label: String?
     let animatesInsertion: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
 
     /// The paragraph's measured height and the reference line count's measured
     /// height. Both are geometry→state and never drive layout: the tail layout
@@ -491,7 +492,6 @@ private struct ThinkingBlock: View {
     /// (the mask, the tap and the accessibility trait).
     @State private var contentHeight: CGFloat = 0
     @State private var referenceHeight: CGFloat = 0
-    @State private var showingDetails = false
 
     init(
         segments: [ChatThinkingSegment],
@@ -522,26 +522,30 @@ private struct ThinkingBlock: View {
             }
             traceViewport(inline: inline)
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    guard isOverflowing else { return }
-                    showingDetails = true
-                }
+                .onTapGesture { openDetails(inline: inline) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibleParagraph)
-        .accessibilityAddTraits(isOverflowing ? .isButton : [])
-        .accessibilityHint(isOverflowing ? "Double-tap to view the full thinking trace" : "")
-        .tronManagedSheet(
-            isPresented: $showingDetails,
-            identity: "chat.thinking-trace.\(traceIdentity)"
-        ) {
-            ThinkingTraceDetailSheet(
-                inline: inline,
-                identity: traceIdentity,
-                streaming: animatesInsertion
-            )
-        }
+        .accessibilityAddTraits(admitsDetailAction ? .isButton : [])
+        .accessibilityHint(admitsDetailAction ? "Double-tap to view the full thinking trace" : "")
+    }
+
+    /// The full trace belongs to the transcript, not to this row: streaming
+    /// pushes the row out of lazy realization, and the sheet must outlive it.
+    private func openDetails(inline: MarkdownPresentation.Inline) {
+        guard isOverflowing, let sheetRoutes else { return }
+        sheetRoutes.present(.thinkingTrace(ChatThinkingTraceSheetRoute(
+            identity: traceIdentity,
+            inline: inline,
+            streaming: animatesInsertion
+        )))
+    }
+
+    /// A row rendered without a transcript host offers no detail action, so its
+    /// trait and hint never claim one.
+    private var admitsDetailAction: Bool {
+        isOverflowing && sheetRoutes != nil
     }
 
     private var accessibleParagraph: String {

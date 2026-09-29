@@ -1372,6 +1372,12 @@ final class ChatTranscriptPresentationStore {
     /// installed rows' own display identities.
     private var inlineDisclosurePhases: [String: DisplayInlineDisclosureState] = [:]
 
+    /// The sheet a row asked to present. It lives here with the other row-owned
+    /// presentation state because a lazy window change discards the row: a
+    /// row-owned sheet is dismissed with the row that presented it, and a tool
+    /// detail can be three viewports away from the row that opened it.
+    let sheetRoutes = ChatTranscriptSheetRouteOwner()
+
     @ObservationIgnored private var pendingEntranceOrder: [String] = []
     @ObservationIgnored private var displayedSemanticIDs: Set<String> = []
     @ObservationIgnored private var displayedSemanticOrder: [String] = []
@@ -1817,6 +1823,7 @@ final class ChatTranscriptPresentationStore {
         entranceSuppressedInstallationTag = nil
         consumedLifecycleEntranceIDs.removeAll(keepingCapacity: false)
         inlineDisclosurePhases.removeAll(keepingCapacity: false)
+        sheetRoutes.dismiss()
         installFrameTask?.cancel()
         installFrameTask = nil
         installed = nil

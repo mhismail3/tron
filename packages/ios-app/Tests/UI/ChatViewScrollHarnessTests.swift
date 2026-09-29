@@ -3788,6 +3788,11 @@ final class ChatViewScrollHarness {
         return !presented.isBeingPresented && presented.transitionCoordinator == nil
     }
     var uncoverTransitionSettled: Bool { hostingController.presentedViewController == nil }
+
+    /// Whether the hosted chat has a sheet presented. A transcript row's detail
+    /// sheet is presented above the rows, so it must outlive the row that asked
+    /// for it.
+    var presentsManagedSheet: Bool { hostingController.presentedViewController != nil }
     func waitForCoverTransition(presented: Bool) async throws {
         for _ in 0..<180 {
             if presented ? coverTransitionSettled : uncoverTransitionSettled { return }

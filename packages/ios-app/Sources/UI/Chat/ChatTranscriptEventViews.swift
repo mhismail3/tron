@@ -32,8 +32,7 @@ struct ChatNotificationView: View {
     let presentation: ChatNotificationPresentation
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var showingDetail = false
-    @State private var detailID = UUID()
+    @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     @State private var titleMeasurement: ChatCompactPillTitleMeasurement?
     #if HOSTED_TEST
     @Environment(\.chatHostedRecorder) private var hostedRecorder
@@ -91,20 +90,21 @@ struct ChatNotificationView: View {
                 guard titleMeasurement != next else { return }
                 titleMeasurement = next
             }
-            .tronManagedSheet(
-                isPresented: $showingDetail,
-                identity: "chat.transcript-event-detail"
-            ) { detailSheet }
     }
 
+    /// The detail sheet belongs to the transcript, not to this pill: a lazy
+    /// window change discards the row, and the sheet must outlive it.
     private func showDetail() {
         guard showsDetailAction else { return }
-        detailID = UUID()
+        let detailID = UUID()
         model.lifecycleRecordDiagnostic(
             event: "detail.tap",
             message: "detailID=\(detailID) sourceBytes=\(presentation.body?.utf8.count ?? 0)"
         )
-        showingDetail = true
+        sheetRoutes?.present(.notificationDetail(ChatNotificationDetailSheetRoute(
+            presentation: presentation,
+            detailID: detailID
+        )))
     }
 
     private var pill: some View {
@@ -136,7 +136,16 @@ struct ChatNotificationView: View {
         [presentation.title, presentation.detail].compactMap { $0 }.joined(separator: ", ")
     }
 
-    private var detailSheet: some View {
+}
+
+/// The full text of one transcript event, in the standard sheet chrome. It is
+/// rendered by the transcript's sheet host from the route a pill presented.
+struct ChatNotificationDetailSheet: View {
+    let presentation: ChatNotificationPresentation
+    let detailID: UUID
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -165,7 +174,7 @@ struct ChatNotificationView: View {
                     TronSheetTitle(title: presentation.title, accent: presentation.tone.surfaceColor)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { showingDetail = false } label: {
+                    Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
                             .foregroundStyle(Color.tronEmerald)

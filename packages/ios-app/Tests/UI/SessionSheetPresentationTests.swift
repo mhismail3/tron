@@ -325,7 +325,17 @@ final class SessionSheetPresentationTests: XCTestCase {
             let coordinator = PresentationActivityCoordinator()
             let probe = HostedToolActionProbe()
             var activated: DisplayPresentationCommand?
+            // The detail sheet belongs to the transcript, not to the row: the row
+            // asks through the routes owner and the transcript's host presents
+            // it, exactly as the mounted chat does.
+            let routes = ChatTranscriptSheetRouteOwner()
             let content = ToolRunView(run: run, installationTag: tag, resolveDetails: { _, _ in tools }, recordChip: { _ in })
+                .environment(\.chatTranscriptSheetRoutes, routes)
+                .modifier(ChatTranscriptSheetHost(
+                    routes: routes,
+                    installationTag: tag,
+                    resolveToolRun: { _, _ in tools }
+                ))
                 .environment(model).environment(\.canonicalResourceSessionID, snapshot.sessionId)
                 .environment(\.displayPresentationHandler, { activated = $0 })
                 .environment(\.hostedToolActionProbe, probe)

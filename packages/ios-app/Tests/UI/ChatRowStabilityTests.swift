@@ -418,6 +418,90 @@ struct ChatRowStabilityTests {
         }
     }
 
+    @Test("a tool detail stays presented while streaming pushes its row out of the window")
+    func toolDetailOutlivesItsStreamingRow() async throws {
+        try await withTestWatchdog(timeout: .seconds(150)) {
+            let snapshot = try toolDetailSnapshot()
+            try await withStabilityHarness(snapshot: snapshot) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && ($0.observation.rowFrames[RowStabilityFixture.groupedRunRowID]?.height ?? 0) > 1
+                }
+                // The reader opens the run's detail through the control the row
+                // itself mounts; the transcript presents it above the rows.
+                let chipAction = RowStabilityFixture.groupedRunChipActionID
+                #expect(
+                    harness.toolActionProbe.activate(chipAction),
+                    "the grouped run's chip was not mounted"
+                )
+                _ = try await harness.recorder.waitUntil { _ in harness.presentsManagedSheet }
+                let detailAction = RowStabilityFixture.groupedRunDetailActionID
+                // The sheet's own content mounts one display boundary after the
+                // presentation, so the detail's control is observed the same way
+                // every other mounted control is.
+                var openingBudget = 120
+                while !harness.toolActionProbe.contains(detailAction), openingBudget > 0 {
+                    try await harness.driveFrameBoundary()
+                    openingBudget -= 1
+                }
+                #expect(
+                    harness.toolActionProbe.contains(detailAction),
+                    "the detail's own rows never mounted"
+                )
+
+                // A streaming reply grows under the reader and pushes the run up
+                // out of the viewport. Each revision is one installed projection,
+                // and the reply reaches more than three viewports by the last one.
+                var next = snapshot
+                next.phase = .running
+                for revision in 1...4 {
+                    next.streaming = try harnessAssistantMessage(
+                        id: RowStabilityFixture.streamingReplyID,
+                        presentationID: RowStabilityFixture.streamingReplyID,
+                        // Escaped separators: the fixture builds JSON directly.
+                        text: (1...(revision * 24))
+                            .map { "Streamed paragraph \($0) of the reply that pushes the tool run out of the window." }
+                            .joined(separator: "\\n\\n")
+                    )
+                    next.revision += 1
+                    next.eventSequence += 1
+                    harness.replaceAuthoritativeSnapshot(next)
+                    try await driveBoundaries(6, harness: harness)
+                }
+                // The run's own control retires when the row leaves the viewport.
+                var budget = 240
+                while harness.toolActionProbe.contains(chipAction), budget > 0 {
+                    try await harness.driveFrameBoundary()
+                    budget -= 1
+                }
+                let rowLeftViewport = !harness.toolActionProbe.contains(chipAction)
+                let sheetIsPresented = harness.presentsManagedSheet
+                let detailIsMounted = harness.toolActionProbe.contains(detailAction)
+                let observation = harness.probeObservation
+                let streamedHeight = observation.rowFrames[RowStabilityFixture.streamingReplyID]?.height ?? 0
+                let viewportHeight = observation.geometry.containerHeight
+                print("ROW-STABILITY-TOOL-DETAIL"
+                    + " streamed=\(rowStabilityNumber(streamedHeight))"
+                    + " viewports=\(rowStabilityNumber(viewportHeight > 0 ? streamedHeight / viewportHeight : 0))"
+                    + " rowLeftViewport=\(rowLeftViewport)"
+                    + " sheetPresented=\(sheetIsPresented)"
+                    + " detailMounted=\(detailIsMounted)")
+
+                #expect(
+                    rowLeftViewport,
+                    "the tool run's row never left the viewport, so this journey proves nothing"
+                )
+                // The detail is the transcript's, not the row's: it is still
+                // presented with its own rows after the installs that carried the
+                // streaming reply. This harness keeps a lazy row's view alive
+                // (and with it a row-owned sheet), so a discarded row cannot be
+                // forced here; the device checklist owns that case.
+                #expect(sheetIsPresented, "streaming dismissed the detail")
+                #expect(detailIsMounted, "the presented detail lost its own rows")
+            }
+        }
+    }
+
     @Test("two adjacent inline Markdown displays both reach their prepared document")
     func twoAdjacentInlineDisplaysBothPrepare() async throws {
         try await withTestWatchdog(timeout: .seconds(120)) {
@@ -935,6 +1019,15 @@ private enum RowStabilityFixture {
     static let collapsedDisplayID = "tool-run-" + collapsedDisplayCallID
     static let toolRunCallID = "stability-tool-call"
     static let toolRunID = "tool-run-" + toolRunCallID
+    /// The tool-detail journey's own run: one finalized group of two calls, so
+    /// the transcript renders one row and its detail sheet lists its own rows.
+    static let groupedRunID = "stability-grouped"
+    static let groupedRunCallIDs = ["stability-grouped-a", "stability-grouped-b"]
+    static let groupedRunRowID = "tool-run-" + groupedRunID
+    static let groupedRunChipActionID = "run:" + groupedRunRowID
+    static let groupedRunDetailActionID = "row:" + groupedRunCallIDs[0]
+    /// The streaming reply the tool-detail journey grows under the reader.
+    static let streamingReplyID = "stability-tool-detail-reply"
     static let errorNoticeID = "stability-error-notice"
     static let codeTableID = "stability-code-table"
     static let oldestHistoryID = "stability-history-0"
@@ -1037,8 +1130,44 @@ private enum RowStabilityFixture {
 /// leave the lazy range when the reader scrolls to the oldest loaded row, then
 /// one row of every kind under test.
 private func rowStabilitySnapshot() throws -> SessionSnapshot {
+    try stabilitySnapshot(items: rowStabilityHistoryItems() + rowStabilityItems())
+}
+
+/// The tool-detail journey's history: the same ordinary rows, then one finalized
+/// group of two calls, which the transcript renders as a single run row. Its
+/// detail sheet is the grouped surface that lists the run's own rows.
+private func toolDetailSnapshot() throws -> SessionSnapshot {
+    var snapshot = try stabilitySnapshot(
+        items: rowStabilityHistoryItems()
+            + RowStabilityFixture.groupedRunCallIDs.flatMap { toolRunRows(callID: $0) }
+    )
+    // The group metadata travels with the run's executions, as an install
+    // delivers it; the transcript rows above carry the calls themselves.
+    snapshot.toolExecutions = harnessRuntimeTools(
+        callIDs: RowStabilityFixture.groupedRunCallIDs,
+        groupID: RowStabilityFixture.groupedRunID
+    )
+    return snapshot
+}
+
+/// One finalized group of the given calls: the same contract a gateway install
+/// publishes when it names a run.
+private func harnessRuntimeTools(callIDs: [String], groupID: String) -> [ToolExecutionState] {
+    callIDs.enumerated().map { index, callID in
+        harnessRuntimeTool(
+            id: callID,
+            order: index,
+            status: .completed,
+            groupId: groupID,
+            groupIndex: index,
+            groupCount: callIDs.count
+        )
+    }
+}
+
+/// The one history a journey starts from: the rows wired into one parent chain.
+private func stabilitySnapshot(items rows: [[String: Any]]) throws -> SessionSnapshot {
     var snapshot = try SessionScenarioBuilder(seed: 1_327).openingTail(targetEncodedBytes: 4_096)
-    let rows = rowStabilityHistoryItems() + rowStabilityItems()
     var parentID: String?
     var items: [TranscriptItem] = []
     for row in rows {

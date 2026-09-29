@@ -746,6 +746,17 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // Pinned presentations are bottom-owned even when the transcript is
         // empty or shorter than the viewport. Anchored readers retain their
         // semantic position through the coordinator's restore transaction.
+        // The sheet a row asked for is presented here, outside the lazy stack, so
+        // streaming a row out of realization cannot dismiss it. The resolver is
+        // the same installed projection the rows are rendered from, so the
+        // detail follows later installs without the row that opened it.
+        .modifier(ChatTranscriptSheetHost(
+            routes: transcriptPresentation.sheetRoutes,
+            installationTag: installed?.tag,
+            resolveToolRun: { callIDs, tag in
+                transcriptPresentation.resolveToolDetails(callIDs: callIDs, installationTag: tag)
+            }
+        ))
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .alignment)
         // Positioning is pinned-owned even while the opaque opening surface is
@@ -1251,6 +1262,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // remounted row reads its own phase from the store instead of losing a
         // row-local one.
         .environment(\.chatInlineDisclosureOwner, transcriptPresentation)
+        // The row's detail sheets are presented above the rows, not inside them.
+        .environment(\.chatTranscriptSheetRoutes, transcriptPresentation.sheetRoutes)
         .chatStableTranscriptUpdates(projectionIdentity: installed.tag)
         #if HOSTED_TEST
         .environment(\.chatHostedRecorder, ChatHostedRecorderBox(recorder: hostedRecorder))
