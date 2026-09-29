@@ -446,6 +446,7 @@ export class GatewayService {
       case "knowledge.search":
       case "knowledge.recall":
       case "knowledge.curation.jobs":
+      case "knowledge.tags.retag-needed":
       case "knowledge.connector.status":
       case "knowledge.raindrop.read": {
 
@@ -461,6 +462,8 @@ export class GatewayService {
         return safeJson(await this.dependencies.connections.invoke({ operation: method, request: {} } as ConnectionAction));
       }
       case "knowledge.config":
+      case "knowledge.tags.configure":
+      case "knowledge.tags.reconcile":
       case "knowledge.observation.dismiss":
       case "knowledge.source.capture":
       case "knowledge.source.preview.refresh":

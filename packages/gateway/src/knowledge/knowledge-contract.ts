@@ -333,6 +333,60 @@ export function knowledgeScopeEligible(eligibility: KnowledgeEligibility, scope:
     || (scope.projectId !== undefined && eligibility.projectIds.includes(scope.projectId));
 }
 
+export type KnowledgeTagDecayClass = "ages" | "stable";
+export type KnowledgeTagState = "active" | "retired" | "merged";
+export interface KnowledgeTagDefinition {
+  id: string;
+  label: string;
+  definition: string;
+  category: string;
+  decayClass: KnowledgeTagDecayClass;
+  state: KnowledgeTagState;
+  mergedInto?: string;
+}
+export interface KnowledgeTagVocabularyConfig {
+  /** Advances only when taxonomy or guidelines change, not unrelated settings. */
+  revision: number;
+  tags: KnowledgeTagDefinition[];
+  guidelines: string;
+}
+export type KnowledgeTagEdit =
+  | { kind: "add"; tag: KnowledgeTagDefinition }
+  | { kind: "rename"; id: string; label: string }
+  | { kind: "redefine"; id: string; definition: string }
+  | { kind: "recategorize"; id: string; category: string; decayClass: KnowledgeTagDecayClass }
+  | { kind: "retire"; id: string }
+  | { kind: "merge"; id: string; mergedInto: string }
+  | { kind: "guidelines"; guidelines: string };
+export interface KnowledgeTagEditRequest {
+  commandId: string;
+  expectedConfigRevision: number;
+  edit: KnowledgeTagEdit;
+}
+export interface KnowledgeTagReconcileRequest {
+  commandId: string;
+  expectedConfigRevision: number;
+  cursor?: string;
+  limit?: number;
+}
+export interface KnowledgeTagRetagRequest {
+  vocabularyRevision: number;
+  cursor?: string;
+  limit?: number;
+}
+export interface KnowledgeTagRetagItem { id: string; revisionId: string; reason: "untagged" | "vocabulary-changed" | "retired-tag"; }
+export interface KnowledgeTagRetagResponse { items: KnowledgeTagRetagItem[]; nextCursor?: string; vocabularyRevision: number; }
+export interface KnowledgeTagReconcileResponse { applied: number; unchanged: number; outcomes: Array<{ id: string; status: "applied" | "unchanged" | "conflict" | "failed"; revisionId?: string; reason?: string }>; nextCursor?: string; configRevision: number; }
+export const KNOWLEDGE_TAG_MAX_COUNT = 256;
+export const KNOWLEDGE_TAG_MAX_GUIDELINES_CHARS = 8_000;
+
+/** Resolve just the configured age policy for K6 without coupling retrieval to
+ * vocabulary mutation or duplicating taxonomy lookups. */
+export function knowledgeTagDecayClass(config: KnowledgeConfig, tagId: string): KnowledgeTagDecayClass | undefined {
+  const tag = config.tagVocabulary.tags.find(candidate => candidate.id === tagId);
+  return tag?.decayClass;
+}
+
 export interface KnowledgeConfig {
   schemaVersion: typeof KNOWLEDGE_SCHEMA_VERSION;
   /** Monotonically increasing revision for optimistic UI/runtime updates. */
@@ -349,6 +403,8 @@ export interface KnowledgeConfig {
   maximumSearchResults: number;
   /** Editable interests used only when an explicit triage operation runs. */
   currentInterests?: string[];
+  /** User-owned taxonomy. Added to older persisted configurations as empty. */
+  tagVocabulary: KnowledgeTagVocabularyConfig;
 }
 
 export const DEFAULT_KNOWLEDGE_CONFIG: KnowledgeConfig = {
@@ -364,6 +420,7 @@ export const DEFAULT_KNOWLEDGE_CONFIG: KnowledgeConfig = {
   },
   maximumSearchResults: 50,
   currentInterests: [],
+  tagVocabulary: { revision: 0, tags: [], guidelines: "" },
 };
 
 /** Every disposition an observation cut can hold. `observed`, `empty`, and
@@ -457,6 +514,8 @@ export interface KnowledgeSourceRow {
   /** Generated summary text, present only while its evidence digest still
    * matches the record's title and readable text. Bounded for row display. */
   summary?: string;
+  /** Current vocabulary labels projected from the catalog head, never the body. */
+  tags?: Array<Pick<KnowledgeTagDefinition, "id" | "label" | "category" | "decayClass" | "state">>;
 }
 
 export interface KnowledgeListResponse {
@@ -911,6 +970,9 @@ export type KnowledgeAction =
   | { operation: "knowledge.object.read"; request: KnowledgeObjectReadRequest }
   | { operation: "knowledge.previews.read"; request: KnowledgePreviewBatchRequest }
   | { operation: "knowledge.config"; request: { commandId: string; config: KnowledgeConfig } }
+  | { operation: "knowledge.tags.configure"; request: KnowledgeTagEditRequest }
+  | { operation: "knowledge.tags.reconcile"; request: KnowledgeTagReconcileRequest }
+  | { operation: "knowledge.tags.retag-needed"; request: KnowledgeTagRetagRequest }
   | { operation: "knowledge.list"; request: KnowledgeListRequest }
   | { operation: "knowledge.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean; includeArchived?: boolean; includePending?: boolean; offset?: number } }
   | { operation: "knowledge.search"; request: KnowledgeSearchRequest }
@@ -1221,5 +1283,43 @@ export function validateKnowledgeConfig(value: unknown): KnowledgeConfig {
   if (eligibility.allSessions !== undefined && eligibility.allSessions !== true) throw new Error("Invalid global observation grant");
   if (observation.model !== undefined && (typeof observation.model !== "string" || observation.model.length === 0 || observation.model.length > 200)) throw new Error("Invalid observation model");
   if (config.currentInterests !== undefined && (!Array.isArray(config.currentInterests) || config.currentInterests.length > 50 || !config.currentInterests.every(item => typeof item === "string" && item.length > 0 && item.length <= 500))) throw new Error("Invalid current interests");
-  return value as KnowledgeConfig;
+  const tagVocabulary = config.tagVocabulary ?? { revision: 0, tags: [], guidelines: "" };
+  validateKnowledgeTagVocabulary(tagVocabulary);
+  // The config was persisted before K3 introduced its vocabulary. This additive
+  // default preserves every existing setting while establishing an empty owner.
+  return { ...(value as KnowledgeConfig), tagVocabulary };
+}
+
+const TAG_ID = /^[a-z][a-z0-9-]{0,47}$/;
+const TAG_CATEGORY = /^[a-z][a-z0-9-]{0,47}$/;
+export function validateKnowledgeTagVocabulary(value: unknown): asserts value is KnowledgeTagVocabularyConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid Knowledge tag vocabulary");
+  const vocabulary = value as Record<string, unknown>;
+  if (Object.keys(vocabulary).some(key => !["revision", "tags", "guidelines"].includes(key)) || !Number.isSafeInteger(vocabulary.revision) || (vocabulary.revision as number) < 0 || !Array.isArray(vocabulary.tags) || vocabulary.tags.length > KNOWLEDGE_TAG_MAX_COUNT || typeof vocabulary.guidelines !== "string" || vocabulary.guidelines.length > KNOWLEDGE_TAG_MAX_GUIDELINES_CHARS) throw new Error(`Knowledge tag vocabulary revision must be non-negative; it carries at most ${KNOWLEDGE_TAG_MAX_COUNT} tags and ${KNOWLEDGE_TAG_MAX_GUIDELINES_CHARS} guideline characters`);
+  const ids = new Set<string>();
+  const labels = new Set<string>();
+  const byId = new Map<string, KnowledgeTagDefinition>();
+  for (const item of vocabulary.tags) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Invalid Knowledge tag definition");
+    const tag = item as Record<string, unknown>;
+    if (Object.keys(tag).some(key => !["id", "label", "definition", "category", "decayClass", "state", "mergedInto"].includes(key)) || typeof tag.id !== "string" || !TAG_ID.test(tag.id) || typeof tag.label !== "string" || tag.label !== tag.label.trim() || tag.label.length < 1 || tag.label.length > 80 || /[\r\n\u0000-\u001f]/.test(tag.label) || typeof tag.definition !== "string" || tag.definition !== tag.definition.trim() || tag.definition.length < 1 || tag.definition.length > 512 || /[\r\n\u0000-\u001f]/.test(tag.definition) || typeof tag.category !== "string" || !TAG_CATEGORY.test(tag.category) || (tag.decayClass !== "ages" && tag.decayClass !== "stable") || !["active", "retired", "merged"].includes(tag.state as string)) throw new Error("Invalid Knowledge tag definition: IDs and categories use lowercase slugs; labels and one-line definitions are bounded");
+    if (ids.has(tag.id)) throw new Error(`Duplicate Knowledge tag ID ${tag.id}`);
+    const labelKey = tag.label.trim().normalize("NFKC").toLocaleLowerCase();
+    if (labels.has(labelKey)) throw new Error(`Duplicate Knowledge tag label ${tag.label.trim()}`);
+    ids.add(tag.id); labels.add(labelKey); byId.set(tag.id, item as KnowledgeTagDefinition);
+    if (tag.state === "merged") {
+      if (typeof tag.mergedInto !== "string" || !TAG_ID.test(tag.mergedInto) || tag.mergedInto === tag.id) throw new Error(`Merged tag ${tag.id} requires a distinct target`);
+    } else if (tag.mergedInto !== undefined) throw new Error(`Only merged tags may name mergedInto (${tag.id})`);
+  }
+  for (const tag of byId.values()) {
+    if (tag.state !== "merged") continue;
+    const seen = new Set<string>([tag.id]);
+    let target: KnowledgeTagDefinition | undefined = tag;
+    while (target?.state === "merged") {
+      if (seen.has(target.mergedInto!)) throw new Error(`Knowledge tag merge cycle at ${target.mergedInto}`);
+      seen.add(target.mergedInto!);
+      target = byId.get(target.mergedInto!);
+    }
+    if (!target || target.state !== "active") throw new Error(`Merged tag ${tag.id} must resolve to an active tag`);
+  }
 }

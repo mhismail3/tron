@@ -5,6 +5,7 @@ import type {
   KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeRaindropReadRequest,
   KnowledgeCurationCode, KnowledgeCurationJobRequest, KnowledgeCurationJobResponse, KnowledgeCurationOutcome,
   KnowledgeCurationRequest, KnowledgeCurationResponse, KnowledgeSourceSummaryStart, ObservationCoverageDisposition,
+  KnowledgeTagEdit, KnowledgeTagEditRequest, KnowledgeTagReconcileRequest, KnowledgeTagRetagRequest,
   SourceAssessment, SourceCurationProducer,
 } from "./knowledge-contract.js";
 import { KNOWLEDGE_CURATION_MAX_ITEMS, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS, KnowledgeCurationRefusal } from "./knowledge-contract.js";
@@ -19,7 +20,7 @@ import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("curationJob")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -65,6 +66,18 @@ const toolParameters = Type.Object({
   curation: Type.Optional(Type.Union([Type.Literal("summary"), Type.Literal("tags"), Type.Literal("verdict"), Type.Literal("placement"), Type.Literal("relation")])),
   producerModel: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   curationStatus: Type.Optional(Type.Union([Type.Literal("running"), Type.Literal("done"), Type.Literal("failed")])),
+  expectedConfigRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+  vocabularyRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+  tagCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+  tagEdit: Type.Optional(Type.Union([
+    Type.Object({ kind: Type.Literal("add"), tag: Type.Object({ id: Type.String({ minLength: 1, maxLength: 48 }), label: Type.String({ minLength: 1, maxLength: 80 }), definition: Type.String({ minLength: 1, maxLength: 512 }), category: Type.String({ minLength: 1, maxLength: 48 }), decayClass: Type.Union([Type.Literal("ages"), Type.Literal("stable")]), state: Type.Literal("active") }, { additionalProperties: false }) }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("rename"), id: Type.String({ minLength: 1, maxLength: 48 }), label: Type.String({ minLength: 1, maxLength: 80 }) }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("redefine"), id: Type.String({ minLength: 1, maxLength: 48 }), definition: Type.String({ minLength: 1, maxLength: 512 }) }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("recategorize"), id: Type.String({ minLength: 1, maxLength: 48 }), category: Type.String({ minLength: 1, maxLength: 48 }), decayClass: Type.Union([Type.Literal("ages"), Type.Literal("stable")]) }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("retire"), id: Type.String({ minLength: 1, maxLength: 48 }) }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("merge"), id: Type.String({ minLength: 1, maxLength: 48 }), mergedInto: Type.String({ minLength: 1, maxLength: 48 }) }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("guidelines"), guidelines: Type.String({ maxLength: 8_000 }) }, { additionalProperties: false }),
+  ])),
   items: Type.Optional(Type.Array(Type.Object({
     id: Type.String({ minLength: 1, maxLength: 200 }),
     revisionId: Type.String({ minLength: 16, maxLength: 80 }),
@@ -438,6 +451,8 @@ export class KnowledgeService {
     }, signal);
   }
 
+  private tagMergeCommandId(commandId: string): string { return `${commandId.slice(0, 120)}:merge-repoint`; }
+
   async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
     switch (action.operation) {
       case "knowledge.status": return this.store.status();
@@ -453,6 +468,14 @@ export class KnowledgeService {
       }
       case "knowledge.previews.read": return this.store.readPreviewsBatch(action.request);
       case "knowledge.config": return this.store.configure(action.request.commandId, action.request.config);
+      case "knowledge.tags.configure": {
+        const config = await this.store.configureTags(action.request);
+        if (action.request.edit.kind !== "merge") return config;
+        const reconciliation = await this.store.reconcileTagMerges({ commandId: this.tagMergeCommandId(action.request.commandId), expectedConfigRevision: config.revision, limit: 25 });
+        return { config, reconciliation };
+      }
+      case "knowledge.tags.reconcile": return this.store.reconcileTagMerges(action.request);
+      case "knowledge.tags.retag-needed": return this.store.tagsNeedingRetag(action.request);
       case "knowledge.list": return action.request.projection === "sourceRow" ? this.store.listSourceRows(action.request) : this.store.list(action.request);
       case "knowledge.read": return this.store.read(action.request.id, action.request.revisionId, action.request.includeSuppressed, action.request.includeArchived, action.request.includePending);
       case "knowledge.search": return action.request.projection === "sourceRow" ? this.store.searchSourceRows(action.request) : this.store.search(action.request);
@@ -694,6 +717,21 @@ export class KnowledgeService {
       case "curate": {
         const response = await this.curate(curationToolRequest(parameters));
         return { text: curationToolText(response), details: response };
+      }
+      case "configureTags": {
+        if (!parameters.commandId || parameters.expectedConfigRevision === undefined || !parameters.tagEdit) throw new GatewayError("invalid_request", "Tag configuration requires commandId, expectedConfigRevision and tagEdit");
+        const details = await this.invoke({ operation: "knowledge.tags.configure", request: { commandId: parameters.commandId, expectedConfigRevision: parameters.expectedConfigRevision, edit: parameters.tagEdit as KnowledgeTagEdit } }, signal);
+        return { text: `Knowledge tag vocabulary updated: ${JSON.stringify(details).slice(0, 4_000)}`, details };
+      }
+      case "reconcileTags": {
+        if (!parameters.commandId || parameters.expectedConfigRevision === undefined) throw new GatewayError("invalid_request", "Tag merge reconciliation requires commandId and expectedConfigRevision");
+        const details = await this.invoke({ operation: "knowledge.tags.reconcile", request: { commandId: parameters.commandId, expectedConfigRevision: parameters.expectedConfigRevision, ...(parameters.tagCursor ? { cursor: parameters.tagCursor } : {}), ...(parameters.limit ? { limit: Math.min(25, parameters.limit) } : {}) } as KnowledgeTagReconcileRequest }, signal);
+        return { text: `Knowledge merged tags re-pointed: ${JSON.stringify(details).slice(0, 4_000)}`, details };
+      }
+      case "tagsNeedingRetag": {
+        if (parameters.vocabularyRevision === undefined) throw new GatewayError("invalid_request", "Tag re-tag query requires vocabularyRevision");
+        const details = await this.invoke({ operation: "knowledge.tags.retag-needed", request: { vocabularyRevision: parameters.vocabularyRevision, ...(parameters.tagCursor ? { cursor: parameters.tagCursor } : {}), ...(parameters.limit ? { limit: Math.min(64, parameters.limit) } : {}) } as KnowledgeTagRetagRequest }, signal);
+        return { text: `Knowledge entries needing re-tag: ${JSON.stringify(details).slice(0, 4_000)}`, details };
       }
       case "summarize": {
         if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId) throw new GatewayError("invalid_request", "Source summary requires commandId, sourceId, and revisionId");

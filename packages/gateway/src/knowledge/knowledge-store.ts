@@ -22,7 +22,8 @@ import {
   KnowledgeCurationRefusal, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS,
   type KnowledgeNoteMutationRequest, type KnowledgeCoverageDismissRequest,
   type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
-  validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
+  type KnowledgeTagDefinition, type KnowledgeTagEditRequest, type KnowledgeTagReconcileRequest, type KnowledgeTagReconcileResponse, type KnowledgeTagRetagRequest, type KnowledgeTagRetagResponse, type KnowledgeTagVocabularyConfig,
+  validateKnowledgeTagVocabulary, validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
 import { KnowledgeCatalog, type KnowledgeTable } from "./knowledge-catalog.js";
 import type { SQLInputValue } from "node:sqlite";
@@ -65,6 +66,8 @@ type SourceRowFields = {
   captureDisposition: SourceContent["captureDisposition"];
   sourceSavedAt?: string; sourcePublishedAt?: string;
   preview?: KnowledgeObjectRef; summary?: string;
+  tagIds?: string[]; tagVocabularyRevision?: number;
+  tags?: NonNullable<KnowledgeSourceRow["tags"]>;
 };
 type RecordHead = LegacyRecordHead & {
   kind: KnowledgeRecord["kind"]; scope: KnowledgeRecord["scope"];
@@ -246,7 +249,7 @@ function originalSourceUri(content: SourceContent): string | undefined {
 }
 /** The single owner of a Library row's presentation fields. A client renders
  * these directly instead of re-deriving them from a full record. */
-function sourceRowFields(record: KnowledgeRecord & { kind: "source" }): SourceRowFields {
+function sourceRowFields(record: KnowledgeRecord & { kind: "source" }, vocabulary: KnowledgeTagVocabularyConfig = { revision: 0, tags: [], guidelines: "" }): SourceRowFields {
   const content = record.content;
   const summary = content.summary?.text.trim();
   const current = content.summary && summary && content.summary.evidenceDigest === sourceEvidenceDigest(content.title, content.text ?? "") ? summary : undefined;
@@ -263,6 +266,8 @@ function sourceRowFields(record: KnowledgeRecord & { kind: "source" }): SourceRo
     ...(content.sourcePublishedAt && content.identity?.provider.toLowerCase() !== "raindrop" ? { sourcePublishedAt: content.sourcePublishedAt } : {}),
     ...(content.preview ? { preview: content.preview } : {}),
     ...(current ? { summary: current.slice(0, ROW_SUMMARY_CHARS) } : {}),
+    ...(content.tags ? { tagIds: [...content.tags.tagIds], tagVocabularyRevision: content.tags.vocabularyRevision } : {}),
+    ...(content.tags ? { tags: content.tags.tagIds.flatMap(id => { const tag = vocabulary.tags.find(candidate => candidate.id === id); return tag ? [{ id: tag.id, label: tag.label, category: tag.category, decayClass: tag.decayClass, state: tag.state }] : []; }) } : {}),
   };
 }
 function headScopeFields(record: KnowledgeRecord): { sessionId?: string; branchId?: string } {
@@ -270,20 +275,20 @@ function headScopeFields(record: KnowledgeRecord): { sessionId?: string; branchI
   const branchId = record.kind === "observation" ? record.content.range.branchId : record.provenance.branchId;
   return { ...(sessionId ? { sessionId } : {}), ...(branchId ? { branchId } : {}) };
 }
-function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: string[] = []): RecordHead {
+function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: string[] = [], config: KnowledgeConfig = DEFAULT_KNOWLEDGE_CONFIG): RecordHead {
   const date = record.kind === "observation" ? record.content.items[0]?.observedAt ?? record.createdAt : record.updatedAt;
   const evidence = [...record.provenance.evidence,
     ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : []),
     ...(record.kind === "note" ? [...(record.content.fields ?? []).flatMap(field => field.evidence), ...(record.content.contraryEvidence ?? [])] : []),
   ];
   return { latestRevisionId: record.revisionId, revisionIds: revisions, kind: record.kind, scope: record.scope,
-    createdAt: record.createdAt, updatedAt: record.updatedAt, sortAt: Date.parse(date), searchFields: searchableFields(record).map(([field, value]) => [field, value.toLocaleLowerCase()]),
+    createdAt: record.createdAt, updatedAt: record.updatedAt, sortAt: Date.parse(date), searchFields: [...searchableFields(record), ...(record.kind === "source" && record.content.tags ? [["tags", (record.content.tags.tagIds.flatMap(id => { const tag = config.tagVocabulary.tags.find(candidate => candidate.id === id); return tag ? [tag.label] : []; }).join(" "))] as [string, string]] : [])].map(([field, value]) => [field, value.toLocaleLowerCase()]),
     recordRefs: [...new Set([...record.relations.map(relation => relation.recordId), ...evidence.flatMap(ref => ref.recordId ? [ref.recordId] : [])])],
     objectHashes: [...new Set([...retainedObjects, ...recordObjectHashes(record)])],
     ...(recordSourceIdentityKeys(record).length > 0 ? { sourceIdentities: recordSourceIdentityKeys(record) } : {}),
     ...(record.kind === "source" && record.content.admission ? { admission: record.content.admission.status } : {}),
     ...headScopeFields(record),
-    ...(record.kind === "source" ? { sourceRow: sourceRowFields(record) } : {}),
+    ...(record.kind === "source" ? { sourceRow: sourceRowFields(record, config.tagVocabulary) } : {}),
   };
 }
 /** Cursor identity for one page of Library rows. Every input that changes which
@@ -336,7 +341,8 @@ function headScore(head: RecordHead, terms: string[]): number {
   return score;
 }
 function sourceRow(id: string, head: RecordHead & { sourceRow: SourceRowFields }): KnowledgeSourceRow {
-  return { id, revisionId: head.latestRevisionId, scope: head.scope, createdAt: head.createdAt, updatedAt: head.updatedAt, ...head.sourceRow, ...(head.admission ? { admission: head.admission } : {}) };
+  const { tagIds: _tagIds, tagVocabularyRevision: _tagVocabularyRevision, ...fields } = head.sourceRow;
+  return { id, revisionId: head.latestRevisionId, scope: head.scope, createdAt: head.createdAt, updatedAt: head.updatedAt, ...fields, ...(head.admission ? { admission: head.admission } : {}) };
 }
 function cleanupKey(item: PendingRecordCleanup): string { return JSON.stringify([item.recordId, item.revisionId]); }
 function sourceIdentityKey(identity: { provider: string; accountId: string; itemId: string }): string {
@@ -438,7 +444,7 @@ function validateState(value: unknown): LegacyKnowledgeState {
     const item = receipt as Record<string, unknown>;
     if (!item || typeof item !== "object" || typeof item.operation !== "string" || typeof item.requestHash !== "string" || !item.result || !Array.isArray(item.recordIds) || (item.invalidated !== undefined && typeof item.invalidated !== "boolean")) throw new KnowledgeStoreError("invalid", "Invalid knowledge mutation receipt");
   }
-  try { validateKnowledgeConfig(state.config); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
+  try { state.config = validateKnowledgeConfig(state.config); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
   if (state.connectors !== undefined) {
     if (!state.connectors || typeof state.connectors !== "object" || Array.isArray(state.connectors)) throw new KnowledgeStoreError("invalid", "Invalid connector map");
     const connectors = state.connectors as Record<string, unknown>;
@@ -614,7 +620,7 @@ export class KnowledgeStore {
       if (before!.ino !== after!.ino || before!.dev !== after!.dev) throw new KnowledgeStoreError("unsafe", "Knowledge catalog changed while opening");
       const control = catalog.control<CatalogControl>();
       if (control.catalogID !== catalogID || control.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || !Number.isSafeInteger(control.stateRevision) || control.stateRevision < 0) throw new KnowledgeStoreError("invalid", "Invalid Knowledge catalog control");
-      validateKnowledgeConfig(control.config);
+      control.config = validateKnowledgeConfig(control.config);
       for (const [key, value] of Object.entries(control.connectors ?? {})) { if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) throw new KnowledgeStoreError("invalid", "Invalid connector state key"); if (value) validateConnectorState(value, value.connector); }
       return { catalog, control };
     } catch (error) {
@@ -744,7 +750,7 @@ export class KnowledgeStore {
           if (revision === head.latestRevisionId) latest = record;
         }
         if (!latest) throw new KnowledgeStoreError("invalid", "Migration is missing a committed record head");
-        const migratedHead = headFor(latest, head.revisionIds, [...objects]);
+        const migratedHead = headFor(latest, head.revisionIds, [...objects], state.config);
         state.records.set(id, migratedHead);
         for (const identity of migratedHead.sourceIdentities ?? []) state.sourceIdentities.set(identity, id);
         catalog.setRevisions(id, head.revisionIds);
@@ -914,9 +920,108 @@ export class KnowledgeStore {
     }
   }
   async config(): Promise<KnowledgeConfig> { return this.readState(state => state.config); }
+  async configureTags(request: KnowledgeTagEditRequest): Promise<KnowledgeConfig> {
+    return this.mutate("knowledge.tags.configure", request.commandId, request, async state => {
+      if (!Number.isSafeInteger(request.expectedConfigRevision) || request.expectedConfigRevision !== state.config.revision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
+      const nextVocabulary = this.applyTagEdit(state.config.tagVocabulary, request.edit);
+      nextVocabulary.revision += 1;
+      try { validateKnowledgeTagVocabulary(nextVocabulary); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid Knowledge tag vocabulary"); }
+      const next = structuredClone(state.config);
+      next.tagVocabulary = nextVocabulary;
+      next.revision += 1;
+      state.config = next;
+      this.reprojectTagHeads(state);
+      return next;
+    });
+  }
+  async tagsNeedingRetag(request: KnowledgeTagRetagRequest): Promise<KnowledgeTagRetagResponse> {
+    if (!Number.isSafeInteger(request.vocabularyRevision) || request.vocabularyRevision < 0) throw invalid("A re-tag query requires a vocabulary revision");
+    if (request.limit !== undefined && (!Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 64)) throw invalid("A re-tag page carries 1..64 items");
+    const cursor = this.parseTagCursor(request.cursor, request.vocabularyRevision);
+    return this.readState(state => {
+      if (request.vocabularyRevision !== state.config.tagVocabulary.revision) throw conflict(`Knowledge vocabulary revision changed; current revision is ${state.config.tagVocabulary.revision}`);
+      const limit = request.limit ?? 25;
+      const retiredIds = state.config.tagVocabulary.tags.filter(tag => tag.state !== "active").map(tag => tag.id);
+      const where = "json_extract(entries.value, '$.kind') = 'source' AND key > ? AND (json_extract(entries.value, '$.sourceRow.tagIds') IS NULL OR json_extract(entries.value, '$.sourceRow.tagVocabularyRevision') != ? OR EXISTS (SELECT 1 FROM json_each(json_extract(entries.value, '$.sourceRow.tagIds')) AS selected WHERE selected.value IN (SELECT value FROM json_each(?))))";
+      const rows = state.catalog?.rows<RecordHead>("records", where, [JSON.stringify(cursor ?? ""), request.vocabularyRevision, JSON.stringify(retiredIds)], "key", limit + 1) ?? [];
+      const items = rows.slice(0, limit).map(({ key, value: head }) => {
+        const ids = head.sourceRow?.tagIds ?? [];
+        const hasRetired = ids.some(id => state.config.tagVocabulary.tags.find(tag => tag.id === id)?.state !== "active");
+        return { id: key, revisionId: head.latestRevisionId, reason: ids.length === 0 ? "untagged" as const : hasRetired ? "retired-tag" as const : "vocabulary-changed" as const };
+      });
+      const last = items.at(-1)?.id;
+      const nextCursor = rows.length > limit && last ? this.tagCursor(last, request.vocabularyRevision) : undefined;
+      return { items, ...(nextCursor ? { nextCursor } : {}), vocabularyRevision: request.vocabularyRevision };
+    });
+  }
+  async reconcileTagMerges(request: KnowledgeTagReconcileRequest): Promise<KnowledgeTagReconcileResponse> {
+    if (request.limit !== undefined && (!Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 25)) throw invalid("A merge re-point batch carries 1..25 items");
+    const cursor = this.parseTagCursor(request.cursor, request.expectedConfigRevision);
+    return this.mutate("knowledge.tags.reconcile", request.commandId, request, async (state, paths) => {
+      if (request.expectedConfigRevision !== state.config.revision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
+      const merged = new Map(state.config.tagVocabulary.tags.filter(tag => tag.state === "merged").map(tag => [tag.id, tag.mergedInto!]));
+      const limit = request.limit ?? 25;
+      if (!merged.size) return { applied: 0, unchanged: 0, outcomes: [], configRevision: state.config.revision };
+      const mergeIds = [...merged.keys()];
+      const where = "json_extract(entries.value, '$.kind') = 'source' AND key > ? AND EXISTS (SELECT 1 FROM json_each(json_extract(entries.value, '$.sourceRow.tagIds')) AS selected WHERE selected.value IN (SELECT value FROM json_each(?)))";
+      const rows = state.catalog?.rows<RecordHead>("records", where, [JSON.stringify(cursor ?? ""), JSON.stringify(mergeIds)], "key", limit + 1) ?? [];
+      const selected = rows.slice(0, limit).map(({ key, value }) => ({ id: key, head: value }));
+      const outcomes: KnowledgeTagReconcileResponse["outcomes"] = [];
+      for (const { id, head } of selected) {
+        try {
+          const current = await this.readRecord(paths, id, head.latestRevisionId);
+          if (current.kind !== "source") { outcomes.push({ id, status: "failed", reason: "Tag merge applies to source records only" }); continue; }
+          const active = new Set(state.config.tagVocabulary.tags.filter(tag => tag.state === "active").map(tag => tag.id));
+          const tagIds = [...new Set((current.content.tags?.tagIds ?? []).map(tagId => merged.get(tagId) ?? tagId).filter(tagId => active.has(tagId)))];
+          if (JSON.stringify(tagIds) === JSON.stringify(current.content.tags?.tagIds ?? [])) { outcomes.push({ id, status: "unchanged", revisionId: current.revisionId }); continue; }
+          const result = await this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, tags: { tagIds, vocabularyRevision: state.config.tagVocabulary.revision, inputsDigest: curationInputsDigest(current.content), assignedAt: now(), producer: { actor: "system" } } } }, current.revisionId);
+          outcomes.push({ id, status: "applied", revisionId: result.record.revisionId });
+        } catch (error) {
+          outcomes.push({ id, status: error instanceof GatewayError && error.code === "conflict" ? "conflict" : "failed", reason: error instanceof Error ? error.message : "Tag merge re-point failed" });
+        }
+      }
+      const hasMore = rows.length > limit;
+      const last = selected.at(-1)?.id;
+      return { applied: outcomes.filter(item => item.status === "applied").length, unchanged: outcomes.filter(item => item.status === "unchanged").length, outcomes, ...(hasMore && last ? { nextCursor: this.tagCursor(last, request.expectedConfigRevision) } : {}), configRevision: request.expectedConfigRevision };
+    });
+  }
+  private tagCursor(id: string, revision: number): string { return Buffer.from(JSON.stringify({ id, revision }), "utf8").toString("base64url"); }
+  private parseTagCursor(cursor: string | undefined, revision: number): string | undefined {
+    if (cursor === undefined) return undefined;
+    try { const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { id?: unknown; revision?: unknown }; if (typeof parsed.id !== "string" || parsed.revision !== revision || this.tagCursor(parsed.id, revision) !== cursor) throw new Error(); return parsed.id; } catch { throw invalid("Knowledge tag cursor is invalid or belongs to another vocabulary revision"); }
+  }
+  private tagRewriteCommand(commandId: string, recordId: string): string { return `${commandId.slice(0, 96)}:${createHash("sha256").update(`${commandId}\\0${recordId}`).digest("hex").slice(0, 32)}`.slice(0, 160); }
+  private applyTagEdit(current: KnowledgeTagVocabularyConfig, edit: KnowledgeTagEditRequest["edit"]): KnowledgeTagVocabularyConfig {
+    if (!edit || typeof edit !== "object") throw invalid("A typed Knowledge tag edit is required");
+    const next = structuredClone(current);
+    const find = (id: string): KnowledgeTagDefinition => { const tag = next.tags.find(item => item.id === id); if (!tag) throw invalid(`Unknown Knowledge tag ${id}`); if (tag.state !== "active") throw invalid(`Knowledge tag ${id} is not active`); return tag; };
+    switch (edit.kind) {
+      case "add": if (edit.tag?.state !== "active" || edit.tag.mergedInto !== undefined) throw invalid("A new Knowledge tag must be active and cannot name a merge target"); next.tags.push(structuredClone(edit.tag)); break;
+      case "rename": find(edit.id).label = edit.label.trim(); break;
+      case "redefine": find(edit.id).definition = edit.definition.trim(); break;
+      case "recategorize": { const tag = find(edit.id); tag.category = edit.category; tag.decayClass = edit.decayClass; break; }
+      case "retire": { const tag = find(edit.id); tag.state = "retired"; break; }
+      case "merge": { const tag = find(edit.id); const target = find(edit.mergedInto); if (tag.id === target.id) throw invalid("A tag cannot be merged into itself"); tag.state = "merged"; tag.mergedInto = target.id; break; }
+      case "guidelines": next.guidelines = edit.guidelines; break;
+      default: throw invalid("Unsupported Knowledge tag edit");
+    }
+    return next;
+  }
+  private reprojectTagHeads(state: KnowledgeState): void {
+    const activeById = new Map(state.config.tagVocabulary.tags.map(tag => [tag.id, tag]));
+    for (const { key, value: head } of state.catalog?.rows<RecordHead>("records", "json_extract(value, '$.kind') = 'source'", [], "key") ?? []) {
+      const row = head.sourceRow;
+      if (!row) continue;
+      const labels = (row.tagIds ?? []).flatMap(id => { const tag = activeById.get(id); return tag ? [tag.label] : []; }).join(" ").toLocaleLowerCase();
+      head.searchFields = head.searchFields.filter(([field]) => field !== "tags");
+      if (labels) head.searchFields.push(["tags", labels]);
+      if (row.tagIds?.length) row.tags = row.tagIds.flatMap(id => { const tag = activeById.get(id); return tag ? [{ id: tag.id, label: tag.label, category: tag.category, decayClass: tag.decayClass, state: tag.state }] : []; });
+      state.records.set(key, head);
+    }
+  }
   async configure(commandId: string, config: KnowledgeConfig): Promise<KnowledgeConfig> {
     try { validateKnowledgeConfig(config); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge config"); }
-    return this.mutate("knowledge.config", commandId, config, async state => { if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale"); const next = structuredClone(config); next.revision += 1; state.config = next; return next; });
+    return this.mutate("knowledge.config", commandId, config, async state => { if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale"); if (JSON.stringify(config.tagVocabulary) !== JSON.stringify(state.config.tagVocabulary)) throw invalid("Tag taxonomy changes require the typed knowledge.tags.configure operation"); const next = structuredClone(config); next.tagVocabulary = structuredClone(state.config.tagVocabulary); next.revision += 1; state.config = next; return next; });
   }
 
   async withConnectorContext<T>(connectionId: string | undefined, task: () => Promise<T>): Promise<T> {
@@ -1361,11 +1466,16 @@ export class KnowledgeStore {
         if (!Array.isArray(item.tagIds) || item.tagIds.length > KNOWLEDGE_CURATION_MAX_TAGS) throw new KnowledgeCurationRefusal("invalid-input", `A tag selection carries at most ${KNOWLEDGE_CURATION_MAX_TAGS} tag IDs`);
         const ids = item.tagIds.map(value => id(value, "tag id"));
         if (new Set(ids).size !== ids.length) throw new KnowledgeCurationRefusal("invalid-input", "A tag selection repeats a tag ID");
-        if (!Number.isSafeInteger(this.tagVocabulary.revision) || this.tagVocabulary.revision < 0) throw new KnowledgeCurationRefusal("unavailable", "The Knowledge tag vocabulary is unavailable");
+        const configured = state.config.tagVocabulary;
+        const configuredRevision = state.config.tagVocabulary.revision;
+        const injected = this.tagVocabulary.revision > 0;
+        const vocabularyRevision = injected ? this.tagVocabulary.revision : configuredRevision;
+        if (!Number.isSafeInteger(vocabularyRevision) || vocabularyRevision < 0) throw new KnowledgeCurationRefusal("unavailable", "The Knowledge tag vocabulary is unavailable");
         for (const value of ids) {
-          if (!this.tagVocabulary.isActiveTag(value)) throw new KnowledgeCurationRefusal("unknown-tag", this.tagVocabulary.revision === 0 ? `Unknown tag ${value}: no tag vocabulary is installed` : `Unknown tag ${value}: it is not in vocabulary revision ${this.tagVocabulary.revision}`);
+          const active = injected ? this.tagVocabulary.isActiveTag(value) : configured.tags.some(tag => tag.id === value && tag.state === "active");
+          if (!active) throw new KnowledgeCurationRefusal("unknown-tag", vocabularyRevision === 0 ? `Unknown tag ${value}: no tag vocabulary is installed` : `Unknown tag ${value}: it is not in vocabulary revision ${vocabularyRevision}`);
         }
-        return { scope: current.scope, relations: current.relations, content: { ...content, tags: { tagIds: ids, vocabularyRevision: this.tagVocabulary.revision, inputsDigest: curationInputsDigest(content), assignedAt: decided, producer } } };
+        return { scope: current.scope, relations: current.relations, content: { ...content, tags: { tagIds: ids, vocabularyRevision, inputsDigest: curationInputsDigest(content), assignedAt: decided, producer } } };
       }
       case "verdict": {
         only("verdict");
@@ -1466,7 +1576,7 @@ export class KnowledgeStore {
     await safeDirectory(join(paths.records, id), true);
     await durableAtomicWriteJson(this.recordPath(paths, id, record.revisionId), record, 0o600);
     const revisions = [...(existing?.revisionIds ?? []), record.revisionId];
-    const nextHead = headFor(record, revisions, existing?.objectHashes);
+    const nextHead = headFor(record, revisions, existing?.objectHashes, state.config);
     for (const identity of existing?.sourceIdentities ?? []) if (nextHead.sourceIdentities?.includes(identity) !== true) state.sourceIdentities.delete(identity);
     for (const identity of nextHead.sourceIdentities ?? []) state.sourceIdentities.set(identity, id);
     state.records.set(id, nextHead);
@@ -1698,7 +1808,7 @@ export class KnowledgeStore {
             const item = { recordId: id, revisionId }; state.recordCleanup.set(cleanupKey(item), item);
           }
           await durableAtomicWriteJson(this.recordPath(paths, id, scrubbed.revisionId), scrubbed, 0o600);
-          state.records.set(id, headFor(scrubbed, [scrubbed.revisionId]));
+          state.records.set(id, headFor(scrubbed, [scrubbed.revisionId], [], state.config));
           state.catalog!.setRevisions(id, [scrubbed.revisionId]);
           state.suppressions.set(id, { excluded: true, forgotten: false, reason: "Dependent evidence was forgotten", updatedAt: now() });
           scrubbedRecordIds.add(id);

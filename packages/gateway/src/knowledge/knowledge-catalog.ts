@@ -61,6 +61,9 @@ function validSourceRow(value: unknown): boolean {
   return typeof row.title === "string" && row.title.length <= 4_096
     && ["complete", "partial", "metadata-only", "inaccessible", "failed", "reference-only"].includes(row.captureDisposition as string)
     && ["uri", "originalUri", "mediaType", "sourceSavedAt", "sourcePublishedAt", "summary"].every(optional)
+    && (row.tagIds === undefined || (Array.isArray(row.tagIds) && row.tagIds.length <= 24 && row.tagIds.every(item => typeof item === "string" && item.length <= 64)))
+    && (row.tagVocabularyRevision === undefined || (typeof row.tagVocabularyRevision === "number" && Number.isSafeInteger(row.tagVocabularyRevision) && row.tagVocabularyRevision >= 0))
+    && (row.tags === undefined || (Array.isArray(row.tags) && row.tags.length <= 24 && row.tags.every(item => !!item && typeof item === "object" && typeof item.id === "string" && typeof item.label === "string" && item.label.length <= 80)))
     && (row.summary === undefined || (row.summary as string).length <= 280)
     && (row.preview === undefined || (typeof row.preview === "object" && row.preview !== null && !Array.isArray(row.preview)));
 }

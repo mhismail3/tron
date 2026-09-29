@@ -11,10 +11,24 @@ const client = (): ClientContext => ({ id: "connection-object", identity: "local
 
 function service(chunk: (params: Record<string, unknown>) => unknown): GatewayService {
   const root = join(tmpdir(), `tron-gateway-object-${Date.now()}-${Math.random().toString(16).slice(2)}`); roots.push(root);
-  return new GatewayService({ config: { tronHome: root }, knowledge: { invoke: async (_action: unknown) => chunk((_action as { request: Record<string, unknown> }).request) }, receipts: { execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() } } as any);
+  return new GatewayService({ config: { tronHome: root }, knowledge: { invoke: async (_action: unknown) => chunk((_action as { request: Record<string, unknown> }).request) }, receipts: { status: async () => undefined, execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() } } as any);
 }
 
 describe("Gateway knowledge object transport", () => {
+  it("routes typed tag configuration mutations and re-tag queries through Knowledge", async () => {
+    const calls: Array<{ operation: string; request: Record<string, unknown> }> = [];
+    const gateway = service(params => ({ accepted: true, ...params }));
+    const invoke = (gateway as unknown as { dependencies: { knowledge: { invoke: (action: { operation: string; request: Record<string, unknown> }) => Promise<unknown> } } }).dependencies.knowledge.invoke;
+    (gateway as unknown as { dependencies: { knowledge: { invoke: typeof invoke } } }).dependencies.knowledge.invoke = async action => { calls.push(action); return invoke(action); };
+    const configured = await gateway.invoke(client(), "knowledge.tags.configure", { commandId: "tag-configure-0001", expectedConfigRevision: 4, edit: { kind: "retire", id: "legacy" } });
+    const reconciled = await gateway.invoke(client(), "knowledge.tags.reconcile", { commandId: "tag-reconcile-0001", expectedConfigRevision: 5, limit: 25 });
+    const retag = await gateway.invoke(client(), "knowledge.tags.retag-needed", { vocabularyRevision: 5, limit: 25 });
+    expect(configured).toMatchObject({ accepted: true, expectedConfigRevision: 4 });
+    expect(reconciled).toMatchObject({ accepted: true, expectedConfigRevision: 5, limit: 25 });
+    expect(retag).toMatchObject({ accepted: true, vocabularyRevision: 5, limit: 25 });
+    expect(calls.map(call => call.operation)).toEqual(["knowledge.tags.configure", "knowledge.tags.reconcile", "knowledge.tags.retag-needed"]);
+  });
+
   it.each([306_865, 1_100_003])("preserves exact bytes and continuations for a %i-byte object", async size => {
     const bytes = Buffer.alloc(size);
     for (let index = 0; index < bytes.length; index += 1) bytes[index] = index % 251;

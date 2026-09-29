@@ -112,14 +112,43 @@ response small enough for both the RPC frame and the model-visible tool bound.
 `unchanged` means the write was already committed: identical values never create
 a new revision.
 
-The **tag vocabulary** belongs to Knowledge configuration: its IDs, labels,
-definitions, decay classes and tagging guidelines. Until a vocabulary is
-installed, no tag ID is active and every tag write is refused as `unknown-tag`
-rather than inventing a taxonomy. A selection records the vocabulary revision it
-was validated against and `curationInputsDigest` (SHA-256 of the record's own
-title, readable text and current verdict), so editing the vocabulary flags
-re-tagging without making stored selections unreadable, while a change to the
-evidence itself does. The **curation gate** is consulted before each item with
+The **tag vocabulary** belongs to Knowledge configuration and has its own
+monotonic vocabulary revision (unrelated Knowledge settings do not invalidate a
+tag selection): up to 256 stable lowercase-slug IDs, unique normalized labels,
+one-line definitions (512
+characters maximum), lowercase-slug categories, `ages`/`stable` decay classes,
+`active`/`retired`/`merged` state, and up to 8,000 characters of free-text
+guidelines. A merged tag names an active target; cycles and dangling chains are
+rejected. Existing configurations gain an empty vocabulary without changing
+their other settings. The decay accessor `knowledgeTagDecayClass(config,
+id)` exposes only the configured class; it does not implement freshness.
+
+Taxonomy changes use the receipted `knowledge.tags.configure` operation and
+require the exact `expectedConfigRevision`. Its typed edits add, rename,
+redefine, recategorize, retire or merge one tag, or replace the guidelines.
+Stale revisions return `conflict`; the same command/request replays its stored
+result and a changed payload under that command ID is rejected. The generic
+`knowledge.config` writer cannot change the vocabulary. The agent tool exposes
+`configureTags` with the same typed edit. A merge immediately starts one
+bounded, receipted re-point batch (up to 25 sources); `knowledge.tags.reconcile`
+continues from its opaque cursor. Each changed source gets a new curation
+revision with system provenance. Batch commits are atomic; a restart either
+replays its committed receipt or safely retries an uncommitted batch. Retiring a
+tag leaves existing selections intact but marks them for re-tagging.
+`knowledge.tags.retag-needed` (agent tool `tagsNeedingRetag`) pages sources with
+no selection, a stale vocabulary edition, or retired tag IDs, using catalog
+heads and an exact vocabulary revision. K4 owns producing replacement
+selections.
+
+A selection records the vocabulary revision it was validated against and
+`curationInputsDigest` (SHA-256 of the record's own title, readable text and
+current verdict), so editing the vocabulary flags re-tagging without making
+stored selections unreadable, while a change to the evidence itself does. Tag
+labels, category and decay class are projected onto source rows from catalog
+heads; both Library row search by label and list/search rendering read no source
+bodies. A vocabulary rename/redefinition reprojects the bounded source-head
+set inside the same config commit, so labels and search agree with the new
+edition without loading source text. The **curation gate** is consulted before each item with
 the batch's operation; a refusal stops the batch and reports that item and every
 later one as `skipped` with the code, which is how the paid tagging owner stops
 dispatching once its budget is spoken for. It refuses only operations that spend
