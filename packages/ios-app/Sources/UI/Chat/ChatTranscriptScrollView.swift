@@ -765,6 +765,15 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // Native size-change anchoring owns ordinary pinned layout changes.
         // ScrollPosition remains target-free outside bounded explicit commands.
         .scrollPosition($scrollPosition)
+        // The chat's own edge chrome, plus the automatic effect the pinned end
+        // cannot use on the origin-anchored path: iOS 26 derives that edge
+        // effect from the scroll view's own content origin, which is exactly
+        // where the origin-anchored newest row is pinned, and it then draws the
+        // soft effect over the whole viewport and washes the transcript out.
+        .scrollEdgeEffectHidden(
+            orientation.suppressesPinnedEndScrollEdgeEffect,
+            for: Edge.Set(orientation.newestEdge)
+        )
         .tronScrollEdgeChrome()
         .onChange(of: scrollPosition.isPositionedByUser) { _, positionedByUser in
             guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),

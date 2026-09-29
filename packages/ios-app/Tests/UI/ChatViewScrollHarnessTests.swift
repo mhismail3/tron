@@ -1293,13 +1293,15 @@ struct ChatViewScrollHarnessTests {
             /// One variant: which of the scroll view's automatic edge effects are hidden.
             struct Variant {
                 let name: String
-                let topHidden: Bool
-                let bottomHidden: Bool
+                /// `nil` leaves the product's own edge-effect state alone.
+                let topHidden: Bool?
+                let bottomHidden: Bool?
                 /// Seconds to hold this state for a host-side screenshot.
                 let hold: Double
             }
             let variants = [
-                Variant(name: "base", topHidden: false, bottomHidden: false, hold: 20),
+                Variant(name: "product", topHidden: nil, bottomHidden: nil, hold: 20),
+                Variant(name: "forced-on", topHidden: false, bottomHidden: false, hold: 20),
                 Variant(name: "no-top-edge", topHidden: true, bottomHidden: false, hold: 20),
                 Variant(name: "no-edge-effect", topHidden: true, bottomHidden: true, hold: 0),
                 Variant(name: "no-bottom-edge", topHidden: false, bottomHidden: true, hold: 0),
@@ -1327,10 +1329,10 @@ struct ChatViewScrollHarnessTests {
                     print("CT23-DIAG orientation=\(label) \(try harness.ct23DiagnosisScrollViewState())")
                     print("CT23-DIAG orientation=\(label) \(harness.ct23DiagnosisRowPixels())")
                     for variant in variants {
-                        try harness.ct23DiagnosisSetEdgeEffectsHidden(
-                            top: variant.topHidden, bottom: variant.bottomHidden
-                        )
-                        try await harness.driveFrameBoundary()
+                        if let top = variant.topHidden, let bottom = variant.bottomHidden {
+                            try harness.ct23DiagnosisSetEdgeEffectsHidden(top: top, bottom: bottom)
+                            try await harness.driveFrameBoundary()
+                        }
                         harness.ct23DiagnosisAttachWholeWindow(named: "\(label)-\(variant.name)")
                         let capture = Self.ct23DiagnosisCapture(
                             harness, label: label, name: variant.name

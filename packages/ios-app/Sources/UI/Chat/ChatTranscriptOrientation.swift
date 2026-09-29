@@ -57,6 +57,20 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// entrance that owes a layout transaction.
     var mountsNewestRowWithContent: Bool { self == .newestAtOrigin }
 
+    /// Whether the transcript suppresses the automatic scroll edge effect at its
+    /// pinned end.
+    ///
+    /// iOS 26 derives that effect from the scroll view's own content origin: the
+    /// origin-anchored transcript pins the newest row exactly at that origin, and
+    /// UIKit then draws the whole soft effect over the whole viewport instead of a
+    /// band, washing the transcript's text out (measured on the owned simulator's
+    /// own screen, CT-23 stage 2: the parity region's frames differ by 0.105 with
+    /// the effect and 0.018 with it suppressed, and the pinned newest row is
+    /// inside the wash). Today's transcript pins at the far end of its content, so
+    /// its own top edge effect is the normal band it has always been. The chat's
+    /// top blur is drawn by the transcript itself and is the same on both paths.
+    var suppressesPinnedEndScrollEdgeEffect: Bool { self == .newestAtOrigin }
+
     /// Whether the pinned end the transcript keeps is the lazy stack's own
     /// estimate. Every mechanism that materializes, repairs or proves that end
     /// exists for this case and is gated off while the anchor is the exact
