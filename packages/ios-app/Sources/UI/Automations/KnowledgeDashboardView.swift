@@ -2019,14 +2019,14 @@ struct KnowledgeDetailView: View {
         } catch {
             guard model.knowledgePresentationIdentity == origin else { return }
             takeSaving = false
-            if let failure = error as? GatewayFailure, failure.code == "conflict",
-               let details = failure.details?.objectValue {
+            if let failure = error as? GatewayFailure, failure.code == "conflict" {
+                let details = failure.details?.objectValue ?? [:]
                 takeCurrentText = details["currentTake"]?.stringValue
+                takeCommandID = UUID().uuidString.lowercased()
                 if let latestRevision = details["currentRevision"]?.stringValue,
                    let latest = try? await model.knowledge.read(id: currentRecord.id, revisionID: latestRevision) {
                     currentRecord = latest
                     takeExpectedRevision = latest.revisionId
-                    takeCommandID = UUID().uuidString.lowercased()
                 }
                 takeError = "Your take changed elsewhere. Your draft is kept; the current saved text is shown above. Retry to save your draft over it."
             } else { takeError = error.localizedDescription }
