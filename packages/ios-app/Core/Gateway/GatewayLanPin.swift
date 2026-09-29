@@ -43,6 +43,29 @@ enum GatewayLanPin {
         return served == pin
     }
 
+    /// The answer a URLSession request gives a server-trust challenge on a lane
+    /// pinned to `pin` (E-3c): the platform's own evaluation when this request
+    /// is unpinned or the challenge is not a server trust, and the pin's
+    /// admission — or a cancelled challenge, resolved during TLS before the
+    /// request that carries the bearer token is written — when it is.
+    static func answerServerTrustChallenge(
+        _ challenge: URLAuthenticationChallenge,
+        pin: String?,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard let pin,
+              challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        guard admitsServerTrust(trust, pin: pin) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        completionHandler(.useCredential, URLCredential(trust: trust))
+    }
+
     /// An advertised pin in the only shape this phone compares: standard base64
     /// of a 32-byte digest. Anything else is dropped, so a malformed
     /// advertisement leaves the profile without a pin instead of one no

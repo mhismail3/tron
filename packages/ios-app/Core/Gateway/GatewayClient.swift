@@ -516,6 +516,10 @@ package actor GatewayClient {
     private struct ConnectionEpoch {
         let id: Int
         let socket: any GatewaySocketConnection
+        /// The lane that won this epoch's dial (E-3c). Its endpoint and pin are
+        /// what the epoch's authenticated HTTP routes use, so live view, media
+        /// and uploads do not fall back to the lane that lost.
+        let route: GatewayDialRoute
         let startedAt: ContinuousClock.Instant
         let attemptID: String?
         let profileID: String
@@ -549,6 +553,10 @@ package actor GatewayClient {
         let socketURL: URL
         let pin: String?
         let raced: Bool
+        /// The advertised endpoint this lane dials, or nil for the saved
+        /// endpoint. The epoch keeps it so HTTP routes compose the same base the
+        /// lane's socket used (E-3c).
+        let endpoint: GatewayLanEndpoint?
 
         /// The `transport` field of this lane's records. nil when the attempt
         /// dialed one lane: nothing was chosen against another (E-3c).
@@ -1134,7 +1142,7 @@ package actor GatewayClient {
     /// this install's Local Network permission, or off the home network.
     private func dialPlan(for profile: GatewayProfile) -> GatewayDialPlan {
         guard let socketURL = profile.socketURL else { return GatewayDialPlan(routes: [], lanLaneDenied: false) }
-        let saved = GatewayDialRoute(lane: .tailscale, socketURL: socketURL, pin: nil, raced: false)
+        let saved = GatewayDialRoute(lane: .tailscale, socketURL: socketURL, pin: nil, raced: false, endpoint: nil)
         // D-5/E-3c: the LAN lane exists only while the Mac advertises an
         // endpoint with a pin and this phone is on Wi-Fi at all.
         guard networkPath()?.contains("wifi") == true,
@@ -1148,8 +1156,8 @@ package actor GatewayClient {
         }
         return GatewayDialPlan(
             routes: [
-                GatewayDialRoute(lane: .lan, socketURL: lanSocketURL, pin: pin, raced: true),
-                GatewayDialRoute(lane: .tailscale, socketURL: socketURL, pin: nil, raced: true),
+                GatewayDialRoute(lane: .lan, socketURL: lanSocketURL, pin: pin, raced: true, endpoint: endpoint),
+                GatewayDialRoute(lane: .tailscale, socketURL: socketURL, pin: nil, raced: true, endpoint: nil),
             ],
             lanLaneDenied: false
         )
@@ -1447,6 +1455,7 @@ package actor GatewayClient {
         var epoch = ConnectionEpoch(
             id: epochID,
             socket: opened.socket,
+            route: opened.route,
             startedAt: attemptStartedAt,
             attemptID: attemptID,
             profileID: profile.id,
@@ -1986,7 +1995,8 @@ package actor GatewayClient {
         request.httpBody = data
         let (responseData, http) = try await boundedHTTPDataTransport.data(
             for: request,
-            maximumBytes: GatewayUploadPolicy.maximumResponseBytes
+            maximumBytes: GatewayUploadPolicy.maximumResponseBytes,
+            pin: context.pin
         )
         // The upload is an independently staged HTTP resource. A WebSocket
         // reconnect while the bytes are in flight must not discard a
@@ -2011,15 +2021,16 @@ package actor GatewayClient {
                 details: nil
             )
         }
-        guard let url = profile.httpURL(path: "/v1/uploads/\(id)") else {
+        guard let route = httpRoute("/v1/uploads/\(id)", profile: profile) else {
             throw Self.invalidProfileEndpoint()
         }
-        var request = URLRequest(url: url, timeoutInterval: 15)
+        var request = URLRequest(url: route.url, timeoutInterval: 15)
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, http) = try await boundedHTTPDataTransport.data(
             for: request,
-            maximumBytes: GatewayUploadPolicy.maximumResponseBytes
+            maximumBytes: GatewayUploadPolicy.maximumResponseBytes,
+            pin: route.pin
         )
         guard self.profile?.id == profile.id else { throw CancellationError() }
         guard http.statusCode != 204, http.statusCode != 404 else { return }
@@ -2048,7 +2059,8 @@ package actor GatewayClient {
         let (responseData, http) = try await boundedHTTPUploadTransport.data(
             for: request,
             fileURL: fileURL,
-            maximumBytes: GatewayUploadPolicy.maximumResponseBytes
+            maximumBytes: GatewayUploadPolicy.maximumResponseBytes,
+            pin: context.pin
         )
         return try admitUploadResponse(responseData, http: http, context: context)
     }
@@ -2056,6 +2068,9 @@ package actor GatewayClient {
     private struct UploadContext {
         let profileID: String
         package let request: URLRequest
+        /// The pin this route's transport must evaluate (E-3c): the LAN lane
+        /// that carries the epoch while it wins.
+        let pin: String?
     }
 
     private func uploadContext(name: String, mimeType: String) throws -> UploadContext {
@@ -2065,15 +2080,16 @@ package actor GatewayClient {
         guard let profile, let token else {
             throw GatewayFailure(code: "not_paired", message: "No paired gateway is selected.", retryable: false, details: nil)
         }
-        guard let url = profile.httpURL(
-            path: "/v1/uploads",
-            queryItems: [URLQueryItem(name: "name", value: name)]
+        guard let route = httpRoute(
+            "/v1/uploads",
+            queryItems: [URLQueryItem(name: "name", value: name)],
+            profile: profile
         ) else { throw Self.invalidProfileEndpoint() }
-        var request = URLRequest(url: url, timeoutInterval: 60)
+        var request = URLRequest(url: route.url, timeoutInterval: 60)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
-        return UploadContext(profileID: profile.id, request: request)
+        return UploadContext(profileID: profile.id, request: request, pin: route.pin)
     }
 
     private func requireUploadSize(_ byteCount: Int) throws {
@@ -2149,21 +2165,26 @@ package actor GatewayClient {
         guard let capability = kind.liveViewCapability,
               info?.capabilities.contains(capability) == true else { throw LiveError.ended }
         guard let profile, profile.id == profileID, let token,
-              let url = Self.liveViewPath(viewId: viewId, sessionID: sessionID).flatMap({ profile.httpURL(path: $0) }) else { throw CancellationError() }
+              let path = Self.liveViewPath(viewId: viewId, sessionID: sessionID),
+              let route = httpRoute(path, profile: profile) else { throw CancellationError() }
         try Task.checkCancellation()
         let connectionID = connection?.id
-        var request = URLRequest(url: url, timeoutInterval: 10)
+        var request = URLRequest(url: route.url, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let body = try JSONEncoder.gateway.encode(["generation": generation])
         request.httpBody = body
         request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let (data, http) = try await liveViewTransport.data(for: request, maximumBytes: 64 * 1_024)
-        guard http.url == url else { throw LiveError.invalidResponse }
+        let (data, http) = try await liveViewTransport.data(
+            for: request,
+            maximumBytes: 64 * 1_024,
+            pin: route.pin
+        )
+        guard http.url == route.url else { throw LiveError.invalidResponse }
         guard http.statusCode == 200 else { throw LiveError.response(data, status: http.statusCode) }
         let wire = try JSONDecoder.gateway.decode(LiveLease.Wire.self, from: data)
-        let lease = try LiveLease(wire: wire, request: request, transport: liveViewTransport)
+        let lease = try LiveLease(wire: wire, request: request, transport: liveViewTransport, pin: route.pin)
         // A valid lease from the wrong producer is never a browser/native alias.
         // It still owns cancellation-independent cleanup at the original origin.
         guard wire.descriptor.schema == kind.liveViewSchema,
@@ -2246,14 +2267,15 @@ package actor GatewayClient {
         token: String,
         maximumBytes: Int
     ) async throws -> (Data, String) {
-        guard let url = mediaURL(id: id, sessionID: sessionID, profile: profile) else {
+        guard let route = mediaRoute(id: id, sessionID: sessionID, profile: profile) else {
             throw Self.invalidProfileEndpoint()
         }
-        var request = URLRequest(url: url, timeoutInterval: 30)
+        var request = URLRequest(url: route.url, timeoutInterval: 30)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, http) = try await boundedHTTPDataTransport.data(
             for: request,
-            maximumBytes: maximumBytes
+            maximumBytes: maximumBytes,
+            pin: route.pin
         )
         guard http.statusCode == 200 else {
             throw GatewayFailure(code: "blob_failed", message: "The image is no longer available. Refresh the session.", retryable: true, details: nil)
@@ -2268,14 +2290,15 @@ package actor GatewayClient {
         token: String,
         maximumBytes: Int
     ) async throws -> BoundedHTTPDownloadedFile {
-        guard let url = mediaURL(id: id, sessionID: sessionID, profile: profile) else {
+        guard let route = mediaRoute(id: id, sessionID: sessionID, profile: profile) else {
             throw Self.invalidProfileEndpoint()
         }
-        var request = URLRequest(url: url, timeoutInterval: 30)
+        var request = URLRequest(url: route.url, timeoutInterval: 30)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let downloaded = try await boundedHTTPFileTransport.download(
             for: request,
-            maximumBytes: maximumBytes
+            maximumBytes: maximumBytes,
+            pin: route.pin
         )
         guard downloaded.response.statusCode == 200 || downloaded.response.statusCode == 206 else {
             BoundedHTTPFileStaging.shared.discard(downloaded.url)
@@ -2284,10 +2307,35 @@ package actor GatewayClient {
         return downloaded
     }
 
-    private func mediaURL(id: String, sessionID: String? = nil, profile: GatewayProfile) -> URL? {
-        Self.mediaPath(id: id, sessionID: sessionID).flatMap { profile.httpURL(path: $0) }
+    private func mediaRoute(id: String, sessionID: String? = nil, profile: GatewayProfile) -> GatewayHTTPRoute? {
+        guard let path = Self.mediaPath(id: id, sessionID: sessionID) else { return nil }
+        return httpRoute(path, profile: profile)
     }
 
+    /// Where one of this client's authenticated HTTP routes goes right now, and
+    /// the certificate pin that route must trust (E-3c). While a raced LAN lane
+    /// carries this epoch, live view, media and uploads use that lane's own base
+    /// with its pin instead of the Tailscale path the race lost; every other
+    /// time they use the profile's saved endpoint, where the platform's own TLS
+    /// evaluation already applies.
+    private func httpRoute(_ path: String, queryItems: [URLQueryItem] = [], profile: GatewayProfile) -> GatewayHTTPRoute? {
+        if let connection, connection.profileID == profile.id,
+           connection.route.lane == .lan,
+           let endpoint = connection.route.endpoint,
+           let pin = connection.route.pin,
+           let url = endpoint.httpURL(path: path, queryItems: queryItems) {
+            return GatewayHTTPRoute(url: url, pin: pin)
+        }
+        guard let url = profile.httpURL(path: path, queryItems: queryItems) else { return nil }
+        return GatewayHTTPRoute(url: url, pin: nil)
+    }
+
+    /// One authenticated HTTP route's destination and the pin its transport
+    /// must evaluate (E-3c).
+    private struct GatewayHTTPRoute: Sendable {
+        let url: URL
+        let pin: String?
+    }
     nonisolated static func liveViewPath(viewId: String, sessionID: String) -> String? {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
         guard !viewId.isEmpty, viewId.utf8.count <= 200, !sessionID.isEmpty, sessionID.utf8.count <= 200,

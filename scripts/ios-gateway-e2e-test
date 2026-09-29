@@ -29,6 +29,12 @@ log_file="$run_root/gateway.log"
 proxy_pid_file="$run_root/proxy.pid"
 proxy_ready="$run_root/proxy-ready.json"
 proxy_script="$repo_root/scripts/ios-gateway-fault-proxy.mjs"
+# The command's test filter and whether this fixture Gateway runs its pinned
+# LAN lane (E-3c). `run` keeps the lane off, so the fault proxy owns every leg
+# the boundary test drives; `run-lan` turns it on, because the two-lane cases
+# dial the lane itself.
+e2e_test_filter="TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
+e2e_lan_endpoint="off"
 process_owner="$repo_root/scripts/ios-test-process.py"
 simulator_owner="$repo_root/scripts/ios-test-simulator.py"
 lock_owner="$repo_root/scripts/ios-test-lock.py"
@@ -66,6 +72,8 @@ Commands:
   prepare   Install/build gateway if needed and start one persistent fixture.
   build     Incrementally build the UI-test products and patch their fixture env.
   run       Renew the Gateway fixture and run only the boundary test, without building.
+  run-lan   Renew the fixture with the pinned LAN lane on and run only the E-3c
+            two-lane cases.
   iterate   Incremental build, then one focused test-without-building run.
   all       Prepare, build, and run. Leaves the fixture running for iteration.
   status    Print fixture/build status.
@@ -318,6 +326,7 @@ PY
     PI_SUBAGENTS_TEMP_ROOT="$gateway_home/internal/subagents" \
     TRON_MACHINE_GROUP_ID=tron-ios-e2e \
     TRON_GATEWAY_HOST=127.0.0.1 TRON_GATEWAY_PORT="$port" \
+    TRON_GATEWAY_LAN_ENDPOINT="$e2e_lan_endpoint" \
     detach nohup node "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null
   spawned_pid="$!"
   echo "$spawned_pid" >"$pid_file"
@@ -352,6 +361,7 @@ PY
     TRON_E2E_TRON_HOME="$tron_home" TRON_E2E_AGENT_DIR="$agent_dir" \
     TRON_E2E_GATEWAY_LOG="$log_file" TRON_E2E_GATEWAY_PID_FILE="$pid_file" \
     TRON_E2E_PROXY_TOKEN="$proxy_token" TRON_E2E_PROXY_READY="$proxy_ready" \
+    TRON_E2E_LAN_ENDPOINT="$e2e_lan_endpoint" \
     detach nohup node "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null
   proxy_pid="$!"
   echo "$proxy_pid" >"$proxy_pid_file"
@@ -455,7 +465,7 @@ run_test() {
     xcodebuild test-without-building \
       -xctestrun "$xctestrun" \
       -destination "$destination" \
-      -only-testing:TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools \
+      -only-testing:"$e2e_test_filter" \
       -parallel-testing-enabled NO \
       -collect-test-diagnostics never \
       -resultBundlePath "$result_bundle"; then
@@ -508,7 +518,13 @@ show_status() {
 
 command="${1:-all}"
 case "$command" in
-  prepare|build|run|iterate|all|stop|clean) ;;
+  run-lan)
+    e2e_test_filter="TronMobileTests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"
+    e2e_lan_endpoint="on"
+    ;;
+esac
+case "$command" in
+  prepare|build|run|run-lan|iterate|all|stop|clean) ;;
   status|logs|-h|--help|help) ;;
   *) usage >&2; die "unknown command: $command" ;;
 esac
@@ -521,7 +537,7 @@ if [[ "$command" != status && "$command" != logs && "$command" != -h && "$comman
     --development-state "$development_state" -- "$0" "$@"
 fi
 case "$command" in
-  prepare|build|run|iterate|all|stop|clean)
+  prepare|build|run|run-lan|iterate|all|stop|clean)
     # The same sweep as scripts/tron-ios-test, before this command provisions
     # anything: owned lanes booted with no live lease are reclaimed, and this
     # command's own lane is leased above, so the sweep never touches it.
@@ -544,6 +560,7 @@ case "$command" in
   prepare) prepare_fixture ;;
   build) build_tests ;;
   run) run_test ;;
+  run-lan) run_test ;;
   iterate) build_tests; run_test ;;
   all) install_gateway_if_needed; build_tests; run_test ;;
   status) show_status ;;
