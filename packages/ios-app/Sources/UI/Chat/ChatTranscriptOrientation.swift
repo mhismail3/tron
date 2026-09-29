@@ -311,7 +311,7 @@ private struct ChatTranscriptViewportModifier: ViewModifier {
                 .contentMargins(.bottom, margins.bottom, for: .scrollContent)
                 .contentMargins(.top, margins.top, for: .scrollIndicators)
                 .contentMargins(.bottom, margins.bottom, for: .scrollIndicators)
-                // Temporary profile control: omit only the viewport reflection.
+                .chatTranscriptOrientation(orientation)
                 .ignoresSafeArea(.all, edges: .vertical)
         } else {
             content
