@@ -90,13 +90,15 @@ describe("Knowledge catalog scale", () => {
     const reads = vi.spyOn(f.store as unknown as { readRecord: (...args: unknown[]) => Promise<KnowledgeRecord> }, "readRecord");
     const first = await f.store.list({ kind: "observation", scope: "personal", limit: 100 });
     expect(first.records[0]?.id).toBe(observation(count - 1).id);
-    expect(reads).toHaveBeenCalledTimes(101);
+    // Exactly one body per row: the continuation is proven from the catalog
+    // head rather than by reading the next body speculatively.
+    expect(reads).toHaveBeenCalledTimes(100);
     const anchor = first.records.at(-1)!;
     await f.store.forget("catalog-scale-forget-anchor", anchor.id, "test cursor deletion");
     reads.mockClear();
     const second = await f.store.list({ kind: "observation", scope: "personal", limit: 100, cursor: first.nextCursor! });
     expect(second.records[0]?.id).toBe(observation(count - 101).id);
-    expect(reads).toHaveBeenCalledTimes(101);
+    expect(reads).toHaveBeenCalledTimes(100);
     await expect(f.store.list({ kind: "note", cursor: first.nextCursor! })).rejects.toThrow(/cursor/);
     reads.mockClear();
     const search = await f.store.search({ query: "rare needle" });

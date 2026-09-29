@@ -957,22 +957,24 @@ export class KnowledgeStore {
       // projection state, where skipped rows can otherwise make pagination
       // appear stalled or omit the first admitted row.
       const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
-      const filter = this.catalogFilter(request);
+      const filter = this.pageFilter(request);
       if (request.cursor) {
         const cursor = readListCursor(request.cursor, scope);
         filter.clauses.push("json_extract(value, '$.sortAt') <= ? AND (json_extract(value, '$.sortAt') < ? OR key > json_quote(?))");
         filter.parameters.push(cursor.sortAt, cursor.sortAt, cursor.id);
       }
-      const records: KnowledgeRecord[] = []; const budget = new KnowledgePageBudget(); let nextCursor: string | undefined;
-      let last: { id: string; sortAt: number } | undefined;
-      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
+      const heads = this.visibleHeadPage(state, filter, scope, limit, request.cursor, request.includeSuppressed === true);
+      const records: KnowledgeRecord[] = []; const budget = new KnowledgePageBudget();
+      for (const { id, head } of heads.page) {
         const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
         if (!record) continue;
+        // The body stays the authority: a head can only ever be derived from it.
         if (this.recordHardErased(state, record) || (!request.includeSuppressed && this.recordExcluded(state, record)) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (request.sourceAdmission !== undefined && (record.kind !== "source" || record.content.admission?.status !== request.sourceAdmission)) continue;
-        if (records.length >= limit || !budget.admit(record)) { nextCursor = listCursor(scope, last!); break; }
-        records.push(record); last = { id, sortAt: head.sortAt };
+        if (records.length >= limit || !budget.admit(record)) break;
+        records.push(record);
       }
+      const nextCursor = this.pageCursor(scope, heads.page, records.length, heads.nextCursor);
       return { records, stateRevision: state.stateRevision, ...(nextCursor ? { nextCursor } : {}) };
     });
   }
@@ -1010,7 +1012,7 @@ export class KnowledgeStore {
    * that continues it. A scored page binds the query, filters, projection and
    * the exact state revision, because it cannot be resumed across a corpus
    * change without skipping or repeating rows. */
-  private searchPage(request: KnowledgeSearchRequest, terms: string[], filter: { clauses: string[]; parameters: SQLInputValue[] }, scope: string, stateRevision: number): { clauses: string[]; parameters: SQLInputValue[]; order: string; continuation: (position: SearchPosition) => string } {
+  private searchPage(request: KnowledgeSearchRequest, terms: string[], filter: { clauses: string[]; parameters: SQLInputValue[] }, scope: string, stateRevision: number): { clauses: string[]; parameters: SQLInputValue[]; order: string } {
     const score = searchScoreSQL(terms);
     const clauses = [...filter.clauses, `${score} > 0`];
     const where = [...filter.parameters, ...terms];
@@ -1020,26 +1022,77 @@ export class KnowledgeStore {
       where.push(...terms, cursor.score, cursor.score, cursor.sortAt, cursor.sortAt, cursor.id);
     }
     // The statement binds ORDER BY placeholders after every WHERE placeholder.
-    return { clauses, parameters: [...where, ...terms], order: `${score} DESC, json_extract(value, '$.sortAt') DESC, key`, continuation: position => searchCursor(scope, stateRevision, position) };
+    return { clauses, parameters: [...where, ...terms], order: `${score} DESC, json_extract(value, '$.sortAt') DESC, key` };
   }
 
-  /** The library partition and privacy fence, all from catalog heads: rows are
-   * sources only, and a head carries exactly the fields `recordExcluded` and
-   * `recordHardErased` read for a non-observation record. */
-  private rowFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission">): { clauses: string[]; parameters: SQLInputValue[] } {
+  /** One page of scored, visible heads, resolved synchronously. The score is the
+   * statement's own ordering key, so the cursor continues that exact order. */
+  private scoredHeadPage(state: KnowledgeState, page: { clauses: string[]; parameters: SQLInputValue[]; order: string }, terms: string[], scope: string, limit: number, stateRevision: number): { page: Array<{ id: string; head: RecordHead; score: number }>; nextCursor?: string } {
+    const scored: Array<{ id: string; head: RecordHead; score: number }> = [];
+    let nextCursor: string | undefined; let last: SearchPosition | undefined;
+    for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", page.clauses.join(" AND "), page.parameters, page.order) ?? []) {
+      if (!this.headVisible(state, id, head)) continue;
+      if (scored.length >= limit) { nextCursor = searchCursor(scope, stateRevision, last!); break; }
+      const score = headScore(head, terms);
+      scored.push({ id, head, score }); last = { score, sortAt: head.sortAt, id };
+    }
+    return { page: scored, ...(nextCursor ? { nextCursor } : {}) };
+  }
+
+  private scoredPageCursor(candidates: { page: Array<{ id: string; head: RecordHead; score: number }>; nextCursor?: string }, admitted: number, scope: string, stateRevision: number): string | undefined {
+    if (admitted >= candidates.page.length) return candidates.nextCursor;
+    const last = admitted > 0 ? candidates.page[admitted - 1] : undefined;
+    return last ? searchCursor(scope, stateRevision, { score: last.score, sortAt: last.head.sortAt, id: last.id }) : undefined;
+  }
+
+  /** The page's kind/scope/admission partition. Admission lives in the head, so
+   * this is the same predicate the body checks apply, evaluated before a body is
+   * read; the body remains the authority for the rows it admits. */
+  private pageFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission">): { clauses: string[]; parameters: SQLInputValue[] } {
     const base = this.catalogFilter(request); const admission = admissionFilter(request);
     return { clauses: [...base.clauses, ...admission.clauses], parameters: [...base.parameters, ...admission.parameters] };
   }
-  private headVisible(state: KnowledgeState, id: string, head: RecordHead): boolean {
+  private headVisible(state: KnowledgeState, id: string, head: RecordHead, includeSuppressed = false): boolean {
     const suppression = state.suppressions.get(id);
-    if (suppression?.excluded || suppression?.forgotten) return false;
+    if (suppression?.forgotten) return false;
     if (head.recordRefs.some(reference => state.suppressions.get(reference)?.forgotten)) return false;
+    if (includeSuppressed) return true;
+    if (suppression?.excluded) return false;
     if (head.sessionId && state.config.eligibility.excludedSessionIds.includes(head.sessionId)) return false;
     const keys = [
       ...(head.sessionId ? [`session:${head.sessionId}`] : []),
       ...(head.sessionId && head.branchId ? [`branch:${head.sessionId}:${head.branchId}`] : []),
     ];
     return !keys.some(key => state.scopeExclusions.get(key)?.excluded);
+  }
+
+  /** Collect one page of visible heads. The whole scan is synchronous, so no
+   * SQLite statement stays open across the body reads that follow and a reader
+   * never blocks a committing writer. Visible heads are chosen here, so the
+   * page is full even when most candidates are excluded. */
+  private visibleHeadPage(state: KnowledgeState, filter: { clauses: string[]; parameters: SQLInputValue[] }, scope: string, limit: number, cursor?: string, includeSuppressed = false): { page: Array<{ id: string; head: RecordHead }>; nextCursor?: string } {
+    const clauses = [...filter.clauses]; const parameters = [...filter.parameters];
+    if (cursor !== undefined) {
+      const anchor = readListCursor(cursor, scope);
+      clauses.push("json_extract(value, '$.sortAt') <= ? AND (json_extract(value, '$.sortAt') < ? OR key > json_quote(?))");
+      parameters.push(anchor.sortAt, anchor.sortAt, anchor.id);
+    }
+    const page: Array<{ id: string; head: RecordHead }> = [];
+    let nextCursor: string | undefined; let last: { sortAt: number; id: string } | undefined;
+    for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", clauses.join(" AND "), parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
+      if (!this.headVisible(state, id, head, includeSuppressed)) continue;
+      if (page.length >= limit) { nextCursor = listCursor(scope, last!); break; }
+      page.push({ id, head }); last = { sortAt: head.sortAt, id };
+    }
+    return { page, ...(nextCursor ? { nextCursor } : {}) };
+  }
+
+  /** The continuation for a page whose bodies no longer all qualify: it resumes
+   * strictly after the last surviving head, so no row is skipped or repeated. */
+  private pageCursor(scope: string, page: Array<{ id: string; head: RecordHead }>, admitted: number, scanned: string | undefined): string | undefined {
+    if (admitted >= page.length) return scanned;
+    const last = admitted > 0 ? page[admitted - 1] : undefined;
+    return last ? listCursor(scope, { sortAt: last.head.sortAt, id: last.id }) : undefined;
   }
 
   /** Library rows. Every field comes from the catalog head, so a page of any
@@ -1057,27 +1110,30 @@ export class KnowledgeStore {
     return this.readState((state, _paths, present) => {
       if (!present) return { rows: [], stateRevision: 0 };
       const limit = this.pageLimit(state, request.limit ?? 50);
-      const filter = this.rowFilter(request);
-      const clauses = [...filter.clauses]; const parameters = [...filter.parameters];
-      let nextCursor: string | undefined; let last: { sortAt: number; id: string } | undefined;
+      const filter = this.pageFilter(request);
+      const rows: KnowledgeSourceRow[] = [];
+      const asRow = (id: string, head: RecordHead): KnowledgeSourceRow => sourceRow(id, head as RecordHead & { sourceRow: SourceRowFields });
+      if (ids) {
+        const clauses = [...filter.clauses, "key IN (SELECT json_quote(value) FROM json_each(?))"];
+        const found = new Map<string, KnowledgeSourceRow>();
+        for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", clauses.join(" AND "), [...filter.parameters, JSON.stringify(ids)], "json_extract(value, '$.sortAt') DESC, key") ?? []) {
+          if (head.kind !== "source" || !head.sourceRow || !this.headVisible(state, id, head)) continue;
+          found.set(id, asRow(id, head));
+        }
+        // A single SQL scan cannot preserve a requested identity order.
+        return { rows: ids.map(id => found.get(id)).filter((row): row is KnowledgeSourceRow => row !== undefined), stateRevision: state.stateRevision };
+      }
       const scope = sourceRowScope(request);
-      if (ids) { clauses.push("key IN (SELECT json_quote(value) FROM json_each(?))"); parameters.push(JSON.stringify(ids)); }
-      else if (request.cursor !== undefined) {
-        const cursor = readListCursor(request.cursor, scope);
-        clauses.push("json_extract(value, '$.sortAt') <= ? AND (json_extract(value, '$.sortAt') < ? OR key > json_quote(?))");
-        parameters.push(cursor.sortAt, cursor.sortAt, cursor.id);
+      const heads = this.visibleHeadPage(state, filter, scope, limit, request.cursor);
+      const budget = new KnowledgePageBudget();
+      for (const { id, head } of heads.page) {
+        if (head.kind !== "source" || !head.sourceRow) continue;
+        const row = asRow(id, head);
+        if (rows.length >= limit || !budget.admit(row)) break;
+        rows.push(row);
       }
-      const rows: KnowledgeSourceRow[] = []; const budget = new KnowledgePageBudget();
-      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", clauses.join(" AND "), parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
-        if (head.kind !== "source" || !head.sourceRow || !this.headVisible(state, id, head)) continue;
-        const row = sourceRow(id, head as RecordHead & { sourceRow: SourceRowFields });
-        if (!ids && (rows.length >= limit || !budget.admit(row))) { nextCursor = listCursor(scope, last!); break; }
-        rows.push(row); last = { sortAt: head.sortAt, id };
-      }
-      if (!ids) return { rows, stateRevision: state.stateRevision, ...(nextCursor ? { nextCursor } : {}) };
-      // A single SQL scan cannot preserve a requested identity order.
-      const byId = new Map(rows.map(row => [row.id, row]));
-      return { rows: ids.map(id => byId.get(id)).filter((row): row is KnowledgeSourceRow => row !== undefined), stateRevision: state.stateRevision };
+      const nextCursor = this.pageCursor(scope, heads.page, rows.length, heads.nextCursor);
+      return { rows, stateRevision: state.stateRevision, ...(nextCursor ? { nextCursor } : {}) };
     });
   }
 
@@ -1086,24 +1142,21 @@ export class KnowledgeStore {
     return this.readState(async (state, paths) => {
       const terms = request.query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
       const hits: KnowledgeSearchHit[] = []; const budget = new KnowledgePageBudget();
-      const filter = this.catalogFilter(request); const limit = this.pageLimit(state, request.limit ?? 50);
-      const page = this.searchPage(request, terms, filter, searchScope(request), state.stateRevision);
-      let last: SearchPosition | undefined; let exhausted = true;
-      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", page.clauses.join(" AND "), page.parameters, page.order) ?? []) {
+      const filter = this.pageFilter(request); const limit = this.pageLimit(state, request.limit ?? 50);
+      const scope = searchScope(request);
+      const page = this.searchPage(request, terms, filter, scope, state.stateRevision);
+      const candidates = this.scoredHeadPage(state, page, terms, scope, limit, state.stateRevision);
+      for (const { id, head, score } of candidates.page) {
         const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
         if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (request.sourceAdmission !== undefined && (record.kind !== "source" || record.content.admission?.status !== request.sourceAdmission)) continue;
-        if (hits.length >= limit) { exhausted = false; break; }
-        const matchedFields: string[] = []; let score = 0;
-        for (const [field, value] of head.searchFields) {
-          const count = terms.reduce((sum, term) => sum + (value.includes(term) ? 1 : 0), 0);
-          if (count) { matchedFields.push(field); score += count; }
-        }
+        const matchedFields = head.searchFields.filter(([, value]) => terms.some(term => value.includes(term))).map(([field]) => field);
         const hit = { record, score, matchedFields };
-        if (!budget.admit(hit)) { exhausted = false; break; }
-        hits.push(hit); last = { score, sortAt: head.sortAt, id };
+        if (!budget.admit(hit)) break;
+        hits.push(hit);
       }
-      return { hits, stateRevision: state.stateRevision, indexState: "canonical", ...(exhausted || !last ? {} : { nextCursor: page.continuation(last) }) };
+      const nextCursor = this.scoredPageCursor(candidates, hits.length, scope, state.stateRevision);
+      return { hits, stateRevision: state.stateRevision, indexState: "canonical", ...(nextCursor ? { nextCursor } : {}) };
     });
   }
 
@@ -1115,17 +1168,17 @@ export class KnowledgeStore {
     return this.readState((state, _paths, present) => {
       if (!present) return { rows: [], stateRevision: 0 };
       const terms = request.query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
-      const filter = this.rowFilter(request); const limit = this.pageLimit(state, request.limit ?? 50);
-      const page = this.searchPage(request, terms, filter, sourceRowSearchScope(request), state.stateRevision);
+      const filter = this.pageFilter(request); const limit = this.pageLimit(state, request.limit ?? 50);
+      const scope = sourceRowSearchScope(request);
+      const page = this.searchPage(request, terms, filter, scope, state.stateRevision);
+      const candidates = this.scoredHeadPage(state, page, terms, scope, limit, state.stateRevision);
       const rows: KnowledgeSourceRow[] = [];
-      let last: SearchPosition | undefined; let exhausted = true;
-      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", page.clauses.join(" AND "), page.parameters, page.order) ?? []) {
-        if (head.kind !== "source" || !head.sourceRow || !this.headVisible(state, id, head)) continue;
-        if (rows.length >= limit) { exhausted = false; break; }
+      for (const { id, head } of candidates.page) {
+        if (head.kind !== "source" || !head.sourceRow) continue;
         rows.push(sourceRow(id, head as RecordHead & { sourceRow: SourceRowFields }));
-        last = { score: headScore(head, terms), sortAt: head.sortAt, id };
       }
-      return { rows, stateRevision: state.stateRevision, ...(exhausted || !last ? {} : { nextCursor: page.continuation(last) }) };
+      const nextCursor = this.scoredPageCursor(candidates, rows.length, scope, state.stateRevision);
+      return { rows, stateRevision: state.stateRevision, ...(nextCursor ? { nextCursor } : {}) };
     });
   }
 
@@ -1133,13 +1186,14 @@ export class KnowledgeStore {
     if (request.query !== undefined && (typeof request.query !== "string" || request.query.length > 512)) throw invalid("Recall query must be bounded");
     return this.readState(async (state, paths) => {
       const terms = request.query?.toLocaleLowerCase().split(/\s+/).filter(Boolean) ?? [];
-      const filter = this.catalogFilter(request); const limit = this.pageLimit(state, request.limit ?? 20);
+      const filter = this.pageFilter(request); const limit = this.pageLimit(state, request.limit ?? 20);
       if (terms.length) {
         filter.clauses.push(`EXISTS (SELECT 1 FROM json_each(entries.value, '$.searchFields') AS field WHERE ${terms.map(() => "instr(json_extract(field.value, '$[1]'), ?) > 0").join(" AND ")})`);
         filter.parameters.push(...terms);
       }
+      const heads = this.visibleHeadPage(state, filter, "recall", limit);
       const records: KnowledgeRecord[] = []; const budget = new KnowledgePageBudget();
-      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
+      for (const { id, head } of heads.page) {
         const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
         if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) continue;
