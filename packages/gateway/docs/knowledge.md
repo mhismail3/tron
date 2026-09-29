@@ -38,6 +38,44 @@ operation; their work still grows with indexed text volume. Pages reserve both
 Coverage uses indexed date/scoped queries; per-turn recovery selects only cuts
 whose starts occur in that turn's admitted entries, not all earlier turns.
 
+## Library rows and previews
+
+`knowledge.list` and `knowledge.search` accept `projection: "sourceRow"`
+(capability `knowledge-library-rows.v1`) and return bounded rows
+(`{rows, nextCursor?, stateRevision}`) instead of full records. A row carries
+identity, scope, timestamps, title, canonical URI, the user-facing original URI,
+media type, capture disposition, admission, provider save/publication times, the
+preview reference, and the current generated summary text. The saved text and raw
+bytes are never part of a page, which is what makes a complete page possible:
+fifty 200,000-character sources are a few kilobytes of rows, where the same page
+of full records cannot carry five of them. `ids` (1..64) refreshes exact rows in
+the requested order for a targeted update; the projection requires
+`kind: "source"`, always excludes suppressed records, and applies the same
+privacy fence and admission partition as the full-record page (an archived
+partition still needs `includeArchived`, and a waiting one `includePending`, as
+the existing client policy already sends).
+
+The row's presentation rules have one owner, `sourceRowFields`: the original URI
+is the requested URI recorded for this exact saved-item identity else the
+canonical URI (HTTP(S) only); a provider save time is never presented as
+publication time for the connector whose legacy field was misfiled; and a
+generated summary is present only while its evidence digest still matches the
+record's title and readable text, truncated for the row.
+
+`knowledge.previews.read` reads up to 16 exact preview references in one call.
+Each item is authorized by its own exact committed revision and rechecked after
+its bytes are read, so a concurrent forget or exclusion wins. An item whose
+reference does not belong to that revision, whose object is missing, or whose
+preview exceeds 512,000 bytes (or the 4 MB batch bound) returns its own
+`unavailable` reason instead of failing the page. Preview batches cross the same
+exact base64 byte boundary as object reads, not the presentation projection.
+
+`knowledge.search` returns `nextCursor` for either projection. A scored page is
+ordered by score, recency and identity; its cursor binds the query, filters,
+projection and exact state revision, because such a page cannot be resumed across
+a corpus change without skipping or repeating rows. A cursor from an older state
+revision fails with `conflict` so the client reloads the first page.
+
 ## Publication, upgrade, and recovery
 
 Objects and immutable revisions are synchronized before a single SQLite
@@ -45,7 +83,28 @@ transaction publishes heads, exact revision ownership, coverage, privacy
 fences, and the command receipt. SQLite uses `synchronous=EXTRA` with its rollback
 journal (including directory synchronization after journal deletion) and secure
 row deletion. The workspace mutex owns connections through close, including
-async body I/O; no presentation reader can see a partial transaction. Failed
+async body I/O; no presentation reader can see a partial transaction. Reads do
+not take that mutex: a read loads one committed catalog snapshot before its first
+await and closes the connection before any body I/O, so a reader never holds a
+lock a mutation must wait for and never observes a mixed snapshot. Record
+revisions are immutable, so a revision a concurrent forget removed reads as
+unavailable rather than as a damaged corpus, and object/preview reads recheck
+authority against a fresh snapshot after their bytes are read. Work that calls a
+model is not held under the mutex either: `knowledge.source.summarize` pre-checks
+its receipt, generates outside the lock, and commits inside it with the same
+revision/config/privacy revalidation, while an in-flight map keyed by command and
+request makes concurrent duplicates share one charge.
+
+Record heads carry the bounded source row projection plus source admission and
+owner scope, so a page partitions by kind, scope and admission and renders rows
+without loading a body. Heads are derived data with one owner, `headFor`.
+`CATALOG_STORAGE_VERSION` 3 admits that projection: ordinary reads refuse an older
+manifest with an explicit row-projection upgrade state instead of presenting an
+unprojected head, and the explicit startup `upgradeStorage()` step rebuilds every
+head from its latest committed revision in one transaction, fsyncs the catalog and
+writes the new manifest last. The rebuild is idempotent and preserves exact
+revision ownership and retained object hashes; a failure leaves the previous
+manifest authoritative and is reported as `knowledge.upgrade-failed`. Failed
 publication leaves only uncommitted immutable files, which are not readable
 through Knowledge. New publications do not create a group-manifest journal.
 Cleanup intentions and tombstones commit before physical deletion; `reconcile()`

@@ -99,7 +99,12 @@ attributed, qualified evidence and points to a pinned record/revision read
 continuation when needed. `KnowledgeStore` emits the global `knowledge.changed`
 invalidation hint after committed mutations, including agent tools, connectors,
 and autonomous observations; receipt replays and rejected writes do not emit it.
-Clients re-read authoritative pages rather than treating the event as a data mirror.
+The hint carries the committed state revision and the records the mutation
+touched, coalesced over a short trailing window so one intake item's several
+writes become one notification. Clients re-read authoritative pages rather than
+treating the event as a data mirror, and the Sources library reads bounded rows
+(`projection: "sourceRow"`, capability `knowledge-library-rows.v1`) with batched
+previews (`knowledge.previews.read`) instead of full records.
 `knowledge-store.test.ts` covers this commit boundary and notification failure isolation. Retained source objects are available only through
 `knowledge.object.read` with the exact owning record ID and committed revision;
 the store rechecks current privacy/exclusion fences after byte I/O and never
