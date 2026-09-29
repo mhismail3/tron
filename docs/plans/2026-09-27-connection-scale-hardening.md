@@ -6,6 +6,7 @@
 - **Last updated:** 2026-09-28, G-8a/G-8d/T-1 Done: an unchanged extension artifact costs one `stat` and no read, the ambient pass stays bound and reports a stop, and both read lanes retry a replace before warning (see the handoff)
 - **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
+- **Last updated:** 2026-09-29, G-3a Done: streaming progress follows the snapshot rule — a `session.progress` frame is projected and serialized only for a session with a subscriber (the O-6a CPU profile's throttled-flush subtree 551.7 → 193.5 ms, the subscriber's wire frames unchanged at 177 → 178; see the handoff)
 
 - **Last updated:** 2026-09-28, G-13 review response 1: the row is Blocked, not
   Done — no run has met the restart criterion — the startup budget's stated
@@ -611,7 +612,7 @@ rows are in priority order.
 | G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | merged `hardening/integration`; `verifiedCut` unified into `reconciledCut`, G-9 keeps the periodic reconcile, `searchIdentities()` reads the index rows. Owning suite 237/237, merge gate 363/363; O-6a p99 is the orchestrator's quiet-host run |
 | G-1d | Done | Catalog contract in the docs: `connection-resilience.md` and the README's catalog paragraphs now describe the index owner, its three feeds, reconciliation, JSONL authority and rebuild on loss; no doc describes a request-path walk | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-1d`) |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
-| G-3a | Claimed | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| G-3a | Done | Streaming progress for a session with no subscriber is no longer projected (`flushPendingProgress` and `message_end`'s finalized frame both return before `projectMessage`/`safeJson`); the row's measured stretch is the O-6a CPU profile's flush subtree 551.7 → 193.5 ms — see the handoff | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-29 (branch `hardening/g-3a`) |
 | C-2 | Done | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-5 | Done | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -10047,3 +10048,89 @@ recovery gaps; all three were fixed on the same branch.
   persists it, covered by `logger.test.ts` ("persists the protocol version a
   refused hello asked for", red first with `expected undefined to be 5`); the
   field reaches the installed app with the next Mac build.
+
+### G-3a · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/g-3a`)
+
+- Result: streaming progress now follows the rule `publishSnapshot` already
+  follows. `flushPendingProgress` returns before `projectMessage` /
+  `boundStreamingProgressItem` / `safeJson` when `sessionAudience(id)` is 0, and
+  `message_end`'s finalized declaration is serialized only with an audience. The
+  two things beside those frames are slot state and stay on every path: the
+  stream identity capture (`captureStreamIdentity`) and the tool-invocation
+  group latch (`toolInvocationGroups`, which the projection in
+  `finalizeToolInvocationGroups` still computes).
+- Evidence:
+  - Focused case `projects no streaming progress for a session with no
+    subscriber and resumes it on subscribe` in
+    `runtime-registry.integration.test.ts`: an unsubscribed stream settles with
+    zero `session.progress` frames, then a subscribed stream produces frames
+    (last one carries the watched text). Passes in 1.9 s; on the reverted half
+    (source stashed, test kept) it fails at the zero-frame assertion
+    (`1 failed | 244 skipped`).
+  - Owning file: 244 passed | 1 failed. The failure is "keeps a large streamed
+    write visible through snapshot recovery and canonical handoff" (its 5 s
+    `!slot.isBusy` wait), and the unmodified file fails the same case the same
+    way in a full-file run (243 passed | 1 failed); R-1's handoff already
+    records it failing on `main`, so it is a pre-existing full-file flake, not a
+    G-3a regression. That case reads `session.progress` frames, so it now
+    subscribes an audience (G-3 deviation 4).
+  - O-6a smokes, G-11's parameters (`--scenario multi-session --no-build
+    --iterations 1 --cases none --catalog-files 100 --catalog-mib 512
+    --mixed-seconds 30 --cpu-profile`): before
+    `~/Library/Developer/Tron/profiles/gateway/20260929T061112Z-multi-session-4b25f5`,
+    after `…/20260929T061654Z-multi-session-a18c7f`; both reports and both
+    iteration CPU profiles are retained at
+    `~/.tron/workspace/files/hardening/g-3a/` with the arithmetic in its
+    `attribution.txt`, so the numbers outlive the profile sweep.
+    - CPU profile, the same call path (the throttled timer's
+      `flushPendingProgress`): exclusive subtree **551.7 → 193.5 ms** of 14.0 →
+      13.8 s non-idle CPU (3.9% → 1.4%). The children the guard removes are
+      `toolLabels` 129.7 → 7.5 ms, `projectMessage` 115.4 → 3.0 ms, `safeJson`
+      75.0 → 0 ms, `boundStreamingProgressItem` 39.6 → 0 ms; what remains is the
+      one subscribed session plus the guard itself (`sessionAudience` 22.9 ms +
+      the `id` getter 26.4 ms over the run's ~3,200 no-audience windows).
+    - Wire parity for the subscriber: mobile `session.progress` 177 → 178
+      frames, 229,687 → 229,792 bytes. The projected frames a subscriber
+      receives did not change.
+    - Event loop: overall max 87.1 → 62.6 ms, p99 16.8 → 8.5 ms; no-subscriber
+      window max 13.0 → 10.5 ms. Both runs were on a load ~10 host and the
+      82 ms single run G-11 measured did not reproduce here (this branch's
+      largest single flush run is ~9 ms before the fix), so the max delta stays
+      inside host noise: the load-robust evidence is the profile attribution
+      above plus the focused case. The exit numbers (max ≤ 250 ms, p99 ≤ 20 ms)
+      remain O-6a's to measure.
+  - Merge gate: this branch's base is `hardening/integration`'s head
+    (`5eb6fa505`, 0 commits behind, nothing to merge); 133/133 across
+    `session-archive`, `server-capacity`, `sync-protocol`, `stall-diagnostics`,
+    `server-heartbeat` and `server-http-lifecycle` integration/unit files;
+    `npx tsc --noEmit -p .` clean. No message shape changed, so protocol stays 6.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: one commit on `hardening/g-3a` (`packages/gateway/src/sessions/runtime-slot.ts`,
+  its integration test, `packages/gateway/README.md`, this plan).
+- Tasks added: none.
+- Kept on purpose: `captureStreamIdentity` on the flush path — the streaming
+  identity is slot state a later snapshot projects, and `message_update` captures
+  it outside the flush too, so keeping the call preserves the subscribed path
+  byte for byte; the pending message is still dropped per window (there is
+  nothing to carry without an audience); the leading-edge/trailing-timer shape of
+  `emitProgress` is unchanged, so a subscribed stream keeps its cadence.
+- Deviations: (1) The plan has no `### G-3a` task-details section; the row,
+  G-3's handoff ("G-3a owns the same rule for streaming progress frames") and
+  the review nit are the whole contract, so the rule implemented is the row's
+  no-audience one — not chunking or incrementally projecting the subscribed
+  path, which no measurement here shows over 50 ms. (2) `finalizeToolInvocationGroups`
+  keeps its projection and guards only the frame, because the group latch needs
+  the projection. (3) One fixture gained an audience (the large-streamed-write
+  case, above). (4) The before/after numbers are reported as profile
+  attribution and wire parity rather than as an event-loop max delta, because
+  the max is host noise on this host (see Evidence).
+- For the next agent: a subscribed session still re-projects the whole
+  cumulative streaming message once per 150 ms window (`projectMessage` +
+  `boundStreamingProgressItem` + `safeJson` + `toolLabels`); if R-1's event-loop
+  max is still driven by a subscribed stream, the next owner is an incremental
+  streaming projection at the same site, and the guard above is what makes that
+  work only about the one session a client is watching. A nonzero
+  `unaudiencedSnapshotBuilds` warning still means an audience check was lost. The
+  `session.progress` rule now matches `session.snapshot`: no subscriber, no
+  frame.
