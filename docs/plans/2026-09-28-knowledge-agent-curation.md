@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-28
 - **Status:** Active
-- **Last updated:** 2026-09-29, K1–K3 done
+- **Last updated:** 2026-09-29, K1–K3, K6 and K8 done
 - **Goal:** Agents keep every Library entry summarized, tagged, judged for freshness and correctly scoped, guided by the user's own takes, so useful sources surface on their own in future work.
 
 ## Goal and constraints
@@ -152,7 +152,7 @@ screenshots of each state. Device validation by the user after K9.
 | K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
 | K6 | Done | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1, K3 | luna-worker, 2026-09-29 |
 | K7 | Ready | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | — |
-| K8 | Ready | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | — |
+| K8 | Done | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | luna-worker, 2026-09-29 |
 | K9 | Ready | Maintainer runtime update and live capability check | K1–K8 | — |
 | K10 | Ready | Seed: agent drafts the vocabulary from the 276 entries; user edits it | K9 | — |
 | K11 | Ready | Seed: summarize and tag the existing library within budget | K10 | — |
@@ -539,3 +539,61 @@ uses the tag definitions/categories/decay classes, and asks
 
 Drafted from the 2026-09-28 interview and approved by the user the same day,
 with the reliability and interaction bars added at the user's request. K1, K2, K3 and K6 are complete; K3/K6 were integrated on `knowledge/k1-k6`.
+
+
+### K8 · Done · 2026-09-29 · luna-worker · `knowledge/k8-multi-collection`
+
+- Result: Raindrop routing is owned by the existing `ConnectionInstance` via
+  revision-fenced `raindropCollections`, configured at setup or with
+  `connections.policy.update`; a Raindrop mapping replaces the former single
+  connection scope. Up to 64 unique numeric collection IDs map to `research` or
+  `personal` and may name a per-collection remote destination. Intake, dry-run,
+  and connector sweeps require a mapped collection (or the sole mapping), reject
+  unmapped IDs before credentials/provider I/O, and bind discovery receipts,
+  pending items, captured progress, and research pilot cohorts to that collection.
+  Raindrop offset pagination deliberately restarts at page zero; it does not
+  persist a provider page number that can skip shifted bookmarks. Provider item
+  collection identity must match the requested endpoint when supplied.
+- Source behavior: Research continues through complete capture and the existing
+  paid Jev pilot/admission path, now with one receipt-backed pilot per mapped
+  collection. Personal captures the original link, title, best-effort preview
+  and saved Raindrop note; inaccessible/partial page capture still admits the
+  personal source without Jev. Provider/account/item identity stays canonical
+  across a collection move: captured provider collection provenance is refreshed
+  and K1's receipted placement write re-scopes the existing record, rather than
+  creating a second source. A setup revision change stops processing before
+  admission or remote effect. Remote moves require the existing account-level
+  `allowWrites` and the exact selected collection's configured destination,
+  which is rechecked against the current setup revision before effect.
+- Failure modes written before implementation: unmapped IDs; collection identity
+  mismatch/duplicate items; collection-local pending/page-receipt/pilot
+  isolation; scope routing; personal page-fetch failure; provider item movement
+  without duplicate source; a connection setup revision changing while an
+  intake awaits capture; and remote destination/write-policy fencing.
+- Evidence: `npm run build` passed. `npx vitest run
+  src/knowledge/connectors.test.ts src/knowledge/multi-account-connectors.test.ts
+  src/integrations/connection-owner.test.ts --no-file-parallelism` — 3 files / 59
+  tests passed. The full focused knowledge/transport/connection-owner run passed
+  752 of 754 tests (68 files); the two failures were the pre-existing timing
+  assertion in `request-span.integration.test.ts` (observed 82–89 ms against a
+  >100 ms threshold) and one observation-admission wait/temporary-directory
+  cleanup race while a sibling worker was running its Gateway suite. No failure
+  touched K8 files. Scale run `npx vitest run --config vitest.scale.config.ts
+  src/knowledge/ --no-file-parallelism --reporter verbose` passed 4 tests. On
+  12,600 records / 440 sources, K6 measured row projection 1.6 ms, row search
+  8.0 ms, full list 3.8 ms, full search 9.6 ms, recall 15.9 ms; K3 tag list,
+  search, and retag queue were 2.7 ms, 8.2 ms, and 0.8 ms, with zero body reads.
+  Existing Raindrop 51-item shifted-page scale test passed in 2.8 s. No dedicated
+  K8 wall-clock benchmark was added; intake remains capped at 10 items and
+  discovery/pending storage remains bounded at 500 identities per connection.
+- Changes: `749f24416` (`feat(integrations): configure Raindrop collection scopes`)
+  and this K8 implementation plus documentation/handoff commit.
+- Tasks added: none. No Raindrop skill exists under `.agents/skills/`; the
+  global `~/.tron/agent/skills/tron-raindrop/SKILL.md` was outside scope. Its
+  future wording should say that setup/policy owns explicit per-collection
+  research/personal mappings, calls must select one when multiple exist, and
+  personal intake is link-first with no Jev assessment.
+- Deviations: None in behavior. Tests use injected HTTP/capture/assessment
+  fakes; no live Gateway, credentials, or paid provider were accessed. The
+  initial full-suite rerun remains blocked by the two host-load-sensitive tests
+  above; focused changed owners and all scale owners pass.

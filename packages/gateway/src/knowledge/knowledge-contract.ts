@@ -865,6 +865,8 @@ export interface KnowledgeAssessmentApprovalRequest {
   id: string;
   maxItems: number;
   budgetCents: number;
+  /** Mapped provider collection for the cohort; required when the connection maps several. */
+  sourceCollection?: string;
   /** Explicit pending identities for renewed attempts; omitted selects only new work. */
   itemIds?: string[];
 }
@@ -891,7 +893,7 @@ export interface KnowledgeConnectorConfigurationRequest {
 }
 
 export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; connectionId?: string; }
-export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; dryRun: boolean; limit?: number; }
+export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; dryRun: boolean; limit?: number; sourceCollection?: string; }
 
 /** Read-only Raindrop API access. Every request revalidates the authenticated
  * user against the configured accountId; returned provider objects are raw
@@ -935,7 +937,11 @@ export interface KnowledgeConnectorState {
   checkpoints?: Record<string, string>;
   pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; savedAt?: string; collectionId?: string; apiPayload?: string; metadataComplete?: boolean }>;
   capturedIds: string[];
+  /** Last mapped collection observed for processed Raindrop item identities. */
+  capturedCollections?: Record<string, string>;
   assessmentPilot?: { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] };
+  /** Initial intake cohorts are isolated by source collection. */
+  assessmentPilots?: Record<string, { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
   /** Append-only later cohorts. The first pilot remains frozen in assessmentPilot. */
   assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
   /** Durable per-cohort/item paid-attempt fence; legacy item-only keys remain valid. */
@@ -973,6 +979,7 @@ export interface KnowledgeConnectorStatus {
   providerIdentity: "admitted" | "mismatch" | "unknown";
   accountId?: string;
   scope?: string;
+  raindropCollections?: Array<{ collectionId: string; scope: "research" | "personal"; destination?: string }>;
   destination?: string;
   lastRunAt?: string;
   lastError?: string;
@@ -983,6 +990,7 @@ export interface KnowledgeConnectorStatus {
   recurringApproved: boolean;
   paidAccessApproved: boolean;
   assessmentPilot?: { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] };
+  assessmentPilots?: Record<string, { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
   assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; reservedCents: number; usedItems: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
 }
 /** Object bytes are authorized by the exact committed record revision that

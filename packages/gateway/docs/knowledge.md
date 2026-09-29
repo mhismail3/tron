@@ -409,8 +409,7 @@ qualified evidence and a pinned `knowledge.read` continuation (`id`,
 `revisionId`, and `offset`) whenever the evidence section is incomplete; the
 complete record is never available only through tool details. Observation
 defaults to disabled and the store never chooses a provider or model silently. Connector DTOs are operation shapes implemented by the installed connector
-extension. Connection setup owns the selected account/scope and opaque `credentialRef`
-(`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it.
+extension. Connection setup owns the selected account, its Raindrop collection-to-scope mapping, and opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it. Raindrop collection routes are edited through the connection's revision-fenced setup/policy command, not duplicated in connector progress state.
 Once `ConnectionOwner` is active, connector actions require an exact
 `connectionId` and Knowledge persists provider progress under that instance
 key, without copying the generic account envelope. Tokens never enter
@@ -754,14 +753,16 @@ provider/account/item rather than scanning source pages.
 ## Bounded Raindrop intake
 
 `knowledge.raindrop.intake` is the explicit manual source-owner operation for a
-bounded pilot. `dryRun` only discovers and persists pending provider identities;
-it does not call Jev or mutate Raindrop. A run requires an explicit pilot ID,
-maximum item count (at most 10), and budget (at most 100 cents), which are
-persisted in connector state so a new command cannot reset usage. The numeric
-source collection must match the connector's configured scope; it cannot bypass
-that authority fence. Discovery retains no more than the approved limit per
-intake call, so shifted provider pages are revisited rather than silently skipped.
-Destination remains the separately configured collection.
+bounded intake. `dryRun` only discovers and persists pending provider identities;
+it does not call Jev or mutate Raindrop. Research admission requires an explicit
+pilot ID, maximum item count (at most 10), and budget (at most 100 cents), which
+are persisted as a receipt-backed cohort for that collection so another
+collection cannot reuse the allowance. The selected numeric collection must be
+present in the connection's explicit mapping; an unmapped collection fails
+before credential lookup/provider I/O. Discovery retains no more than the
+selected limit per collection, so shifted provider pages are revisited rather
+than silently skipped. Remote destinations are configured per source collection
+and still require the connection's independent `allowWrites` approval.
 
 Each item keeps its bounded complete Raindrop JSON as a `provider-api` source
 representation, the fetched linked evidence separately, and the source
@@ -866,5 +867,8 @@ bounded run revisits page zero and uses durable IDs, so moved items shrinking
 earlier pages cannot silently skip later entries. Malformed read envelopes are
 rejected locally before credential lookup or provider HTTP; provider failures
 remain sanitized.
-The operation is manual only; no recurring approval, scheduler, X integration,
-or collection creation is implied.
+For Raindrop, `ConnectionInstance.raindropCollections` is the sole routing configuration: 1..64 unique numeric collection IDs map to `research` or `personal`, with an optional destination per source collection. Setup completion installs the mappings; `connections.policy.update` can replace them only against the exact `setupRevision`. Raindrop no longer needs a single selected collection in the generic connector scope. Intake requires a mapped collection, and when several are configured the caller must select one; an unmapped ID is rejected before discovery. Dry-run and pending results filter to that collection. Provider page receipts include the collection ID; offset discovery restarts at page zero because moving bookmarks shifts Raindrop's pages, while durable pending/captured identities are tracked by their last collection. The returned item's collection, when present, must match the requested collection; if absent, the exact collection endpoint is the provenance.
+
+Research retains the existing complete-capture → Jev assessment → admission path, with its pilot/receipt budget isolated by collection. Personal uses the original link, title, best-effort preview, and saved Raindrop note; failed or partial page fetches do not block `retained` admission and do not call Jev. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
+
+A remote move is authorized only by the existing connection `allowWrites` policy and the selected source collection's optional mapped destination, revalidated against the current setup revision at preflight and effect admission. No destination on a mapping means no move; another collection's destination cannot authorize it. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.
