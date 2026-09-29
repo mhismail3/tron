@@ -618,10 +618,12 @@ export class KnowledgeStore {
     });
   }
 
-  /** Mutex-free read projection. The action receives one committed catalog
-   * snapshot, taken before its first await; the connection closes as soon as
-   * the action settles. A reader therefore never holds a lock a mutation would
-   * have to wait for, and never observes a mixed snapshot. Callers that read
+  /** Mutex-free read projection. Each catalog query sees committed state, and
+   * the connection closes as soon as the action settles, so a reader never
+   * holds a lock a mutation would have to wait for. Page selection resolves its
+   * heads synchronously, before any body read. Privacy checks made after a body
+   * read can observe a newer commit than those heads; that can only hide a
+   * record excluded or forgotten meanwhile, never reveal one. Callers that read
    * revision bodies use `readRecordOrRemoved`, which reports a body a concurrent
    * forget removed as unavailable instead of as a damaged corpus. */
   private async readState<T>(action: (state: KnowledgeState, paths: StorePaths, present: boolean) => T | Promise<T>): Promise<T> {

@@ -84,9 +84,11 @@ fences, and the command receipt. SQLite uses `synchronous=EXTRA` with its rollba
 journal (including directory synchronization after journal deletion) and secure
 row deletion. The workspace mutex owns connections through close, including
 async body I/O; no presentation reader can see a partial transaction. Reads do
-not take that mutex: a read loads one committed catalog snapshot before its first
-await and closes the connection before any body I/O, so a reader never holds a
-lock a mutation must wait for and never observes a mixed snapshot. Record
+not take that mutex: every catalog query sees committed state and the connection
+closes when the read settles, so a reader never holds a lock a mutation must wait
+for. A page resolves its heads before any body read; privacy checks made after a
+body read may observe a newer commit, which can only hide a record excluded or
+forgotten meanwhile, never reveal one. Record
 revisions are immutable, so a revision a concurrent forget removed reads as
 unavailable rather than as a damaged corpus, and object/preview reads recheck
 authority against a fresh snapshot after their bytes are read. Work that calls a
