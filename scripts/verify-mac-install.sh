@@ -417,11 +417,19 @@ check_owner() {
   [[ "$listener_pids" == "$pid" ]] \
     && pass "$label is the exact listener PID on port $port" \
     || { fail "$label listener PID set does not exactly match launchd PID"; return; }
-  listener="$(lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9; exit}')"
-  [[ -n "$listener" ]] || { fail "$label has no listening socket on port $port"; return; }
-  host="${listener%:$port}"; host="${host#TCP }"; host="${host#[}"; host="${host%]}"
-  [[ "$host" == '*' || "$host" == '0.0.0.0' || "$host" == '::' ]] && host=127.0.0.1
-  info="$(authenticated_system_info "$host" "$port" "$home" "$payload_root" || true)"
+  # The Gateway may hold two listeners on this port: its main one and, when the
+  # LAN endpoint is on, a TLS-only one on a private address. The plain probe
+  # only completes on the main listener, so probe each and check the one that
+  # answers; a listener that answers with the wrong identity still fails below.
+  listeners="$(lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9}')"
+  [[ -n "$listeners" ]] || { fail "$label has no listening socket on port $port"; return; }
+  info=""
+  while IFS= read -r listener; do
+    host="${listener%:$port}"; host="${host#TCP }"; host="${host#[}"; host="${host%]}"
+    [[ "$host" == '*' || "$host" == '0.0.0.0' || "$host" == '::' ]] && host=127.0.0.1
+    info="$(authenticated_system_info "$host" "$port" "$home" "$payload_root" || true)"
+    [[ -n "$info" ]] && break
+  done <<< "$listeners"
   local expected_fingerprint expected_revision expected_epoch
   if [[ "$channel" == stable ]]; then
     expected_fingerprint="$STABLE_FINGERPRINT"
