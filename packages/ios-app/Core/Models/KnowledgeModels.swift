@@ -18,7 +18,7 @@ package struct KnowledgePresentationIdentity: Equatable, Sendable {
 }
 
 package enum KnowledgeScope: String, Codable, CaseIterable, Sendable { case personal, research
-    package var label: String { self == .personal ? "Moose's Corner" : "Research" }
+    package var label: String { self == .personal ? "Personal" : "Research" }
 }
 package enum KnowledgeRecordKind: String, Codable, CaseIterable, Sendable { case source, observation, note
     package var label: String { rawValue.capitalized }

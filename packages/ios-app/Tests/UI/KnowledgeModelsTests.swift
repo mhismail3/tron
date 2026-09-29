@@ -93,7 +93,7 @@ final class KnowledgeModelsTests: XCTestCase {
         let record = KnowledgeObservationFixture.record()
         let presentation = try XCTUnwrap(KnowledgeObservationPresentation(record: record))
         XCTAssertEqual(presentation.statement, "The user prefers concise explanations.")
-        XCTAssertEqual(presentation.scope, "Moose's Corner")
+        XCTAssertEqual(presentation.scope, "Personal")
         XCTAssertEqual(presentation.date, GatewayTimestamp.parse("2026-01-01T09:30:00Z"))
         XCTAssertNotEqual(presentation.observedAt, record.updatedAt, "Correcting a record must not redate its observation")
         XCTAssertEqual(presentation.sessionID, "fixture-session")

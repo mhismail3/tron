@@ -70,7 +70,7 @@ includes site chrome. Everything else is inline in the same sheet, with no secon
 the **Summary** group (generated summary or Generate/Regenerate action), a
 permanent **Your take** editor, vocabulary-backed tags and their updating
 state, a verdict control, a replacement picker (bounded source search including
-archived entries), Research / Moose's Corner placement and archive controls, and
+archived entries), Research / Personal scope and archive controls, and
 a **Details** table with type, publication/save/capture dates, current freshness
 and age basis, capture state, origin, media type, and revision. Saved notes,
 related entries, links and incomplete-capture coverage remain below. Related

@@ -534,7 +534,7 @@ struct KnowledgeDashboardView: View {
             TronDashboardFilterOption(title: "All scopes", selected: scope == nil, accent: .tronKnowledge,
                                       inactiveAccent: .tronSlate) { setActiveScope(nil) }
             ForEach(KnowledgeScope.allCases, id: \.self) { value in
-                TronDashboardFilterOption(title: value == .personal ? "Moose's Corner" : value.label, selected: scope == value, accent: .tronKnowledge,
+                TronDashboardFilterOption(title: value.label, selected: scope == value, accent: .tronKnowledge,
                                           inactiveAccent: .tronSlate) { setActiveScope(value) }
             }
         }
@@ -1675,95 +1675,120 @@ struct KnowledgeDetailView: View {
                 }
             }.padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
         }
-        TronSettingsGroup("Tags and verdict", accent: .tronKnowledge) {
-            VStack(alignment: .leading, spacing: TronSpacing.md) {
-                if taggingJob?.status == "running" {
-                    Label("Updating tags", systemImage: "arrow.triangle.2.circlepath")
-                        .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-                } else if taggingJob?.status == "failed" || retagError != nil {
-                    HStack {
-                        Text(retagError ?? taggingJob?.reason ?? "Re-tagging failed; your current tags are unchanged.")
-                            .font(TronTypography.caption).foregroundStyle(Color.tronAmber)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                        Button("Retry tagging") { startRetag() }
-                            .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
-                            .disabled(!admitsOrigin)
-                    }
-                } else if tagsStale {
-                    Text("Needs re-tagging").font(TronTypography.caption).foregroundStyle(Color.tronAmber)
-                }
-                sourceTagLabels(source)
-                Menu {
-                    ForEach(KnowledgeSourceVerdict.allCases, id: \.self) { verdict in
-                        Button(verdict.label) {
-                            if verdict == .superseded { choosingReplacement = true }
-                            else { choosingReplacement = false; setVerdict(verdict) }
+        TronSettingsGroup("Tags", accent: .tronKnowledge) {
+            VStack(spacing: 0) {
+                TronValueRow(icon: "tag", title: "Tags", detail: tagStatus(source), accent: .tronKnowledge) {
+                    if taggingJob?.status == "running" {
+                        TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14)
+                    } else if taggingJob?.status == "failed" || retagError != nil || tagsStale {
+                        Button { startRetag() } label: {
+                            TronInlineActionLabel(taggingJob?.status == "failed" || retagError != nil ? "Retry tagging" : "Re-tag", accent: .tronKnowledge)
                         }
+                        .buttonStyle(.plain)
+                        .disabled(!admitsOrigin)
                     }
-                } label: {
-                    TronSettingsRow(icon: "checkmark.seal", title: "Verdict", subtitle: source.verdict?.verdict.label ?? "Not judged yet", accent: .tronKnowledge) {
-                        if verdictSaving { TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14) }
+                }
+                let labels = sourceTagLabelTexts(source)
+                if !labels.isEmpty {
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    KnowledgeTagChips(labels: labels)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                        .padding(.vertical, TronSpacing.lg)
+                }
+            }
+        }
+        TronSettingsGroup("Verdict and scope", accent: .tronKnowledge) {
+            VStack(spacing: 0) {
+                TronValueRow(icon: "checkmark.seal", title: "Verdict", accent: .tronKnowledge) {
+                    Menu {
+                        ForEach(KnowledgeSourceVerdict.allCases, id: \.self) { verdict in
+                            Button(verdict.label) {
+                                if verdict == .superseded { choosingReplacement = true }
+                                else { choosingReplacement = false; setVerdict(verdict) }
+                            }
+                        }
+                    } label: {
+                        TronInlineActionLabel(source.verdict?.verdict.label ?? "Not judged", isWorking: verdictSaving, accent: .tronKnowledge)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
-                }.disabled(verdictSaving || !admitsOrigin)
+                    .disabled(verdictSaving || !admitsOrigin)
+                    .accessibilityLabel("Verdict, \(source.verdict?.verdict.label ?? "not judged")")
+                }
                 if source.verdict?.verdict == .superseded, let replacement = supersededReplacementRow {
+                    TronSettingsDivider(accent: .tronKnowledge)
                     Button { openLinkedRecord(id: replacement.id, revisionID: replacement.revisionId) } label: {
-                        TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", subtitle: replacement.id, accent: .tronKnowledge) {
+                        TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", accent: .tronKnowledge) {
                             Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronKnowledge)
                         }
                     }.buttonStyle(.plain)
                 }
                 if choosingReplacement || source.verdict?.verdict == .superseded {
-                    TextField("Search replacement", text: $replacementQuery)
-                        .tronField()
-                        .task(id: replacementQuery) { await searchReplacement() }
-                    ForEach(replacementRows.filter { $0.id != currentRecord.id }, id: \.id) { row in
-                        Button("Replaced by: \(row.title)") { choosingReplacement = false; setVerdict(.superseded, replacementID: row.id) }
-                            .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
-                    }
-                }
-                Menu {
-                    ForEach(KnowledgeScope.allCases, id: \.self) { target in
-                        Button(target == .personal ? "Moose's Corner" : target.label) { setScope(target) }
-                    }
-                    if source.admission?.status != .archived {
-                        Button("Archive entry", role: .destructive) { setVerdict(.archive) }
-                    } else {
-                        Button("Unarchive entry") { setAdmission(.retained) }
-                    }
-                } label: {
-                    TronSettingsRow(icon: "folder", title: "Scope and archive", subtitle: currentRecord.scope == .personal ? "Moose's Corner" : "Research", accent: .tronKnowledge) {
-                        if scopeSaving { TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14) }
-                    }
-                }.disabled(scopeSaving || !admitsOrigin)
-                if let verdictError {
+                    TronSettingsDivider(accent: .tronKnowledge)
                     VStack(alignment: .leading, spacing: TronSpacing.sm) {
-                        TronSettingsCaption(verdictError)
-                        Button("Retry") {
+                        TextField(source.verdict?.verdict == .superseded ? "Change replacement" : "Search for the replacement", text: $replacementQuery)
+                            .tronField()
+                            .task(id: replacementQuery) { await searchReplacement() }
+                        ForEach(replacementRows.filter { $0.id != currentRecord.id }, id: \.id) { row in
+                            Button { choosingReplacement = false; setVerdict(.superseded, replacementID: row.id) } label: {
+                                TronSettingsRow(icon: "doc.text", title: row.title, accent: .tronKnowledge) {
+                                    TronInlineActionLabel("Choose", accent: .tronKnowledge)
+                                }
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    .padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
+                }
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronValueRow(icon: "folder", title: "Scope", detail: currentRecord.scope == .personal ? "Only surfaces when asked about you" : "Surfaces in agent work", accent: .tronKnowledge) {
+                    Menu {
+                        ForEach(KnowledgeScope.allCases, id: \.self) { target in
+                            Button(target.label) { setScope(target) }
+                        }
+                    } label: {
+                        TronInlineActionLabel(currentRecord.scope.label, isWorking: scopeSaving, accent: .tronKnowledge)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .disabled(scopeSaving || !admitsOrigin)
+                    .accessibilityLabel("Scope, \(currentRecord.scope.label)")
+                }
+                TronSettingsDivider(accent: .tronKnowledge)
+                let archived = source.admission?.status == .archived
+                TronValueRow(icon: "archivebox", title: archived ? "Archived" : "Archive", detail: archived ? "Hidden from the Library and agents" : "Hide from the Library and agents; recoverable", accent: .tronKnowledge) {
+                    Button { if archived { setAdmission(.retained) } else { setVerdict(.archive) } } label: {
+                        TronInlineActionLabel(archived ? "Unarchive" : "Archive", isWorking: scopeSaving, accent: .tronKnowledge)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(scopeSaving || verdictSaving || !admitsOrigin)
+                }
+                if let verdictError {
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    TronSettingsRow(icon: "exclamationmark.triangle", title: "Change not saved", subtitle: verdictError, subtitleLineLimit: 3, accent: .tronAmber) {
+                        Button {
                             if let retryVerdict { setVerdict(retryVerdict, replacementID: retryReplacementID) }
                             else if let retryScope { setScope(retryScope) }
                             else if let retryAdmission { setAdmission(retryAdmission) }
-                        }.buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+                        } label: { TronInlineActionLabel("Retry change", accent: .tronKnowledge) }
+                        .buttonStyle(.plain)
                     }
                 }
-            }.padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
+            }
         }
     }
 
-    @ViewBuilder private func sourceTagLabels(_ source: KnowledgeSourceContent) -> some View {
-        let labels = sourceRow?.tags?.map(\.label) ?? source.tags?.tagIds.compactMap { id in sourceConfig?.tagVocabulary.tags.first(where: { $0.id == id })?.label } ?? []
-        if !labels.isEmpty {
-            ToolChipFlowLayout(spacing: TronSpacing.sm) {
-                ForEach(Array(labels.enumerated()), id: \.offset) { _, label in
-                    Text(label).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronKnowledgeText)
-                        .padding(.horizontal, 10).padding(.vertical, 5).background(Color.tronKnowledge.opacity(0.12), in: Capsule())
-                }
-            }
-        } else if let tagIds = source.tags?.tagIds, !tagIds.isEmpty {
-            Text(tagIds.joined(separator: " · ")).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-        } else if source.tags == nil {
-            Text("Tags not assigned yet").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-        }
+    private func tagStatus(_ source: KnowledgeSourceContent) -> String {
+        if taggingJob?.status == "running" { return "Updating tags" }
+        if let retagError { return retagError }
+        if taggingJob?.status == "failed" { return taggingJob?.reason ?? "Re-tagging failed; your current tags are unchanged." }
+        if tagsStale { return "Needs re-tagging" }
+        let count = sourceTagLabelTexts(source).count
+        return count == 0 ? "Not tagged yet" : "\(count) tag\(count == 1 ? "" : "s")"
+    }
+
+    private func sourceTagLabelTexts(_ source: KnowledgeSourceContent) -> [String] {
+        if let rowTags = sourceRow?.tags { return rowTags.map(\.label) }
+        // Unresolved IDs stay visible rather than disappearing behind a spinner.
+        return source.tags?.tagIds.map { id in sourceConfig?.tagVocabulary.tags.first(where: { $0.id == id })?.label ?? id } ?? []
     }
 
     @ViewBuilder private func sourceDetails(_ source: KnowledgeSourceContent) -> some View {
@@ -2231,6 +2256,23 @@ struct KnowledgeDetailView: View {
     private func saveNote(_ note: KnowledgeNoteContent) { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.updateNote(id: currentRecord.id, expectedRevision: currentRecord.revisionId, record: KnowledgeRecordDraft(id: currentRecord.id, createdAt: currentRecord.createdAt, updatedAt: nil, kind: .note, scope: currentRecord.scope, provenance: currentRecord.provenance, temporal: currentRecord.temporal, relations: currentRecord.relations, content: .note(KnowledgeNoteContent(title: note.title, body: noteBody, fields: note.fields, role: note.role, confirmed: note.confirmed, contraryEvidence: note.contraryEvidence, freshness: note.freshness, privacyScope: note.privacyScope, usageConstraint: note.usageConstraint))), confirmedByUser: note.confirmed); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.record; mutationInFlight = false; message = "Saved"; await onChanged() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func exclude() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.setExclusion(recordID: currentRecord.id, expectedRevision: currentRecord.revisionId, excluded: true); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func forget() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.forget(id: currentRecord.id, expectedRevision: currentRecord.revisionId, reason: "Forgotten from iOS"); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
+}
+
+/// Controlled-vocabulary tag labels as wrapping chips.
+private struct KnowledgeTagChips: View {
+    let labels: [String]
+
+    var body: some View {
+        ToolChipFlowLayout(spacing: TronSpacing.sm) {
+            ForEach(Array(labels.enumerated()), id: \.offset) { _, label in
+                Text(label)
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronKnowledgeText)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Color.tronKnowledge.opacity(0.12), in: Capsule())
+            }
+        }
+    }
 }
 
 struct KnowledgeConfigurationView: View {

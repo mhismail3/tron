@@ -84,7 +84,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         app.buttons["fixture.type-take"].tap()
         XCTAssertTrue(counters(app, contain: "take:1"), "Autosave after the typing pause: \(app.debugDescription)")
 
-        let updating = app.staticTexts["Updating tags"]
+        let updating = updatingTags(app)
         scrollTo(updating, in: app)
         XCTAssertTrue(updating.waitForExistence(timeout: 10), "A saved take re-tags in the background: \(app.debugDescription)")
         keepScreenshot(named: "k7-updating-tags")
@@ -103,7 +103,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         app.buttons["Retry"].tap()
         XCTAssertTrue(counters(app, contain: "take:3"), "Retry saves the draft over the current revision")
         XCTAssertFalse(current.waitForExistence(timeout: 2), "A saved retry clears the conflict")
-        XCTAssertTrue(app.staticTexts["Updating tags"].waitForExistence(timeout: 10))
+        XCTAssertTrue(updatingTags(app).waitForExistence(timeout: 10))
         app.buttons["fixture.complete-tags"].tap()
 
         // A failed save keeps the draft and retries on request.
@@ -130,7 +130,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         scrollTo(take, in: app)
         app.buttons["fixture.type-take"].tap()
         XCTAssertTrue(counters(app, contain: "take:1"))
-        XCTAssertTrue(app.staticTexts["Updating tags"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(updatingTags(app).waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["fixture.fail-tags"].tap()
         let retry = app.buttons["Retry tagging"]
         XCTAssertTrue(retry.waitForExistence(timeout: 10), app.debugDescription)
@@ -138,7 +138,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         keepScreenshot(named: "k7-tag-failure-retry")
         retry.tap()
         XCTAssertTrue(counters(app, contain: "tag:1"), "Retry starts one explicit re-tag")
-        XCTAssertTrue(app.staticTexts["Updating tags"].waitForExistence(timeout: 10))
+        XCTAssertTrue(updatingTags(app).waitForExistence(timeout: 10))
         app.buttons["fixture.complete-tags"].tap()
         XCTAssertTrue(app.staticTexts["Agent harness"].waitForExistence(timeout: 10), app.debugDescription)
     }
@@ -148,7 +148,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "personal")
         defer { app.terminate() }
-        let scope = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Moose's Corner")).firstMatch
+        let scope = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Scope, Personal")).firstMatch
         XCTAssertTrue(app.textViews["Your take"].waitForExistence(timeout: 10), app.debugDescription)
         scrollTo(scope, in: app)
         XCTAssertTrue(scope.exists, app.debugDescription)
@@ -163,6 +163,12 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         app.launchArguments = ["-tron-knowledge-detail-fixture", "-knowledge-detail-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         return app
+    }
+
+    /// The Tags row merges its title and status into one accessibility element.
+    @MainActor
+    private func updatingTags(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Updating tags")).firstMatch
     }
 
     @MainActor
