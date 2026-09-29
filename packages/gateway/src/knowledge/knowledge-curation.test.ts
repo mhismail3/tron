@@ -86,6 +86,19 @@ const statuses = (response: KnowledgeCurationResponse) => response.outcomes.map(
 const byStatus = (response: KnowledgeCurationResponse, status: string) => response.outcomes.filter(outcome => outcome.status === status);
 
 describe("Knowledge curation", () => {
+  /** Failure modes: terminal state is never published, failure is mistaken for
+   * success, or event delivery can alter the durable job result. */
+  it("publishes terminal events for successful and failed owned jobs", async () => {
+    const events: unknown[] = [];
+    const jobs = new KnowledgeCurationJobs(64, 30_000, job => events.push(job));
+    jobs.start({ commandId: "job-success", operation: "summary", sourceId: "source-1", run: async () => ({ revisionId: "revision-2" }) });
+    jobs.start({ commandId: "job-failure", operation: "tags", sourceId: "source-2", run: async () => { throw new Error("provider failed"); } });
+    for (let attempt = 0; attempt < 200 && events.length < 2; attempt += 1) await new Promise(resolve => setTimeout(resolve, 5));
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ commandId: "job-success", operation: "summary", sourceId: "source-1", status: "done", revisionId: "revision-2" }),
+      expect.objectContaining({ commandId: "job-failure", operation: "tags", sourceId: "source-2", status: "failed", code: expect.any(String), reason: expect.any(String) }),
+    ]));
+  });
   it("applies a batch through the agent tool and reads back what it wrote", async () => {
     const { store, service } = await fixture();
     const records = [await capture(store, 1), await capture(store, 2)];

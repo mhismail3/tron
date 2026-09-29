@@ -110,9 +110,13 @@ previews (`knowledge.previews.read`) instead of full records.
 Curation (`knowledge.source.curate`, capability `knowledge-curation.v1`) writes
 summaries, vocabulary tags, verdicts, placement and relations as interpretation
 through the same owner, one receipted mutation per item, so a batch reports each
-entry's outcome and a replay resumes it; summary generation is owned background
-work whose state the agent observes (`knowledge.curation.jobs`) instead of
-holding a request open. See [Knowledge storage](docs/knowledge.md#curation-and-enrichment).
+entry's outcome and a replay resumes it; summary generation and Jev re-tagging
+are owned background work whose state the agent observes (`knowledge.curation.jobs`)
+instead of holding a request open. Their terminal `knowledge.curation.job`
+events carry the job identity/status and outcome/error metadata; clients query
+canonical job/record state after the event. The event list also includes
+`knowledge.changed`, a short-window coalesced state-revision invalidation after
+committed Knowledge mutations. See [Knowledge storage](docs/knowledge.md#curation-and-enrichment).
 `knowledge-store.test.ts` covers this commit boundary and notification failure isolation. Retained source objects are available only through
 `knowledge.object.read` with the exact owning record ID and committed revision;
 the store rechecks current privacy/exclusion fences after byte I/O and never

@@ -175,8 +175,16 @@ placement or relations.
 `tags` job instead of waiting for Jev. `knowledge.tags.run` (agent tool
 `retagQueue`) owns one bounded queue run of 1..25 entries from the canonical
 `knowledge.tags.retag-needed` query. Repeated command IDs observe the existing
-job. `knowledge.curation.jobs` reports its state. Cancellation preserves already
-committed entries; an interrupted entry remains in the K3 query. K5 can call
+job. `knowledge.curation.jobs` reports its state. On every owned job's
+`running` → `done` or `failed` transition, the Gateway publishes
+`knowledge.curation.job` with `sourceId`, `commandId`, `operation`, `status`,
+and the terminal `revisionId` or actionable `code`/`reason`. This is an
+invalidation/event signal, not a state mirror: clients query `knowledge.curation.jobs`
+on open, reconnect, and this event, then read the committed record revision.
+Terminal notifications share the Gateway event transport with the coalesced
+`knowledge.changed` invalidation emitted by committed writes. Cancellation
+preserves already committed entries; an interrupted entry remains in the K3
+query. K5 can call
 `knowledge.source.tag` after source capture/summary as part of its intake flow.
 
 Tag evidence is limited by UTF-8 byte bounds: title 512, current summary 2,000,

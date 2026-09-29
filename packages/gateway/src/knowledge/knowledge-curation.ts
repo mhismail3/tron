@@ -89,7 +89,11 @@ interface JobEntry { job: KnowledgeCurationJob; controller: AbortController }
  * committed revision, where a restart can only lose `running`. */
 export class KnowledgeCurationJobs {
   private readonly jobs = new Map<string, JobEntry>();
-  constructor(private readonly maximum = 64, private readonly deadlineMs = 120_000) {}
+  constructor(
+    private readonly maximum = 64,
+    private readonly deadlineMs = 120_000,
+    private readonly onTerminal?: (job: KnowledgeCurationJob) => void,
+  ) {}
 
   /** The job one command ID already started, so a duplicate request observes
    * that run instead of starting (and paying for) a second one. */
@@ -114,9 +118,11 @@ export class KnowledgeCurationJobs {
         const settled = await input.run(controller.signal, reason => controller.abort(reason));
         const { code: _code, reason: _reason, ...rest } = entry.job;
         entry.job = { ...rest, status: "done", finishedAt: new Date().toISOString(), revisionId: settled.revisionId };
+        try { this.onTerminal?.({ ...entry.job }); } catch { /* Event delivery cannot change an owned job outcome. */ }
       } catch (error) {
         const failure = curationJobFailure(error, controller.signal.aborted, controller.signal.reason);
         entry.job = { ...entry.job, status: "failed", finishedAt: new Date().toISOString(), code: failure.code, reason: failure.reason };
+        try { this.onTerminal?.({ ...entry.job }); } catch { /* Event delivery cannot change an owned job outcome. */ }
       } finally {
         clearTimeout(deadline);
       }

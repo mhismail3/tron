@@ -44,6 +44,7 @@ import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
+import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
 import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
@@ -378,7 +379,15 @@ const knowledge = new KnowledgeService(
     const configured = (await connections.snapshot()).instances.filter(instance => instance.definitionId === "knowledge.jev" && instance.policy.enabled);
     return knowledgeTaggingBudget.gate(configured.length === 1 ? configured[0]!.id : undefined);
   },
-  undefined,
+  new KnowledgeCurationJobs(64, 120_000, job => transport?.broadcast("knowledge.curation.job", {
+    sourceId: job.sourceId,
+    commandId: job.commandId,
+    operation: job.operation,
+    status: job.status,
+    ...(job.revisionId ? { revisionId: job.revisionId } : {}),
+    ...(job.code ? { code: job.code } : {}),
+    ...(job.reason ? { reason: job.reason } : {}),
+  })),
   knowledgeTagging,
 );
 sessions.setKnowledgeService(knowledge);
