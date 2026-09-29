@@ -449,7 +449,6 @@ final class ChatVisualParityRunner {
     /// to 0.019 of their 0.025 bound, so the snap still carries the reference's
     /// determinism and F9's removal belongs with CT-23's exact origin.
     func capture(_ phase: String) {
-        try? harness.snapNativeTranscriptOffsetToWholePoint()
         let rendered = harness.renderedParityFrame(
             scale: ChatVisualParitySpec.renderScale,
             rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
@@ -505,8 +504,7 @@ final class ChatVisualParityRunner {
         var stable = 0
         for _ in 0..<cap {
             try await harness.driveFrameBoundary()
-            try? harness.snapNativeTranscriptOffsetToWholePoint()
-            let fingerprint = ChatVisualParityFingerprint(harness.renderedParityFrame(
+                let fingerprint = ChatVisualParityFingerprint(harness.renderedParityFrame(
                 scale: ChatVisualParitySpec.renderScale,
                 rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
                 columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,

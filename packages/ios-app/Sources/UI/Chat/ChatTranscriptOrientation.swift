@@ -303,7 +303,16 @@ private struct ChatTranscriptViewportModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if orientation.presentsNewestRowFirst {
-            content.chatTranscriptOrientation(orientation)
+            let margins = orientation.scrollMargins(for: safeAreaInsets)
+            content
+                .ignoresSafeArea(.container, edges: .vertical)
+                .ignoresSafeArea(.keyboard, edges: .vertical)
+                .contentMargins(.top, margins.top, for: .scrollContent)
+                .contentMargins(.bottom, margins.bottom, for: .scrollContent)
+                .contentMargins(.top, margins.top, for: .scrollIndicators)
+                .contentMargins(.bottom, margins.bottom, for: .scrollIndicators)
+                .chatTranscriptOrientation(orientation)
+                .ignoresSafeArea(.all, edges: .vertical)
         } else {
             content
         }
