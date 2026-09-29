@@ -567,6 +567,35 @@ struct ChatRowStabilityTests {
                     abs(returned - collapsedHeight) <= 1.5,
                     "the collapsed height must survive the scroll: \(returned) vs \(collapsedHeight)"
                 )
+
+                // The same display presenting a later revision is still the
+                // card the reader collapsed: the phase is keyed by the display's
+                // own identity, not by the revision that carries new content.
+                var revised = snapshot
+                revised.transcript = snapshot.transcript.map { item in
+                    item.id == "\(callID)-result"
+                        ? (try? decodeTranscriptFixture(
+                            TranscriptItem.self,
+                            from: JSONSerialization.data(withJSONObject: inlineDisplayRows(
+                                callID: callID,
+                                title: "Inline Markdown A revised",
+                                revision: 2
+                            )[1])
+                        )) ?? item
+                        : item
+                }
+                revised.revision += 1
+                revised.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(revised)
+                try await driveBoundaries(20, harness: harness)
+                let afterRevision = try await settledRowHeight(rowID, harness: harness)
+                print("ROW-STABILITY-DISCLOSURE expanded=\(rowStabilityNumber(expandedHeight))"
+                    + " collapsed=\(rowStabilityNumber(collapsedHeight))"
+                    + " afterRevision=\(rowStabilityNumber(afterRevision))")
+                #expect(
+                    abs(afterRevision - collapsedHeight) <= 1.5,
+                    "a content revision re-expanded the collapsed card: \(afterRevision) vs collapsed \(collapsedHeight)"
+                )
             }
         }
     }
@@ -1908,7 +1937,8 @@ private func inlineDisplayRows(
     callID: String,
     title: String,
     surface: String = "inline",
-    tapAction: String = "sheet"
+    tapAction: String = "sheet",
+    revision: Int = 1
 ) -> [[String: Any]] {
     let requestID = "\(callID)-request"
     let resultID = "\(callID)-result"
@@ -1947,7 +1977,7 @@ private func inlineDisplayRows(
             "display": [
                 "schema": "tron.display.v1",
                 "displayId": callID,
-                "revision": 1,
+                "revision": revision,
                 "title": title,
                 "altText": "\(title) fixture.",
                 "kind": "markdown",
