@@ -59,8 +59,8 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
 
     /// Whether the pinned end the transcript keeps is the lazy stack's own
     /// estimate. Every mechanism that materializes, repairs or proves that end
-    /// exists for this case, and is gated off — not deleted, CT-19 removes them
-    /// — while the anchor is the exact origin.
+    /// exists for this case and is gated off while the anchor is the exact
+    /// origin (not deleted: CT-19 removes them).
     var pinsToEstimatedOrigin: Bool { self == .newestAtEnd }
 
     // MARK: The layout the transcript's own ends map to

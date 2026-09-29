@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-29, CT-27 merged with CT-25 and green on the merged base
+- **Last updated:** 2026-09-29, CT-23 re-applied on the CT-25/CT-27 base (stage 1)
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -111,7 +111,7 @@ breaks context-menu previews.
 | CT-27 | Done | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | chat scroll session (worker lane ct-27-rows), 2026-09-28 |
 | CT-28 | Ready | Record-only invariant monitor in the product (pinned bottom band uncovered for more than 2 frames, detached anchor moved without input, opening revealed uncovered), deduplicated, reaching device exports and surviving relaunch; delete the noisy tail-edge trace records; write the missing send-choreography device checklist in `development.md` | CT-25 | |
 | CT-24 | Done | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
-| CT-23 | Claimed | Origin-anchored transcript spike: the transcript's scroll view is flipped so its content origin is the visual bottom, rows are counter-flipped and ordered newest first; judged by every yardstick plus the risk probes in Task details | CT-24 | chat scroll session, 2026-09-28 |
+| CT-23 | Claimed | Origin-anchored transcript, re-applied on `main`'s post-CT-25/CT-27 structure in stages under the one `ChatTranscriptOrientation` owner: the scroll view's render flip with a counter-flip per content element through the same modifier, newest-first spine order, the owner-mapped edges/anchors/padding, the flip as the whole composer/keyboard inset mechanism, opening as install → one frame → reveal, and the five estimated-end mechanisms gated off. Stage 1 measured: the four bottom gates 3/3 with zero blank and zero uncovered boundaries, the keyboard journey 3/3 at the 12 pt tail, switch off unchanged (parity 10/10); open: the parity region's contrast wash (8/10), the detached reader's row-identity anchor, and the review's other flip-path items | CT-24 | chat scroll session (worker lane ct23b), 2026-09-29 |
 | CT-22 | Claimed | Exact tail prototype (keep the SwiftUI `ScrollView`, rows and animations): measure two ways of making the pinned bottom exact on a throwaway branch. (a) Previously measured rows keep their last measured height when they leave the viewport. (b) The newest rows render in an eager stack below a `LazyVStack` of older history, so the bottom and everything near it are measured, never estimated; the boundary moves in coarse steps so rows rarely change parent. Judged by the CT-2 fixtures, the parity gate, the harness and CT-10's scale numbers | CT-20 | chat scroll investigation session, 2026-09-27 |
 | CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15, CT-20 | |
 | CT-17 | Needs scoping | Qualification: with the switch on, the CT-12 and CT-14 gates pass against the `main` reference, the CT-2 fixtures and a 512-row blank fixture read zero blank boundaries, every `ChatViewScrollHarnessTests` visible invariant holds, and frame cost, opening time and memory at 150, 300 and 512 heavy rows are no worse than CT-10's baseline | CT-16, CT-14, CT-10 | |
@@ -2402,3 +2402,192 @@ pass only through eager-only repairs, stop and report.
 - For the next agent: CT-27 is complete and green on the merged base on
   `ct-27-rows`; the branch is ready for the supervisor's merge, and CT-23
   resumes against CT-25's gates unchanged.
+
+### CT-23 re-application stage 1 · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: the origin-anchored transcript is re-applied on `main`'s post-CT-25/
+  CT-27 structure and measured. `ChatTranscriptOrientation` is the one owner: the
+  render flip on the scroll view, the counter-flip every content element applies
+  through the same modifier, the row spine's newest-first order, the layout edge,
+  anchor and padding set a transcript-relative name maps to, the sign a layout
+  offset keeps, and the geometry the coordinator reads (the `ScrollGeometry` read
+  moved out of the scroll view into the owner). No caller branches on the flip
+  (review finding P2-2): the five gated sites ask one of three semantic questions
+  — `presentsNewestRowFirst`, `mountsNewestRowWithContent`, `pinsToEstimatedOrigin`
+  — and every end-naming site goes through the owner. The flip is the whole
+  composer/keyboard inset mechanism (the flipped scroll view's own mirrored safe
+  areas; no `GeometryReader`, no margin), the opening is install → one frame →
+  reveal, and the five estimated-end mechanisms are gated off, not deleted.
+
+  With the switch off today's path is unchanged: parity 10/10, the four field
+  shapes still reproduce their blank, and the full harness is 64/65 with only the
+  recorded `displacedRetainedResume` load flake (CT-9) — which passes in isolation
+  in the same lane. With the switch on the four bottom gates pass three runs each
+  with zero blank boundaries, zero uncovered-band boundaries,
+  `minVisibleRowFraction=1.0` and the newest row settled at exactly 12.0 pt; the
+  keyboard journey passes three runs at the same 12.0 pt. The spike's one-frame
+  tall-insertion sliver (`minVisibleRowFraction` 0.0-0.1 on the CT-24 shapes) does
+  not appear on CT-27's row structure in these runs. The one visible gate still
+  failing is the parity region's wash, unchanged from the spike: 8 of 10 scenarios
+  differ by 0.083-0.096 with every worst frame matching at `shift1.0`.
+
+- Evidence (lane ct23b, products built from this worktree's own source state at
+  `e1f1ff05d`, clean, every run under `~/Library/Developer/Tron/ios/test-runs/`;
+  the orientation is selected with
+  `TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`):
+
+  **(1) The four bottom gates with the switch on, three runs each** (each run is
+  one invocation of all four journeys; `TranscriptBottomGateExpectation
+  .current(for:)` = `coveringBottomIsRequired`):
+
+  | shape | blank | uncovered band | min visible row fraction | newest-row clearance | run dirs |
+  | --- | --- | --- | --- | --- | --- |
+  | CT-2 many tall replies (72) | 0 | 0 | 1.0 | 12.0 | `114234Z.ODYqM9`, `114317Z.sfTJa8`, `114347Z.MEwz8J` |
+  | CT-2 keyboard cycles + sends (340) | 0 | 0 | 1.0 | 12.0 | same three |
+  | CT-24 resync under tall newest (90) | 0 | 0 | 1.0 | 12.0 | same three |
+  | CT-24 send under tall newest (68) | 0 | 0 | 1.0 | 12.0 | same three |
+
+  All twelve journeys report `repairCommands=materialize:0,physical:0,pastEnd:0`
+  and `tailDisplacements=0`: nothing on the flipped path asks for a repair. The
+  CT-24 shapes' realized tall rows measure 1,762.7 and 1,897.3 pt, and every
+  CT-2/CT-24 line carries `orientation=origin`, so a line says which side of the
+  switch produced it.
+
+  **(2) The same gates and the keyboard journey with the switch off**
+  (`114542Z.OXo8es`): the four shapes still reproduce the field defect — 56/72,
+  183/340, 77/90 and 14/68 blank boundaries — so every gate passes as
+  `uncoveringBottomIsTheKnownDefect`, and the journey is unchanged by the
+  restructure. The keyboard journey settles at 12.3 pt on today's path, but its
+  own ramp swings `[-674.2, 96317.3]` and one boundary in the keyboard phase
+  blanks with `minVisibleRowFraction=0.0`.
+
+  **(3) The keyboard's own inset path with the switch on, three runs**
+  (`114512Z.Au7qjG`, `121014Z.tytsZm`, `121034Z.fSRAmi`): every run passes with
+  `blankBoundaries=0/56`, `uncoveredBandBoundaries=0`,
+  `minVisibleRowFraction=1.0`, `clearanceRange=[4.0,12.0]` and
+  `settledClearance=12.0` at both settled boundaries (`p2`-`p4` are exactly 12.0;
+  the low 4.0 is the phase before the keyboard's inset is driven, and `p1` reads
+  9.0-9.6 as the inset lands). Today's path on the same journey: see (2).
+
+  **(4) `ChatVisualParityTests`, all ten scenarios.**
+  - Switch **off** (`114640Z.276JYr`): 10/10 pass (worst 0.05488 transition,
+    0.01355 stable) — the content extraction, the owner-mapped anchors and the
+    conditional orientation modifier do not move today's path.
+  - Switch **on** (`114809Z.1DnXAg`): 2/10 pass. `short-transcript-at-rest`
+    passes at 0.00293 and `oldest-row-at-visual-top` now passes at 0.01861 (the
+    spike's orientation-specific far-top clamp is gone; `main`'s verbatim
+    legal-range clamp and the committed reference agree). The other eight fail at
+    0.08291-0.09553 from `frame0:rest` on against their 0.025 stable bound, every
+    worst frame best-matching at `shift1.0` — the spike's ~24%-contrast wash over
+    the parity band (`opened-long-history-at-rest`, `ordinary-send-keyboard-up`,
+    `streaming-tail-growth`, `queued-card-to-sent-row`, `tool-chip-entrance`,
+    `earlier-page-load-at-rest`, `detached-reader-catch-up`,
+    `keyboard-safe-area-inset`). The keyboard scenario's failure is now the wash
+    alone: the inset path it drives passes (3).
+
+  **(5) The full `ChatViewScrollHarnessTests`, both orientations.**
+  - Switch **off** (`120258Z.unRrkY`): 64/65 pass, 16.3 s suite; the single
+    failure is `displacedRetainedResume`'s 15 s watchdog under the full suite, the
+    load flake CT-9 records (`120921Z.OQ4a2s` passes it in isolation in the same
+    lane). So the switch-off restructure is a no-op for the whole harness.
+  - Switch **on** (`114955Z.8vxLGo`): 48/65 pass and 17 fail (33 issues, 273 s),
+    all classified:
+    - *Asserts a mechanism the flip retires (13, for CT-19 to delete with their
+      tests)*: the tail-materialization command counts (`an ordinary send over a
+      mixed-height lazy history settles on its native tail`,
+      `agent response and compaction settlement retain mounted physical rows`,
+      `ordinary discrete transcript insertion materializes and reveals exactly
+      once`, `running tool entrance uses displayed install when desired completion
+      advances first`, `real tool group topology inserts one chip under native
+      viewport pinning`), the `ScrollPosition` target lease and its release
+      (`resumed multiline send settles from native row geometry during keyboard
+      resize`, and the watchdogs of `ordinary send keeps one stable tail through
+      target release`, `short and long history preserve the mounted prompt through
+      acknowledgement and successor`, `a real managed sheet freezes covered chat
+      and uncovers to the latest native frame`, `retained detached authority
+      replacement preserves its installed cut`), the target-free rebase
+      (`dynamic-height retained pinned view rebases native rows after
+      displacement`), the past-end net (`a sustained past-end pinned viewport
+      returns to the tail through one disabled repair`), and the lease trace
+      (`chat.lease.semantic-handoff`).
+    - *The flipped opening's own shape (3)*: `production unfinished opening
+      retains its exact subscription across cover and settles an accepted upload
+      once` and `real opening deadline failures publish only for their current
+      live owner` deadlock in their hosted waits, because install → one frame →
+      reveal never publishes the physical settlement they hold, and `cancelled
+      frame wait closes readiness exactly once` sees a different first-ready
+      sequence because the flipped opening runs no positioning pass. These
+      journeys are owed by the opening rewrite, not by this stage.
+    - *A test premise that assumes today's orientation (1)*:
+      `a flipped transcript without counter-flipped rows fails the window oracle`
+      flips the native scroll view by hand and expects the removed scroll-space
+      measurement to read the legal end; on a run whose spine is already
+      newest-first that end is 3,006 pt away.
+    - *Visible behaviour not yet implemented (1)*: `a detached reader holds its
+      top row through streaming, a keyboard cycle and a page load` — the
+      reader's top row moves 10.0 pt and changes identity
+      (`detach-anchor-turn-43` → `detach-anchor-turn-54`) across the earlier-page
+      load, and the keyboard cycle moves it too. This is the row-identity
+      detached anchor the 2026-09-29 review decided, still owed.
+
+- Changes: `ChatTranscriptOrientation.swift` (new, the owner and the one modifier
+  both the transcript and each content element apply),
+  `ChatTranscriptScrollView.swift` (the spine's newest-first order and `newest`
+  accessor, the content split into `transcriptContent`/`earlierMessagesRow` with
+  the orientation's end mapping and the counter-flip, the owner-mapped anchors and
+  geometry reads, the gated lazy-tail request, the `ScrollGeometry` read moved to
+  the owner), `ChatScrollCoordinator.swift` (the orientation and the four gated
+  mechanisms), `ChatView.swift` (the orientation field, the semantic-question
+  gates, the commands mapped through the owner's anchors and edge),
+  `ChatViewScrollHarnessTests.swift` (per-run orientation selection,
+  `TranscriptBottomGateExpectation.current(for:)`, the per-orientation
+  materialization expectation, the orientation field on both metrics lines).
+- Deviations from the spike, all deliberate:
+  - Review P2-2 is fixed rather than carried: the spike's raw `isFlipped` branches
+    at nine sites are three semantic questions on the owner, and the row
+    counter-flip is the owner's modifier instead of an inline `scaleEffect`.
+  - The print-only contrast probe (`ct23FlippedParityContrast`, `ct23Ink`) and its
+    `CT24-TRANSIENT`/`CT25-KEYBOARD-TRACE` diagnostics were **not** ported: the
+    testing policy excludes shipping tests that assert nothing, and this stage's
+    evidence does not need them. The parity failure above is therefore named by
+    the gate's own retained captures and its `shift1.0` framing, not by a new
+    probe.
+  - `main`'s verbatim legal-range clamp replaces the spike's orientation-specific
+    far-top clamp, so `oldest-row-at-visual-top` passes on the flipped path (4).
+  - The stage-1 spike's CT-24 `minVisibleRowFraction` deviation (1-2 of 90
+    boundaries at 0.0-0.1, the "sliver") did not reproduce on `main`'s CT-27 row
+    structure in three runs (1). It stays on the CT-7 device checklist rather than
+    being declared fixed, because these are hosted runs of one fixture.
+  - Row and collection *positions* (`physicalRowPositions`,
+  `physicalTerminalPosition`) still read the spine's visual order, so the
+  diagnostic `requestedRowOffsetFromTerminal` is inverted on the flipped path
+  (review P2-3). Diagnostic only; left for the stage that owns the flip's traces.
+- Kept on purpose: all five gated mechanisms with their command origins, traces
+  and harness counters (CT-19 deletes them once the flip passes every gate);
+  `snapNativeTranscriptOffsetToWholePoint`; the CT-2/CT-24 estimate fields; the
+  `.offsetY` scroll destination unmapped (review P1-1 — the staged catch-up is the
+  one command the flip still receives in mirrored coordinates, and replacing it
+  with a row or edge target is a design decision, not a port).
+- Open, with owners, in the order the evidence supports:
+  1. **The parity wash** (P1-6): 8/10 scenarios, 0.083-0.096, every worst frame at
+     `shift1.0`. The spike's bisection ruled out the capture path, capture scale,
+     the inset swap, the reveal opacity, the entrance wrapper, the row content,
+     the scroll structure, `scrollEdgeEffectStyle`, and a plain blur; what remains
+     is the row/marker *host* layer, the anchor modifiers on the scroll view, and
+     the UIKit-backed pieces inside rows.
+  2. **The detached reader's row-identity anchor** (decided 2026-09-29): the CT-25
+     B3 journey still fails on the flipped path (5).
+  3. The review's other flip-path items, each unmeasured here: the `.offsetY`
+     catch-up mapping (P1-1), adapted or deleted row and marker frames with the
+     anomaly classifier (P1-2), a row-identity detached anchor (P1-3), an entrance
+     that does not leave the viewport for a tall insertion (P1-4 — not observed in
+     (1), still a CT-7 item), the status-bar tap (P1-5, a user decision if only a
+     private reach-in would do it), context menus, VoiceOver order and scroll
+     direction, and optimized-profiler numbers (P2-6).
+  4. The `displacedRetainedResume` load flake is CT-9's, recorded again here; it is
+     not a correctness failure and this stage did not change it.
+- For the next agent: the flip is on `ct-23-flip2` (this worktree), today's path is
+  untouched, and stage 2 should start with the parity wash because it gates every
+  other visual probe, then the detached reader's row-identity anchor, then the
+  `ChatViewScrollHarnessTests` journeys the flip retires, which CT-19 deletes with
+  the mechanisms.
