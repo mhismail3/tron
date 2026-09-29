@@ -2182,6 +2182,19 @@ private final class HostRoutedGatewaySocketFactory: @unchecked Sendable {
     }
 }
 
+/// The routes one test's injected HTTP transports were asked to carry, so a
+/// case can say where an epoch's live view, media and uploads went (E-3c).
+private actor RecordedHTTPCalls {
+    private var calls: [(url: URL, pin: String?)] = []
+
+    func record(_ request: URLRequest, pin: String?) {
+        guard let url = request.url else { return }
+        calls.append((url, pin))
+    }
+
+    func recorded() -> [(url: URL, pin: String?)] { calls }
+}
+
 @Suite("Gateway client LAN lane race (E-3c)")
 struct GatewayClientLanLaneTests {
     private static let helloFrame = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8)
@@ -2207,6 +2220,84 @@ struct GatewayClientLanLaneTests {
     }
 
     private func wifiOnlyPath() -> @Sendable () -> String? { { "wifi,other" } }
+
+    @Test("an epoch the LAN lane carries routes HTTP and its pin to that lane")
+    func httpRoutesFollowTheWinningLane() async throws {
+        let calls = RecordedHTTPCalls()
+        let uploadID = UUID().uuidString
+        let payload = Data("media".utf8)
+        let lan = ScriptedGatewaySocket()
+        await lan.enqueue(Self.helloFrame)
+        let factory = HostRoutedGatewaySocketFactory(queued: [Self.lanHost: [lan]])
+        let client = GatewayClient(
+            socketFactory: factory.factory,
+            boundedHTTPDataTransport: BoundedHTTPDataTransport { request, _, pin in
+                await calls.record(request, pin: pin)
+                if request.httpMethod == "POST" {
+                    return (Data(#"{"upload":{"id":"\#(uploadID)"}}"#.utf8),
+                            HTTPURLResponse(url: request.url!, statusCode: 201, httpVersion: nil, headerFields: nil)!)
+                }
+                return (payload, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            },
+            boundedHTTPFileTransport: BoundedHTTPFileTransport { request, _, pin in
+                await calls.record(request, pin: pin)
+                return BoundedHTTPDownloadedFile(
+                    url: FileManager.default.temporaryDirectory.appending(path: "e-3c-\(UUID().uuidString)"),
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    byteCount: Int64(payload.count)
+                )
+            },
+            networkPath: wifiOnlyPath()
+        )
+        let profile = lanProfile()
+        _ = try await client.connect(profile: profile, token: "token")
+
+        let blobID = UUID().uuidString
+        let exportID = UUID().uuidString
+        let (blob, _) = try await client.blob(id: blobID, profileID: profile.id, maximumBytes: 1_024)
+        #expect(blob == payload)
+        let export = try await client.blobFile(id: exportID, maximumBytes: 1_024)
+        let uploaded = try await client.upload(name: "photo.bin", mimeType: "application/octet-stream", data: payload)
+
+        #expect(uploaded == uploadID)
+        #expect(export.lastPathComponent.hasPrefix("e-3c-"))
+        let recorded = await calls.recorded()
+        // Every route — media, the staged export file, and an upload — runs on
+        // the lane that won, with the pin its certificate must match.
+        #expect(recorded.count == 3)
+        #expect(recorded.allSatisfy { $0.url.host == Self.lanHost && $0.url.scheme == "https" })
+        #expect(recorded.allSatisfy { $0.pin == Self.pin })
+        #expect(Set(recorded.map(\.url.path)) == [
+            "/v1/blobs/\(blobID)", "/v1/blobs/\(exportID)", "/v1/uploads",
+        ])
+        await client.close()
+    }
+
+    @Test("an epoch the saved endpoint carries keeps HTTP there with no pin")
+    func httpRoutesStayOnTheSavedEndpoint() async throws {
+        let calls = RecordedHTTPCalls()
+        let payload = Data("media".utf8)
+        let socket = ScriptedGatewaySocket()
+        await socket.enqueue(Self.helloFrame)
+        let client = GatewayClient(
+            socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+            boundedHTTPDataTransport: BoundedHTTPDataTransport { request, _, pin in
+                await calls.record(request, pin: pin)
+                return (payload, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            },
+            networkPath: wifiOnlyPath()
+        )
+        let profile = savedOnlyProfile()
+        _ = try await client.connect(profile: profile, token: "token")
+        _ = try await client.blob(id: UUID().uuidString, profileID: profile.id, maximumBytes: 1_024)
+
+        let recorded = await calls.recorded()
+        #expect(recorded.count == 1)
+        #expect(recorded.first?.url.host == Self.savedHost)
+        #expect(recorded.first?.url.scheme == "http")
+        #expect(recorded.first?.pin == nil)
+        await client.close()
+    }
 
     @Test("the pinned LAN lane wins the race before the saved endpoint is dialed")
     func lanLaneWinsTheRace() async throws {

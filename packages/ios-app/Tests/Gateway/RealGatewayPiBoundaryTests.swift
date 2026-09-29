@@ -518,9 +518,10 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     /// production code end to end.
     ///
     /// Done when: the saved leg blackholed for 90 s is invisible to the
-    /// connection the LAN lane carries; a blocked LAN lane falls back to the
-    /// saved lane within the stagger plus one handshake; and a pin that does not
-    /// match the served certificate sends no credential.
+    /// connection the LAN lane carries — WebSocket and HTTP routes alike; a
+    /// blocked LAN lane falls back to the saved lane within the stagger plus one
+    /// handshake and retires its own socket; and a pin that does not match the
+    /// served certificate sends no credential.
     func testRacesLanAndTailscaleLanes() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let portText = environment["TRON_E2E_PORT"],
@@ -555,15 +556,27 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         XCTAssertEqual(lanHandshakes.first?.handshake?.transport, "lan")
 
         // (2) The saved lane blackholed for 90 s is invisible to that
-        // connection: the proxy drops every byte the other lane would carry while
-        // the LAN socket keeps answering.
-        try await control("blackhole", port: port, token: proxyToken)
+        // connection: the proxy drops every byte the other lane would carry —
+        // WebSocket frames and plain HTTP — while the LAN socket keeps
+        // answering. The upload is the HTTP half: the blackholed saved lane
+        // cannot answer it at all, so the route that returns an id is the
+        // winning LAN lane, exactly as live view and media use it.
+        try await control("blackhole", port: port, token: proxyToken, httpBlackhole: true)
         NSLog("e-3c: 90 s blackhole of the saved lane starts over a live LAN connection")
         let outageStarted = ContinuousClock().now
+        var uploads = 0
         while outageStarted.duration(to: ContinuousClock().now) < .seconds(90) {
             _ = try await lanClient.requestValue("system.info", EmptyParams(), timeout: .seconds(10))
+            let uploadID = try await lanClient.upload(
+                name: "e-3c-blackhole.txt",
+                mimeType: "text/plain",
+                data: Data("through a blackholed saved lane".utf8)
+            )
+            XCTAssertFalse(uploadID.isEmpty, "The upload route must answer over the winning lane")
+            uploads += 1
             try await Task.sleep(for: .seconds(5))
         }
+        XCTAssertGreaterThan(uploads, 8, "The HTTP leg must run through the blackhole, not around it")
         try await control("pass", port: port, token: proxyToken)
         let survivingHandshakes = await successfulHandshakes(of: lanClient)
         XCTAssertEqual(survivingHandshakes.count, 1, "A blackholed saved lane must not reconnect the LAN connection")
@@ -573,11 +586,13 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         await lanClient.close()
         NSLog("e-3c: the 90 s blackhole left the LAN connection up")
 
-        // (3) A blocked LAN lane costs the stagger plus one handshake: the saved
-        // lane wins, and the attempt records the lane it lost.
-        let blockedPort = try blockedLoopbackPort()
+        // (3) A blocked LAN lane costs the stagger plus one handshake: the lane
+        // TCP-connects but never answers TLS, so the saved lane wins, and the
+        // losing LAN socket is retired instead of hanging on.
+        let blockedLane = try HangingLanLane()
+        defer { blockedLane.close() }
         var blocked = paired
-        blocked.lanEndpoints = [try XCTUnwrap(GatewayLanEndpoint(host: "127.0.0.1", port: blockedPort))]
+        blocked.lanEndpoints = [try XCTUnwrap(GatewayLanEndpoint(host: "127.0.0.1", port: blockedLane.port))]
         let blockedClient = makeClient(networkPath: onWifi)
         let attemptStarted = ContinuousClock().now
         _ = try await blockedClient.connect(profile: blocked, token: token)
@@ -585,10 +600,19 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let fallbackHandshakes = await successfulHandshakes(of: blockedClient)
         XCTAssertEqual(fallbackHandshakes.first?.handshake?.transport, "tailscale",
                        "A blocked LAN lane must fall back to the saved endpoint")
+        XCTAssertGreaterThanOrEqual(fallbackElapsed, .milliseconds(240),
+                                    "The saved lane must wait out the 250 ms stagger for a LAN lane that is still dialing")
         XCTAssertLessThan(fallbackElapsed, .milliseconds(1_750),
                           "The saved lane must win within the LAN stagger (250 ms) plus one handshake")
+        XCTAssertTrue(
+            blockedLane.dialWasMadeAndClosed(within: .seconds(3)),
+            "The losing LAN socket must be retired, not left dialing"
+        )
+        // The winner cancelled that lane, so there is no answer to report: a
+        // retired lane is not a LAN failure (its focused case is
+        // `GatewayClientLanLaneTests.failedLanLaneWakesTheStagger`).
         let blockedLaneLosses = await lanFailures(of: blockedClient)
-        XCTAssertFalse(blockedLaneLosses.isEmpty, "The attempt must record the LAN lane it lost")
+        XCTAssertTrue(blockedLaneLosses.isEmpty, "A lane the winner retired must not be recorded as a LAN failure")
         await blockedClient.close()
 
         // (4) A pin that does not match the served certificate sends no
@@ -626,31 +650,78 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             .sorted { $0.sequence < $1.sequence }
     }
 
-    /// A loopback port nothing answers on: the blocked LAN lane this fixture can
-    /// state without touching the host's own network.
-    private func blockedLoopbackPort() throws -> Int {
-        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
-        guard descriptor >= 0 else { throw BoundaryFailure.invalidFixture("The blocked lane needs a socket") }
-        defer { close(descriptor) }
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_addr.s_addr = inet_addr("127.0.0.1")
-        address.sin_port = 0
-        let bound = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-                bind(descriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
+    /// A LAN lane that TCP-connects but never answers TLS: the socket binds and
+    /// listens but never accepts, so a dial completes its TCP handshake and then
+    /// waits for a TLS answer that never comes — a client-isolated network or a
+    /// silently dropped packet, rather than the immediate refusal a closed port
+    /// gives. It also proves what the dial did: that a connection arrived, and
+    /// that the losing socket was retired rather than left dialing.
+    private final class HangingLanLane {
+        private let descriptor: Int32
+        let port: Int
+
+        init() throws {
+            let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+            guard descriptor >= 0 else { throw BoundaryFailure.invalidFixture("The blocked lane needs a socket") }
+            var reuse: Int32 = 1
+            setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+            var address = sockaddr_in()
+            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_addr.s_addr = inet_addr("127.0.0.1")
+            address.sin_port = 0
+            let bound = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                    bind(descriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
             }
-        }
-        guard bound == 0 else { throw BoundaryFailure.invalidFixture("The blocked lane could not bind") }
-        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let named = withUnsafeMutablePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-                getsockname(descriptor, socketAddress, &length)
+            guard bound == 0, listen(descriptor, 1) == 0 else {
+                Darwin.close(descriptor)
+                throw BoundaryFailure.invalidFixture("The blocked lane could not listen")
             }
+            var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let named = withUnsafeMutablePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                    getsockname(descriptor, socketAddress, &length)
+                }
+            }
+            guard named == 0 else {
+                Darwin.close(descriptor)
+                throw BoundaryFailure.invalidFixture("The blocked lane could not read its port")
+            }
+            self.descriptor = descriptor
+            self.port = Int(UInt16(bigEndian: address.sin_port))
         }
-        guard named == 0 else { throw BoundaryFailure.invalidFixture("The blocked lane could not read its port") }
-        return Int(UInt16(bigEndian: address.sin_port))
+
+        /// Whether a dial reached this lane and then closed again: the queued
+        /// connection, the bytes it sent, and the end of the stream it left —
+        /// which is the losing socket being retired rather than left open.
+        func dialWasMadeAndClosed(within timeout: Duration) -> Bool {
+            var listener = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            guard poll(&listener, 1, Self.milliseconds(timeout)) > 0 else { return false }
+            let accepted = accept(descriptor, nil, nil)
+            guard accepted >= 0 else { return false }
+            defer { Darwin.close(accepted) }
+            let deadline = ContinuousClock().now.advanced(by: timeout)
+            var sawBytes = false
+            while ContinuousClock().now < deadline {
+                var readable = pollfd(fd: accepted, events: Int16(POLLIN), revents: 0)
+                guard poll(&readable, 1, Self.milliseconds(.seconds(1))) > 0 else { return false }
+                var chunk = [UInt8](repeating: 0, count: 4_096)
+                let received = recv(accepted, &chunk, chunk.count, 0)
+                if received > 0 { sawBytes = true; continue }
+                // 0 is the peer's close; an error is the peer's reset. Both mean
+                // this dial is over.
+                return sawBytes
+            }
+            return false
+        }
+
+        func close() { Darwin.close(descriptor) }
+
+        private static func milliseconds(_ duration: Duration) -> Int32 {
+            Int32(duration.components.seconds * 1_000 + duration.components.attoseconds / 1_000_000_000_000_000)
+        }
     }
 
     /// C-1: a 90 s blackhole under a foreground app. Recovery must keep
@@ -1142,17 +1213,17 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         return client
     }
 
-    private func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil) async throws {
+    private func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil, httpBlackhole: Bool = false) async throws {
         try await Self.control(
             mode, port: port, token: token, commandID: commandID, status: status,
-            closeCode: closeCode, bytes: bytes
+            closeCode: closeCode, bytes: bytes, httpBlackhole: httpBlackhole
         )
     }
 
     /// The isolated fault proxy's control plane. It is static so the blackhole
     /// helper can drive the proxy without carrying the test case into a
     /// main-actor function.
-    private static func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil) async throws {
+    private static func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil, httpBlackhole: Bool = false) async throws {
         let url = URL(string: "http://127.0.0.1:\(port)/_fixture/control")!
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
@@ -1162,6 +1233,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         if let status { values["status"] = .number(Double(status)) }
         if let closeCode { values["code"] = .number(Double(closeCode)) }
         if let bytes { values["bytes"] = .number(Double(bytes)) }
+        if httpBlackhole { values["http"] = .bool(true) }
         request.httpBody = try JSONEncoder.gateway.encode(values)
         let (_, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
