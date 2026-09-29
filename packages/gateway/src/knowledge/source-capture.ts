@@ -994,9 +994,15 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   if (options.signal?.aborted) throw invalid("Source capture was cancelled");
   const normalized = normalizeKnowledgeSourceUrl(sourceUrl.toString());
   const refreshRequested = input.publicPostLookup === true && input.publicPostCoverage !== undefined && input.publicPostCoverage !== "root";
+  const identityMatches = input.origin === "connector" && input.identity
+    ? existing.filter(record => record.content.identity?.provider === input.identity!.provider && record.content.identity.accountId === input.identity!.accountId && record.content.identity.itemId === input.identity!.itemId)
+    : [];
+  if (identityMatches.length > 1) throw invalid("Multiple sources match the requested provider identity");
   const requestedMatches = existing.filter(record => record.scope === input.scope && sourceMatches(record, input, sourceUrl.toString(), normalized));
   if (requestedMatches.length > 1) throw invalid("Multiple sources match the requested source identity");
-  const requestedTarget = requestedMatches[0];
+  // Provider identity follows a moved bookmark across collection scopes. Keep
+  // one canonical source; the connector's K1 placement write re-scopes it.
+  const requestedTarget = identityMatches[0] ?? requestedMatches[0];
   const refreshTarget = refreshRequested ? requestedTarget : undefined;
   const duplicate = refreshTarget ? undefined : requestedTarget?.content.captureDisposition === "complete" ? requestedTarget : undefined;
   let retryTarget = refreshTarget ?? (requestedTarget && requestedTarget.content.captureDisposition !== "complete" ? requestedTarget : undefined);
@@ -1005,8 +1011,9 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     const origins = duplicate.content.origins ?? (duplicate.content.origin ? [{ kind: duplicate.content.origin, capturedAt: duplicate.content.capturedAt }] : []);
     const nextOrigins = origins.some(origin => origin.kind === kind && origin.uri === sourceUrl.toString() && JSON.stringify(origin.identity) === JSON.stringify(input.identity)) ? origins : [...origins, { kind, capturedAt: now(), uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }];
     const annotations = input.annotations ? [...(duplicate.content.annotations ?? []), ...input.annotations.filter(annotation => !(duplicate.content.annotations ?? []).some(previous => previous.text === annotation.text && previous.locator === annotation.locator))] : duplicate.content.annotations;
-    if (nextOrigins.length !== origins.length || annotations?.length !== duplicate.content.annotations?.length) {
-      const mergedContent: SourceContent = { ...duplicate.content, origins: nextOrigins, ...(annotations ? { annotations } : {}) };
+    const collectionChanged = input.origin === "connector" && input.collectionId !== undefined && duplicate.content.collectionId !== input.collectionId;
+    if (nextOrigins.length !== origins.length || annotations?.length !== duplicate.content.annotations?.length || collectionChanged) {
+      const mergedContent: SourceContent = { ...duplicate.content, origins: nextOrigins, ...(annotations ? { annotations } : {}), ...(collectionChanged ? { collectionId: input.collectionId } : {}) };
       const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: duplicate.revisionId, ...(options.signal ? { signal: options.signal } : {}), record: { kind: "source", id: duplicate.id, createdAt: duplicate.createdAt, scope: duplicate.scope, provenance: duplicate.provenance, relations: duplicate.relations, ...(duplicate.temporal ? { temporal: duplicate.temporal } : {}), content: mergedContent } });
       if (merged.record.kind !== "source") throw new Error("Source deduplication returned a non-source record");
       return { record: merged.record, duplicate: true, fetched: false };

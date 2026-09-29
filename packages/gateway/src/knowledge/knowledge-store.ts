@@ -431,11 +431,22 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x"): as
     if (!authority || typeof authority !== "object" || typeof authority.id !== "string" || authority.id.length < 1 || authority.id.length > 160 || typeof authority.accountId !== "string" || !/^\d+$/.test(authority.accountId) || typeof authority.sourceCollection !== "string" || !/^-?\d{1,18}$/.test(authority.sourceCollection) || typeof authority.profileVersion !== "string" || authority.profileVersion.length < 1 || authority.profileVersion.length > 256 || !Array.isArray(authority.itemIds) || authority.itemIds.length > 10 || authority.itemIds.some(itemId => typeof itemId !== "string" || itemId.length < 1 || itemId.length > 512) || !Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 10 || !Number.isSafeInteger(budgetCents) || budgetCents < 1 || budgetCents > 100 || !Number.isSafeInteger(usedItems) || usedItems < 0 || usedItems > maxItems || !Number.isSafeInteger(reservedCents) || reservedCents < 0 || reservedCents > budgetCents) throw new KnowledgeStoreError("invalid", `Invalid connector ${label}`);
   };
   if (state.assessmentPilot !== undefined) validateAssessmentAuthority(state.assessmentPilot, "assessment pilot");
+  if (state.assessmentPilots !== undefined) {
+    if (!state.assessmentPilots || typeof state.assessmentPilots !== "object" || Array.isArray(state.assessmentPilots) || Object.keys(state.assessmentPilots).length > 64) throw new KnowledgeStoreError("invalid", "Invalid connector collection pilots");
+    for (const [collectionId, pilot] of Object.entries(state.assessmentPilots as Record<string, unknown>)) {
+      validateAssessmentAuthority(pilot, "collection assessment pilot");
+      if (!/^-?\d{1,18}$/.test(collectionId) || (pilot as Record<string, unknown>).sourceCollection !== collectionId) throw new KnowledgeStoreError("invalid", "Connector collection pilot does not match its collection");
+    }
+  }
   if (state.assessmentApprovals !== undefined) {
     if (!Array.isArray(state.assessmentApprovals) || state.assessmentApprovals.length > 32 || new Set(state.assessmentApprovals.map(item => (item as Record<string, unknown>)?.id)).size !== state.assessmentApprovals.length) throw new KnowledgeStoreError("invalid", "Invalid connector assessment approvals");
     state.assessmentApprovals.forEach(item => validateAssessmentAuthority(item, "assessment approval"));
   }
   for (const id of state.capturedIds) if (typeof id !== "string" || id.length > 512) throw new KnowledgeStoreError("invalid", "Invalid connector captured ID");
+  if (state.capturedCollections !== undefined) {
+    if (!state.capturedCollections || typeof state.capturedCollections !== "object" || Array.isArray(state.capturedCollections) || Object.keys(state.capturedCollections).length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector collection progress");
+    for (const [itemId, collectionId] of Object.entries(state.capturedCollections as Record<string, unknown>)) if (!itemId || itemId.length > 512 || typeof collectionId !== "string" || !/^-?\d{1,18}$/.test(collectionId)) throw new KnowledgeStoreError("invalid", "Invalid connector collection progress");
+  }
   if (state.assessmentAttempts !== undefined) {
     if (!state.assessmentAttempts || typeof state.assessmentAttempts !== "object" || Array.isArray(state.assessmentAttempts) || Object.keys(state.assessmentAttempts).length > 500) throw new KnowledgeStoreError("invalid", "Invalid connector assessment attempts");
     for (const [itemId, attempt] of Object.entries(state.assessmentAttempts as Record<string, unknown>)) {

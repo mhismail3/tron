@@ -222,6 +222,7 @@ export function validateConnectionInstance(value: unknown): asserts value is Con
   if (item.providerDisplayName !== undefined && normalizeProviderDisplayName(item.providerDisplayName) !== item.providerDisplayName) throw new Error("Provider display name is invalid");
   if (item.raindropCollections !== undefined) {
     if (item.definitionId !== "knowledge.raindrop") throw new Error("Only Raindrop connections may map collections");
+    if (item.scope !== undefined) throw new Error("Raindrop collection mappings replace the single connector scope");
     validateRaindropCollectionMappings(item.raindropCollections);
   }
   if (item.configuration !== undefined) {

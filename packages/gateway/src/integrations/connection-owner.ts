@@ -125,7 +125,10 @@ function validateCommand(command: ConnectionCommand): void {
     if (command.scope !== undefined && (typeof command.scope !== "string" || command.scope.length < 1 || command.scope.length > 512)) throw invalid("Connection scope is invalid");
     assertCredentialReference(command.credentialRef); validateConnectionPolicy(command.policy);
     if (command.configuration !== undefined) validateMcpConnectionConfiguration(command.configuration);
-    if (command.raindropCollections !== undefined) validateRaindropCollectionMappings(command.raindropCollections);
+    if (command.raindropCollections !== undefined) {
+      if (command.scope !== undefined) throw invalid("Raindrop collection mappings replace the single connector scope");
+      validateRaindropCollectionMappings(command.raindropCollections);
+    }
     return;
   }
   if (command.kind === "setup.cancel") { assertConnectionId(command.operationId, "setup operation id"); assertConnectionId(command.instanceId); return; }
@@ -138,7 +141,7 @@ function validateCommand(command: ConnectionCommand): void {
 }
 
 function resultForInstance(instance: ConnectionInstance): Record<string, unknown> {
-  return { id: instance.id, definitionId: instance.definitionId, implementation: instance.implementation, providerAccountId: instance.providerAccountId, ...(instance.scope ? { scope: instance.scope } : {}), ...(instance.providerDisplayName ? { providerDisplayName: instance.providerDisplayName } : {}), policy: instance.policy, health: instance.health, createdAt: instance.createdAt, updatedAt: instance.updatedAt, setupRevision: instance.setupRevision, ...(instance.lastError ? { lastError: instance.lastError } : {}) };
+  return { id: instance.id, definitionId: instance.definitionId, implementation: instance.implementation, providerAccountId: instance.providerAccountId, ...(instance.scope ? { scope: instance.scope } : {}), ...(instance.raindropCollections ? { raindropCollections: copy(instance.raindropCollections) } : {}), ...(instance.providerDisplayName ? { providerDisplayName: instance.providerDisplayName } : {}), policy: instance.policy, health: instance.health, createdAt: instance.createdAt, updatedAt: instance.updatedAt, setupRevision: instance.setupRevision, ...(instance.lastError ? { lastError: instance.lastError } : {}) };
 }
 
 export class ConnectionOwner {
@@ -348,6 +351,7 @@ export class ConnectionOwner {
       if (command.raindropCollections !== undefined) {
         if (instance.definitionId !== "knowledge.raindrop") throw invalid("Only Raindrop connections accept collection mappings");
         instance.raindropCollections = copy(command.raindropCollections);
+        delete instance.scope;
       }
       instance.policy = copy(command.policy); instance.health = command.policy.enabled ? "setup-required" : "disabled"; instance.credentialAvailability = "unknown"; instance.providerIdentity = "unknown"; delete instance.providerDisplayName; instance.updatedAt = timestamp; instance.setupRevision += 1; delete instance.lastError;
       return resultForInstance(instance);
