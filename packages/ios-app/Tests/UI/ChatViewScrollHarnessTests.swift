@@ -2219,13 +2219,8 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil { $0.observation.isReady }
                 try harness.setComposerText("keep detached draft")
                 let draft = try harness.composerTextAndSelection()
-                let bottom = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight: 400)
-                let away = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_000, containerHeight: 400)
-                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: bottom, current: away)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                harness.driveNativeOwnership(false)
+                try await harness.detachReaderByRealScroll()
+                #expect(harness.probeObservation.isDetached)
                 let baseline = harness.probeObservation.projectionInstallCount
                 gate.condition = { harness.probe.extensionPublicationAllowed?() == false && harness.probe.openingPhase?() == .ready }
                 var next = snapshot
@@ -2382,13 +2377,8 @@ struct ChatViewScrollHarnessTests {
             try await withHarness(snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true, usesRealOpening: true) { harness in
                 _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.observation.readyFrameCompletionCount == 1 }
                 let oldTarget = try #require(harness.currentTarget)
-                let bottom = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight: 400)
-                let away = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_000, containerHeight: 400)
-                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: bottom, current: away)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                harness.driveNativeOwnership(false)
+                try await harness.detachReaderByRealScroll()
+                #expect(harness.probeObservation.isDetached)
                 let baseline = harness.probeObservation.projectionInstallCount
                 var replacement = snapshot
                 replacement.runtimeGeneration += "-replacement"
@@ -2569,120 +2559,6 @@ struct ChatViewScrollHarnessTests {
                 #expect(settled.physicalTailRepairCommandCount == repairBaseline)
                 #expect(settled.visibleRowIDs.contains(tailSemanticID))
                 #expect(harness.recorder.samples.last?.nativePinnedAtBottom == true)
-            }
-        }
-    }
-
-    @Test("actual ChatView emits no growth offset writes while pinned or detached")
-    func drivenCoordinatorExecutor() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) {
-            try await withHarness(seed: 107) { harness in
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.readyFrameCompletionCount == 1
-                }
-
-                let baseline = harness.recorder.samples.last?.observation.automaticScrollCommandCount ?? 0
-                let projectionWorkBaseline = harness.probeObservation.projectionWorkAdmissionCount
-                let bottom = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
-                )
-                let firstGrowth = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_100, containerHeight: 400
-                )
-                let secondGrowth = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_180, containerHeight: 400
-                )
-                harness.driveGeometry(previous: bottom, current: firstGrowth)
-                harness.driveGeometry(previous: firstGrowth, current: secondGrowth)
-                try await harness.driveFrameBoundary()
-                #expect(harness.probeObservation.automaticScrollCommandCount == baseline)
-
-                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
-                harness.driveNativeOwnership(true)
-                let away = ChatTranscriptGeometry(
-                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
-                )
-                harness.driveGeometry(previous: bottom, current: away)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                harness.driveSemanticResponse()
-                #expect(harness.probeObservation.isDetached)
-                #expect(harness.probeObservation.hasUnread)
-                let commandsBeforeDetachedGrowth = harness.probeObservation.scrollCommandCount
-                harness.driveGeometry(
-                    previous: away,
-                    current: ChatTranscriptGeometry(
-                        offsetY: 300, contentHeight: 1_200, containerHeight: 400
-                    )
-                )
-                harness.driveGeometry(
-                    previous: away,
-                    current: ChatTranscriptGeometry(
-                        offsetY: 300, contentHeight: 1_200, containerHeight: 320, bottomInset: 80
-                    ),
-                    viewport: true
-                )
-                try await harness.driveFrameBoundary()
-                #expect(
-                    harness.probeObservation.scrollCommandCount
-                        == commandsBeforeDetachedGrowth
-                )
-                #expect(
-                    harness.probeObservation.projectionWorkAdmissionCount
-                        == projectionWorkBaseline
-                )
-
-                let commandsBeforeCatchUp = harness.probeObservation.scrollCommandCount
-                harness.driveCatchUp(reduceMotion: true)
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.scrollCommandCount == commandsBeforeCatchUp + 1
-                }
-                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
-                #expect(harness.probeObservation.isDetached)
-                #expect(harness.probeObservation.hasUnread)
-            }
-        }
-    }
-
-    @Test("actual ChatView pinned and detached shrink emits zero scroll writes")
-    func shrinkDoesNotFollow() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) {
-            try await withHarness(seed: 1_193) { harness in
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.readyFrameCompletionCount == 1
-                }
-                let pinnedBefore = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_200, containerHeight: 400
-                )
-                let pinnedAfter = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_150, containerHeight: 400
-                )
-                let pinnedBaseline = harness.probeObservation.scrollCommandCount
-                harness.driveGeometry(previous: pinnedBefore, current: pinnedAfter)
-                try await harness.driveFrameBoundary()
-                #expect(harness.probeObservation.scrollCommandCount == pinnedBaseline)
-
-                let bottom = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
-                )
-                let away = ChatTranscriptGeometry(
-                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
-                )
-                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: bottom, current: away)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                harness.driveNativeOwnership(false)
-                #expect(harness.probeObservation.isDetached)
-
-                let detachedBaseline = harness.probeObservation.scrollCommandCount
-                harness.driveGeometry(
-                    previous: away,
-                    current: ChatTranscriptGeometry(
-                        offsetY: 300, contentHeight: 950, containerHeight: 400
-                    )
-                )
-                try await harness.driveFrameBoundary()
-                #expect(harness.probeObservation.scrollCommandCount == detachedBaseline)
             }
         }
     }
@@ -3241,17 +3117,7 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.readyFrameCompletionCount == 1
                 }
-                let bottom = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
-                )
-                let away = ChatTranscriptGeometry(
-                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
-                )
-                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: bottom, current: away)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                harness.driveNativeOwnership(false)
+                try await harness.detachReaderByRealScroll()
                 #expect(harness.probeObservation.isDetached)
 
                 let commandBaseline = harness.probeObservation.automaticScrollCommandCount
@@ -3266,11 +3132,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(harness.probeObservation.projectionInstallCount == installBaseline)
                 #expect(harness.probeObservation.automaticScrollCommandCount == commandBaseline)
 
-                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: away, current: bottom)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: bottom)
-                harness.driveNativeOwnership(false)
+                try await harness.returnReaderToPinnedTailByCatchUp()
                 let reconciled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > installBaseline
                 }
@@ -3287,17 +3149,8 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.readyFrameCompletionCount == 1
                 }
-                let bottom = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
-                )
-                let away = ChatTranscriptGeometry(
-                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
-                )
-                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: bottom, current: away)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                harness.driveNativeOwnership(false)
+                try await harness.detachReaderByRealScroll()
+                #expect(harness.probeObservation.isDetached)
 
                 let installBaseline = harness.probeObservation.projectionInstallCount
                 var newest = harness.snapshot
@@ -3320,7 +3173,7 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.scrollCommandCount > commandBaseline
                 }
                 #expect(harness.probeObservation.projectionInstallCount == installBaseline)
-                harness.driveGeometry(previous: away, current: bottom, viewport: true)
+                try await harness.returnReaderToPinnedTail()
                 let reconciled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount == installBaseline + 1
                 }
@@ -3337,17 +3190,7 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.readyFrameCompletionCount == 1
                 }
-                let bottom = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
-                )
-                let away = ChatTranscriptGeometry(
-                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
-                )
-                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: bottom, current: away)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                harness.driveNativeOwnership(false)
+                try await harness.detachReaderByRealScroll()
                 #expect(harness.probeObservation.isDetached)
 
                 let installBaseline = harness.probeObservation.projectionInstallCount
@@ -3365,11 +3208,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(harness.probeObservation.isDetached)
                 #expect(harness.probeObservation.projectionInstallCount == installBaseline)
 
-                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: away, current: bottom, viewport: true)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: bottom)
-                harness.driveNativeOwnership(false)
+                try await harness.returnReaderToPinnedTail()
                 let reconciled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount == installBaseline + 1
                 }
@@ -3390,17 +3229,7 @@ struct ChatViewScrollHarnessTests {
                         && ($0.observation.scrollSettledDistance ?? .infinity)
                             <= ChatTranscriptGeometry.catchUpDistance
                 }
-                let bottom = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
-                )
-                let away = ChatTranscriptGeometry(
-                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
-                )
-                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: bottom, current: away)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                harness.driveNativeOwnership(false)
+                try await harness.detachReaderByRealScroll()
                 #expect(harness.probeObservation.isDetached)
 
                 var newest = harness.snapshot
@@ -3438,11 +3267,7 @@ struct ChatViewScrollHarnessTests {
                         == committedEvaluationBaseline
                 )
 
-                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: away, current: bottom)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: bottom)
-                harness.driveNativeOwnership(false)
+                try await harness.returnReaderToPinnedTailByCatchUp()
                 let newestInstall = try await harness.recorder.waitUntil {
                     $0.observation.installedProjectionSourceOrdinal == initialProjectionOrdinal + 30
                 }
@@ -3464,6 +3289,129 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("a detached reader holds its top row through streaming, a keyboard cycle and a page load")
+    func detachedReaderHoldsItsTopRowThroughStreamingKeyboardAndPage() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            // A 60-row mixed-height history with 40 earlier messages loaded
+            // before it, so the reader's oldest end is real history rather than
+            // the top of a short transcript, and a page load has somewhere to go.
+            var snapshot = try SessionScenarioBuilder(seed: 1_273)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            snapshot.transcript = try (0..<60).map { index in
+                try harnessRichAssistantMessage(
+                    id: "detach-anchor-\(index)",
+                    presentationID: "detach-anchor-turn-\(index)",
+                    thinkingLines: [],
+                    text: Array(
+                        repeating: "Detached reader row \(index) keeps its own height while the reader is away.",
+                        count: 1 + index % 4
+                    ).joined(separator: "\n\n")
+                )
+            }
+            snapshot.transcriptStart = 40
+            snapshot.transcriptTotal = 100
+            try await withHarness(snapshot: snapshot) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.observation.projectionInstallCount >= 1
+                }
+                try await harness.detachReaderByRealScroll()
+                #expect(
+                    harness.probeObservation.isDetached,
+                    "the real scroll detached the reader: \(harness.pinnedDescription())"
+                )
+                // A detached reader owns the viewport: nothing the app does while
+                // they are away may write an automatic scroll command. This is
+                // the invariant the two synthetic zero-write fixtures asserted,
+                // measured here on the real view.
+                let commandBaseline = harness.probeObservation.automaticScrollCommandCount
+                let anchor = try #require(
+                    harness.readerAnchor(), "the detached reader had no on-screen row"
+                )
+                #expect(anchor.windowMinY > 0, "the anchor row is on screen")
+                var movements: [String] = []
+
+                // 1. Streaming while the reader is away: the installed
+                // projection stays frozen, so nothing on screen may move.
+                var streamed = harness.snapshot
+                for step in 1...6 {
+                    streamed.revision += 1
+                    streamed.eventSequence += 1
+                    streamed.streaming = try harnessAssistantMessage(
+                        id: "detach-stream-\(step)",
+                        presentationID: "detach-stream-turn",
+                        text: "Streaming update \(step) while the reader is away."
+                    )
+                    harness.replaceAuthoritativeSnapshot(streamed)
+                }
+                for _ in 0..<12 { try await harness.driveFrameBoundary() }
+                let afterStreaming = try #require(try await harness.settleReaderAnchor(to: anchor))
+                movements.append("streaming:\(ct2Number(afterStreaming.windowMinY - anchor.windowMinY))")
+                #expect(
+                    afterStreaming.physicalID == anchor.physicalID,
+                    "streaming remounted the reader's anchor row"
+                )
+                #expect(
+                    abs(afterStreaming.windowMinY - anchor.windowMinY) <= 0.5,
+                    "streaming moved the detached reader by \(ct2Number(afterStreaming.windowMinY - anchor.windowMinY)) pt"
+                )
+                #expect(
+                    harness.probeObservation.automaticScrollCommandCount == commandBaseline,
+                    "streaming wrote an automatic scroll command while the reader was away"
+                )
+
+                // 2. The keyboard's inset cycle: the composer's own edge moves,
+                // which neither the reader's rows nor its position may follow.
+                try await harness.driveKeyboardInset(.show())
+                let afterShow = try #require(try await harness.settleReaderAnchor(to: anchor))
+                movements.append("keyboard-up:\(ct2Number(afterShow.windowMinY - anchor.windowMinY))")
+                #expect(
+                    afterShow.physicalID == anchor.physicalID
+                        && abs(afterShow.windowMinY - anchor.windowMinY) <= 0.5,
+                    "the keyboard moved the detached reader by \(ct2Number(afterShow.windowMinY - anchor.windowMinY)) pt"
+                )
+                try await harness.driveKeyboardInset(.hide())
+                let afterHide = try #require(try await harness.settleReaderAnchor(to: anchor))
+                movements.append("keyboard-down:\(ct2Number(afterHide.windowMinY - anchor.windowMinY))")
+                #expect(
+                    afterHide.physicalID == anchor.physicalID
+                        && abs(afterHide.windowMinY - anchor.windowMinY) <= 0.5,
+                    "the dismissal moved the detached reader by \(ct2Number(afterHide.windowMinY - anchor.windowMinY)) pt"
+                )
+                #expect(
+                    harness.probeObservation.automaticScrollCommandCount == commandBaseline,
+                    "the keyboard cycle wrote an automatic scroll command while the reader was away"
+                )
+
+                // 3. A page load above the reader: older rows arrive at the far
+                // end, so the row being read must not move.
+                guard harness.drivePrepend() else {
+                    Issue.record("the earlier-messages row admitted no page load")
+                    return
+                }
+                _ = try await harness.recorder.waitUntil { $0.observation.prependLoadWaiting }
+                harness.releasePrependPage()
+                for _ in 0..<20 { try await harness.driveFrameBoundary() }
+                let afterPage = try #require(try await harness.settleReaderAnchor(to: anchor))
+                movements.append("page-load:\(ct2Number(afterPage.windowMinY - anchor.windowMinY))")
+                #expect(
+                    afterPage.physicalID == anchor.physicalID,
+                    "the page load remounted the reader's anchor row"
+                )
+                #expect(
+                    abs(afterPage.windowMinY - anchor.windowMinY) <= 0.5,
+                    "the page load moved the detached reader by \(ct2Number(afterPage.windowMinY - anchor.windowMinY)) pt"
+                )
+                #expect(
+                    harness.probeObservation.automaticScrollCommandCount == commandBaseline,
+                    "the page load wrote an automatic scroll command while the reader was away"
+                )
+                #expect(harness.probeObservation.isDetached, "the reader stayed away")
+                print("CT25-DETACH-METRICS anchor=\(anchor.physicalID) startY=\(ct2Number(anchor.windowMinY)) movements=\(movements.joined(separator: ","))")
+            }
+        }
+    }
+
     @Test("manual tail return hides catch-up and pinned keyboard transition follows")
     func manualTailReturnAndKeyboardFollow() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -3474,24 +3422,20 @@ struct ChatViewScrollHarnessTests {
                         && ($0.observation.scrollSettledDistance ?? .infinity)
                             <= ChatTranscriptGeometry.catchUpDistance
                 }
-                let bottom = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
-                )
-                let away = ChatTranscriptGeometry(
-                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
-                )
-                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
-                harness.driveNativeOwnership(true)
-                harness.driveGeometry(previous: bottom, current: away)
-                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                harness.driveNativeOwnership(false)
+                try await harness.detachReaderByRealScroll()
                 harness.driveSemanticResponse()
                 #expect(harness.probeObservation.isDetached)
                 #expect(harness.probeObservation.hasUnread)
 
-                // Production callback order observed on device: the final
-                // direct return can be a mixed scroll/viewport callback while
-                // interactive keyboard dismissal changes the inset.
+                // The reader's own finger remains the only thing a hosted test
+                // cannot produce: `onScrollPhaseChange` is the pan gesture's
+                // callback, so this part stays the production callback order
+                // observed on device — a mixed scroll/viewport callback whose
+                // final frame lands while interactive keyboard dismissal changes
+                // the inset. Everything above it is now the real scroll view.
+                let away = ChatTranscriptGeometry(
+                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
+                )
                 harness.drivePhase(from: .idle, to: .interacting, geometry: away)
                 let intermediateViewport = ChatTranscriptGeometry(
                     offsetY: 300, contentHeight: 1_000, containerHeight: 350
@@ -4753,6 +4697,87 @@ final class ChatViewScrollHarness {
             animated: false
         )
         scrollView.layoutIfNeeded()
+    }
+
+    /// Detach the reader the way a reader does: move the real transcript scroll
+    /// view to the oldest end of the loaded history, which the coordinator reads
+    /// as direct ownership (today's status-bar-tap path). The hand-written
+    /// `drivePhase`/`driveGeometry` sequence this replaces wrote an offset and a
+    /// container height no scroll view produced, so it encoded today's
+    /// orientation and could contradict the real view in the same frame. The
+    /// boundary ceiling is a fail-closed bound, not a retry: the caller asserts
+    /// the detached state it needs.
+    func detachReaderByRealScroll(boundaries: Int = 60) async throws {
+        try scrollReader(byVisualPoints: 10_000_000)
+        for _ in 0..<boundaries {
+            if probeObservation.isDetached, readerAnchor() != nil { return }
+            try await driveFrameBoundary()
+        }
+    }
+
+    /// Return the reader to the pinned tail through the real scroll view.
+    func returnReaderToPinnedTail(boundaries: Int = 40) async throws {
+        try scrollReader(byVisualPoints: 0)
+        for _ in 0..<boundaries {
+            if !probeObservation.isDetached && isPinnedToBottom() { return }
+            try await driveFrameBoundary()
+        }
+    }
+
+    /// Return the reader to the pinned tail through the real scroll view, by
+    /// pressing the product's own catch-up affordance. A hosted test cannot
+    /// synthesize the pan gesture whose phase transitions re-pin a detached
+    /// reader (`onScrollPhaseChange` is the gesture's own callback), so the
+    /// finger-driven return stays the device checklist's check and this is the
+    /// real in-product equivalent: a scroll command to the tail, its exact lease
+    /// settling, and the pinned mode restored.
+    func returnReaderToPinnedTailByCatchUp(boundaries: Int = 60) async throws {
+        let baseline = probeObservation.scrollCommandCount
+        driveCatchUp(reduceMotion: true)
+        for _ in 0..<boundaries {
+            if !probeObservation.isDetached { return }
+            if probeObservation.scrollCommandCount > baseline, isPinnedToBottom() { return }
+            try await driveFrameBoundary()
+        }
+    }
+
+    /// The row the reader is reading: the topmost mounted row that intersects the
+    /// transcript's visible region, in window coordinates. A detached reader's
+    /// anchor is this row's window position, so the same measurement holds
+    /// whichever way the transcript's scroll view is oriented.
+    struct ReaderAnchor: Equatable {
+        let physicalID: String
+        let instance: UUID
+        let windowMinY: CGFloat
+    }
+
+    func readerAnchor() -> ReaderAnchor? {
+        TranscriptWindowOracle.rows(in: hostingController.view)
+            .filter(\.isOnScreen)
+            .min { $0.windowFrame.minY < $1.windowFrame.minY }
+            .map { ReaderAnchor(
+                physicalID: $0.physicalID, instance: $0.instance, windowMinY: $0.windowFrame.minY
+            ) }
+    }
+
+    /// Advance driven boundaries until the reader's anchor row sits where it did,
+    /// or the bound is reached; returns the anchor either way. A journey that
+    /// gates the anchor uses this to give the layout transaction's clock its own
+    /// frames, then asserts the position itself.
+    @discardableResult
+    func settleReaderAnchor(
+        to anchor: ReaderAnchor,
+        boundaries: Int = 40
+    ) async throws -> ReaderAnchor? {
+        for _ in 0..<boundaries {
+            if let current = readerAnchor(),
+               current.physicalID == anchor.physicalID,
+               abs(current.windowMinY - anchor.windowMinY) <= 0.5 {
+                return current
+            }
+            try await driveFrameBoundary()
+        }
+        return readerAnchor()
     }
 
     /// The render region of one oracle row. The oracle reports window

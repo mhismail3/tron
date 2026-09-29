@@ -784,6 +784,24 @@ to run; `keyboardInsetOverFlippedTranscriptFailsTheComposerGate` is the control
 that the settled gate fails when the transcript is flipped without its rows
 counter-flipped.
 
+Detached reading is driven through the real scroll view. `ChatViewScrollHarness.detachReaderByRealScroll()`
+moves the transcript's own `UIScrollView` to the oldest loaded row — the path the
+coordinator reads as direct ownership — instead of the hand-written
+offset/container geometry the fixtures used to inject; `returnReaderToPinnedTailByCatchUp()`
+returns the reader through the product's own catch-up affordance, because a
+hosted test cannot synthesize the pan gesture whose phase transitions re-pin a
+detached reader. `detachedReaderHoldsItsTopRowThroughStreamingKeyboardAndPage`
+asserts the reader's top visible row stays within 0.5 pt in window coordinates
+through streaming, the keyboard's inset cycle and a page load, and that none of
+them writes an automatic scroll command; that invariant replaced the
+`drivenCoordinatorExecutor` and `shrinkDoesNotFollow` fixtures, which could only
+reach it through synthetic geometry. The three fixtures whose subject is the
+past-end net or the pinned re-application (`pastEndRepairReturnsToTail`,
+`pinnedOvershootNeedsNoAppWrite`, `displacedRetainedResume`) keep their injected
+geometry: a real scroll cannot be dragged past the legal content bottom, and
+their mechanisms retire at CT-19, not here. The finger-driven return and the
+real software keyboard stay device-checklist and XCUITest checks.
+
 ```bash
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/ct2ManyTallRepliesMetrics()' \

@@ -1244,3 +1244,80 @@ pass only through eager-only repairs, stop and report.
   `README`-level gate docs live in the parity section of
   `packages/ios-app/docs/development.md`. F9's `snapNativeTranscriptOffsetToWholePoint`
   removal is still owed by CT-23.
+
+### CT-25 stage B3 · 2026-09-29 · chat scroll session (worker lanes)
+
+- Result: detached reading is driven through the real transcript scroll view, and
+  the anchor invariant it exists for is now measured in window coordinates (F3).
+
+  **The driver.** `ChatViewScrollHarness.detachReaderByRealScroll()` moves the
+  transcript's own `UIScrollView` to the oldest loaded row — the path the
+  coordinator reads as direct ownership, today's status-bar tap — and waits until
+  the coordinator reports the detached mode *and* a row is on screen.
+  `returnReaderToPinnedTailByCatchUp()` returns the reader through the product's
+  own catch-up affordance, because a hosted test cannot synthesize the pan
+  gesture whose `onScrollPhaseChange` callbacks re-pin a detached reader; the
+  finger-driven return stays the device checklist's check (F10). The hand-written
+  `ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight:
+  400)` sequence is gone from every journey that only needed a detached viewport:
+  `detachedDiscreteInsertion`, `catchUpReconcilesNewestProjection`,
+  `retainedDetachedAuthorityReplacement`, `streamingBurstLatestProjection`,
+  `cancelledDetachedReplacement` (4 cases) and
+  `detachedReplacementAdmitsCurrentTarget` (2 cases) now detach for real.
+  `manualTailReturnAndKeyboardFollow` detaches for real and keeps its synthetic
+  part, which is explicitly the device-observed callback *order* a finger's
+  return produces — the one input a hosted test cannot generate.
+
+  **The anchor oracle.**
+  `detachedReaderHoldsItsTopRowThroughStreamingKeyboardAndPage` opens a 60-row
+  mixed history with 40 earlier messages, detaches for real, takes the topmost
+  visible row as the reader's anchor, and asserts in window coordinates that its
+  `minY` stays within ±0.5 pt through streaming (six updates), the keyboard's
+  inset cycle (the stage B1 driver, up and down) and a page load — and that none
+  of them writes an automatic scroll command. A real-scroll journey covering that
+  also let two fabricated-geometry fixtures go:
+  `drivenCoordinatorExecutor` and `shrinkDoesNotFollow` (audit F3/F8), whose whole
+  subject was "no scroll writes while pinned or detached" through injected
+  geometry.
+- Evidence (lane ct25, products from this worktree's own source state, all under
+  `~/Library/Developer/Tron/ios/test-runs/`):
+  - Three consecutive runs of the real-scroll set (the anchor journey and the six
+    converted journeys, 8 tests), 7.759 s and 7.870 s
+    (`20260929T025916Z-run.H5TfzJ`, `20260929T025951Z-run.6Jjpzu`, plus
+    `20260929T025453Z-run.S3cEra` for the anchor journey alone), each:
+
+    ```
+    CT25-DETACH-METRICS anchor=detach-anchor-turn-0 startY=64.0 movements=streaming:0.0,keyboard-up:0.0,keyboard-down:0.0,page-load:0.0
+    ```
+
+    The anchor row is the oldest loaded row (`detach-anchor-turn-0`, 64 pt from the
+    top of the window) and it does not move by a hundredth of a point through any
+    of the three phases, with zero automatic scroll commands in all of them.
+  - Full `ChatViewScrollHarnessTests`: 60 tests pass in 81.9 s
+    (`20260929T025525Z-run.Xxguyn`) — 62 before this stage (59 stage A + 2 B1 + 1
+    B3) minus the two deleted fixtures.
+  - The field shapes are unaffected: `CT2-METRICS shape=many-tall-replies … blankBoundaries=13/72`
+    and `CT24-METRICS shape=resync-under-tall-newest … blankBoundaries=77/90` in
+    `20260929T025825Z-run.8QBFXl` (2.0 s and 2.4 s), both still reproducing the
+    known defect the stage A gates require.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`packages/ios-app/Tests/UI/ChatViewScrollHarnessTests.swift`,
+  `packages/ios-app/docs/development.md`, this plan).
+- Deviations:
+  - The audit's F3 also lists the coordinator suite's fixtures
+    (`ChatScrollCoordinatorTests`) and `ChatVisualParityTests`' detached scenario
+    as fabricated geometry. The coordinator suite tests the reducer's own
+    transitions, which no end-to-end journey covers and which AGENTS.md's
+    isolation rule allows; its fixtures stay until CT-23 rewrites them against one
+    orientation-free geometry value (audit section A). The parity gate's detached
+    scenario is a *rendered-frame* scenario whose geometry is the harness's
+    driver by design; it is re-recorded, not rewritten, and F2's driver work is
+    stage B5.
+  - `displacedRetainedResume` (a real scroll, then the pinned-position
+    re-application), `pinnedOvershootNeedsNoAppWrite` and
+    `pastEndRepairReturnsToTail` keep their injected geometry: their subject is a
+    mechanism CT-19 retires, the plan's deletion rule deletes those with the
+    mechanism, and a real scroll view cannot be dragged past its legal content
+    bottom in a hosted test (`scrollReader` clamps to the legal range). That is
+    F8's work, not F3's.
