@@ -89,7 +89,7 @@ package enum GatewayDiagnosticTopicAdmission {
         "session.structureChanged", "session.contextChanged", "session.resourcesChanged",
         "session.processTranscript.changed", "transport.disconnected", "transport.resyncRequired",
         "system.stopping", "notification.inbox.changed", "auth.prompt", "auth.event",
-        "auth.completed", "automation.changed", "knowledge.changed", "settings.changed", "trust.changed",
+        "auth.completed", "automation.changed", "knowledge.changed", "knowledge.curation.job", "settings.changed", "trust.changed",
         "providers.changed", "packages.changed", "packages.progress", "packages.completed",
         "models.customChanged", "models.recentChanged", "devices.changed", "terminal.output", "terminal.exit"
     ]

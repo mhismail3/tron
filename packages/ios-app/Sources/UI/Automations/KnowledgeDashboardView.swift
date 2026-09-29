@@ -1319,6 +1319,7 @@ struct KnowledgeDetailView: View {
     @State private var sourceRow: KnowledgeSourceRow?
     @State private var replacementQuery = ""
     @State private var replacementRows: [KnowledgeSourceRow] = []
+    @State private var supersededReplacementRow: KnowledgeSourceRow?
     @State private var choosingReplacement = false
     private let navigationAncestors: Set<String>
 
@@ -1484,11 +1485,17 @@ struct KnowledgeDetailView: View {
             // receipt-owned mutation must survive later edits cancelling this task.
             Task { @MainActor in await saveTakeDraft() }
         }
-        .task(id: "source-config-\(origin.profileID ?? "none")") { await loadSourceConfig() }
-        .task(id: "source-row-\(currentRecord.id)") { await refreshSourceRow() }
+        .task(id: "source-config-\(origin.profileID ?? "none")-\(String(describing: model.connectionState))-\(model.knowledgeInvalidationRevision)") { await loadSourceConfig() }
+        .task(id: "source-row-\(currentRecord.id)") { await refreshSourceRow(); await refreshSupersededRow() }
         .onChange(of: model.knowledgeInvalidationRevision) { _, _ in
             jobsRequestGeneration &+= 1
-            Task { @MainActor in await refreshSourceRow() }
+            Task { @MainActor in await refreshSourceRow(); await refreshSupersededRow() }
+        }
+        .onChange(of: model.knowledgeCurationJobRevision) { _, _ in
+            guard let job = model.latestKnowledgeCurationJob, job.sourceId == currentRecord.id else { return }
+            if job.operation == "summary" { summaryJob = job; if job.status == "failed" { summaryError = job.reason ?? "Summary failed; the existing summary is unchanged." } }
+            if job.operation == "tags" { taggingJob = job; if job.status == "done" { Task { @MainActor in await refreshSourceRow() } } }
+            jobsRequestGeneration &+= 1
         }
         .onChange(of: takeDraft) { _, value in
             takeEditGeneration &+= 1
@@ -1679,6 +1686,10 @@ struct KnowledgeDetailView: View {
         }
         TronSettingsGroup("Tags and verdict", accent: .tronKnowledge) {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
+                if taggingJob?.status == "running" || tagsStale {
+                    Text(taggingJob?.status == "running" ? "Updating tags" : "Needs re-tagging")
+                        .font(TronTypography.caption).foregroundStyle(taggingJob?.status == "running" ? Color.tronTextSecondary : Color.tronAmber)
+                }
                 sourceTagLabels(source)
                 Menu {
                     ForEach(KnowledgeSourceVerdict.allCases, id: \.self) { verdict in
@@ -1692,9 +1703,16 @@ struct KnowledgeDetailView: View {
                         if verdictSaving { TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14) }
                     }
                 }.disabled(verdictSaving || !admitsOrigin)
+                if source.verdict?.verdict == .superseded, let replacement = supersededReplacementRow {
+                    Button { openLinkedRecord(id: replacement.id, revisionID: replacement.revisionId) } label: {
+                        TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", subtitle: replacement.id, accent: .tronKnowledge) {
+                            Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronKnowledge)
+                        }
+                    }.buttonStyle(.plain)
+                }
                 if choosingReplacement || source.verdict?.verdict == .superseded {
                     TextField("Search replacement", text: $replacementQuery)
-                        .textFieldStyle(.roundedBorder)
+                        .tronField()
                         .task(id: replacementQuery) { await searchReplacement() }
                     ForEach(replacementRows.filter { $0.id != currentRecord.id }, id: \.id) { row in
                         Button("Replaced by: \(row.title)") { choosingReplacement = false; setVerdict(.superseded, replacementID: row.id) }
@@ -1738,8 +1756,8 @@ struct KnowledgeDetailView: View {
                         .padding(.horizontal, 10).padding(.vertical, 5).background(Color.tronKnowledge.opacity(0.12), in: Capsule())
                 }
             }
-        } else if source.tags?.tagIds.isEmpty == false {
-            Text("Tags updating").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+        } else if let tagIds = source.tags?.tagIds, !tagIds.isEmpty {
+            Text(tagIds.joined(separator: " · ")).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
         } else if source.tags == nil {
             Text("Tags not assigned yet").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
         }
@@ -1990,34 +2008,25 @@ struct KnowledgeDetailView: View {
     private func observeCurationJobs() async {
         guard model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
         let identity = origin
-        for attempt in 0..<30 {
-            do {
-                let response = try await model.knowledge.curationJobs(sourceID: currentRecord.id)
-                guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
-                taggingJob = response.jobs.first(where: { $0.operation == "tags" })
-                if taggingJob?.status == "done" { await refreshSourceRow() }
-                if let job = response.jobs.first(where: { $0.operation == "summary" }) {
-                    summaryJob = job
-                    if job.status == "done", let revision = job.revisionId {
-                        let record = try await model.knowledge.read(id: currentRecord.id, revisionID: revision)
-                        guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
-                        if let record { currentRecord = record; await onChanged() }
-                        summaryCommandID = nil
-                        return
-                    }
-                    if job.status == "failed" { return }
+        do {
+            let response = try await model.knowledge.curationJobs(sourceID: currentRecord.id)
+            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+            taggingJob = response.jobs.first(where: { $0.operation == "tags" })
+            if let job = response.jobs.first(where: { $0.operation == "summary" }) {
+                summaryJob = job
+                if job.status == "failed" { summaryError = job.reason ?? "Summary failed; the existing summary is unchanged." }
+                if job.status == "done", let revision = job.revisionId {
+                    let record = try await model.knowledge.read(id: currentRecord.id, revisionID: revision)
+                    guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+                    if let record { currentRecord = record; await onChanged() }
+                    summaryCommandID = nil
                 }
-                let summaryRunning = summaryJob?.status == "running"
-                let tagsRunning = taggingJob?.status == "running"
-                // A take write schedules K4's job asynchronously. A short bounded
-                // status poll lets its owner publish the job before showing the
-                // stale-row fallback; the indicator itself is never timer-derived.
-                if !summaryRunning && !tagsRunning && (!tagsStale || attempt >= 10) { return }
-            } catch {
-                guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             }
-            try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
+            if taggingJob?.status == "done" { await refreshSourceRow() }
+        } catch {
+            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+            if summaryJob?.status == "running" { summaryError = error.localizedDescription }
+            if taggingJob?.status == "running" { taggingJob = nil }
         }
     }
 
@@ -2081,6 +2090,18 @@ struct KnowledgeDetailView: View {
             let value = try await model.knowledge.status()
             guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
             sourceConfig = value.config
+        } catch { return }
+    }
+
+    private func refreshSupersededRow() async {
+        guard case .source(let source) = currentRecord.content,
+              source.verdict?.verdict == .superseded,
+              let id = source.verdict?.supersededBy else { supersededReplacementRow = nil; return }
+        let identity = origin
+        do {
+            let page = try await model.knowledge.sourceRows(ids: [id], includeArchived: true, includePending: true)
+            guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
+            supersededReplacementRow = page.rows.first
         } catch { return }
     }
 

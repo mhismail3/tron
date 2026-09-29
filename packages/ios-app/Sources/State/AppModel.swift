@@ -306,6 +306,8 @@ final class AppModel {
     /// one. Absent means the client cannot reason about the revision and must
     /// refresh rather than patch rows.
     private(set) var latestKnowledgeChange: KnowledgeChanged?
+    private(set) var latestKnowledgeCurationJob: KnowledgeCurationJob?
+    private(set) var knowledgeCurationJobRevision = 0
     var workspace: WorkspaceListing?
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
@@ -4704,6 +4706,10 @@ final class AppModel {
         case "knowledge.changed":
             knowledgeInvalidationRevision &+= 1
             latestKnowledgeChange = { if case .knowledgeChanged(let change) = event.preparation { return change }; return nil }()
+        case "knowledge.curation.job":
+            guard case .knowledgeCurationJob(let job) = event.preparation else { break }
+            latestKnowledgeCurationJob = job
+            knowledgeCurationJobRevision &+= 1
         case "packages.progress", "packages.completed":
             let completed = event.topic == "packages.completed"
             let succeeded = event.payload.objectValue?["success"]?.boolValue == true

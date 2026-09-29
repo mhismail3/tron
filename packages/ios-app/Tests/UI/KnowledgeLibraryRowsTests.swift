@@ -221,6 +221,22 @@ struct KnowledgeLibraryRowsTests {
         #expect(GatewayDiagnosticTopicAdmission.admit("knowledge.changed") == "knowledge.changed")
     }
 
+    @Test("curation terminal events decode the owned job and remain admitted")
+    func curationJobEventProjection() throws {
+        let payload = #"{"commandId":"tag-command","operation":"tags","sourceId":"entry-1","status":"failed","startedAt":"2026-01-01T00:00:00Z","finishedAt":"2026-01-01T00:00:01Z","code":"provider-error","reason":"Jev unavailable"}"#
+        let event = GatewayEvent(type: "event", topic: "knowledge.curation.job", sessionId: nil,
+                                 payload: try JSONDecoder.gateway.decode(JSONValue.self, from: Data(payload.utf8)))
+        guard case .knowledgeCurationJob(let job) = event.preparation else {
+            Issue.record("knowledge.curation.job must decode into its typed preparation")
+            return
+        }
+        #expect(job.commandId == "tag-command")
+        #expect(job.operation == "tags")
+        #expect(job.status == "failed")
+        #expect(job.code == "provider-error")
+        #expect(GatewayDiagnosticTopicAdmission.admit("knowledge.curation.job") == "knowledge.curation.job")
+    }
+
     @Test("a superseded or cancelled query is never published")
     func searchDebounce() async throws {
         let debouncer = KnowledgeSearchDebouncer(delay: .milliseconds(25))

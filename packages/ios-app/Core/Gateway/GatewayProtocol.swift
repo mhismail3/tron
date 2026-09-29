@@ -204,6 +204,7 @@ package enum GatewayEventPreparation: Sendable, Equatable {
     case processTranscriptChanged(ProcessTranscriptChanged)
     case automationChanged(AutomationChanged)
     case knowledgeChanged(KnowledgeChanged)
+    case knowledgeCurationJob(KnowledgeCurationJob)
     case notificationInboxChanged(NotificationInboxChanged)
     case terminalEvent(PreparedTerminalEvent)
 }
@@ -300,7 +301,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
                 eventSequence: event.envelope.eventSequence
             )
         case .none, .sessionSummary, .processTranscriptChanged, .automationChanged,
-             .knowledgeChanged, .notificationInboxChanged, .terminalEvent:
+             .knowledgeChanged, .knowledgeCurationJob, .notificationInboxChanged, .terminalEvent:
             return nil
         }
     }
@@ -317,7 +318,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
         case .none:
             return !topic.hasPrefix("session.")
         case .sessionSummary, .processTranscriptChanged, .automationChanged,
-             .knowledgeChanged, .notificationInboxChanged, .terminalEvent:
+             .knowledgeChanged, .knowledgeCurationJob, .notificationInboxChanged, .terminalEvent:
             return true
         }
     }
@@ -349,6 +350,8 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
             return (try? adapter.decode(AutomationChanged.self)).map(GatewayEventPreparation.automationChanged) ?? .none
         case "knowledge.changed":
             return (try? adapter.decode(KnowledgeChanged.self)).map(GatewayEventPreparation.knowledgeChanged) ?? .none
+        case "knowledge.curation.job":
+            return (try? adapter.decode(KnowledgeCurationJob.self)).map(GatewayEventPreparation.knowledgeCurationJob) ?? .none
         case "notification.inbox.changed":
             guard let change = try? adapter.decode(NotificationInboxChanged.self),
                   NotificationInboxAdmissionPolicy.admits(change) else { return .none }
