@@ -1742,7 +1742,7 @@ struct ChatViewScrollHarnessTests {
                     )
                     guard let display = rows.first(where: { $0.isOnScreen && $0.semanticID.contains("display") }) else {
                         Issue.record("\(orientation): the display card's source frame must be mounted")
-                        continue
+                        return
                     }
                     let displayPoint = CGPoint(x: display.windowFrame.midX, y: display.windowFrame.minY + 12)
                     guard let configuration = delegate.contextMenuInteraction(
@@ -1750,7 +1750,7 @@ struct ChatViewScrollHarnessTests {
                         configurationForMenuAtLocation: bridge.view.convert(displayPoint, from: nil)
                     ) else {
                         Issue.record("\(orientation): the display card's menu configuration must resolve")
-                        continue
+                        return
                     }
                     let preview = delegate.contextMenuInteraction?(
                         bridge.interaction,
@@ -1759,11 +1759,11 @@ struct ChatViewScrollHarnessTests {
                     )
                     guard let preview else {
                         Issue.record("\(orientation): SwiftUI's display-card preview must be available")
-                        continue
+                        return
                     }
                     guard let container = preview.target.container as? UIView else {
                         Issue.record("\(orientation): SwiftUI's preview must identify its source container")
-                        continue
+                        return
                     }
                     let failure = ContextMenuPreviewPlacement.failure(
                         sourceWindowFrame: display.windowFrame,
