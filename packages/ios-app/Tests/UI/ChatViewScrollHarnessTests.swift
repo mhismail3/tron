@@ -3579,15 +3579,12 @@ struct ChatViewScrollHarnessTests {
                         == nonLeaseCommands,
                     "pinned growth published a position write: \(harness.pinnedDescription())"
                 )
-
-                // The same row arrives shorter: rows may get their own lease, and
-                // the tail must stay at the composer either way.
+                // Content shrinks: the reply leaves again, so the pinned transcript
+                // has to come back to where it was. Rows may get their own lease
+                // here too; nothing may write a position.
                 var shrunk = grown
-                shrunk.transcript[shrunk.transcript.count - 1] = try harnessAssistantMessage(
-                    id: "pinned-growth-row",
-                    presentationID: semanticID,
-                    text: "The pinned reply settles shorter."
-                )
+                shrunk.transcript.removeLast()
+                shrunk.transcriptTotal = (shrunk.transcriptTotal ?? shrunk.transcript.count) - 1
                 shrunk.revision += 1
                 shrunk.eventSequence += 1
                 harness.replaceAuthoritativeSnapshot(shrunk)
@@ -3604,11 +3601,16 @@ struct ChatViewScrollHarnessTests {
                         == nonLeaseCommands,
                     "pinned shrink published a position write: \(harness.pinnedDescription())"
                 )
+                // The settled live state, not only the sample the wait returned on.
+                // The oracle's own pinned decision, which allows both positions a
+                // pinned transcript has today: the 12 pt tail affordance after its
+                // newest row, and the terminal row owning that affordance. The
+                // shrink's own layout gets its frames first.
+                for _ in 0..<24 { try await harness.driveFrameBoundary() }
+                let settledBottom = harness.transcriptBottom()
                 #expect(
-                    TranscriptWindowOracle.isPinned(
-                        in: harness.visibleRootView, tolerance: TranscriptWindowOracle.pinnedTolerance
-                    ),
-                    "the settled tail holds the pinned band: \(harness.pinnedDescription())"
+                    settledBottom.isPinned,
+                    "the settled tail holds the pinned band (clearance \(settledBottom.clearance.map(ct2Number) ?? "none")): \(harness.pinnedDescription())"
                 )
             }
         }
