@@ -1276,122 +1276,62 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    // TEMPORARY (CT-23 stage 2 diagnosis): where each automatic scroll edge
-    // effect is drawn on the flipped transcript. One line per (state, variant)
-    // with the navigation band's and the composer band's luminance distance from
-    // the same state with the product's own effect state, plus the parity region's
-    // own magnitude. Removed with the stage-2 handoff.
-    @MainActor
-    final class CT23ChromeDiagnosis {
-        var navBands: [String: [Double]] = [:]
-        var composerBands: [String: [Double]] = [:]
-        var regions: [String: ChatVisualParityFingerprint] = [:]
-    }
-
-    @Test("CT-23 diagnosis: the automatic edge effects on both orientations", .enabled(if: UIValidationTier.isActive))
-    func ct23EdgeEffectPlacement() async throws {
-        try await withTestWatchdog(timeout: .seconds(300)) {
-            struct Variant {
-                let name: String
-                let topHidden: Bool?
-                let bottomHidden: Bool?
-            }
-            let variants = [
-                Variant(name: "product", topHidden: nil, bottomHidden: nil),
-                Variant(name: "no-top", topHidden: true, bottomHidden: false),
-                Variant(name: "no-bottom", topHidden: false, bottomHidden: true),
-                Variant(name: "no-effects", topHidden: true, bottomHidden: true),
-            ]
-            let diagnosis = CT23ChromeDiagnosis()
+    // TEMPORARY (CT-23 stage 2 diagnosis): the automatic scroll edge effect's
+    // band. `ct23DiagnosisEffectBand` reports the effect-carrying layer's window
+    // frame, so the whole-viewport wash can be told from the 170.8 pt band the
+    // unflipped transcript has, under each candidate state.
+    @Test("CT-23 diagnosis: the edge effect's band under the flip", .enabled(if: UIValidationTier.isActive))
+    func ct23EdgeEffectBand() async throws {
+        try await withTestWatchdog(timeout: .seconds(240)) {
             for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
                 let label = orientation.presentsNewestRowFirst ? "origin" : "end"
-                for state in ["pinned"] {
-                    var snapshot = try SessionScenarioBuilder(seed: 1_282).openingTail(targetEncodedBytes: 10_000)
-                    snapshot.acceptsQueuedPrompts = false
-                    snapshot.transcript = try (0..<40).map { index in
-                        try harnessRichAssistantMessage(
-                            id: "chrome-history-\(index)",
-                            presentationID: "chrome-turn-\(index)",
-                            thinkingLines: [],
-                            text: index.isMultiple(of: 4)
-                                ? harnessTallEstimateRowText(index)
-                                : "Chrome history row \(index) stays one line."
-                        )
+                var snapshot = try SessionScenarioBuilder(seed: 1_282).openingTail(targetEncodedBytes: 10_000)
+                snapshot.acceptsQueuedPrompts = false
+                snapshot.transcript = try (0..<40).map { index in
+                    try harnessRichAssistantMessage(
+                        id: "band-history-\(index)",
+                        presentationID: "band-turn-\(index)",
+                        thinkingLines: [],
+                        text: index.isMultiple(of: 4)
+                            ? harnessTallEstimateRowText(index)
+                            : "Band history row \(index) stays one line."
+                    )
+                }
+                snapshot.transcriptStart = 0
+                snapshot.transcriptTotal = snapshot.transcript.count
+                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
+                    _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                    for _ in 0..<40 { try await harness.driveFrameBoundary() }
+                    try harness.snapNativeTranscriptOffsetToWholePoint()
+                    func report(_ name: String) {
+                        print("CT23-BAND orientation=\(label) state=\(name) band=\(harness.ct23DiagnosisEffectBand())")
+                        print("CT23-BAND orientation=\(label) state=\(name) layers=\(harness.ct23DiagnosisEffectLayers())")
                     }
-                    snapshot.transcriptStart = 0
-                    snapshot.transcriptTotal = snapshot.transcript.count
-                    try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
-                        _ = try await harness.recorder.waitUntil { $0.observation.isReady }
-                        for _ in 0..<40 { try await harness.driveFrameBoundary() }
-                        try harness.snapNativeTranscriptOffsetToWholePoint()
-                        if state == "history300" {
-                            try harness.scrollReader(byVisualPoints: 300)
-                            for _ in 0..<3 { try await harness.driveFrameBoundary() }
+                    report("product")
+                    try harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
+                    try await harness.driveFrameBoundary()
+                    report("effects-on")
+                    let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+                    for style in ["hard", "automatic", "soft"] {
+                        switch style {
+                        case "hard": scrollView.topEdgeEffect.style = .hard
+                        case "automatic": scrollView.topEdgeEffect.style = .automatic
+                        default: scrollView.topEdgeEffect.style = .soft
                         }
-                        for variant in variants {
-                            if let top = variant.topHidden, let bottom = variant.bottomHidden {
-                                try harness.ct23DiagnosisSetEdgeEffectsHidden(top: top, bottom: bottom)
-                                try await harness.driveFrameBoundary()
-                            }
-                            let key = "\(label)-\(state)-\(variant.name)"
-                            diagnosis.navBands[key] = harness.renderedRowLuminance(
-                                in: CGRect(x: 0, y: 0, width: 390, height: 160)
-                            )
-                            diagnosis.composerBands[key] = harness.renderedRowLuminance(
-                                in: CGRect(x: 0, y: 600, width: 390, height: 191)
-                            )
-                            let rendered = harness.renderedParityFrame(
-                                scale: ChatVisualParitySpec.renderScale,
-                                rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
-                                columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
-                                includingPNG: true
-                            )
-                            diagnosis.regions[key] = ChatVisualParityFingerprint(rendered)
-                            if variant.name == "product", let png = rendered.png {
-                                Attachment.record(png, named: "ct23-chrome-\(key).png")
-                            }
-                            if variant.name != "product" {
-                                try? harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
-                                try await harness.driveFrameBoundary()
-                            }
-                            if state == "pinned", variant.name != "no-bottom" {
-                                print("CT23-LAYERS orientation=\(label) variant=\(variant.name)"
-                                    + " \(try harness.ct23DiagnosisEffectLayers())")
-                            }
-                        }
+                        try await harness.driveFrameBoundary()
+                        report("top-style-\(style)")
+                    }
+                    scrollView.topEdgeEffect.style = .soft
+                    try harness.ct23DiagnosisSetEdgeEffectsHidden(top: true, bottom: false)
+                    try await harness.driveFrameBoundary()
+                    for (name, shift) in [("scrolled-60", CGFloat(60)), ("scrolled-400", CGFloat(400))] {
+                        try harness.ct23DiagnosisShiftOffset(by: shift)
+                        try await harness.driveFrameBoundary()
+                        report(name)
+                        try harness.ct23DiagnosisShiftOffset(by: -shift)
+                        try await harness.driveFrameBoundary()
                     }
                 }
-            }
-            let measurements = await MainActor.run {
-                (nav: diagnosis.navBands, composer: diagnosis.composerBands, regions: diagnosis.regions)
-            }
-            func distance(_ first: [Double], _ second: [Double]) -> Double {
-                guard first.count == second.count, !first.isEmpty else { return .infinity }
-                let squared = zip(first, second).reduce(0.0) { partial, pair in
-                    let delta = (pair.0 - pair.1) / 255
-                    return partial + delta * delta
-                }
-                return (squared / Double(first.count)).squareRoot()
-            }
-            func regionMagnitude(_ key: String, _ other: String) -> Double {
-                guard let first = measurements.regions[key], let second = measurements.regions[other] else {
-                    return .infinity
-                }
-                return ChatVisualParityFingerprint.magnitude(
-                    first, second, alignmentPoints: ChatVisualParitySpec.alignmentPoints
-                ).magnitude
-            }
-            for key in measurements.regions.keys.sorted() {
-                let parts = key.split(separator: "-").map(String.init)
-                let suppressed = "\(parts[0])-\(parts[1])-no-effects"
-                let endProduct = "end-\(parts[1])-product"
-                print("CT23-CHROME key=\(key)"
-                    + " vsSuppressedNav=\(String(format: "%.5f", distance(measurements.nav[key] ?? [], measurements.nav[suppressed] ?? [])))"
-                    + " vsSuppressedComposer=\(String(format: "%.5f", distance(measurements.composer[key] ?? [], measurements.composer[suppressed] ?? [])))"
-                    + " vsSuppressedRegion=\(String(format: "%.5f", regionMagnitude(key, suppressed)))"
-                    + " vsEndNav=\(String(format: "%.5f", distance(measurements.nav[key] ?? [], measurements.nav[endProduct] ?? [])))"
-                    + " vsEndComposer=\(String(format: "%.5f", distance(measurements.composer[key] ?? [], measurements.composer[endProduct] ?? [])))"
-                    + " vsEndRegion=\(String(format: "%.5f", regionMagnitude(key, endProduct)))")
             }
         }
     }
@@ -5408,6 +5348,38 @@ final class ChatViewScrollHarness {
         let scrollView = try nativeTranscriptScrollView()
         scrollView.topEdgeEffect.isHidden = top
         scrollView.bottomEdgeEffect.isHidden = bottom
+    }
+
+    /// TEMPORARY (CT-23 stage 2 diagnosis): the effect layers' window frames, so
+    /// the band the system drew can be read off directly.
+    func ct23DiagnosisEffectBand() -> String {
+        guard let window = hostingController.view.window,
+              let scrollView = Self.nativeTranscriptScrollView(in: hostingController.view) else {
+            return "no-scroll-view"
+        }
+        var found: [String] = []
+        func walk(_ layer: CALayer, depth: Int) {
+            guard depth <= 5 else { return }
+            let name = String(describing: type(of: layer))
+            if name.contains("Backdrop") || name.contains("Blur") || name.contains("Edge") {
+                let rect = layer.convert(layer.bounds, to: window.layer)
+                found.append("\(name)\(String(format: "(%.1f,%.1f,%.1f,%.1f)", Double(rect.minX), Double(rect.minY), Double(rect.width), Double(rect.height)))o\(String(format: "%.2f", Double(layer.opacity)))h\(layer.isHidden)")
+            }
+            for sublayer in layer.sublayers ?? [] { walk(sublayer, depth: depth + 1) }
+        }
+        walk(scrollView.layer, depth: 0)
+        return found.joined(separator: " ")
+    }
+
+    /// TEMPORARY (CT-23 stage 2 diagnosis): move the raft of the transcript by
+    /// `points` without any product input.
+    func ct23DiagnosisShiftOffset(by points: CGFloat) throws {
+        let scrollView = try nativeTranscriptScrollView()
+        scrollView.setContentOffset(
+            CGPoint(x: scrollView.contentOffset.x, y: scrollView.contentOffset.y + points),
+            animated: false
+        )
+        scrollView.layoutIfNeeded()
     }
 
     /// TEMPORARY (CT-23 stage 2 diagnosis): the effect-carrying layers of the
