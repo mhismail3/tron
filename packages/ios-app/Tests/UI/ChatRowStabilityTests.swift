@@ -1221,6 +1221,7 @@ private struct RowStabilityReport {
             values[id] = observation.rowFrames[id]?.height
         }
         collectNativeHeights(harness)
+        print("CT23-ROW-PHASE phase=\(phase) heights=\(heightsByPhase[phase] ?? [:]) records=\(observation.rowStabilityRecords.filter { RowStabilityFixture.rowIDs.contains($0.key) }) mounted=\(observation.physicalRowAppearanceCounts) excluded=\(observation.excludedRowStabilityIDs)")
     }
 
     /// Drains the retained display-frame samples into the per-mount height
