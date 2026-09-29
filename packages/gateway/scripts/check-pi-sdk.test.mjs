@@ -57,10 +57,18 @@ async function editJson(root, file, mutate) {
   await writeFile(path, JSON.stringify(value));
 }
 
-test("accepts npm's current nested pi-coding-agent shrinkwrap shape", async () => {
-  await withFixture({}, (root) => assert.deepEqual(validatePiSdk({ gatewayDir: root }), {
-    ok: true, version, rollbackVersion: version, packages: [...PI_PACKAGES].sort(), installedChecked: false, issues: [],
-  }));
+test("accepts MCP and codemode from pi-coding-agent's nested shrinkwrap", async () => {
+  await withFixture({}, async (root) => {
+    const report = validatePiSdk({ gatewayDir: root });
+    assert.deepEqual(report, {
+      ok: true, version, rollbackVersion: version, packages: [...PI_PACKAGES].sort(), installedChecked: false, issues: [],
+    });
+    const lock = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "package-lock.json"), "utf8"));
+    for (const name of ["@earendil-works/pi-mcp", "@earendil-works/pi-codemode"]) {
+      assert.equal(lock.packages[lockPath(name, true)]?.version, version);
+      assert.equal(lock.packages[lockPath(name)], undefined);
+    }
+  });
 });
 
 test("validates actual 64-byte sha512 integrity values", () => {

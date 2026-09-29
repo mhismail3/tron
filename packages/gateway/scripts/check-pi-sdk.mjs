@@ -16,6 +16,8 @@ export const PI_PACKAGES = Object.freeze([
   "@earendil-works/pi-ai",
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-tui",
+  "@earendil-works/pi-mcp",
+  "@earendil-works/pi-codemode",
   "@earendil-works/pi-client",
   "@earendil-works/pi-protocol",
   "@earendil-works/pi-telemetry",

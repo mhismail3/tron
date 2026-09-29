@@ -228,7 +228,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Built-in section in `pi config`; `-builtin:<name>` in `extensions`; SDK `builtin: true` | **Adapt**: compose Tron built-ins with `builtin: true`, surface toggles on iOS | P99-6, P99-15 |
 | `defaultTools` `+name`/`-name` entries | **Adapt**: settings projection and patch (D-5) | P99-6 |
 | codemode `models.classify` cost added to tool result usage; `ctx.executeTool` usage added to the calling result | **Verify** session cost totals include tool-result usage | P99-5 |
-| TypeScript 7 / ES2024 build; `tsx` replaced by Node type stripping | **Verified** by probe `tsc`; Node 22.22 runs the dist | P99-2 |
+| TypeScript 7 / ES2024 build; `tsx` replaced by Node type stripping | **Adapt**: current candidate type check has five expected API integration errors owned by P99-3; Node 22.22.0 is the validation runtime | P99-2, P99-3 |
 | Startup header/banner and `[Themes]` changes; light/dark detection order; `TERM=*-direct` | **Not applicable** (TUI only) | — |
 | OpenAI Codex provider renamed "OpenAI Codex (legacy)" | **Inherit**; iOS shows provider names from the Gateway | P99-9 |
 | `builtin:<name>` naming in errors, diagnostics and source info | **Adapt**: agent-instructions and extension diagnostics map `builtin:` sources | P99-6 |
@@ -240,14 +240,14 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | RpcClient listener fix; X11 clipboard; Finder paste; Kitty images; cursor after exit; `/settings` input; autocomplete fixes; pinned `-e` git refs | **Not applicable** (Tron uses the SDK, not RpcClient or the TUI) | — |
 | Provider fixes: Vercel 1-hour cache pricing, `samplingParams`, Mistral GLM and reasoning, OpenAI Fast pricing, OpenCode qwen thinking replay, Responses without `output_index`, OAuth error redirects and busy callback port, Copilot Opus levels | **Inherit**; covered by provider/catalog regressions where Tron owns a seam | P99-12 |
 | Footer/bash/`sanitizeBinaryOutput` CPU reductions | **Inherit** | — |
-| Family graph: `pi-mcp`, `pi-codemode`, `quickjs-wasi` | **Adapt** SDK checker, helper tests, payload verification | P99-2 |
+| Family graph: `pi-mcp`, `pi-codemode`, `quickjs-wasi` | **Adapt**: checker admits the new packages at the observed nested `pi-coding-agent` paths; helper tests lock down placement. Payload verification deferred because the bundler performs `npm ci` and publishes generated resources. | P99-2 |
 
 ## Tasks
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | P99-1 | Done | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | orchestrator session, 2026-09-29 |
-| P99-2 | Claimed | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | luna-worker, 2026-09-29 |
+| P99-2 | Done | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | luna-worker, 2026-09-29 |
 | P99-3 | Claimed | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | luna-worker, 2026-09-29 |
 | P99-4 | Claimed | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
 | P99-5 | Ready | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | Unassigned |
@@ -630,6 +630,16 @@ from a session; Sign in with ChatGPT; select a virtual model if one is
 installed. Then close the plan per `docs/plans/README.md`.
 
 ## Handoff log
+
+### P99-2 · Done · 2026-09-29 · luna-worker
+
+- Result: Pinned SDK 0.99.1 with the repository updater; checker now admits both new family packages at their nested shrinkwrap paths; rollback baseline is 0.87.1.
+- Evidence: `npm run update:pi-sdk -- 0.99.1` verified all ten packages share gitHead `d86654abb8862e201933517d6f1fce9f88dd117f`, version 0.99.1 and Node `>=22.19.0`; `check:pi-sdk` passed (8 resolved entries, installed tree checked); `test:pi-sdk-scripts` passed 23/23 in 6.48 s; `npm audit signatures` passed (364 packages, 96 attestations); npm reported 3 audit vulnerabilities (2 moderate, 1 high). tsc has five API errors assigned to P99-3 (no fixes made): missing `mcp_servers_change`/`provider_stream_event`; six ExtensionAPI members; six ToolDefinition fields; `ExtensionContext` vs `ExtensionToolContext`; and string vs boolean at runtime-slot.ts:6798. `compare-pi-sdk-graph.mjs 9b52706db 35353e38d` returned `changed:true`. This compared the package graph in the P99-2 commit; this documentation-only amendment leaves those package files unchanged.
+- Changes: `package.json`, `package-lock.json`, `pi-sdk-baseline.json`, `packages/gateway/scripts/check-pi-sdk.mjs`, `packages/gateway/scripts/check-pi-sdk.test.mjs`, and this plan.
+- Tasks added: none.
+- Kept on purpose: `pi-client` and `pi-protocol` remain in the checker cohort because 0.99.1 still publishes them, though they are no longer in the resolved lock graph.
+- Deviations: payload staging skipped. Read `bundle-gateway.sh`: even `--skip-install` requires a prebuilt `dist/index.js` (absent); normal operation performs `npm ci` and `npm run build` and publishes into Mac app Resources. This violates the task's instruction not to install or activate via that script. `quickjs.wasm`, codemode worker and pi-mcp payload inclusion remain unverified.
+- For the next agent: P99-3 owns the five tsc errors. Run the bundle/payload verification only at an approved later stage and only under the repo's build safety policy; this task made no deployment or Gateway lifecycle calls.
 
 ### P99-1 · Done · 2026-09-29 · orchestrator session
 
