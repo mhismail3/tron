@@ -99,7 +99,7 @@ struct ServerStatusPollerBoundedAdmissionTests {
             tailscaleFromSettings: "100.64.0.1",
             admitStableRuntime: { info in
                 await probes.record()
-                return admission(info: info, processID: processID)
+                return .success(admission(info: info, processID: processID))
             },
             pingServer: { _ in
                 await pings.record()
@@ -198,8 +198,8 @@ struct ServerStatusPollerBoundedAdmissionTests {
             admitStableRuntime: { info in
                 await attempts.record()
                 // One transient listener read failure must not pin needs-repair.
-                guard await attempts.count > 1 else { return nil }
-                return Self.admission(info: info, processID: 16027)
+                guard await attempts.count > 1 else { return .failure(.listener) }
+                return .success(Self.admission(info: info, processID: 16027))
             },
             pingServer: { _ in
                 await pings.record()
@@ -230,7 +230,7 @@ struct ServerStatusPollerBoundedAdmissionTests {
             token: "abc123",
             admitStableRuntime: { info in
                 await probes.record()
-                return Self.admission(info: info, processID: 16027)
+                return .success(Self.admission(info: info, processID: 16027))
             },
             pingServer: { _ in await versions.next() }
         )
@@ -280,8 +280,8 @@ struct ServerStatusPollerBoundedAdmissionTests {
                 await probes.record()
                 // The first admission holds; the explicit check then finds the
                 // extra listener the cached admission never sees again.
-                guard await probes.count == 1 else { return nil }
-                return Self.admission(info: info, processID: 16027)
+                guard await probes.count == 1 else { return .failure(.listener) }
+                return .success(Self.admission(info: info, processID: 16027))
             },
             pingServer: { _ in
                 await pings.record()
@@ -314,7 +314,7 @@ struct ServerStatusPollerBoundedAdmissionTests {
             token: "abc123",
             admitStableRuntime: { info in
                 await probes.record()
-                return Self.admission(info: info, processID: 16027)
+                return .success(Self.admission(info: info, processID: 16027))
             },
             pingServer: { _ in
                 await livePings.record()

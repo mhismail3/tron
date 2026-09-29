@@ -3,9 +3,9 @@ import Foundation
 /// What one fail-closed Stable probe concluded for the status poll.
 enum StableProbe: Equatable, Sendable {
     case admitted(StableGatewayObserver.Admission)
-    /// Admission was refused. `selected` is the selected payload's verdict, or
-    /// nil when the selection itself does not validate.
-    case refused(selected: GatewayPayloadValidationResult?)
+    /// Admission was refused by `refusal`. `selected` is the selected payload's
+    /// verdict, or nil when the selection itself does not validate.
+    case refused(StableGatewayObserver.Refusal, selected: GatewayPayloadValidationResult?)
 }
 
 /// Reuses one admitted probe while the runtime fence and the authenticated ping
@@ -208,7 +208,7 @@ struct ServerStatusPoller: Sendable {
                 installationState = .running(version: info.version, port: setup.serverPort)
                 processID = admission.processID
                 uptime = admission.uptime
-            case .refused(let selected):
+            case .refused(let refusal, let selected):
                 processID = nil
                 uptime = nil
                 if setup.profile.channel == "stable",
@@ -222,7 +222,7 @@ struct ServerStatusPoller: Sendable {
                     installationState = .needsRepair(
                         version: info.version,
                         port: setup.serverPort,
-                        reason: "Installed app, listener, selected payload, and authenticated runtime do not match"
+                        reason: "Stable admission refused: \(refusal.rawValue)"
                     )
                 }
             }
@@ -249,15 +249,19 @@ struct ServerStatusPoller: Sendable {
     /// One fail-closed Stable probe: the admission, plus — when it refuses — the
     /// selected payload's verdict that tells an in-progress update from a repair.
     static func fullProbe(setup: EnvironmentSetup, info: ServerPingInfo) async -> StableProbe {
-        if let admission = await setup.admitStableRuntime(info) { return .admitted(admission) }
+        let refusal: StableGatewayObserver.Refusal
+        switch await setup.admitStableRuntime(info) {
+        case .success(let admission): return .admitted(admission)
+        case .failure(let refused): refusal = refused
+        }
         guard setup.profile.channel == "stable", info.buildFingerprint != nil else {
-            return .refused(selected: nil)
+            return .refused(refusal, selected: nil)
         }
         let store = GatewayPayloadStore(home: setup.tronHome, channel: setup.profile.channel)
         guard case .success(let selected) = GatewayPayloadValidator.validateSelection(store: store) else {
-            return .refused(selected: nil)
+            return .refused(refusal, selected: nil)
         }
-        return .refused(selected: selected)
+        return .refused(refusal, selected: selected)
     }
 
     private static func launchdStateSnapshot(setup: EnvironmentSetup, reason: String) async -> ServerStatusSnapshot {

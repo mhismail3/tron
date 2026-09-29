@@ -49,7 +49,7 @@ struct DebugGatewayObserverTests {
     }
 
     private var command: String {
-        "\(root.path)/runtime/node-arm64 \(root.path)/app/dist/index.js --host tailscale --port 9848"
+        "\(root.path)/runtime/node-arm64 --max-old-space-size=4096 \(root.path)/app/dist/index.js --host tailscale --port 9848"
     }
 
     @Test("admits only exact supervisor, child, listener, payload, command, and authenticated identity")
@@ -116,7 +116,7 @@ struct DebugGatewayObserverTests {
     func loopbackCommandAdmission() {
         var loopback = lifecycle
         loopback.expectedHost = " 127.0.0.1 "
-        let loopbackCommand = "\(root.path)/runtime/node-arm64 \(root.path)/app/dist/index.js --host 127.0.0.1 --port 9848"
+        let loopbackCommand = "\(root.path)/runtime/node-arm64 --max-old-space-size=4096 \(root.path)/app/dist/index.js --host 127.0.0.1 --port 9848"
         #expect(validates(lifecycle: loopback, command: loopbackCommand))
         #expect(!validates(lifecycle: loopback, command: command))
         var mismatch = lifecycle

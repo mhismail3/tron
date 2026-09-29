@@ -294,7 +294,7 @@ struct PairingInfoStep: View {
             guard refreshFence.accepts(request), !Task.isCancelled else { return }
             switch pingResult {
             case .success(let info):
-                let admission = await setup.admitStableRuntime(info)
+                let admission = try? await setup.admitStableRuntime(info).get()
                 guard refreshFence.accepts(request), !Task.isCancelled else { return }
                 guard let admission else {
                     fail(.serverUnreachable, request: request)
@@ -334,7 +334,7 @@ struct PairingInfoStep: View {
                 pinned: admitted,
                 token: localToken,
                 ping: setup.pingServer,
-                admit: setup.admitStableRuntime
+                admit: { try? await setup.admitStableRuntime($0).get() }
             )
             guard refreshFence.accepts(request), !Task.isCancelled else { return }
             guard let current else {

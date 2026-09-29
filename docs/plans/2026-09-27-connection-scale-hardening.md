@@ -626,6 +626,7 @@ rows are in priority order.
 | G-9 | Done | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 (the libuv pool comparison and the O-6a latency confirmation are owed by the orchestrator's quiet-host run; the background `node_modules` clone in this worktree is private) |
 | G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence; round 3 after merging `hardening/integration`: the replacement path's client is asserted on the authority it installs, covered `session.snapshot`/`session.rebaseline` alike, and the round's fixtures speak protocol 6); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
 | G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-5a | Done | The Mac app admits the argv G-5's launcher execs: Stable admission, registration repair, Debug admission and `mac verify` require the launcher's exact command; a refused admission names its check; the menu keeps Pause when admission refuses; `protocol_mismatch` records the peer's version | G-5 | direct session on `main`, 2026-09-29 (see handoff) |
 | E-3a | Done | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3b | Done | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
@@ -9953,3 +9954,85 @@ recovery gaps; all three were fixed on the same branch.
   merges them once more.
 - For the next agent: the plan copy on `main` and on `hardening/integration`
   are identical at this point; keep updating the integration copy until R-1.
+
+### G-5a · 2026-09-29 · direct session on `main`
+
+- Incident: the user installed the Release app built from `efc88f1b5` after
+  the early merge. The menu showed Update required (with two "Repair Tron" rows
+  and no Pause), and the phone did not connect. `scripts/tron mac verify`
+  passed every check.
+- Cause 1 (Mac): G-5 made the launcher exec
+  `node --max-old-space-size=4096 index.js --host … --port …`, but
+  `StableGatewayProvenance.processCommand` and
+  `LiveLaunchAgentManager.processCommandOwnsProfile` each held their own copy
+  of the old six-field argv. Stable admission refused the running Gateway
+  (Update required, pairing and native capture refused), registration repair
+  treated it as stale (Repair relaunched into the same state), and Debug
+  admission would refuse a Debug Gateway the same way. `mac verify` matched the
+  command with a glob. The launcher's shell test and the Swift tests each
+  asserted their own copy of the argv; nothing ran the launcher's real output
+  through the Swift checks.
+- Cause 2 (phone): the phone ran a build installed 2026-09-28 01:02 PDT,
+  before the protocol-6 bump (`c16e4b279`, 07:22 PDT). The Gateway logged 29
+  `http.upgrade` `protocol_mismatch` refusals after the restart, none naming the
+  phone's version. The fix is installing the iOS app from `main`; no code change.
+- Failure modes written before the code: (1) Stable admission refuses the argv
+  the real launcher execs from the LaunchAgent plist; (2) registration repair
+  treats that runtime as stale; (3) Debug admission refuses the argv the same
+  launcher execs for `scripts/tron dev`; (4) the fix loosens the contract
+  (missing heap flag, another heap value, flag after the entrypoint, an extra
+  flag are admitted); (5) a refusal does not say which check refused; (6) the
+  refused menu offers no Pause, so the reinstall runbook cannot be followed;
+  (7) `mac verify` passes a command the app refuses; (8) `protocol_mismatch`
+  omits the peer's version.
+- Result: `StableGatewayProvenance.launchArguments` is the one Swift argv
+  contract; Stable/Debug admission and registration repair use it, and
+  `verify-mac-install.sh` compares the exact same string (plist arguments for
+  Stable, the lifecycle host for Debug). `StableGatewayObserver.observe`
+  returns a `Refusal` naming the refusing check, which becomes the Update
+  required reason and the `observer.state-changed` `why`. The menu offers Pause
+  in Update required with a single Repair. The Gateway's `protocol_mismatch`
+  record carries `peerProtocolVersion` and the accepted range. The payload
+  fixture builder moved from `GatewayPayloadStoreTests` to
+  `Tests/Support/GatewayPayloadFixture.swift` so the launcher test can use it.
+  Version bumped to `0.1.0-beta.8` / build 8 (`scripts/tron-version bump beta`).
+- Tests: `GatewayLauncherArgvTests` copies the test host's signed
+  `Tron Agent.app`, stubs Node with an argv recorder in a fixture payload, runs
+  the real launcher with the plist's arguments and environment (and the
+  `scripts/tron dev` invocation), and checks the recorded argv against Stable
+  admission, registration repair and Debug admission (modes 1-3). It failed on
+  the unfixed source with the real argv, and again with `launchArguments`
+  mutated back to the six-field list (3 issues); it passes on the fix.
+  `StableGatewayObserverTests.refusesOtherLaunchArguments` (4, 5),
+  `ServerStatusPollerTests.refusalNamesItsCheck` (5),
+  `MenuBarItemBuilderTests.needsRepairOffersPause` (6; failed first with
+  `[resumeServer, restartServer]` and no Pause), and the extended
+  `server-http-lifecycle` protocol-mismatch case (8; failed first without
+  `peerProtocolVersion`). Mode 7 is the live `mac verify` run below.
+- Evidence: the ten touched Mac suites pass 79/79
+  (`GatewayLauncherArgvTests`, `MenuBarItemBuilderTests`,
+  `StableGatewayObserverTests`, `ServerStatusPollerTests`,
+  `ServerStatusPollerBoundedAdmissionTests`, `LiveLaunchAgentManagerTests`,
+  `MacAppStartupMaintenanceTests`, `DebugGatewayObserverTests`,
+  `GatewayPayloadStoreTests`, `PresentationRequestFenceTests`); the full Mac
+  unit run passes 310 tests in 50 suites;
+  `server-http-lifecycle.integration.test.ts` 20/20; Gateway `tsc` clean;
+  `scripts/test-mac-reinstall.py` 69/69; `scripts/tron-version check` in sync;
+  documentation, agent, protocol-contract and personal-info checks pass; the
+  exact `mac verify` command check passes against the installed `efc88f1b5`
+  Gateway.
+- Signals: `observer.state-changed` `why` names the refusing admission check,
+  and `http.upgrade` `peerProtocolVersion` names the stale side; either would
+  have diagnosed its half of this incident in one step. Rows updated in
+  `packages/gateway/docs/observability.md`.
+- Deviation: done on `main` at the user's request so the installed app could be
+  fixed before R-1, not on `hardening/integration`; integration picks it up
+  when it next merges `main`. The build bump is deliberate: the build-7 wrapper
+  in Update required cannot Pause, and a new build number makes the new
+  wrapper's startup re-register (boot out and restart) the Gateway the old one
+  started.
+- For the next agent: the user installs the build-8 Release app (quit the old
+  wrapper after Disable Helper for Update, replace, launch), then runs
+  `scripts/tron mac verify`, then installs the iOS app from `main`. Building
+  the Mac app from a shell whose PATH puts GNU `find`/`stat` first fails in
+  `bundle-gateway.sh`; put `/usr/bin` first.

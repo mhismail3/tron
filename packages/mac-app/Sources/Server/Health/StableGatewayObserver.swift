@@ -24,23 +24,39 @@ enum StableGatewayObserver {
         }
     }
 
+    /// The admission check that refused a runtime. The status poller puts it in
+    /// the Update required reason, which `observer.state-changed` records, so a
+    /// refusal is diagnosable from the wrapper's log alone.
+    enum Refusal: String, Error, Equatable, Sendable {
+        case serviceNotEnabled = "the Tron Agent Login Items service is not enabled"
+        case noRuntime = "launchd reports no running Gateway process"
+        case noPayload = "neither the selected nor the bundled Gateway payload validates"
+        case listener = "the launchd Gateway process is not the only listener on the Gateway port"
+        case processCommand = "the Gateway command line is not the one this app's launcher execs"
+        case launchIdentity = "the Gateway was not started by this app's helper with its supervision and channel markers"
+        case authenticatedIdentity = "the Gateway's authenticated identity does not match its payload manifest"
+    }
+
     static func observe(
         info: ServerPingInfo,
         manager: LiveLaunchAgentManager = LiveLaunchAgentManager(profile: .stable),
         fileManager: FileManager = .default
-    ) async -> Admission? {
-        guard ExistingInstallDetector.serviceStatus(label: TronGatewayProfile.stable.launchAgentLabel) == .enabled,
-              let runtime = await manager.runtimeInfo(label: TronGatewayProfile.stable.launchAgentLabel),
-              let payload = activePayload(fileManager: fileManager) else { return nil }
+    ) async -> Result<Admission, Refusal> {
+        guard ExistingInstallDetector.serviceStatus(label: TronGatewayProfile.stable.launchAgentLabel) == .enabled else {
+            return .failure(.serviceNotEnabled)
+        }
+        guard let runtime = await manager.runtimeInfo(label: TronGatewayProfile.stable.launchAgentLabel),
+              let pid = runtime.pid else { return .failure(.noRuntime) }
+        guard let payload = activePayload(fileManager: fileManager) else { return .failure(.noPayload) }
         let listeners = await ServerProcessProbe.listenerPIDs(port: TronGatewayProfile.stable.port)
-        guard validates(
+        if let refused = refusal(
             runtimeInfo: runtime,
             listenerPIDs: listeners,
             payload: payload,
             info: info,
             expectedHelperPath: TronPaths.serverHelperBinary(profile: .stable).path
-        ), let pid = runtime.pid else { return nil }
-        return Admission(processID: pid, uptime: runtime.uptime, payload: payload, info: info)
+        ) { return .failure(refused) }
+        return .success(Admission(processID: pid, uptime: runtime.uptime, payload: payload, info: info))
     }
 
     /// Re-pings and re-admits immediately before pairing data is read. A
@@ -140,24 +156,30 @@ enum StableGatewayObserver {
         }
     }
 
-    static func validates(
+    /// The first check that refuses the runtime, or nil when it is admitted.
+    static func refusal(
         runtimeInfo: LaunchAgentRuntimeInfo?,
         listenerPIDs: Set<Int>,
         payload: GatewayPayloadValidationResult,
         info: ServerPingInfo,
         expectedHelperPath: String,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
-    ) -> Bool {
+    ) -> Refusal? {
         let profile = TronGatewayProfile.stable
-        guard let runtimeInfo,
-              let pid = runtimeInfo.pid,
-              listenerPIDs == Set([pid]),
-              StableGatewayProvenance.validates(runtimeInfo, payload: payload,
-                  expectedHelperPath: expectedHelperPath, fileExists: fileExists),
-              authenticatedIdentity(info, matches: payload.manifest, channel: profile.channel) else {
-            return false
+        guard let runtimeInfo, let pid = runtimeInfo.pid else { return .noRuntime }
+        guard listenerPIDs == Set([pid]) else { return .listener }
+        // Named apart from the rest of provenance: the command line is the half
+        // of the contract another language (the launcher) decides.
+        guard StableGatewayProvenance.processCommand(
+            runtimeInfo.processCommand, owns: payload.root, expectedHost: "tailscale", profile: profile
+        ) else { return .processCommand }
+        guard StableGatewayProvenance.validates(
+            runtimeInfo, payload: payload, expectedHelperPath: expectedHelperPath, fileExists: fileExists
+        ) else { return .launchIdentity }
+        guard authenticatedIdentity(info, matches: payload.manifest, channel: profile.channel) else {
+            return .authenticatedIdentity
         }
-        return true
+        return nil
     }
 
     static func authenticatedIdentity(

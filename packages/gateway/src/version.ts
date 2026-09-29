@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync } from "node:fs";
 
-export const GATEWAY_VERSION = "0.1.0-beta.7";
+export const GATEWAY_VERSION = "0.1.0-beta.8";
 // Protocol v5 makes fork-boundary gap metadata explicit. There is no
 // v4 runtime path: every mobile peer must understand the typed projection.
 export const PROTOCOL_VERSION = 6;

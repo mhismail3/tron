@@ -155,6 +155,8 @@ packages/mac-app/scripts/test-gateway-payload-verifier.sh
 
 # Launcher boundary fixture (also covers channel path-component rejection)
 packages/mac-app/scripts/test-tron-gateway-launcher.sh
+# The launcher's argv against the app's admission checks is the hosted
+# TronMacTests/GatewayLauncherArgvTests suite; run it after any argv change.
 
 # Bundled npm removal with sanitized PATH and isolated HOME/cache
 packages/mac-app/scripts/test-tron-gateway-npm.sh

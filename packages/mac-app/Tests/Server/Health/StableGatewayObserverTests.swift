@@ -41,7 +41,7 @@ struct StableGatewayObserverTests {
             parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
             executablePath: helper,
             bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-            processCommand: "\(root.path)/runtime/node-arm64 \(root.path)/app/dist/index.js --host tailscale --port 9847",
+            processCommand: "\(root.path)/runtime/node-arm64 --max-old-space-size=4096 \(root.path)/app/dist/index.js --host tailscale --port 9847",
             gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
             gatewayChannelMarker: "stable"
         )
@@ -139,8 +139,24 @@ struct StableGatewayObserverTests {
     @Test("rejects wrong host even when payload and process otherwise match")
     func rejectsHostMismatch() {
         var wrongHost = runtime
-        wrongHost.processCommand = "\(root.path)/runtime/node-arm64 \(root.path)/app/dist/index.js --host 127.0.0.1 --port 9847"
+        wrongHost.processCommand = "\(root.path)/runtime/node-arm64 --max-old-space-size=4096 \(root.path)/app/dist/index.js --host 127.0.0.1 --port 9847"
         #expect(!validates(runtime: wrongHost))
+    }
+
+    @Test("refuses command lines the launcher never execs and names that check")
+    func refusesOtherLaunchArguments() {
+        let node = "\(root.path)/runtime/node-arm64"
+        let entry = "\(root.path)/app/dist/index.js"
+        for command in [
+            "\(node) \(entry) --host tailscale --port 9847", // a launcher from before the heap limit
+            "\(node) --max-old-space-size=8192 \(entry) --host tailscale --port 9847",
+            "\(node) \(entry) --max-old-space-size=4096 --host tailscale --port 9847",
+            "\(node) --max-old-space-size=4096 --inspect \(entry) --host tailscale --port 9847",
+        ] {
+            var other = runtime
+            other.processCommand = command
+            #expect(refusal(runtime: other) == .processCommand, "\(command)")
+        }
     }
 
     @Test("rejects wrong listener PID, wrong port, and extra responder")
@@ -149,7 +165,7 @@ struct StableGatewayObserverTests {
         #expect(!validates(listenerPIDs: [81, 82]))
 
         var wrongPort = runtime
-        wrongPort.processCommand = "\(root.path)/runtime/node-arm64 \(root.path)/app/dist/index.js --host tailscale --port 9848"
+        wrongPort.processCommand = "\(root.path)/runtime/node-arm64 --max-old-space-size=4096 \(root.path)/app/dist/index.js --host tailscale --port 9848"
         #expect(!validates(runtime: wrongPort))
     }
 
@@ -270,7 +286,15 @@ struct StableGatewayObserverTests {
         listenerPIDs: Set<Int> = [81],
         info: ServerPingInfo? = nil
     ) -> Bool {
-        StableGatewayObserver.validates(
+        refusal(runtime: runtime, listenerPIDs: listenerPIDs, info: info) == nil
+    }
+
+    private func refusal(
+        runtime: LaunchAgentRuntimeInfo? = nil,
+        listenerPIDs: Set<Int> = [81],
+        info: ServerPingInfo? = nil
+    ) -> StableGatewayObserver.Refusal? {
+        StableGatewayObserver.refusal(
             runtimeInfo: runtime ?? self.runtime,
             listenerPIDs: listenerPIDs,
             payload: payload,

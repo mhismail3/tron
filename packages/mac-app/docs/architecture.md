@@ -235,6 +235,14 @@ stderr before executing Node, so launcher messages and Node aborts survive the
 process that produced them. That stream, the Gateway's own
 `gateway.jsonl` rotation, and every cap are owned by
 [observability](../../gateway/docs/observability.md).
+The launcher execs exactly `<payload>/runtime/node-<arch>
+--max-old-space-size=4096 <payload>/app/dist/index.js` followed by the
+LaunchAgent's (or `scripts/tron dev`'s) arguments. Stable admission,
+registration repair and Debug admission compare the live process's `ps` command
+line with that one list (`StableGatewayProvenance.launchArguments`), and
+`scripts/tron mac verify` compares the same string, so a launcher argv change
+changes all of them together. `GatewayLauncherArgvTests` runs the built
+launcher and fails when the Swift side disagrees with it.
 Quitting `Tron.app` does not stop accepted work. Quit and async command/uninstall
 exits request AppKit termination through `ApplicationTermination` on the main
 run loop, outside the main dispatch queue. AppKit's `.terminateLater` nested loop
@@ -263,7 +271,11 @@ restart, log and feedback capture, menu presentation) still resolves live and
 runs the full admission. Menu presentation and post-action refreshes run that
 full admission against the poll's own cache and record what it finds, so a
 failure an explicit check detects replaces the cached admission instead of
-being overwritten by it on the next cycle. Menu controls can pause, resume, restart,
+being overwritten by it on the next cycle. A refused admission is shown as
+Update required; its reason, which `observer.state-changed` records as `why`,
+names the check that refused (`StableGatewayObserver.Refusal`), and the menu
+still offers Pause next to a single Repair, so the reinstall sequence below
+stays possible. Menu controls can pause, resume, restart,
 inspect bounded persisted Gateway logs, show a fresh pairing invitation, and
 uninstall. Log and feedback capture resolve a validated
 Tailscale host from live state or the bounded owner-only Tailscale cache and pass

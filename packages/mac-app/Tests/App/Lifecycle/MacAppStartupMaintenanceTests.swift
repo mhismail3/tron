@@ -162,7 +162,7 @@ struct MacAppStartupMaintenanceTests {
             parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
             parentBundleVersion: current.buildNumber,
             executablePath: helper,
-            processCommand: "\(payload)/runtime/node-arm64 \(payload)/app/dist/index.js --host tailscale --port 9847",
+            processCommand: "\(payload)/runtime/node-arm64 --max-old-space-size=4096 \(payload)/app/dist/index.js --host tailscale --port 9847",
             gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
             gatewayChannelMarker: TronGatewayProfile.stable.channel
         )
@@ -196,7 +196,7 @@ struct MacAppStartupMaintenanceTests {
             parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
             parentBundleVersion: current.buildNumber,
             executablePath: helper,
-            processCommand: "\(selectedPayload)/runtime/node-arm64 \(selectedPayload)/app/dist/index.js --host tailscale --port 9847",
+            processCommand: "\(selectedPayload)/runtime/node-arm64 --max-old-space-size=4096 \(selectedPayload)/app/dist/index.js --host tailscale --port 9847",
             gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
             gatewayChannelMarker: TronGatewayProfile.stable.channel
         )

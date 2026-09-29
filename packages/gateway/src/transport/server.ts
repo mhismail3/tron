@@ -715,6 +715,9 @@ interface UpgradeEnding {
     | "protocol_mismatch" | "invalid_frame" | "hello";
   /** The O-1 peer key, once hello named it. */
   peer?: PeerDiagnostics;
+  /** The version a refused hello asked for: whether the phone or the Gateway is
+   * the stale build. */
+  peerProtocolVersion?: number;
   /** Overrides the level rule for an ending the Gateway expects and clients
    * retry: readiness and shutdown refusals are info, not a warning. */
   level?: LogLevel;
@@ -2052,6 +2055,7 @@ export class GatewayServer {
         acceptToUpgradeMs, authMs, handshakeMs, helloMs,
         ...(trace.connectionId === undefined ? {} : { connectionId: trace.connectionId }),
         ...ending.peer,
+        ...(ending.peerProtocolVersion === undefined ? {} : { peerProtocolVersion: ending.peerProtocolVersion }),
       });
   }
 
@@ -2178,7 +2182,9 @@ export class GatewayServer {
       }
       const protocol = frame.protocolVersion as number;
       if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) {
-        this.finishUpgrade(connection.upgrade, "rejected", "hello", "protocol version mismatch", { reason: "protocol_mismatch" });
+        this.finishUpgrade(connection.upgrade, "rejected", "hello",
+          `protocol version mismatch: peer ${protocol}, Gateway accepts ${MIN_PROTOCOL_VERSION}-${PROTOCOL_VERSION}`,
+          { reason: "protocol_mismatch", peerProtocolVersion: protocol });
         return this.closeFailedConnection(connection, 1008, "protocol version mismatch");
       }
       connection.ready = true;

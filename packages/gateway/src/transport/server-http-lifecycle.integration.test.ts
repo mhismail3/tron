@@ -259,7 +259,10 @@ describe("HTTP pending-work ownership", () => {
     peer.send(JSON.stringify({ type: "hello", protocolVersion: 99 }));
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
-    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "hello", reason: "protocol_mismatch" });
+    // The peer's version is what tells a stale phone build from a stale Gateway.
+    expect(record.fields).toMatchObject({
+      outcome: "rejected", phaseReached: "hello", reason: "protocol_mismatch", peerProtocolVersion: 99,
+    });
     // The frame was refused before it could name the peer.
     expect(record.fields).not.toHaveProperty("peerClientId");
     expect(typeof record.fields.helloMs).toBe("number");

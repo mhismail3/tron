@@ -2,6 +2,21 @@ import Foundation
 
 /// Shared process provenance, not wrapper Running/pairing or native peer authentication.
 enum StableGatewayProvenance {
+    /// The exact argv `packages/mac-app/scripts/tron-gateway-launcher.c` execs
+    /// for a payload: Node, its explicit V8 heap limit, the entrypoint, then the
+    /// LaunchAgent's (or `scripts/tron dev`'s) host and port. Stable admission,
+    /// registration repair and Debug admission all compare a live Gateway's
+    /// `ps` command with this list, and `scripts/verify-mac-install.sh` builds
+    /// the same string. `GatewayLauncherArgvTests` runs the built launcher
+    /// against it, because a launcher change these checks miss refuses every
+    /// Gateway it starts.
+    static func launchArguments(payloadRoot: String, runtime: String, host: String, port: Int) -> [String] {
+        [
+            "\(payloadRoot)/runtime/\(runtime)", "--max-old-space-size=4096", "\(payloadRoot)/app/dist/index.js",
+            "--host", host, "--port", String(port),
+        ]
+    }
+
     static func validates(_ runtime: LaunchAgentRuntimeInfo, payload: GatewayPayloadValidationResult,
                           expectedHelperPath: String,
                           fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> Bool {
@@ -43,16 +58,9 @@ enum StableGatewayProvenance {
         // always Tailscale-bound; Debug may explicitly use loopback.
         guard (profile == TronGatewayProfile.stable && normalizedHost == "tailscale")
             || (profile == TronGatewayProfile.debug && (normalizedHost == "tailscale" || normalizedHost == "127.0.0.1")) else { return false }
-        guard fields == [
-            "\(payloadRoot)/runtime/node-arm64",
-            "\(payloadRoot)/app/dist/index.js",
-            "--host", normalizedHost, "--port", String(profile.port)
-        ] || fields == [
-            "\(payloadRoot)/runtime/node-x64",
-            "\(payloadRoot)/app/dist/index.js",
-            "--host", normalizedHost, "--port", String(profile.port)
-        ] else { return false }
-        return true
+        return ["node-arm64", "node-x64"].contains { runtime in
+            fields == launchArguments(payloadRoot: payloadRoot, runtime: runtime, host: normalizedHost, port: profile.port)
+        }
     }
 
 }

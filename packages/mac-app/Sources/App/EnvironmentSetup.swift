@@ -36,8 +36,8 @@ struct EnvironmentSetup: Sendable {
     var runtimeOwnershipHealthy: @Sendable () async -> Bool = { false }
 
     /// Coherent Stable admission correlating launchd, listener, payload,
-    /// process command, and authenticated identity.
-    var admitStableRuntime: @Sendable (ServerPingInfo) async -> StableGatewayObserver.Admission? = { _ in nil }
+    /// process command, and authenticated identity, or the check that refused.
+    var admitStableRuntime: @Sendable (ServerPingInfo) async -> Result<StableGatewayObserver.Admission, StableGatewayObserver.Refusal> = { _ in .failure(.noRuntime) }
 
     /// One-shot read-only Debug observation. It owns transport resolution and
     /// returns one immutable admission rather than exposing split projections.
