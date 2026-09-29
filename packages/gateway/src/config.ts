@@ -29,7 +29,8 @@ export interface GatewayConfig {
   readonly maxLiveRuntimes: number;
   readonly maxOutboundBytes: number;
   readonly maxSynchronizationBytes: number;
-  /** The second, TLS-only listener for the private LAN (E-3a). */
+  /** The second, TLS-only listener for the private LAN (E-3a). On by default;
+   * the setting is the kill switch (E-3d). */
   readonly lanEndpoint: {
     readonly enabled: boolean;
     readonly stateDirectory: string;
@@ -77,10 +78,14 @@ function parsePort(raw: string | undefined): number {
   return port;
 }
 
-/** The LAN endpoint's kill switch. Off until E-3d sets the release default, so
- * a Gateway without the setting behaves exactly as it did before E-3a. */
+// The release serves the pinned LAN lane (E-3d): the phone's home connection is
+// what fixes most Tailscale flaps, so an unset setting means on.
+const LAN_ENDPOINT_ENABLED_BY_DEFAULT = true;
+
+/** The LAN endpoint's kill switch. E-3d turned the release default on; `off`
+ * stays the one setting that takes the listener down (R-4 reviews its use). */
 function parseLanEndpointEnabled(raw: string | undefined): boolean {
-  if (raw === undefined) return false;
+  if (raw === undefined) return LAN_ENDPOINT_ENABLED_BY_DEFAULT;
   if (raw === "on") return true;
   if (raw === "off") return false;
   throw new GatewayError("invalid_request", "TRON_GATEWAY_LAN_ENDPOINT must be on or off");

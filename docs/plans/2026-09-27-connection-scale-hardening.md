@@ -6,6 +6,7 @@
 - **Last updated:** 2026-09-28, G-8a/G-8d/T-1 Done: an unchanged extension artifact costs one `stat` and no read, the ambient pass stays bound and reports a stop, and both read lanes retry a replace before warning (see the handoff)
 - **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
+- **Last updated:** 2026-09-29, E-3d Done: the release serves the pinned LAN lane by default (`LAN_ENDPOINT_ENABLED_BY_DEFAULT`, `--lan-endpoint off` / `TRON_GATEWAY_LAN_ENDPOINT=off` is the kill switch); both E-3c E2E legs re-passed on the flipped default and a private fixture Gateway started with no LAN setting logged `lan.listener state=bound` (see the handoff)
 - **Last updated:** 2026-09-29, E-3c2 Done: HTTP routes on the epoch's winning lane (live view, media, uploads, with the lane's pin) and the E-3c two-lane E2E cases both land; the E2E's blocked-lane leg now proves the 250 ms stagger and a retired LAN socket, and its blackhole leg uploads an attachment through a proxied HTTP blackhole
 
 - **Last updated:** 2026-09-29, F-2 Done: the O-6b page leg's refusal was the driver mounting six presentations on one mobile connection (one presentation slot, by contract); the lane now abandons a superseded page with the phone's own `cancel`, the repro is green with zero `session.sync` refusals, and the driver's page leg no longer fails on a mount the connection retired by design (see the handoff)
@@ -636,7 +637,7 @@ rows are in priority order.
 | E-3b | Done | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3c | Done | LAN endpoint, phone side: pin validation, staggered race, seamless fallback (race, pin and denial record land; HTTP routes and the two-leg E2E cases do not - see the handoff) | E-3b, C-3 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | E-3c2 | Done | Finish E-3c: HTTP routes (live view, media, uploads) use the winning lane's base with the same pin; the two-leg E2E cases (Tailscale leg blackholed 90 s → no visible disconnect; LAN leg blocked → Tailscale wins within stagger + one handshake; pin mismatch sends no credential) in `scripts/ios-gateway-e2e-test` (both halves land: the routes follow the winning lane's base and pin, and the E2E's legs — including an upload through the blackhole — pass) | E-3c | orchestrator-dispatched deepseek-worker, 2026-09-29 |
-| E-3d | Claimed | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| E-3d | Done | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | G-13 | Blocked | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`/`.close_to_listening_ms`, read from the new process's own record; the case reports G-13's criterion with its numbers. Blocked, not Done: the criterion is a "Done when" and no run has met it — the measured misses are host-bound plus two named causes (the old process's 2 s `work-settle` grace and the storm upgrades serialized by `DeviceStore`'s credential mutex), which need rows of their own or a quiet-host R-1 run; see the handoff |
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8a | Done | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-8a`; the atomic-replace check fails 4/4 before the fix and passes; the watcher lane's pending debounce also owns the retry now) |
@@ -10544,3 +10545,51 @@ recovery gaps; all three were fixed on the same branch.
   production-shaped root costs one `stat` per entry every 750 ms — measured here
   at 90–216 ms idle. A future row that wants pass *latency* bounded, rather than
   pass *work*, starts there; the two cases are deterministic without it.
+
+
+### E-3d · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3d`)
+
+- Result: `lanEndpoint.enabled` defaults to true, so the release and the
+  evaluation day serve the pinned LAN lane; `--lan-endpoint off` and
+  `TRON_GATEWAY_LAN_ENDPOINT=off` still take it down and stay the kill switch for
+  R-4. The default is one named constant next to the setting's parser
+  (`LAN_ENDPOINT_ENABLED_BY_DEFAULT`); the parser, the CLI/env precedence and the
+  invalid-value refusal are unchanged.
+- Evidence: `scripts/ios-gateway-e2e-test run-lan` green 112 s (status 0, case
+  passed 91.6 s, 1/1 with 0 failures/skips), artifact
+  `${TMPDIR}/tron-ios-gateway-e2e-501/results/20260929T095026Z-run.CxTMwx/FocusedE2E.xcresult`;
+  that fixture logged `LAN endpoint bound (state=bound family=IPv4 port=50007)`.
+  `scripts/ios-gateway-e2e-test all` green 200 s (status 0, boundary case passed
+  184 s, 1/1), artifact
+  `.../results/20260929T095418Z-run.EQOiFZ/FocusedE2E.xcresult`; its fixture logs
+  `LAN endpoint disabled (state=disabled reason=setting_off)` twice, which is the
+  kill switch still winning over the new default. Focused Gateway suites:
+  `npx vitest run src/config.test.ts src/transport/lan-endpoint.integration.test.ts`
+  **40/40** in 20.1 s (config now asserts the default, `--lan-endpoint off` and
+  `TRON_GATEWAY_LAN_ENDPOINT=off`, and the invalid-value refusal).
+  Default proof at the process level: a private fixture Gateway started from this
+  worktree's `dist/index.js` with **no** LAN setting (own `HOME`, `TRON_DATA_DIR`,
+  `PI_CODING_AGENT_DIR`, loopback port 52142) logged `LAN endpoint bound
+  (state=bound family=IPv4 port=52142)`; started and killed by this worker.
+  Merge gate with `hardening/integration` at `adb0887b6` (already the branch's
+  base, nothing to merge): transport six-file set **134/134**, runtime-registry
+  **245/245**, `npx tsc --noEmit -p .` clean.
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Changes: `packages/gateway/src/config.ts` (default + the constant),
+  `packages/gateway/src/config.test.ts`, `packages/gateway/README.md` transport
+  section, `packages/gateway/docs/connection-resilience.md` (Tailscale flaps),
+  `AGENTS.md` exposure invariant ("off unless enabled" → "on by default, turned
+  off by its own setting"). No transport, iOS or E2E-harness change: the harness's
+  own `off` for the boundary case and `on` for `run-lan` already prove both
+  directions of the setting.
+- Keeping on purpose: the harness's explicit `e2e_lan_endpoint` values. They are
+  not redundant with the new default: `run` needs the lane off so the fault proxy
+  owns every leg of the boundary case, and the explicit values keep both E2E legs
+  reproducible whatever the default is.
+- Deviations: none.
+- For the next agent (R-4): the evaluation day's LAN review reads `lan.listener`
+  transitions plus `transport=lan` on `http.upgrade`, so a user who turned the
+  lane off with `--lan-endpoint off` is distinguishable from a Mac that never had
+  a private address (`reason=no_private_address`) without reading the settings
+  file.

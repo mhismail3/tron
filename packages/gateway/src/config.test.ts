@@ -57,7 +57,7 @@ describe("gateway configuration", () => {
     expect(() => resolveBindHost("tailscale", {})).toThrow(/Tailscale is not connected/);
   });
 
-  it("resolves only private, non-Tailscale LAN addresses and keeps the endpoint off by default", async () => {
+  it("resolves only private, non-Tailscale LAN addresses and keeps the endpoint on by default", async () => {
     const interfaces = {
       en0: [
         { address: "192.168.4.24", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" },
@@ -97,9 +97,10 @@ describe("gateway configuration", () => {
     const home = await mkdtemp(join(tmpdir(), "tron-lan-endpoint-setting-"));
     const environment = { TRON_DATA_DIR: home };
     const configured = await loadConfig([], environment);
-    // Off until E-3d decides the release default; the kill switch is explicit.
-    expect(configured.lanEndpoint).toEqual({ enabled: false, stateDirectory: join(home, "gateway", "lan-endpoint") });
+    // On by default since E-3d; either spelling of the kill switch still wins.
+    expect(configured.lanEndpoint).toEqual({ enabled: true, stateDirectory: join(home, "gateway", "lan-endpoint") });
     expect((await loadConfig(["--lan-endpoint", "on"], environment)).lanEndpoint.enabled).toBe(true);
+    expect((await loadConfig(["--lan-endpoint", "off"], environment)).lanEndpoint.enabled).toBe(false);
     expect((await loadConfig([], { ...environment, TRON_GATEWAY_LAN_ENDPOINT: "off" })).lanEndpoint.enabled).toBe(false);
     for (const raw of ["true", "yes", "", "ON"]) {
       await expect(loadConfig(["--lan-endpoint", raw], environment)).rejects.toMatchObject({ code: "invalid_request" });

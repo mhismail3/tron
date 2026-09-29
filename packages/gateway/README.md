@@ -718,10 +718,10 @@ ownership, diagnostics, qualification commands, and remaining platform limits.
 For failure-boundary interpretation, evidence collection, and regression
 expectations, see [connection resilience and diagnosis](docs/connection-resilience.md).
 
-A second, TLS-only listener can serve the Mac's private LAN address, so a phone
-at home does not depend on Tailscale's path (E-3a). It is off unless
-`--lan-endpoint on` or `TRON_GATEWAY_LAN_ENDPOINT=on` enables it (E-3d decides
-the release default; the setting stays the kill switch). It binds only an
+A second, TLS-only listener serves the Mac's private LAN address, so a phone
+at home does not depend on Tailscale's path (E-3a). It is on by default (E-3d);
+`--lan-endpoint off` or `TRON_GATEWAY_LAN_ENDPOINT=off` is the kill switch for a
+Mac or a network where the lane misbehaves. It binds only an
 RFC 1918 or IPv6 ULA address the Mac actually has — never a wildcard, never
 link-local, never Tailscale's own ranges — on the main listener's port, rebinds
 when the preferred address changes, and disables itself when the Mac has none.
