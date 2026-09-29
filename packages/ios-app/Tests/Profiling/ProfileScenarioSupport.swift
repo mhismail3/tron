@@ -1,5 +1,6 @@
 import CoreFoundation
 import Foundation
+@testable import TronMobile
 import UIKit
 import XCTest
 
