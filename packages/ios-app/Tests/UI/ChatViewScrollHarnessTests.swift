@@ -1303,14 +1303,14 @@ struct ChatViewScrollHarnessTests {
                     _ = try await harness.recorder.waitUntil { $0.observation.isReady }
                     for _ in 0..<40 { try await harness.driveFrameBoundary() }
                     try harness.snapNativeTranscriptOffsetToWholePoint()
-                    func report(_ name: String) {
-                        print("CT23-BAND orientation=\(label) state=\(name) band=\(harness.ct23DiagnosisEffectBand())")
-                        print("CT23-BAND orientation=\(label) state=\(name) layers=\(harness.ct23DiagnosisEffectLayers())")
+                    func report(_ name: String) async {
+                        let band = await MainActor.run { harness.ct23DiagnosisEffectBand() }
+                        print("CT23-BAND orientation=\(label) state=\(name) band=\(band)")
                     }
-                    report("product")
+                    await report("product")
                     try harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
                     try await harness.driveFrameBoundary()
-                    report("effects-on")
+                    await report("effects-on")
                     let scrollView = try harness.nativeTranscriptScrollViewForTesting()
                     for style in ["hard", "automatic", "soft"] {
                         switch style {
@@ -1319,7 +1319,7 @@ struct ChatViewScrollHarnessTests {
                         default: scrollView.topEdgeEffect.style = .soft
                         }
                         try await harness.driveFrameBoundary()
-                        report("top-style-\(style)")
+                        await report("top-style-\(style)")
                     }
                     scrollView.topEdgeEffect.style = .soft
                     try harness.ct23DiagnosisSetEdgeEffectsHidden(top: true, bottom: false)
@@ -1327,7 +1327,7 @@ struct ChatViewScrollHarnessTests {
                     for (name, shift) in [("scrolled-60", CGFloat(60)), ("scrolled-400", CGFloat(400))] {
                         try harness.ct23DiagnosisShiftOffset(by: shift)
                         try await harness.driveFrameBoundary()
-                        report(name)
+                        await report(name)
                         try harness.ct23DiagnosisShiftOffset(by: -shift)
                         try await harness.driveFrameBoundary()
                     }
