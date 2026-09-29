@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ChatMessageMenuAction: Identifiable {
-    enum ID: String { case moveEarlier, moveLater, clearQueue }
+    enum ID: String { case moveEarlier, moveLater, clearQueue, toolDetails }
     let id: ID
     let title: String
     let icon: String

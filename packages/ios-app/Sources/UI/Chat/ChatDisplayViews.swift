@@ -232,9 +232,15 @@ struct DisplayToolView: View {
                 .accessibilityHidden(disclosure.phase != .collapsed)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contextMenu {
-            Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
-        }
+        .modifier(ChatMessageCopyMenu(
+            text: "",
+            actions: [ChatMessageMenuAction(
+                id: .toolDetails,
+                title: "Tool Details",
+                icon: "info.circle",
+                perform: onOpenTechnicalDetails
+            )]
+        ))
     }
 
     @ViewBuilder
@@ -301,9 +307,15 @@ struct DisplayToolView: View {
             accessibilityValue: display?.title,
             action: activatePill
         )
-        .contextMenu {
-            Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
-        }
+        .modifier(ChatMessageCopyMenu(
+            text: "",
+            actions: [ChatMessageMenuAction(
+                id: .toolDetails,
+                title: "Tool Details",
+                icon: "info.circle",
+                perform: onOpenTechnicalDetails
+            )]
+        ))
     }
 
     private func activatePill() {
