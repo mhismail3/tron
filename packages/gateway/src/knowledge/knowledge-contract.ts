@@ -816,6 +816,11 @@ export interface KnowledgeCurationJob {
   reason?: string;
 }
 
+export interface KnowledgeTagRequest { commandId: string; sourceId: string; expectedRevision: string; connectionId: string; }
+export interface KnowledgeTagRunRequest { commandId: string; connectionId: string; limit?: number; }
+export interface KnowledgeTagBudgetRequest { connectionId: string; }
+export interface KnowledgeTagCostEstimateRequest { connectionId: string; limit?: number; }
+
 export interface KnowledgeCurationJobRequest {
   commandId?: string;
   sourceId?: string;
@@ -902,8 +907,15 @@ export interface KnowledgeRaindropRequest {
   read: KnowledgeRaindropReadRequest;
 }
 
+export interface KnowledgeTaggingLedger {
+  month: string;
+  spentCents: number;
+  reservedCents: number;
+  attempts: Record<string, { month: string; reservedCents: number; status: "reserved" | "settled" | "uncertain"; actualCostCents?: number; inputTokens?: number; outputTokens?: number }>;
+}
+
 export interface KnowledgeConnectorState {
-  connector: "raindrop" | "x";
+  connector: "raindrop" | "x" | "jev";
   /** Adapter state key. Generic account authority remains ConnectionOwner. */
   connectionId?: string;
   enabled: boolean;
@@ -924,6 +936,8 @@ export interface KnowledgeConnectorState {
   assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
   /** Durable per-cohort/item paid-attempt fence; legacy item-only keys remain valid. */
   assessmentAttempts?: Record<string, { itemId?: string; cohortId?: string; status: "dispatched" | "settled"; chargeCents: number; inputTokens?: number; outputTokens?: number; estimatedCostCents?: number }>;
+  /** Durable tagger dispatch reservations; uncertain attempts are never blindly retried. */
+  taggingBudget?: KnowledgeTaggingLedger;
   health: "unconfigured" | "setup-required" | "ready" | "running" | "partial" | "rate-limited" | "auth-error" | "error";
   /** Adapter observations are bounded; unknown is the pre-admission state. */
   credentialAvailability?: "available" | "unavailable" | "unknown";
@@ -1020,6 +1034,10 @@ export type KnowledgeAction =
   | { operation: "knowledge.source.curate"; request: KnowledgeCurationRequest }
   | { operation: "knowledge.source.take"; request: KnowledgeSourceTakeRequest }
   | { operation: "knowledge.curation.jobs"; request: KnowledgeCurationJobRequest }
+  | { operation: "knowledge.source.tag"; request: KnowledgeTagRequest }
+  | { operation: "knowledge.tags.run"; request: KnowledgeTagRunRequest }
+  | { operation: "knowledge.tags.budget"; request: KnowledgeTagBudgetRequest }
+  | { operation: "knowledge.tags.estimate"; request: KnowledgeTagCostEstimateRequest }
   | { operation: "knowledge.correction"; request: KnowledgeCorrectionRequest }
   | { operation: "knowledge.forget"; request: KnowledgeForgetRequest }
   | { operation: "knowledge.exclusion"; request: KnowledgeExclusionRequest }

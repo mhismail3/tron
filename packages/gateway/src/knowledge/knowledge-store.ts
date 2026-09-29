@@ -413,7 +413,7 @@ function validateCoverage(value: unknown): asserts value is ObservationCoverage 
   range.entryIds.forEach(entry => safeId(entry as string, "coverage entry id"));
   if (range.projectId !== undefined) assertKnowledgeProjectId(range.projectId as string, "coverage projectId");
 }
-function validateConnectorState(value: unknown, connector: "raindrop" | "x"): asserts value is KnowledgeConnectorState {
+function validateConnectorState(value: unknown, connector: "raindrop" | "x" | "jev"): asserts value is KnowledgeConnectorState {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Invalid connector state");
   const state = value as Record<string, unknown>;
   if (state.connectionId !== undefined && (typeof state.connectionId !== "string" || !/^[A-Za-z0-9._:-]{1,160}$/.test(state.connectionId))) throw new KnowledgeStoreError("invalid", "Invalid connector connection ID");
@@ -440,6 +440,14 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x"): as
     if (!state.assessmentAttempts || typeof state.assessmentAttempts !== "object" || Array.isArray(state.assessmentAttempts) || Object.keys(state.assessmentAttempts).length > 500) throw new KnowledgeStoreError("invalid", "Invalid connector assessment attempts");
     for (const [itemId, attempt] of Object.entries(state.assessmentAttempts as Record<string, unknown>)) {
       if (!itemId || !attempt || typeof attempt !== "object" || ((attempt as Record<string, unknown>).itemId !== undefined && (typeof (attempt as Record<string, unknown>).itemId !== "string" || !(attempt as Record<string, unknown>).itemId)) || ((attempt as Record<string, unknown>).cohortId !== undefined && (typeof (attempt as Record<string, unknown>).cohortId !== "string" || !(attempt as Record<string, unknown>).cohortId)) || !["dispatched", "settled"].includes((attempt as Record<string, unknown>).status as string) || !Number.isSafeInteger((attempt as Record<string, unknown>).chargeCents) || ((attempt as Record<string, unknown>).chargeCents as number) < 1 || ((attempt as Record<string, unknown>).inputTokens !== undefined && (!Number.isSafeInteger((attempt as Record<string, unknown>).inputTokens) || (attempt as Record<string, unknown>).inputTokens as number < 0)) || ((attempt as Record<string, unknown>).outputTokens !== undefined && (!Number.isSafeInteger((attempt as Record<string, unknown>).outputTokens) || (attempt as Record<string, unknown>).outputTokens as number < 0)) || ((attempt as Record<string, unknown>).estimatedCostCents !== undefined && (typeof (attempt as Record<string, unknown>).estimatedCostCents !== "number" || !Number.isFinite((attempt as Record<string, unknown>).estimatedCostCents) || (attempt as Record<string, unknown>).estimatedCostCents as number < 0))) throw new KnowledgeStoreError("invalid", "Invalid connector assessment attempt");
+    }
+  }
+  if (state.taggingBudget !== undefined) {
+    const ledger = state.taggingBudget as Record<string, unknown>;
+    if (!ledger || typeof ledger !== "object" || !/^[0-9]{4}-[0-9]{2}$/.test(ledger.month as string) || !Number.isFinite(ledger.spentCents) || (ledger.spentCents as number) < 0 || !Number.isFinite(ledger.reservedCents) || (ledger.reservedCents as number) < 0 || !ledger.attempts || typeof ledger.attempts !== "object" || Array.isArray(ledger.attempts) || Object.keys(ledger.attempts).length > 4_096) throw new KnowledgeStoreError("invalid", "Invalid Knowledge Jev tagging budget");
+    for (const [id, raw] of Object.entries(ledger.attempts as Record<string, unknown>)) {
+      const attempt = raw as Record<string, unknown>;
+      if (!id || id.length > 200 || !attempt || !/^[0-9]{4}-[0-9]{2}$/.test(attempt.month as string) || !["reserved", "settled", "uncertain"].includes(attempt.status as string) || !Number.isFinite(attempt.reservedCents) || (attempt.reservedCents as number) <= 0 || ((attempt.actualCostCents !== undefined) && (!Number.isFinite(attempt.actualCostCents) || (attempt.actualCostCents as number) < 0)) || ((attempt.inputTokens !== undefined) && (!Number.isSafeInteger(attempt.inputTokens) || (attempt.inputTokens as number) < 0)) || ((attempt.outputTokens !== undefined) && (!Number.isSafeInteger(attempt.outputTokens) || (attempt.outputTokens as number) < 0))) throw new KnowledgeStoreError("invalid", "Invalid Jev tagging reservation");
     }
   }
   for (const key of ["accountId", "scope", "destination", "credentialRef", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
@@ -1067,7 +1075,7 @@ export class KnowledgeStore {
     return this.connectorContext.run(connectionId, task);
   }
 
-  async connectorState(connector: "raindrop" | "x", connectionId?: string): Promise<KnowledgeConnectorState | undefined> {
+  async connectorState(connector: "raindrop" | "x" | "jev", connectionId?: string): Promise<KnowledgeConnectorState | undefined> {
     return this.readState(async state => {
       const contextConnectionId = this.connectorContext.getStore();
       const key = connectionId ?? contextConnectionId;
@@ -1103,7 +1111,7 @@ export class KnowledgeStore {
 
   /** Connector operational state shares the knowledge owner’s serialized state;
    * this update never accepts or persists a credential value. */
-  async updateConnectorState(commandId: string, connector: "raindrop" | "x", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }, connectionId?: string): Promise<KnowledgeConnectorState> {
+  async updateConnectorState(commandId: string, connector: "raindrop" | "x" | "jev", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }, connectionId?: string): Promise<KnowledgeConnectorState> {
     const contextConnectionId = this.connectorContext.getStore();
     const key = connectionId ?? contextConnectionId;
     if (this.connectorEnvelope && !key) throw conflict("Connector state requires an admitted connection instance");
@@ -1114,9 +1122,10 @@ export class KnowledgeStore {
     const receiptOperation = `knowledge.connector.state:${stateKey}`;
     const receiptPayload = { ...(payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : { payload }), connectionId: stateKey };
     return this.mutate(receiptOperation, commandId, receiptPayload, async state => {
-      const current = state.connectors?.[stateKey] ? structuredClone(state.connectors[stateKey]) : undefined;
+      let current = state.connectors?.[stateKey] ? structuredClone(state.connectors[stateKey]) : undefined;
       const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
       if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
+      if (envelope && !current && connector === "jev") current = { connector: "jev", ...(key ? { connectionId: key } : {}), enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved, pending: [], capturedIds: [], health: "setup-required", remaining: 0 };
       if (current && envelope) Object.assign(current, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
       const next = update(current);
       if (key) next.connectionId = key;

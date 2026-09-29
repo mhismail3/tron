@@ -37,7 +37,7 @@ export interface JevDispatchContext {
   maxChargeCents?: number;
   beforeDispatch?: () => Promise<void>;
   /** Called immediately before the POST is handed to the HTTP transport. */
-  onDispatch?: (certainty: "sent") => void;
+  onDispatch?: (certainty: "sent") => Promise<void> | void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
@@ -139,7 +139,7 @@ export class JevDecisionClient {
     assertActive(signal);
     let response: JevHTTPResponse;
     try {
-      try { context.onDispatch?.("sent"); }
+      try { await context.onDispatch?.("sent"); }
       catch (error) { if (error instanceof JevEvaluationError) throw error; throw new JevEvaluationError("Jev dispatch admission was revoked", "notSent"); }
       response = await this.http(JEV_ENDPOINT, { method: "POST", headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json" }, body, signal });
     } catch (error) {
