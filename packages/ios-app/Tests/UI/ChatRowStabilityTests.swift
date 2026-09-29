@@ -307,6 +307,10 @@ private struct RowStabilityReport {
     var disappearanceCounts: [String: Int] = [:]
     var excludedRowCount = 0
     var semanticFrameCallbackCount = 0
+    /// The compact thinking traces' own measurements: the F2 fix is only real if
+    /// the trace still receives them (the tap target, the trait and the mask
+    /// read the overflow flag, which nothing else observes).
+    var thinkingTraces: [String: ChatHostedThinkingTraceMeasurement] = [:]
     var collapsedStaysCollapsed = false
     var inlineDisplaysPrepared = false
     var inlineDisplaysStable = false
@@ -347,6 +351,7 @@ private struct RowStabilityReport {
         disappearanceCounts = observation.physicalRowDisappearanceCounts
         excludedRowCount = observation.excludedRowStabilityIDs.count
         semanticFrameCallbackCount = observation.semanticFrameCallbackCount
+        thinkingTraces = observation.thinkingTraceMeasurements
         postMountResizeCount = observation.postMountResizeCount
         maximumPostMountResize = observation.maximumPostMountResize
         resizedRows = observation.resizedSemanticIDs
@@ -433,6 +438,7 @@ private struct RowStabilityReport {
             + " withinMountVariants=\(rowStabilityVariantSummary(withinMountVariantRows))"
             + " crossMountVariants=\(rowStabilityVariantSummary(crossMountVariantRows))"
             + " phaseVariants=\(rowStabilityVariantSummary(phaseVariantRows))"
+            + " thinkingTraces=\(rowStabilityThinkingSummary(thinkingTraces))"
             + " collapsedStaysCollapsed=\(collapsedStaysCollapsed)"
             + " inlineDisplaysPrepared=\(inlineDisplaysPrepared)"
             + " inlineDisplaysStable=\(inlineDisplaysStable)"
@@ -465,6 +471,13 @@ private struct RowStabilityReport {
             entranceIdentityStable: entranceIdentityStable,
             excludedRowCount: excludedRowCount,
             semanticFrameCallbackCount: semanticFrameCallbackCount,
+            thinkingTraces: thinkingTraces.mapValues { trace in
+                Payload.Trace(
+                    contentHeight: trace.contentHeight,
+                    referenceHeight: trace.referenceHeight,
+                    overflowing: trace.overflowing
+                )
+            },
             rows: RowStabilityFixture.rowIDs.map { id in
                 let record = records[id]
                 return Payload.Row(
@@ -524,8 +537,15 @@ private struct RowStabilityReport {
         let inlineDisplaysPrepared: Bool
         let inlineDisplaysStable: Bool
         let entranceIdentityStable: Bool
+        struct Trace: Encodable {
+            let contentHeight: CGFloat
+            let referenceHeight: CGFloat
+            let overflowing: Bool
+        }
+
         let excludedRowCount: Int
         let semanticFrameCallbackCount: Int
+        let thinkingTraces: [String: Trace]
         let rows: [Row]
     }
 }
@@ -556,6 +576,19 @@ private struct RowMountHeight {
         }
         latestHeight = height
     }
+}
+
+private func rowStabilityThinkingSummary(
+    _ traces: [String: ChatHostedThinkingTraceMeasurement]
+) -> String {
+    guard !traces.isEmpty else { return "0" }
+    return traces.sorted { $0.key < $1.key }
+        .map {
+            "\($0.key)=content:\(rowStabilityNumber($0.value.contentHeight))"
+                + ":reference:\(rowStabilityNumber($0.value.referenceHeight))"
+                + ":overflowing:\($0.value.overflowing)"
+        }
+        .joined(separator: ",")
 }
 
 private func rowStabilityVariantSummary(_ values: [String: String]) -> String {

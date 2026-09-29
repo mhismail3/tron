@@ -1109,3 +1109,49 @@ pass only through eager-only repairs, stop and report.
   only ever presents the estimate are invisible to it.
 - This commit adds no assertion; it records what today's code does.
 - Changes: `ChatRowStabilityTests.swift`.
+
+### CT-27 stage B2 (F2) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: the compact thinking trace is measured in the layout that places it.
+  `ThinkingTailLayout` (a `Layout` + `Animatable`) holds the paragraph and the
+  four reference lines as its two subviews, returns `min(paragraph, reference)`
+  from `sizeThatFits`, and offsets the paragraph by its tail. `ThinkingBlock` no
+  longer derives its height from geometry→state: `contentHeight` and
+  `referenceHeight` are measured by `onGeometryChange` on the layout's own
+  subviews and now only decide the overflow flag (the tap target, the
+  accessibility trait and the tail mask), which does not change layout. The
+  hidden duplicate measurement text and its preference key are deleted, with
+  `ChatThinkingTraceLayoutPolicy.initialViewportHeight` (the 16 pt a segment
+  estimate) and the removed `maximumHeight` state.
+- Growth motion is scoped to `sourceLength` (the trace's own source), so a mount,
+  a width change or a measurement landing cannot grow the row; the layout's
+  animatable `contentHeight` still interpolates the viewport and the tail offset
+  while the trace streams.
+- Evidence (lane ct27, all products rebuilt from this worktree):
+  - `ChatRowStabilityTests` 4/4 (3.6-4.0 s, `…T013845Z-run.adYYKE`):
+    `phaseVariants=0` (was `1: stability-thinking=82.7..132.7`), the thinking row
+    now mounts at its measured 132.7 pt frame and keeps it at every phase, and the
+    journey asserts that the wrapped trace measured itself
+    (`thinking-run:thinking-0:line:0=content:99.0:reference:66.0:overflowing:true`;
+    the viewport is the 66.0 pt four-line reference the trace overflows).
+  - Parity gate 7/7 in 46.8 s (`…T013635Z-run.VTfJgW`); CT-14 motion evidence
+    unchanged (`streaming-tail-growth` worst 0.03899, `outgoing-entrance` 0.05488
+    against the gate's 0.065 transition bound).
+  - Regression: `ThinkingTraceSheetTests`, `StreamingTextRevealContinuityTests`
+    and `StreamingTextRevealPacingTests` pass; the full
+    `ChatViewScrollHarnessTests` suite reports the same single pre-existing
+    failure with and without this change (`displacedRetainedResume` exceeds its
+    15 s watchdog on stage A's code too — verified by stashing this work).
+- Negative control: the stage B1 run above is the pre-fix measurement of the same
+  oracle (`phaseVariants=1`); the journey's new assertion fails on that code and
+  passes here.
+- Deviations: (a) the overflow flag still costs one geometry→state write per
+  measurement (the audit allows it because it does not change layout); (b) no
+  motion evidence exists for a thinking row's streaming growth in the parity gate
+  — the gate has no thinking scenario — so the growth animation is preserved by
+  construction (the same `smooth(0.16)` curve driven by the layout's animatable
+  height) and is not gate-verified; (c) the trace's measurements are read through
+  a new `HOSTED_TEST`-only probe because nothing else observes them.
+- Changes: `TranscriptRow.swift`, `StreamingTextReveal.swift`,
+  `ChatHostedProbe.swift`, `ChatTranscriptScrollView.swift`,
+  `ChatRowStabilityTests.swift`.
