@@ -246,7 +246,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| P99-1 | Ready | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | Unassigned |
+| P99-1 | Claimed | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | orchestrator session, 2026-09-29 |
 | P99-2 | Ready | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | Unassigned |
 | P99-3 | Ready | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | Unassigned |
 | P99-4 | Ready | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | Unassigned |
