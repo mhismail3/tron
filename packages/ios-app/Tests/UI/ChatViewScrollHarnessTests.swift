@@ -1369,23 +1369,25 @@ struct ChatViewScrollHarnessTests {
                 }
                 return (squared / Double(first.count)).squareRoot()
             }
+            func regionMagnitude(_ key: String, _ other: String) -> Double {
+                guard let first = measurements.regions[key], let second = measurements.regions[other] else {
+                    return .infinity
+                }
+                return ChatVisualParityFingerprint.magnitude(
+                    first, second, alignmentPoints: ChatVisualParitySpec.alignmentPoints
+                ).magnitude
+            }
             for key in measurements.regions.keys.sorted() {
                 let parts = key.split(separator: "-").map(String.init)
-                let own = "\(parts[0])-\(parts[1])-product"
-                let reference = measurements.regions[own]
-                let magnitude = reference.map {
-                    ChatVisualParityFingerprint.magnitude(
-                        measurements.regions[key]!, $0,
-                        alignmentPoints: ChatVisualParitySpec.alignmentPoints
-                    ).magnitude
-                } ?? .infinity
-                let towardEnd = "\(parts[0] == "origin" ? "end" : "end")-\(parts[1])-\(parts[2])"
+                let suppressed = "\(parts[0])-\(parts[1])-no-effects"
+                let endProduct = "end-\(parts[1])-product"
                 print("CT23-CHROME key=\(key)"
-                    + " navDelta=\(String(format: "%.5f", distance(measurements.nav[key] ?? [], measurements.nav[own] ?? [])))"
-                    + " composerDelta=\(String(format: "%.5f", distance(measurements.composer[key] ?? [], measurements.composer[own] ?? [])))"
-                    + " regionMag=\(String(format: "%.5f", magnitude))"
-                    + " navVsEnd=\(String(format: "%.5f", distance(measurements.nav[key] ?? [], measurements.nav[towardEnd] ?? [])))"
-                    + " composerVsEnd=\(String(format: "%.5f", distance(measurements.composer[key] ?? [], measurements.composer[towardEnd] ?? [])))")
+                    + " vsSuppressedNav=\(String(format: "%.5f", distance(measurements.nav[key] ?? [], measurements.nav[suppressed] ?? [])))"
+                    + " vsSuppressedComposer=\(String(format: "%.5f", distance(measurements.composer[key] ?? [], measurements.composer[suppressed] ?? [])))"
+                    + " vsSuppressedRegion=\(String(format: "%.5f", regionMagnitude(key, suppressed)))"
+                    + " vsEndNav=\(String(format: "%.5f", distance(measurements.nav[key] ?? [], measurements.nav[endProduct] ?? [])))"
+                    + " vsEndComposer=\(String(format: "%.5f", distance(measurements.composer[key] ?? [], measurements.composer[endProduct] ?? [])))"
+                    + " vsEndRegion=\(String(format: "%.5f", regionMagnitude(key, endProduct)))")
             }
         }
     }
