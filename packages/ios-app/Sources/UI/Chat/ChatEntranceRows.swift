@@ -24,6 +24,10 @@ enum ChatEntranceGrowthPolicy {
     /// row's layout bounds. The entrance reveal owns only vertical admission;
     /// this transparent gutter keeps those effects out of its clip boundary.
     static let effectOverflow: CGFloat = 24
+    /// A settled row's clip covers this far past its own bounds in every
+    /// direction: past any Liquid Glass press expansion or shadow the row draws,
+    /// and small enough that the clip stays a bounded surface.
+    static let settledOverflow: CGFloat = 128
     /// Height interpolation is a layout optimization for compact arrivals, not
     /// a transcript admission requirement. Keeping very tall rows at their
     /// natural height prevents a single large prompt or Markdown response from
@@ -45,13 +49,19 @@ enum ChatEntranceGrowthPolicy {
         return min(natural, max(1, natural * normalizedProgress(progress)))
     }
 
-    static func requiresClip(progress: CGFloat) -> Bool {
-        normalizedProgress(progress) < 1
-    }
-
+    /// The admission clip: vertically inset while the row is still being
+    /// admitted, and past every edge of the row at progress 1. The clip is
+    /// applied at every progress, because removing the node at admission is what
+    /// switched the row's view structure and discarded the state below it; at
+    /// progress 1 it constrains neither the row's shadows nor its press region.
     static func clipRect(in bounds: CGRect, progress: CGFloat) -> CGRect {
-        let hiddenVerticalOverflow = effectOverflow * (1 - normalizedProgress(progress))
-        return bounds.insetBy(dx: 0, dy: hiddenVerticalOverflow)
+        let normalized = normalizedProgress(progress)
+        guard normalized < 1 else {
+            return bounds.insetBy(dx: -settledOverflow, dy: -settledOverflow)
+        }
+        // Horizontal overflow stays available to native text and glass effects
+        // throughout incremental growth; only the vertical admission is clipped.
+        return bounds.insetBy(dx: -effectOverflow, dy: effectOverflow * (1 - normalized))
     }
 }
 
@@ -256,21 +266,12 @@ private extension View {
             .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
     }
 
-    /// Keeps the measured-height entrance vertically bounded while preserving
-    /// the natural horizontal shadow and press-morph region. Vertical overflow
-    /// joins continuously as the row reaches its full admitted height.
-    @ViewBuilder
+    /// Clips only the animated vertical admission. The clip node is present at
+    /// every progress — a settled row's clip covers everything it can draw — so
+    /// admission never switches the row's view structure and the transcript chip
+    /// keeps its unconstrained Liquid Glass press-and-drag region.
     func chatEntranceGrowthClip(progress: CGFloat) -> some View {
-        if ChatEntranceGrowthPolicy.requiresClip(progress: progress) {
-            padding(ChatEntranceGrowthPolicy.effectOverflow)
-                .clipShape(ChatEntranceGrowthClipShape(progress: progress))
-                .padding(-ChatEntranceGrowthPolicy.effectOverflow)
-        } else {
-            // Once admission settles, remove the clipping node entirely. The
-            // transcript chip then has its unconstrained native Liquid Glass
-            // press-and-drag region.
-            self
-        }
+        clipShape(ChatEntranceGrowthClipShape(progress: progress))
     }
 }
 

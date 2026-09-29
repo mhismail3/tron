@@ -125,6 +125,41 @@ struct ChatRowStabilityTests {
             }
         }
     }
+
+    @Test("a discrete insertion's admission keeps the row content's identity")
+    func entranceAdmissionKeepsRowContentIdentity() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            let snapshot = try rowStabilitySnapshot()
+            try await withStabilityHarness(snapshot: snapshot) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1 && $0.observation.isReady
+                }
+                try await driveBoundaries(3, harness: harness)
+                let baseline = harness.probeObservation.animatedEntranceCount
+                harness.replaceAuthoritativeSnapshot(try insertingEntranceRow(into: snapshot))
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.animatedEntranceCount > baseline
+                }
+                try await driveBoundaries(10, harness: harness)
+                let observation = harness.probeObservation
+                #expect(
+                    observation.animatedEntranceCount > baseline,
+                    "the insertion never admitted an animated entrance"
+                )
+                // The row content below the admission is one structure: an
+                // admission that switched it would record a second identity for
+                // the same row, and would re-measure the row after it mounted.
+                #expect(
+                    observation.rowIdentityInstanceCounts[RowStabilityFixture.entranceRowID] == 1,
+                    "the admission switched the row content's view identity"
+                )
+                #expect(
+                    observation.rowFrames[RowStabilityFixture.entranceRowID]?.height ?? 0 > 0,
+                    "the inserted row never published a frame"
+                )
+            }
+        }
+    }
 }
 
 // MARK: - The journey's phases and report

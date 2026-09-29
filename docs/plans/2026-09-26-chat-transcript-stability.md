@@ -917,3 +917,31 @@ pass only through eager-only repairs, stop and report.
   identity probe in `renderRow`), `ChatViewScrollHarnessTests.swift` (one new
   `scrollCallbackMode` parameter on the harness, `.synthetic` by default),
   `ChatRowStabilityTests.swift` (new).
+
+### CT-27 stage A2 (F1) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: confirmed by probe, then fixed. The entrance clip's if/else did switch
+  the row content's view structure at admission: the A1 journey measured
+  `entranceIdentityStable=false` and `remountedRows=1:stability-entrance` for the
+  inserted row before this change. `chatEntranceGrowthClip` now always applies
+  one `clipShape`; at progress 1 its rect covers the row's bounds by 128 pt in
+  every direction (past any Liquid Glass press expansion or shadow, and bounded
+  so the clip stays a small surface) instead of the node being removed. The
+  padding/negative-padding wrapper is gone with it, so a pending row is now
+  measured at the same width as a settled one. `requiresClip` is deleted.
+- Evidence (lane ct27, products rebuilt from this worktree):
+  - `ChatRowStabilityTests` 2/2 in 2.2 s: `entranceIdentityStable=true`,
+    `remountedRows=0`, `entranceIdentityStable` asserted directly by
+    `entranceAdmissionKeepsRowContentIdentity` (identity instances for the
+    inserted row = 1 across its admission).
+  - Parity gate 7/7 (45.3 s), including the entrance transition frames
+    (`tool-chip-entrance` worst 0.04919 against 0.065, `outgoing-entrance`
+    worst 0.05227); the CT-14 motion evidence is unchanged within the gate's
+    bounds.
+- Deviations: the entrance's height interpolation now runs (the layout keeps its
+  identity), which is the layout's intended behaviour but was previously lost
+  with the switched branch. The gate's sampled transition frames did not move
+  beyond their recorded bounds. The Liquid Glass press-and-drag region is
+  covered by the gate's frames, not by a device check; F1's device check stays
+  on CT-7 as the audit asked.
+- Changes: `ChatEntranceRows.swift`, `ChatRowStabilityTests.swift`.
