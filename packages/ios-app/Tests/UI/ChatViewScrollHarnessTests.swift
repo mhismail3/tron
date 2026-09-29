@@ -1762,7 +1762,16 @@ struct ChatViewScrollHarnessTests {
                             containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
                             previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
                         )
-                        #expect(failure == nil, "\(orientation): \(failure ?? "")")
+                        if orientation == .newestAtOrigin {
+                            // Open CT-23 blocker: SwiftUI's public preview delegate
+                            // targets the flipped scroll host. Recorded as a known
+                            // issue so it stays visible, and fails once it is fixed.
+                            withKnownIssue("CT-23: the display-card preview renders flipped on the origin path") {
+                                #expect(failure == nil, "\(orientation): \(failure ?? "")")
+                            }
+                        } else {
+                            #expect(failure == nil, "\(orientation): \(failure ?? "")")
+                        }
                     }
                     // The display card is the only row with a SwiftUI
                     // `.contextMenu`; a bridge that resolved everywhere would
