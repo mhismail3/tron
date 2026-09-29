@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { KnowledgeAssessmentApprovalRequest, KnowledgeConnectorConfigurationRequest, KnowledgeConnectorRunRequest, KnowledgeConnectorState, KnowledgeConnectorStatus, KnowledgeAction, KnowledgeRecord, KnowledgeRaindropRequest, KnowledgeRaindropIntakeRequest } from "./knowledge-contract.js";
-import { captureSource, isVerifiedSourceCapture } from "./source-capture.js";
+import { captureSource, isVerifiedSourceCapture, recoverProviderSaveTime } from "./source-capture.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
 import { xPostIdentity } from "./x-public-post.js";
@@ -483,14 +483,29 @@ export class KnowledgeConnectorExtension {
     });
   }
 
-  private async attachProviderPayload(item: PendingItem, source: KnowledgeRecord & { kind: "source" }, commandId: string): Promise<KnowledgeRecord & { kind: "source" }> {
-    if (!item.apiPayload) return source;
-    const apiObject = await this.store.putObject(new TextEncoder().encode(item.apiPayload), "application/json");
+  /** Recover the provider's original save time from the payload already
+   * retained at this revision. The live list DTO carries `created` too, but the
+   * retained evidence is what survives a later re-capture, and the sweep path
+   * has no live save-time field at all. Metadata only: a moved revision is not
+   * an item failure. */
+  private async recoverSaveTime(source: KnowledgeRecord & { kind: "source" }, commandId: string, evidence?: { objectHash: string; bytes: Uint8Array }): Promise<KnowledgeRecord & { kind: "source" }> {
+    if (source.content.identity?.provider.toLowerCase() !== "raindrop" || source.content.sourceSavedAt) return source;
+    const recovered = await recoverProviderSaveTime(this.store, { commandId, sourceId: source.id, expectedRevision: source.revisionId, ...(evidence ? { evidence } : {}) });
+    if (recovered.status !== "recovered" || !recovered.revisionId) return source;
+    const current = await this.store.read(source.id, recovered.revisionId, false, true, true);
+    return current?.kind === "source" ? current : source;
+  }
+
+  private async attachProviderPayload(item: PendingItem, source: KnowledgeRecord & { kind: "source" }, commandId: string): Promise<{ record: KnowledgeRecord & { kind: "source" }; evidence?: { objectHash: string; bytes: Uint8Array } }> {
+    if (!item.apiPayload) return { record: source };
+    const bytes = new TextEncoder().encode(item.apiPayload);
+    const apiObject = await this.store.putObject(bytes, "application/json");
+    const evidence = { objectHash: apiObject.hash, bytes };
     const representations = source.content.representations ?? [];
-    if (representations.some(value => value.kind === "provider-api" && value.object.hash === apiObject.hash)) return source;
+    if (representations.some(value => value.kind === "provider-api" && value.object.hash === apiObject.hash)) return { record: source, evidence };
     const updated = await this.store.captureSource({ commandId, expectedRevision: source.revisionId, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content: { ...source.content, representations: [...representations, { kind: "provider-api", object: apiObject, mediaType: "application/json" }] } } });
     if (updated.record.kind !== "source") throw new Error("Provider payload attachment returned a non-source record");
-    return updated.record;
+    return { record: updated.record, evidence };
   }
 
   private async markUnsafeLinkedCapture(item: PendingItem, source: KnowledgeRecord & { kind: "source" }, commandId: string): Promise<KnowledgeRecord & { kind: "source" }> {
@@ -583,7 +598,9 @@ export class KnowledgeConnectorExtension {
           const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: "research", title: item.title, origin: "connector", ...(isPublicXPost(item.url) ? { publicPostLookup: true } : {}), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
           let source = result.record;
           setOutcome(item, { sourceId: source.id, sourceRevision: source.revisionId, disposition: "pending", assessment: "not-run", move: "not-attempted", reason: "Source captured; processing not yet complete" });
-          source = await this.attachProviderPayload(item, result.record, command(request.commandId, `metadata-${item.id}`));
+          const attached = await this.attachProviderPayload(item, result.record, command(request.commandId, `metadata-${item.id}`));
+          source = attached.record;
+          source = await this.recoverSaveTime(source, command(request.commandId, `save-time-${item.id}`), attached.evidence);
           let sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
           source = await this.markUnsafeLinkedCapture(item, source, command(request.commandId, `quality-${item.id}`));
           sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
@@ -738,11 +755,17 @@ export class KnowledgeConnectorExtension {
           let capturedRecord = result.record;
           // X API entities/author fields are authenticated evidence. Retain a
           // bounded canonical object instead of certifying a public-page fetch.
+          let attachedEvidence: { objectHash: string; bytes: Uint8Array } | undefined;
           if (item.apiPayload && capturedRecord.content.captureDisposition !== "failed") {
-            const apiObject = await this.store.putObject(new TextEncoder().encode(item.apiPayload), "application/json");
+            const bytes = new TextEncoder().encode(item.apiPayload);
+            const apiObject = await this.store.putObject(bytes, "application/json");
+            attachedEvidence = { objectHash: apiObject.hash, bytes };
             const updated = await this.store.captureSource({ commandId: command(request.commandId, `api-evidence-${item.id}`), expectedRevision: capturedRecord.revisionId, record: { kind: "source", id: capturedRecord.id, createdAt: capturedRecord.createdAt, scope: capturedRecord.scope, provenance: capturedRecord.provenance, relations: capturedRecord.relations, content: { ...capturedRecord.content, representations: [...(capturedRecord.content.representations ?? []), { kind: "provider-api", object: apiObject, mediaType: "application/json" }] } } });
             if (updated.record.kind === "source") capturedRecord = updated.record;
           }
+          // A freshly captured source is still pending, so its own objects are
+          // fenced; hand the exact retained bytes to the reconciliation.
+          capturedRecord = await this.recoverSaveTime(capturedRecord, command(request.commandId, `save-time-${item.id}`), attachedEvidence);
           if (capturedRecord.content.captureDisposition !== "complete") { partial += 1; lastError = `Capture for ${item.id} is ${capturedRecord.content.captureDisposition}`; break; }
           if (connector === "raindrop" && state.allowWrites && state.destination && item.collectionId && item.collectionId !== state.destination) {
             const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: capturedRecord, expectedRevision: capturedRecord.revisionId, identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, destination: state.destination }, signal);

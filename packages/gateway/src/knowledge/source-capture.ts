@@ -892,6 +892,92 @@ async function captureLinkedPublicSources(
 }
 
 /** Capture is durable before optional assessment. Assessment errors are returned, not promoted to capture failures. */
+/** Recovered original save time for one source, from retained provider
+ * evidence. `absent` never means "no save time exists"; it means the retained
+ * evidence does not establish one. */
+export interface SourceSaveTimeRecovery {
+  sourceId: string;
+  status: "recovered" | "present" | "absent" | "unsupported" | "conflict";
+  reason: string;
+  saveTime?: string;
+  revisionId?: string;
+  currentRevision?: string;
+}
+
+/** The intake gate keeps a Raindrop item payload under 100 KB; this bound only
+ * fences the parser read of anything already retained. */
+const RAINDROP_PAYLOAD_MAX_BYTES = 200_000;
+/** Raindrop did not exist before this, so an earlier instant is a placeholder,
+ * not a save time. */
+const RAINDROP_EARLIEST_SAVE_TIME = Date.parse("2001-01-01T00:00:00.000Z");
+const SAVE_TIME_RECOVERY_REASON = "Save time recovered from the retained Raindrop item payload.";
+
+/** Raindrop's item `created` is the original save time. It is never a
+ * publication time (`lastUpdate` is not a substitute for either), and the
+ * evidence must belong to this exact saved item. */
+function raindropSaveTimeFromPayload(bytes: Uint8Array, itemId: string): string | undefined {
+  let payload: unknown;
+  try { payload = JSON.parse(new TextDecoder("utf-8", { fatal: false }).decode(bytes)); } catch { return undefined; }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const values = payload as Record<string, unknown>;
+  if (String(values._id ?? "") !== itemId) return undefined;
+  const created = values.created;
+  if (typeof created !== "string" || created.length === 0 || created.length > 64) return undefined;
+  const instant = Date.parse(created);
+  if (!Number.isFinite(instant) || instant < RAINDROP_EARLIEST_SAVE_TIME || instant > Date.now() + 86_400_000) return undefined;
+  return new Date(instant).toISOString();
+}
+
+/** Owner-mediated reconciliation for one source: recover its original save time
+ * from the provider payload already retained at its exact revision, with no
+ * network request and no credentials. It never overwrites a recorded save time,
+ * never derives one from capture time or `lastUpdate`, and is idempotent per
+ * command ID. Callers that expose this to an agent must translate `conflict`
+ * into a typed conflict. */
+export async function recoverProviderSaveTime(store: KnowledgeStore, request: { commandId: string; sourceId: string; expectedRevision?: string; evidence?: { objectHash: string; bytes: Uint8Array } }): Promise<SourceSaveTimeRecovery> {
+  const sourceId = request.sourceId;
+  const record = await store.read(sourceId, undefined, false, true, true);
+  if (!record || record.kind !== "source") return { sourceId, status: "absent", reason: "Source is unavailable, excluded, or forgotten." };
+  if (request.expectedRevision !== undefined && request.expectedRevision !== record.revisionId) {
+    return { sourceId, status: "conflict", reason: "Source revision changed; re-read before reconciling.", currentRevision: record.revisionId };
+  }
+  const identity = record.content.identity;
+  // Only Raindrop's list payload carries an original save time; another
+  // provider's `created`/`created_at` field means something else.
+  if (!identity || identity.provider.toLowerCase() !== "raindrop" || !identity.itemId) return { sourceId, status: "unsupported", reason: "This provider has no recoverable save time." };
+  if (record.content.sourceSavedAt) return { sourceId, status: "present", reason: "A save time is already recorded.", saveTime: record.content.sourceSavedAt };
+  const representations = (record.content.representations ?? []).filter(representation => representation.kind === "provider-api");
+  if (representations.length === 0) return { sourceId, status: "absent", reason: "Source has no retained provider evidence." };
+  const includeArchived = record.content.admission?.status === "archived";
+  let oversized = false;
+  for (const representation of representations) {
+    if (representation.object.bytes <= 0 || representation.object.bytes > RAINDROP_PAYLOAD_MAX_BYTES) { oversized = true; continue; }
+    // A pending source is fenced from reading its own objects, so a caller that
+    // has just retained this payload on this exact revision may supply it. The
+    // bytes must hash to the representation the revision lists, so the value
+    // stays bound to the committed evidence rather than to a caller's claim.
+    const supplied = request.evidence
+      && request.evidence.objectHash === representation.object.hash
+      && request.evidence.bytes.byteLength === representation.object.bytes
+      && createHash("sha256").update(request.evidence.bytes).digest("hex") === representation.object.hash
+      ? request.evidence.bytes : undefined;
+    const bytes = supplied ?? await store.readObject(representation.object, { recordId: record.id, revisionId: record.revisionId, includeArchived });
+    if (!bytes) continue;
+    const saveTime = raindropSaveTimeFromPayload(bytes, identity.itemId);
+    if (!saveTime) continue;
+    // Provenance for the value is the retained provider representation on this
+    // same revision plus the reason below; a self-citation in `evidence` would
+    // claim a citation the record does not have.
+    const updated = await store.captureSource({ commandId: request.commandId, expectedRevision: record.revisionId, record: {
+      kind: "source", id: record.id, createdAt: record.createdAt, scope: record.scope,
+      provenance: record.provenance, relations: record.relations, ...(record.temporal ? { temporal: record.temporal } : {}),
+      content: { ...record.content, sourceSavedAt: saveTime, captureReason: appendCaptureReason(record.content.captureReason, SAVE_TIME_RECOVERY_REASON) },
+    } });
+    return { sourceId, status: "recovered", reason: SAVE_TIME_RECOVERY_REASON, saveTime, revisionId: updated.record.revisionId };
+  }
+  return { sourceId, status: "absent", reason: oversized ? "Retained provider evidence exceeds the parser bound." : "Retained provider evidence does not carry a valid original save time." };
+}
+
 export async function captureSource(store: KnowledgeStore, input: SourceCaptureInput, options: SourceCaptureOptions = {}): Promise<SourceCaptureResult> {
   const now = options.now ?? (() => new Date().toISOString());
   const limits = { ...SOURCE_CAPTURE_LIMITS, ...(options.limits ?? {}) };

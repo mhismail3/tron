@@ -183,6 +183,23 @@ describe("knowledge connectors", () => {
     expect((await store.list({ kind: "source", includePending: true })).records).toHaveLength(1);
   });
 
+  it("recovers the bookmark save time from the retained item payload during a sweep", async () => {
+    const { store, extension } = await fixture(async (url) => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      if (url.includes("/raindrops/321?page=0")) return response({ items: [{ _id: 77, title: "Bookmark", link: "https://example.com/saved", created: "2024-09-03T06:22:40.426Z", lastUpdate: "2026-04-13T18:00:34.580Z", collection: { $id: 321 } }] });
+      throw new Error(`unexpected endpoint ${url}`);
+    }, undefined, { sourceFetch: async () => new Response("Complete saved evidence", { headers: { "content-type": "text/plain" } }) });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("save-time-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "321", credentialRef: "connector:raindrop:test-account" } });
+    await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("save-time-discover"), connector: "raindrop", dryRun: true, limit: 1 } });
+    const result = await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("save-time-capture"), connector: "raindrop", dryRun: false, limit: 1 } }) as { captured: number };
+    expect(result.captured).toBe(1);
+    const sources = (await store.list({ kind: "source", includeArchived: true, includePending: true })).records.filter(record => record.kind === "source");
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.content.sourceSavedAt).toBe("2024-09-03T06:22:40.426Z");
+    // The sweep never labels lastUpdate or capture time as publication time.
+    expect(sources[0]?.content.sourcePublishedAt).toBeUndefined();
+  });
+
   it("reads raw bookmark metadata and continues small pages without losing fields", async () => {
     const seen: string[] = [];
     const { extension } = await fixture(async (url) => {
