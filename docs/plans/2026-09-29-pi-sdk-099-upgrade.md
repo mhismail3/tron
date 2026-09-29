@@ -247,9 +247,9 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | P99-1 | Done | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | orchestrator session, 2026-09-29 |
-| P99-2 | Ready | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | Unassigned |
-| P99-3 | Ready | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | Unassigned |
-| P99-4 | Ready | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | Unassigned |
+| P99-2 | Claimed | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | luna-worker, 2026-09-29 |
+| P99-3 | Claimed | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | luna-worker, 2026-09-29 |
+| P99-4 | Claimed | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
 | P99-5 | Ready | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | Unassigned |
 | P99-6 | Ready | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | Unassigned |
 | P99-7 | Ready | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | Unassigned |
