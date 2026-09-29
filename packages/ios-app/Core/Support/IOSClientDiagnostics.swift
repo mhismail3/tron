@@ -257,6 +257,7 @@ package struct IOSClientDiagnosticBuffer: Sendable {
             if let milliseconds = handshake.transportOpenMilliseconds { fields.append("transportOpenMs=\(max(0, milliseconds))") }
             if handshake.waitedForConnectivity { fields.append("waitedForConnectivity=true") }
             fields.append("interfaces=\(boundedUTF8(handshake.networkInterfaces ?? "unknown", maximumBytes: 64))")
+            if let transport = handshake.transport { fields.append("transport=\(boundedUTF8(transport, maximumBytes: 24))") }
         }
         return GatewayProfileLogRecord(
             profileID: "\(ownerID):ios-client",

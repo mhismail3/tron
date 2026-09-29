@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Testing
 @testable import TronMobile
 @testable import TronMobileCore
@@ -59,6 +60,20 @@ struct GatewayProtocolContractTests {
         // A pin no certificate can match is dropped rather than stored.
         #expect(GatewayLanPin.admit("not-a-pin") == nil)
         #expect(GatewayLanPin.admit(Data(repeating: 1, count: 20).base64EncodedString()) == nil)
+
+        // The pinned lane's whole trust decision (E-3c): the served certificate
+        // is admitted for the advertised pin and refused for any other. The
+        // socket evaluates this during the TLS handshake, before URLSession
+        // writes the request that carries the bearer credential.
+        let certificate = try #require(SecCertificateCreateWithData(nil, der as CFData))
+        var trust: SecTrust?
+        #expect(SecTrustCreateWithCertificates(certificate, SecPolicyCreateBasicX509(), &trust) == errSecSuccess)
+        let serverTrust = try #require(trust)
+        #expect(GatewayLanPin.admitsServerTrust(serverTrust, pin: fixture.pin))
+        #expect(!GatewayLanPin.admitsServerTrust(
+            serverTrust,
+            pin: Data(repeating: 9, count: 32).base64EncodedString()
+        ))
     }
 
     private static func certificateDER(_ pem: String) -> Data? {

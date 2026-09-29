@@ -31,6 +31,18 @@ enum GatewayLanPin {
         return Data(SHA256.hash(data: exported)).base64EncodedString()
     }
 
+    /// Whether a pinned lane may trust the certificate a `SecTrust` names: the
+    /// leaf's public key must hash to the advertised pin (E-3c). E-3a's
+    /// certificate is self-signed, so the pin is the lane's whole trust — a
+    /// substituted certificate or a changed key fails here rather than falling
+    /// back to the platform's own evaluation.
+    static func admitsServerTrust(_ trust: SecTrust, pin: String) -> Bool {
+        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let leaf = chain.first,
+              let served = GatewayLanPin.pin(forCertificateDER: SecCertificateCopyData(leaf) as Data) else { return false }
+        return served == pin
+    }
+
     /// An advertised pin in the only shape this phone compares: standard base64
     /// of a 32-byte digest. Anything else is dropped, so a malformed
     /// advertisement leaves the profile without a pin instead of one no

@@ -1590,6 +1590,13 @@ struct AppModelReconnectTests {
                 try await sockets[1].waitUntilSent(count: 1)
                 try await failHandshake(sockets[1])
                 try await sockets[1].waitUntilClosed()
+                // The restart watchdog may fire only while the reconnect loop
+                // allows acceleration. Its `reconnect.delay` record is the loop
+                // parked in the backoff the watchdog preempts, so the clock must
+                // not advance before it: advancing on the clock alone can resume
+                // the watchdog first, and the loop then refuses the immediate
+                // replacement the test is measuring.
+                try await waitForDiagnostics(projection, prefix: "reconnect.delay", count: 1)
                 try await clock.waitUntilSleeping(count: 1, duration: .seconds(90))
                 clock.advance(by: .seconds(90))
                 try await sockets[2].waitUntilSent(count: 1)

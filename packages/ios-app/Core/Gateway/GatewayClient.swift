@@ -532,6 +532,211 @@ package actor GatewayClient {
         var gatewayConnectionID: String?
     }
 
+    /// Which lane a raced attempt dialed (E-3c): the Mac's advertised, pinned
+    /// LAN endpoint, or the profile's saved endpoint, which is what Tailscale
+    /// reaches.
+    private enum GatewayDialLane: String, Sendable {
+        case lan
+        case tailscale
+    }
+
+    /// One dialable lane: where its socket opens, the certificate pin its TLS
+    /// must match (nil on the saved endpoint), and whether the attempt dialed
+    /// more than one lane — which is what makes the lane attributable on a
+    /// record.
+    private struct GatewayDialRoute: Sendable {
+        let lane: GatewayDialLane
+        let socketURL: URL
+        let pin: String?
+        let raced: Bool
+
+        /// The `transport` field of this lane's records. nil when the attempt
+        /// dialed one lane: nothing was chosen against another (E-3c).
+        var transport: String? { raced ? lane.rawValue : nil }
+    }
+
+    /// An authenticated lane waiting to be installed as the connection epoch.
+    private struct GatewayOpenedLeg: Sendable {
+        let route: GatewayDialRoute
+        let socket: any GatewaySocketConnection
+        let info: GatewayInfo
+        let gatewayConnectionID: String?
+        /// The lane this race teaches the network to prefer, or nil when the
+        /// race learned nothing about it (E-3c).
+        let rememberedLane: GatewayDialLane?
+    }
+
+    /// Why one raced lane did not carry the attempt.
+    private struct GatewayLegFailure: Sendable {
+        let route: GatewayDialRoute
+        /// The original error, which the attempt rethrows when every lane failed
+        /// so a caller still sees cancellation as cancellation.
+        let error: any Error
+        /// The typed answer when the Mac rejected the upgrade (unauthorized,
+        /// forbidden, busy). It supersedes the transport's own failure.
+        let upgradeFailure: GatewayFailure?
+        let stage: GatewayConnectionDiagnosticStage
+        let metadata: GatewaySocketMetadata
+        let startedAt: ContinuousClock.Instant
+        let endedAt: ContinuousClock.Instant
+        let attemptID: String?
+        let profileID: String
+        let profileLabel: String
+
+        var transportOpened: Bool { metadata.transportOpenMilliseconds != nil }
+
+        /// iOS reports a denied Local Network permission as "not connected"
+        /// while the path is otherwise satisfied; the Tailscale lane proving
+        /// the Mac is reachable is what tells the two apart (E-3c). A Mac that
+        /// is simply off the home network fails the LAN dial as an unreachable
+        /// host instead, and is retried on the next attempt.
+        var deniesLocalNetwork: Bool {
+            guard let urlError = error as? URLError else { return false }
+            return urlError.code == .notConnectedToInternet
+        }
+
+        /// How much this lane's ending is an answer from the Mac rather than a
+        /// transport failure (E-3c). The attempt reports the highest-ranked
+        /// failure, so a 401 only the LAN lane answered is not thrown away for
+        /// the other lane's timeout — which keeps the phone retrying a device
+        /// the Mac has revoked instead of stopping at `unauthorized`.
+        var answerRank: Int {
+            if upgradeFailure != nil { return 2 }
+            if let failure = error as? GatewayFailure,
+               failure.code == "protocol_mismatch" || failure.code == "identity_mismatch" { return 2 }
+            if metadata.certificatePinRejected { return 2 }
+            return 1
+        }
+
+        /// The pin refused this lane's certificate, and the Mac's own answer
+        /// (an upgrade refusal) are different facts from a LAN that is
+        /// unreachable: neither may be reported as a network outage.
+        var reason: GatewayConnectionDiagnosticReason {
+            if metadata.certificatePinRejected { return .lanPinMismatch }
+            guard route.lane == .lan else {
+                return GatewayClient.diagnosticReason(for: (upgradeFailure ?? GatewayClient.transportFailure(error)).code)
+            }
+            guard let upgradeFailure else { return .lanUnreachable }
+            return GatewayClient.diagnosticReason(for: upgradeFailure.code)
+        }
+    }
+
+    private enum GatewayLegOutcome: Sendable {
+        case opened(GatewayOpenedLeg)
+        case failed(GatewayLegFailure)
+        /// The lane never dialed, or the race retired it after another lane won:
+        /// no failure to report.
+        case abandoned
+    }
+
+    /// Shared with this attempt's lanes so one the race retired for its winner
+    /// stays silent, while a lane an outer cancellation stopped still records
+    /// its own ending. It also holds which lanes have ended and which lane has
+    /// opened, which the stagger and the tie rule read (E-3c).
+    private final class GatewayRaceResolution: @unchecked Sendable {
+        private let lock = NSLock()
+        private var settled = false
+        private var settledLanes: Set<String> = []
+        private var openedLanes: Set<String> = []
+        private var laneWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+        func settle() {
+            lock.lock(); settled = true; lock.unlock()
+        }
+
+        var hasWinner: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return settled
+        }
+
+        /// The lane reached its own ending. A waiting lane — the staggered lane
+        /// behind a lane that already failed — is woken here.
+        func markLaneSettled(_ lane: GatewayDialLane, opened: Bool) {
+            let key = lane.rawValue
+            lock.lock()
+            settledLanes.insert(key)
+            if opened { openedLanes.insert(key) }
+            let waiters = laneWaiters.removeValue(forKey: key) ?? []
+            lock.unlock()
+            for waiter in waiters { waiter.resume() }
+        }
+
+        /// Whether that lane already completed its hello. A lane waiting out the
+        /// stagger behind it reads this, so it never dials a race the lane ahead
+        /// of it has already won.
+        func hasOpened(_ lane: GatewayDialLane) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return openedLanes.contains(lane.rawValue)
+        }
+
+        /// Wait until that lane ends. Cancellation resumes the waiter so the
+        /// task group can still unwind.
+        func waitUntilSettled(_ lane: GatewayDialLane) async {
+            let key = lane.rawValue
+            if hasSettledLane(key) { return }
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    register(continuation, for: key)
+                }
+            } onCancel: {
+                let waiters = self.takeWaiters(key)
+                for waiter in waiters { waiter.resume() }
+            }
+        }
+
+        private func hasSettledLane(_ key: String) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return settledLanes.contains(key)
+        }
+
+        private func register(_ continuation: CheckedContinuation<Void, Never>, for key: String) {
+            lock.lock()
+            if settledLanes.contains(key) {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            laneWaiters[key, default: []].append(continuation)
+            lock.unlock()
+        }
+
+        private func takeWaiters(_ key: String) -> [CheckedContinuation<Void, Never>] {
+            lock.lock(); defer { lock.unlock() }
+            return laneWaiters.removeValue(forKey: key) ?? []
+        }
+    }
+
+    /// The lanes one attempt is racing, so a close, a background retirement or
+    /// a replacement connect ends the sockets that are not yet the connection
+    /// (E-3c). `connection` is nil while the handshake runs, and a lane would
+    /// otherwise run on until its next generation fence.
+    private final class GatewayLiveAttempt: @unchecked Sendable {
+        private let lock = NSLock()
+        private var retired = false
+        private var sockets: [any GatewaySocketConnection] = []
+
+        /// Track the socket this lane opened. False once the attempt is retired,
+        /// so the lane closes what it opened instead of dialing.
+        func track(_ socket: any GatewaySocketConnection) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard !retired else { return false }
+            sockets.append(socket)
+            return true
+        }
+
+        func closeAll() async {
+            for socket in takeAll() { await socket.close() }
+        }
+
+        private func takeAll() -> [any GatewaySocketConnection] {
+            lock.lock(); defer { lock.unlock() }
+            retired = true
+            let open = sockets
+            sockets.removeAll()
+            return open
+        }
+    }
+
     package nonisolated let events: GatewayEventStream
     private let eventHub: GatewayEventHub
     private let socketFactory: GatewaySocketFactory
@@ -560,6 +765,29 @@ package actor GatewayClient {
     private var generation = 0
     private var profile: GatewayProfile?
     private var token: String?
+    /// The lanes an attempt without an epoch is dialing (E-3c). A close, a
+    /// background retirement or a replacement connect ends them here.
+    private var liveAttempt: GatewayLiveAttempt?
+    /// The lane that carried each network path last, keyed by the path snapshot
+    /// (`wifi,other`). A lane known to carry this network sets the race's head
+    /// start (E-3c).
+    private var preferredLaneByPath: [String: GatewayDialLane] = [:]
+    /// Whether iOS denied this install the Local Network permission.
+    private let lanPermission: GatewayLanPermissionRecord
+    /// Whether this client already named the denied permission.
+    private var recordedLanDenial = false
+    /// The delay the trailing lane waits before it joins a race the LAN lane
+    /// started (E-3c). A home network keeps the cheap local socket, and a LAN
+    /// that cannot answer costs at most this much of the connect budget.
+    private static let lanRaceStagger: Duration = .milliseconds(250)
+    /// The shorter head start a reconnect leaves the LAN lane when this network
+    /// already carried it: enough to keep the preference, small enough not to
+    /// spend the recovery (Do 4).
+    private static let reconnectLanRaceStagger: Duration = .milliseconds(50)
+    /// How long a saved lane that opened first holds for a LAN lane still
+    /// dialing in the same instant. Only a race with no head start has a tie to
+    /// resolve, and an equal finish belongs to the local lane (E-3c).
+    private static let lanTieGrace: Duration = .milliseconds(50)
 
     package var info: GatewayInfo? { connection?.info }
 
@@ -639,6 +867,7 @@ package actor GatewayClient {
         stage: GatewayConnectionDiagnosticStage,
         outcome: GatewayConnectionDiagnosticOutcome,
         startedAt: ContinuousClock.Instant,
+        endedAt: ContinuousClock.Instant? = nil,
         reason: GatewayConnectionDiagnosticReason? = nil,
         error: Error? = nil,
         platformCode: Int? = nil,
@@ -663,7 +892,7 @@ package actor GatewayClient {
         decodeCodingPath: String? = nil,
         handshake: GatewayHandshakeDiagnostic? = nil
     ) {
-        let components = startedAt.duration(to: clock.now()).components
+        let components = startedAt.duration(to: endedAt ?? clock.now()).components
         let elapsed = max(
             Int64(0),
             components.seconds * 1_000
@@ -751,9 +980,11 @@ package actor GatewayClient {
         eventBufferPolicy: GatewayEventBufferPolicy = .default,
         diagnosticStore: IOSClientDiagnosticStore? = nil,
         appLog: AppLog? = nil,
+        lanPermission: GatewayLanPermissionRecord = GatewayLanPermissionRecord(),
         networkPath: @escaping @Sendable () -> String? = { GatewayNetworkPathSnapshot.shared.current }
     ) {
         self.networkPath = networkPath
+        self.lanPermission = lanPermission
         self.diagnosticStore = diagnosticStore
         self.socketFactory = socketFactory
         self.clock = clock
@@ -822,6 +1053,9 @@ package actor GatewayClient {
     ) async throws -> GatewayConnectionIdentity {
         generation &+= 1
         let epochID = generation
+        let retiredAttempt = liveAttempt
+        liveAttempt = nil
+        await retiredAttempt?.closeAll()
         let retiredConnectionID = connection?.id
         await detachConnection(
             reason: GatewayFailure(code: "replaced", message: "Connection replaced", retryable: true, details: nil)
@@ -834,137 +1068,545 @@ package actor GatewayClient {
         try Task.checkCancellation()
         guard generation == epochID else { throw CancellationError() }
 
-        guard let socketURL = profile.socketURL else { throw Self.invalidProfileEndpoint() }
+        let plan = dialPlan(for: profile)
+        guard plan.routes.last != nil else { throw Self.invalidProfileEndpoint() }
+        let attempt = GatewayLiveAttempt()
+        liveAttempt = attempt
+        // The winner's socket belongs to the epoch from here on; a failed
+        // attempt leaves nothing tracked.
+        defer { if liveAttempt === attempt { liveAttempt = nil } }
         self.profile = profile
         self.token = token
-        // Two bounds, not one shared deadline: the socket open gives up at
-        // `transportOpenDeadline` so a down path is named in 5 s, and only a
-        // socket that opened may spend the hello budget (D-4, C-3).
-        let transportOpenTimeout = GatewayConnectionPolicy.transportOpenDeadline
-        let helloTimeout = GatewayConnectionPolicy.helloDeadline
         let attemptStartedAt = clock.now()
-        let handshakeStage = GatewayHandshakeStage()
-        // The URL loading inactivity timeout stays above the
-        // application-owned liveness decision.
-        var request = URLRequest(url: socketURL, timeoutInterval: GatewayConnectionPolicy.requestInactivityTimeout)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let socket = socketFactory.makeConnection(request)
-        connection = ConnectionEpoch(
-            id: epochID, socket: socket, startedAt: attemptStartedAt,
-            attemptID: attemptID, profileID: profile.id, profileLabel: profile.label
+        if plan.lanLaneDenied { recordLanPermissionDenialIfNeeded(epochID: epochID, attemptID: attemptID, profile: profile) }
+        let hello: JSONValue = .object([
+            "type": .string("hello"),
+            "protocolVersion": .number(Double(TronGatewayProtocolContract.protocolVersion)),
+            "clientId": .string(uuidSource.next().uuidString),
+            "clientRole": .string("mobile"),
+            // O-1 correlation key: the Gateway stamps it on this
+            // connection's records (packages/gateway/README.md, hello).
+            "diagnostics": .object([
+                "clientId": .string(diagnosticOwnerID),
+                "attemptId": .string(attemptID ?? "initial"),
+                "epoch": .string(String(epochID)),
+            ]),
+        ])
+        let helloData = try JSONEncoder.gateway.encode(hello)
+        let outcome = await raceLanes(
+            plan.routes,
+            stagger: raceStagger(routes: plan.routes, isReconnect: isReconnect),
+            helloData: helloData,
+            token: token,
+            epochID: epochID,
+            attemptID: attemptID,
+            profile: profile,
+            attempt: attempt
         )
-
-        do {
-            let hello: JSONValue = .object([
-                "type": .string("hello"),
-                "protocolVersion": .number(Double(TronGatewayProtocolContract.protocolVersion)),
-                "clientId": .string(uuidSource.next().uuidString),
-                "clientRole": .string("mobile"),
-                // O-1 correlation key: the Gateway stamps it on this
-                // connection's records (packages/gateway/README.md, hello).
-                "diagnostics": .object([
-                    "clientId": .string(diagnosticOwnerID),
-                    "attemptId": .string(attemptID ?? "initial"),
-                    "epoch": .string(String(epochID)),
-                ]),
-            ])
-            let helloData = try JSONEncoder.gateway.encode(hello)
-            _ = try await Self.withTimeout(
-                clock: clock,
-                duration: transportOpenTimeout,
-                onTimeout: { await socket.close() },
-                timeoutFailure: Self.transportOpenTimeoutFailure
-            ) {
-                handshakeStage.set(.helloSend)
-                // The hello write completes only once the socket opened, so its
-                // deadline is the transport-open one.
-                try await socket.send(helloData)
-                await self.markWriteProgress(epochID: epochID)
-                try await self.requireEpoch(epochID)
-            }
-            // One hello deadline covers send and receive once the socket is
-            // open; the transport-open bound above is what a connect gets.
-            let data = try await Self.withTimeout(clock: clock, duration: helloTimeout, onTimeout: { await socket.close() }) {
-                handshakeStage.set(.helloReceive)
-                return try await socket.receive()
-            }
-            try requireEpoch(epochID)
-            try GatewayFramePolicy.validateInboundBytes(data)
-            let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
-            try requireEpoch(epochID)
-            guard decoded.type == "hello",
-                  decoded.protocolVersion == TronGatewayProtocolContract.protocolVersion,
-                  decoded.minProtocolVersion == TronGatewayProtocolContract.minimumProtocolVersion else {
-                throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway protocol is not compatible with this app.", retryable: false, details: nil)
-            }
-            let admittedChannel = try GatewayChannelPolicy.admit(decoded.gatewayChannel)
-            guard admittedChannel == profile.gatewayChannel else {
-                throw GatewayFailure(
-                    code: "identity_mismatch",
-                    message: "The connected Gateway channel does not match this paired server.",
-                    retryable: false,
-                    details: nil
-                )
-            }
-            guard var epoch = connection, epoch.id == epochID else { throw CancellationError() }
-            epoch.info = decoded.info
-            epoch.gatewayConnectionID = decoded.connectionId
-            epoch.lastInboundAt = clock.now()
-            connection = epoch
-            if activateEvents { try activateEventDelivery(connectionID: epochID) }
-            // No socket metadata read here: an extra await on the success path
-            // would let a slow or retired socket delay admission. A completed
-            // hello already proves the transport opened.
-            recordDiagnostic(
-                stage: .helloReceive,
-                outcome: .success,
-                startedAt: attemptStartedAt,
-                connectionID: epochID,
-                profileID: profile.id,
-                profileLabel: profile.label,
+        switch outcome {
+        case .abandoned:
+            throw CancellationError()
+        case .failed(let failure):
+            if let upgradeFailure = failure.upgradeFailure { throw upgradeFailure }
+            throw failure.error
+        case .opened(let opened):
+            return try await installEpoch(
+                opened,
+                epochID: epochID,
+                attemptStartedAt: attemptStartedAt,
                 attemptID: attemptID,
-                handshake: handshakeDiagnostic(
-                    metadata: GatewaySocketMetadata(closeCode: nil, httpStatusCode: nil),
-                    reachedHelloReceive: true
-                )
+                profile: profile,
+                activateEvents: activateEvents
             )
-            return GatewayConnectionIdentity(
-                id: epochID, info: decoded.info, gatewayConnectionID: decoded.connectionId
-            )
-        } catch {
-            let metadata = await socket.metadata()
-            let upgradeFailure = Self.upgradeFailure(error, metadata: metadata)
-            let failure = upgradeFailure ?? Self.transportFailure(error)
-            let reachedStage = handshakeStage.get()
-            let handshake = handshakeDiagnostic(metadata: metadata, reachedHelloReceive: reachedStage == .helloReceive)
-            recordDiagnostic(
-                // A hello write that never completed on a socket that never
-                // opened is a path failure, not a Mac that did not answer.
-                stage: reachedStage == .helloSend && !handshake.transportOpened ? .transportOpen : reachedStage,
-                outcome: .failure,
-                startedAt: attemptStartedAt,
-                reason: Self.diagnosticReason(for: failure.code),
-                error: error,
-                closeCode: metadata.closeCode,
-                httpStatusCode: metadata.httpStatusCode,
-                connectionID: epochID,
-                profileID: profile.id,
-                profileLabel: profile.label,
-                attemptID: attemptID,
-                handshake: handshake
-            )
-            await detachConnection(epochID: epochID, reason: failure)
-            if let upgradeFailure { throw upgradeFailure }
-            throw error
         }
     }
 
-    private func handshakeDiagnostic(metadata: GatewaySocketMetadata, reachedHelloReceive: Bool) -> GatewayHandshakeDiagnostic {
+    /// This attempt's lanes, and whether the LAN lane is missing because iOS
+    /// reported the install's Local Network permission denied (E-3c).
+    private struct GatewayDialPlan {
+        let routes: [GatewayDialRoute]
+        let lanLaneDenied: Bool
+    }
+
+    /// The lanes this attempt dials, in the order it starts them. The saved
+    /// endpoint is always last: it works wherever the Mac is reachable, and it
+    /// is what remains when the LAN lane is unadvertised, unpinned, denied by
+    /// this install's Local Network permission, or off the home network.
+    private func dialPlan(for profile: GatewayProfile) -> GatewayDialPlan {
+        guard let socketURL = profile.socketURL else { return GatewayDialPlan(routes: [], lanLaneDenied: false) }
+        let saved = GatewayDialRoute(lane: .tailscale, socketURL: socketURL, pin: nil, raced: false)
+        // D-5/E-3c: the LAN lane exists only while the Mac advertises an
+        // endpoint with a pin and this phone is on Wi-Fi at all.
+        guard networkPath()?.contains("wifi") == true,
+              let pin = profile.lanPin,
+              let endpoint = profile.lanEndpoints.first,
+              let lanSocketURL = endpoint.socketURL else {
+            return GatewayDialPlan(routes: [saved], lanLaneDenied: false)
+        }
+        guard !lanPermission.isDenied else {
+            return GatewayDialPlan(routes: [saved], lanLaneDenied: true)
+        }
+        return GatewayDialPlan(
+            routes: [
+                GatewayDialRoute(lane: .lan, socketURL: lanSocketURL, pin: pin, raced: true),
+                GatewayDialRoute(lane: .tailscale, socketURL: socketURL, pin: nil, raced: true),
+            ],
+            lanLaneDenied: false
+        )
+    }
+
+    /// How long the saved lane waits before it joins a race the LAN lane
+    /// started (E-3c): nothing when this attempt has one lane, or when the
+    /// saved lane is the one this network is known to carry — the local lane is
+    /// then the gamble, and the lane that works must not be delayed. A network
+    /// the LAN lane carried keeps it first with a head start, shorter on a
+    /// reconnect so a lane that just died does not spend the attempt's budget.
+    private func raceStagger(routes: [GatewayDialRoute], isReconnect: Bool) -> Duration? {
+        guard routes.count > 1, let signature = networkPath() else { return nil }
+        switch preferredLaneByPath[signature] {
+        case .tailscale: return nil
+        case .lan: return isReconnect ? Self.reconnectLanRaceStagger : Self.lanRaceStagger
+        case nil: return isReconnect ? nil : Self.lanRaceStagger
+        }
+    }
+
+    /// Wait out the stagger, or until the lane ahead of this one ends: a lane
+    /// that already failed must not hold the attempt for the rest of it.
+    private static func waitForStagger(
+        _ delay: Duration,
+        lead: GatewayDialLane,
+        resolution: GatewayRaceResolution,
+        clock: MonotonicClock
+    ) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await resolution.waitUntilSettled(lead) }
+            group.addTask { try? await clock.sleep(delay) }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
+    /// Dial this attempt's lanes concurrently and take the first authenticated
+    /// hello (E-3c). Every other lane is retired — before it can carry work, and
+    /// including one that opened while the winner was being taken — so the Mac
+    /// never keeps a connection this phone has stopped using.
+    private func raceLanes(
+        _ routes: [GatewayDialRoute],
+        stagger: Duration?,
+        helloData: Data,
+        token: String,
+        epochID: Int,
+        attemptID: String?,
+        profile: GatewayProfile,
+        attempt: GatewayLiveAttempt
+    ) async -> GatewayLegOutcome {
+        let resolution = GatewayRaceResolution()
+        return await withTaskGroup(of: GatewayLegOutcome.self) { group in
+            for (index, route) in routes.enumerated() {
+                // Only a lane behind an already-started one waits; that stagger
+                // is what keeps a home network on the cheap local socket
+                // instead of spending the other lane's connect.
+                let delay = index == 0 ? nil : stagger
+                // A race with no head start has no preference to express, so a
+                // saved lane that opens while the LAN lane is still dialing
+                // holds for a moment: an equal finish belongs to the local lane.
+                let tieGrace = delay == nil && index > 0 && route.lane != .lan ? Self.lanTieGrace : nil
+                group.addTask { [self] in
+                    if let delay {
+                        let lead = routes[index - 1].lane
+                        await Self.waitForStagger(delay, lead: lead, resolution: resolution, clock: clock)
+                        // The stagger ends early on a lane that already
+                        // answered: this one needs no dial and no hello.
+                        if Task.isCancelled || resolution.hasOpened(lead) { return .abandoned }
+                    }
+                    return await attemptLeg(
+                        route,
+                        helloData: helloData,
+                        token: token,
+                        epochID: epochID,
+                        attemptID: attemptID,
+                        profile: profile,
+                        resolution: resolution,
+                        attempt: attempt,
+                        tieGrace: tieGrace
+                    )
+                }
+            }
+            var failures: [GatewayLegFailure] = []
+            while let outcome = await group.next() {
+                switch outcome {
+                case .abandoned:
+                    continue
+                case .failed(let failure):
+                    failures.append(failure)
+                case .opened(let opened):
+                    resolution.settle()
+                    group.cancelAll()
+                    var superseded: [GatewayOpenedLeg] = []
+                    while let next = await group.next() {
+                        switch next {
+                        case .opened(let loser): superseded.append(loser)
+                        case .failed(let failure): failures.append(failure)
+                        case .abandoned: continue
+                        }
+                    }
+                    for loser in superseded { await loser.socket.close() }
+                    if opened.route.lane != .lan,
+                       let lanFailure = failures.first(where: { $0.route.lane == .lan && $0.deniesLocalNetwork }) {
+                        recordLanPermissionDenial(lanFailure, epochID: epochID, attemptID: attemptID, profile: profile)
+                    }
+                    for failure in failures { recordLegFailure(failure, epochID: epochID) }
+                    return .opened(GatewayOpenedLeg(
+                        route: opened.route,
+                        socket: opened.socket,
+                        info: opened.info,
+                        gatewayConnectionID: opened.gatewayConnectionID,
+                        rememberedLane: Self.rememberedLane(winner: opened.route.lane, failures: failures)
+                    ))
+                }
+            }
+            guard let reported = Self.reportedFailureIndex(failures) else { return .abandoned }
+            // Record the losers first, so the newest record of the attempt is
+            // the failure the caller is about to see (E-3c).
+            for (index, loser) in failures.enumerated() where index != reported {
+                recordLegFailure(loser, epochID: epochID)
+            }
+            recordLegFailure(failures[reported], epochID: epochID)
+            return .failed(failures[reported])
+        }
+    }
+
+    /// Which lane's failure the attempt reports when every lane failed (E-3c).
+    /// A typed answer — the Mac refused the upgrade, named a protocol or
+    /// identity mismatch, or served a certificate the pin refuses — outranks a
+    /// transport ending from the other lane, whichever lane it came from.
+    /// Reporting a transport timeout for a 401 keeps the phone retrying an
+    /// address whose Mac already revoked it; equal answers go to the saved
+    /// endpoint, the lane that works wherever the Mac is reachable.
+    private static func reportedFailureIndex(_ failures: [GatewayLegFailure]) -> Int? {
+        var best: Int?
+        for index in failures.indices {
+            guard let current = best else { best = index; continue }
+            let failure = failures[index]
+            let better = failure.answerRank > failures[current].answerRank
+                || (failure.answerRank == failures[current].answerRank
+                    && failure.route.lane == .tailscale
+                    && failures[current].route.lane != .tailscale)
+            if better { best = index }
+        }
+        return best
+    }
+
+    /// What this race teaches the network (E-3c): the lane that won, but only
+    /// when the race learned why the other lane lost. A saved-lane win over a
+    /// LAN lane that was still dialing is a coin flip rather than a fact about
+    /// the network, and must not overwrite a remembered LAN win.
+    private static func rememberedLane(
+        winner: GatewayDialLane,
+        failures: [GatewayLegFailure]
+    ) -> GatewayDialLane? {
+        if winner == .lan { return .lan }
+        return failures.contains { $0.route.lane == .lan } ? .tailscale : nil
+    }
+
+    /// Dial one lane and complete its hello. A lane that fails — or is cancelled
+    /// because another lane won — always closes the socket it opened here.
+    private func attemptLeg(
+        _ route: GatewayDialRoute,
+        helloData: Data,
+        token: String,
+        epochID: Int,
+        attemptID: String?,
+        profile: GatewayProfile,
+        resolution: GatewayRaceResolution,
+        attempt: GatewayLiveAttempt,
+        tieGrace: Duration?
+    ) async -> GatewayLegOutcome {
+        let startedAt = clock.now()
+        let handshakeStage = GatewayHandshakeStage()
+        // The URL loading inactivity timeout stays above the
+        // application-owned liveness decision.
+        var request = URLRequest(url: route.socketURL, timeoutInterval: GatewayConnectionPolicy.requestInactivityTimeout)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let socket = socketFactory.makeConnection(request, route.pin)
+        // A close or a replacement connect owns an attempt's sockets while it
+        // has no epoch; one the attempt already retired is not dialed at all.
+        guard attempt.track(socket) else {
+            await socket.close()
+            return .abandoned
+        }
+        return await withTaskCancellationHandler {
+            do {
+                // Two bounds, not one shared deadline: the socket open gives up
+                // at `transportOpenDeadline` so a down path is named in 5 s,
+                // and only a socket that opened may spend the hello budget
+                // (D-4, C-3).
+                _ = try await Self.withTimeout(
+                    clock: clock,
+                    duration: GatewayConnectionPolicy.transportOpenDeadline,
+                    onTimeout: { await socket.close() },
+                    timeoutFailure: Self.transportOpenTimeoutFailure
+                ) {
+                    handshakeStage.set(.helloSend)
+                    // The hello write completes only once the socket opened, so
+                    // its deadline is the transport-open one.
+                    try await socket.send(helloData)
+                    try await self.requireGeneration(epochID)
+                }
+                // One hello deadline covers send and receive once the socket is
+                // open; the transport-open bound above is what a connect gets.
+                let data = try await Self.withTimeout(clock: clock, duration: GatewayConnectionPolicy.helloDeadline, onTimeout: { await socket.close() }) {
+                    handshakeStage.set(.helloReceive)
+                    return try await socket.receive()
+                }
+                try requireGeneration(epochID)
+                try GatewayFramePolicy.validateInboundBytes(data)
+                let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
+                try requireGeneration(epochID)
+                guard decoded.type == "hello",
+                      decoded.protocolVersion == TronGatewayProtocolContract.protocolVersion,
+                      decoded.minProtocolVersion == TronGatewayProtocolContract.minimumProtocolVersion else {
+                    throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway protocol is not compatible with this app.", retryable: false, details: nil)
+                }
+                let admittedChannel = try GatewayChannelPolicy.admit(decoded.gatewayChannel)
+                guard admittedChannel == profile.gatewayChannel else {
+                    throw GatewayFailure(
+                        code: "identity_mismatch",
+                        message: "The connected Gateway channel does not match this paired server.",
+                        retryable: false,
+                        details: nil
+                    )
+                }
+                // A lane with no head start has a tie to resolve: a saved lane
+                // that opened while the LAN lane is still dialing holds for a
+                // moment, and an equal finish belongs to the local lane.
+                if let tieGrace, !resolution.hasOpened(.lan) {
+                    try? await clock.sleep(tieGrace)
+                    if resolution.hasOpened(.lan) {
+                        await socket.close()
+                        resolution.markLaneSettled(route.lane, opened: false)
+                        return .abandoned
+                    }
+                }
+                resolution.markLaneSettled(route.lane, opened: true)
+                return .opened(GatewayOpenedLeg(
+                    route: route,
+                    socket: socket,
+                    info: decoded.info,
+                    gatewayConnectionID: decoded.connectionId,
+                    rememberedLane: nil
+                ))
+            } catch {
+                let endedAt = clock.now()
+                resolution.markLaneSettled(route.lane, opened: false)
+                let metadata = await socket.metadata()
+                await socket.close()
+                // A lane this race retired for its winner is not a failure to
+                // report; every other ending — including an outer cancellation,
+                // exactly as a single-lane attempt recorded one — is.
+                let cancelled = Task.isCancelled
+                    || error is CancellationError
+                    || (error as? URLError)?.code == .cancelled
+                if cancelled, resolution.hasWinner { return .abandoned }
+                return .failed(GatewayLegFailure(
+                    route: route,
+                    error: error,
+                    upgradeFailure: Self.upgradeFailure(error, metadata: metadata),
+                    stage: handshakeStage.get(),
+                    metadata: metadata,
+                    startedAt: startedAt,
+                    endedAt: endedAt,
+                    attemptID: attemptID,
+                    profileID: profile.id,
+                    profileLabel: profile.label
+                ))
+            }
+        } onCancel: {
+            // Cancellation can arrive while either bound's child is suspended.
+            // The captured socket close is deliberately initiated before the
+            // group waits for non-cooperative Foundation callbacks to unwind.
+            Task { await socket.close() }
+        }
+    }
+
+    /// Install the lane whose hello completed, if this attempt still owns the
+    /// generation. A winner that arrived after a newer attempt started is
+    /// closed instead of installed.
+    private func installEpoch(
+        _ opened: GatewayOpenedLeg,
+        epochID: Int,
+        attemptStartedAt: ContinuousClock.Instant,
+        attemptID: String?,
+        profile: GatewayProfile,
+        activateEvents: Bool
+    ) async throws -> GatewayConnectionIdentity {
+        guard generation == epochID else {
+            await opened.socket.close()
+            throw CancellationError()
+        }
+        var epoch = ConnectionEpoch(
+            id: epochID,
+            socket: opened.socket,
+            startedAt: attemptStartedAt,
+            attemptID: attemptID,
+            profileID: profile.id,
+            profileLabel: profile.label
+        )
+        epoch.info = opened.info
+        epoch.gatewayConnectionID = opened.gatewayConnectionID
+        epoch.lastInboundAt = clock.now()
+        connection = epoch
+        if let rememberedLane = opened.rememberedLane { rememberLane(rememberedLane) }
+        if activateEvents { try activateEventDelivery(connectionID: epochID) }
+        // No socket metadata read here: an extra await on the success path
+        // would let a slow or retired socket delay admission. A completed
+        // hello already proves the transport opened.
+        recordDiagnostic(
+            stage: .helloReceive,
+            outcome: .success,
+            startedAt: attemptStartedAt,
+            connectionID: epochID,
+            profileID: profile.id,
+            profileLabel: profile.label,
+            attemptID: attemptID,
+            handshake: handshakeDiagnostic(
+                metadata: GatewaySocketMetadata(closeCode: nil, httpStatusCode: nil),
+                reachedHelloReceive: true,
+                transport: opened.route.transport
+            )
+        )
+        return GatewayConnectionIdentity(
+            id: epochID, info: opened.info, gatewayConnectionID: opened.gatewayConnectionID
+        )
+    }
+
+    /// Remember which lane carries this network, so the next attempt gives it
+    /// the head start instead of re-learning it.
+    private func rememberLane(_ lane: GatewayDialLane) {
+        guard let signature = networkPath() else { return }
+        preferredLaneByPath[signature] = lane
+    }
+
+    /// One raced lane lost. The winner's own hello record names the transport
+    /// that carried the connection; this record names the lane that did not,
+    /// and the stage it stopped at.
+    private func recordLegFailure(_ failure: GatewayLegFailure, epochID: Int) {
+        // A hello write that never completed on a socket that never opened is a
+        // path failure, not a Mac that did not answer; a failure at the hello
+        // receive happened after that write completed, so its socket did open.
+        let stage: GatewayConnectionDiagnosticStage = failure.stage == .helloSend && !failure.transportOpened
+            ? .transportOpen
+            : failure.stage
+        recordDiagnostic(
+            stage: stage,
+            outcome: .failure,
+            startedAt: failure.startedAt,
+            endedAt: failure.endedAt,
+            reason: failure.reason,
+            error: failure.error,
+            closeCode: failure.metadata.closeCode,
+            httpStatusCode: failure.metadata.httpStatusCode,
+            connectionID: epochID,
+            profileID: failure.profileID,
+            profileLabel: failure.profileLabel,
+            attemptID: failure.attemptID,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: failure.transportOpened || failure.stage == .helloReceive,
+                transportOpenMilliseconds: failure.metadata.transportOpenMilliseconds,
+                waitedForConnectivity: failure.metadata.waitedForConnectivity,
+                networkInterfaces: networkPath(),
+                transport: failure.route.transport
+            )
+        )
+    }
+
+    /// iOS denied this install the Local Network permission: the LAN lane is
+    /// not dialed, and the phone stays on Tailscale (E-3c, D-5). The permission
+    /// is state the app's path monitor reports, so the record names the lane's
+    /// one failure rather than repeating it per attempt.
+    private func recordLanPermissionDenial(
+        _ failure: GatewayLegFailure,
+        epochID: Int,
+        attemptID: String?,
+        profile: GatewayProfile
+    ) {
+        guard !lanPermission.isDenied else { return }
+        lanPermission.markDenied()
+        writeLanPermissionDenial(
+            startedAt: failure.startedAt,
+            endedAt: failure.endedAt,
+            error: failure.error,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: failure.transportOpened,
+                transportOpenMilliseconds: failure.metadata.transportOpenMilliseconds,
+                waitedForConnectivity: failure.metadata.waitedForConnectivity,
+                networkInterfaces: networkPath(),
+                transport: GatewayDialLane.lan.rawValue
+            ),
+            epochID: epochID,
+            attemptID: attemptID,
+            profile: profile
+        )
+    }
+
+    /// The path monitor, or an earlier dial, already named the denied
+    /// permission: this attempt leaves the LAN lane out, and the launch records
+    /// that once.
+    private func recordLanPermissionDenialIfNeeded(
+        epochID: Int,
+        attemptID: String?,
+        profile: GatewayProfile
+    ) {
+        guard !recordedLanDenial else { return }
+        recordedLanDenial = true
+        writeLanPermissionDenial(
+            startedAt: clock.now(),
+            endedAt: nil,
+            error: nil,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: false,
+                transportOpenMilliseconds: nil,
+                waitedForConnectivity: false,
+                networkInterfaces: networkPath(),
+                transport: GatewayDialLane.lan.rawValue
+            ),
+            epochID: epochID,
+            attemptID: attemptID,
+            profile: profile
+        )
+    }
+
+    private func writeLanPermissionDenial(
+        startedAt: ContinuousClock.Instant,
+        endedAt: ContinuousClock.Instant?,
+        error: Error?,
+        handshake: GatewayHandshakeDiagnostic,
+        epochID: Int,
+        attemptID: String?,
+        profile: GatewayProfile
+    ) {
+        recordDiagnostic(
+            stage: .transportRace,
+            outcome: .failure,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            reason: .lanDenied,
+            error: error,
+            connectionID: epochID,
+            profileID: profile.id,
+            profileLabel: profile.label,
+            attemptID: attemptID,
+            handshake: handshake
+        )
+    }
+
+    private func handshakeDiagnostic(metadata: GatewaySocketMetadata, reachedHelloReceive: Bool, transport: String?) -> GatewayHandshakeDiagnostic {
         GatewayHandshakeDiagnostic(
             transportOpened: metadata.transportOpenMilliseconds != nil || reachedHelloReceive,
             transportOpenMilliseconds: metadata.transportOpenMilliseconds,
             waitedForConnectivity: metadata.waitedForConnectivity,
-            networkInterfaces: networkPath()
+            networkInterfaces: networkPath(),
+            transport: transport
         )
     }
 
@@ -1010,6 +1652,7 @@ package actor GatewayClient {
     package func retireForBackground() async {
         generation &+= 1
         let retiredConnectionID = connection?.id
+        await retireLiveAttempt()
         await detachConnection(
             reason: GatewayFailure(code: "backgrounded", message: "Connection retired while the app was backgrounded.", retryable: true, details: nil)
         )
@@ -1032,6 +1675,7 @@ package actor GatewayClient {
         // erase the profile installed by a concurrent replacement connection.
         profile = nil
         token = nil
+        await retireLiveAttempt()
         let retiredConnectionID = connection?.id
         await detachConnection(
             reason: GatewayFailure(code: "closed", message: "Connection closed", retryable: true, details: nil)
@@ -2060,12 +2704,28 @@ package actor GatewayClient {
         return generation == epoch.id && connection == nil
     }
 
+    /// End the lanes of an attempt that has no epoch yet (E-3c): the close,
+    /// background retirement or replacement connect that owns the attempt ends
+    /// its sockets here instead of letting them run to their next generation
+    /// fence.
+    private func retireLiveAttempt() async {
+        guard let attempt = liveAttempt else { return }
+        liveAttempt = nil
+        await attempt.closeAll()
+    }
+
     private func ownsEpoch(_ epochID: Int) -> Bool {
         connection?.id == epochID
     }
 
     private func requireEpoch(_ epochID: Int) throws {
         guard ownsEpoch(epochID) else { throw CancellationError() }
+    }
+
+    /// The attempt's own fence while no epoch is installed yet: a newer connect
+    /// or a close invalidates this attempt's lanes before they finish.
+    private func requireGeneration(_ epochID: Int) throws {
+        guard generation == epochID else { throw CancellationError() }
     }
 
     private nonisolated static func invalidProfileEndpoint() -> GatewayFailure {
