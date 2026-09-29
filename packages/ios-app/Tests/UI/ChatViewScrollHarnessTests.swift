@@ -3449,6 +3449,9 @@ final class ChatViewScrollHarness {
     let recorder: PresentedFrameRecorder
     let signposts: RecordingPerformanceSignposts
     let probe: ChatHostedProbe
+    /// The mounted callbacks a hosted test activates through the control that
+    /// owns them (a SwiftUI button cannot be tapped from the harness).
+    let toolActionProbe = HostedToolActionProbe()
 
     private struct Dependencies {
         let suiteName: String
@@ -3650,6 +3653,7 @@ final class ChatViewScrollHarness {
                 )
             }
             .environment(model)
+            .environment(\.hostedToolActionProbe, toolActionProbe)
         )
         hostingController = UIHostingController(rootView: enablesPresentationCover
             ? AnyView(HarnessManagedSurface(content: root, cover: cover))

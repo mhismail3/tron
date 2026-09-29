@@ -539,6 +539,11 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
 struct ChatTranscriptRenderRow: View, Equatable {
     let item: ChatTranscriptRenderItem
     let preparedText: ChatTextPreparationSnapshot
+    /// The inline display card's disclosure phase, or the default phase for a
+    /// row without a display. It is part of the row's identity because the row is
+    /// `.equatable()`: an observable read below that boundary is skipped when the
+    /// row's inputs are unchanged.
+    let inlineDisclosurePhase: DisplayInlineDisclosureState
     let installationTag: ChatTranscriptProjectionTag
     let toolPayloadRevision: ChatToolPayloadRevision
     let resolveToolDetails: ([String]) -> [ChatToolPresentation]?
@@ -552,6 +557,7 @@ struct ChatTranscriptRenderRow: View, Equatable {
                 == rhs.preparedText.hiddenThinkingLabel else { return false }
         guard case .toolRun = lhs.item else { return true }
         return lhs.toolPayloadRevision == rhs.toolPayloadRevision
+            && lhs.inlineDisclosurePhase == rhs.inlineDisclosurePhase
     }
 
     @ViewBuilder var body: some View {
@@ -577,7 +583,8 @@ struct ChatTranscriptRenderRow: View, Equatable {
                 run: run,
                 installationTag: installationTag,
                 resolveDetails: { callIDs, _ in resolveToolDetails(callIDs) },
-                recordChip: recordToolChip
+                recordChip: recordToolChip,
+                inlineDisclosurePhase: inlineDisclosurePhase
             )
             .frame(maxWidth: .infinity, alignment: .leading)
         case .notification(let notification):

@@ -63,6 +63,20 @@ enum ToolDisplayActivation {
 
 typealias DisplayPresentationHandler = @MainActor @Sendable (DisplayPresentationCommand) -> Void
 
+/// The transcript's presentation store, which owns the inline display cards'
+/// disclosure phases so a lazily mounted row cannot lose them. The rows receive
+/// it from the transcript's own row installation.
+private struct ChatInlineDisclosureOwnerKey: EnvironmentKey {
+    static let defaultValue: ChatTranscriptPresentationStore? = nil
+}
+
+extension EnvironmentValues {
+    var chatInlineDisclosureOwner: ChatTranscriptPresentationStore? {
+        get { self[ChatInlineDisclosureOwnerKey.self] }
+        set { self[ChatInlineDisclosureOwnerKey.self] = newValue }
+    }
+}
+
 private struct DisplayPresentationHandlerKey: EnvironmentKey {
     static let defaultValue: DisplayPresentationHandler? = nil
 }
@@ -148,18 +162,21 @@ struct DisplayInlineDisclosureState: Equatable, Sendable {
 
 struct DisplayToolView: View {
     let tool: ChatToolDescriptor
+    /// The card's disclosure phase, read from the transcript's presentation store
+    /// by the row installation. The transcript's rows are `.equatable()`, so the
+    /// phase the card renders must arrive as an input.
+    let disclosure: DisplayInlineDisclosureState
     let onOpenTechnicalDetails: () -> Void
 
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.displayPresentationHandler) private var present
+    @Environment(\.chatInlineDisclosureOwner) private var disclosureOwner
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var disclosure = DisplayInlineDisclosureState()
-    @State private var expandedHeight: CGFloat = 0
-    @State private var pillHeight: CGFloat = 0
 
     private var display: DisplayProjection? { tool.display }
+    private var disclosureIdentity: String? { display?.presentationIdentity }
     private var effectiveSurface: DisplaySurface {
         display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? tool.requestedDisplaySurface ?? .sheet
@@ -195,16 +212,17 @@ struct DisplayToolView: View {
 
     @ViewBuilder
     private func inlineDisclosureHost(_ display: DisplayProjection) -> some View {
-        ZStack(alignment: .topLeading) {
+        // Both layers are measured in the pass that places them, and only
+        // `progress` (1 = expanded) is animated, so the row's height is exact on
+        // its first frame and the collapse sequence is the fade followed by the
+        // contract.
+        DisclosureLayout(progress: disclosure.rendersInlineContainer ? 1 : 0) {
             inlineExpandedSurface(display)
                 .fixedSize(horizontal: false, vertical: true)
                 .opacity(disclosure.inlineOpacity)
                 .scaleEffect(disclosure.isCollapsed ? 0.985 : 1, anchor: .topLeading)
                 .allowsHitTesting(disclosure.phase == .expanded)
                 .accessibilityHidden(disclosure.phase != .expanded)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                    recordDisclosureHeight($0, expanded: true)
-                }
 
             displayPill
                 .fixedSize(horizontal: false, vertical: true)
@@ -212,11 +230,7 @@ struct DisplayToolView: View {
                 .scaleEffect(disclosure.isCollapsed ? 1 : 0.985, anchor: .topLeading)
                 .allowsHitTesting(disclosure.phase == .collapsed)
                 .accessibilityHidden(disclosure.phase != .collapsed)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                    recordDisclosureHeight($0, expanded: false)
-                }
         }
-        .frame(height: disclosureHeight, alignment: .top)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contextMenu {
             Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
@@ -239,22 +253,6 @@ struct DisplayToolView: View {
                 onCollapse: collapseInline,
                 onOpenSheet: inlineSheetAction(for: display)
             )
-        }
-    }
-
-    private var disclosureHeight: CGFloat? {
-        let measured = disclosure.rendersInlineContainer ? expandedHeight : pillHeight
-        return measured > 0 ? measured : nil
-    }
-
-    private func recordDisclosureHeight(_ height: CGFloat, expanded: Bool) {
-        guard height.isFinite, height > 0 else { return }
-        let current = expanded ? expandedHeight : pillHeight
-        guard abs(current - height) > 0.5 else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            if expanded { expandedHeight = height } else { pillHeight = height }
         }
     }
 
@@ -366,35 +364,46 @@ struct DisplayToolView: View {
     }
 
     private func collapseInline() {
-        guard let transition = disclosure.proposed(.collapse) else { return }
+        guard let identity = disclosureIdentity,
+              let transition = disclosureOwner?.proposedInlineDisclosure(
+                  identity: identity, direction: .collapse
+              ) else { return }
         // Both endpoints remain in one measured host. First fade the card and
         // its native shadow completely while preserving row height; only then
         // contract the invisible card region into the already-visible pill.
         withAnimation(disclosureFadeAnimation, completionCriteria: .logicallyComplete) {
-            guard disclosure.begin(transition) else { return }
+            disclosureOwner?.beginInlineDisclosure(identity: identity, transition: transition)
         } completion: {
-            guard disclosure.generation == transition.generation else { return }
+            guard disclosureOwner?.inlineDisclosurePhase(for: identity).generation
+                    == transition.generation else { return }
             withAnimation(disclosureLayoutAnimation) {
-                _ = disclosure.complete(transition)
+                disclosureOwner?.completeInlineDisclosure(identity: identity, transition: transition)
             }
         }
     }
 
     private func expandInline() {
-        guard let transition = disclosure.proposed(.expand) else { return }
+        guard let identity = disclosureIdentity,
+              let transition = disclosureOwner?.proposedInlineDisclosure(
+                  identity: identity, direction: .expand
+              ) else { return }
         // Growth cannot paint across following rows, so expansion can resize and
         // crossfade in one transaction without any temporary clipping surface.
         withAnimation(disclosureLayoutAnimation) {
-            guard disclosure.begin(transition) else { return }
-            _ = disclosure.complete(transition)
+            guard disclosureOwner?.beginInlineDisclosure(
+                identity: identity, transition: transition
+            ) == true else { return }
+            disclosureOwner?.completeInlineDisclosure(identity: identity, transition: transition)
         }
     }
 
     private func settleDisclosureWithoutAnimation() {
-        guard !disclosure.permitsInteraction else { return }
+        guard let identity = disclosureIdentity else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
-        withTransaction(transaction) { disclosure.settleTransientPhase() }
+        withTransaction(transaction) {
+            disclosureOwner?.settleInlineDisclosure(identity: identity)
+        }
     }
 }
 
@@ -448,6 +457,103 @@ enum DisplayInlineLayoutPolicy {
         case .image, .video, .audio, .pdf: 220
         case .markdown, .text, .code, .html, .document, .webpage, .hls, .browserLive, .nativeLive: 180
         }
+    }
+
+    /// The disclosure host's height between the collapsed pill and the expanded
+    /// card. Progress is clamped, so a stale phase value can never ask the host
+    /// for a height beyond either end.
+    static func disclosureHeight(pill: CGFloat, expanded: CGFloat, progress: CGFloat) -> CGFloat {
+        let clamped = progress.isFinite ? min(1, max(0, progress)) : 0
+        return pill + (expanded - pill) * clamped
+    }
+}
+
+/// The inline display card's disclosure host: the expanded card and the
+/// collapsed pill, both measured in the pass that places them. `progress`
+/// (1 = expanded) is the layout's one animated input, so the row's height is
+/// exact on its first frame and only the collapse or expand sequence
+/// interpolates it. The two layers keep their natural heights and share their
+/// top edge; the invisible one is already opacity 0, so the shrinking host
+/// never clips it.
+private struct DisclosureLayout: Layout, Animatable {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    struct Cache {
+        var width: CGFloat?
+        var expandedHeight: CGFloat?
+        var pillHeight: CGFloat?
+    }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        // Async card content and Dynamic Type change both heights; animating
+        // `progress` alone does not, so each pass re-measures on a real change.
+        cache = Cache()
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) -> CGSize {
+        let width = proposal.width ?? Self.naturalWidth(subviews)
+        let measured = measure(width: width, subviews: subviews, cache: &cache)
+        return CGSize(
+            width: width,
+            height: DisplayInlineLayoutPolicy.disclosureHeight(
+                pill: measured.pill,
+                expanded: measured.expanded,
+                progress: progress
+            )
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) {
+        let measured = measure(width: bounds.width, subviews: subviews, cache: &cache)
+        for (index, subview) in subviews.enumerated() {
+            subview.place(
+                at: CGPoint(x: bounds.minX, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(
+                    width: bounds.width,
+                    height: index == 0 ? measured.expanded : measured.pill
+                )
+            )
+        }
+    }
+
+    private func measure(
+        width: CGFloat,
+        subviews: Subviews,
+        cache: inout Cache
+    ) -> (expanded: CGFloat, pill: CGFloat) {
+        if cache.width == width,
+           let expanded = cache.expandedHeight,
+           let pill = cache.pillHeight {
+            return (expanded, pill)
+        }
+        let measurement = ProposedViewSize(width: width, height: nil)
+        let expanded = subviews.first?.sizeThatFits(measurement).height ?? 0
+        let pill = subviews.count > 1 ? subviews[1].sizeThatFits(measurement).height : 0
+        cache.width = width
+        cache.expandedHeight = expanded
+        cache.pillHeight = pill
+        return (expanded, pill)
+    }
+
+    private static func naturalWidth(_ subviews: Subviews) -> CGFloat {
+        subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
     }
 }
 
@@ -622,6 +728,15 @@ private struct DisplayInlineContainer: View {
                             accessibilityLabel: "Collapse \(display.title)",
                             action: onCollapse
                         )
+                        #if HOSTED_TEST
+                        // The hosted journey collapses a real mounted card
+                        // through its own collapse action; a tap cannot be
+                        // injected into a SwiftUI button.
+                        .modifier(HostedToolActionProbeModifier(
+                            id: "display-collapse:\(display.presentationIdentity)",
+                            action: onCollapse
+                        ))
+                        #endif
                     }
                 }
             }

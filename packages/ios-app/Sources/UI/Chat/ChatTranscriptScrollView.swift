@@ -323,7 +323,24 @@ private extension ChatPhysicalTranscriptRow {
     }
 }
 
+extension ChatTranscriptScrollView {
+    /// The disclosure phase of the inline display card this row hosts, read from
+    /// the store that owns it. The row installation passes it down because the
+    /// row is `.equatable()` and an observable read below that boundary would be
+    /// skipped.
+    func inlineDisclosurePhase(of item: ChatTranscriptRenderItem) -> DisplayInlineDisclosureState {
+        guard let display = item.displayPresentation else { return DisplayInlineDisclosureState() }
+        return transcriptPresentation.inlineDisclosurePhase(for: display.presentationIdentity)
+    }
+}
+
 private extension ChatTranscriptRenderItem {
+    /// The display projection this row presents, if any.
+    var displayPresentation: DisplayProjection? {
+        guard case .toolRun(let run) = self else { return nil }
+        return run.tools.compactMap(\.display).first
+    }
+
     var isCanonicalUserPrompt: Bool {
         switch self {
         case .transcript(let item): item.role == .user
@@ -1166,6 +1183,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         ChatTranscriptRenderRow(
             item: item,
             preparedText: installed.preparedText(for: item),
+            // A row rendered inside `.equatable()` must receive everything it
+            // renders: a display card's disclosure phase is transcript state, so
+            // the row installation reads it and passes it down.
+            inlineDisclosurePhase: inlineDisclosurePhase(of: item),
             installationTag: installed.tag,
             toolPayloadRevision: installed.toolPayloadRevision(for: item),
             resolveToolDetails: { callIDs in
@@ -1178,6 +1199,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         )
         .equatable()
         .environment(\.displayTranscriptReady, isReady && permitsAsynchronousContent)
+        // The display cards' disclosure phases are transcript state. A lazily
+        // remounted row reads its own phase from the store instead of losing a
+        // row-local one.
+        .environment(\.chatInlineDisclosureOwner, transcriptPresentation)
         .chatStableTranscriptUpdates(projectionIdentity: installed.tag)
         #if HOSTED_TEST
         .environment(\.chatHostedRecorder, ChatHostedRecorderBox(recorder: hostedRecorder))

@@ -224,6 +224,9 @@ struct ToolRunView: View {
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
     let recordChip: (ToolChipInstrumentationSample) -> Void
+    /// Supplied by the transcript's row installation; a host that renders a run
+    /// outside a transcript shows the default expanded card.
+    var inlineDisclosurePhase: DisplayInlineDisclosureState = DisplayInlineDisclosureState()
     @State private var resolvedState: ToolRunResolvedState?
     @State private var detailDetent: PresentationDetent = .medium
     @State private var displayHandoff = ToolDisplayHandoff()
@@ -232,7 +235,11 @@ struct ToolRunView: View {
     var body: some View {
         Group {
             if run.tools.count == 1, let tool = run.tools.first, tool.toolName == "display" {
-                DisplayToolView(tool: tool, onOpenTechnicalDetails: openDetails)
+                DisplayToolView(
+                    tool: tool,
+                    disclosure: inlineDisclosurePhase,
+                    onOpenTechnicalDetails: openDetails
+                )
             } else {
                 ToolActivityChip(
                     run: run,

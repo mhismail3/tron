@@ -129,6 +129,17 @@ struct ChatRowStabilityTests {
                     phaseVariants.isEmpty,
                     "a settled row changed height between phases: \(phaseVariants)"
                 )
+                // A settled row without asynchronous content presents one height
+                // per mount. The two inline markdown displays are the exception
+                // and stay recorded rather than asserted: their card content
+                // arrives when the transcript becomes ready, so the row's height
+                // changes from the loading placeholder to the display's own
+                // content (F4, not part of this stage).
+                let unstable = Set(report.withinMountVariantRows.keys)
+                #expect(
+                    unstable.isSubset(of: Set(RowStabilityFixture.inlineDisplayIDs)),
+                    "a settled row measured itself after mounting: \(report.withinMountVariantRows)"
+                )
                 // The rewrite measures the trace in the layout that places it;
                 // without those measurements the trace loses its tap target and
                 // its tail fade, which nothing else observes.
@@ -269,6 +280,133 @@ struct ChatRowStabilityTests {
                 #expect(
                     observation.rowIdentityInstanceCounts["embedded-notice"] == 1,
                     "the truncation measurement remounted the notice pill"
+                )
+            }
+        }
+    }
+
+    @Test("a collapsed inline display card keeps its phase and its collapse motion")
+    func collapsedInlineDisplayKeepsPhaseAndMotion() async throws {
+        try await withTestWatchdog(timeout: .seconds(150)) {
+            let snapshot = try rowStabilitySnapshot()
+            try await withStabilityHarness(snapshot: snapshot) { harness in
+                let callID = RowStabilityFixture.inlineDisplayCallIDs[0]
+                let rowID = RowStabilityFixture.inlineDisplayIDs[0]
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && ($0.observation.rowFrames[rowID]?.height ?? 0) > 100
+                }
+                // The card is mounted just above the opening viewport, at the
+                // height its own content decides.
+                let expandedHeight = try await settledRowHeight(rowID, harness: harness)
+                #expect(expandedHeight > 100, "the card did not render expanded")
+
+                // The user's own collapse action, mounted on the card's control.
+                #expect(
+                    harness.toolActionProbe.activate(RowStabilityFixture.collapseActionID(for: callID)),
+                    "the inline card's collapse action was not mounted"
+                )
+                // The collapse sequence, frame by frame: the card fades while the
+                // row keeps its expanded height, then the row contracts into the
+                // already-visible pill. No frame grows and no single frame
+                // carries more than 60% of the change.
+                var collapseFrames: [CGFloat] = []
+                for _ in 0..<40 {
+                    try await harness.driveFrameBoundary()
+                    if let height = harness.probeObservation.rowFrames[rowID]?.height, height > 1 {
+                        collapseFrames.append(height)
+                    }
+                }
+                let collapsedHeight = try #require(collapseFrames.last)
+                let totalChange = expandedHeight - collapsedHeight
+                #expect(collapsedHeight < expandedHeight - 100, "the card did not collapse")
+                #expect(
+                    collapseFrames.filter { $0 >= expandedHeight - 0.5 }.count >= 2,
+                    "the fade must hold the expanded height while the card fades: \(collapseFrames)"
+                )
+                let steps = zip(collapseFrames, collapseFrames.dropFirst()).map { $0 - $1 }
+                #expect(
+                    steps.allSatisfy { $0 >= -0.5 },
+                    "the collapse must contract monotonically: \(collapseFrames)"
+                )
+                #expect(
+                    (steps.max() ?? 0) <= totalChange * 0.6,
+                    "the collapse changed in one jump: \(collapseFrames)"
+                )
+                #expect(
+                    collapseFrames.filter { $0 < expandedHeight - 1 && $0 > collapsedHeight + 1 }.count >= 3,
+                    "too few intermediate heights: \(collapseFrames)"
+                )
+
+                // Scroll the card's own row away to the oldest loaded row and
+                // back: the phase is transcript state, so the card must still be
+                // collapsed. This fixture cannot make SwiftUI discard a row's
+                // local state across a lazy remount (the native row keeps one
+                // identity through the journey), so the assertion guards the
+                // invariant rather than reproducing a lost-state failure.
+                let appearances = harness.probeObservation.physicalRowAppearanceCounts[rowID] ?? 0
+                try await detachToOldestAndReturn(harness: harness)
+                #expect(
+                    (harness.probeObservation.physicalRowAppearanceCounts[rowID] ?? 0) > appearances,
+                    "the card's row never left the viewport"
+                )
+                let returned = try await settledRowHeight(rowID, harness: harness)
+                #expect(
+                    returned < expandedHeight - 100,
+                    "the card must still be collapsed: \(returned) vs expanded \(expandedHeight)"
+                )
+                #expect(
+                    abs(returned - collapsedHeight) <= 1.5,
+                    "the collapsed height must survive the scroll: \(returned) vs \(collapsedHeight)"
+                )
+            }
+        }
+    }
+
+    @Test("a display's disclosure phase is dropped when its row leaves the installed window")
+    func disclosurePhaseIsBoundedToInstalledRows() async throws {
+        try await withTestWatchdog(timeout: .seconds(150)) {
+            let snapshot = try rowStabilitySnapshot()
+            try await withStabilityHarness(snapshot: snapshot) { harness in
+                let callID = RowStabilityFixture.inlineDisplayCallIDs[0]
+                let rowID = RowStabilityFixture.inlineDisplayIDs[0]
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && ($0.observation.rowFrames[rowID]?.height ?? 0) > 100
+                }
+                let expandedHeight = try await settledRowHeight(rowID, harness: harness)
+                #expect(
+                    harness.toolActionProbe.activate(RowStabilityFixture.collapseActionID(for: callID))
+                )
+                _ = try await harness.recorder.waitUntil {
+                    ($0.observation.rowFrames[rowID]?.height ?? expandedHeight)
+                        < expandedHeight - 40
+                }
+                let collapsedHeight = try await settledRowHeight(rowID, harness: harness)
+                #expect(collapsedHeight < expandedHeight - 100, "the card did not collapse")
+
+                // The display leaves the installed rows: its phase is dropped with
+                // it, so a later installation starts expanded instead of
+                // inheriting a phase no row owns.
+                var withoutDisplay = snapshot
+                withoutDisplay.transcript.removeAll { item in
+                    item.id.hasPrefix(callID)
+                }
+                withoutDisplay.transcriptTotal = (withoutDisplay.transcriptTotal ?? 0)
+                    - (snapshot.transcript.count - withoutDisplay.transcript.count)
+                withoutDisplay.revision += 1
+                withoutDisplay.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(withoutDisplay)
+                try await driveBoundaries(6, harness: harness)
+
+                harness.replaceAuthoritativeSnapshot(snapshot)
+                _ = try await harness.recorder.waitUntil {
+                    ($0.observation.rowFrames[rowID]?.height ?? 0) > 100
+                }
+                let restoredHeight = try await settledRowHeight(rowID, harness: harness)
+                #expect(
+                    abs(restoredHeight - expandedHeight) <= 0.5,
+                    "a reinstalled display must start expanded: \(restoredHeight) vs expanded \(expandedHeight), collapsed \(collapsedHeight)"
                 )
             }
         }
@@ -634,6 +772,13 @@ private enum RowStabilityFixture {
         errorNoticeID,
         codeTableID,
     ]
+
+    /// The collapse control a hosted test activates. A display's disclosure owner
+    /// key is its presentation identity, `displayId:revision`, and the fixture
+    /// projects revision 1.
+    static func collapseActionID(for callID: String) -> String {
+        "display-collapse:\(callID):1"
+    }
 
     /// Display artifact identity is a UUID in the display contract.
     static func artifactID(for callID: String) -> String {
@@ -1054,4 +1199,56 @@ private func withComposerSubmissionHarness(
 @MainActor
 private func driveBoundaries(_ count: Int, harness: ChatViewScrollHarness) async throws {
     for _ in 0..<count { try await harness.driveFrameBoundary() }
+}
+
+/// A row's height once it has stopped changing: three consecutive display
+/// boundaries within half a point. A collapse sequence fades before it
+/// contracts, so the first height below the expanded card is mid-animation.
+@MainActor
+private func settledRowHeight(
+    _ rowID: String,
+    harness: ChatViewScrollHarness
+) async throws -> CGFloat {
+    var previous: CGFloat?
+    var stable = 0
+    for _ in 0..<80 {
+        if let height = harness.probeObservation.rowFrames[rowID]?.height {
+            if let previous, abs(height - previous) <= 0.5 {
+                stable += 1
+                if stable >= 3 { return height }
+            } else {
+                stable = 0
+            }
+            previous = height
+        }
+        try await harness.driveFrameBoundary()
+    }
+    throw HarnessError.missingTranscript
+}
+
+/// Detach with the real native scroll, drive to the oldest loaded row and come
+/// back to the pinned tail. The reader's interaction phase is admitted through
+/// the coordinator's own path because the harness cannot inject a UIKit drag,
+/// and the probe stays in `.native` callback mode so the geometry is real.
+@MainActor
+private func detachToOldestAndReturn(harness: ChatViewScrollHarness) async throws {
+    try harness.displaceNativeTranscriptFromTail(by: 240)
+    try await driveBoundaries(2, harness: harness)
+    harness.drivePhase(
+        from: .idle,
+        to: .interacting,
+        geometry: harness.probeObservation.geometry
+    )
+    try harness.displaceNativeTranscriptFromTail(by: 900)
+    try await driveBoundaries(3, harness: harness)
+    harness.drivePhase(
+        from: .interacting,
+        to: .idle,
+        geometry: harness.probeObservation.geometry
+    )
+    try await driveBoundaries(2, harness: harness)
+    try harness.displaceNativeTranscriptFromTail(by: 1_000_000)
+    try await driveBoundaries(4, harness: harness)
+    try harness.displaceNativeTranscriptFromTail(by: 0)
+    try await driveBoundaries(4, harness: harness)
 }

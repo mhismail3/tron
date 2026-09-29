@@ -1053,7 +1053,11 @@ private struct InlinePhotoResumeFixture: View {
     let tool: ChatToolDescriptor
     let state: State
     var body: some View {
-        DisplayToolView(tool: tool, onOpenTechnicalDetails: {})
+        DisplayToolView(
+            tool: tool,
+            disclosure: DisplayInlineDisclosureState(),
+            onOpenTechnicalDetails: {}
+        )
             .environment(\.displayTranscriptReady, state.ready)
             .environment(\.tronPresentationActivity, state.active ? .active : .covered)
             .environment(\.canonicalResourceSessionID, "photo-fixture")

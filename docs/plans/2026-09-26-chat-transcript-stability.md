@@ -1155,3 +1155,60 @@ pass only through eager-only repairs, stop and report.
 - Changes: `TranscriptRow.swift`, `StreamingTextReveal.swift`,
   `ChatHostedProbe.swift`, `ChatTranscriptScrollView.swift`,
   `ChatRowStabilityTests.swift`.
+
+### CT-27 stage B3 (F3) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: an inline display card's disclosure phase is transcript state, and the
+  card's host measures both layers in the pass that places them.
+  - `ChatTranscriptPresentationStore` owns the phase, keyed by the display's
+    presentation identity, with `inlineDisclosurePhase(for:)`,
+    `proposedInlineDisclosure`, `begin`/`complete`/`settle`, and prunes the
+    dictionary to the installed rows' own display identities on every install
+    (`pruneInlineDisclosurePhases`, cleared in `reset()`).
+  - `DisclosureLayout` (a `Layout` + `Animatable`) replaces the ZStack and the
+    measured heights: it holds the expanded card and the pill, returns
+    `pill + (expanded − pill) × progress` through
+    `DisplayInlineLayoutPolicy.disclosureHeight`, and keeps both layers at their
+    natural height. `expandedHeight`, `pillHeight`, `recordDisclosureHeight` and
+    the two `onGeometryChange` measurement writes are deleted.
+  - The phase reaches the row as a *row input*
+    (`ChatTranscriptRenderRow.inlineDisclosurePhase`, part of its `==`,
+    threaded through `ToolRunView` to `DisplayToolView`), not only as an
+    observable read: the rows are `.equatable()`, and an observable read below
+    that boundary is skipped when the row's inputs are unchanged. Verified:
+    without the input the card's body never re-rendered after the collapse and
+    the row kept its expanded height until the next remount.
+- Evidence (lane ct27, all products rebuilt from this worktree):
+  - `ChatRowStabilityTests` 6/6 (6.1 s, `…T022607Z-run.BQW5ix`): the journey
+    (`phaseVariants=0`, `withinMountVariants` limited to the two inline markdown
+    displays whose card content arrives when the transcript becomes ready — F4,
+    not this stage), `collapsedInlineDisplayKeepsPhaseAndMotion` (the collapse
+    sequence frame by frame: ≥2 frames holding the expanded height during the
+    fade, a monotonic contract, no frame carrying more than 60% of the change,
+    ≥3 intermediate heights, and the collapsed height kept after the transcript
+    scrolls to the oldest row and back), and
+    `disclosurePhaseIsBoundedToInstalledRows` (a display that leaves the
+    installed rows is reinstalled expanded).
+  - Parity gate 7/7 in 49.7 s (`…T022001Z-run.J22i94`); `queued-card-to-sent-row`
+    worst 0.04639 against the 0.065 transition bound.
+  - `ChatTranscriptPresentationStoreTests` 54/54; the full
+    `ChatViewScrollHarnessTests` suite reports only the same pre-existing
+    `displacedRetainedResume` watchdog failure as stage A.
+- Deviations: (a) the audit's F3 premise — a collapsed card comes back expanded
+  because the row's `@State` is lost on remount — is **not reproducible in this
+  hosted harness**: every fixture row keeps one native row identity (one mount,
+  1 mount entry per row) and one content identity across the journey's detach
+  and oldest-row scroll while `physicalRowAppearanceCounts` counts 2–4
+  `onAppear` events, so SwiftUI preserves row `@State` here. The negative
+  control (the pre-change row-local `@State` disclosure, with the store and the
+  layout kept) still passes the collapse test. The store ownership therefore
+  rests on the audit's direction, on the bounded-phase test, and on the
+  structural deletion of the measure→state→frame loop; the collapse test is a
+  guard, not a reproduction. (b) The journey's `remounts=8/9` field counts
+  `onAppear` re-fires, not new mounts — stage A's label overstates what the
+  journey exercises; it is left as-is here and noted for review.
+- Changes: `ChatTranscriptPresentationStore.swift`, `ChatDisplayViews.swift`,
+  `ChatTranscriptScrollView.swift`, `ChatEntranceRows.swift`,
+  `ChatToolRunViews.swift`, `ChatViewScrollHarnessTests.swift`,
+  `ChatRowStabilityTests.swift`, `ChatCommittedLedgerTests.swift`,
+  `SessionSheetPresentationTests.swift`.

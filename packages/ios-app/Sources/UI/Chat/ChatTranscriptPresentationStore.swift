@@ -1365,6 +1365,13 @@ final class ChatTranscriptPresentationStore {
     private(set) var admittedEntranceIDs: Set<String> = []
     private(set) var displayedSemanticIDCount: Int = 0
 
+    /// An inline display card's disclosure phase, keyed by the display's
+    /// presentation identity. It lives here because a lazily mounted row cannot
+    /// own it: a remount discarded the row's own state and brought the collapsed
+    /// card back expanded. `install` keeps the dictionary bounded to the
+    /// installed rows' own display identities.
+    private var inlineDisclosurePhases: [String: DisplayInlineDisclosureState] = [:]
+
     @ObservationIgnored private var pendingEntranceOrder: [String] = []
     @ObservationIgnored private var displayedSemanticIDs: Set<String> = []
     @ObservationIgnored private var displayedSemanticOrder: [String] = []
@@ -1657,6 +1664,56 @@ final class ChatTranscriptPresentationStore {
     /// installed transcript merely to locate a newly inserted lazy row.
     var newestPendingEntranceID: String? { pendingEntranceOrder.last }
 
+    /// The phase an inline display card is in. Unknown identities are expanded,
+    /// which is the only state a freshly installed display has.
+    func inlineDisclosurePhase(for identity: String) -> DisplayInlineDisclosureState {
+        inlineDisclosurePhases[identity] ?? DisplayInlineDisclosureState()
+    }
+
+    func proposedInlineDisclosure(
+        identity: String,
+        direction: DisplayInlineDisclosureDirection
+    ) -> DisplayInlineDisclosureTransition? {
+        inlineDisclosurePhase(for: identity).proposed(direction)
+    }
+
+    @discardableResult
+    @MainActor
+    func beginInlineDisclosure(
+        identity: String,
+        transition: DisplayInlineDisclosureTransition
+    ) -> Bool {
+        var state = inlineDisclosurePhase(for: identity)
+        guard state.begin(transition) else { return false }
+        inlineDisclosurePhases[identity] = state
+        return true
+    }
+
+    @discardableResult
+    @MainActor
+    func completeInlineDisclosure(
+        identity: String,
+        transition: DisplayInlineDisclosureTransition
+    ) -> Bool {
+        var state = inlineDisclosurePhase(for: identity)
+        guard state.complete(transition) else { return false }
+        inlineDisclosurePhases[identity] = state
+        return true
+    }
+
+    /// An interrupted fade or expansion settles to its destination phase. The
+    /// row calls this when the scene or the presentation surface stops animating
+    /// and when it disappears, so a transient phase can never freeze a card
+    /// half-faded or be restored by a remount.
+    @MainActor
+    func settleInlineDisclosure(identity: String) {
+        guard inlineDisclosurePhases[identity] != nil else { return }
+        var state = inlineDisclosurePhase(for: identity)
+        guard !state.permitsInteraction else { return }
+        state.settleTransientPhase()
+        inlineDisclosurePhases[identity] = state
+    }
+
     func entranceState(for id: String) -> ChatTranscriptEntranceState {
         if admittedEntranceIDs.contains(id) { return .admitted }
         if pendingEntranceIDs.contains(id) { return .pending }
@@ -1759,6 +1816,7 @@ final class ChatTranscriptPresentationStore {
         suppressesNextInstallationEntrances = false
         entranceSuppressedInstallationTag = nil
         consumedLifecycleEntranceIDs.removeAll(keepingCapacity: false)
+        inlineDisclosurePhases.removeAll(keepingCapacity: false)
         installFrameTask?.cancel()
         installFrameTask = nil
         installed = nil
@@ -1870,8 +1928,20 @@ final class ChatTranscriptPresentationStore {
         consumedLifecycleEntranceIDs.formIntersection(output.lifecycleRenderedIDs)
         appendPendingEntrances(inserted, output: output)
         recordDisplayedSemanticIDs(from: output)
+        pruneInlineDisclosurePhases(to: output)
         installed = output
         return output
+    }
+
+    /// The disclosure phases survive remounts but never outlive the rows they
+    /// belong to: an installed transcript owns a bounded source window, and a
+    /// display that left it cannot be disclosed again until it is installed.
+    @MainActor
+    private func pruneInlineDisclosurePhases(to output: InstalledChatTranscript) {
+        guard !inlineDisclosurePhases.isEmpty else { return }
+        let identities = Set(output.completedDisplayPresentations.map(\.presentationIdentity))
+        guard inlineDisclosurePhases.keys.contains(where: { !identities.contains($0) }) else { return }
+        inlineDisclosurePhases = inlineDisclosurePhases.filter { identities.contains($0.key) }
     }
 
     private func synchronizeEntranceBookkeeping(with output: InstalledChatTranscript) {
