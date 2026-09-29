@@ -212,7 +212,7 @@ const restartDrainMethods = new Set([
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
-  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs",
+  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate",
   "connections.list",
 ]);
 
@@ -447,6 +447,8 @@ export class GatewayService {
       case "knowledge.recall":
       case "knowledge.curation.jobs":
       case "knowledge.tags.retag-needed":
+      case "knowledge.tags.budget":
+      case "knowledge.tags.estimate":
       case "knowledge.connector.status":
       case "knowledge.raindrop.read": {
 
@@ -469,6 +471,9 @@ export class GatewayService {
       case "knowledge.source.preview.refresh":
       case "knowledge.source.triage":
       case "knowledge.source.summarize":
+      case "knowledge.source.tag":
+      case "knowledge.tags.run":
+      case "knowledge.tags.budget.reconcile":
       case "knowledge.source.curate":
       case "knowledge.source.take":
       case "knowledge.source.admission":

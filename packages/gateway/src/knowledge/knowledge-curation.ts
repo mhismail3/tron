@@ -48,6 +48,7 @@ export function curationItemRefusal(operation: KnowledgeCurationOperation, item:
     return { code: "invalid-input", reason: `Item ${item.recordId} requires summary text of 1..${KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS} characters` };
   }
   if (operation === "tags" && !Array.isArray(item.tagIds)) return { code: "invalid-input", reason: `Item ${item.recordId} requires tagIds` };
+  if (operation === "tags" && item.vocabularyRevision !== undefined && (!Number.isSafeInteger(item.vocabularyRevision) || item.vocabularyRevision < 0)) return { code: "invalid-input", reason: `Item ${item.recordId} requires a valid vocabulary revision` };
   if (operation === "verdict" && item.verdict === undefined) return { code: "invalid-input", reason: `Item ${item.recordId} requires a verdict` };
   if (operation === "placement" && item.placement === undefined) return { code: "invalid-input", reason: `Item ${item.recordId} requires a placement` };
   if (operation === "relation" && item.relation === undefined) return { code: "invalid-input", reason: `Item ${item.recordId} requires a relation` };

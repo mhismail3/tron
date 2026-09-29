@@ -107,7 +107,7 @@ function capabilityAvailability(
   if (!instance.policy.enabled) return { availability: "disabled", detail: "Connection is disabled by policy" };
   const providerPrerequisitesAdmitted = instance.implementation === "mcp"
     ? true
-    : instance.credentialAvailability === "available" && instance.providerIdentity === "admitted";
+    : instance.credentialAvailability === "available" && (instance.providerIdentity === "admitted" || instance.definitionId === "knowledge.jev");
   if (instance.health !== "ready" || !providerPrerequisitesAdmitted) {
     return { availability: "unavailable", detail: instance.lastError ?? prerequisiteDetail(instance) };
   }
@@ -215,7 +215,8 @@ export class ConnectionOwner {
         && observation.providerIdentity === "admitted"
         ? normalizeProviderDisplayName(observation.providerDisplayName)
         : undefined;
-      const health: ConnectionHealth = observation.credentialAvailability === "available" && observation.providerIdentity === "admitted" ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
+      const localCredentialAdmission = instance.definitionId === "knowledge.jev" && observation.credentialAvailability === "available";
+      const health: ConnectionHealth = observation.credentialAvailability === "available" && (observation.providerIdentity === "admitted" || localCredentialAdmission) ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
       // All four projected fields already hold these values (an absent
       // observation field projects as `unknown`, so it is compared that way),
       // so this is not a state transition: a read that re-observes the same

@@ -153,9 +153,9 @@ no selection, a stale vocabulary edition, retired/merged tag IDs, or a stale
 an exact vocabulary revision. K4 owns producing replacement selections.
 
 A selection records the vocabulary revision it was validated against and
-`curationInputsDigest` (SHA-256 of the record's own title, readable text and
-current verdict), so editing the vocabulary flags re-tagging without making
-stored selections unreadable, while a change to the evidence itself does. Tag
+`curationInputsDigest` (SHA-256 of the record's title, current summary, readable
+text, verdict, and Your take), so edits to any tag input enter the bounded query
+without making stored selections unreadable. Tag
 labels, category and decay class are projected onto source rows from catalog
 heads; both Library row search by label and list/search rendering read no source
 bodies. A vocabulary label/category/decay/state edit reprojects the bounded
@@ -167,6 +167,73 @@ later one as `skipped` with the code, which is how the paid tagging owner stops
 dispatching once its budget is spoken for. It refuses only operations that spend
 the budget: a spent tagging budget never blocks free edits such as verdicts,
 placement or relations.
+
+### Jev tag decisions and paid-work ownership
+
+`knowledge.source.tag` (agent tool `tagSource`) accepts one source's exact
+`expectedRevision` and one `knowledge.jev` `connectionId`; it returns an owned
+`tags` job instead of waiting for Jev. `knowledge.tags.run` (agent tool
+`retagQueue`) owns one bounded queue run of 1..25 entries from the canonical
+`knowledge.tags.retag-needed` query. Repeated command IDs observe the existing
+job. `knowledge.curation.jobs` reports its state. Cancellation preserves already
+committed entries; an interrupted entry remains in the K3 query. K5 can call
+`knowledge.source.tag` after source capture/summary as part of its intake flow.
+
+Tag evidence is limited by UTF-8 byte bounds: title 512, current summary 2,000,
+readable text 8,000, take 2,000, verdict 1,000, and guidelines 3,000 bytes. The
+summary, evidence, take, verdict, and guidelines are in shared Jev state, while
+each candidate question carries its vocabulary ID, label, definition, and
+category. The input digest covers title, current summary, readable text,
+verdict, and take. K1 computes the stored digest and provenance; the tag write
+also fences the vocabulary edition used to make the decision, so a taxonomy
+change in-flight cannot publish under a newer edition. A strict noul confidence
+threshold of **greater than 0.65** selects a tag; equal-to-threshold results are
+omitted. At more than 16 active tags Jev first chooses applicable categories
+(one or two category-choice questions for the maximum 256-category vocabulary),
+then answers one noul question per remaining candidate, in groups of at most 16.
+
+The paid capability belongs to `knowledge.jev` in ConnectionOwner, not to a
+Raindrop account. It uses only the existing Keychain reference
+`connector:jev:personal`. A user must create/enable that connection and
+explicitly set `paidAccessApproved: true`; default paid approval remains false.
+Its generic `paidBudgetCents` is the configurable monthly ceiling (500 cents is
+the chosen default). No tagging code creates the connection or approves spend.
+Before each Jev POST, the tagger durably reserves the current connection's
+published 64,000-input-token maximum ($0.2688 cents); after a valid response it
+settles to Jev's actual usage cost. A process restart leaves reserved or
+uncertain dispatches visible in `knowledge.tags.budget` and blocks further paid
+tagging in that month. `knowledge.tags.budget.reconcile` explicitly reconciles
+one unknown result at its full reserved ceiling; it never makes the same Jev
+call again. The UTC month rollover resets only that month's settled/reserved
+counters and retains prior unresolved attempts. `knowledge.tags.estimate`
+(agent tool `estimateTaggingCost`) uses the current retag query and worst-case
+question batches to report maximum reservations without making a paid call.
+`knowledge.tags.budget` (agent tool `taggingBudget`) reports cap, spend,
+reservations, availability, and uncertain attempts. The standalone `jev` tool's
+per-call ceiling remains independent.
+
+K1's curation gate checks paid policy only for tag writes; free verdict, scope,
+relation, and other edits continue when Jev spend is disabled or exhausted.
+Paid reservations occur immediately before the Jev dispatch, not when the
+already-computed tag selection is published. Take and summary revisions
+invalidate the tag input digest; take edits and summary changes start an
+automatic single-source job when one enabled Jev connection exists. Vocabulary
+or guideline edition changes run a cost estimate first, then start one bounded
+queue page only when its worst-case reservation is affordable. Otherwise all
+stale entries stay in the K3 query for an explicit later run. There is no
+recurring queue or scheduler.
+
+To configure paid tagging, the user explicitly calls `connections.setup.begin`
+with `{commandId, instanceId, definitionId:"knowledge.jev", method:"token"}`;
+then `connections.setup.complete` with the returned `operationId`, matching
+`instanceId`, `providerAccountId:"personal"`,
+`credentialRef:"connector:jev:personal"`, and policy
+`{enabled:true, allowWrites:false, paidAccessApproved:false, paidBudgetCents:500, recurringApproved:false}`.
+After adding the Jev value to the existing Mac Keychain service, the user
+explicitly updates that instance through `connections.policy.update` with its
+current `expectedSetupRevision` and the same policy except
+`paidAccessApproved:true`. These are ordinary existing connection-owner setup
+and policy actions; there is no second tagging approval store.
 
 Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
 owned background work, not a request that waits for a model: the call accepts a

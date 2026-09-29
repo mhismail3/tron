@@ -14,6 +14,15 @@ not automatically admitted into a session or child runtime: the runtime owner
 must supply an exact `RuntimeBinding` with integration, connection, capability,
 session, and generation identity. There is no generic `enable`/`disable` RPC.
 
+Knowledge Jev tagging is the `knowledge.jev` definition and its paid `tag`
+capability. The existing generic ConnectionOwner policy (`enabled`,
+`paidAccessApproved`, and `paidBudgetCents`) governs admission; K4's monthly usage
+ledger remains in the Knowledge connector state keyed by that exact connection
+instance. The Jev reference is the existing `connector:jev:personal` Keychain
+item. Jev has no provider identity endpoint, so its capability readiness records
+Keychain availability without claiming a verified provider identity. Setup never
+enables paid access by itself.
+
 The accepted owner-typed commands are:
 
 - `connections.setup.begin` / `connections.setup.complete` /

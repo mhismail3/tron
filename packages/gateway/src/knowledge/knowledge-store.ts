@@ -201,13 +201,12 @@ function catalogState(control: CatalogControl, catalog?: KnowledgeCatalog): Know
 export function sourceEvidenceDigest(title: string, text: string): string {
   return createHash("sha256").update(JSON.stringify({ title, text })).digest("hex");
 }
-/** Digest of the record's own taggable inputs: its saved title and readable
- * text plus its current verdict. The vocabulary edition is recorded separately
- * on the selection, so editing the vocabulary flags re-tagging without making
- * stored selections unreadable. A later owner that adds an input (the user's
- * take) extends this and re-tags; a stored digest then no longer matches. */
+/** Digest of the record's own taggable inputs: its saved title, current
+ * summary, readable text, verdict, and the user's take. The vocabulary edition
+ * is recorded separately on the selection, so taxonomy edits can re-tag without
+ * making stored selections unreadable. */
 export function curationInputsDigest(content: SourceContent): string {
-  return createHash("sha256").update(JSON.stringify({ title: content.title, text: content.text ?? "", verdict: content.verdict?.verdict ?? null, take: content.take?.text ?? null })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ title: content.title, summary: content.summary?.text ?? null, text: content.text ?? "", verdict: content.verdict?.verdict ?? null, take: content.take?.text ?? null })).digest("hex");
 }
 /** The fields one curation operation wrote, read back from its committed
  * revision. Bounded by the item bounds, so a batch outcome stays small. */
@@ -1503,6 +1502,8 @@ export class KnowledgeStore {
         if (state.suppressions.get(input.item.recordId)?.forgotten) throw new KnowledgeCurationRefusal("forgotten", "Knowledge record was forgotten and cannot be curated");
         if (!head) throw new KnowledgeCurationRefusal("unknown-record", `Knowledge record ${input.item.recordId} is not available`);
         if (head.latestRevisionId !== input.item.expectedRevision) throw new KnowledgeCurationRefusal("stale-revision", `Knowledge record revision changed; expected ${input.item.expectedRevision} but ${head.latestRevisionId} is committed`, head.latestRevisionId);
+        if (input.operation === "tags" && input.item.vocabularyRevision !== undefined && input.item.vocabularyRevision !== state.config.tagVocabulary.revision) throw new KnowledgeCurationRefusal("stale-vocabulary", `Tag vocabulary changed while Jev was deciding; re-read edition ${state.config.tagVocabulary.revision}`, head.latestRevisionId);
+        if (input.operation !== "tags" && input.item.vocabularyRevision !== undefined) throw new KnowledgeCurationRefusal("invalid-input", "Only a tag operation may fence its vocabulary revision");
         const current = await this.readRecord(paths, input.item.recordId, head.latestRevisionId);
         if (current.kind !== "source") throw new KnowledgeCurationRefusal("invalid-input", "Knowledge curation applies to source records only");
         if (this.recordExcluded(state, current)) throw new KnowledgeCurationRefusal("excluded", "Knowledge record is excluded from retrieval");

@@ -724,6 +724,7 @@ export type KnowledgeCurationOperation = "summary" | "tags" | "verdict" | "place
  * the caller records the code and continues with the next item. */
 export type KnowledgeCurationCode =
   | "stale-revision"
+  | "stale-vocabulary"
   | "unknown-record"
   | "excluded"
   | "forgotten"
@@ -755,6 +756,8 @@ export interface KnowledgeCurationItem {
   summary?: { text: string; coverage: "full" | "sampled" };
   /** `tags` only. */
   tagIds?: string[];
+  /** Optional tager fence: rejects publication if the taxonomy edition changed while Jev ran. */
+  vocabularyRevision?: number;
   /** `verdict` only. */
   verdict?: { verdict: SourceVerdict; supersededBy?: string; reason?: string };
   /** `placement` only; at least one of scope or admission. */
@@ -819,6 +822,7 @@ export interface KnowledgeCurationJob {
 export interface KnowledgeTagRequest { commandId: string; sourceId: string; expectedRevision: string; connectionId: string; }
 export interface KnowledgeTagRunRequest { commandId: string; connectionId: string; limit?: number; }
 export interface KnowledgeTagBudgetRequest { connectionId: string; }
+export interface KnowledgeTagBudgetReconcileRequest { connectionId: string; attemptId: string; }
 export interface KnowledgeTagCostEstimateRequest { connectionId: string; limit?: number; }
 
 export interface KnowledgeCurationJobRequest {
@@ -1037,6 +1041,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.source.tag"; request: KnowledgeTagRequest }
   | { operation: "knowledge.tags.run"; request: KnowledgeTagRunRequest }
   | { operation: "knowledge.tags.budget"; request: KnowledgeTagBudgetRequest }
+  | { operation: "knowledge.tags.budget.reconcile"; request: KnowledgeTagBudgetReconcileRequest }
   | { operation: "knowledge.tags.estimate"; request: KnowledgeTagCostEstimateRequest }
   | { operation: "knowledge.correction"; request: KnowledgeCorrectionRequest }
   | { operation: "knowledge.forget"; request: KnowledgeForgetRequest }

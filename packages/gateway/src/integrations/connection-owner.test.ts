@@ -12,10 +12,10 @@ describe("ConnectionOwner", () => {
     const owner = new ConnectionOwner(home);
     const setup = await owner.execute({ kind: "setup.begin", commandId: "jev-tag-begin-0001", instanceId: "tagger", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
     await owner.execute({ kind: "setup.complete", commandId: "jev-tag-complete-0001", operationId: setup.operationId, instanceId: "tagger", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 500, recurringApproved: false } });
-    await owner.recordProviderObservation("tagger", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
+    await owner.recordProviderObservation("tagger", 1, { credentialAvailability: "available", providerIdentity: "unknown" });
     expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "unavailable", detail: "Paid access approval is required for this capability" }));
     await owner.execute({ kind: "policy.update", commandId: "jev-tag-approve-0001", instanceId: "tagger", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
-    await owner.recordProviderObservation("tagger", 2, { credentialAvailability: "available", providerIdentity: "admitted" });
+    await owner.recordProviderObservation("tagger", 2, { credentialAvailability: "available", providerIdentity: "unknown" });
     expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "available" }));
     } finally { await rm(home, { recursive: true, force: true }); }
   });

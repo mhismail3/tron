@@ -148,7 +148,7 @@ screenshots of each state. Device validation by the user after K9.
 | K1 | Done | Typed enrichment and curation operations for agents, RPC and the agent tool | none | deepseek-worker, 2026-09-28 |
 | K2 | Done | Clean evidence for summaries: extraction without site chrome, provider-date recovery | none | deepseek-worker, 2026-09-29 |
 | K3 | Done | Tag vocabulary and tagging guidelines owned by Knowledge config | K1 | luna-worker, 2026-09-29 |
-| K4 | Ready | Jev tagger with monthly budget and re-tag triggers | K1, K3 | — |
+| K4 | Done | Jev tagger with monthly budget and re-tag triggers | K1, K3 | luna-worker, 2026-09-29 |
 | K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
 | K6 | Done | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1, K3 | luna-worker, 2026-09-29 |
 | K7 | Ready | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | — |
@@ -215,14 +215,18 @@ The decay-class accessor is exported for K6; freshness remains K6's owner.
 
 ### K4 — Jev tagger
 
-Owning files: `packages/gateway/src/knowledge/jev-assessment.ts`,
-`packages/gateway/src/knowledge/jev-client.ts`.
+Owning files: `packages/gateway/src/knowledge/knowledge-tagger.ts`,
+`packages/gateway/src/knowledge/knowledge-service.ts`,
+`packages/gateway/src/knowledge/knowledge-store.ts`,
+`packages/gateway/src/knowledge/jev-client.ts`, and ConnectionOwner definition/policy.
 
 One `noul` question per candidate tag, batched 16 per call; a category `choice`
 pass first narrows candidates when the vocabulary is large. Inputs: title,
-summary, bounded clean text, the user's take, verdict, tag definitions and
-guidelines. Threshold and ties defined and tested. Monthly budget ($5) persisted
-with reservations and settlement; the tagger stops cleanly when exhausted.
+summary, bounded UTF-8 clean text, the user's take, verdict, tag definitions and
+guidelines. Selection requires confidence greater than 0.65 (ties are omitted).
+Monthly budget ($5 default, ConnectionOwner-configurable) persisted with
+per-dispatch reservation, usage settlement, and crash-safe uncertainty
+reconciliation; the tagger stops cleanly when exhausted or unapproved.
 Re-tag triggers: new entry, summary change, Your take change, vocabulary or
 guideline change (bulk, with a cost estimate first). Install the budget through
 K1's `KnowledgeCurationGate`, which receives the batch operation: refuse only
@@ -487,6 +491,51 @@ uses the tag definitions/categories/decay classes, and asks
   with zero body reads (host-dependent).
 - Regression tests cover no-write crossing of 180 days and reordering, decay edit
   re-projection, merged/retired semantics, and take-driven re-tag discovery.
+
+### K4 · Done · 2026-09-29 · luna-worker · `knowledge/k4-jev-tagger`
+
+- Result: Added the built-in `knowledge.jev` ConnectionOwner paid capability
+  and exact `connector:jev:personal` credential reference. Typed agent-tool/RPC
+  operations start one-source jobs, run bounded (1..25) re-tag queue pages,
+  estimate worst-case reservations, report the monthly ledger, and reconcile an
+  uncertain attempt at its reserved ceiling. The Jev decision engine uses the
+  configured vocabulary/guidelines and current source evidence; publishes via
+  K1's expected-revision write and K3's vocabulary-revision fence. Summary/take
+  changes start a single-source job when one approved Jev connection exists;
+  vocabulary changes estimate before a queue page. No recurring worker exists.
+- Budget: ConnectionOwner paid approval remains false until explicitly changed;
+  its `paidBudgetCents` is the only monthly cap (500 cents is the default).
+  Each Jev dispatch durably reserves its 64,000-token ceiling, settles actual
+  usage on valid result, and leaves an explicit uncertain fence after ambiguous
+  results or restart. Free verdict/scope/relation edits remain available when
+  paid tagging is unavailable.
+- Evidence: `npm run build`; focused ConnectionOwner/tagger tests passed 2
+  files / 22 tests, and the obsolete 440-source `todo` was removed after its
+  scale test was implemented. The final full command
+  `npx vitest run src/knowledge/ src/transport/ src/integrations/connection-owner.test.ts src/index.test.ts --no-file-parallelism`
+  passed 69/70 files and 764 tests; one unrelated timing-sensitive request-span
+  assertion observed 94 ms against its 100 ms minimum. Re-running that owning
+  file alone passed 2/2 tests. `npx vitest run --config vitest.scale.config.ts
+  src/knowledge/knowledge-tagger.scale.test.ts --reporter=verbose` — 1 test
+  passed. With 440 synthetic source records, 18 batches and 440 fake Jev calls,
+  the queue took 54,066.7 ms (8.1 sources/second) after setup; no paid provider
+  or live Gateway was used. Measurements are host-dependent.
+- Changes: `550ad665f` (paid authority), `0a48df2f8` (persistent reservations),
+  the K4 integration commit (tagger, tests, docs and handoff).
+- Tasks added: none.
+- Deviations: The specific paid Jev approval is a generic ConnectionOwner policy,
+  not Raindrop approval, a standalone Jev budget, or a second K4 setting. A
+  dispatch with uncertain provider outcome is not retried: the user may reconcile
+  the attempt at the full reserved upper bound, after which a deliberate later
+  run is a new budgeted operation. Take and summary changes invalidate the
+  current digest; K5 calls the one-source tag operation after a new source has
+  completed intake.
+- For K5/K7: `knowledge.source.tag`, `knowledge.tags.run`,
+  `knowledge.tags.estimate`, `knowledge.tags.budget`, and
+  `knowledge.tags.budget.reconcile` are the typed RPC operations; the agent
+  knowledge tool exposes `tagSource`, `retagQueue`, `estimateTaggingCost`, and
+  `taggingBudget`. Read `packages/gateway/docs/knowledge.md` for the explicit
+  connection setup/policy actions and ledger behavior.
 
 Drafted from the 2026-09-28 interview and approved by the user the same day,
 with the reliability and interaction bars added at the user's request. K1, K2, K3 and K6 are complete; K3/K6 were integrated on `knowledge/k1-k6`.

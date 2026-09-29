@@ -48,6 +48,7 @@ import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConf
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
 import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
+import { KnowledgeTaggingBudget, KnowledgeTaggingEngine } from "./knowledge/knowledge-tagger.js";
 import { SessionSearchIndex } from "./sessions/session-search-index.js";
 import { SessionSearchAllowanceLedger } from "./sessions/session-search-allowance.js";
 import { SessionSearchService } from "./sessions/session-search-service.js";
@@ -347,6 +348,8 @@ const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   ...(xPricing ? { xPricing } : {}),
   connections,
 });
+const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, connections, knowledgeCredentials);
+const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(knowledgeCredentials), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections };
 const knowledge = new KnowledgeService(
   knowledgeStore,
   new KnowledgeObservationService(
@@ -370,6 +373,13 @@ const knowledge = new KnowledgeService(
     return model ? new ModelRuntimeKnowledgeModel(modelRuntime, model) : undefined;
   },
   workRegistry,
+  async operation => {
+    if (operation !== "tags") return { ok: true };
+    const configured = (await connections.snapshot()).instances.filter(instance => instance.definitionId === "knowledge.jev" && instance.policy.enabled);
+    return knowledgeTaggingBudget.gate(configured.length === 1 ? configured[0]!.id : undefined);
+  },
+  undefined,
+  knowledgeTagging,
 );
 sessions.setKnowledgeService(knowledge);
 const terminal = new TerminalService(
