@@ -175,7 +175,16 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   out instead of holding the entry, and the return then starts the next attempt
   at once. Only
   authentication, authorization, protocol, and identity
-  failures stop automatic recovery. The WebSocket open and the hello after it
+  failures stop automatic recovery. A hello whose protocol the Gateway cannot
+  speak is refused with the application close code 4006
+  (`PROTOCOL_MISMATCH_CLOSE_CODE`) and a close reason that carries
+  `{"code":"protocol_mismatch","gatewayProtocol","minProtocol"}`, so the phone
+  names which build must update instead of retrying a version pair that can
+  never connect; the same refusal keeps its `http.upgrade` record with
+  `reason=protocol_mismatch` and `peerProtocolVersion`. A Gateway built before
+  that refusal still closes the same hello with `1008 "protocol version
+  mismatch"`, which the phone reads as a retryable transport failure, so the
+  typed close only protects a Mac that runs it. The WebSocket open and the hello after it
   have separate bounds: a socket that never opens gives up at the 5-second
   `clientTransportOpenDeadline`, and only a socket that opened may spend the
   15-second `clientHelloDeadline` on hello and authentication, so a down path is

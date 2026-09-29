@@ -78,6 +78,10 @@
 - **Last updated:** 2026-09-28, T-2 review round 1 addressed: the kill is another worktree's run on the same default-lane simulator, and T-3 tracks the lease that did not serialize them
 
 - **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes the session state a newer snapshot re-states with the one `session.rebaseline` that covers it, fencing one-shot frames a snapshot cannot restore (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
+- **Last updated:** 2026-09-29, F-3 Done: the Gateway's protocol-mismatch refusal is now a typed close (4006 plus `{code, gatewayProtocol, minProtocol}`), so the phone stops retrying that profile instead of looping, and the failure names the older app or the older Mac (see the handoff)
+
+- **Last updated:** 2026-09-29, F-3 review round 1 addressed: no compatibility bridge for a Gateway built before that close (Option B — those Macs keep retrying until they are updated), a background profile's stop message reaches the device detail, the LAN lane names a typed refusal instead of `lan_unreachable`, and the terminal client maps close 4006 to a non-retryable `protocol_mismatch`
+
 - **Last updated:** 2026-09-29, T-6 Done: neither registry load flake was a product race — the large-streamed-write case spent its 5 s `waitUntil` guard on 3,188 provider chunks (its 51 KB arguments and assertions unchanged, chunk size pinned), and the discovery helper capped its wait for a running pass at 5 s (it now waits for the pass to end and keeps the deadline for its own retries); see the handoff
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
@@ -651,7 +655,7 @@ rows are in priority order.
 | T-4 | Done | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28; the killer is XCTest's per-test execution-time allowance (XCTestCore reports `Restarting after unexpected exit, crash, or test timeout`) SIGKILLing the app (`Test crashed with signal kill`), and the test it lands on is the process's CPU-heaviest because `IOSClientDiagnosticBuffer.redactedMessage` matched URLs super-quadratically (3 ms at 512 characters, 654 ms at 4,096; the export test 8.646-10.297 s -> 0.072 s); see the T-4 handoff |
 | T-5 | Done | `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` hit its 5 s watchdog once in the full iOS run on `419a67a53` ("blocked on a wait that ignores cancellation"); passes alone 3/3. Check whether it waits on a write-log index a C-6 cancel frame can shift (as F-1 found) and make it robust. **Blocked on validation only:** the scenario no longer indexes the write log by position (it finds each read by method and scope), but the owned iOS lane was leased by another worker for this whole session, so the suite was never compiled or run; see the handoff | F-1 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | F-2 | Done | O-6b `bandwidth` page leg fails on integration with `session.sync` conflict "Session synchronization is no longer owned by this token" (run `20260928T235606Z-multi-session-471100`); `--cases none` passes. Decide driver artifact (concurrent page mounts on one connection) vs Gateway regression (C-6/G-12 barrier handling) and fix at the owner. **Fixed in the driver** (F-2 second pass): the earlier "Gateway regression" reading came from matching the refusal to the wrong frame — the first `session.open`+`session.sync` on the fresh connection succeeds (104-byte answer, then a successful `session.presentation.set`), and the refusals are the six concurrent page lanes racing the Gateway's documented one-presentation-per-mobile-connection rule. The same conflict storm (264) is present in the `--cases bandwidth` run cited as passing, so the reconnect is not the trigger; the lane now abandons a superseded page with the phone's own `cancel` frame instead of synchronizing it. Repro `--cases blackhole,bandwidth` is green (run `20260929T073639Z-multi-session-e06f2e`: `link_use` 0.993, `max_in_flight` 6, zero `session.sync` conflicts); see the handoff | O-6b | orchestrator-dispatched deepseek-worker, 2026-09-29 (second pass on branch `hardening/f-2`) |
-| F-3 | Claimed | A protocol mismatch reads as a generic transport failure on the phone: the Gateway closes 1008 without a machine-readable reason, so the phone retries forever and shows no "update this Mac" state (2026-09-29, a protocol-5 MacBook Pro profile left the Knowledge dashboard loading). Send a typed close reason for protocol mismatch; the phone stops retrying that profile and shows which side needs updating | E-3b | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| F-3 | Done | A protocol mismatch reads as a generic transport failure on the phone: the Gateway closes 1008 without a machine-readable reason, so the phone retries forever and shows no "update this Mac" state (2026-09-29, a protocol-5 MacBook Pro profile left the Knowledge dashboard loading). Send a typed close reason for protocol mismatch; the phone stops retrying that profile and shows which side needs updating | E-3b | orchestrator-dispatched deepseek-worker, 2026-09-29 (branch `hardening/f-3`): the Gateway refuses an unspeakable hello with application close 4006 (`PROTOCOL_MISMATCH_CLOSE_CODE`) plus a JSON close reason carrying `{protocol_mismatch, gatewayProtocol, minProtocol}`; the phone classifies that close as non-retryable `protocol_mismatch` and its stop names the build to update, for the lifecycle and the dashboard pool, with the device detail's Status group showing the reason durably |
 | T-6 | Done | Load flakes in `runtime-registry.integration.test.ts`: "keeps a large streamed write visible through snapshot recovery and canonical handoff" (fails intermittently on `main` too) and "does not reopen an unchanged ambient artifact for a live slot" (G-8a, failed once in a combined run, passes alone 3/3). Make both deterministic | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-29 (branch `hardening/t-6`; neither was a product race: the write case spent its 5 s `waitUntil` guard streaming 3,188 provider chunks, and the discovery helper capped its wait for a running pass at 5 s — see the handoff) |
 | C-7 | Done | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/c-7`; the connection epoch now owns its event reader) |
 
@@ -10610,3 +10614,92 @@ recovery gaps; all three were fixed on the same branch.
   who turned the lane off is distinguishable from a Mac that never had a private
   address (`reason=no_private_address`), and a loopback-bound Gateway is
   distinguishable too (`reason=setting_off` with no user switch).
+
+### F-3 · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/f-3`)
+
+- Result: a hello whose protocol the Mac cannot speak is now a typed close
+  (`PROTOCOL_MISMATCH_CLOSE_CODE` 4006 + JSON close reason
+  `{code:"protocol_mismatch",gatewayProtocol,minProtocol}`), and the phone
+  classifies that close as the non-retryable `protocol_mismatch` it already
+  stops recovery on, with a message that names the build to update ("Update Tron
+  on the Mac" / "Update Tron on this iPhone"). Both the selected lifecycle and a
+  dashboard pool entry stop retrying; the device-detail Status group shows the
+  reason durably, and the transient notice keeps the existing surface.
+- Changes: `packages/gateway/src/transport/server.ts` (close code, reason
+  builder, `closeFailedConnection` gains the optional wire reason),
+  `packages/ios-app/Core/Gateway/GatewaySocketTransport.swift` (peer close
+  reason on `GatewaySocketMetadata`), `GatewayProtocolContract.swift`
+  (`GatewayProtocolMismatchClose`: close code, reason decode, message),
+  `GatewayClient.swift` (classify the hello close; the post-hello range check
+  now uses the same message), `packages/ios-app/Sources/UI/Settings/ConnectionSettingsView.swift`
+  (Status group shows the selected profile's stop reason), owning tests, and the
+  gateway connection-resilience + iOS development docs.
+- Evidence: `npx vitest run src/transport/server-http-lifecycle.integration.test.ts`
+  **21/21** (the refusal case is now `it.each([5, 99])`: asserts close 4006, the
+  JSON range, and the ≤123-byte control-frame bound); merge gate on this branch
+  (up to date with `hardening/integration` `adb0887b6`): six-file transport set
+  **135/135** in 37.7 s, `npx vitest run src/sessions/runtime-registry.integration.test.ts`
+  **245/245** in 139.1 s, `npx tsc --noEmit -p .` clean.
+  iOS (lane `F3`, `scripts/tron-ios-test build` + `run`): 3 suites
+  **175/175** in 10.3 s (`20260929T095829Z-run.IIpJMs`), including
+  `GatewayClientTransportTests/a typed protocol-mismatch close names the build
+  that must update` (older Mac and older app), `AppModelReconnectTests/a
+  protocol-mismatch close stops recovery and names the stale build` (state
+  `.offline("…Update Tron on the Mac")`, one socket attempt, `reconnect.stopped
+  … code=protocol_mismatch nonRetryable=true`), and `DashboardStateOwnerTests/
+  dashboard protocol mismatch stops retrying the background profile`
+  (`.offline`, `factory.requests.count == 1`).
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Kept on purpose: 1008-class refusals for `hello_required`/`invalid_frame`/
+  revocation; the `http.upgrade` record (unchanged, already
+  `reason=protocol_mismatch` + `peerProtocolVersion`); the existing
+  `GatewayRecoveryFailurePolicy`/pool non-retryable plumbing and the post-hello
+  range check; a protocol-5 *phone* still cannot decode the new close, which no
+  phone-side change can fix.
+- Deviation: none beyond the durable Status-group row (the notice alone is
+  transient); the close reason is not added to the iOS `gateway.connection`
+  record — the existing `closeCode=4006` + `reason=protocol_mismatch` pair
+  already names it in one step.
+- For the next agent: the 4006 code and reason shape are the contract
+  (`packages/gateway/docs/connection-resilience.md`, "Failure boundaries"); a
+  future protocol bump keeps `PROTOCOL_VERSION`/`MIN_PROTOCOL_VERSION` in
+  `config/GatewayProtocol.json` as the single authority. A real-device check of
+  the old-Mac scenario is R-2's install, not this row.
+
+#### F-3 review round 1 · 2026-09-29
+
+- Result: (1) **no compatibility bridge** for a Gateway built before this close
+  (Option B, orchestrator decision): `1008 "protocol version mismatch"` stays a
+  retryable transport failure, every fixture now models the close a shipped
+  Gateway actually sends (4006 carrying the Gateway's own protocol range), and
+  the Gateway README, `connection-resilience.md` and the iOS contract state that
+  a Mac must run an F-3 Gateway before the typed close protects it. (2) A
+  background profile's non-retryable stop keeps its message on the pool entry
+  (`stopReason(for:)`), publishes it with the state, and the device detail reads
+  it for any profile via `AppModel.dashboardConnectionStopReason(for:)`. (3) A
+  protocol/identity mismatch on the LAN lane is reported as its own reason
+  instead of `lan_unreachable`. (4) The terminal client maps close 4006 to a
+  non-retryable `protocol_mismatch` naming the stale side instead of showing the
+  raw JSON reason.
+- Changes: `packages/gateway/src/version.ts` now owns
+  `PROTOCOL_MISMATCH_CLOSE_CODE` (the transport and the terminal client both read
+  it; `server.ts` cannot be imported from a client process),
+  `src/client/gateway-client.ts`, `DashboardGatewayConnectionPool.swift`,
+  `AppModel.swift`, `ConnectionSettingsView.swift`, `GatewayClient.swift`,
+  `GatewayProtocolContract.swift`, the owning tests, the three docs.
+- Evidence: `npx vitest run src/transport/server-http-lifecycle.integration.test.ts`
+  **21/21**, `npx vitest run src/client/gateway-client.test.ts` **5/5**; merge
+  gate on this branch (up to date with `hardening/integration` `adb0887b6`):
+  six-file transport set **135/135** in 15.7 s, `runtime-registry.integration.test.ts`
+  **245/245** in 72.4 s, `npx tsc --noEmit -p .` clean. iOS (lane `F3`): three
+  suites **177/177** (`20260929T102047Z-run.Yl0vZd`) plus `GatewayClientLanLaneTests`
+  **18/18** (`20260929T102149Z-run.HEP2Er`); reverting only the LAN change makes
+  the new LAN test fail (`.lanUnreachable` vs `.protocolMismatch`), so it is not
+  vacuous, and the narrowed range-message assertion re-ran
+  `GatewayClientTransportTests` **61/61**. `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- For the next agent: the Option B residual is real — a phone whose Mac still
+  runs a pre-F-3 Gateway keeps retrying the mismatch until that Mac is updated,
+  and R-2 installs both sides; the close code now lives in
+  `packages/gateway/src/version.ts`.

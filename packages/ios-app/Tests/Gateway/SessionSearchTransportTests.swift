@@ -200,8 +200,8 @@ final class SessionSearchTransportTests: XCTestCase {
         }
         await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: profile, token: "token")
-        model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .connected)
-        model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .connected)
+        model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .connected, stopReason: nil)
+        model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .connected, stopReason: nil)
         try await Task.sleep(for: .milliseconds(100))
         let methods = (try? await socket.sentFrames().compactMap { try JSONDecoder.gateway.decode(JSONValue.self, from: $0).objectValue?["method"]?.stringValue }) ?? []
         XCTAssertFalse(methods.contains("session.search.policy.get"))
@@ -229,7 +229,7 @@ final class SessionSearchTransportTests: XCTestCase {
         ])))
         await restore.value
         XCTAssertTrue(model.sessionSearchConsent(for: profile.id))
-        model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .offline)
+        model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .offline, stopReason: nil)
         XCTAssertTrue(model.sessionSearchConsent(for: profile.id), "A retired secondary cannot invalidate focused consent")
         await replacement.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: profile, token: "token")

@@ -48,7 +48,12 @@ promotion and rollback treat that rejected external pointer as bounded history
 and use the validated signed bundle as their recovery authority; they never
 require the incompatible payload to become admissible again. Do not widen the
 advertised minimum or allow a mixed v5/v6 pair merely to bypass that handoff.
-Ordinary same-major updates continue through the owned Gateway update flow.
+Ordinary same-major updates continue through the owned Gateway update flow. A
+Gateway built before the typed protocol-mismatch close (F-3) still refuses an
+unspeakable hello with `1008 "protocol version mismatch"` and no version range,
+and mobile clients treat that as a retryable transport failure: every Mac must
+run a Gateway that sends the typed close before the phone can stop retrying it
+and name the build to update.
 
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
 app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
