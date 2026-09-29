@@ -1398,23 +1398,36 @@ struct ChatVisualParityTests {
                 )
             }
         }
-        func magnitude(_ rows: [UInt8]) -> (magnitude: Double, shift: Double) {
+        func fingerprint(_ rows: [UInt8]) -> ChatVisualParityFingerprint {
+            ChatVisualParityFingerprint(
+                width: frame.width, height: frame.height, rows: rows, columns: frame.columns.values
+            )
+        }
+        func magnitude(_ rows: [UInt8], step: Double = 1.0 / 3.0) -> (magnitude: Double, shift: Double) {
             ChatVisualParityFingerprint.magnitude(
-                ChatVisualParityFingerprint(
-                    width: frame.width, height: frame.height, rows: rows, columns: frame.columns.values
-                ),
+                fingerprint(rows),
                 reference,
                 alignmentPoints: ChatVisualParitySpec.alignmentPoints,
-                step: 1.0 / 3.0
+                step: step
             )
         }
         let bandsPerPoint = 1 / Double(ChatVisualParitySpec.rowStep)
 
-        // A whole-device-pixel pinned offset (the 0.667 pt today's estimated
-        // pinned end sits above the 12 pt tail) is found and absorbed.
-        let pinnedOffset = magnitude(resampled(frame.rows.values, byBands: 0.667 * bandsPerPoint))
-        #expect(abs(abs(pinnedOffset.shift) - 0.667) < 0.01, "the search found the pinned offset")
-        #expect(pinnedOffset.magnitude < ChatVisualParitySpec.tolerance)
+        // A whole-device-pixel pinned offset — the 0.667 pt today's estimated
+        // pinned end sits above the 12 pt tail — is absorbed.
+        #expect(
+            magnitude(resampled(frame.rows.values, byBands: 0.667 * bandsPerPoint)).magnitude
+                < ChatVisualParitySpec.tolerance
+        )
+        // The device-pixel step resolves an offset the half-point grid cannot:
+        // one device pixel is a third of a point, so a half-point search lands
+        // off the offset and leaves a residual the stable bound rejects.
+        let thirdOfAPoint = resampled(frame.rows.values, byBands: bandsPerPoint / 3)
+        #expect(magnitude(thirdOfAPoint).magnitude < ChatVisualParitySpec.tolerance)
+        #expect(
+            magnitude(thirdOfAPoint).magnitude
+                < magnitude(thirdOfAPoint, step: ChatVisualParitySpec.transitionAlignmentStep).magnitude
+        )
 
         // A uniform 3 pt shift is beyond the ±2 pt allowance: the search clamps
         // at its edge and the frame still fails.
@@ -1430,14 +1443,18 @@ struct ChatVisualParityTests {
         #expect(washed.magnitude > ChatVisualParitySpec.tolerance)
 
         // A row-spacing change is a differential move, not a uniform one: rows
-        // above a split and rows below it move apart by the spacing change, so a
-        // single whole-frame shift cannot bring them back together.
-        let above = resampled(frame.rows.values, byBands: bandsPerPoint)
-        let below = resampled(frame.rows.values, byBands: -bandsPerPoint)
-        let spread = frame.rows.values.indices.map { index in
-            index < frame.rows.values.count / 2 ? above[index] : below[index]
+        // below a split move away from rows above it, and it accumulates, so a
+        // single whole-frame shift cannot bring the two ends back together.
+        let stretched = frame.rows.values.indices.map { index -> UInt8 in
+            let split = frame.rows.values.count / 2
+            guard index >= split else { return frame.rows.values[index] }
+            let rowsBelow = Double(index - split)
+            return resampled(
+                frame.rows.values,
+                byBands: -rowsBelow * 2 * bandsPerPoint / 10
+            )[index]
         }
-        #expect(magnitude(spread).magnitude > ChatVisualParitySpec.tolerance)
+        #expect(magnitude(stretched).magnitude > ChatVisualParitySpec.tolerance)
     }
 
     @Test("recorded reference frames match the rendered transcript within tolerance")
