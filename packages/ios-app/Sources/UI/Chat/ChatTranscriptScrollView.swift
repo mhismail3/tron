@@ -687,13 +687,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
 
     @ViewBuilder
     var body: some View {
-        if orientation.presentsNewestRowFirst {
-            GeometryReader { insetReader in
-                transcriptBody(safeAreaInsets: insetReader.safeAreaInsets)
-            }
-        } else {
-            transcriptBody(safeAreaInsets: .init())
-        }
+        transcriptBody(safeAreaInsets: .init())
     }
 
     @ViewBuilder
