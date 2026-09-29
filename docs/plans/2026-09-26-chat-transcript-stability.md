@@ -3455,3 +3455,29 @@ lane and retained the live worktree's reusable products. Final
 `scripts/tron-ios-test status --all` reports no booted simulators and no running
 Simulator.app; no other lane was removed. The worktree and Git index are clean.
 Review remains a separate required gate; this handoff is not production approval.
+
+### CT-23 merged for device evaluation · 2026-09-29 · chat scroll session (supervisor)
+
+- Result: at the user's request the origin-anchored transcript merges to
+  `main` behind its switch, after the user's first device check ("looks good,
+  all working well so far"). Today's path stays the default in Release and in
+  hosted tests; `LocalDevice` builds default to the flipped transcript with the
+  Settings evaluation toggle, so the user's normal device builds from `main`
+  carry it. This is evaluation, not the CT-19 cutover: the switch, today's path
+  and the estimated-end mechanisms stay until the open items close.
+- Evidence: rebased on `main`; full default unit tier 1,920 tests: one failure,
+  the pre-existing `displacedRetainedResume` load watchdog (passes focused twice,
+  run `20260929T230657Z-run.m6OeqA`); the flipped display-card preview gate is a
+  recorded known issue. `unifiedResponseAndNotificationSettlement` timed out once
+  under suite load and passed focused twice.
+- Open, in order: (1) the user's device finding: on the flipped path the pinned
+  content jumps instead of following animated bottom obstructions (the command
+  and skills sheet; likely also composer growth and the real keyboard), because
+  the obstruction is applied as content margins rather than animated safe-area
+  insets; the fix is designed in the stopped 'animated obstruction follow' task
+  (reproduce with real animations, then make the clearance animate in the
+  causing transaction without moving a detached reader). (2) Display-card
+  context-menu preview renders flipped. (3) Status-bar tap reaches the newest
+  row; user decision. (4) Navigation-bar fade; user decision after comparison.
+  (5) Parity residual on the flipped path (7/10, pinned-offset class).
+  (6) Streaming interrupt wakeups +7.6-8.3%.
