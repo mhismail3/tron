@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-29, approved
+- **Last updated:** 2026-09-29, P99-1
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -246,7 +246,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| P99-1 | Claimed | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | orchestrator session, 2026-09-29 |
+| P99-1 | Done | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | orchestrator session, 2026-09-29 |
 | P99-2 | Ready | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | Unassigned |
 | P99-3 | Ready | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | Unassigned |
 | P99-4 | Ready | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | Unassigned |
@@ -630,6 +630,14 @@ from a session; Sign in with ChatGPT; select a virtual model if one is
 installed. Then close the plan per `docs/plans/README.md`.
 
 ## Handoff log
+
+### P99-1 · Done · 2026-09-29 · orchestrator session
+
+- Result: npm `latest` is still 0.99.1 (`gitHead` d86654abb8862e201933517d6f1fce9f88dd117f, Node `>=22.19.0`). Plan activated and P99-1 claimed on `main`; candidate branch `feat/pi-sdk-099-upgrade` created in the sibling worktree `tron-pi-sdk-099` beside the main checkout, from the claim commit.
+- Evidence: independent `npm ci` under Node 22.22.0 (nvm) in the candidate; `check:pi-sdk` coherent at 0.87.1; `tsc --noEmit` clean.
+- Changes: plan metadata only.
+- Deviations: Implementation is delegated to `luna-worker` subagents, one task per child, sequential on the single candidate worktree because most tasks share `runtime-slot.ts` and the protocol. Claims are committed on `main` per phase and cherry-picked onto the candidate so the plan copies stay aligned.
+- For the next agent: use Node 22.22.0 from nvm for Vitest; the app-bundled Node cannot load Rolldown's native binding and `npx`/`timeout` are not on the default PATH.
 
 ### Draft · Proposed · 2026-09-29 · planning session
 
