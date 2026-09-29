@@ -471,8 +471,17 @@ export class KnowledgeService {
       case "knowledge.tags.configure": {
         const config = await this.store.configureTags(action.request);
         if (action.request.edit.kind !== "merge") return config;
-        const reconciliation = await this.store.reconcileTagMerges({ commandId: this.tagMergeCommandId(action.request.commandId), expectedConfigRevision: config.revision, limit: 25 });
-        return { config, reconciliation };
+        try {
+          const reconciliation = await this.store.reconcileTagMerges({ commandId: this.tagMergeCommandId(action.request.commandId), expectedConfigRevision: config.revision, limit: 25 });
+          return { config, reconciliation };
+        } catch (error) {
+          if (!(error instanceof GatewayError) || error.code !== "conflict") throw error;
+          const current = await this.store.config();
+          // The vocabulary edit is already receipted. Report its committed
+          // result separately from a concurrent config change that fenced the
+          // first re-point batch; the caller can resume at the newer revision.
+          return { config, reconciliation: { applied: 0, unchanged: 0, outcomes: [], configRevision: current.revision, conflict: true, reason: error.message } };
+        }
       }
       case "knowledge.tags.reconcile": return this.store.reconcileTagMerges(action.request);
       case "knowledge.tags.retag-needed": return this.store.tagsNeedingRetag(action.request);

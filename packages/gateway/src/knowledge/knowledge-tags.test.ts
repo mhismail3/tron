@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { GatewayError } from "../errors.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeService } from "./knowledge-service.js";
 import { KnowledgeStore } from "./knowledge-store.js";
@@ -99,6 +100,24 @@ describe("Knowledge tag vocabulary", () => {
     const rpcResult = await service.invoke({ operation: "knowledge.tags.configure", request: { commandId: command("rpc-merge"), expectedConfigRevision: config.revision, edit: { kind: "merge", id: "legacy", mergedInto: "systems" } } });
     expect(rpcResult).toMatchObject({ config: { revision: config.revision + 1 }, reconciliation: { applied: 1, outcomes: [{ id: record.id, status: "applied" }] } });
     expect((await store.read(record.id))?.content.tags?.tagIds).toEqual(["systems"]);
+  });
+
+  it("reports a committed merge when a concurrent config revision fences its automatic first batch", async () => {
+    const { store, service } = await fixture();
+    await addTag(store);
+    let config = await store.config();
+    config = await store.configureTags({ commandId: command("add-race-merge"), expectedConfigRevision: config.revision, edit: { kind: "add", tag: { ...activeTag, id: "legacy-race", label: "Legacy race" } } });
+    const reconcile = store.reconcileTagMerges.bind(store);
+    store.reconcileTagMerges = async request => {
+      const current = await store.config();
+      await store.configure(command("concurrent-config"), { ...current, maximumSearchResults: current.maximumSearchResults - 1 });
+      throw new GatewayError("conflict", "Knowledge configuration changed during automatic merge reconciliation");
+    };
+    const result = await service.invoke({ operation: "knowledge.tags.configure", request: { commandId: command("merge-race"), expectedConfigRevision: config.revision, edit: { kind: "merge", id: "legacy-race", mergedInto: "systems" } } }) as { config: { revision: number }; reconciliation: { conflict?: boolean; configRevision: number; reason?: string } };
+    expect(result.config.revision).toBe(config.revision + 1);
+    expect(result.reconciliation).toMatchObject({ conflict: true, configRevision: config.revision + 2 });
+    store.reconcileTagMerges = reconcile;
+    await expect(store.reconcileTagMerges({ commandId: command("merge-race-resume"), expectedConfigRevision: result.reconciliation.configRevision })).resolves.toMatchObject({ applied: 0 });
   });
 
   it("rejects a concurrent retire at the stale configuration revision", async () => {

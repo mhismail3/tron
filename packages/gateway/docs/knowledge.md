@@ -146,9 +146,10 @@ current verdict), so editing the vocabulary flags re-tagging without making
 stored selections unreadable, while a change to the evidence itself does. Tag
 labels, category and decay class are projected onto source rows from catalog
 heads; both Library row search by label and list/search rendering read no source
-bodies. A vocabulary rename/redefinition reprojects the bounded source-head
-set inside the same config commit, so labels and search agree with the new
-edition without loading source text. The **curation gate** is consulted before each item with
+bodies. A vocabulary label/category/decay/state edit reprojects the bounded
+source-head set inside the same config commit, so labels and search agree with
+the new edition without loading source text. Definition and guideline-only
+edits leave row projections untouched. The **curation gate** is consulted before each item with
 the batch's operation; a refusal stops the batch and reports that item and every
 later one as `skipped` with the code, which is how the paid tagging owner stops
 dispatching once its budget is spoken for. It refuses only operations that spend

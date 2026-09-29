@@ -930,7 +930,7 @@ export class KnowledgeStore {
       next.tagVocabulary = nextVocabulary;
       next.revision += 1;
       state.config = next;
-      this.reprojectTagHeads(state);
+      if (request.edit.kind !== "guidelines" && request.edit.kind !== "redefine") this.reprojectTagHeads(state);
       return next;
     });
   }

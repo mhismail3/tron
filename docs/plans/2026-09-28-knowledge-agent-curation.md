@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-28
 - **Status:** Active
-- **Last updated:** 2026-09-29, K1 and K2 done
+- **Last updated:** 2026-09-29, K1–K3 done
 - **Goal:** Agents keep every Library entry summarized, tagged, judged for freshness and correctly scoped, guided by the user's own takes, so useful sources surface on their own in future work.
 
 ## Goal and constraints
@@ -147,7 +147,7 @@ screenshots of each state. Device validation by the user after K9.
 | --- | --- | --- | --- | --- |
 | K1 | Done | Typed enrichment and curation operations for agents, RPC and the agent tool | none | deepseek-worker, 2026-09-28 |
 | K2 | Done | Clean evidence for summaries: extraction without site chrome, provider-date recovery | none | deepseek-worker, 2026-09-29 |
-| K3 | Ready | Tag vocabulary and tagging guidelines owned by Knowledge config | K1 | — |
+| K3 | Done | Tag vocabulary and tagging guidelines owned by Knowledge config | K1 | luna-worker, 2026-09-29 |
 | K4 | Ready | Jev tagger with monthly budget and re-tag triggers | K1, K3 | — |
 | K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
 | K6 | Ready | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1 | — |
@@ -200,11 +200,18 @@ publication dates stay unknown. Carried from the replaced plan's E2.
 
 ### K3 — Tag vocabulary
 
-A canonical vocabulary in Knowledge config: tag ID, label, one-line
-definition, category, decay class (ages / does not age), and free-text tagging
-guidelines. Agents may add, rename, merge and retire tags (decision: apply
-directly); retiring or merging re-tags affected entries. Validation bounds count
-and lengths.
+A canonical vocabulary in Knowledge config: stable tag ID, unique label, one-line
+definition, category, decay class (`ages`/`stable`), active/retired/merged state,
+and free-text tagging guidelines. Agents may add, rename, redefine,
+recategorize, merge and retire tags (decision: apply directly), or edit
+guidelines, through typed, receipted edits fenced on the expected configuration
+revision. Validation bounds count and lengths and rejects duplicate labels,
+malformed IDs, dangling merge targets and cycles. The vocabulary has its own
+edition revision, so unrelated configuration edits do not trigger Jev
+re-tagging. A merge re-points matching selections in bounded, receipt-backed
+source curation batches; retirements remain visible and are listed by a bounded
+re-tag query. Source row labels and search use catalog heads without body reads.
+The decay-class accessor is exported for K6; freshness remains K6's owner.
 
 ### K4 — Jev tagger
 
@@ -369,6 +376,48 @@ session only after the user confirms the schedule.
   measured above still hold pre-K2 text. The 34 pages now reported as
   needing-evidence are the honest set to re-capture with a browser or the
   provider, not to summarize.
+
+### K3 · Done · 2026-09-29 · luna-worker · `knowledge/k3-vocabulary`
+
+- Result: Knowledge config owns a bounded controlled vocabulary and free-text
+tagging guidelines, with typed receipt-backed add/rename/redefine/recategorize/
+retire/merge/guidelines operations fenced on the config revision. Vocabulary
+edition is separate from the broader config revision. Merge edits start one
+atomic, bounded re-point batch; opaque cursors and batch receipts resume more
+than 25 affected sources. Retired selections stay visible and the bounded
+`knowledge.tags.retag-needed` query pages untagged/stale/retired sources for K4.
+Source-row list and search carry catalog-head labels, category, decay class and
+state without body reads. `knowledgeTagDecayClass` exposes the decay class for K6.
+- Evidence: `npm run build` passed. `npx vitest run src/knowledge/` passed
+23 files / 329 tests; `npx vitest run src/transport/` passed 43 files / 405
+tests; `npx vitest run --config vitest.scale.config.ts src/knowledge/` passed
+3 scale tests. `knowledge-tags.test.ts` covers stale/reused config receipts,
+validation, merge cycles/retired targets, config changes during partial merge,
+restart resume/replay, retired-tag refusal, re-tag queries, the agent/RPC paths,
+label rename/search and zero body reads. `knowledge-tags.scale.test.ts` uses
+12,600 heads / 440 source heads and measured row list 4.4 ms, tag search 15.6 ms,
+and re-tag query 1.8 ms in its verbose run; body reads: 0.
+- Changes: `f908e35cb` (`feat(knowledge): own controlled tag vocabulary`); this
+handoff updates the plan with the implementation.
+- Tasks added: none.
+- Kept on purpose: the vocabulary has a revision distinct from
+`KnowledgeConfig.revision`; ordinary observation/config edits must not cause a
+paid Jev re-tag. Definitions/guidelines do not rewrite row heads, while edits to
+label/category/decay/state reproject only the source heads in the catalog.
+Existing selections stay as immutable prior revisions when a tag is retired;
+K4 receives them through the bounded query. A merge cursor is fenced by the
+current config revision, and each batch commits atomically with its replay
+receipt.
+- Deviations: merge configuration immediately re-points the first 25 sources,
+then returns a cursor for explicit continuation; this bounds each RPC and makes
+partial restart recovery receipted. An unrelated config edit between the merge
+and its first batch is returned as a committed vocabulary edit plus a typed
+resume conflict rather than misreported as a failed taxonomy mutation.
+- For the next agent: K4 reads `config.tagVocabulary` (including `guidelines`),
+uses the tag definitions/categories/decay classes, and asks
+`knowledge.tags.retag-needed` for a vocabulary edition before tagging. K6 should
+use `knowledgeTagDecayClass(config, tagId)` and keep freshness policy outside
+K3. K7 can render `KnowledgeSourceRow.tags` without opening source bodies.
 
 Drafted from the 2026-09-28 interview and approved by the user the same day,
 with the reliability and interaction bars added at the user's request. K1 and
