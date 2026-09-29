@@ -436,6 +436,12 @@ final class ChatScrollCoordinator {
 
     func semanticFrameChanged(renderedID: String, layoutEpoch: Int, frame: CGRect) {
         guard layoutEpoch == self.layoutEpoch else { return }
+        // Rows and the tail marker report the scroll view's own frames. On the
+        // origin-anchored path those measure upward from the visual bottom, so
+        // every consumer below — the reader's anchor row, the marker's
+        // placement against the viewport, a correction's signed residual — is
+        // handed the same transcript-relative space today's transcript reports.
+        let frame = orientation.transcriptFrame(frame, containerHeight: geometry.containerHeight)
         // SwiftUI can invoke an observation action again with the same frame
         // while the row tree settles. Such callbacks are inert unless an exact
         // active owner is awaiting later temporal evidence from that row.
@@ -1775,10 +1781,9 @@ final class ChatScrollCoordinator {
             return
         }
         restore.correctionCount &+= 1
-        let requested = Self.prependCorrectionOffset(
-            currentOffsetY: geometry.offsetY,
-            capturedViewportOffsetY: restore.anchor.viewportOffsetY,
-            installedFrameMinY: sample.frame.minY
+        let requested = orientation.correctedOffsetY(
+            currentModelOffsetY: geometry.offsetY,
+            visualOffset: residual
         )
         publish(.offsetY(requested), animation: .disabled, origin: .layout)
         restore.correctionCommandToken = command?.token
@@ -1808,10 +1813,9 @@ final class ChatScrollCoordinator {
             return
         }
         context.correctionCount &+= 1
-        let requested = Self.prependCorrectionOffset(
-            currentOffsetY: geometry.offsetY,
-            capturedViewportOffsetY: anchor.viewportOffsetY,
-            installedFrameMinY: sample.frame.minY
+        let requested = orientation.correctedOffsetY(
+            currentModelOffsetY: geometry.offsetY,
+            visualOffset: residual
         )
         publish(.offsetY(requested), animation: .disabled, origin: .prepend)
         context.correctionCommandToken = command?.token
@@ -3192,14 +3196,6 @@ final class ChatScrollCoordinator {
         hostedCommandWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
     }
     #endif
-
-    nonisolated static func prependCorrectionOffset(
-        currentOffsetY: CGFloat,
-        capturedViewportOffsetY: CGFloat,
-        installedFrameMinY: CGFloat
-    ) -> CGFloat {
-        max(0, currentOffsetY + installedFrameMinY - capturedViewportOffsetY)
-    }
 
     private static func isDirectUserPhase(_ phase: ScrollPhase) -> Bool {
         phase == .interacting || phase == .tracking || phase == .decelerating

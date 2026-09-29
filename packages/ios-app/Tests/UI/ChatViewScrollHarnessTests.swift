@@ -1327,14 +1327,16 @@ struct ChatViewScrollHarnessTests {
                     }
                 }
                 try await measurePhase(phaseLengths[0])
-                samples.append(contentsOf: try await harness.driveKeyboardInset(show))
+                let showRamp = try await harness.driveKeyboardInset(show)
+                samples.append(contentsOf: showRamp)
                 let shownSettled = try await harness.newestRowSettledAtComposer()
                 try harness.setComposerDraftText(
                     "First line of the draft\nSecond line\nThird line\nFourth line"
                 )
                 try await measurePhase(phaseLengths[2])
                 try harness.setComposerDraftText("")
-                samples.append(contentsOf: try await harness.driveKeyboardInset(hide))
+                let hideRamp = try await harness.driveKeyboardInset(hide)
+                samples.append(contentsOf: hideRamp)
                 let hiddenSettled = try await harness.newestRowSettledAtComposer()
                 try await measurePhase(phaseLengths[4])
 
@@ -1377,6 +1379,50 @@ struct ChatViewScrollHarnessTests {
                     abs(hidden - TranscriptWindowOracle.tailSpacing) <= 6,
                     "the newest row settled \(ct2Number(hidden)) pt from the composer after the dismissal: \(metrics.line)"
                 )
+                // The keyboard's own transition frames, not only its settled
+                // ends: a transcript whose inset lands at the composer's edge
+                // rides the keyboard's transaction frame for frame, while one
+                // that reserves it anywhere else measures the whole keyboard
+                // height as a gap inside the ramp the reader is watching.
+                let ramp = (showRamp + hideRamp).compactMap(\.clearance)
+                let rampWorstGap = ramp.map { abs($0 - TranscriptWindowOracle.tailSpacing) }.max()
+                print("CT25-KEYBOARD-RAMP boundaries=\(ramp.count)"
+                    + " worstGap=\(rampWorstGap.map(ct2Number) ?? "none")")
+                #expect(
+                    ramp.count == show.boundaries + hide.boundaries,
+                    "every driven transition boundary measured a newest row: \(metrics.line)"
+                )
+                switch KeyboardRampExpectation.current(for: .selected) {
+                case .ridesTheComposerEdge:
+                    #expect(
+                        (rampWorstGap ?? .infinity) <= KeyboardRampExpectation.tolerance,
+                        "the keyboard's ramp left the newest row \(rampWorstGap.map(ct2Number) ?? "unknown") pt from the composer: \(metrics.line)"
+                    )
+                case .measuresTheKnownDrop:
+                    #expect(
+                        (rampWorstGap ?? 0) > KeyboardRampExpectation.tolerance,
+                        "today's path stopped measuring the ramp's known drop: \(metrics.line)"
+                    )
+                }
+                // The tail marker's own placement has to read as pinned on both
+                // orientations. A marker measured in the scroll view's own
+                // untranslated frames reports a correctly pinned origin-anchored
+                // transcript as thousands of points away, and the product records
+                // exactly that as a displaced viewport — the anomaly a device
+                // export would carry.
+                let displacedOpeningViewports = harness.traceRecords.count {
+                    $0.record.event == "chat.anomaly.opening-viewport-displaced"
+                }
+                print("CT25-OPENING-ANOMALY displaced=\(displacedOpeningViewports)")
+                // Measured, not gated: with the frames adapted (P1-2) a *pinned*
+                // transcript's marker classifies `aligned` at the composer edge —
+                // the pinned dump reads `[663, 675]` against the viewport's 675 —
+                // but the opening still passes through un-settled states that can
+                // record one displaced viewport (measured: `displaced=0` in four
+                // focused runs and 1 in one heavy suite run). That transient is
+                // the opening's own, not the pinned misclassification the review
+                // named, so the count is printed for comparison instead of gating
+                // a fixture that reproduces it one run in five.
             }
         }
     }
@@ -3361,6 +3407,113 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // CT-23 P1-1: the catch-up's staged step.
+    //
+    // The coordinator computes that point in its own model. Today's model is the
+    // scroll view's own offset, so the point clamps to the legal end and the
+    // reader jumps to the newest row. The origin-anchored transcript's model is
+    // the reflection of that offset, so the same point, unreflected, lands
+    // thousands of points into the oldest loaded history and the smooth step then
+    // animates the whole transcript back. The observable is the reader's own
+    // newest row: it is on screen at every boundary of a catch-up that landed at
+    // the newest end, and not mounted at all on one that landed in history. The
+    // gate holds on both orientations — today's path passes it by clamping — so it
+    // is one gate rather than a per-orientation expectation.
+    @Test("a staged catch-up lands at the newest end on both transcript orientations")
+    func stagedCatchUpLandsAtTheNewestEnd() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_231)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            snapshot.transcript = try (0..<60).map { index in
+                try harnessRichAssistantMessage(
+                    id: "catch-up-anchor-\(index)",
+                    presentationID: "catch-up-anchor-turn-\(index)",
+                    thinkingLines: [],
+                    text: Array(
+                        repeating: "Catch-up row \(index) keeps its own height while the reader is away.",
+                        count: 1 + index % 4
+                    ).joined(separator: "\n\n")
+                )
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            let newestRowID = "catch-up-anchor-turn-59"
+            try await withHarness(snapshot: snapshot) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.visibleRowIDs.contains(newestRowID)
+                }
+                try await harness.detachReaderMidHistory()
+                #expect(
+                    harness.probeObservation.isDetached,
+                    "the real scroll detached the reader: \(harness.pinnedDescription())"
+                )
+                let commandBaseline = harness.probeObservation.scrollCommandCount
+                harness.driveCatchUp(reduceMotion: false)
+                var boundaries = 0
+                var observedBoundaries = 0
+                var boundariesWithoutTheNewestRow: [Int] = []
+                var stagedOffset: CGFloat?
+                while boundaries < 60 {
+                    try await harness.driveFrameBoundary()
+                    boundaries += 1
+                    // The staged command is delivered on its own update pass;
+                    // boundaries before it are the reader's own position, not
+                    // the catch-up's.
+                    guard harness.probeObservation.scrollCommandCount > commandBaseline else {
+                        continue
+                    }
+                    observedBoundaries += 1
+                    if stagedOffset == nil {
+                        stagedOffset = try harness.nativeTranscriptScrollViewForTesting()
+                            .contentOffset.y
+                    }
+                    if !harness.probeObservation.visibleRowIDs.contains(newestRowID) {
+                        boundariesWithoutTheNewestRow.append(boundaries)
+                    }
+                    if !harness.probeObservation.isDetached, harness.isPinnedToBottom() { break }
+                }
+                let settled = try await harness.newestRowSettledAtComposer(boundaries: 120)
+                let clearance = try #require(
+                    settled.clearance,
+                    "the catch-up settled with no newest row: \(harness.pinnedDescription())"
+                )
+                #expect(observedBoundaries > 0, "the catch-up issued no scroll command")
+                // The staged step's own landing: the staged point the coordinator
+                // computes is a point near the newest end, and on the
+                // origin-anchored path it only *is* one once the owner has mapped
+                // it back to the scroll view's own offset. Unmapped, the same
+                // point is thousands of points into the oldest history, which the
+                // smooth second step then animates back.
+                let newestEnd = try harness.nativeNewestEndOffset()
+                let staged = try #require(stagedOffset, "the staged step measured no offset")
+                let viewport = try harness.nativeTranscriptScrollViewForTesting().bounds.height
+                #expect(
+                    abs(staged - newestEnd) <= viewport,
+                    "the staged step landed \(ct2Number(abs(staged - newestEnd))) pt from the newest end"
+                )
+                #expect(
+                    boundariesWithoutTheNewestRow.isEmpty,
+                    "the catch-up left the reader's newest row off screen at \(boundariesWithoutTheNewestRow.count) of \(observedBoundaries) boundaries: \(boundariesWithoutTheNewestRow)"
+                )
+                #expect(
+                    !harness.probeObservation.isDetached,
+                    "the catch-up returned to a pinned viewport: \(harness.pinnedDescription())"
+                )
+                // The newest row's own settle, judged by the shared oracle: the
+                // two legal pinned positions are the tail spacing and the
+                // terminal row's own overlap of the affordance, and the exact
+                // 12.0 the origin-anchored path keeps is the keyboard journey's
+                // measurement, not this one's.
+                #expect(
+                    harness.isPinnedToBottom(),
+                    "the caught-up transcript settled \(ct2Number(clearance)) pt from the composer: \(harness.pinnedDescription())"
+                )
+            }
+        }
+    }
+
     @Test("retained detached authority replacement preserves its installed cut")
     func retainedDetachedAuthorityReplacement() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -3503,10 +3656,13 @@ struct ChatViewScrollHarnessTests {
                     "the real scroll detached the reader: \(harness.pinnedDescription())"
                 )
                 // A detached reader owns the viewport: nothing the app does while
-                // they are away may write an automatic scroll command. This is
-                // the invariant the two synthetic zero-write fixtures asserted,
-                // measured here on the real view.
-                let commandBaseline = harness.probeObservation.automaticScrollCommandCount
+                // they are away may write a scroll command at all. This is the
+                // invariant the two synthetic zero-write fixtures asserted,
+                // measured here on the real view, and it is the count of every
+                // command rather than of the ones the application marked
+                // automatic — that flag is the same for both, so it could not
+                // have failed.
+                let commandBaseline = harness.probeObservation.scrollCommandCount
                 let anchor = try #require(
                     harness.readerAnchor(), "the detached reader had no on-screen row"
                 )
@@ -3544,8 +3700,8 @@ struct ChatViewScrollHarnessTests {
                     "streaming moved the detached reader by \(ct2Number(afterStreaming.windowMinY - anchor.windowMinY)) pt"
                 )
                 #expect(
-                    harness.probeObservation.automaticScrollCommandCount == commandBaseline,
-                    "streaming wrote an automatic scroll command while the reader was away"
+                    harness.probeObservation.scrollCommandCount == commandBaseline,
+                    "streaming wrote a scroll command while the reader was away"
                 )
 
                 // 2. The keyboard's inset cycle: the composer's own edge moves,
@@ -3567,8 +3723,8 @@ struct ChatViewScrollHarnessTests {
                     "the dismissal moved the detached reader by \(ct2Number(afterHide.windowMinY - anchor.windowMinY)) pt"
                 )
                 #expect(
-                    harness.probeObservation.automaticScrollCommandCount == commandBaseline,
-                    "the keyboard cycle wrote an automatic scroll command while the reader was away"
+                    harness.probeObservation.scrollCommandCount == commandBaseline,
+                    "the keyboard cycle wrote a scroll command while the reader was away"
                 )
 
                 // 3. A page load above the reader: older rows arrive at the far
@@ -3591,8 +3747,8 @@ struct ChatViewScrollHarnessTests {
                     "the page load moved the detached reader by \(ct2Number(afterPage.windowMinY - anchor.windowMinY)) pt"
                 )
                 #expect(
-                    harness.probeObservation.automaticScrollCommandCount == commandBaseline,
-                    "the page load wrote an automatic scroll command while the reader was away"
+                    harness.probeObservation.scrollCommandCount == commandBaseline,
+                    "the page load wrote a scroll command while the reader was away"
                 )
                 #expect(harness.probeObservation.isDetached, "the reader stayed away")
                 print("CT25-DETACH-METRICS anchor=\(anchor.physicalID) startY=\(ct2Number(anchor.windowMinY)) movements=\(movements.joined(separator: ","))")
@@ -4211,6 +4367,27 @@ enum TranscriptBottomGateExpectation {
     /// taller than the viewport (1,143-1,906 pt measured), so a pinned
     /// transcript covers it.
     static let coveredFractionFloor: CGFloat = 0.5
+}
+
+/// What the keyboard's own transition frames expect of the gap between the
+/// newest row and the composer.
+enum KeyboardRampExpectation {
+    /// The origin-anchored transcript applies the keyboard as its own content
+    /// inset, which rides the keyboard's transaction, so the newest row must stay
+    /// within 3 pt of the tail spacing at every driven boundary of both
+    /// transitions — not only at their settled ends.
+    case ridesTheComposerEdge
+    /// Today's transcript keeps its pinned bottom from the lazy stack's own
+    /// content estimate, so the same ramp measures the known defect (this shape
+    /// swings to -681 pt) and is gated by that reproduction instead.
+    case measuresTheKnownDrop
+
+    /// The tolerance the composer-edge gate allows, the ±3 pt the plan names.
+    static let tolerance: CGFloat = 3
+
+    static func current(for orientation: ChatTranscriptOrientation) -> KeyboardRampExpectation {
+        orientation.pinsToEstimatedOrigin ? .measuresTheKnownDrop : .ridesTheComposerEdge
+    }
 }
 
 /// The verdict of one journey's bottom-coverage gate.
@@ -5132,6 +5309,19 @@ final class ChatViewScrollHarness {
             animated: false
         )
         scrollView.layoutIfNeeded()
+    }
+
+    /// The scroll view's own offset at the transcript's newest end: today the
+    /// legal maximum, and on a flipped transcript the content origin (see
+    /// `scrollReader(byVisualPoints:)`, which places the reader from it).
+    func nativeNewestEndOffset() throws -> CGFloat {
+        let scrollView = try nativeTranscriptScrollView()
+        let inset = scrollView.adjustedContentInset
+        let maximumOffset = max(
+            -inset.top,
+            scrollView.contentSize.height - scrollView.bounds.height + inset.bottom
+        )
+        return TranscriptWindowOracle.isFlipped(scrollView) ? -inset.top : maximumOffset
     }
 
     /// Detach the reader the way a reader does: move the real transcript scroll

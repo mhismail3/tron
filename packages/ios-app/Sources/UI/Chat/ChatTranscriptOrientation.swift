@@ -106,6 +106,89 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// to stay a rise rather than a fall.
     func screenOffset(forLayoutRise rise: CGFloat) -> CGFloat { rise * verticalScale }
 
+    /// The transcript-relative viewport frame for the `ScrollView` frame a row
+    /// or the tail marker reports: `0` at the visual top of the visible
+    /// transcript, increasing downward, exactly as today's transcript reports
+    /// its own frames.
+    ///
+    /// The origin-anchored transcript renders its content mirrored, so its
+    /// reported frames measure *upward* from the visual bottom: the pinned
+    /// newest row reports a frame at `0` while it is drawn at the bottom of the
+    /// viewport. Every consumer reads one space — the reader's anchor row, the
+    /// tail marker's placement against the viewport, an entrance's visibility
+    /// test, a correction's signed residual — so the reflection belongs here,
+    /// at the one place frames enter the coordinator, and nowhere else.
+    /// `containerHeight` is the model's own visible height; before the first
+    /// geometry sample there is no space to reflect into and the frame is
+    /// returned unchanged.
+    func transcriptFrame(_ frame: CGRect, containerHeight: CGFloat) -> CGRect {
+        guard self == .newestAtOrigin, containerHeight > 0 else { return frame }
+        return CGRect(
+            x: frame.minX,
+            y: containerHeight - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        )
+    }
+
+    /// The model offset that puts an anchor back where the layout moved it.
+    /// `visualOffset` is the anchor's own movement down the visible transcript
+    /// since the reader's position was captured.
+    ///
+    /// Today's model offset is the scroll view's own content offset, so it moves
+    /// with the content and is clamped at the content's top. The origin-anchored
+    /// transcript's model offset is the reflection of that offset, so it moves
+    /// against the content, and its legal ends are the native scroll view's own
+    /// — which clamps an out-of-range target itself.
+    func correctedOffsetY(
+        currentModelOffsetY: CGFloat,
+        visualOffset: CGFloat
+    ) -> CGFloat {
+        switch self {
+        case .newestAtEnd:
+            return max(0, currentModelOffsetY + visualOffset)
+        case .newestAtOrigin:
+            return currentModelOffsetY - visualOffset
+        }
+    }
+
+    /// The scroll view's own `scrollTo(y:)` offset for a point in the model the
+    /// coordinator reasons in.
+    ///
+    /// Today's transcript reports the scroll view's offset as its model offset.
+    /// The origin-anchored transcript reports the reflection of it, so a command
+    /// computed in the model — the staged catch-up's point, a correction's
+    /// target — has to be reflected back before it reaches the scroll view, or
+    /// it becomes a jump of the same size in the opposite direction: thousands
+    /// of points into the oldest loaded history instead of a point near the
+    /// newest row.
+    ///
+    /// The model's own `distanceFromBottom` is the reverse of its offset, so the
+    /// two share one anchor — the model offset at the pinned end — and a target's
+    /// distance from that end is what a native offset is built from. The
+    /// composer/keyboard inset is the model's bottom inset and sits at the
+    /// scroll view's own origin on this path, so that distance is measured from
+    /// `-bottomInset`.
+    func scrollOffsetY(
+        forModelOffsetY modelOffsetY: CGFloat,
+        geometry: ChatTranscriptGeometry
+    ) -> CGFloat {
+        guard self == .newestAtOrigin, geometry.isValid else { return modelOffsetY }
+        let pinnedModelOffsetY = geometry.offsetY + geometry.distanceFromBottom
+        return (pinnedModelOffsetY - modelOffsetY) - geometry.bottomInset
+    }
+
+    /// The transcript position a spine index reports: a row's position counted
+    /// from the transcript's visual top, which is the position every diagnostic
+    /// that names a row's place in the transcript reports. Today's spine presents
+    /// the oldest row first, so its own index is that position; the
+    /// origin-anchored spine presents the newest row first, so its positions are
+    /// reversed.
+    func visualPosition(ofSpinePosition position: Int, count: Int) -> Int {
+        guard self == .newestAtOrigin else { return position }
+        return count - 1 - position
+    }
+
     /// The geometry the coordinator reads. Both orientations report one model:
     /// `distanceFromBottom` is the distance from the newest row. The flipped
     /// scroll view's content origin is its visual bottom, so the visible rect is

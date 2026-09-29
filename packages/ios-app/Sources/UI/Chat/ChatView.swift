@@ -935,7 +935,12 @@ struct ChatView: View {
             )
             let hasEarlierMessages = ($0.sourceWindow.originalStart ?? 0) > 0
             var positions = Dictionary(uniqueKeysWithValues: rows.enumerated().map {
-                ($0.element.id, $0.offset + (hasEarlierMessages ? 1 : 0))
+                (
+                    $0.element.id,
+                    transcriptOrientation.visualPosition(
+                        ofSpinePosition: $0.offset, count: rows.count
+                    ) + (hasEarlierMessages ? 1 : 0)
+                )
             })
             if hasEarlierMessages { positions["earlier-messages"] = 0 }
             return positions
@@ -947,8 +952,11 @@ struct ChatView: View {
                 orientation: transcriptOrientation
             )
             let leadingEarlierRow = ($0.sourceWindow.originalStart ?? 0) > 0 ? 1 : 0
-            return rows.indices.last.map { $0 + leadingEarlierRow }
-                ?? (leadingEarlierRow > 0 ? 0 : nil)
+            return rows.indices.last.map {
+                transcriptOrientation.visualPosition(
+                    ofSpinePosition: $0, count: rows.count
+                ) + leadingEarlierRow
+            } ?? (leadingEarlierRow > 0 ? 0 : nil)
         }
         let terminalPhysicalID = installed.flatMap {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
@@ -2106,7 +2114,12 @@ struct ChatView: View {
                 ?? ((retained.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil)
             let hasEarlierMessages = (retained.sourceWindow.originalStart ?? 0) > 0
             var physicalPositions = Dictionary(uniqueKeysWithValues: rows.enumerated().map {
-                ($0.element.id, $0.offset + (hasEarlierMessages ? 1 : 0))
+                (
+                    $0.element.id,
+                    transcriptOrientation.visualPosition(
+                        ofSpinePosition: $0.offset, count: rows.count
+                    ) + (hasEarlierMessages ? 1 : 0)
+                )
             })
             if hasEarlierMessages { physicalPositions["earlier-messages"] = 0 }
             let leadingEarlierRow = hasEarlierMessages ? 1 : 0
@@ -2115,8 +2128,11 @@ struct ChatView: View {
                 terminalPhysicalID: terminalID,
                 projectionTag: retained.tag,
                 physicalRowPositions: physicalPositions,
-                physicalTerminalPosition: rows.indices.last.map { $0 + leadingEarlierRow }
-                    ?? (leadingEarlierRow > 0 ? 0 : nil)
+                physicalTerminalPosition: rows.indices.last.map {
+                    transcriptOrientation.visualPosition(
+                        ofSpinePosition: $0, count: rows.count
+                    ) + leadingEarlierRow
+                } ?? (leadingEarlierRow > 0 ? 0 : nil)
             )
         }
         let interval = performanceSignposts.begin(.firstReadyFrame)
@@ -2771,7 +2787,15 @@ struct ChatView: View {
             case .tail:
                 transcriptScrollPosition.scrollTo(edge: transcriptOrientation.newestEdge)
             case .offsetY(let offsetY):
-                transcriptScrollPosition.scrollTo(y: offsetY)
+                // The coordinator computes points in its own model, which is the
+                // scroll view's offset on today's path and its reflection on the
+                // origin-anchored one. Reflecting a point back is the owner's
+                // mapping: without it a point near the newest row scrolls the
+                // view the same distance the other way, into the oldest history.
+                transcriptScrollPosition.scrollTo(y: transcriptOrientation.scrollOffsetY(
+                    forModelOffsetY: offsetY,
+                    geometry: scrollCoordinator.latestGeometry
+                ))
             }
         }
         switch command.animation {
@@ -2824,6 +2848,7 @@ struct ChatView: View {
 
     @MainActor
     private func applyViewportMode(_ mode: ChatViewportMode) {
+        hostedProbe?.recordTargetRelease()
         guard mode == .anchored || scrollCoordinator.canInstallPersistentBottomPosition else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
