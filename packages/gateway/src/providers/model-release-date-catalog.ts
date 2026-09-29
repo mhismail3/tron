@@ -20,7 +20,8 @@ type Log = (level: "warning" | "info", message: string, metadata?: Record<string
 
 export class ModelReleaseDateCatalog {
   private readonly path: string;
-  private readonly dates = new Map<string, string>();
+  private readonly baselineDates = new Map<string, string>();
+  private readonly fetchedDates = new Map<string, string>();
   private fetchedAt: number | undefined;
   private etag: string | undefined;
   private lastModified: string | undefined;
@@ -42,12 +43,15 @@ export class ModelReleaseDateCatalog {
   }) {
     this.path = join(options.tronHome, "gateway", "model-release-dates.json");
     this.aliases = options.aliases ?? aliases;
-    for (const [key, date] of Object.entries(options.baseline ?? baseline)) this.dates.set(key, date);
+    for (const [key, date] of Object.entries(options.baseline ?? baseline)) this.baselineDates.set(key, date);
   }
 
   async modelReleaseDate(provider: string, id: string): Promise<string | undefined> {
     await this.load();
-    return this.dates.get(`${provider}/${id}`) ?? (this.aliases[provider] ? this.dates.get(`${this.aliases[provider]}/${id}`) : undefined);
+    const key = `${provider}/${id}`;
+    const aliasKey = this.aliases[provider] ? `${this.aliases[provider]}/${id}` : undefined;
+    return this.fetchedDates.get(key) ?? this.baselineDates.get(key)
+      ?? (aliasKey === undefined ? undefined : this.fetchedDates.get(aliasKey) ?? this.baselineDates.get(aliasKey));
   }
 
   start(signal?: AbortSignal): void {
@@ -102,7 +106,7 @@ export class ModelReleaseDateCatalog {
           if (!/^[^/]{1,120}\/.{1,500}$/.test(key) || typeof value !== "string" || !isValidReleaseDate(value)) throw new Error("invalid date entry");
           normalized[key] = value;
         }
-        for (const [key, value] of Object.entries(normalized)) this.dates.set(key, value);
+        for (const [key, value] of Object.entries(normalized)) this.fetchedDates.set(key, value);
         this.fetchedAt = fetchedAt;
         if (typeof saved.etag === "string") this.etag = saved.etag;
         if (typeof saved.lastModified === "string") this.lastModified = saved.lastModified;
@@ -143,18 +147,19 @@ export class ModelReleaseDateCatalog {
           && typeof (entry as { models: unknown }).models === "object";
       })) throw new Error("models.dev payload contains no runtime provider catalogs");
       const result = releaseDatesFromCatalog(parsed, providerNames, this.aliases);
-      const merged = new Map(this.dates);
-      for (const [key, value] of Object.entries(result.dates)) merged.set(key, value);
+      const previous = new Map(this.fetchedDates);
+      const keys = new Set([...this.baselineDates.keys(), ...previous.keys(), ...Object.keys(result.dates)]);
+      const effective = (key: string, fetched: Map<string, string>): string | undefined => fetched.get(key) ?? this.baselineDates.get(key);
+      const nextFetched = new Map(Object.entries(result.dates));
       let updated = 0;
-      for (const [key, value] of merged) if (this.dates.get(key) !== value) updated++;
-      const previous = new Map(this.dates);
-      this.dates.clear(); for (const [key, value] of merged) this.dates.set(key, value);
+      for (const key of keys) if (effective(key, previous) !== effective(key, nextFetched)) updated++;
+      this.fetchedDates.clear(); for (const [key, value] of nextFetched) this.fetchedDates.set(key, value);
       const oldFetchedAt = this.fetchedAt, oldEtag = this.etag, oldLastModified = this.lastModified;
       this.fetchedAt = Date.now();
       this.etag = response.headers.get("etag") ?? this.etag;
       this.lastModified = response.headers.get("last-modified") ?? this.lastModified;
       try { await this.persist(); } catch (error) {
-        this.dates.clear(); for (const [key, value] of previous) this.dates.set(key, value);
+        this.fetchedDates.clear(); for (const [key, value] of previous) this.fetchedDates.set(key, value);
         this.fetchedAt = oldFetchedAt; this.etag = oldEtag; this.lastModified = oldLastModified;
         throw error;
       }
@@ -178,7 +183,7 @@ export class ModelReleaseDateCatalog {
       fetchedAt: new Date(this.fetchedAt ?? Date.now()).toISOString(),
       ...(this.etag ? { etag: this.etag } : {}),
       ...(this.lastModified ? { lastModified: this.lastModified } : {}),
-      dates: Object.fromEntries([...this.dates].sort(([a], [b]) => a.localeCompare(b))),
+      dates: Object.fromEntries([...this.fetchedDates].sort(([a], [b]) => a.localeCompare(b))),
     };
     await durablePublishBoundedJson(this.path, document, MAX_FILE_BYTES);
   }
