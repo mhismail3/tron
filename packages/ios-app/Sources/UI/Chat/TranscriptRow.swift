@@ -90,6 +90,24 @@ enum AutomationPromptPresentationPolicy {
     }
 }
 
+/// What `TranscriptRow` has to show for a projected item. The kernel asks this
+/// before it installs a row, because a row whose body is `EmptyView` still costs
+/// a padded lazy child: it takes part in realization, entrance bookkeeping and
+/// tail anchoring while showing nothing. A `customEntry` that is not a command
+/// lifecycle, and a summary/model/thinking/label receipt whose typed
+/// presentation the adapter declined, render nothing, so they are not rows. It
+/// is the same branch the row itself takes, kept next to it so the two cannot
+/// drift.
+enum TranscriptRowPresentationPolicy {
+    static func rendersRow(for item: TranscriptItem) -> Bool {
+        switch item.kind {
+        case .message, .bash, .customMessage: true
+        case .customEntry: item.semantic?.kind == .command
+        case .compaction, .branchSummary, .modelChange, .thinkingChange, .label: false
+        }
+    }
+}
+
 struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     var streaming = false
@@ -148,7 +166,9 @@ struct TranscriptRow: View, Equatable {
                 } else {
                     // appendEntry/custom entries are extension state, not chat
                     // content. Only typed Gateway receipts have a transcript
-                    // presentation; unadapted state remains absent.
+                    // presentation; unadapted state remains absent, and
+                    // `TranscriptRowPresentationPolicy` keeps the kernel from
+                    // installing the empty row.
                     EmptyView()
                 }
             case .compaction, .branchSummary, .modelChange, .thinkingChange, .label:

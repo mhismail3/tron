@@ -357,7 +357,11 @@ projection installation: entries older than the retirement boundary are removed,
 epoch remains admissible for its successor build even when retirement delivery is delayed.
 One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entries into ordered
 raw atoms and then globally assembles call/result joins, bootstrap filtering, barriers, grouping,
-and semantic maps. Message presentation IDs and required content/thinking-run ordinals arrive from
+and semantic maps. It installs a row only when that row has a presentation: a `customEntry` that is
+not a command lifecycle, or a summary/model/thinking/label receipt the adapter did not adapt into a
+typed presentation, renders `EmptyView`, and an empty lazy child still costs realization, entrance
+bookkeeping and tail anchoring. `TranscriptRowPresentationPolicy` is the row's own branch, kept next
+to it so the kernel and the row cannot disagree about what exists. Message presentation IDs and required content/thinking-run ordinals arrive from
 the Gateway and are never rewritten: the same semantic row, thinking run, and prepared-text source
 therefore survive live-to-canonical settlement even though the canonical entry ID changes. When one
 snapshot briefly retains a streaming assistant after its matching presentation ID becomes canonical,
@@ -920,6 +924,12 @@ use the same block boundaries to reflow prose only, leaving lists, quotes, code,
 verbatim without adding Markdown styling. Thinking traces opt out because their line boundaries
 carry their own meaning. Table sizing, horizontal scrolling, ragged-row padding, and block identities
 remain unchanged.
+A row that leaves the lazy window and returns is a new mount, and every horizontal offset is
+deliberately a mount-local view state: the code block's and the table's horizontal scroll position and
+the prompt attachment strip's scroll position reset to their leading edge, and an inline video tears
+down its player and staged file on disappearance, so it resumes muted at the beginning rather than
+retaining a scrub position. No transcript owner restores them; retaining one would require a second
+authority for a scroll offset per block identity.
 Block and list identities combine exact content with UTF-8 source ranges, so equal duplicates remain
 distinct. Code-header progress is eligible only for the one unterminated fence while its owning response
 is still streaming; closed fences settle immediately and every fence is terminal when the response settles.

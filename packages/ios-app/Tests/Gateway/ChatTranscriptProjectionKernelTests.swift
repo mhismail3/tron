@@ -1364,6 +1364,45 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(candidate.toolPayloads.callIDs.isEmpty)
     }
 
+    @Test("a custom entry with no presentation installs no empty transcript row")
+    func unadaptedCustomEntryInstallsNoRow() throws {
+        // FM-F12a: the kernel's fall-through appended a `.transcript` row for
+        // every entry it could not adapt, and `TranscriptRow` renders that entry
+        // as `EmptyView`, so an unadapted `customEntry` occupied a padded lazy
+        // row that participated in realization and tail anchoring while showing
+        // nothing.
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"before","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"before-text","ordinal":0,"type":"text","text":"Before"}]},
+          {"id":"state","parentId":"before","timestamp":"2026-01-01T00:00:01Z","kind":"customEntry","customType":"tron.unadapted-state.v1","data":{"writer":"gateway","version":1}},
+          {"id":"after","parentId":"state","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"after-text","ordinal":0,"type":"text","text":"After"}]}
+        ]
+        """)
+        snapshot.transcriptTotal = snapshot.transcript.count
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.count == 2)
+        #expect(candidate.timeline.ids == ["before", "after"])
+        #expect(candidate.isValid)
+    }
+
+    @Test("an adapted custom entry still installs its own row")
+    func adaptedCustomEntryKeepsItsRow() throws {
+        // Negative control for the filter above: an entry whose typed receipt
+        // has a presentation is still a row, and so is a command lifecycle.
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"adapter"},"invocationId":"invocation","operationId":"operation","sequence":1,"lifecycle":"running","resourceInvocation":{"source":"extension","name":"goal","arguments":"count to 20"}}},
+          {"id":"notice","parentId":"command","timestamp":"2026-01-01T00:00:01Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"writer":"gateway","version":1,"receiptId":"notification:goal","sessionId":"session","message":"Goal created.","tone":"info","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"sequence":1,"createdAt":"2026-01-01T00:00:00.000Z"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"sequence":1}}
+        ]
+        """)
+        snapshot.transcriptTotal = snapshot.transcript.count
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.count == 2)
+        #expect(candidate.timeline.ids == ["command", "notification-notice"])
+    }
+
     @Test("canonical extension notifications are centered status rows rather than app notices")
     func extensionNotificationIsCanonicalStatus() throws {
         var snapshot = try fixture(transcript: """
