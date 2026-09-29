@@ -78,6 +78,7 @@ EXPORT_PEAK_BYTES_PER_TRACE_BYTE = 20
 #     recording never started (see packages/ios-app/docs/development.md).
 TEMPLATES: dict[str, tuple[str, str | None, tuple[str, ...]]] = {
     "time-profiler": ("host", "Time Profiler", ()),
+    "system-trace": ("host", "System Trace", ()),
     "swiftui": ("simulator", "SwiftUI", ("os_signpost",)),
     "points-of-interest": ("simulator", None, ("os_signpost", "Points of Interest")),
 }
