@@ -496,6 +496,18 @@ export function observationBranchIdFor(
  * canonical JSONL session. Every mutation runs through `lane`; distinct slots
  * remain concurrent.
  */
+/** A run this Gateway first reads already terminal (after a restart or slot
+ * reload) ended when its producer recorded, not when it was read: stamping the
+ * read time would bring every old run back as recent, with a duration counted
+ * from its start to now. A run the Gateway watched finish keeps its own
+ * observation instant. A missing, malformed or future producer instant falls
+ * back to the observation. */
+function rediscoveredTerminalAt(state: string, producerEndedAt: string | undefined, observedAt: string): string {
+  if (!["completed", "failed", "stopped", "rejected"].includes(state) || producerEndedAt === undefined) return observedAt;
+  const ended = Date.parse(producerEndedAt);
+  return Number.isFinite(ended) && ended <= Date.parse(observedAt) ? producerEndedAt : observedAt;
+}
+
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
@@ -4616,7 +4628,8 @@ export class RuntimeSlot {
       const observedAt = new Date().toISOString();
       const terminalAt = effectiveState === "running"
         ? previous?.lifecycle?.terminalAt
-        : previous?.lifecycle?.terminalAt ?? observedAt;
+        : previous?.lifecycle?.terminalAt
+          ?? (previous === undefined ? rediscoveredTerminalAt(effectiveState, effectiveCompletedAt, observedAt) : observedAt);
       const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
       const activity = this.attachChildSessionReferences(projectExtensionRunActivity(artifactValue, {
         id: previous?.id ?? toolCallId,

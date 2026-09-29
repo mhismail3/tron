@@ -11,7 +11,7 @@ import type { RuntimeSlot } from "./runtime-slot.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which lifecycle facts the
- * real artifact projection published for a paused subagent. */
+ * real artifact projection published for a paused or rediscovered subagent. */
 const REPORT_PATH = join(process.cwd(), "test-results", "paused-subagent.integration.json");
 const report: {
   generatedAt: string;
@@ -266,5 +266,77 @@ it("settles a paused subagent row as recent only after the observed process-term
     resumedRow: resumed!,
     settledRow: unchanged,
     overview: slot.snapshot().processOverview,
+  });
+});
+
+/** A Gateway restart or a slot reload rediscovers runs that finished long ago.
+ * Their terminal instant is the producer's recorded end, never the moment the
+ * Gateway happened to read the artifact: otherwise every old run returns as
+ * "recent" with a duration that counts from its start to now. */
+it("keeps a rediscovered terminal run's own end instant, so an old run does not return as recent", async () => {
+  const fixture = await pausedFixture("rediscovery");
+  const { slot } = fixture;
+  const internal = slot as unknown as {
+    subagentExtensionOrigin: () => ExtensionToolOrigin;
+    extensionToolOrigin: (toolName: string) => ExtensionToolOrigin | undefined;
+  };
+  vi.spyOn(internal, "subagentExtensionOrigin").mockReturnValue(PROVIDER_ORIGIN);
+  vi.spyOn(internal, "extensionToolOrigin").mockReturnValue(PROVIDER_ORIGIN);
+  const slotManager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } })
+    .runtime.session.sessionManager;
+
+  const cases = [
+    { label: "old", runId: "old-failed-run", startedAt: Date.now() - 3 * 24 * 60 * 60_000 },
+    { label: "recent", runId: "recent-failed-run", startedAt: Date.now() - 60_000 },
+  ];
+  for (const { label, runId, startedAt } of cases) {
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", label);
+    await mkdir(asyncDir, { recursive: true });
+    slotManager.appendMessage({
+      role: "toolResult",
+      toolCallId: `${label}-tool`,
+      toolName: "subagent",
+      content: [{ type: "text", text: "launched" }],
+      details: { runId, asyncId: runId, asyncDir, mode: "single", results: [] },
+      isError: false,
+      timestamp: startedAt,
+    });
+    // The producer's shape for a workflow that failed 28 ms after launch.
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
+      runId,
+      mode: "async",
+      state: "failed",
+      startedAt,
+      lastUpdate: startedAt + 29,
+      endedAt: startedAt + 28,
+      error: "SyntaxError: Unexpected token",
+      steps: [{ index: 0, agent: "worker", workflowKey: "worker-1", runId: `${runId}-child`, status: "failed",
+        startedAt, endedAt: startedAt + 28, durationMs: 28 }],
+    }));
+    await slot.discoverExtensionArtifact(asyncDir);
+  }
+
+  const activities = slot.snapshot().extensionActivities ?? [];
+  const rows = processRows(slot);
+  for (const { runId, startedAt } of cases) {
+    const endedAt = new Date(startedAt + 28).toISOString();
+    const activity = activities.find((item) => item.runId === runId);
+    if (activity) expect(activity.lifecycle?.terminalAt).toBe(endedAt);
+    const row = rows.find((item) => item.runId === runId);
+    if (row) {
+      expect(row.lifecycle.terminalAt).toBe(endedAt);
+      expect(row.durationMs).toBe(28);
+    }
+  }
+  const old = rows.find((row) => row.runId === "old-failed-run");
+  const recent = rows.find((row) => row.runId === "recent-failed-run");
+  // The run that ended a minute ago is still recent; the three-day-old one is not.
+  expect(recent?.visibility).toBe("recent");
+  expect(old === undefined || old.visibility !== "recent").toBe(true);
+  expect(activities.find((item) => item.runId === "old-failed-run")?.visibility === "current").toBe(false);
+  record("rediscovered-terminal", {
+    rows: rows.filter((row) => row.runId === "old-failed-run" || row.runId === "recent-failed-run"),
+    activities: activities.filter((item) => item.runId === "old-failed-run" || item.runId === "recent-failed-run"),
   });
 });
