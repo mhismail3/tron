@@ -1560,11 +1560,13 @@ pass only through eager-only repairs, stop and report.
     The merged manifest's seven reviewed entries are identical to the ones they
     replaced (scenario-by-scenario comparison); only the three re-recorded
     scenarios and their `recordedFrom` changed.
-  - `20260929T081608Z-run.MN2ESo`: `ChatViewScrollHarnessTests` +
-    `ChatVisualParityTests`, 66 tests in 2 suites, pass in 162.3 s, parity gate
-    10/10 `verdict=pass` — the three re-recorded scenarios at 0.02258
-    (keyboard-safe-area-inset), 0.00455 (short transcript) and 0.00264 (oldest
-    row at the visual top).
+  - `20260929T081608Z-run.MN2ESo` and, from the final committed revision,
+    `20260929T083222Z-run.j4QYYF` (`f663f1fa3`, `dirty: false`):
+    `ChatViewScrollHarnessTests` + `ChatVisualParityTests`, 66 tests in 2 suites,
+    pass in 162.3 s and 158.7 s, parity gate 10/10 `verdict=pass` — the three
+    re-recorded scenarios at 0.02258 (keyboard-safe-area-inset), 0.00455 (short
+    transcript) and 0.00264 (oldest row at the visual top). The second run proves
+    the reference still reproduces after the harness's last edit.
   - The harness suite alone: 65 tests (`20260929T080850Z-run.JOT2h1`, the
     UIValidation tier — 61 before this change plus the four new tests), with one
     failure in `retiredComposerCatalogDoesNotPublish` that the same heavy suite
