@@ -82,6 +82,8 @@ describe.sequential("compaction cancellation with the pinned runtime", () => {
     try {
       await registry.initialize();
       const slot = await registry.create(cwd);
+      // A snapshot is published only for a subscriber, so this test is one.
+      registry.subscribe("test-audience", slot.id);
       session = (slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
@@ -181,6 +183,8 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
   disposals.push(async () => { await registry.dispose(); await rm(root, { recursive: true, force: true }); });
   await registry.initialize();
   const slot = await registry.create(cwd);
+  // A snapshot is published only for a subscriber, so this fixture is one.
+  registry.subscribe("test-audience", slot.id);
   const session = (slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
   await slot.setModel(faux.getModel().provider, faux.getModel().id);
   faux.setResponses([fauxAssistantMessage("Earlier work ".repeat(historyRepeats))]);

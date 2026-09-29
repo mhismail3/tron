@@ -80,7 +80,7 @@ enum MenuBarItemBuilder {
         items.append(.action(title: "Send feedback", isEnabled: true, action: .sendFeedback))
 
         items.append(.separator)
-        if snapshot.state.isRunning {
+        if snapshot.state.canPause {
             items.append(.action(title: "Pause Tron", isEnabled: serviceControlsEnabled, action: .pauseServer))
         } else {
             items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, action: .resumeServer))
@@ -189,9 +189,12 @@ enum ServerStatusState: Equatable, Sendable {
         return false
     }
 
-    var isRunning: Bool {
+    /// A Gateway answers on the port, so Pause has a job to unregister. That
+    /// includes a refused admission: the reinstall sequence pauses the old
+    /// wrapper before its app is replaced, whatever state it reports.
+    var canPause: Bool {
         switch self {
-        case .running, .updateIncomplete: return true
+        case .running, .updateIncomplete, .needsRepair: return true
         default: return false
         }
     }
@@ -238,7 +241,6 @@ enum ServerStatusState: Equatable, Sendable {
         if case .busy(let action) = self {
             return "\(action.rawValue)…"
         }
-        if case .needsRepair = self { return "Repair Tron" }
         return "Resume Tron"
     }
 }

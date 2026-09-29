@@ -31,8 +31,39 @@ struct GatewayProtocolContractTests {
         let fixture = try JSONDecoder().decode(GatewayConnectionContractFixture.self, from: Data(contentsOf: fixtureURL))
         #expect(fixture.clientPingInterval.milliseconds == Int(GatewayConnectionPolicy.clientPingInterval.components.seconds * 1_000))
         #expect(fixture.clientPongDeadline.milliseconds == Int(GatewayConnectionPolicy.clientPongDeadline.components.seconds * 1_000))
-        #expect(fixture.clientHandshakeDeadline.milliseconds == Int(GatewayConnectionPolicy.handshakeDeadline.components.seconds * 1_000))
-        #expect(GatewayConnectionPolicy.requestInactivityTimeout > Double(GatewayConnectionPolicy.handshakeDeadline.components.seconds))
+        #expect(fixture.clientHelloDeadline.milliseconds == Int(GatewayConnectionPolicy.helloDeadline.components.seconds * 1_000))
+        #expect(fixture.clientTransportOpenDeadline.milliseconds == Int(GatewayConnectionPolicy.transportOpenDeadline.components.seconds * 1_000))
+        #expect(GatewayConnectionPolicy.requestInactivityTimeout
+            > Double(GatewayConnectionPolicy.transportOpenDeadline.components.seconds
+                + GatewayConnectionPolicy.helloDeadline.components.seconds))
+    }
+
+    @Test("the LAN pin matches the certificate in the shared fixture both platforms assert against")
+    func lanPinMatchesSharedFixture() throws {
+        struct Fixture: Decodable {
+            let certificatePem: String
+            let pin: String
+        }
+        let fixtureURL = try #require(
+            ([Bundle.main] + Bundle.allBundles)
+                .compactMap { $0.url(forResource: "lan-endpoint-pin", withExtension: "json", subdirectory: "protocol-fixtures") }
+                .first
+        )
+        let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureURL))
+        let der = try #require(Self.certificateDER(fixture.certificatePem))
+        // The Gateway derives this same value from the same key
+        // (lan-endpoint.integration.test.ts): if either side changes the bytes
+        // it hashes, a paired phone would never admit the LAN leg.
+        #expect(GatewayLanPin.pin(forCertificateDER: der) == fixture.pin)
+        #expect(GatewayLanPin.admit(fixture.pin) == fixture.pin)
+        // A pin no certificate can match is dropped rather than stored.
+        #expect(GatewayLanPin.admit("not-a-pin") == nil)
+        #expect(GatewayLanPin.admit(Data(repeating: 1, count: 20).base64EncodedString()) == nil)
+    }
+
+    private static func certificateDER(_ pem: String) -> Data? {
+        let body = pem.split(separator: "\n").filter { !$0.hasPrefix("-----") }.joined()
+        return Data(base64Encoded: body)
     }
 
     @Test("authoritative session snapshot decodes")
@@ -627,5 +658,37 @@ struct GatewayProtocolContractTests {
         #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1"]))
         #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1"]))
         #expect(AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1", "restart-supervised.v1"]))
+    }
+
+    @Test("Gateway-answer provenance is local and cannot travel on the wire")
+    func failureProvenanceStaysOffTheWire() throws {
+        // `answeredByGateway` says the phone decoded this code from a Gateway
+        // error response. A response frame that carried the marker would let a
+        // Gateway (or a stale frame) claim provenance the phone never saw, and
+        // `session.open.failure` reports `gatewayCode` only from a stamped
+        // failure, so the wire must not be able to set or clear it.
+        let frame = try JSONSerialization.data(withJSONObject: [
+            "type": "response", "id": "open-1", "ok": false,
+            "error": [
+                "code": "conflict", "message": "Session is open elsewhere.",
+                "retryable": false, "answeredByGateway": true,
+            ],
+        ])
+        let response = try JSONDecoder.gateway.decode(GatewayResponse.self, from: frame)
+        let failure = try #require(response.error)
+        #expect(failure.code == "conflict")
+        #expect(failure.answeredByGateway == nil)
+
+        let stamped = failure.stampedAsGatewayAnswer
+        #expect(stamped.answeredByGateway == true)
+        let encoded = try JSONEncoder.gateway.encode(stamped)
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        #expect(object["answeredByGateway"] == nil)
+        #expect(object["code"] as? String == "conflict")
+        // The local stamp still discriminates a decoded answer from a phone-side
+        // literal of the same failure.
+        #expect(stamped != failure)
     }
 }

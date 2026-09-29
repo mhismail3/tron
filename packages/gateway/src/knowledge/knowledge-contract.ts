@@ -94,6 +94,7 @@ export interface SourceOrigin {
 
 /** Generated material is deliberately separate from retained source evidence. */
 export type SourceAdmission = "pending" | "retained" | "archived";
+export type KnowledgeCaptureDisposition = "complete" | "partial" | "metadata-only" | "inaccessible" | "failed" | "reference-only";
 
 export interface SourceAssessmentUsage {
   inputTokens: number;
@@ -166,7 +167,7 @@ export interface SourceContent {
   /** Additional retained representations never replace the captured object. */
   representations?: SourceRepresentation[];
   mediaType?: string;
-  captureDisposition: "complete" | "partial" | "metadata-only" | "inaccessible" | "failed" | "reference-only";
+  captureDisposition: KnowledgeCaptureDisposition;
   /** Sanitized capture phase/reason for recoverable provider or safety failures. */
   captureReason?: string;
   /** Bounded provider-declared outbound targets; target sources are separate records. */
@@ -386,6 +387,38 @@ export interface KnowledgeListRequest {
   sourceAdmission?: SourceAdmission;
   cursor?: string;
   limit?: number;
+  /** Library row projection: bounded presentation fields instead of full
+   * records. Valid only with `kind: "source"`. */
+  projection?: "sourceRow";
+  /** Exact row identities for a targeted refresh; row projection only. */
+  ids?: string[];
+}
+
+/** One library row. Source text and raw bytes are never part of a page: they
+ * stay behind an exact `knowledge.read`/`knowledge.object.read`. */
+export interface KnowledgeSourceRow {
+  id: string;
+  revisionId: string;
+  scope: KnowledgeScope;
+  createdAt: string;
+  updatedAt: string;
+  title: string;
+  /** Canonical captured URI. */
+  uri?: string;
+  /** User-facing original link: the requested URI recorded for this exact
+   * saved-item identity in origin provenance, else the canonical URI. */
+  originalUri?: string;
+  mediaType?: string;
+  captureDisposition: KnowledgeCaptureDisposition;
+  admission?: SourceAdmission;
+  sourceSavedAt?: string;
+  /** Never present for connector providers whose legacy save time was once
+   * misfiled as publication time. */
+  sourcePublishedAt?: string;
+  preview?: KnowledgeObjectRef;
+  /** Generated summary text, present only while its evidence digest still
+   * matches the record's title and readable text. Bounded for row display. */
+  summary?: string;
 }
 
 export interface KnowledgeListResponse {
@@ -393,6 +426,20 @@ export interface KnowledgeListResponse {
   nextCursor?: string;
   stateRevision: number;
   incomplete?: boolean;
+}
+
+/** `knowledge.list` with `projection: "sourceRow"`. */
+export interface KnowledgeSourceRowListResponse {
+  rows: KnowledgeSourceRow[];
+  nextCursor?: string;
+  stateRevision: number;
+}
+
+/** `knowledge.search` with `projection: "sourceRow"`. */
+export interface KnowledgeSourceRowSearchResponse {
+  rows: KnowledgeSourceRow[];
+  nextCursor?: string;
+  stateRevision: number;
 }
 
 export interface KnowledgeSearchRequest {
@@ -404,6 +451,9 @@ export interface KnowledgeSearchRequest {
   /** Optional server-side partition for source search projections. */
   sourceAdmission?: SourceAdmission;
   limit?: number;
+  /** Library row projection; see `KnowledgeListRequest.projection`. */
+  projection?: "sourceRow";
+  cursor?: string;
 }
 
 export interface KnowledgeSearchHit {
@@ -414,6 +464,7 @@ export interface KnowledgeSearchHit {
 
 export interface KnowledgeSearchResponse {
   hits: KnowledgeSearchHit[];
+  nextCursor?: string;
   stateRevision: number;
   indexState: "canonical";
   incomplete?: boolean;
@@ -680,11 +731,26 @@ export interface KnowledgeObjectReadRequest {
 }
 export interface KnowledgeCoverageDismissRequest { commandId: string; coverageId: string; expectedRevision: string; }
 
+/** Bounded batch of exact preview references. Each item is authorized by its
+ * own record revision; one item's failure never fails the batch. */
+export interface KnowledgePreviewBatchRequest {
+  items: Array<Pick<KnowledgeObjectReadRequest, "recordId" | "revisionId" | "hash" | "mediaType" | "bytes">>;
+  includeArchived?: boolean;
+}
+export interface KnowledgePreviewBatchItem {
+  recordId: string;
+  hash: string;
+  base64?: string;
+  unavailable?: "forbidden" | "missing" | "too-large";
+}
+export interface KnowledgePreviewBatchResponse { items: KnowledgePreviewBatchItem[] }
+
 export type KnowledgeAction =
   | { operation: "knowledge.status"; request: Record<string, never> }
   | { operation: "knowledge.observation.coverage"; request: KnowledgeCoverageRequest }
   | { operation: "knowledge.observation.dismiss"; request: KnowledgeCoverageDismissRequest }
   | { operation: "knowledge.object.read"; request: KnowledgeObjectReadRequest }
+  | { operation: "knowledge.previews.read"; request: KnowledgePreviewBatchRequest }
   | { operation: "knowledge.config"; request: { commandId: string; config: KnowledgeConfig } }
   | { operation: "knowledge.list"; request: KnowledgeListRequest }
   | { operation: "knowledge.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean; includeArchived?: boolean; includePending?: boolean; offset?: number } }

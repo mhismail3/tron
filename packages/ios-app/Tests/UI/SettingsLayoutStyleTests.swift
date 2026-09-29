@@ -106,7 +106,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let model = AppModel(client: client, cache: SnapshotCache(root: root))
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
         do {
             try await model.connectHostedGateway(profile: GatewayProfile(id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
                 machineId: "machine", deviceId: "device"), token: "token")
@@ -152,7 +152,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
             let model = AppModel(client: client, cache: SnapshotCache(root: root))
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("hello"), "gatewayVersion": .string("1.0.0"), "piVersion": .string("1.0.0"),
-                "protocolVersion": .number(5), "minProtocolVersion": .number(5), "machineId": .string("machine"),
+                "protocolVersion": .number(6), "minProtocolVersion": .number(6), "machineId": .string("machine"),
                 "machineName": .string("Mac"), "gatewayChannel": .string("stable"),
                 "capabilities": .array(capabilities.map(JSONValue.string)),
             ])))
@@ -201,7 +201,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
         let model = AppModel(client: client, cache: SnapshotCache(root: root))
         await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("hello"), "gatewayVersion": .string("1.0.0"), "piVersion": .string("1.0.0"),
-            "protocolVersion": .number(5), "minProtocolVersion": .number(5), "machineId": .string("machine"),
+            "protocolVersion": .number(6), "minProtocolVersion": .number(6), "machineId": .string("machine"),
             "machineName": .string("Mac"), "gatewayChannel": .string("stable"),
             "capabilities": .array([.string("sessions.v1")]),
         ])))
@@ -260,7 +260,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
         let model = AppModel(client: client, cache: SnapshotCache(root: root))
         await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("hello"), "gatewayVersion": .string("1.0.0"), "piVersion": .string("1.0.0"),
-            "protocolVersion": .number(5), "minProtocolVersion": .number(5), "machineId": .string("machine"),
+            "protocolVersion": .number(6), "minProtocolVersion": .number(6), "machineId": .string("machine"),
             "machineName": .string("Mac"), "gatewayChannel": .string("stable"),
             "capabilities": .array([.string("sessions.v1"), .string("hooks.v1")]),
         ])))
@@ -315,7 +315,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
         let model = AppModel(client: client, cache: SnapshotCache(root: root))
         await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("hello"), "gatewayVersion": .string("1.0.0"), "piVersion": .string("1.0.0"),
-            "protocolVersion": .number(5), "minProtocolVersion": .number(5), "machineId": .string("machine"),
+            "protocolVersion": .number(6), "minProtocolVersion": .number(6), "machineId": .string("machine"),
             "machineName": .string("Mac"), "gatewayChannel": .string("stable"),
             "capabilities": .array([.string("sessions.v1")]),
         ])))

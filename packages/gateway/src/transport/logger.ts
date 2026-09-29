@@ -30,6 +30,13 @@ export interface LogRecord {
   payloadVersion?: string;
   sessionId?: string;
   connectionId?: string;
+  /** The phone's hello correlation key (O-1): joins its records to this connection. */
+  peerClientId?: string;
+  peerAttemptId?: string;
+  peerEpoch?: string;
+  /** The protocol version a refused hello asked for (`http.upgrade`,
+   * `reason=protocol_mismatch`): names the stale side of a version mismatch. */
+  peerProtocolVersion?: number;
   commandId?: string;
   /** A named lifecycle step, such as a startup checkpoint. */
   step?: string;
@@ -40,6 +47,31 @@ export interface LogRecord {
   code?: string;
   reason?: string;
   durationMs?: number;
+  /** The request span's compact stage breakdown, one bounded string. */
+  stages?: string;
+  /** The measured stage a request was in at one instant, e.g. the stage a
+   * cancellation interrupted (`rpc.cancelled`). */
+  stage?: string;
+  /** The part of `durationMs` no named stage accounted for. */
+  unaccountedMs?: number;
+  /** How far an upgrade got: `request`, `auth`, `handshake` or `hello`. */
+  phaseReached?: string;
+  /** Upgrade phase durations, in the order they run (`http.upgrade`). */
+  acceptToUpgradeMs?: number;
+  authMs?: number;
+  handshakeMs?: number;
+  helloMs?: number;
+  /** The peer's Tailscale path at an inbound-silence episode (`connection.inbound-silent`). */
+  peerPath?: string;
+  peerRelay?: string;
+  /** The listener a connection reached: `lan`, `tailscale` or `primary`
+   * (`http.upgrade`). The phone names the two real legs it races the same way. */
+  transport?: string;
+  /** How long the socket had been silent when it spoke again. */
+  silentMs?: number;
+  /** Named counters for one record (a reconcile's files and rows): the writer
+   * bounds how many, their names and their values. */
+  counts?: Record<string, number>;
   error?: LogError;
 }
 
@@ -48,6 +80,10 @@ export interface LogMetadata {
   source?: string;
   sessionId?: string;
   connectionId?: string;
+  peerClientId?: string;
+  peerAttemptId?: string;
+  peerEpoch?: string;
+  peerProtocolVersion?: number;
   commandId?: string;
   step?: string;
   requestID?: string;
@@ -56,8 +92,38 @@ export interface LogMetadata {
   code?: string;
   reason?: string;
   durationMs?: number;
+  /** `name=12ms×2/610KB;name=5ms`; the writer bounds it. */
+  stages?: string;
+  /** The measured stage a request was in at one instant, e.g. the stage a
+   * cancellation interrupted (`rpc.cancelled`). */
+  stage?: string;
+  /** The part of `durationMs` the stage breakdown did not cover. */
+  unaccountedMs?: number;
+  phaseReached?: string;
+  /** The admission a capacity shed refused (`gateway.shed` with `reason=heap`):
+   * a cold runtime load (`open`) or a JSONL import. A deadline shed names its
+   * `method` instead. */
+  admission?: string;
+  acceptToUpgradeMs?: number;
+  authMs?: number;
+  handshakeMs?: number;
+  helloMs?: number;
+  peerPath?: string;
+  peerRelay?: string;
+  /** The listener a connection reached; the `transport` field of `http.upgrade`. */
+  transport?: string;
+  silentMs?: number;
+  /** Named integer counters, e.g. `{ files: 12, added: 1 }`. */
+  counts?: Readonly<Record<string, number>>;
   /** Any thrown value; the writer bounds and redacts it. */
   error?: unknown;
+}
+
+/** One duration field: finite, non-negative, rounded, never NaN in a record. */
+function durationField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value)))
+    : undefined;
 }
 
 export interface LoggerIdentity {
@@ -74,9 +140,19 @@ const DEBUG_BUFFER_MAX_BYTES = 2 * 1_024 * 1_024;
 const SEGMENT_MAX_BYTES = 5 * 1_024 * 1_024;
 const SEGMENT_COUNT = 8;
 const MAX_MESSAGE_BYTES = 2_000;
+/** A stage breakdown is read as one line beside the record it explains; past
+ * this it stops naming stages rather than crowding the other fields. Wide
+ * enough for a cold open's ~260-byte breakdown with room for a nested catalog
+ * walk. */
+const MAX_STAGES_BYTES = 1_024;
 const MAX_ERROR_MESSAGE_BYTES = 1_000;
 const MAX_STACK_BYTES = 4_000;
 const MAX_FIELD_CHARS = 160;
+/** A record names a handful of counters; more would make the field a payload. */
+const MAX_COUNT_FIELDS = 16;
+/** A counter name is a short identifier: the shape check below already rejects
+ * anything but letters and digits, so only its length needs bounding. */
+const MAX_COUNT_NAME_CHARS = 32;
 const PERSISTED_LEVELS: ReadonlySet<LogLevel> = new Set(["info", "warning", "error"]);
 
 /** The one redaction rule set. Every writer applies it at its write boundary,
@@ -100,8 +176,26 @@ export function boundedMessage(value: string): string {
   return boundedBytes(redact(value), MAX_MESSAGE_BYTES);
 }
 
+/** Named counters are fields a reader can aggregate, so their names are short
+ * plain identifiers and their values are bounded integers. */
+function boundedCounts(value: Readonly<Record<string, number>>): Record<string, number> {
+  const bounded: Record<string, number> = {};
+  for (const [name, count] of Object.entries(value)) {
+    if (Object.keys(bounded).length >= MAX_COUNT_FIELDS) break;
+    if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(name) || !Number.isFinite(count)) continue;
+    bounded[name.slice(0, MAX_COUNT_NAME_CHARS)] = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(count)));
+  }
+  return bounded;
+}
+
 function boundedDiagnosticID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, MAX_FIELD_CHARS);
+}
+
+/** The stage breakdown keeps its `=`, `;`, `×` and `/` separators, so it is
+ * bounded by bytes and redacted like a message, not diagnostic-ID-escaped. */
+function boundedStages(value: string): string {
+  return boundedBytes(redact(value), MAX_STAGES_BYTES);
 }
 
 // Payload and home prefixes are shortened before the standard redaction, which
@@ -150,11 +244,22 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
   const error = value.error === undefined
     ? undefined
     : errorIsDescribed ? boundedError(value.error) : describeError(value.error);
+  const durationMs = durationField(value.durationMs);
+  const unaccountedMs = durationField(value.unaccountedMs);
+  const acceptToUpgradeMs = durationField(value.acceptToUpgradeMs);
+  const authMs = durationField(value.authMs);
+  const handshakeMs = durationField(value.handshakeMs);
+  const helloMs = durationField(value.helloMs);
+  const silentMs = durationField(value.silentMs);
   return {
     ...(typeof value.event === "string" ? { event: boundedMessage(value.event).slice(0, MAX_FIELD_CHARS) } : {}),
     ...(typeof value.source === "string" ? { source: boundedMessage(value.source).slice(0, 64) } : {}),
     ...(typeof value.sessionId === "string" ? { sessionId: boundedDiagnosticID(value.sessionId) } : {}),
     ...(typeof value.connectionId === "string" ? { connectionId: boundedDiagnosticID(value.connectionId) } : {}),
+    ...(typeof value.peerClientId === "string" ? { peerClientId: boundedDiagnosticID(value.peerClientId) } : {}),
+    ...(typeof value.peerAttemptId === "string" ? { peerAttemptId: boundedDiagnosticID(value.peerAttemptId) } : {}),
+    ...(typeof value.peerEpoch === "string" ? { peerEpoch: boundedDiagnosticID(value.peerEpoch) } : {}),
+    ...(Number.isSafeInteger(value.peerProtocolVersion) ? { peerProtocolVersion: value.peerProtocolVersion } : {}),
     ...(typeof value.commandId === "string" ? { commandId: boundedDiagnosticID(value.commandId) } : {}),
     ...(typeof value.step === "string" ? { step: boundedDiagnosticID(value.step).slice(0, 64) } : {}),
     ...(typeof value.requestID === "string" ? { requestID: boundedDiagnosticID(value.requestID) } : {}),
@@ -162,9 +267,20 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
     ...(typeof value.reason === "string" ? { reason: boundedDiagnosticID(value.reason).slice(0, 64) } : {}),
     ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
-    ...(typeof value.durationMs === "number" && Number.isFinite(value.durationMs)
-      ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.durationMs))) }
-      : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(typeof value.stages === "string" ? { stages: boundedStages(value.stages) } : {}),
+    ...(typeof value.stage === "string" ? { stage: boundedDiagnosticID(value.stage).slice(0, 64) } : {}),
+    ...(unaccountedMs !== undefined ? { unaccountedMs } : {}),
+    ...(typeof value.phaseReached === "string" ? { phaseReached: boundedDiagnosticID(value.phaseReached).slice(0, 32) } : {}),
+    ...(acceptToUpgradeMs !== undefined ? { acceptToUpgradeMs } : {}),
+    ...(authMs !== undefined ? { authMs } : {}),
+    ...(handshakeMs !== undefined ? { handshakeMs } : {}),
+    ...(helloMs !== undefined ? { helloMs } : {}),
+    ...(typeof value.peerPath === "string" ? { peerPath: boundedDiagnosticID(value.peerPath).slice(0, 32) } : {}),
+    ...(typeof value.peerRelay === "string" ? { peerRelay: boundedDiagnosticID(value.peerRelay).slice(0, 32) } : {}),
+    ...(typeof value.transport === "string" ? { transport: boundedDiagnosticID(value.transport).slice(0, 32) } : {}),
+    ...(silentMs !== undefined ? { silentMs } : {}),
+    ...(value.counts ? { counts: boundedCounts(value.counts) } : {}),
     ...(error ? { error } : {}),
   };
 }

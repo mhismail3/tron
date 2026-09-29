@@ -200,11 +200,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         refreshDebugGatewayState()
         Task { [weak self] in
             guard let self else { return }
-            let freshSnapshot = await ServerStatusPoller.singleSnapshot(setup: self.setup)
+            let freshSnapshot = await self.explicitStatusSnapshot()
             await MainActor.run {
                 self.applyPolledSnapshot(freshSnapshot)
             }
         }
+    }
+
+    /// The full fail-closed probe for an explicit user action (menu open, or a
+    /// post-action refresh). It shares the poller's admission cache, so a
+    /// failure it finds is recorded and cannot be overwritten by the next 30 s
+    /// cycle's reused admission.
+    func explicitStatusSnapshot() async -> ServerStatusSnapshot {
+        await poller.explicitSnapshot()
     }
 
     func showPairingInfoWindow() {

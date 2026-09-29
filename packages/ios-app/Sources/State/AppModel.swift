@@ -242,6 +242,10 @@ final class AppModel {
     let automationCatalog: AutomationCatalogCoordinator
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.
     let knowledge: KnowledgeRPCClient
+    /// The Library's bounded first-page projection and its preview images. Both
+    /// are disposable and neither is a second authority for the corpus.
+    let knowledgeLibraryCache: KnowledgeLibraryPageCache
+    let knowledgePreviews: KnowledgePreviewStore
     /// Read-side projections and owner-routed connection-instance mutations.
     let integrations: IntegrationsRPCClient
     private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
@@ -298,6 +302,10 @@ final class AppModel {
     /// Gateway-broadcast knowledge mutations invalidate dashboard reads without
     /// introducing a dashboard-owned polling loop.
     private(set) var knowledgeInvalidationRevision = 0
+    /// The typed change carried by the latest broadcast, when the Gateway sent
+    /// one. Absent means the client cannot reason about the revision and must
+    /// refresh rather than patch rows.
+    private(set) var latestKnowledgeChange: KnowledgeChanged?
     var workspace: WorkspaceListing?
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
@@ -514,7 +522,8 @@ final class AppModel {
             pairer: pairer,
             pairingCommit: resolvedPairingCommit,
             pairingCommitWithoutSelection: resolvedPairingCommitWithoutSelection,
-            profileTokenLookup: resolvedProfileTokenLookup
+            profileTokenLookup: resolvedProfileTokenLookup,
+            appLog: appLog
         )
         let mutationExecutor = ConfirmedMutationExecutor(
             client: client,
@@ -645,6 +654,12 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
+        let knowledgeLibraryCache = KnowledgeLibraryPageCache()
+        let knowledgePreviews = KnowledgePreviewStore(
+            loadBatch: { requests, includeArchived in
+                try await knowledge.readPreviews(requests, includeArchived: includeArchived)
+            }
+        )
         let integrations = IntegrationsRPCClient(
             request: { method, params in
                 try await client.requestValue(method, params)
@@ -684,6 +699,8 @@ final class AppModel {
         self.dashboardConnections = dashboardConnections
         self.automationCatalog = automationCatalog
         self.knowledge = knowledge
+        self.knowledgeLibraryCache = knowledgeLibraryCache
+        self.knowledgePreviews = knowledgePreviews
         self.integrations = integrations
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
@@ -1114,6 +1131,18 @@ final class AppModel {
         } else {
             dashboardConnections.retry(profileID: profile.id)
         }
+    }
+
+    /// A workspace read that failed because the transport was unavailable asks
+    /// recovery for one immediate attempt on the selected profile. The scene did
+    /// not move, so this is not a scene activation: it writes no scene record,
+    /// mints no navigation activation, and runs no foreground reconciliation. It
+    /// only revives recovery the lifecycle already owns: a parked
+    /// `offline`/`reconnecting`/`restarting` route. A rejected credential, a
+    /// connecting route and a live connection are left exactly as they are, so a
+    /// failed read can never change reconnect behaviour.
+    func recoverTransientTransportFailure() {
+        lifecycle.requestTransportRecovery()
     }
 
     func sessionPresentationGeneration(for sessionID: String) -> Int? {
@@ -1670,7 +1699,14 @@ final class AppModel {
         surface(error)
     }
 
-    func start(sceneIsActive: Bool = true) async {
+    func start(scenePhase: AppScenePhase = .active) async {
+        // The launch phase is the scene's real starting point: a cold launch into
+        // the background must not later report `from=active`, and a backgrounded
+        // launch must not be labelled a foreground transition. Seed it before
+        // the first await, so a scene change during startup cannot be overwritten
+        // by the phase the launch sampled, and only while the scene has not
+        // moved yet.
+        seedLaunchScenePhase(scenePhase)
         await client.installAppLog(appLog)
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
@@ -1678,8 +1714,8 @@ final class AppModel {
             name: "app.started", outcome: "success",
             details: "appVersion=\(appVersion) build=\(build) os=\(ProcessInfo.processInfo.operatingSystemVersionString)"
         )
-        sceneAllowsCatalogRefresh = sceneIsActive
-        pushNavigationActivationReady = sceneIsActive
+        sceneAllowsCatalogRefresh = scenePhase.isActive
+        pushNavigationActivationReady = scenePhase.isActive
         await lifecycle.start()
         didStart = true
         if sceneAllowsCatalogRefresh {
@@ -1688,7 +1724,7 @@ final class AppModel {
     }
 
     func becameInactive() {
-        Task { await appLog.recordCausal(name: "app.backgrounded", outcome: "success"); await appLog.flush() }
+        recordSceneTransition(to: .inactive, flush: true)
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
@@ -1704,7 +1740,7 @@ final class AppModel {
         pushNavigationActivationGeneration &+= 1
         let activationGeneration = pushNavigationActivationGeneration
         noticeCenter.setBackgrounded(false)
-        Task { await appLog.recordCausal(name: "app.foregrounded", outcome: "success") }
+        recordSceneTransition(to: .active)
         let requiresRetirementBarrier = lifecycle.routeActivationRequiresRetirementBarrier
         let lifecycleTask = lifecycle.becameActive()
         return Task { @MainActor [weak self] in
@@ -1723,8 +1759,70 @@ final class AppModel {
         }
     }
 
+    /// The app's scene phase. One type names the phase a scene record moved `from`
+    /// and the phase it moved to, including the launch phase, which the scene
+    /// reports through its first callback rather than through a transition.
+    enum AppScenePhase: String, Sendable {
+        case active
+        case inactive
+        case background
+
+        var isActive: Bool { self == .active }
+    }
+
+    @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
+    /// Whether `recordedSceneTransition` came from a real transition. The launch
+    /// seed may only fill in the scene's starting point while nothing has moved:
+    /// a transition that arrived during startup is newer than the phase the
+    /// launch sampled, and overwriting it would suppress the next record.
+    @ObservationIgnored private var hasRecordedSceneTransition = false
+    /// Scene records are chained so their order in the log is the order the
+    /// scene moved, not the order three tasks happened to reach the log actor.
+    @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
+
+    /// Records the scene's own transitions once, at the instant each happened.
+    /// `.inactive` arriving from `.background` is the scene re-entering the
+    /// foreground, not the app backgrounding; recording that as
+    /// `app.backgrounded` is why exports showed a background immediately before
+    /// a resume. The scene timestamp travels with the record because the log's
+    /// own write time can trail the transition.
+    /// Seeds the scene's starting point from the phase the launch observed,
+    /// writing no record: the launch phase is where the scene starts, not a
+    /// transition. A transition that already happened wins over the seed.
+    private func seedLaunchScenePhase(_ phase: AppScenePhase) {
+        guard !hasRecordedSceneTransition else { return }
+        recordedSceneTransition = phase
+    }
+
+    private func recordSceneTransition(to transition: AppScenePhase, flush: Bool = false) {
+        // Every observed transition spends the launch seed, including one that
+        // matches the phase already recorded: the scene has moved on its own, so
+        // the phase the launch sampled is stale and must not overwrite it.
+        hasRecordedSceneTransition = true
+        guard transition != recordedSceneTransition else { return }
+        let previous = recordedSceneTransition
+        recordedSceneTransition = transition
+        let event = switch (previous, transition) {
+        case (_, .active): "scene.active"
+        case (_, .background): "scene.background"
+        case (.background, .inactive): "scene.foreground"
+        case (_, .inactive): "scene.resign-active"
+        }
+        let sceneAt = GatewayTimestamp.preciseString(from: Date())
+        let previousRecord = sceneRecordTask
+        sceneRecordTask = Task {
+            await previousRecord?.value
+            await appLog.recordCausal(
+                name: event, outcome: "success",
+                details: "sceneAt=\(sceneAt) from=\(previous.rawValue)"
+            )
+            if flush { await appLog.flush() }
+        }
+    }
+
     @discardableResult
     func enteredBackground() -> Task<Void, Never> {
+        recordSceneTransition(to: .background, flush: true)
         sceneAllowsCatalogRefresh = false
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
@@ -1744,6 +1842,9 @@ final class AppModel {
         sessionCatalog.markDisconnected()
         let draftCheckpoint = composerDrafts.checkpointDrafts()
         lifecycle.enteredBackground()
+        // Intervals still open when the scene retires end as `backgrounded`, not
+        // as the failure their eventual cancellation would otherwise report.
+        performanceSignposts.endOpenIntervalsAtBackground()
         catalogInvalidationGeneration &+= 1
         cancelCatalogRefresh()
         // Provider login is stable-device-owned on the Gateway. Retire only
@@ -1860,6 +1961,13 @@ final class AppModel {
         setGatewayEnabled(false, profile: profile)
     }
 
+    /// Disposable per-Gateway projections retire with the Gateway itself.
+    private func forgetProfileCaches(_ profileID: String) async {
+        await composerDrafts.removeProfile(profileID).value
+        await cache.remove(profileID: profileID)
+        await knowledgeLibraryCache.remove(profileID: profileID)
+    }
+
     func forgetGateway(_ profile: GatewayProfile) async {
         if profiles.selected?.id == profile.id {
             await forgetCurrentGateway()
@@ -1867,8 +1975,7 @@ final class AppModel {
         }
         do {
             try profiles.remove(profile)
-            await composerDrafts.removeProfile(profile.id).value
-            await cache.remove(profileID: profile.id)
+            await forgetProfileCaches(profile.id)
             profileRevision &+= 1
             reconcileDashboardConnections()
         } catch {
@@ -1880,8 +1987,7 @@ final class AppModel {
         let forgottenProfileID = profiles.selected?.id
         if await lifecycle.forgetCurrentGateway() {
             if let forgottenProfileID {
-                await composerDrafts.removeProfile(forgottenProfileID).value
-                await cache.remove(profileID: forgottenProfileID)
+                await forgetProfileCaches(forgottenProfileID)
             }
             profileRevision &+= 1
             reconcileDashboardConnections()
@@ -2216,7 +2322,10 @@ final class AppModel {
     ) async -> CatalogTraversalResult {
         let admission = sessionCatalog.beginLoad(key: key)
         do {
-            let loaded = try await SessionCatalogLoader.load(client: client) {
+            let loaded = try await SessionCatalogLoader.load(
+                client: client,
+                sinceToken: sessionCatalog.projectionToken
+            ) {
                 self.admitsCatalogRefresh(key: key, requestGeneration: requestGeneration)
                     && self.sessionCatalog.admits(admission, key: key)
             }
@@ -2225,10 +2334,11 @@ final class AppModel {
                 return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
             }
             switch loaded {
-            case let .loaded(rows, pageCount, revision, archivedCount):
+            case let .loaded(rows, pageCount, revision, projectionToken, archivedCount):
                 guard sessionCatalog.publishAuthoritative(
                     rows,
                     admission: admission,
+                    projectionToken: projectionToken,
                     archivedCount: archivedCount
                 ) else {
                     return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
@@ -2243,6 +2353,30 @@ final class AppModel {
                     outcome: .published,
                     genuineFailure: false,
                     pageCount: pageCount,
+                    revision: revision
+                )
+            case let .unchanged(revision):
+                // The Gateway confirmed these rows. Nothing is republished, so
+                // selection, scroll and chat identity are untouched; the
+                // traversal still counts as a complete authoritative read.
+                // A confirmation that revives a retired projection must still
+                // rebuild the dashboard's row snapshot: the view derives a
+                // row's activity from the catalog's liveness, so a snapshot
+                // taken while the projection was retired has every non-idle
+                // row reading "resuming". A page read rebuilds it, and this
+                // answer does the same without touching the rows themselves.
+                let wasLive = sessionCatalog.freshness == .live
+                guard sessionCatalog.confirmUnchanged(admission: admission) else {
+                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+                }
+                if !wasLive {
+                    installSelectedDashboardCatalog()
+                    archiveProjectionRevision &+= 1
+                }
+                return CatalogTraversalResult(
+                    outcome: .published,
+                    genuineFailure: false,
+                    pageCount: 0,
                     revision: revision
                 )
             case let .revisionMoved(pageCount, revision):
@@ -2959,8 +3093,7 @@ final class AppModel {
             pairedDevices.removeAll { $0.id == id }
             if let profile = profiles.selected, profile.deviceId == id,
                await lifecycle.forget(profile: profile) {
-                await composerDrafts.removeProfile(profile.id).value
-                await cache.remove(profileID: profile.id)
+                await forgetProfileCaches(profile.id)
                 profileRevision &+= 1
                 reconcileDashboardConnections()
                 setupComplete = false
@@ -3435,11 +3568,15 @@ final class AppModel {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            // The presentation owner rewords a typed open failure as its own
+            // `sync_failed`, so this record carries both: the phone-side wording
+            // in `code`, and `gatewayCode` for what the Gateway itself answered
+            // (`conflict`, `busy`, …) when it answered at all.
             await appLog.recordCausal(
                 name: "session.open.failure", outcome: "failure",
                 profileID: profileID, connectionID: admission.connectionID,
                 lifecycleGeneration: admission.generation, level: "warning",
-                details: "code=\(GatewayDiagnosticFailure.code(error))"
+                details: "code=\(GatewayDiagnosticFailure.answerCode(error)) gatewayCode=\(sessionPresentation.openingFailureGatewayCode(sessionID: id) ?? "none")"
             )
             throw error
         }
@@ -4439,10 +4576,11 @@ final class AppModel {
         recordEventConsumer(category: "session", phase: phase, duration: duration)
     }
 
-    func lifecycleNotePathHint(satisfied: Bool) {
-        lifecycle.notePathHint(satisfied: satisfied)
+    func lifecycleNotePathHint(satisfied: Bool, signature: String? = nil) {
+        lifecycle.notePathHint(satisfied: satisfied, signature: signature)
         // Path facts are advisory projections for every admitted secondary;
-        // each pool entry applies its own profile/generation fence.
+        // each pool entry applies its own profile/generation fence. The pool's
+        // own gate is the satisfied/unsatisfied transition.
         let selectedID = profiles.selected?.id
         for profile in profiles.profiles where profile.id != selectedID {
             dashboardConnections.notePathHint(profileID: profile.id, satisfied: satisfied)
@@ -4566,6 +4704,7 @@ final class AppModel {
             automationCatalog.invalidate()
         case "knowledge.changed":
             knowledgeInvalidationRevision &+= 1
+            latestKnowledgeChange = { if case .knowledgeChanged(let change) = event.preparation { return change }; return nil }()
         case "packages.progress", "packages.completed":
             let completed = event.topic == "packages.completed"
             let succeeded = event.payload.objectValue?["success"]?.boolValue == true
@@ -4639,6 +4778,29 @@ final class AppModel {
         } catch {
             // Group identity is a presentation-side safety hint. Keep the
             // authenticated runtime usable if metadata repair is unavailable.
+            surface(error)
+        }
+    }
+
+    /// Store the LAN endpoints and pin the hello advertised with the profile
+    /// this connection is authenticated for (E-3b). The hello is the only
+    /// source of `GatewayInfo`, so every connect and reconnect refreshes them:
+    /// a Mac whose private address moved, or whose lane was switched off,
+    /// corrects the stored profile before the LAN race (E-3c) can dial a stale
+    /// endpoint. The admission that gates this call already fences the
+    /// connection to the selected profile, so no machine identity precondition
+    /// is needed here.
+    private func adoptConnectedGatewayLanAdvertising() {
+        guard let profile = profiles.selected, let info = gatewayInfo else { return }
+        do {
+            try profiles.adoptLanAdvertising(
+                endpoints: info.lanEndpoints,
+                pin: info.lanPin,
+                for: profile.id
+            )
+        } catch {
+            // The advertisement is an optimization over the saved endpoint.
+            // Keep the authenticated runtime usable if metadata repair fails.
             surface(error)
         }
     }
@@ -5078,7 +5240,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         if event == "reconnect.failure" || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()
         }
-        let recordedEvents = ["scene.foreground", "scene.background", "reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "path.changed", "detail.tap", "detail.preparation"]
+        let recordedEvents = ["reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "reconnect.parked", "reconnect.parked-resume", "reconnect.skipped", "path.changed", "detail.tap", "detail.preparation"]
         guard recordedEvents.contains(event) else { return }
         iosClientDiagnostics.recordLifecycle(
             event: "gateway.lifecycle",
@@ -5132,6 +5294,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard !Task.isCancelled, admitsLifecycle(admission) else { return }
         adoptConnectedGatewayIdentity()
+        // No revision is bumped for the advertisement: nothing presents it yet,
+        // and the profile's dial endpoint did not change.
+        adoptConnectedGatewayLanAdvertising()
         // Catalog and inbox reads can begin as soon as the transport is ready;
         // provider, settings, and device reads wait for mounted-chat restoration.
         optionalReconnectRefreshTask?.cancel()
@@ -5263,7 +5428,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
 
         invalidateProfileScopedLoads()
-        dashboardConnections.retire()
+        // A profile switch, pairing or teardown retires the pool's projections
+        // because the transition stopped them, not because the scene did.
+        dashboardConnections.retire(endedBy: .stopped)
         notificationInbox.cancelRefreshes()
         await dashboardConnections.waitForRetirement()
         invalidateSessionConnectionOwnership()

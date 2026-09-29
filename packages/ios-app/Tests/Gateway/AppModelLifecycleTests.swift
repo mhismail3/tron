@@ -156,7 +156,7 @@ struct PushNavigationLifecycleRaceTests {
         do {
             try await withTestWatchdog {
                 try await Task { @MainActor in
-                    let starting = Task { await model.start(sceneIsActive: true) }
+                    let starting = Task { await model.start(scenePhase: .active) }
                     defer { starting.cancel() }
                     try await sockets[0].waitUntilSent(count: 1)
 
@@ -318,6 +318,38 @@ struct AppModelLifecycleTests {
         }
     }
 
+    @Test("a hello's LAN advertisement replaces what the paired profile stored")
+    func helloAdoptsLanAdvertising() async throws {
+        try await withFixture(socketCount: 1) { fixture in
+            let pin = "JEmgCK6cjn6zQe6FLvuOu2GErCFbEldD4cViMU8odVc="
+            let connecting = Task {
+                try await fixture.model.connectHostedGateway(
+                    profile: fixture.initialProfile,
+                    token: "token"
+                )
+            }
+            defer { connecting.cancel() }
+            try await fixture.sockets[0].waitUntilSent(count: 1)
+            await fixture.sockets[0].enqueue(helloFrame(
+                endpoints: [(host: "fd00::4", port: 9_847)],
+                pin: pin
+            ))
+            _ = try await connecting.value
+
+            // A hosted connect installs the transport only; the projection the
+            // real lifecycle runs under every connect is invoked here.
+            let connectionID = try #require(await fixture.client.activeConnectionID())
+            await fixture.model.lifecycleRefreshAll(
+                admission: .init(generation: 0, connectionID: connectionID)
+            )
+
+            let stored = try #require(fixture.store.selected)
+            #expect(stored.lanEndpoints.map(\.host) == ["fd00::4"])
+            #expect(stored.lanEndpoints.map(\.port) == [9_847])
+            #expect(stored.lanPin == pin)
+        }
+    }
+
     @Test("revoking the current device uses the same awaited lifecycle boundary")
     func currentDeviceRevokeOwnsShutdown() async throws {
         try await withFixture(socketCount: 1) { fixture in
@@ -408,12 +440,80 @@ struct AppModelLifecycleTests {
         }
     }
 
+    @Test("scene transitions are recorded once, and a resume is not a backgrounding")
+    func sceneTransitionsAreRecordedOnce() async throws {
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "scene-records-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(socketCount: 1, appLog: appLog) { fixture in
+            // Backgrounding: the inactive phase is a resignation, not a background.
+            fixture.model.becameInactive()
+            _ = fixture.model.enteredBackground()
+            // Resume: the scene reports inactive again on the way back, which
+            // must not be recorded as a background.
+            fixture.model.becameInactive()
+            fixture.model.becameActive()
+            // A repeated callback for the phase the model is already in is not
+            // a new transition.
+            fixture.model.becameActive()
+
+            let records = try await waitForSceneRecords(in: appLog, count: 4)
+            #expect(records.map(\.event) == [
+                "scene.resign-active", "scene.background", "scene.foreground", "scene.active",
+            ])
+            #expect(records.allSatisfy { $0.message.contains("sceneAt=") })
+            #expect(records[2].message.contains("from=background"))
+        }
+    }
+
+    @Test("a launch phase sampled after the scene already moved cannot suppress its next record")
+    func launchSeedDoesNotOverwriteAnObservedTransition() async throws {
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "scene-launch-seed-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(socketCount: 1, appLog: appLog) { fixture in
+            // The scene moved before the launch task reached its seed: SwiftUI
+            // delivered `.active` while startup was still sampling the launch
+            // phase. The stale sample must not become the recorded phase, or the
+            // resignation that follows is read as "no transition". The seed is
+            // read before `start()`'s first await, so the socket request proves
+            // it ran while the scene was already active.
+            fixture.model.becameActive()
+            let start = Task { await fixture.model.start(scenePhase: .inactive) }
+            defer { start.cancel() }
+            try await fixture.sockets[0].waitUntilSent(count: 1)
+            fixture.model.becameInactive()
+
+            let records = try await waitForSceneRecords(in: appLog, count: 1)
+            #expect(records.map(\.event) == ["scene.resign-active"])
+        }
+    }
+
+    private func waitForSceneRecords(in log: AppLog, count: Int) async throws -> [AppLogRecord] {
+        for _ in 0..<600 {
+            let values = await log.snapshot().filter { $0.event.hasPrefix("scene.") }
+            if values.count >= count { return values }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("timed out waiting for \(count) scene record(s)")
+        return await log.snapshot().filter { $0.event.hasPrefix("scene.") }
+    }
+
     private func withFixture(
         socketCount: Int,
         suspendsClose: Bool = false,
+        appLog: AppLog = .shared,
         operation: @escaping @MainActor @Sendable (LifecycleFixture) async throws -> Void
     ) async throws {
-        let fixture = makeFixture(socketCount: socketCount, suspendsClose: suspendsClose)
+        let fixture = makeFixture(socketCount: socketCount, suspendsClose: suspendsClose, appLog: appLog)
         do {
             try await withTestWatchdog {
                 try await operation(fixture)
@@ -425,7 +525,7 @@ struct AppModelLifecycleTests {
         await fixture.cleanup()
     }
 
-    private func makeFixture(socketCount: Int, suspendsClose: Bool) -> LifecycleFixture {
+    private func makeFixture(socketCount: Int, suspendsClose: Bool, appLog: AppLog = .shared) -> LifecycleFixture {
         let suiteName = "AppModelLifecycleTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -443,7 +543,8 @@ struct AppModelLifecycleTests {
             client: client,
             profiles: store,
             cache: SnapshotCache(root: cacheRoot),
-            profileTokenLookup: { profile in "token-for-\(profile.id)" }
+            profileTokenLookup: { profile in "token-for-\(profile.id)" },
+            appLog: appLog
         )
         return LifecycleFixture(
             suiteName: suiteName,
@@ -469,8 +570,18 @@ struct AppModelLifecycleTests {
         ]))
     }
 
-    private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+    private func helloFrame(
+        endpoints: [(host: String, port: Int)] = [],
+        pin: String? = nil
+    ) -> Data {
+        var frame: [String: Any] = [
+            "type": "hello", "gatewayVersion": "1.0.0", "piVersion": "1.0.0",
+            "protocolVersion": 6, "minProtocolVersion": 6, "machineId": "machine",
+            "machineName": "Mac", "gatewayChannel": "stable", "capabilities": ["sessions.v1"],
+            "lanEndpoints": endpoints.map { ["host": $0.host, "port": $0.port] },
+        ]
+        if let pin { frame["lanPin"] = pin }
+        return try! JSONSerialization.data(withJSONObject: frame)
     }
 
     private func profile(id: String, host: String) -> GatewayProfile {

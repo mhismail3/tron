@@ -1,6 +1,6 @@
 # Gateway events
 
-## Protocol v5 chat semantics
+## Protocol v6 chat semantics
 
 Session events are live invalidation hints; the authoritative snapshot and
 canonical Pi JSONL determine transcript order and lifecycle truth. Typed chat
@@ -100,7 +100,12 @@ admits and reduces mounted-session topics:
   profile event streams converge every dashboard; Gateway invalidates the catalog when it cannot
   broadcast a full summary rather than fabricating an unknown row. `session.listChanged` marks
   the shared traversal dirty instead of cancel/restarting it. User-scoped 500-row pagination
-  has named page/item/cursor bounds and publishes atomically. Mixed page revisions
+  has named page/item/cursor bounds and publishes atomically. A traversal whose connection already published a catalog projection
+  token re-reads it conditionally: the first page names that token and the Gateway answers `notModified` with no rows, so the
+  retained rows, selection, and scroll stay untouched and the traversal still counts as authoritative. The token spans the whole
+  projection — the Gateway runtime epoch, the structural revision and every mutable row overlay — so a replacement connection
+  revalidates the rows it already holds instead of reloading them, and a restarted Gateway whose revisions begin again at zero
+  can never confirm a pre-restart token. Mixed page revisions
   and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; a current connection retries failed catalog reads with the shared reconnect backoff and shows “Session list unavailable” after three consecutive failures without stopping retries. Invalidations coalesce with the current traversal. This expected
   optimistic invalidation no longer creates the intrusive “Sessions changed while loading the
   dashboard” in-app notification or another routine synchronization notice;
@@ -119,7 +124,7 @@ admits and reduces mounted-session topics:
   path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
   bounded queue projection (at most 32 authoritative items, including total attachment count and optional photo/file counts)
   and queue revision; queue updates therefore replace the visible
-  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v5 requires
+  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v6 requires
   both rich fields; iOS admits Edit/Remove only for that authoritative pair. A mutation response
   never rewrites queue projection locally: clear,
   edit, reorder, and remove keep controls inert until a strictly newer sequenced queue revision
@@ -368,7 +373,7 @@ Session subscription ownership is token-scoped end to end. The open response rem
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
 credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its
 already-drained contiguous event suffix then publish in one MainActor turn. The fitted tail mounts immediately regardless of its display-bearing count; earlier-page reads begin only from the mounted presentation and cannot make the conversation unavailable. A stale or failed
-attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v5
+attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v6
 peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,
 iOS clears context/tree/resource/command projections, invalidates their in-flight request generations,
 and advances all three public reload revisions before publishing the replacement. Secondary read successes

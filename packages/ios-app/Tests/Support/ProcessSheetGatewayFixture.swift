@@ -23,7 +23,7 @@ final class ProcessSheetGatewayFixture {
         try await waitForRequest(at: 0)
         await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("hello"), "gatewayVersion": .string("1"), "piVersion": .string("1"),
-            "protocolVersion": .number(5), "minProtocolVersion": .number(5),
+            "protocolVersion": .number(6), "minProtocolVersion": .number(6),
             "machineId": .string("fixture"), "machineName": .string("Fixture"),
             "gatewayChannel": .string("stable"), "capabilities": .array(capabilities.map(JSONValue.string)),
         ])))

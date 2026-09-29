@@ -53,7 +53,7 @@ final class KnowledgeModelsTests: XCTestCase {
             pairingCommit: { _, _ in }, profileTokenLookup: { _ in nil }
         )
         let executor = ConfirmedMutationExecutor(client: gateway, lifecycle: lifecycle, clock: .continuous, performanceSignposts: RecordingPerformanceSignposts())
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
         try await lifecycle.connectHosted(profile: GatewayProfile(id: "fixture", label: "Fixture", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device"), token: "token")
         let client = KnowledgeRPCClient(request: { method, parameters in
             try await gateway.requestValue(method, parameters)
@@ -475,12 +475,30 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertTrue(KnowledgeCatalogRequestFence.accepts(sources, current: sources))
     }
 
-    func testCataloguePaginationAllowsListContinuationButNotSearchPages() {
-        XCTAssertTrue(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", search: "", loadingMore: false))
-        XCTAssertTrue(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", search: "  \n", loadingMore: false))
-        XCTAssertFalse(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", search: "preference", loadingMore: false))
-        XCTAssertFalse(KnowledgeCatalogPaginationPolicy.admits(cursor: nil, search: "", loadingMore: false))
-        XCTAssertFalse(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", search: "", loadingMore: true))
+    func testCataloguePaginationFollowsTheReturnedCursorOnly() {
+        // Library row search paginates like the catalogue; a full-record search
+        // returns no cursor, which is what keeps it to one page.
+        XCTAssertTrue(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", loadingMore: false))
+        XCTAssertFalse(KnowledgeCatalogPaginationPolicy.admits(cursor: nil, loadingMore: false))
+        XCTAssertFalse(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", loadingMore: true))
+    }
+
+    func testLibraryPrefetchLoadsOnlyNearTheEndOfTheLoadedRows() throws {
+        let rows = try (0..<20).map { try KnowledgeRowFixture.row(KnowledgeRowFixture.rowJSON(id: "row-\($0)")) }
+        XCTAssertFalse(KnowledgeLibraryPrefetchPolicy.admits(rows: rows, cursor: "page-2", loadingMore: false, appearing: "row-0"))
+        XCTAssertTrue(KnowledgeLibraryPrefetchPolicy.admits(rows: rows, cursor: "page-2", loadingMore: false, appearing: "row-16"))
+        XCTAssertTrue(KnowledgeLibraryPrefetchPolicy.admits(rows: rows, cursor: "page-2", loadingMore: false, appearing: "row-19"))
+        XCTAssertFalse(KnowledgeLibraryPrefetchPolicy.admits(rows: rows, cursor: nil, loadingMore: false, appearing: "row-19"), "The last page must not request another one")
+        XCTAssertFalse(KnowledgeLibraryPrefetchPolicy.admits(rows: rows, cursor: "page-2", loadingMore: true, appearing: "row-19"))
+    }
+
+    func testLibraryRowFilterKeysDistinguishEveryCatalogueState() {
+        let base = KnowledgeCatalogRequestKey(section: .sources, kind: .source, scope: nil, search: "", sourceVisibility: .saved)
+        let archived = KnowledgeCatalogRequestKey(section: .sources, kind: .source, scope: nil, search: "", sourceVisibility: .archived)
+        let scoped = KnowledgeCatalogRequestKey(section: .sources, kind: .source, scope: .personal, search: "", sourceVisibility: .saved)
+        let searched = KnowledgeCatalogRequestKey(section: .sources, kind: .source, scope: nil, search: "agents", sourceVisibility: .saved)
+        XCTAssertEqual(Set([base.cacheFilterID, archived.cacheFilterID, scoped.cacheFilterID, searched.cacheFilterID]).count, 4)
+        XCTAssertEqual(base.cacheFilterID, KnowledgeCatalogRequestKey(section: .sources, kind: .source, scope: nil, search: "", sourceVisibility: .saved).cacheFilterID)
     }
 
     func testKnowledgeHandoffIsBoundedEvidenceOnlyAndPinsGateway() {

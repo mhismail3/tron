@@ -1,10 +1,10 @@
 import { lstatSync, readFileSync } from "node:fs";
 
-export const GATEWAY_VERSION = "0.1.0-beta.7";
+export const GATEWAY_VERSION = "0.1.0-beta.8";
 // Protocol v5 makes fork-boundary gap metadata explicit. There is no
 // v4 runtime path: every mobile peer must understand the typed projection.
-export const PROTOCOL_VERSION = 5;
-export const MIN_PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
+export const MIN_PROTOCOL_VERSION = 6;
 
 // package.json is the sole Pi SDK version authority. Keep this runtime check
 // strict so a malformed or partially updated package cannot report a false

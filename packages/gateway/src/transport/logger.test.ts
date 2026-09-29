@@ -42,6 +42,64 @@ describe("GatewayLogger", () => {
     expect(new GatewayLogger(path).recent(1)[0]).toMatchObject({ runtimeEpoch: "epoch-1", commandId: "command_1" });
   });
 
+  it("keeps the request span breakdown beside the request it explains", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    const long = `${"catalog.walk=1234ms×2;".repeat(60)}frame.serialize=12ms/610KB`;
+    logger.log("warning", "RPC session.open completed", {
+      event: "rpc.completed", method: "session.open", durationMs: 1_500, stages: long, unaccountedMs: 12.4 });
+    logger.log("warning", "RPC session.open completed", {
+      event: "rpc.completed", method: "session.open", durationMs: 1_500,
+      stages: "frame.serialize=12ms/610KB", unaccountedMs: -5 });
+
+    const [truncated, separators] = lines(path) as Array<Record<string, unknown>>;
+    // Bounded by bytes with its `=`, `;`, `×` and `/` separators intact, not
+    // escaped into a diagnostic ID or cut at the 160-character field bound.
+    expect(Buffer.byteLength(truncated!.stages as string, "utf8")).toBeLessThanOrEqual(1_024);
+    expect(truncated!.stages).toMatch(/^catalog\.walk=1234ms×2;/u);
+    expect(truncated!.stages).not.toContain("frame.serialize");
+    expect(truncated!.unaccountedMs).toBe(12);
+    expect(separators!.stages).toBe("frame.serialize=12ms/610KB");
+    expect(separators!.unaccountedMs).toBe(0);
+    // The restored persisted tail keeps both fields, since it is the same
+    // normalization.
+    const restored = new GatewayLogger(path).recent(2)[0]!;
+    expect(restored.stages).toMatch(/^catalog\.walk=1234ms×2;/u);
+    expect(restored.unaccountedMs).toBe(12);
+  });
+
+  it("persists the stage a cancellation interrupted, bounded like a diagnostic ID", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    logger.log("warning", "RPC session.open was cancelled in catalog.walk after 1500ms", {
+      event: "rpc.cancelled", method: "session.open", requestID: "open-1", outcome: "cancelled",
+      stage: "catalog.walk", durationMs: 1_500 });
+    logger.log("warning", "RPC session.open was cancelled", {
+      event: "rpc.cancelled", stage: "x".repeat(200) });
+
+    const [record, longStage] = lines(path) as Array<Record<string, unknown>>;
+    expect(record!.stage).toBe("catalog.walk");
+    expect((longStage!.stage as string)).toHaveLength(64);
+    // The restored persisted tail keeps the field, since it is the same
+    // normalization the writer applied.
+    expect(new GatewayLogger(path).recent(2)[0]!.stage).toBe("catalog.walk");
+  });
+
+  it("persists the protocol version a refused hello asked for", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    logger.log("warning", "Socket upgrade rejected at hello", {
+      event: "http.upgrade", reason: "protocol_mismatch", peerProtocolVersion: 5 });
+    logger.log("warning", "Socket upgrade rejected at hello", {
+      event: "http.upgrade", reason: "protocol_mismatch", peerProtocolVersion: 5.5 });
+
+    const [record, fractional] = lines(path) as Array<Record<string, unknown>>;
+    expect(record!.peerProtocolVersion).toBe(5);
+    // Only an integer is a protocol version; the writer keeps nothing else.
+    expect(fractional).not.toHaveProperty("peerProtocolVersion");
+    expect(new GatewayLogger(path).recent(2)[0]!.peerProtocolVersion).toBe(5);
+  });
+
   it.each([["1", false], ["0", true]])("mirrors persisted records to process streams only when TRON_GATEWAY_SUPERVISED is %s", (supervised, mirrors) => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", supervised);
     const path = logPath();
@@ -68,6 +126,31 @@ describe("GatewayLogger", () => {
     const requestID = logger.recent(1)[0]?.requestID ?? "";
     expect(requestID).toMatch(/^[A-Za-z0-9._:-]+$/u);
     expect(requestID.length).toBe(160);
+  });
+
+  it("bounds the named counters one record carries", () => {
+    const path = logPath();
+    const longName = `n${"x".repeat(200)}`;
+    const counts: Record<string, number> = {
+      files: 12, unproven: -3, added: 1.6, huge: Number.MAX_SAFE_INTEGER + 10,
+      "not a name": 1, "1leading": 2, missing: Number.NaN, infinite: Number.POSITIVE_INFINITY,
+      [longName]: 4,
+    };
+    // A record that names more counters than the field holds keeps the ones it
+    // accepted and drops the rest, rather than writing a payload.
+    for (let index = 0; index < 20; index += 1) counts[`field${index}`] = index;
+    const logger = new GatewayLogger(path);
+    logger.log("warning", "Session catalog reconciled", { event: "catalog.reconciled", counts });
+
+    // The persisted line and the restored tail are the same normalization.
+    const persisted = lines(path)[0]!.counts as Record<string, number>;
+    const restored = new GatewayLogger(path).recent(1)[0]!.counts as Record<string, number>;
+    expect(restored).toEqual(persisted);
+    expect(Object.keys(persisted)).toEqual([
+      "files", "unproven", "added", "huge", `n${"x".repeat(31)}`,
+      ...Array.from({ length: 11 }, (_, index) => `field${index}`),
+    ]);
+    expect(persisted).toMatchObject({ files: 12, unproven: 0, added: 2, huge: Number.MAX_SAFE_INTEGER });
   });
 
   it("keeps a bounded lifecycle step name across restart", () => {

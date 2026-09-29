@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { freemem, totalmem } from "node:os";
-import { PerformanceObserver, performance, type EventLoopUtilization } from "node:perf_hooks";
+import { monitorEventLoopDelay, PerformanceObserver, performance, type EventLoopUtilization, type IntervalHistogram } from "node:perf_hooks";
+import { getHeapStatistics } from "node:v8";
+import { drainDurableWriteStats } from "../util/durable-json.js";
 
 /*
  * Evidence for why the event loop stalled, attached to
@@ -150,6 +152,494 @@ async function sampleHostMemory(): Promise<HostMemory> {
   const base = { freeBytes: freemem(), totalBytes: totalmem() };
   if (process.platform !== "darwin") return base;
   return { ...base, ...await probeHostKernel() };
+}
+
+/** One resource record a minute. A faster timer would only add wakeups on a
+ * shared Mac without adding evidence to a minute's picture. */
+export const RESOURCE_SAMPLE_INTERVAL_MS = 60_000;
+
+/** `monitorEventLoopDelay` samples at this period and records the whole interval
+ * between its own ticks, so every reading carries this period as its floor. */
+export const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
+
+/** The exit target for event-loop delay p99. A window that moves to another
+ * band of this size is a change the day's records have to show. */
+export const EVENT_LOOP_P99_INFO_STEP_MS = 20;
+
+/** The exit criterion's bound for one stalled turn. A window whose max moves to
+ * another band of this size is a change the day's records have to show whatever
+ * its p99 was, so the day's `max ≤ 250 ms` check has a persisted value to read. */
+export const EVENT_LOOP_MAX_INFO_STEP_MS = 250;
+
+/** Heap above this share of the V8 heap limit is the pressure the shedding work
+ * has to bound. */
+export const HEAP_WARNING_SHARE = 0.7;
+
+/** Heap used moved this many absolute bytes from the last window written at
+ * info or above: a growth step no share of a multi-gigabyte limit would round
+ * away, measured from an anchor so a heap that swings tens of megabytes between
+ * garbage collections does not write a record every minute. */
+export const HEAP_USED_INFO_STEP_BYTES = 256 * 1_024 * 1_024;
+
+/** RSS moved this share away from the last window written at info or above,
+ * which is the memory-growth criterion's own resolution. A slower growth has to
+ * accumulate across the debug-only minutes between records, so it still reaches
+ * disk eventually instead of never. */
+export const RSS_INFO_STEP_SHARE = 0.1;
+
+/** An event-loop p99 over this bound in one minute misses the exit criterion. */
+export const EVENT_LOOP_P99_WARNING_MS = 100;
+
+/** A window that recorded a snapshot built although no ready socket held a
+ * subscription token for its session. The slot builds one only for a session
+ * with a subscriber, so such a build means an audience check was lost (a
+ * regressed slot guard, or a registry and transport subscription record that
+ * diverged) rather than an expected condition, which is why it is the one
+ * threshold here that has no value to compare against. */
+export const UNAUDIENCED_SNAPSHOT_WARNING = 0;
+
+/** Named entries in the message's topic and runtime detail; the rest are
+ * counted, so the record stays one readable line. */
+const MAX_RESOURCE_DETAIL = 8;
+
+/** One live runtime in the sample: its canonical transcript size is the byte
+ * estimate of what it holds until runtime residency is measured directly. */
+export interface ResourceRuntimeEntry {
+  sessionId: string;
+  bytes: number;
+  subscribers: number;
+}
+
+/** One topic's traffic over the sample window. `subscribers` is the highest
+ * recipient count a frame on that topic had; a topic whose recipients left is
+ * still visible by its frames and bytes. */
+export interface ResourceTopicTraffic {
+  frames: number;
+  bytes: number;
+  subscribers: number;
+}
+
+export interface ResourceSample {
+  /** The closed window's length; an in-flight sample that skipped a tick makes
+   * it longer than `RESOURCE_SAMPLE_INTERVAL_MS`, and a rate reader has to know
+   * that. */
+  windowMs: number;
+  heapUsedBytes: number;
+  heapLimitBytes: number;
+  rssBytes: number;
+  /** `monitorEventLoopDelay` percentiles over the closed window, in ms. */
+  eventLoopDelayP50Ms: number;
+  eventLoopDelayP99Ms: number;
+  eventLoopDelayMaxMs: number;
+  eventLoopUtilization: number;
+  runtimes: readonly ResourceRuntimeEntry[];
+  runtimeBytes: number;
+  runtimesLoaded: number;
+  runtimesEvicted: number;
+  /** Snapshot projections broadcast for a session, and the part of them built
+   * while no ready recipient could receive them (`UNAUDIENCED_SNAPSHOT_WARNING`).
+   * Topic frames count only frames that had a recipient, so this pair is where a
+   * projection that reached nobody stays visible. */
+  snapshotBuilds: number;
+  unaudiencedSnapshotBuilds: number;
+  topics: ReadonlyMap<string, ResourceTopicTraffic>;
+  catalogWalks: number;
+  /** The part of `catalogWalks` a request was waiting on; the request path's
+   * criterion is zero of them. */
+  requestPathCatalogWalks: number;
+  catalogWalkMs: number;
+  catalogWalkFiles: number;
+  /** Durable fsyncs completed in the window and the time they took. */
+  durableWrites: number;
+  durableWriteMs: number;
+  outboundBytes: number;
+  /** Frames a newer frame's own state superseded before they were written, and
+   * the bytes they would have cost: the state G-4 kept off a slow link. */
+  outboundCoalescedFrames: number;
+  outboundCoalescedBytes: number;
+}
+
+/**
+ * What the owners of measurable work report to the sampler. Each call counts
+ * one occurrence at the site that already knows it; the sampler never scans to
+ * discover what happened.
+ */
+export interface ResourceRecorder {
+  /** One serialized frame offered on a topic, and the recipients it had. */
+  recordTopicFrame(topic: string, bytes: number, subscribers: number): void;
+  /** One catalog walk, with the time it took, the files it read, and whether a
+   * request was waiting on it. */
+  recordCatalogWalk(durationMs: number, files: number, requestPath?: boolean): void;
+  recordOutboundBytes(bytes: number): void;
+  /** One superseded frame dropped in a connection's outbound queue, with the
+   * encoded bytes it would have sent: the state G-4 kept off a slow link. */
+  recordOutboundCoalesced(bytes: number): void;
+  /** One runtime that became live, counted where it is published: a load and an
+   * eviction inside one window are otherwise invisible to a set comparison. */
+  recordRuntimeLoaded(): void;
+  /** One published runtime that was disposed, counted at its disposal; a start
+   * that was retired before it was ever live is not an eviction. */
+  recordRuntimeEvicted(): void;
+}
+
+export interface ResourceSamplerDependencies {
+  readRuntimes?: () => Promise<readonly ResourceRuntimeEntry[]>;
+  durableWrites?: () => { count: number; ms: number };
+  memoryUsage?: () => { heapUsed: number; rss: number };
+  heapLimitBytes?: () => number;
+  eventLoopDelay?: () => { p50Ms: number; p99Ms: number; maxMs: number };
+  eventLoopUtilization?: (current?: EventLoopUtilization, previous?: EventLoopUtilization) => EventLoopUtilization;
+}
+
+/** The event-loop delay histogram, read once per sample and reset with it, so a
+ * percentile covers one minute and a momentary stall is not a permanent max.
+ * Every reading carries the sampling period (see
+ * `EVENT_LOOP_DELAY_RESOLUTION_MS`); subtracting it leaves the lateness the
+ * exit criterion bounds, so an idle loop reads 0 instead of the period. */
+function eventLoopDelayReader(): { read: () => { p50Ms: number; p99Ms: number; maxMs: number }; dispose: () => void } {
+  const histogram: IntervalHistogram = monitorEventLoopDelay({ resolution: EVENT_LOOP_DELAY_RESOLUTION_MS });
+  histogram.enable();
+  return {
+    read: () => {
+      const delayMs = (value: number) => Number.isFinite(value)
+        ? Math.max(0, value / 1e6 - EVENT_LOOP_DELAY_RESOLUTION_MS)
+        : 0;
+      const delay = {
+        p50Ms: delayMs(histogram.percentile(50)),
+        p99Ms: delayMs(histogram.percentile(99)),
+        maxMs: delayMs(histogram.max),
+      };
+      histogram.reset();
+      return delay;
+    },
+    dispose: () => histogram.disable(),
+  };
+}
+
+/**
+ * Owns the `gateway.resources` picture: what the Gateway spends memory, CPU and
+ * I/O on, one window at a time. Owners report their own work (see
+ * `ResourceRecorder`); this class only closes windows, states thresholds and
+ * places values in named steps (`level`).
+ */
+export class ResourceSampler implements ResourceRecorder {
+  private readonly readRuntimes: () => Promise<readonly ResourceRuntimeEntry[]>;
+  private readonly readDurableWrites: () => { count: number; ms: number };
+  private readonly readMemory: () => { heapUsed: number; rss: number };
+  private readonly readHeapLimitBytes: () => number;
+  private readonly delay: { read: () => { p50Ms: number; p99Ms: number; maxMs: number }; dispose: () => void };
+  private readonly eventLoopUtilization: (current?: EventLoopUtilization, previous?: EventLoopUtilization) => EventLoopUtilization;
+  private utilizationMark: EventLoopUtilization;
+  private readonly topics = new Map<string, ResourceTopicTraffic>();
+  private snapshotBuilds = 0;
+  private unaudiencedSnapshotBuilds = 0;
+  private catalogWalks = 0;
+  private requestPathCatalogWalks = 0;
+  private catalogWalkMs = 0;
+  private catalogWalkFiles = 0;
+  private outboundBytes = 0;
+  private outboundCoalescedFrames = 0;
+  private outboundCoalescedBytes = 0;
+  private loadedRuntimes = 0;
+  private evictedRuntimes = 0;
+  /** The steps of the previous window; a step counts as a change only against
+   * the window before it, so a value that repeats does not reach disk. */
+  private steps?: ResourceSteps;
+  /** The RSS of the last window written at info or above, or of the first window
+   * this sampler closed; the memory-growth step is measured against it, so slow
+   * drift over many debug-only minutes still promotes one record. */
+  private anchoredRssBytes?: number;
+  /** The heap used by the last window written at info or above, or by the first
+   * window this sampler closed; the heap step is measured against it, the same
+   * way the RSS step is, so a heap oscillating around a band edge writes
+   * nothing while a real step of `HEAP_USED_INFO_STEP_BYTES` does. */
+  private anchoredHeapUsedBytes?: number;
+  /** When the current window opened; the closed window reports its length. */
+  private windowStartedAt = performance.now();
+
+  constructor(dependencies: ResourceSamplerDependencies = {}) {
+    this.readRuntimes = dependencies.readRuntimes ?? (async () => []);
+    this.readDurableWrites = dependencies.durableWrites ?? drainDurableWriteStats;
+    this.readMemory = dependencies.memoryUsage ?? (() => process.memoryUsage());
+    this.readHeapLimitBytes = dependencies.heapLimitBytes ?? (() => getHeapStatistics().heap_size_limit);
+    this.delay = dependencies.eventLoopDelay === undefined
+      ? eventLoopDelayReader()
+      : { read: dependencies.eventLoopDelay, dispose: () => {} };
+    this.eventLoopUtilization = dependencies.eventLoopUtilization
+      ?? ((current, previous) => performance.eventLoopUtilization(current, previous));
+    this.utilizationMark = this.eventLoopUtilization();
+  }
+
+  /** One snapshot projection handed to the transport for a session, with the
+   * ready recipients it could reach. Deliberately not part of
+   * `ResourceRecorder`: only the transport knows the recipients, so only it
+   * calls this, and a build with none is a tripwire (a lost slot guard, or a
+   * divergence between the registry's subscriber record and the transport's)
+   * rather than an ordinary minute. */
+  recordSnapshotBuild(subscribers: number): void {
+    this.snapshotBuilds += 1;
+    if (!(subscribers > 0)) this.unaudiencedSnapshotBuilds += 1;
+  }
+
+  recordTopicFrame(topic: string, bytes: number, subscribers: number): void {
+    const traffic = this.topics.get(topic) ?? { frames: 0, bytes: 0, subscribers: 0 };
+    traffic.frames += 1;
+    if (Number.isFinite(bytes) && bytes > 0) traffic.bytes += bytes;
+    if (Number.isFinite(subscribers) && subscribers > traffic.subscribers) traffic.subscribers = subscribers;
+    this.topics.set(topic, traffic);
+  }
+
+  recordCatalogWalk(durationMs: number, files: number, requestPath = false): void {
+    this.catalogWalks += 1;
+    if (requestPath) this.requestPathCatalogWalks += 1;
+    if (Number.isFinite(durationMs) && durationMs > 0) this.catalogWalkMs += durationMs;
+    if (Number.isFinite(files) && files > 0) this.catalogWalkFiles += files;
+  }
+
+  recordOutboundBytes(bytes: number): void {
+    if (Number.isFinite(bytes) && bytes > 0) this.outboundBytes += bytes;
+  }
+
+  recordOutboundCoalesced(bytes: number): void {
+    this.outboundCoalescedFrames += 1;
+    if (Number.isFinite(bytes) && bytes > 0) this.outboundCoalescedBytes += bytes;
+  }
+
+  recordRuntimeLoaded(): void {
+    this.loadedRuntimes += 1;
+  }
+
+  recordRuntimeEvicted(): void {
+    this.evictedRuntimes += 1;
+  }
+
+  /** The level this window is recorded at, and why. The band comparison is
+   * against the previous window, so a step change is written once, where it
+   * happens; the memory anchors move only when the window is written at info or
+   * above (and the first window starts them). */
+  level(sample: ResourceSample): { level: "debug" | "info" | "warning"; reason?: string } {
+    const previous = this.steps;
+    this.steps = resourceSteps(sample);
+    const decision = resourceSampleLevel(sample, previous, this.anchoredRssBytes, this.anchoredHeapUsedBytes);
+    if (decision.level !== "debug" || this.anchoredRssBytes === undefined) {
+      this.anchoredRssBytes = sample.rssBytes;
+      this.anchoredHeapUsedBytes = sample.heapUsedBytes;
+    }
+    return decision;
+  }
+
+  /** Closes the window and starts the next. Counters are drained, not re-read,
+   * so one occurrence is reported exactly once. */
+  async sample(): Promise<ResourceSample> {
+    const closedAt = performance.now();
+    const windowMs = Math.max(0, closedAt - this.windowStartedAt);
+    this.windowStartedAt = closedAt;
+    const memory = this.readMemory();
+    const delay = this.delay.read();
+    const current = this.eventLoopUtilization();
+    const utilization = this.eventLoopUtilization(current, this.utilizationMark).utilization;
+    this.utilizationMark = current;
+    // Every counter closes at `closedAt`, before the runtime inventory is
+    // awaited: a hung inventory read would otherwise report the work done while
+    // it hung inside this window, whose `windowMs` was already fixed here, and
+    // a rate read from that pair would be wrong exactly then. A sample that
+    // fails after this point has already consumed its counters, so the window it
+    // would have reported is dropped rather than folded into the next one — the
+    // same rule the histogram and `windowStartedAt` already follow.
+    const counters = this.drainWindowCounters();
+    // The runtime set is a current value, not a counter: it is read after the
+    // window closed, while every counter above covers the closed window.
+    const runtimes = [...await this.readRuntimes()];
+    return {
+      windowMs,
+      heapUsedBytes: nonNegative(memory.heapUsed),
+      heapLimitBytes: nonNegative(this.readHeapLimitBytes()),
+      rssBytes: nonNegative(memory.rss),
+      eventLoopDelayP50Ms: delay.p50Ms,
+      eventLoopDelayP99Ms: delay.p99Ms,
+      eventLoopDelayMaxMs: delay.maxMs,
+      eventLoopUtilization: Number.isFinite(utilization) ? utilization : 0,
+      runtimes,
+      runtimeBytes: runtimes.reduce((total, runtime) => total + nonNegative(runtime.bytes), 0),
+      ...counters,
+    };
+  }
+
+  /** The closed window's counters, taken and cleared together so every value in
+   * one record covers the same span of time. */
+  private drainWindowCounters() {
+    const durable = this.readDurableWrites();
+    const counters = {
+      topics: new Map(this.topics),
+      runtimesLoaded: this.loadedRuntimes,
+      runtimesEvicted: this.evictedRuntimes,
+      snapshotBuilds: this.snapshotBuilds,
+      unaudiencedSnapshotBuilds: this.unaudiencedSnapshotBuilds,
+      catalogWalks: this.catalogWalks,
+      requestPathCatalogWalks: this.requestPathCatalogWalks,
+      catalogWalkMs: this.catalogWalkMs,
+      catalogWalkFiles: this.catalogWalkFiles,
+      durableWrites: nonNegative(durable.count),
+      durableWriteMs: nonNegative(durable.ms),
+      outboundBytes: this.outboundBytes,
+      outboundCoalescedFrames: this.outboundCoalescedFrames,
+      outboundCoalescedBytes: this.outboundCoalescedBytes,
+    };
+    this.topics.clear();
+    this.loadedRuntimes = 0;
+    this.evictedRuntimes = 0;
+    this.snapshotBuilds = 0;
+    this.unaudiencedSnapshotBuilds = 0;
+    this.catalogWalks = 0;
+    this.requestPathCatalogWalks = 0;
+    this.catalogWalkMs = 0;
+    this.catalogWalkFiles = 0;
+    this.outboundBytes = 0;
+    this.outboundCoalescedFrames = 0;
+    this.outboundCoalescedBytes = 0;
+    return counters;
+  }
+
+  dispose(): void {
+    this.delay.dispose();
+  }
+}
+
+/** Where one window's values sit, compared with the window before it. Info is
+ * written when a step moves, so a minute that repeats the same steps never
+ * reaches disk. */
+export interface ResourceSteps {
+  /** Event-loop p99 in bands of `EVENT_LOOP_P99_INFO_STEP_MS`. */
+  eventLoopP99Band: number;
+  /** Event-loop max in bands of `EVENT_LOOP_MAX_INFO_STEP_MS`. */
+  eventLoopMaxBand: number;
+}
+
+/** The named steps a sample's values are placed in. */
+export function resourceSteps(sample: ResourceSample): ResourceSteps {
+  return {
+    eventLoopP99Band: Math.floor(sample.eventLoopDelayP99Ms / EVENT_LOOP_P99_INFO_STEP_MS),
+    eventLoopMaxBand: Math.floor(sample.eventLoopDelayMaxMs / EVENT_LOOP_MAX_INFO_STEP_MS),
+  };
+}
+
+/**
+ * The level a sample is recorded at and why. Warning is a broken bound — the
+ * heap share, the event-loop p99, or a snapshot built while no ready recipient
+ * could receive it (`UNAUDIENCED_SNAPSHOT_WARNING`); info is
+ * a named step that moved since `previous` (the window before this one), heap
+ * used moved `HEAP_USED_INFO_STEP_BYTES` or RSS moved `RSS_INFO_STEP_SHARE` from
+ * the last window written at info or above (`anchoredHeapUsedBytes`,
+ * `anchoredRssBytes`; the first window starts both anchors), or a runtime
+ * load/eviction in this window. That is what makes
+ * a minute readable without writing every minute to disk; debug otherwise.
+ * `undefined` `previous` is the first window, which is never a band change, and
+ * an undefined anchor has no memory-growth baseline yet, which is never a step.
+ */
+export function resourceSampleLevel(
+  sample: ResourceSample,
+  previous?: ResourceSteps,
+  anchoredRssBytes?: number,
+  anchoredHeapUsedBytes?: number,
+): { level: "debug" | "info" | "warning"; reason?: string } {
+  const heapShare = heapShareOf(sample);
+  if (heapShare >= HEAP_WARNING_SHARE) {
+    return { level: "warning", reason: `heapShare=${heapShare.toFixed(2)} at or above ${HEAP_WARNING_SHARE}` };
+  }
+  if (sample.eventLoopDelayP99Ms >= EVENT_LOOP_P99_WARNING_MS) {
+    return { level: "warning", reason: `eventLoopDelayP99Ms=${Math.round(sample.eventLoopDelayP99Ms)} at or above ${EVENT_LOOP_P99_WARNING_MS}` };
+  }
+  if (sample.unaudiencedSnapshotBuilds > UNAUDIENCED_SNAPSHOT_WARNING) {
+    return { level: "warning", reason: `unaudiencedSnapshotBuilds=${sample.unaudiencedSnapshotBuilds} with no ready recipient` };
+  }
+  if (previous !== undefined) {
+    const steps = resourceSteps(sample);
+    if (steps.eventLoopP99Band !== previous.eventLoopP99Band) {
+      return { level: "info", reason: `eventLoopDelayP99Ms=${Math.round(sample.eventLoopDelayP99Ms)} entering band ${steps.eventLoopP99Band}` };
+    }
+    if (steps.eventLoopMaxBand !== previous.eventLoopMaxBand) {
+      return { level: "info", reason: `eventLoopDelayMaxMs=${Math.round(sample.eventLoopDelayMaxMs)} entering band ${steps.eventLoopMaxBand}` };
+    }
+    const heapMove = anchoredHeapUsedBytes === undefined
+      ? 0
+      : Math.abs(sample.heapUsedBytes - anchoredHeapUsedBytes);
+    if (heapMove >= HEAP_USED_INFO_STEP_BYTES) {
+      return { level: "info", reason: `heapUsedBytes=${sample.heapUsedBytes} moved ${Math.round(heapMove / 1_048_576)} MiB from ${anchoredHeapUsedBytes}` };
+    }
+    const move = anchoredRssBytes !== undefined && anchoredRssBytes > 0
+      ? Math.abs(sample.rssBytes - anchoredRssBytes) / anchoredRssBytes
+      : 0;
+    if (move >= RSS_INFO_STEP_SHARE) {
+      return { level: "info", reason: `rssBytes=${sample.rssBytes} moved ${Math.round(move * 100)}% from ${anchoredRssBytes}` };
+    }
+  }
+  if (sample.runtimesLoaded + sample.runtimesEvicted > 0) {
+    return { level: "info", reason: `runtimes=${sample.runtimes.length} loaded=${sample.runtimesLoaded} evicted=${sample.runtimesEvicted}` };
+  }
+  return { level: "debug" };
+}
+
+function heapShareOf(sample: ResourceSample): number {
+  return sample.heapLimitBytes > 0 ? sample.heapUsedBytes / sample.heapLimitBytes : 0;
+}
+
+/** One `gateway.resources` line: every number, then the per-topic and
+ * per-runtime detail, most expensive first and bounded. */
+export function formatResourceSample(sample: ResourceSample): string {
+  const heapShare = heapShareOf(sample);
+  const fields = [
+    `windowMs=${roundMs(sample.windowMs)}`,
+    `heapUsedBytes=${sample.heapUsedBytes}`,
+    `heapLimitBytes=${sample.heapLimitBytes}`,
+    `heapShare=${heapShare.toFixed(2)}`,
+    `rssBytes=${sample.rssBytes}`,
+    `eventLoopDelayP50Ms=${roundMs(sample.eventLoopDelayP50Ms)}`,
+    `eventLoopDelayP99Ms=${roundMs(sample.eventLoopDelayP99Ms)}`,
+    `eventLoopDelayMaxMs=${roundMs(sample.eventLoopDelayMaxMs)}`,
+    `eventLoopUtilization=${sample.eventLoopUtilization.toFixed(2)}`,
+    `liveRuntimes=${sample.runtimes.length}`,
+    `runtimeBytes=${sample.runtimeBytes}`,
+    `runtimesLoaded=${sample.runtimesLoaded}`,
+    `runtimesEvicted=${sample.runtimesEvicted}`,
+    `snapshotBuilds=${sample.snapshotBuilds}`,
+    `unaudiencedSnapshotBuilds=${sample.unaudiencedSnapshotBuilds}`,
+    `catalogWalks=${sample.catalogWalks}`,
+    `requestPathCatalogWalks=${sample.requestPathCatalogWalks}`,
+    `catalogWalkMs=${roundMs(sample.catalogWalkMs)}`,
+    `catalogWalkFiles=${sample.catalogWalkFiles}`,
+    `durableWrites=${sample.durableWrites}`,
+    `durableWriteMs=${roundMs(sample.durableWriteMs)}`,
+    `outboundBytes=${sample.outboundBytes}`,
+    `outboundCoalescedFrames=${sample.outboundCoalescedFrames}`,
+    `outboundCoalescedBytes=${sample.outboundCoalescedBytes}`,
+    `topics=${formatTopics(sample.topics)}`,
+    `runtimes=${formatRuntimes(sample.runtimes)}`,
+  ];
+  return `Gateway resources ${fields.join(" ")}`;
+}
+
+function formatTopics(topics: ReadonlyMap<string, ResourceTopicTraffic>): string {
+  const ordered = [...topics.entries()].sort((left, right) => right[1].bytes - left[1].bytes || left[0].localeCompare(right[0]));
+  const named = ordered.slice(0, MAX_RESOURCE_DETAIL)
+    .map(([topic, traffic]) => `${topic}:${traffic.frames}/${traffic.bytes}B/${traffic.subscribers}`);
+  if (ordered.length > named.length) named.push(`+${ordered.length - named.length}`);
+  return named.length === 0 ? "none" : named.join(",");
+}
+
+function formatRuntimes(runtimes: readonly ResourceRuntimeEntry[]): string {
+  const ordered = [...runtimes].sort((left, right) => right.bytes - left.bytes || left.sessionId.localeCompare(right.sessionId));
+  const named = ordered.slice(0, MAX_RESOURCE_DETAIL)
+    .map((runtime) => `${runtime.sessionId}:${Math.round(runtime.bytes / 1_024)}KB/${runtime.subscribers}`);
+  if (ordered.length > named.length) named.push(`+${ordered.length - named.length}`);
+  return named.length === 0 ? "none" : named.join(",");
+}
+
+function roundMs(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+}
+
+function nonNegative(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }
 
 /**

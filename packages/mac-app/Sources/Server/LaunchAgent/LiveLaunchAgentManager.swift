@@ -340,20 +340,19 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         expectedHelperPath: String,
         expectedPayloadRoot: URL? = nil
     ) -> Bool {
-        guard let command, !command.isEmpty else { return false }
-        let fields = command.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard fields.count == 6,
-              let runtimeRange = fields[0].range(of: "/runtime/node-", options: .backwards) else {
+        guard let command,
+              let executable = command.split(separator: " ", omittingEmptySubsequences: true).first,
+              let runtimeRange = executable.range(of: "/runtime/node-", options: .backwards) else {
             return false
         }
-        let payloadRoot = String(fields[0][..<runtimeRange.lowerBound])
+        let payloadRoot = String(executable[..<runtimeRange.lowerBound])
         if let expectedPayloadRoot,
            payloadRoot != expectedPayloadRoot.standardizedFileURL.path { return false }
-        guard fields[0] == "\(payloadRoot)/runtime/node-arm64"
-                || fields[0] == "\(payloadRoot)/runtime/node-x64",
-              fields[1] == "\(payloadRoot)/app/dist/index.js",
-              fields[2] == "--host", fields[3] == "tailscale",
-              fields[4] == "--port", fields[5] == String(profile.port) else { return false }
+        // The same launcher argv admission requires; a second copy here once let
+        // a launcher argv change mark every running Gateway stale.
+        guard StableGatewayProvenance.processCommand(
+            command, owns: URL(fileURLWithPath: payloadRoot), expectedHost: "tailscale", profile: profile
+        ) else { return false }
 
         let helper = URL(fileURLWithPath: expectedHelperPath).standardizedFileURL.path
         guard let contentsRange = helper.range(of: "/Contents/Library/LoginItems/") else { return false }

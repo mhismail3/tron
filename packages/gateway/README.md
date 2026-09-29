@@ -1,6 +1,6 @@
 # Tron Gateway
 
-## Protocol v5 chat semantics
+## Protocol v6 chat semantics
 
 The Gateway is the sole live owner of invocation, operation, and activity
 identity. Canonical Pi JSONL remains authoritative; Gateway-owned bounded
@@ -26,18 +26,20 @@ command-driven replacement cases in
 `src/transport/session-archive.integration.test.ts` cover all three calls.
 
 Transcript order is canonical branch order, never timestamp or activity recency.
-The v5 projection separates inbound context, agent output/invocations, ambient
+The v6 projection separates inbound context, agent output/invocations, ambient
 status, and hidden state. `custom_message` is model input; `custom`/`appendEntry`
 is extension state. Producer attribution is only exact at a Gateway callback
 boundary, receipt, trusted adapter, or registered tool ownership; unknown remains
 unknown. Every projection is bounded by count and byte limits and malformed
 recognized data fails closed for authoritative resynchronization.
 
-Protocol v5 deliberately has no v4 runtime path. The deployed v4 update helper
-cannot promote a candidate whose required range is strictly v5, so that one-time
-major transition must use the Mac app's manual local Release reinstall runbook:
-install the Mac app containing the v5 Gateway payload while preserving
-`~/.tron`, verify the registered Gateway, and only then install a v5-only iOS
+Protocol v6 deliberately has no v5 runtime path. The deployed v5 update helper
+validates a candidate payload manifest against the protocol version it speaks
+and refuses a candidate whose advertised protocol range does not contain it, so
+it cannot promote a strictly v6 candidate. That one-time major transition must
+use the Mac app's manual local Release reinstall runbook:
+install the Mac app containing the v6 Gateway payload while preserving
+`~/.tron`, verify the registered Gateway, and only then install a v6-only iOS
 client. The repository protocol manifest is projected into Gateway payload,
 Mac app, and iOS app metadata; launch/build/install validators require one exact
 range. A replacement launcher's bundled payload is the migration bootstrap when
@@ -45,7 +47,7 @@ a previously selected external payload advertises an older range. Same-major
 promotion and rollback treat that rejected external pointer as bounded history
 and use the validated signed bundle as their recovery authority; they never
 require the incompatible payload to become admissible again. Do not widen the
-advertised minimum or allow a mixed v4/v5 pair merely to bypass that handoff.
+advertised minimum or allow a mixed v5/v6 pair merely to bypass that handoff.
 Ordinary same-major updates continue through the owned Gateway update flow.
 
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
@@ -99,7 +101,12 @@ attributed, qualified evidence and points to a pinned record/revision read
 continuation when needed. `KnowledgeStore` emits the global `knowledge.changed`
 invalidation hint after committed mutations, including agent tools, connectors,
 and autonomous observations; receipt replays and rejected writes do not emit it.
-Clients re-read authoritative pages rather than treating the event as a data mirror.
+The hint carries the committed state revision and the records the mutation
+touched, coalesced over a short trailing window so one intake item's several
+writes become one notification. Clients re-read authoritative pages rather than
+treating the event as a data mirror, and the Sources library reads bounded rows
+(`projection: "sourceRow"`, capability `knowledge-library-rows.v1`) with batched
+previews (`knowledge.previews.read`) instead of full records.
 `knowledge-store.test.ts` covers this commit boundary and notification failure isolation. Retained source objects are available only through
 `knowledge.object.read` with the exact owning record ID and committed revision;
 the store rechecks current privacy/exclusion fences after byte I/O and never
@@ -523,8 +530,55 @@ catalog are owned by [`docs/observability.md`](docs/observability.md).
   `{name, code, message, stack}` with one level of `cause`.
 - `gateway.startup-step` records each interval between startup checkpoints,
   adding to process start through listener readiness without double counting.
+  `gateway.startup-budget` then judges process start to listening against
+  `STARTUP_LISTEN_BUDGET_MS` (5 s) the moment the Gateway serves and names the
+  slowest step. That number is this process's own start, not the whole wait a
+  restarting client sees — the client counts from its own socket's close, before
+  the predecessor is down — so `scripts/tron-profile-gateway` reads the record
+  (and its `budgetMs`) for the start while judging the restart case's criterion
+  on its own close → listening span.
   `gateway.shutdown-step` names and times every awaited shutdown operation so a
   forced exit can be attributed to its owner.
+
+### Background work
+
+One owner decides when recurring background work may run: `backgroundWork` in
+`src/background-work.ts`, started by `gateway-main.ts` after the listener is
+serving. Registered jobs take turns **one slice at a time**; between slices the
+scheduler yields with `setImmediate`, so the next slice runs in the loop's check
+phase after the poll phase's timers and I/O. A due slice waits while a request is
+competing for the loop (`requestsCompetingForLoop()` in
+`src/transport/request-span.ts`) or while the loop's delay p99 is at or above
+`BACKGROUND_PAUSE_P99_MS` (50 ms), re-checking every
+`BACKGROUND_PAUSE_RECHECK_MS` (100 ms). A request that hands its wait to work
+outside the loop — a receipt-backed mutation (`offLoop`), such as a `session.bash`
+shell command, a `session.compact` or a `knowledge.*` model call — does not count
+as competing: it holds its receipt for its whole operation while the loop is idle,
+and the loop's own delay is what covers the loop work it still does. A slice with
+more to do than one bounded batch awaits `backgroundWork.yieldToLoop()` between
+batches: that is one loop turn, or a re-check interval while the same pause is in
+force, so the slice yields to a request that arrives mid-slice. A rejecting slice
+is reported and never stops the scheduler or the jobs registered after it.
+`background.slice` (debug, warning on failure) and `background.backlog`
+(warning once per starved spell past `BACKGROUND_BACKLOG_WARNING_MS`, 5 minutes)
+are the records, and each carries the job in its `step` field;
+[`docs/observability.md`](docs/observability.md) owns their fields.
+
+The jobs are the session catalog's periodic reconcile
+(`CATALOG_RECONCILE_INTERVAL_MS`, registered by `session-catalog.ts` itself),
+command-receipt pruning, and the attachment/display-artifact maintenance pass.
+The catalog's startup, watcher-event and watcher-replacement passes are the same
+reconcile pass, so they yield to the same pause between bounded batches (the
+durable-row batches of `CatalogMetadataIndex.reconcile` and one file per batch in
+its rebuild path) even though they are not slices of the registered job. Each
+owner keeps its own bounds; the scheduler only decides *when* a slice — or the
+next batch of one — may start. Nothing in a request path prunes, walks or
+reconciles: an admission may still force one exact pass at its own capacity
+boundary (receipts), which is correctness rather than maintenance.
+`register({ name, intervalMs, slice })` returns the function that unregisters the
+job — exactly that registration, so a later registration under the same name is
+not deleted by the replaced owner's dispose — and that call is the seam any other
+recurring owner moves its work under.
 
 ### Diagnostic bundle
 
@@ -642,7 +696,7 @@ from an automation-originated turn to prevent self-replication. Paired Gateway c
  clients may manage automations across that Gateway; this is not a new
  per-session authorization boundary.
 
-Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
+Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. A registration identical to the stored grant is answered with the same status and writes nothing at all: no command receipt, no credential document, and no delivery-receipt or revocation overlay. Every other upsert keeps its command receipt and is admitted durably as before. `hello` and `system.info` carry `pushRegistrationRevision`, a digest of the grants this Gateway stores and the relay origin they are valid for; it changes whenever a grant is added, rotated, disabled at runtime or retired, so a phone that acknowledged an earlier value re-sends its registration and learns the rotation requirement. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 
 Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. Quotas apply across the installation, canonical session, and target grant.
 
@@ -664,6 +718,39 @@ ownership, diagnostics, qualification commands, and remaining platform limits.
 For failure-boundary interpretation, evidence collection, and regression
 expectations, see [connection resilience and diagnosis](docs/connection-resilience.md).
 
+A second, TLS-only listener can serve the Mac's private LAN address, so a phone
+at home does not depend on Tailscale's path (E-3a). It is off unless
+`--lan-endpoint on` or `TRON_GATEWAY_LAN_ENDPOINT=on` enables it (E-3d decides
+the release default; the setting stays the kill switch). It binds only an
+RFC 1918 or IPv6 ULA address the Mac actually has — never a wildcard, never
+link-local, never Tailscale's own ranges — on the main listener's port, rebinds
+when the preferred address changes, and disables itself when the Mac has none.
+Its key and self-signed certificate live at `~/.tron/gateway/lan-endpoint/`
+(`tls-key.pem`, `tls-certificate.pem`, both 0600 inside a 0700 directory), are
+created once on first use, and are replaced only by an explicit rotation: a
+paired phone pins the certificate's public key, so a silent regeneration would
+break the pin instead of fixing it. The listener shares the main listener's HTTP
+and WebSocket handling — admission, capacity, heartbeat, revocation, hello and
+its header, request-idle and TLS handshake bounds are the same code — and serves
+only the socket route and the authenticated
+routes: `POST /v1/pair` stays on the main listener, and `/health` on the LAN leg
+answers its status alone because any host on that network can reach it. Each
+accepted connection's `http.upgrade` record names the leg it arrived on
+(`transport=lan`, `tailscale` or `primary`), and each bind, rebind or disable
+writes one `lan.listener` record with its state, address family and port but not
+the address ([observability](docs/observability.md)).
+
+A paired device learns the lane on the two channels it already owns (E-3b): the
+`POST /v1/pair` response and every `hello` answer carry `lanEndpoints` —
+`[{host, port}]` for the lane's current bind, or `[]` while the lane is off or
+has no private address — and `lanPin`, standard base64 of the SHA-256 of the
+certificate's public key as its raw uncompressed X9.63 point (`0x04 || X || Y`,
+[shared fixture](../protocol-fixtures/lan-endpoint-pin.json)). No
+unauthenticated route names the lane. A phone replaces the endpoints and pin it
+stored on every hello, so a Mac that moved, or whose lane was switched off,
+is corrected before the next connection instead of dialling an address this Mac
+no longer serves.
+
 Authenticated `system.logs.export` is a user-requested diagnostics projection: it accepts only a
 bounded already-redacted snapshot and command ID, appends the newest Gateway debug records (at most
 1 MB), writes a server-chosen `<device-hash>-<timestamp>.jsonl` file under
@@ -680,7 +767,7 @@ Files are 0600. It never accepts a client filesystem path, reads session content
 - `POST /v1/sessions/:sessionId/live-views/:id` — open a disposable viewer with `{generation}`
 - `GET /v1/sessions/:sessionId/live-views/:id/frame` — latest JPEG or a body-free waiting/unchanged response
 - `DELETE /v1/sessions/:sessionId/live-views/:id` — close the exact viewer; last native viewer requests joined suspension, never browser automation shutdown
-- `GET /v1/socket` — authenticated protocol version 5 WebSocket
+- `GET /v1/socket` — authenticated protocol version 6 WebSocket
 
 Bearer admission is linearized with the paired-device document under the
 DeviceStore mutex: the credential check and synchronous HTTP/upgrade registration
@@ -781,7 +868,8 @@ removes uncommitted staging and releases its reservation. An authenticated clien
 an unclaimed upload when its local chip or presentation is retired; claimed prompt attachments reject that
 operation. Remaining unclaimed uploads expire after 24 hours. Prompt attachment IDs are unique, and one
 prompt cannot materialize more than the per-prompt byte ceiling. Startup performs the one physical inventory,
-legacy migration, integrity/ownership reconciliation, and orphan-object sweep. The ten-minute pass then removes
+legacy migration, integrity/ownership reconciliation, and orphan-object sweep. The ten-minute pass, which the
+background-work scheduler runs as one slice, then removes
 stale bodies, expires indexed unclaimed files, retries pending cleanup, and removes claimed logical references
 only when the canonical session catalog proves their owner no longer exists; it does not rescan every retained
 metadata file. A later process start can always rebuild the disposable index from physical metadata.
@@ -914,7 +1002,7 @@ Authorized device names are projected from one Gateway-owned record: a validated
 Every WebSocket starts with:
 
 ```json
-{"type":"hello","protocolVersion":5}
+{"type":"hello","protocolVersion":6}
 ```
 
 The hello, pairing response, and authenticated `system.info` identify the runtime
@@ -928,7 +1016,64 @@ be projected. Older gateways omit `machineGroupID`; clients fall back to
 never names or shares session files, credentials, or other canonical runtime
 data.
 
+The hello also carries the connection correlation key. The phone sends
+`diagnostics: { clientId, attemptId, epoch }`: its client's stable diagnostic
+owner ID, the reconnect loop ID or `"initial"`, and the connection epoch number
+as a decimal string. The Gateway keeps each value only if it is a token of at
+most 64 characters of `[A-Za-z0-9-]`. It drops an invalid or missing value and
+never rejects the hello for one. It stamps the kept values as `peerClientId`,
+`peerAttemptId` and `peerEpoch` on that connection's records
+([observability](docs/observability.md)). The hello response adds
+`connectionId`, and the phone logs it as `gatewayConnectionId`. Both halves are
+diagnostic only: a peer that omits them still connects.
+
 Requests use `{type,id,method,params}` and receive `{type,id,ok,result|error}`.
+A client that stops waiting for a disposable read sends `{type:"cancel",id}` and
+receives no answer: the Gateway abandons that request's work and records
+`rpc.cancelled` with the stage it interrupted. Cancellation applies only to
+`session.open`, `session.list`, `session.transcript`, `session.history.list`,
+`session.history.entry`, `session.search`, `model.list`, `provider.list` and
+`provider.usage`; a cancel for any other method is ignored. An accepted mutation
+or admitted prompt is never cancelled, and neither is a `session.sync`
+acknowledgement: their owners settle them durably whatever the client does with
+their wait.
+Five of those nine methods have server-side deadlines
+(`DISPOSABLE_READ_DEADLINES_MS` in `packages/gateway/src/transport/server.ts`):
+10 s for `session.open`, whose cold load may parse a large transcript before its
+subscription commits, and 5 s for `session.list` and the transcript pages
+(`session.transcript`, `session.history.list`, `session.history.entry`). A read
+that outlives its deadline is aborted, answered `busy` with
+`details.retryAfterMs`, and recorded once as `gateway.shed` with
+`reason=deadline`; the phone waits that hint (bounded to 10 s), retries the read
+once and logs `rpc.retry-after`. A method with no entry in that table has no
+deadline and is never shed: that is every mutation, every prompt, `session.sync`,
+and the four disposable reads whose own owners already allow longer than the
+client does — `session.search` may spend Jev's 20 s on a paid remote-ranked
+evaluation and `provider.usage` answers a typed timed-out snapshot after up to
+10 s per fetch, so a deadline below those owners' bounds would throw away an
+answer they were about to produce (and, for a search, have the phone pay twice).
+Concurrency caps queue rather than refuse: two cold runtime loads, one session
+export and two workspace inspections at a time, each a named constant next to its
+user. Cold loads are additionally gated on heap pressure: above
+`HEAP_EVICTION_SHARE` (0.70) of the V8 heap limit idle runtimes are retired
+largest first until the share is back under it — the registry's own accounting of
+what it gave back is what ends that pass, because `heapUsed` does not fall until
+V8 collects — and above `HEAP_REFUSAL_SHARE` (0.85) the admission is refused with
+`busy` and `HEAP_REFUSAL_RETRY_AFTER_MS` and one `gateway.shed` with
+`reason=heap` naming its `admission` (`open` for a cold runtime load, `import`
+for a JSONL import, which is refused before it writes anything). A protected
+runtime (a subscriber, a run, a lease) is never retired to make room, so a heap
+made of protected runtimes refuses instead of pretending it made room.
+`packages/gateway/docs/connection-resilience.md` owns the full limits table.
+A second `session.open` for the same connection and session joins the attempt
+already in flight and receives its exact result instead of a `conflict`; the
+shared attempt is abandoned only when its last waiting request leaves, and a
+genuinely overlapping open that is not a join is still rejected. A cancel for a
+request that was already cancelled or never admitted changes nothing. A cancel
+for an answered `session.open` whose barrier the client never synchronized
+revokes that barrier, so a retry in that window is answered instead of failing
+as a duplicate - unless another delivered response carries the same token, as a
+joined retry's does; that barrier stays for the client to synchronize.
 Mutations require `params.commandId`; receipts deduplicate completed commands.
 After an uncertain disconnect, clients reconnect and poll `command.status`, reuse
 a completed result, retry only a confirmed-missing command with the same ID, and
@@ -950,25 +1095,43 @@ blind duplicate. Each receipt is capped at one response frame plus 4 KiB of
 identity/envelope overhead before decode and persistence. The store admits at most
 32,768 direct entries and 64 MiB of aggregate evidence, reserving one maximum
 completion before a mutation executes; full capacity returns retryable `busy`.
-Admission keeps an in-process usage total and periodically reconciles it from
-disk, so sustained revisioned activity is not quadratic in the receipt count;
-owned interrupted atomic-write temporaries are scavenged but arbitrary files are
-not treated as receipt evidence.
+Admission keeps an in-process usage total, reconciled from disk when a prune
+removed evidence rather than once per receipt write, so sustained revisioned
+activity is not quadratic in the receipt count; the age-based prune is the
+background-work scheduler's job (`COMMAND_RECEIPT_PRUNE_INTERVAL_MS`, one
+minute), and admission only forces one exact pass at the capacity boundary
+before it refuses;
+owned interrupted atomic-write temporaries are scavenged, but only when the
+command that named them no longer holds a lane, so a receipt write in flight
+never loses its temporary, and arbitrary files are not treated as receipt
+evidence.
 Only expired, valid completed receipts are reclaimed; revisioned editor updates use
 a ten-minute receipt window because newer revisions supersede them. Pending,
 malformed, oversized, or identity-mismatched evidence remains outcome-unknown, is
 never pruned, and can never authorize replay. Receipt execution serializes identical command keys only;
 unrelated commands and sessions remain concurrent.
-Outbound WebSocket admission keeps the 1 MiB encoded-frame ceiling, a 32,768-value JSON node ceiling, and an 8 MiB / 4,096-frame per-connection aggregate queue ceiling. Byte size alone does not prove native decoder admission: many small browser-result records can exceed the structural limit. Transcript pages reserve 24,000 nodes and snapshots 30,000, leaving room for enclosing metadata. Aggregate structural pressure compacts disposable detail into explicit previews before publication, without changing canonical JSONL, row ordinals, or transcript cursors. The shared `gateway-json-limits.json` fixture pins the native/sender contract. This is the common bounded projection contract for local and mobile clients, not separate audience-specific schemas. Final response rejection stays correlated as `response_too_large`; rejected events request resynchronization. A rejected response does not undo an accepted command: confirmed mutations must preserve outcome uncertainty rather than treat projection failure as definitive execution failure. Node-limit diagnostics report a bounded lower count (`nodeCountAtLeast`) and maximum, never payload content. A connection-local ordered writer hands exactly one frame to the WebSocket implementation at a time; enqueue acceptance is the response/event ordering boundary, so a response remains ahead of its synchronization suffix while concurrent startup catalogs cannot manufacture `bufferedAmount` pressure. A broadcast prepares one immutable encoding per operation and reuses it for eligible connections, while each barrier and queue retains its existing connection-local byte admission and failure isolation. The queue includes its active frame and releases each completed payload at the same boundary as its byte reservation; array compaction must never retain unaccounted completed payloads. Count or byte overflow closes only that peer with `1013`. Admission and disposable observers retire immediately, including asynchronous subscription installation that returns after the retirement cut. A one-second forced-close deadline releases a stalled peer; it still consumes connection capacity until physical close. Asynchronous write failures are logged and terminate that exact connection. Each socket also owns abort controllers for in-flight requests: retirement releases disposable `session.list` waits immediately while the coalesced canonical materialization may finish for another caller; accepted prompts and durable mutations never inherit socket cancellation. `server-capacity.integration.test.ts` covers continuously busy payload retention, tiny-frame bursts, stalled overload closure, unrelated-peer responsiveness, and accepted-command settlement.
+Outbound WebSocket admission keeps the 1 MiB encoded-frame ceiling, a 32,768-value JSON node ceiling, and an 8 MiB / 4,096-frame per-connection aggregate queue ceiling. Byte size alone does not prove native decoder admission: many small browser-result records can exceed the structural limit. Transcript pages reserve 24,000 nodes and snapshots 30,000, leaving room for enclosing metadata. Aggregate structural pressure compacts disposable detail into explicit previews before publication, without changing canonical JSONL, row ordinals, or transcript cursors. The shared `gateway-json-limits.json` fixture pins the native/sender contract. This is the common bounded projection contract for local and mobile clients, not separate audience-specific schemas. Final response rejection stays correlated as `response_too_large`; rejected events request resynchronization. A rejected response does not undo an accepted command: confirmed mutations must preserve outcome uncertainty rather than treat projection failure as definitive execution failure. Node-limit diagnostics report a bounded lower count (`nodeCountAtLeast`) and maximum, never payload content. A connection-local ordered writer hands exactly one frame to the WebSocket implementation at a time; enqueue acceptance is the response/event ordering boundary, so a response remains ahead of its synchronization suffix while concurrent startup catalogs cannot manufacture `bufferedAmount` pressure. A frame whose state a newer frame replaces is dropped while it is still unsent, so a slow link queues current state instead of every superseded revision of it. A newer `session.summary` replaces the unsent revision of that session; a newer `session.snapshot` supersedes the unsent sequenced state of its own runtime generation that its own state fully re-states, up to its own `eventSequence`, and only together with the frame that covers them: the surviving snapshot is encoded as the `session.rebaseline` carrying the whole snapshot and the connection's installed `subscriptionToken`, which the phone admits as fresh authority across the sequences the queue dropped instead of resynchronizing. Installing a snapshot restores state, not every effect: a sequenced frame whose effect no snapshot installation performs (a failure receipt that retires a submission and restores its draft, a resource/structure/context revision bump that reloads commands, an editor directive) is a fence, and the queue drops neither it nor anything behind it, so no replacement has to restore what it cannot. Frames of another runtime generation are fences too, because a replacement runtime restarts `eventSequence` at zero. Without that installed token a snapshot supersedes nothing, the frame already entering `ws` is never recalled, and what a client receives stays a subsequence of what was enqueued in enqueue order. A dropped frame is released with its byte reservation and is no longer outstanding, so the `connection.closed`/`connection.write-error` frame counts still describe frames the connection owed its peer, and `gateway.resources` reports the dropped frames and bytes as `outboundCoalescedFrames`/`outboundCoalescedBytes`. A broadcast prepares one immutable encoding per operation and reuses it for eligible connections, while each barrier and queue retains its existing connection-local byte admission and failure isolation; the coalescing `session.rebaseline` is the one frame encoded per connection, because it carries that connection's installed `subscriptionToken` and nothing else differs. The queue reports the bytes it accepted, so the frame that is actually queued is the one counted. The queue includes its active frame and releases each completed payload at the same boundary as its byte reservation; array compaction must never retain unaccounted completed payloads. Count or byte overflow closes only that peer with `1013`, and the record names the topic of the frame it was waiting on and the one that did not fit. Admission and disposable observers retire immediately, including asynchronous subscription installation that returns after the retirement cut. A one-second forced-close deadline releases a stalled peer; it still consumes connection capacity until physical close. Asynchronous write failures are logged and terminate that exact connection. Each socket also owns abort controllers for in-flight requests: retirement releases disposable `session.list` waits immediately while the coalesced canonical materialization may finish for another caller; accepted prompts and durable mutations never inherit socket cancellation. `server-capacity.integration.test.ts` covers continuously busy payload retention, tiny-frame bursts, superseded-frame replacement and the unchanged backstop, stalled overload closure, unrelated-peer responsiveness, and accepted-command settlement; `sync-protocol.integration.test.ts` covers a superseded frame whose sequence was still quarantined behind a synchronization barrier.
 Paired devices that offer `permessage-deflate` get compressed frames with context takeover; local-credential clients stay uncompressed. Every frame, queue and inbound bound above applies to uncompressed bytes. The [frame compression](docs/connection-resilience.md#frame-compression) section owns the settings, measurements and the phone's decoded-size boundary.
 The gateway runs a 25-second heartbeat and terminates a socket only after three
 consecutive ticks received no frame from it, so half-open Tailscale/iOS paths
-are observable without allowing one delayed timer or transient callback stall to destroy a healthy epoch. Pong, ping, and application frames all reset the consecutive-miss counter. A tick sends a WebSocket ping only to a client that initiated no message or ping during the preceding interval, so silent and pong-only clients are pinged every tick while a foreground phone's own pings make server pings unnecessary; the [connection resilience guide](docs/connection-resilience.md) owns the rule and its one-tick transition residual. Mobile clients wait ten seconds between transport-level probes from a liveness task that does not depend on application event reduction. Inbound event traffic therefore cannot starve the client-activity proof. Mobile clients additionally observe pong completion under an eight-second local deadline and bound the entire hello send/receive attempt; loss of that disposable connection never cancels an accepted prompt. Uncertain sends reconcile by command ID on the replacement connection, not by blindly replaying a prompt. Client-side bounded diagnostics distinguish heartbeat timeout, event-buffer overflow, and intentional retirement and remain available offline without sending pre-hello RPCs. Heartbeat timeouts include the disposable connection ID and miss count. Sampled heartbeat timer drift of one second or more emits bounded event-loop-delay telemetry with connection/request counts, queued bytes, RSS, heap, and external-memory bytes; this is a sampled diagnostic, not proof that every shorter stall is observed. Outbound-capacity diagnostics include the violated count/byte limits and high-water marks plus those process-pressure facts. Oversized or unencodable projections log bounded rejection diagnostics without payloads, and connection-capacity rejections report actual counts and limits. Timeout and close records also carry non-payload inbound age, write-progress age, and outbound queue counters in the existing bounded message field, preserving the log record schema. A paired device's connection open and close records additionally carry the Mac's free and total memory, swap used and swap total, the kernel's memory pressure and available-memory percentage, and the age of the host sample they came from, taken from the sample the heartbeat keeps current, so a drop during host paging is readable in the same line without a probe of its own, and a sample a discarded probe left older than a tick says so. WebSocket close codes/reasons remain credential-free so transient transport failures are diagnosable. Reconnect and foreground activation converge through an authoritative
+are observable without allowing one delayed timer or transient callback stall to destroy a healthy epoch. Pong, ping, and application frames all reset the consecutive-miss counter. A tick sends a WebSocket ping only to a client that initiated no message or ping during the preceding interval, so silent and pong-only clients are pinged every tick while a foreground phone's own pings make server pings unnecessary; the [connection resilience guide](docs/connection-resilience.md) owns the rule and its one-tick transition residual. Mobile clients wait ten seconds between transport-level probes from a liveness task that does not depend on application event reduction. Inbound event traffic therefore cannot starve the client-activity proof. Mobile clients additionally observe pong completion under an eight-second local deadline and bound the entire hello send/receive attempt; loss of that disposable connection never cancels an accepted prompt. Uncertain sends reconcile by command ID on the replacement connection, not by blindly replaying a prompt. Client-side bounded diagnostics distinguish heartbeat timeout, event-buffer overflow, and intentional retirement and remain available offline without sending pre-hello RPCs. Heartbeat timeouts include the disposable connection ID and miss count, and every connection record carries the peer's hello correlation key when it sent one. A socket that stops proving liveness for 12 seconds — a server ping left unanswered, or a client that pings on its own gone quiet — writes one `connection.inbound-silent` warning carrying the peer's Tailscale path (`direct`, `relay`, `offline` or `unknown`), and its next frame writes `connection.inbound-resumed` with `silentMs`; a client that only answers the Gateway's pings is idle between them, never silent. Each upgrade writes exactly one `http.upgrade` record with its phase durations, the phase it reached, its outcome and its structured `reason` ([observability](docs/observability.md)). Sampled heartbeat timer drift of one second or more emits bounded event-loop-delay telemetry with connection/request counts, queued bytes, RSS, heap, and external-memory bytes; this is a sampled diagnostic, not proof that every shorter stall is observed. Outbound-capacity diagnostics include the violated count/byte limits and high-water marks plus those process-pressure facts. Oversized or unencodable projections log bounded rejection diagnostics without payloads, and connection-capacity rejections report actual counts and limits. Timeout and close records also carry non-payload inbound age, write-progress age, and outbound queue counters in the existing bounded message field, preserving the log record schema. A paired device's connection open and close records additionally carry the Mac's free and total memory, swap used and swap total, the kernel's memory pressure and available-memory percentage, and the age of the host sample they came from, taken from the sample the heartbeat keeps current, so a drop during host paging is readable in the same line without a probe of its own, and a sample a discarded probe left older than a tick says so. WebSocket close codes/reasons remain credential-free so transient transport failures are diagnosable. Reconnect and foreground activation converge through an authoritative
 snapshot. `session.summary` is a bounded, per-session revisioned global projection
-of aggregate phase, narrow foreground phase, active-subagent presence, pending-user-input state, name, activity time, message count, and first-message title. Full catalog rows additionally project immutable Automation creation identity only when the first canonical user entry is bound to a Gateway-boundary Automation invocation receipt; live generated sessions carry the same identity from their exact execution lease until persistence, while cold catalogs rederive it from JSONL without consulting or mirroring the Automation store. Fork headers take precedence and do not inherit this creation marker. Pi's pre-append `message_end` boundary invalidates cached canonical row facts and schedules their post-append publication, so a new session exposes its first-prompt title while the initial response is still running rather than waiting for a Gateway restart. First-message titles strip exact machine-authored skill envelopes and slash invocation tokens, preferring the user's arguments and otherwise a readable resource name; malformed envelopes remain literal rather than risking content loss. Cold catalog and live summary recency share the canonical user/assistant message-time boundary; settings, names, and extension metadata appends do not change that boundary. Live activity time overlays it with foreground agent events, detached extension lifecycle timestamps, and a ten-second heartbeat while either remains active; session open/close, idle lifecycle events, and rereading an old terminal artifact do not advance recency, so merely viewing a settled session cannot reorder history. Administrative receipt persistence does not make a row active. When detached subagents outlive the parent response, aggregate `phase` remains active while `foregroundPhase` is settled and `hasActiveSubagents` remains true, allowing shallow dashboard clients to present delegated work without opening the transcript. `waitingForUser` is orthogonal to those phases and transitions immediately with the first pending semantic interaction and final settlement, so dashboards can identify that only a user response can advance the session. The additive `activeSince` fact is fixed for one continuous Gateway-observed active period, so catalog ordering keeps active rows first and stable while `updatedAt` continues to advance for truthful freshness labels. Settled history remains reverse chronological by parsed instant rather than ISO text precision, and Gateway restart naturally falls back to canonical message time (header time only when there is no qualifying message). Focused `runtime-registry.integration.test.ts` regressions cover cold opens preserving settled recency, reusable user cuts and search admission during parallel child appends, isolation of an unfinished child tail, successor header-walk coalescing, and cold acquisition independent of mutable dashboard metadata. Summary updates reach every connected
-dashboard immediately without broadcasting full transcripts or changing the structural list revision. User-scoped catalog admission compares only non-delegated structural identities, so a concurrent child-session write cannot make an unchanged dashboard fail `session.list`; complete whole-tree header evidence still quarantines duplicate IDs, including a user ID claimed by a delegated file. Catalog folder enumeration uses bounded concurrency of 16 while retaining canonical-folder and inode checks, all traversal/materialization budgets, and ten-way metadata reads. Results are path-ordered so filesystem enumeration order cannot change discovery output. All-sessions/admin reads retain exact whole-catalog stability checks. The Gateway-owned catalog metadata index is an acceleration only: unchanged and append-only rows are reconciled with the same inode, header, newline, and tail-boundary checks using bounded parallel filesystem work; any failed admission falls back to canonical materialization rather than weakening authority. Catalog `messageCount` counts visible conversation rows, excluding Pi 0.87 `system` transcript deltas that carry provider context but are not chat rows. Index version 3 invalidates the disposable version-2 catalog cache and rebuilds counts from canonical JSONL on demand; no canonical session migration is needed. Clients subscribe
+of aggregate phase, narrow foreground phase, active-subagent presence, pending-user-input state, name, activity time, message count, and first-message title. Full catalog rows additionally project immutable Automation creation identity only when the first canonical user entry is bound to a Gateway-boundary Automation invocation receipt; live generated sessions carry the same identity from their exact execution lease until persistence, while cold catalogs rederive it from JSONL without consulting or mirroring the Automation store. Fork headers take precedence and do not inherit this creation marker. Pi's pre-append `message_end` boundary invalidates cached canonical row facts and schedules their post-append publication, so a new session exposes its first-prompt title while the initial response is still running rather than waiting for a Gateway restart. First-message titles strip exact machine-authored skill envelopes and slash invocation tokens, preferring the user's arguments and otherwise a readable resource name; malformed envelopes remain literal rather than risking content loss. Cold catalog and live summary recency share the canonical user/assistant message-time boundary; settings, names, and extension metadata appends do not change that boundary. Live activity time overlays it with foreground agent events, detached extension lifecycle timestamps, and a ten-second heartbeat while either remains active; session open/close, idle lifecycle events, and rereading an old terminal artifact do not advance recency, so merely viewing a settled session cannot reorder history. Administrative receipt persistence does not make a row active. When detached subagents outlive the parent response, aggregate `phase` remains active while `foregroundPhase` is settled and `hasActiveSubagents` remains true, allowing shallow dashboard clients to present delegated work without opening the transcript. `waitingForUser` is orthogonal to those phases and transitions immediately with the first pending semantic interaction and final settlement, so dashboards can identify that only a user response can advance the session. The additive `activeSince` fact is fixed for one continuous Gateway-observed active period, so catalog ordering keeps active rows first and stable while `updatedAt` continues to advance for truthful freshness labels. Settled history remains reverse chronological by parsed instant rather than ISO text precision, and Gateway restart naturally falls back to canonical message time (header time only when there is no qualifying message). Focused `runtime-registry.integration.test.ts` regressions cover cold opens preserving settled recency, user search admission during parallel child appends, isolation of an unfinished child tail, and a list, a cold open and a hot re-acquire resolved from the owner's rows without a walk. Summary updates reach every connected
+dashboard immediately without broadcasting full transcripts or changing the structural list revision. User-scoped catalog admission compares only non-delegated index rows, so a concurrent child-session write cannot make an unchanged dashboard fail `session.list`; the index's whole-folder rows still quarantine duplicate IDs, including a user ID claimed by a delegated file. Catalog folder enumeration uses bounded concurrency of 16 while retaining canonical-folder and inode checks and all traversal/materialization budgets. Results are path-ordered so filesystem enumeration order cannot change discovery output. All-scope reads serve the same rows without a second scan. The Gateway-owned catalog index is the request path's membership source: unchanged and append-only rows are kept with the same inode, header, newline, and tail-boundary checks using bounded parallel filesystem work, and a file this process cannot prove refuses retryably rather than weakening authority. Catalog `messageCount` counts visible conversation rows, excluding Pi 0.87 `system` transcript deltas that carry provider context but are not chat rows. Index version 3 invalidates the disposable version-2 catalog cache and rebuilds counts from canonical JSONL on demand; no canonical session migration is needed. Clients subscribe
 to `session.snapshot`, progress, tool, queue, and extension events only for chats
-they actually open. Streaming progress republishes the cumulative live message, so
+they actually open. No client consumes a session's snapshot for a session it has
+not opened, so the Gateway builds and serializes one only for a session with a
+subscriber: the transport subscribes a client before it installs that client's
+synchronization barrier, so a pending barrier is always a subscriber, and a
+state change for an unsubscribed session publishes its `session.summary` with no
+transcript projection at all. The transport is the only writer of that
+subscriber record: a slot that closes without the client unsubscribing does not
+end the subscription, so a re-acquired session still reaches the client that was
+watching it. The transport also counts the recipients of every snapshot frame it
+is handed, and a projection no ready socket could receive is recorded as
+unaudienced and warns (`UNAUDIENCED_SNAPSHOT_WARNING`) rather than passing as an
+ordinary build. A client that subscribes later receives its snapshot through the
+ordinary open and synchronization path. Streaming progress republishes the cumulative live message, so
 updates are throttled to at most one frame, carrying the newest message, per
 150 ms window while they keep arriving (the first update after a quiet window
 stays immediate, and a snapshot publishes any pending frame ahead of itself),
@@ -1614,11 +1777,11 @@ without duplication.
 Before materialization, recursive discovery streams at most 50,001 directory entries,
 retains at most 25,001 canonical directories/8 MiB of traversal paths, and admits at most 25,000 session
 records/8 MiB of retained metadata; overflow fails retryably without publishing a partial catalog. Cold scans, live summaries, and appended metadata cap session names and first-message previews at 1,024 UTF-8 bytes, including the truncation marker, without splitting code points or modifying canonical JSONL. Oversized cached preview/name rows are discarded and rebuilt from canonical metadata; they cannot bypass the bound after restart. The pinned
-Gateway performs its own bounded direct-directory JSONL metadata scan for catalog rows, so catalog discovery does not construct the SDK's unused transcript-wide picker search text. User-scoped reads scan metadata only for non-delegated rows while retaining whole-tree structural evidence; all-scope reads remain strict over every canonical row. Same-scope materializations coalesce, with at most one active materialization per scope. An all-scope request waits for an existing user request, but a new user request never inherits an all-scope scan's delay or failure. Header walks remain globally coalesced. A user cut is retained in the same bounded in-memory index with its explicit scope; delegated transcript appends do not invalidate user metadata. Whole-tree header evidence still guards duplicate identities, and an all-scope read cannot reuse an incomplete user cut. A user cut is never persisted as the all-scope sidecar unless that evidence proves no delegated rows were omitted. The first complete structural read after startup or an uncertain canonical mutation uses this scan. Gateway then retains one bounded normalized disk index containing only canonical identity/classification metadata—never transcript text—and revalidates it with bounded header evidence. Later `session.list` traversals dynamically overlay live-only slots and revisioned summaries without rebuilding transcript-wide picker text. Empty live-slot create/delete updates preserve the warmed disk index, and a confirmed persisted delete repairs it from post-delete header evidence. Canonical path normalization runs with at most 16 concurrent filesystem operations.
+Gateway performs its own bounded direct-directory JSONL metadata scan for catalog rows, so catalog discovery does not construct the SDK's unused transcript-wide picker search text. One owner, `session-catalog.ts`, holds the index of every canonical row and is every reader's membership source: `session.list`, a cold open, attention resolution, automation admission, workspace lookup and storage maintenance read its rows, so no request walks the session folder. The owner keeps the index current from the Gateway's own commit points, the recursive folder watcher, and a whole-folder reconcile every `CATALOG_RECONCILE_INTERVAL_MS` (30 minutes) that is the backstop for a dropped event or a stopped watcher; its passes run in bounded batches that yield to the background-work scheduler between them. A user-scoped read filters those same rows by each row's own delegated flag, and duplicate identities are quarantined from the whole index, so a concurrent child write cannot make an unchanged dashboard fail `session.list` and an ambiguous user ID never resolves to one of its files. The durable `gateway/catalog-metadata-v2.json` document is the owner's acceleration only — bounded identity/classification metadata, file identity, size/mtime/EOF and a tail-boundary hash, never transcript text — and only the owner writes it, debounced. JSONL remains authoritative: a missing, corrupt or foreign-root document leaves the index to rebuild every row from canonical files, and a pass that cannot prove a file keeps the row it already had and refuses retryably (`catalog_not_ready`) instead of answering membership from a cut that might be wrong. Live-only slots and revisioned summaries are overlaid on the rows per projection generation, so heartbeats never rebuild catalog metadata. Canonical path normalization runs with at most 16 concurrent filesystem operations.
 
-`RuntimeRegistry` separately retains only a bounded acquisition admission: canonical header ID/path/cwd, structural user-versus-subagent classification, the atomic ambiguous-ID set, and a fixed-size digest. It never retains transcript text or a second canonical catalog. The normal cold-acquire path uses an independent mutex and builds or validates this admission from canonical JSONL membership, canonicalized paths, and bounded header ID/cwd/parent evidence, without waiting for transcript-wide catalog materialization. Acquisition uses only this header admission, independently of the dashboard metadata index; exact header evidence and the selected manager's ID/cwd are still revalidated before runtime resources load. Ordinary message/tool appends do not change the digest. Additions, removals, aliases, duplicate identities, or same-path header identity replacement do. A malformed file under the reserved `subagent-artifacts` diagnostic subtree is ignored as a non-session artifact and cannot poison evidence completeness. Malformed files in canonical session locations still fail closed. Stable generic header/acquisition-budget incompleteness may fall back to the independently bounded full metadata scanner for that one list response, but cannot certify a reusable structural index, durable sidecar generation, or runtime acquisition. An observed non-newline tail remains unstable for reads of that transcript and its catalog scope, but a stable complete header still supplies whole-tree identity evidence. An unfinished delegated append therefore cannot force unrelated cold opens into transcript-wide discovery or prevent a user dashboard from reusing its admitted metadata. The selected cold file is checked before SDK open, which can repair incomplete tails; an unfinished selected file fails retryably without being rewritten. Changing, replaced, symlinked, duplicate, or header-rewritten files remain strict; append-only tail growth of the exact inode currently owned by a live RuntimeSlot remains permitted. Incomplete lightweight acquisition falls back, without holding the acquisition mutex, to two matching Gateway-scanned fingerprints over the full normalized canonical identity set. That one-off result is not cached and its exact identity fingerprint is validated again immediately before runtime creation. Directories named `*.jsonl` are not file candidates.
+`RuntimeRegistry` derives membership from the index rows, not a second catalog: `catalogAcquisition` projects canonical ID/path/cwd, the structural user-versus-subagent classification and the ambiguous-ID set from the owner's rows, with no filesystem read of its own. The index is authoritative for cold open, attention resolution, automation admission, workspace lookup and delete. A Gateway-owned change reaches a row at its commit point but asynchronously, so a read that finds no row for a named session waits for the owner's queued changes and re-resolves before it may answer `not_found`; an ID the owner read a header for but could not prove refuses retryably. Ordinary message/tool appends do not change membership. Additions, removals, aliases, duplicate identities, or same-path header identity replacement do. A malformed file under the reserved `subagent-artifacts` diagnostic subtree is ignored as a non-session artifact and cannot poison the cut. Malformed files in canonical session locations still fail closed. An unfinished delegated append therefore cannot force unrelated cold opens into discovery or prevent a user dashboard from serving its rows. The selected cold file is checked before SDK open, which can repair incomplete tails; an unfinished selected file fails retryably without being rewritten. Changing, replaced, symlinked, duplicate, or header-rewritten files remain strict; append-only tail growth of the exact inode currently owned by a live RuntimeSlot remains permitted. Directories named `*.jsonl` are not file candidates.
 
-The exact opened manager must still reproduce the admitted ID and canonical cwd. Concurrent header checks share a single in-flight filesystem walk; post-read checks wait for it and share a successor cut that starts after the protected read. Normal complete-header acquisition runs a second bounded structure/header comparison after manager open and before runtime resources load; fallback acquisition instead repeats its full SDK-derived identity validation. Changes reject retryably, while the unavoidable cross-process race after that final validation point is not presented as eliminated. Header validation starts with 512-byte reads, runs in deterministic batches of at most 16 files, permits at most 64 KiB per candidate with a strict shared 64 MiB aggregate budget apportioned across the candidate set, and inserts at most 25,000 identities/4 MiB into transient or reusable evidence. Validation reads only the canonical session header; later `session_info` and transcript appends do not change the structural digest. Gateway-owned mutations are generation-checked before and after every lightweight build and again immediately before a full catalog identity is published. Mutable summary/attention overlays are captured only after structural materialization, so heartbeats cannot starve a list projection. Delete admits only the hardened structural identity/path/cwd/classification record and revalidates its structural digest and user classification immediately before inode-safe quarantine, so a new parent file, duplicate ID, or topology change cannot commit stale deletion. An unstable lightweight scan or full list retries once and then fails retryably without publishing stale evidence. Hot slots not marked ambiguous by the latest full catalog bypass global header validation; known ambiguous IDs continue validating until duplicate repair is observed. Same-session cold opens share one startup, while distinct session starts reserve capacity atomically and perform manager/runtime initialization outside the registry-global publication mutex. Creation uses the same short reservation boundary, so one slow project resource loader cannot serialize unrelated starts. Administrative drain and shutdown wait for already-admitted starts before snapshotting runtime ownership. Thus idle resume normally avoids a transcript-wide catalog parse while JSONL and the pinned manager remain canonical. Startup binds the HTTP listener before RuntimeRegistry recovery begins. RuntimeRegistry loads the bounded durable attention/marker inputs while health remains `starting`, performs one bounded structural evidence cut (`catalog-warming`), then reconciles attention and interrupted markers from that same cut (`attention-recovery`); blob storage follows as `storage-warming`. Storage warming loads durable stores without materializing the presentation catalog or treating an unavailable catalog as an empty membership set. Periodic attachment/display-artifact maintenance derives retention membership directly from complete whole-tree header evidence plus live runtime slots. It never materializes transcript summaries or joins an all-scope presentation scan merely to obtain IDs. Ambiguous IDs still retain their artifacts; incomplete header evidence or a retired mutation generation prevents orphan collection. Pending Knowledge observation recovery independently resolves canonical header evidence, rejects duplicate IDs, and rechecks the read file identity and manager header; incomplete or changed evidence leaves durable cuts pending instead of inventing a missing session. It neither depends on a warmed presentation index nor starts an agent runtime. Large previews or catalog presentation failures therefore cannot block storage initialization; canonical acquisition, catalog bounds, and artifact authorization remain enforced. Focused regressions in `runtime-registry.integration.test.ts`, `catalog-metadata-index.test.ts`, and `summary-text.test.ts` cover cold scans, UTF-8 boundaries, cached/append metadata, storage readiness, and retained artifacts. Only after all startup phases succeed does GatewayServer publish `ok`. Catalog validation, SDK materialization, target manager open, runtime creation, attention resolution/persistence, and startup attention reconciliation are separately timed with privacy-safe stage records; they report only method/stage, outcome, and duration and never log IDs, paths, prompts, or parameters. Runtime snapshots reuse exact statistics/context and latest-cache derivation for an unchanged runtime revision, then invalidate naturally at canonical event, branch, compaction, or rebind revisions.
+The exact opened manager must still reproduce the admitted ID and canonical cwd, and the fence reads only the target: the index must still claim this exact file, and that file's own stat and header must still be the ones the index admitted, so no request walks the tree. Changes reject retryably, while the unavoidable cross-process race after that final validation point is not presented as eliminated. The owner's whole-folder scan reads canonical session headers with 512-byte first reads, runs in deterministic batches of at most 16 files, permits at most 64 KiB per candidate with a strict shared 64 MiB aggregate budget apportioned across the candidate set, and inserts at most 25,000 identities/4 MiB into the index. It reads only the canonical session header; later `session_info` and transcript appends do not change the structural identity. Gateway-owned mutations are generation-checked across an admission, so a catalog change that lands during one refuses retryably instead of committing stale membership. Mutable summary/attention overlays are captured per projection generation after the rows, so heartbeats cannot starve a list projection. Delete resolves membership from the index and re-proves the exact path, inode and user classification immediately before inode-safe quarantine, so a new parent file, duplicate ID, or topology change cannot commit stale deletion. A cut that cannot prove a file refuses retryably instead of publishing stale evidence. Same-session cold opens share one startup, while distinct session starts reserve capacity atomically and perform manager/runtime initialization outside the registry-global publication mutex. Creation uses the same short reservation boundary, so one slow project resource loader cannot serialize unrelated starts. Administrative drain and shutdown wait for already-admitted starts before snapshotting runtime ownership. Thus idle resume normally avoids a transcript-wide catalog parse while JSONL and the pinned manager remain canonical. Startup binds the HTTP listener before RuntimeRegistry recovery begins. RuntimeRegistry loads the bounded durable attention/marker inputs while health remains `starting`, waits for the catalog owner's first reconcile pass (`catalog-warming`), then reconciles attention and interrupted markers from that same cut (`attention-recovery`); blob storage follows as `storage-warming`. Storage warming loads durable stores without materializing the presentation catalog or treating an unavailable catalog as an empty membership set. Periodic attachment/display-artifact maintenance derives retention membership from the owner's reconciled cut plus live runtime slots, and never materializes transcript summaries. Ambiguous IDs still retain their artifacts; an unreconciled or incomplete cut refuses retryably instead of collecting orphans. Pending Knowledge observation recovery resolves membership from the owner's reconciled cut, rejects duplicate IDs, and re-reads and re-proves the row's exact file identity and manager header; incomplete or changed evidence leaves durable cuts pending instead of inventing a missing session. It does not start an agent runtime. Large previews or catalog presentation failures therefore cannot block storage initialization; canonical acquisition, catalog bounds, and artifact authorization remain enforced. Focused regressions in `runtime-registry.integration.test.ts`, `session-catalog.test.ts`, `catalog-metadata-index.test.ts`, and `summary-text.test.ts` cover cold scans, UTF-8 boundaries, cached/append metadata, storage readiness, and retained artifacts. Only after all startup phases succeed does GatewayServer publish `ok`. Catalog validation, SDK materialization, target manager open, runtime creation, attention resolution/persistence, and startup attention reconciliation are separately timed with privacy-safe stage records; they report only method/stage, outcome, and duration and never log IDs, paths, prompts, or parameters. Runtime snapshots reuse exact statistics/context and latest-cache derivation for an unchanged runtime revision, then invalidate naturally at canonical event, branch, compaction, or rebind revisions.
 
 Accepted `session.prompt` and `terminal.open` mutations synchronously retain their
 exact live runtime before receipt I/O and pre-effect materialization/resolution
@@ -1632,7 +1795,7 @@ Interactive cold opening has one remaining dependency boundary: pinned `@earendi
 
 Every session-list traversal is one
 immutable, disposable catalog materialization: every page carries the same structural `listRevision`, and its authenticated opaque cursor
-is bound to the connection, scope, materialization, offset, and revision. RuntimeRegistry supplies a disposable page-source generation for indexed catalog cuts; the pagination store leases that source and hydrates requested pages, while preserving the older full `catalog()` API for internal snapshot owners. Single-page results are not retained as generations. A Gateway-owned `gateway/catalog-metadata-v2.json` acceleration file may persist only bounded identity/summary metadata (including receipt-derived Automation creation identity), canonical file identity, size/mtime/EOF, and a fixed tail-boundary hash. It is versioned and root-bound, written through a 0600 temp-file/fsync/rename/directory-fsync transaction, and is discarded on any schema/root/inode/size/mtime/boundary mismatch. A catalog read persists it without awaiting that transaction, so registry disposal settles the admitted write and refuses later ones: no temp file or rename may land in the Gateway state directory after its owner reports shutdown. JSONL remains authoritative and persistence failure degrades to the canonical in-memory projection. The current query builds one bounded compact seed source, sorts it once, and hydrates only the requested offset page; canonical JSONL remains authoritative and true keyset indexing remains a later phase. Traversal
+is bound to the connection, scope, materialization, offset, and revision. RuntimeRegistry supplies a disposable page-source generation for indexed catalog cuts; the pagination store leases that source and hydrates requested pages, while preserving the older full `catalog()` API for internal snapshot owners. Single-page results are not retained as generations. A Gateway-owned `gateway/catalog-metadata-v2.json` acceleration file may persist only bounded identity/summary metadata (including receipt-derived Automation creation identity), canonical file identity, size/mtime/EOF, and a fixed tail-boundary hash. It is versioned and root-bound, written through a 0600 temp-file/fsync/rename/directory-fsync transaction, and is discarded on any schema/root/inode/size/mtime/boundary mismatch. The catalog owner is its only writer: it persists its own cut, debounced, and a catalog read never writes it, so a row a read projected cannot reach the document with a count or a size its file no longer has. Disposal settles the admitted write and refuses later ones: no temp file or rename may land in the Gateway state directory after its owner reports shutdown. JSONL remains authoritative and persistence failure degrades to the canonical in-memory projection. The current query builds one bounded compact seed source, sorts it once, and hydrates only the requested offset page; canonical JSONL remains authoritative and true keyset indexing remains a later phase. Traversal
 leases expire after 30 seconds, are released on disconnect, and are bounded by
 per-client lease quotas plus per-lease/global row and encoded-byte limits with LRU eviction. Runtime `session.summary` revisions remain independent, so activity heartbeats
 and ordinary row updates neither rescan nor tear catalog pagination; a later traversal
@@ -1640,6 +1803,18 @@ observes newer canonical truth. Both full scans and reconciled durable-index cut
 publish membership through the same structural revision owner, including the first
 cut after restart. Additions and removals advance `listRevision`; unchanged cuts
 reuse it, and already-leased traversals keep their original rows and revision.
+An uncursored `session.list` may name the client's retained projection token:
+an equal token is answered with `notModified: true` and no rows. The token is the
+Gateway runtime epoch plus the page-source generation, so it covers structural
+identity, archive membership, the visible archived count and every mutable row
+overlay — a live summary, a cold row's attention projection and archive state
+each move it. A first-party client may therefore revalidate a retained token on
+any connection, including a replacement one, and still holds that exact
+projection. The epoch is per Gateway process, so a restarted Gateway whose
+revisions begin again at zero can never confirm a pre-restart token rows do not
+match. Any other token, a cursored page that received one, or an absent
+parameter receives ordinary rows; a cursor traversal already belongs to the
+projection its first page admitted.
 Clients still fail closed and restart from a nil cursor
 when interoperating with an older Gateway that changes revisions between pages. Model-list
 cursors bind their offset to an exact whole-catalog SHA-256 fingerprint and a 30-second immutable
@@ -1650,7 +1825,7 @@ beneath the socket envelope ceiling. Provider catalogs reject more than 1,000 ro
 or 4 MiB of strings before generic projection can truncate them.
 
 Cross-client read attention is narrow Gateway-owned metadata, not transcript or
-catalog mirroring. Membership is resolved against the exact structural/acquisition admission outside the serialized attention lane. The commit boundary rechecks deletion and generation, takes fresh bounded catalog identity evidence, and verifies the selected inode/header; this remains a whole-catalog header cost until durable indexing replaces it, but no transcript metadata materialization occurs beneath the lane. A bounded atomic `gateway/session-attention.json` document
+catalog mirroring. Membership is resolved from the catalog owner's rows outside the serialized attention lane. The commit boundary rechecks deletion and generation and re-proves the index's exact row for the selected file — its path, inode and header — so a request reads only that target file and no transcript metadata materialization occurs beneath the lane. A bounded atomic `gateway/session-attention.json` document
 stores only completion/read-through revisions, a manual-unread flag, a bounded
 recent-completion deduplication set, and a restart-reconciliation cursor. The listener
 becomes ready before canonical attention recovery opens session transcripts; run markers
@@ -1690,7 +1865,7 @@ durable attention replacement, clears manual unread, and publishes no transient
 unread summary. Successful `session.open` returns its current completion revision,
 and first-party clients acknowledge it only after installing the snapshot and
 retry transient acknowledgement failure against that same absolute revision.
-Protocol-v5 clients require the complete attention and presentation contract;
+Protocol-v6 clients require the complete attention and presentation contract;
 they do not attach to an earlier Gateway that lacks the method or revisioned
 response.
 Delete removes attention metadata, true identity replacement moves it without
@@ -1760,7 +1935,7 @@ drops archived rows from every page of that traversal and returns
 newest-archived first. Archived rows carry `archivedAt` and are otherwise
 unchanged, and a list cursor is bound to the filter that created it. The
 `session-archive.v1` capability advertises the method and the filter; the
-additive field and parameter leave protocol version 5 unchanged.
+additive field and parameter required no protocol version change.
 
 `session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
@@ -1788,7 +1963,7 @@ large active runs therefore remain openable; no canonical Pi content is modified
 discarded. Canonical non-image upload
 envelopes retain their runtime-owned readable paths, but the mobile transcript
 projection replaces those tags with bounded name/type/size metadata on an
-ordinary text part and never sends the Mac path to clients. Protocol-v5 clients therefore receive the safe filename instead of the
+ordinary text part and never sends the Mac path to clients. Protocol-v6 clients therefore receive the safe filename instead of the
 Mac path for a new content discriminant. A page carries and echoes the next projected entry as its branch anchor plus the current runtime
 generation and leaf identity. Raw canonical parent links may pass through filtered session-info,
 hidden custom, or extension-receipt entries and therefore never define projected-row adjacency.
@@ -1803,8 +1978,8 @@ Tron operating context, with each section, tool line, rule, skill, and instructi
 attributed to Pi, a Tron module, a package, a local file, or an MCP connection. Pi does
 not expose its section map, so the Gateway splits the rendered text; file-backed
 bodies are matched exactly, every byte stays in one section, and a prompt without Pi's
-structure is returned verbatim as one `prompt` section. The additive field leaves
-protocol version 5 unchanged; `systemPrompt` remains Pi's base prompt. The resource
+structure is returned verbatim as one `prompt` section. The additive field
+required no protocol version change; `systemPrompt` remains Pi's base prompt. The resource
 projection includes display-safe extension, prompt, skill, context-file, and tool
 metadata while canonical resource files and runtime loaders remain authoritative.
 Extension entries also expose the public loader handler event names and bounded
@@ -1873,7 +2048,7 @@ Each row includes the runtime loader's source, scope, origin, and path when avai
 `session.commandDetail` read requires one exact current `source:name` identity and returns
 that selected prompt, skill, or extension source document only; content is UTF-8 bounded
 to 96 KiB with original byte count and explicit truncation metadata, so catalog loading
-never reads or copies every resource body. Protocol-v5 `session.prompt` accepts one typed
+never reads or copies every resource body. Protocol-v6 `session.prompt` accepts one typed
 `resourceInvocation` with source, canonical name, and visible arguments. The Gateway revalidates
 exact live `(source,name)` identity and extension-command precedence before constructing Pi's
 normalized leading invocation. Pending and queued projections retain the same typed resource;
@@ -2120,17 +2295,43 @@ own provider/resource admission limits and are not counted as parent runtimes.
 The registry integration suite qualifies 128 simultaneous synthetic parent runs
 across eight projects through child-file churn and repeated client reentry.
 
-Catalog acquisition generations share one physical predecessor and coalesce its
-successor after settlement, including failure. Invalidations cannot multiply
-concurrent discovery work. A live persisted `RuntimeSlot` proves membership for
+Admission also holds a byte budget, `LIVE_RUNTIME_BYTE_BUDGET` (1.5 GiB) in
+`packages/gateway/src/sessions/runtime-registry.ts`, because the runtime count
+alone let loaded sessions push the heap toward its limit. Each live runtime is
+charged `LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` (3) times its canonical JSONL bytes,
+measured at admission from the same one-`stat`-per-runtime inventory the
+resource sample already reads. The budget is eviction pressure, not an
+admission gate: when the live charge plus the opening session's charge exceeds
+it, the largest reloadable idle runtime is retired first (the one whose
+retirement reclaims the most), under the protections above, and retiring
+continues until that projected total fits. Nothing is retired when retiring
+could not help — the opening session's own charge is larger than the whole
+budget, or the excess is larger than every eligible runtime together — and an
+admission the retired set still cannot fit is served anyway, with its
+`runtime.loaded` record carrying `overBudget: true`. The runtime count and the
+explicit heap limit below stay the backstop; this budget never refuses an open,
+and refusal under the real heap limit is not its decision. The projected total
+counts the starts already reserved for, except the requested session's own
+reservation, which the opening charge already is: two opens of one session at
+once therefore retire nothing for it, and a start that adds no bytes (a session
+that has not written a transcript yet) retires nothing either. The launcher
+passes `--max-old-space-size=4096` to the Gateway's Node process
+(`packages/mac-app/scripts/tron-gateway-launcher.c`), and the budget is sized
+below that limit. `runtime.loaded` and `runtime.evicted` record each transition
+with the session, its reason (`heap` for the heap-pressure pass `G-12` added),
+its transcript bytes and the charge, as named `counts`.
+
+Catalog membership is one owner's index, so nothing coalesces a second
+discovery: a live persisted `RuntimeSlot` proves membership for
 attention reads and writes, as it does for `acquire`, so acknowledging an open
-chat never walks catalog headers. A cold open's final validation fences only
-the target: exactly one unchanged canonical claimant for its ID. Unrelated
+chat never walks catalog headers. A cold open's fence reads only
+the target: exactly one unchanged canonical claimant for its ID, and that file's
+own stat and header. Unrelated
 catalog churn, such as files created by active subagents, cannot fail the open. Every opened header descriptor closes even if its
 initial tail probe fails. Upload and display orphan maintenance resolve canonical
 session membership inside their respective serialized ownership lanes, after
-previous claims/grants commit; discovery failure preserves ownership rather than
-interpreting unavailable membership as an empty catalog.
+previous claims/grants commit; a cut that cannot prove membership preserves
+ownership rather than interpreting unavailable membership as an empty catalog.
 
 1. `RuntimeRegistry` owns at most one `RuntimeSlot` per session in this process.
 2. `RuntimeSlot` serializes mutations for its session. Different slots execute
@@ -2143,7 +2344,13 @@ interpreting unavailable membership as an empty catalog.
    The client acknowledges the exact
    baseline with `session.sync`, after which only later sequenced events are released.
    While the barrier owns a session's catch-up it is the only delivery path, so every
-   in-window event reaches the client exactly once and in sequence. A bounded barrier
+   in-window event reaches the client exactly once and in sequence, except where the
+   connection's outbound queue supersedes unsent state: a dropped sequence is always
+   covered by the `session.rebaseline` that replaced it, so the client can
+   still accept what follows. Only state that replacement fully re-states may be
+   dropped; a frame whose effect installing a snapshot does not perform (a failure
+   receipt, a revision bump, an editor directive) is a fence, and it and every frame
+   behind it arrive in order. A bounded barrier
    overflow converges the client with a fresh authoritative `session.rebaseline`
    snapshot instead of a resync dead end; only an unavailable session falls back to
    `transport.resyncRequired`.
@@ -2307,6 +2514,7 @@ scripts/tron-profile gateway --list
 scripts/tron-profile gateway --self-test            # prove the recording path first
 scripts/tron-profile gateway --scenario stream-reply # or tool-loop, idle, dashboard-observer, all
 scripts/tron-profile gateway --scenario idle --window-seconds 60 --iterations 3 --no-build --cpu-profile
+scripts/tron-profile gateway --scenario multi-session # qualification run; wants an idle host
 ```
 
 Each scenario run builds the Gateway (`npm ci` only when the lockfile changed),
@@ -2387,6 +2595,211 @@ the report's noise bound in the expected ratio and the unsubscribed client never
 receives `session.progress`. Limits: the faux model bypasses provider network
 streams, Knowledge is unconfigured, the recording clients are Node `ws`, not
 `URLSessionWebSocketTask`, and the loopback socket has no radio cost.
+
+#### Multi-session qualification
+
+`--scenario multi-session` is the connection and scale qualification run and the
+standing check before a Gateway release or a change to the transport, catalog,
+registry or slot. `all` does not include it. It refuses to start (exit 73) when
+memory pressure is not normal, swap exceeds 4 GiB or the temporary volume
+cannot hold the catalog, and it takes the same per-host profile lock.
+
+- **Catalog:** `scripts/tron-profile-gateway-driver.mjs catalog` writes a
+  seeded catalog into the fixture's private agent directory: 3,000 JSONL files
+  and 2 GiB by default (`--catalog-files`, `--catalog-mib`), shaped like the
+  measured one (7.5% sessions, 15% forks at `<parent>/forks/`, the rest subagent
+  runs at `<parent>/<producer>/run-N/session.jsonl`), including five sessions of
+  100–200 MiB. One seed gives one content digest (in the report context). The
+  catalog is deleted on success, failure, deadline and interruption, even when
+  the rest of a fixture home is kept as evidence.
+- **Phases:** a priming start pairs the devices and loads the dashboard list
+  once (building the durable catalog index). Each iteration then starts a fresh
+  fixture Gateway, so every session is cold again, and starts eight faux-model
+  tool loops from seeded sessions whose transcript page is full; the driver
+  unsubscribes after each prompt. Four subagent-like writers append one entry
+  each to child transcripts every 500 ms from the first measured window on (on
+  `main` every append re-scans the whole catalog, so starting them with the
+  setup would let an unmeasured precondition queue behind that backlog).
+- **No-subscriber window (30 s):** the eight loops run; only an unsubscribed
+  dashboard and the driver are connected. Its metrics carry the
+  `no_subscriber.` prefix.
+- **Mixed window (`--mixed-seconds`, 120):** the mobile client is mounted on a
+  running session; the dashboard lists (`session.list`, `user`, 500) every 5 s;
+  lanes that can starve each other each get their own device, start together and
+  report: cold opens of the large sessions (largest first, as many as the window
+  allows), a warm open of a running session every 5 s, a cold open of a 1 MiB
+  session followed by a prompt every 5 s, and a dashboard-fidelity reconnect
+  every 60 s at offset 50 s. The mobile reconnects on the mobile client every
+  60 s at offset 20 s and times reconnect-to-ready (mounted chat restored); the
+  dashboard-fidelity lane times its own (list returned). A retryable Gateway
+  error is retried after 250 ms and counted (`requests.busy_retries`); on the
+  phone it would be a failed attempt. Only the mobile and dashboard clients are
+  recorded: the prober and reconnect lanes' own wire traffic is not.
+- **Fixed window edges:** the mixed window closes at `--mixed-seconds` whatever
+  is still in flight, so its frames, bytes, CPU time and catalog walks do not
+  scale with the fixture's latency and two runs can be compared. An operation
+  still running then gets a fixed 45 s tail (`tailGraceMs`); its latency still
+  lands in the samples. Whatever the tail outlasts is censored: its elapsed
+  time becomes the sample (so it counts in `requests.over_phone_deadline`) and
+  `requests.censored_tail` counts it. The no-subscriber window is fixed by its
+  sleep alone. Every lane that can starve another runs on its own device and
+  keeps its own schedule: a `session.list` that outlasts the window cannot
+  delay the reconnect lane's next reconnect of its own client. Operations that
+  are not in flight when the window closes are not started: the cold lane skips
+  its prompt once the deadline has passed, so no sample is timed after the
+  other lanes stopped.
+
+- **Impairment cases (`--cases`, default
+  `blackhole,bandwidth,bandwidth-stream,restart`):** they
+  run after the mixed window, on the clients it already connected, and measure
+  recovery rather than throughput. `--cases none` runs none. The mobile client's
+  path is a loopback TCP relay the driver shapes, so what a cap or a blackhole
+  applies to is the real byte stream — the Gateway's own socket buffers fill and
+  its capacity policy is exercised — and the bytes counted are the ones the link
+  carried, not a decompressed frame's size. Every client retries on the phone's
+  own backoff (2 s × 1.7, capped at 15 s, ±20% jitter).
+  - **blackhole** (`--blackhole-seconds`, default 90, longer than the Gateway's
+    75 s half-open hold): the relay stops forwarding in both directions, so an
+    established socket goes silent and an attempt made during the outage is held
+    with no answer until the phone's transport-open deadline gives up. A held
+    attempt is deliberately never forwarded when the path returns; that is a
+    pessimistic model, not the phone's behaviour (an attempt still inside its
+    deadline has not been abandoned and real TCP would retransmit), and it
+    inflates the recovery baseline by the rest of that attempt. The mobile chat
+    is mounted on the shaped path and settles for one ping interval
+    (`blackholeSettleMs`) before the outage, so the client is between pings; it
+    keeps its socket open until one liveness window (18 s: its ping interval
+    plus its pong deadline) passes with no inbound frame, then abandons it, and
+    `silence_ms` measures that silence from the client's last inbound frame.
+    Because the phone says nothing to the Gateway when it gives up on a frozen
+    path, the Gateway keeps that socket half-open. The path returns on its own
+    timer, and the case times the recovery to a ready mounted chat from that
+    moment — an attempt still in flight then is part of the recovery. The model
+    hands the phone that return as a path change (C-3): it cancels a pending
+    reconnect wait, restarts the backoff curve, and is consumed by an attempt
+    still on the wire when it arrives, which retries at once. A relay blackhole
+    changes nothing the phone's own path monitor can see, so on a device this
+    leg's recovery is the wait it happened to be in plus the attempt after it;
+    the modelled cancel is the path-change case C-3 is about (a route whose
+    interface set really changes), not something this leg observes on a device.
+  - **bandwidth** (`--bandwidth-mbps`, default 2, for `--bandwidth-seconds`,
+    default 90): the relay holds one rate budget per direction and pauses the
+    sending socket when it is spent — until the receiving socket drains — so a
+    queued pong waits behind the data in flight on the Gateway's side of the
+    link. The workload keeps `bandwidthInFlight` (default 6) full bounded
+    transcript pages in flight at once, each on its own session (the Gateway
+    admits one `session.open` per session per connection), and reports the peak
+    it held (`.max_in_flight`) and the load that peak asked the Gateway to send,
+    in the decoder's bytes (`.offered_in_flight_bytes` — the unit the Gateway's
+    own 8 MiB outbound queue is bounded in) and in wire bytes
+    (`.offered_in_flight_wire_bytes`). A leg is rejected unless it filled at
+    least half its cap. What this leg *cannot* show at its default cap, stated
+    plainly: one page is about 39 kB of wire, so even six in flight are far
+    under one pong deadline of 2 Mbit/s (8 s × 250 kB/s = 2 MB of wire), and six
+    pages are under the 8 MiB per-connection backstop — at 2 Mbit/s neither a
+    pong deadline miss nor a capacity close is reachable. What it reports is the
+    mobile's longest ping-to-pong round trip (`.max_ping_to_pong_ms`, the delay
+    a pong deadline is set against) and the load it offered, and zero misses and
+    zero closes are read as "this cap never reached them", not as a pass. The
+    case that can reach them is `bandwidth-stream` below. Note what a pong waits
+    behind when they are reached: the queue's bytes compress on the wire (about
+    25-30× for this fixture's generated transcripts), and the Gateway's own
+    `autoPong` answer is not queued in its application queue at all, so what
+    delays a pong is the socket's own buffered bytes.
+  - **bandwidth-stream** (`--bandwidth-stream-mbps`, default 0.08, for
+    `--bandwidth-stream-seconds`, default 30): the mobile mounts several chats on
+    the phase's running sessions (up to `bandwidthStreamSessions`), which stream
+    superseding snapshots and keyed events, and the path is then capped *below
+    what they produce* — the measured seven streams of this fixture produced
+    295,621 B/s of decoded state and 11,901 B/s of wire, so the cap's 10,000 B/s
+    is below the workload and the relay, not the workload, bounds the leg — so
+    the Gateway's queue holds replaced state — the state G-4 coalesces — and
+    whatever waits behind it. This is the case that can show what the page leg's
+    default cap cannot: on code without G-4 the queue reaches its 8 MiB backstop
+    and the socket closes for capacity, and on code without C-4 the phone tears
+    down a link over a pong a busy path delayed. It reports the streams it held,
+    their decoded payload rate, `.delivered_bytes_per_second` and `.link_use`
+    (the cap must stay full: the leg is rejected below 0.9), its
+    `.max_ping_to_pong_ms`, `.pong_deadline_misses` and `.unexpected_closes`. The
+    streams are attached before the cap is applied: the phone mounts its chats
+    on a working path and the path then slows. A leg is rejected unless it held
+    at least two mounted streams, filled at least 0.9 of its cap, and showed a
+    backlog: its own round trip longer than the *same run's* uncapped round trip,
+    a missed deadline, or a close. The round trip is the leg's own window (the
+    client's lifetime maximum is not the leg's) and each pong is charged to the
+    ping it answers.
+  - **restart:** the driver asks the profiler — its parent, which owns the
+    fixture process — for a Gateway restart while every connected client is
+    live. The profiler stops the child and starts a fresh one on the same port,
+    and reports the epoch millisecond at which the new Gateway was healthy, plus
+    the downtime (request to healthy) as its own metric. Each client retries as
+    soon as its own socket closes, so the refused connects and the reconnects
+    include the downtime; the exit criterion's three clients (a mounted phone, a
+    listing dashboard, one more pair) are the measured ones and every other
+    client reconnects too, or the run is rejected. Every request a measured
+    client makes is kept: the requests the new Gateway served are the storm —
+    the ready sequence's own mounts and lists included, each timestamped
+    `sinceRestoreMs` against the moment the new Gateway was healthy — and the
+    ones that failed (refused while the Gateway was down, or on the socket it
+    closed) are marked `duringDowntime` and reported as `.downtime_requests`
+    instead of being dropped. The classification is by outcome, not by the
+    timestamp: the profiler stamps the restore after the new Gateway already
+    answered, and classifying by time would move its first, most contended
+    requests out of the storm. Each client's storm loop starts when that client
+    is ready rather than when the slowest one returns.
+- **Impairment metrics:** `impairment.blackhole.attempts_during_outage`,
+  `.silence_ms`, `.recovery_ready_ms` (C-3's target: p95 ≤ 5 s),
+  `.attempt_ms_max`; `impairment.bandwidth.link_use` (delivered rate ÷ cap),
+  `.delivered_bytes_per_second` and `.sent_bytes_per_second` (wire bytes each
+  way), `.operation_ms_p99`, `.max_ping_to_pong_ms`, `.max_in_flight`,
+  `.offered_in_flight_bytes`, `.offered_in_flight_wire_bytes`,
+  `.pong_deadline_misses` (C-4's target: zero), `.unexpected_closes` (G-4: zero
+  for capacity);
+  `impairment.restart.reconnect_ms_max` (G-13: ≤ 10 s), `.downtime_ms`,
+  `.failed_attempts`, `.requests`, `.downtime_requests`, `.requests_over_1s`
+  (G-13: zero), `.request_ms_p99`, `.startup_ms` (the new Gateway's own process
+  start to listening, from its `gateway.startup-budget` record) and
+  `.close_to_listening_ms` (the span a restarting client waits: its socket's
+  close to that listening, the predecessor's shutdown included). Volume and
+  throughput metrics are read as
+  "higher is better"; the cap and the leg length are configuration and live in
+  the report context (`impairment.bandwidth_mbps`,
+  `impairment.bandwidth_stream_mbps`, `workload`), with each case's attempts,
+  loads and per-client details, and
+  `impairment.gateway_outbound_capacity_records` counts
+  `connection.outbound-capacity` records inside the bandwidth legs' own time
+  windows (both capped legs' windows). A run is rejected when a selected case
+  reported nothing, when a bandwidth leg never filled half its cap, when the
+  streaming leg held fewer than two mounted streams, did not fill 0.9 of its cap,
+  or showed no backlog (no round trip longer than the same run's uncapped one,
+  no miss and no close), or when any connected client is left down — and an
+  unexpected close, the phone's socket included, fails the run. G-13's restart
+  criterion (every client reconnecting within 10 s, no storm request over 1 s,
+  and the new Gateway listening inside the clients' own close → listening
+  budget) is reported as a warning with its numbers instead of rejecting the
+  run: a busy host slows the start itself.
+
+Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so
+p99 is the maximum below 100 samples) for `session_list`,
+`session_open_warm|cold|cold_large`, `prompt_admission` and
+`reconnect_ready_mobile|dashboard`; `requests.over_phone_deadline` (slower than
+the phone's 30 s, including censored tail operations); `requests.censored_tail`;
+the `wire.*` metrics above; fixture CPU
+(`gateway.cpu.percent`, 100% is one core); and, from
+`scripts/tron-profile-gateway-probe.mjs`, `catalog.walks`,
+`gateway.event_loop.delay_p99|max`, `gateway.heap.peak`,
+`gateway.heap.peak_percent_of_limit` and `gateway.rss.peak`. The probe is
+preloaded (`node --import`) only into this scenario's fixture and refuses to
+load anywhere else. It counts `opendir` of the catalog root (one per catalog
+structure walk), runs `monitorEventLoopDelay` at 10 ms resolution, samples
+memory once a second and writes one small snapshot per window edge on SIGUSR2.
+It is a stand-in until the Gateway's own request spans and resource sampler
+report these numbers; `catalog.walks` counts every walk, not only those on the
+request path. Window edges are fixed and the tail is bounded, so a slow Gateway
+censors operations instead of lengthening the run: an iteration's measured part
+is `--mixed-seconds` plus at most the 45 s tail, and the run's total is set by
+what the host makes of the per-iteration fixture start and the eight setup
+opens. A full 2 GiB run therefore wants a quiet host.
 
 ## Session subagent activity
 
@@ -2496,6 +2909,12 @@ offered, no restart drain is held, and the session carries no dashboard subagent
 A paused run without that proof owns live work: it keeps `visibility: active` and no
 terminal timestamp, so iOS presents it as still pausing. A resume is a new run ID and
 appears as its own active row while the settled paused row keeps the facts it published.
+
+A run the Gateway watched finish takes its own observation instant as `terminalAt`. A run
+it first reads already terminal, after a restart or slot reload, takes the producer's
+recorded end instead (falling back to the observation when that end is missing, malformed
+or in the future). Otherwise every old run in a reopened session would return as recent,
+with a duration counted from its start to now.
 
 `session.processHistory.list` and `.get` page only normalized subagent terminal receipts
 under one bounded branch-derived revision and opaque cursor. Pagination stops before a row that exhausts the current page's byte

@@ -27,6 +27,15 @@ regular_file() { [[ -f "$1" && ! -L "$1" ]]; }
 regular_dir() { [[ -d "$1" && ! -L "$1" ]]; }
 plist_value() { plutil -extract "$1" raw -o - "$2" 2>/dev/null || true; }
 plist_json() { plutil -extract "$1" json -o - "$2" 2>/dev/null || true; }
+# The exact command packages/mac-app/scripts/tron-gateway-launcher.c execs for
+# a payload, then the launchd or scripts/tron-dev arguments ($2, space-led).
+# The Mac app's admission (StableGatewayProvenance.launchArguments) requires the
+# same list, so this check fails exactly when the app would refuse the Gateway.
+launcher_command() {
+  local runtime=node-arm64
+  [[ "$HOST_ARCH" == x86_64 ]] && runtime=node-x64
+  printf '%s' "$1/runtime/$runtime --max-old-space-size=4096 $1/app/dist/index.js$2"
+}
 
 [[ -d "$APP" ]] && pass "installed app exists: $APP" || fail "installed app missing: $APP"
 APP_PROTOCOL_VERSION="$(plist_value TRONGatewayProtocolVersion "$APP/Contents/Info.plist")"
@@ -358,7 +367,7 @@ NODE
 
 check_owner() {
   local label="$1" port="$2" home="$3" helper="$4" channel="$5" expected_home="$6"
-  local plist="$APP/Contents/Library/LaunchAgents/$label.plist" output pid command_line listener_pids listener host info payload_root
+  local plist="$APP/Contents/Library/LaunchAgents/$label.plist" output pid command_line listener_pids listener host info payload_root launch_arguments index argument
   regular_file "$plist" || { fail "$label LaunchAgent plist missing"; return; }
   [[ "$(plist_value Label "$plist")" == "$label" ]] && pass "$label plist label" || fail "$label plist label mismatch"
   [[ "$(plist_json AssociatedBundleIdentifiers "$plist")" == '["com.tron.mac"]' ]] \
@@ -386,8 +395,15 @@ check_owner() {
   [[ "$pid" =~ ^[0-9]+$ ]] || { fail "$label has no running PID"; return; }
   command_line="$(ps -ww -o command= -p "$pid" 2>/dev/null || true)"
   if [[ "$channel" == stable ]]; then payload_root="$STABLE_PAYLOAD_ROOT"; else payload_root="$DEV_PAYLOAD_ROOT"; fi
-  [[ "$command_line" == "$payload_root/runtime/node-"*" $payload_root/app/dist/index.js "* ]] \
-    && pass "$label PID uses exact selected payload" || fail "$label PID selected payload path mismatch"
+  launch_arguments=""
+  index=1
+  while argument="$(plist_value "ProgramArguments.$index" "$plist")"; [[ -n "$argument" ]]; do
+    launch_arguments+=" $argument"
+    index=$((index + 1))
+  done
+  [[ "$command_line" == "$(launcher_command "$payload_root" "$launch_arguments")" ]] \
+    && pass "$label PID runs the launcher's exact command for the selected payload" \
+    || fail "$label PID command is not the launcher's command for the selected payload: $command_line"
   [[ "$output" == *"TRON_GATEWAY_SUPERVISED => 1"* || "$output" == *"TRON_GATEWAY_SUPERVISED = 1"* ]] || fail "$label runtime supervision marker missing"
   [[ "$output" == *"TRON_GATEWAY_CHANNEL => $channel"* || "$output" == *"TRON_GATEWAY_CHANNEL = $channel"* ]] || fail "$label runtime channel marker missing"
   if [[ "$channel" == dev ]]; then
@@ -449,7 +465,7 @@ done
 observe_debug() {
   local legacy_output listener_pids listener_pid lifecycle lifecycle_state expected_port expected_home
   local supervisor_pid supervisor_start actual_supervisor_start child_pid child_start actual_start
-  local command_line listener host auth_info
+  local command_line listener host auth_info debug_host
   legacy_output="$(launchctl print "gui/$UID_VALUE/com.tron.server.dev" 2>/dev/null || true)"
   if [[ -n "$legacy_output" ]]; then
     fail "legacy com.tron.server.dev SMAppService is loaded; scripts/tron dev must be the sole Debug owner"
@@ -499,9 +515,11 @@ observe_debug() {
     || { fail "Debug listener has no immutable dev selection"; return; }
   verify_payload dev "$HOME/.tron-dev" dev "$BUNDLED"
   command_line="$(ps -ww -o command= -p "$listener_pid" 2>/dev/null || true)"
-  [[ -n "$DEV_PAYLOAD_ROOT" && "$command_line" == "$DEV_PAYLOAD_ROOT/runtime/node-"*" $DEV_PAYLOAD_ROOT/app/dist/index.js "*" --port 9848"* ]] \
-    && pass "Debug PID uses the exact selected immutable dev payload" \
-    || { fail "Debug PID does not use the selected immutable dev payload"; return; }
+  debug_host="$(plist_value expectedHost "$lifecycle")"
+  [[ -n "$DEV_PAYLOAD_ROOT" && -n "$debug_host" \
+    && "$command_line" == "$(launcher_command "$DEV_PAYLOAD_ROOT" " --host $debug_host --port 9848")" ]] \
+    && pass "Debug PID runs the launcher's exact command for the selected immutable dev payload" \
+    || { fail "Debug PID command is not the launcher's command for the selected immutable dev payload: $command_line"; return; }
 
   [[ "$(plist_value epoch "$lifecycle")" == "$DEV_EPOCH" \
       && "$(plist_value sourceRevision "$lifecycle")" == "$DEV_REVISION" \

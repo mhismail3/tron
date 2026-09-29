@@ -3,6 +3,7 @@ import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { syncDurably } from "../util/durable-json.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { SessionCreationOrigin } from "../protocol/types.js";
 import { userFacingPromptPreview } from "./resource-invocation.js";
@@ -97,11 +98,47 @@ export interface CatalogMetadataIndexSummary {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  /** The file size the counts above were parsed from. A source that can observe
+   * it sets it, and the index then refuses to stamp a row with a later size:
+   * an append between the parse and the stamp would make the row claim an
+   * offset past content it never counted. */
+  parsedSize?: number;
 }
 
-interface CatalogMetadataIndexDiagnostics {
-  (stage: "load" | "discard" | "rebuild" | "append" | "save", durationMs: number, outcome: "success" | "failure"): void;
+/** One reconcile's result. A candidate the pass could not prove is reported
+ * instead of failing the whole cut: the caller keeps its own prior row for that
+ * path, because an unprovable file proves neither presence nor absence. */
+export interface CatalogMetadataIndexReconciliation {
+  rows: CatalogMetadataIndexRow[];
+  unproven: string[];
 }
+
+/** What one reconcile has proven so far. A candidate whose row is missing from
+ * `rows` and from `unproven` has not been read yet. */
+export interface CatalogMetadataReconcileProgress {
+  proven: number;
+  unproven: number;
+}
+
+/** The owner's own control over one reconcile pass, asked between batches of
+ * candidates and before each transcript parse. Returning true stops the pass;
+ * the call is awaited, so it is also where a pass hands the loop back — the
+ * session catalog yields to the background-work scheduler's pause there, which
+ * is what keeps a startup or watcher-triggered pass from holding the loop while
+ * a request waits. The owner passes its own shutdown flag — the index's `closed`
+ * is set only after the owner has finished closing, so it cannot report the
+ * owner's shutdown — and the pre-index acquisition path stops at the first file
+ * it cannot prove, because it discards the whole cut in that case and would
+ * otherwise parse every later candidate for nothing. A stopped pass reports the
+ * remaining candidates as unproven. */
+export type CatalogMetadataReconcileStop = (progress: CatalogMetadataReconcileProgress) => boolean | Promise<boolean>;
+
+/** A handled index-write failure. The affected rows are left to be rebuilt from
+ * canonical files, so nothing else records it; the index write is
+ * fire-and-forget outside any request span, which is why its owner reports it. */
+export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append";
+export type CatalogMetadataIndexFailure =
+  (stage: CatalogMetadataIndexFailureStage, durationMs: number) => void;
 
 interface CatalogMetadataIndexDocument {
   version: typeof CATALOG_METADATA_INDEX_VERSION;
@@ -127,13 +164,13 @@ function validCreationOrigin(value: unknown): value is SessionCreationOrigin {
 /** Gateway-owned acceleration only. This never stores transcript content. */
 export class CatalogMetadataIndex {
   readonly path: string;
-  private readonly diagnostics: CatalogMetadataIndexDiagnostics | undefined;
+  private readonly onFailure: CatalogMetadataIndexFailure | undefined;
   private readonly writeMutex = new AsyncMutex();
   private closed = false;
 
-  constructor(private readonly gatewayStateRoot: string, diagnostics?: CatalogMetadataIndexDiagnostics) {
+  constructor(private readonly gatewayStateRoot: string, onFailure?: CatalogMetadataIndexFailure) {
     this.path = join(gatewayStateRoot, "catalog-metadata-v2.json");
-    this.diagnostics = diagnostics;
+    this.onFailure = onFailure;
   }
 
   /** Its caller persists this index fire-and-forget (a catalog read must not
@@ -146,6 +183,14 @@ export class CatalogMetadataIndex {
     await this.writeMutex.run(() => {});
   }
 
+  /** The durable rows, or undefined when the document is missing, corrupt or
+   * bound to another root. Its caller (the catalog owner) rebuilds from
+   * canonical files, so an unusable document is never membership evidence. */
+  async load(catalogRoot: string): Promise<CatalogMetadataIndexRow[] | undefined> {
+    const document = await this.readDocument(catalogRoot);
+    return document ? document.rows.map((row) => ({ ...row })) : undefined;
+  }
+
   async save(catalogRoot: string, rows: readonly CatalogMetadataIndexRow[]): Promise<boolean> {
     return this.writeMutex.run(async () => {
       // Checked inside the mutex: a write queued after disposal began, but
@@ -153,7 +198,7 @@ export class CatalogMetadataIndex {
       if (this.closed) return false;
       const started = Date.now();
     if (rows.length > CATALOG_METADATA_INDEX_MAX_ENTRIES) {
-      this.note("save", started, "failure");
+      this.failed("save", started);
       return false;
     }
     const document: CatalogMetadataIndexDocument = {
@@ -163,7 +208,7 @@ export class CatalogMetadataIndex {
     };
     const encoded = JSON.stringify(document);
     if (Buffer.byteLength(encoded) > CATALOG_METADATA_INDEX_MAX_BYTES) {
-      this.note("save", started, "failure");
+      this.failed("save", started);
       return false;
     }
     await mkdir(this.gatewayStateRoot, { recursive: true });
@@ -173,15 +218,14 @@ export class CatalogMetadataIndex {
       const handle = await open(temporary, "wx", 0o600);
       try {
         await handle.writeFile(encoded, "utf8");
-        await handle.sync();
+        await syncDurably(handle);
       } finally { await handle.close(); }
       await rename(temporary, this.path);
       const directory = await open(dirname(this.path), "r");
-      try { await directory.sync(); } finally { await directory.close(); }
-      this.note("save", started, "success");
+      try { await syncDurably(directory); } finally { await directory.close(); }
       return true;
     } catch (error) {
-      this.note("save", started, "failure");
+      this.failed("save", started);
       throw error;
     } finally { await rm(temporary, { force: true }).catch(() => {}); }
     });
@@ -191,11 +235,10 @@ export class CatalogMetadataIndex {
     catalogRoot: string,
     candidates: readonly { path: string; id: string; cwd: string; fileIdentity: string; size: number; mtimeMs: number }[],
     rebuild: (candidate: { path: string; id: string; cwd: string; fileIdentity: string; size: number; mtimeMs: number }) => Promise<CatalogMetadataIndexSummary | undefined>,
-  ): Promise<CatalogMetadataIndexRow[] | undefined> {
-    const started = Date.now();
+    stop?: CatalogMetadataReconcileStop,
+  ): Promise<CatalogMetadataIndexReconciliation | undefined> {
     const document = await this.readDocument(catalogRoot);
     if (!document) {
-      this.note("discard", started, "success");
       return undefined;
     }
     const prior = new Map(document.rows.map((row) => [resolve(row.path), row]));
@@ -206,8 +249,18 @@ export class CatalogMetadataIndex {
     // parallelism; each candidate still performs the same identity and
     // stability checks before its row is admitted.
     const rows: CatalogMetadataIndexRow[] = [];
-    let rebuiltAny = false;
+    const unproven: string[] = [];
+    // A disposed index must not keep reading files it can no longer publish,
+    // and the caller may have its own reason to stop and its own yield point.
+    // Either way the remaining candidates stay unproven instead of holding this
+    // pass open.
+    const shouldStop = async (): Promise<boolean> => this.closed
+      || ((await stop?.({ proven: rows.length, unproven: unproven.length })) ?? false);
     for (let start = 0; start < candidates.length; start += RECONCILE_CONCURRENCY) {
+      if (await shouldStop()) {
+        unproven.push(...candidates.slice(start).map((candidate) => resolve(candidate.path)));
+        break;
+      }
       const batch = candidates.slice(start, start + RECONCILE_CONCURRENCY);
       const results = await Promise.all(batch.map(async (candidate) => {
         const candidatePath = await realpath(candidate.path).catch(() => resolve(candidate.path));
@@ -217,6 +270,7 @@ export class CatalogMetadataIndex {
           const advanced = await this.append(old);
           if (advanced) return advanced;
         }
+        if (await shouldStop()) return undefined;
         const summary = await rebuild(candidate);
         if (!summary) return undefined;
         const rebuilt = await this.entryFromSummary(summary);
@@ -226,16 +280,15 @@ export class CatalogMetadataIndex {
       }));
       for (let index = 0; index < results.length; index += 1) {
         const result = results[index];
-        if (!result) return undefined;
-        rows.push(result);
-        const candidate = batch[index]!;
-        if (!prior.has(resolve(candidate.path)) || result !== prior.get(resolve(candidate.path))) rebuiltAny = true;
+        if (result) rows.push(result);
+        else unproven.push(resolve(batch[index]!.path));
       }
     }
-    // The candidate set is the exact structural evidence cut. Dropped rows
-    // therefore represent removed canonical paths, never stale index entries.
-    this.note(rebuiltAny ? "rebuild" : "load", started, "success");
-    return rows;
+    // The candidate set is the exact structural evidence cut. A proven row is
+    // published; a candidate this pass could not prove is reported so its
+    // caller retains whatever row it already had, and a candidate that is
+    // absent from the cut is still a removed canonical path.
+    return { rows, unproven };
   }
 
   async append(row: CatalogMetadataIndexRow): Promise<CatalogMetadataIndexRow | undefined> {
@@ -285,10 +338,9 @@ export class CatalogMetadataIndex {
       next.mtimeMs = after.mtimeMs;
       next.eofOffset = after.size;
       next.tailBoundaryHash = await this.tailBoundaryHandle(handle, after.size);
-      this.note("append", started, "success");
       return next;
     } catch {
-      this.note("append", started, "failure");
+      this.failed("append", started);
       return undefined;
     } finally { await handle?.close().catch(() => {}); }
   }
@@ -307,6 +359,11 @@ export class CatalogMetadataIndex {
       if (!before.isFile() || `${before.dev}:${before.ino}` !== `${beforePath.dev}:${beforePath.ino}`) return undefined;
       const header = await this.headerMatches(handle, { ...summary, fileIdentity: `${before.dev}:${before.ino}` } as CatalogMetadataIndexRow);
       if (!header || before.size === 0) return undefined;
+      // The summary's counts only describe the bytes it parsed. A file that
+      // grew since then must not be stamped with the later size, or the row
+      // claims an offset past a message it never counted and every later
+      // append starts from there.
+      if (summary.parsedSize !== undefined && summary.parsedSize !== before.size) return undefined;
       const final = Buffer.alloc(1);
       const finalRead = await handle.read(final, 0, 1, before.size - 1);
       if (finalRead.bytesRead !== 1 || final[0] !== 0x0a) return undefined;
@@ -328,7 +385,7 @@ export class CatalogMetadataIndex {
         tailBoundaryHash: await this.tailBoundaryHandle(handle, after.size),
       };
     } catch {
-      this.note("rebuild", started, "failure");
+      this.failed("rebuild", started);
       return undefined;
     } finally { await handle?.close().catch(() => {}); }
   }
@@ -462,7 +519,7 @@ export class CatalogMetadataIndex {
       && validString(value.tailBoundaryHash, 128);
   }
 
-  private note(stage: Parameters<NonNullable<CatalogMetadataIndexDiagnostics>>[0], started: number, outcome: "success" | "failure"): void {
-    this.diagnostics?.(stage, Math.max(0, Date.now() - started), outcome);
+  private failed(stage: CatalogMetadataIndexFailureStage, started: number): void {
+    this.onFailure?.(stage, Math.max(0, Date.now() - started));
   }
 }

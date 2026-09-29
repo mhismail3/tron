@@ -6,7 +6,7 @@ import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync } from "node:fs";
-import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,17 +22,29 @@ import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry, type GatewayWorkHandle } from "./gateway-work-registry.js";
-import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS } from "./catalog-discovery.js";
+import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.js";
+import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
+import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
+import type { SessionCatalog, SessionCatalogReconcileOutcome } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import {
+  HEAP_REFUSAL_RETRY_AFTER_MS,
+  LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
+  RuntimeRegistry,
+  type CapacityShedRecord,
+  type ExtensionArtifactDiscoveryCounts,
+  type RuntimeLifecycleRecord,
+} from "./runtime-registry.js";
+import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { observationEntriesDigest, type KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-markers.js";
 import { toolSegmentId } from "./projection.js";
+import { AutomationService } from "../automations/automation-service.js";
 import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 
@@ -50,6 +62,72 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
   }
 }
 
+/** A snapshot is built and broadcast only for a subscriber, so a test that reads
+ * published snapshots has to be one. */
+function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
+  registry.subscribe("test-audience", sessionId);
+}
+
+/** The catalog owner's whole-folder walk: the one seam that re-derives
+ * membership from the folder. A read must add none — G-1c moved every reader
+ * onto the owner's rows, and the O-5 counter counts walks here. */
+function catalogWalks(): { count: () => number; restore: () => void } {
+  const walk = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence");
+  return { count: () => walk.mock.calls.length, restore: () => walk.mockRestore() };
+}
+
+/** Every canonical file whose header the registry read while installed. The
+ * commit fence may read the file it admits, and nothing else. */
+function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
+  const reads = vi.spyOn(CatalogDiscovery.prototype, "readCatalogHeader");
+  return { paths: () => reads.mock.calls.map(([path]) => String(path)), restore: () => reads.mockRestore() };
+}
+
+/** A test that writes canonical files itself is an external writer: the folder
+ * watcher observes it, but no reader polls for it. Forcing one owner reconcile
+ * is the deterministic equivalent of waiting the watcher out, and settling the
+ * owner then makes its rows and the durable document current without waiting
+ * out the persist debounce. */
+/** Registry discovery is a bounded single owner: a call that arrives while a
+ * pass is in flight returns without discovering anything, and the next scheduled
+ * pass is up to 750 ms away. A test that asserts on an artifact must run a pass
+ * of its own instead of treating the awaited call as a barrier, so wait out any
+ * in-flight pass and then await one this call starts; `settled` names the state
+ * that pass must publish (T-1). */
+async function discoverExtensionArtifactsUntil(registry: RuntimeRegistry, settled: () => boolean = () => true): Promise<void> {
+  const state = registry as unknown as { artifactDiscoveryInFlight: boolean };
+  const deadline = Date.now() + 5_000;
+  do {
+    while (state.artifactDiscoveryInFlight) {
+      if (Date.now() >= deadline) throw new Error("extension artifact discovery stayed in flight");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await (registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
+  } while (!settled() && Date.now() < deadline);
+  if (!settled()) throw new Error("extension artifact discovery did not settle");
+}
+
+/** Initialize a registry and wait for the catalog owner's first published cut.
+ * A read that lands before that cut refuses retryably (G-1c), and no reader
+ * walks the folder any more, so a test lets the owner publish one first. */
+async function initializeRegistry(
+  registry: RuntimeRegistry,
+  phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void,
+): Promise<void> {
+  await registry.initialize(phaseObserver);
+  await catalogOwner(registry).whenPublished();
+}
+
+async function settleCatalog(registry: RuntimeRegistry): Promise<void> {
+  await catalogOwner(registry).reconcile();
+  await catalogOwner(registry).settled();
+}
+
+/** The registry's catalog owner: the index every read path serves from (G-1c). */
+function catalogOwner(registry: RuntimeRegistry): SessionCatalog {
+  return (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
+}
+
 describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
@@ -58,18 +136,23 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     nested?: boolean;
     name?: string;
     maximumLiveRuntimes?: number;
-    catalogDiscoveryLimits?: { maximumRetainedBytes: number };
+    catalogDiscoveryLimits?: { maximumHeaderBytes: number };
     workRegistry?: GatewayWorkRegistry;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
+    catalogIndexFailure?: (stage: "save" | "rebuild" | "append", durationMs: number) => void;
+    catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
+    artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
+    runtimeDisposeTimeout?: (graceMs: number) => void;
+    /** Admit one explicit delegated artifact root, as the production cutover
+     * does, so ambient discovery scans exactly that root. */
+    delegatedRoot?: string;
     beforeInitialize?: (sessionFile: string) => Promise<void>;
     notifications?: NotificationService;
-    stageTiming?: (
-      stage: string,
-      durationMs: number,
-      outcome: "success" | "failure",
-      metadata?: { workID?: string; scope?: "user" | "all" },
-    ) => void;
+    resources?: ResourceRecorder;
+    runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
+    heapSample?: () => { usedBytes: number; limitBytes: number };
+    capacityShedRecord?: (record: CapacityShedRecord) => void;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -85,6 +168,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const runtimeFactory = vi.fn(async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }));
     const events: Array<{ topic: string; payload: any }> = [];
     const summaries: SessionSummaryUpdate[] = [];
+    const delegatedRoot = options.delegatedRoot;
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -93,19 +177,28 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       catalogDiscoveryLimits: options.catalogDiscoveryLimits,
       workRegistry: options.workRegistry,
       modelRuntimeFactory: runtimeFactory,
+      ...(delegatedRoot ? { delegatedArtifactRoot: delegatedRoot } : {}),
+      ...(options.artifactDiscoveryTruncated ? { artifactDiscoveryTruncated: options.artifactDiscoveryTruncated } : {}),
       trust: new TrustService(agentDir),
       broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
       sessionSummaryChanged: (summary) => summaries.push(summary),
       sessionListChanged: options.sessionListChanged ?? (() => {}),
       ...(options.notifications ? { notifications: options.notifications } : {}),
-      stageTiming: options.stageTiming,
+      ...(options.catalogIndexFailure ? { catalogIndexFailure: options.catalogIndexFailure } : {}),
+      ...(options.catalogReconciled ? { catalogReconciled: options.catalogReconciled } : {}),
+      ...(options.runtimeDisposeTimeout ? { runtimeDisposeTimeout: options.runtimeDisposeTimeout } : {}),
+      ...(options.resources ? { resources: options.resources } : {}),
+      ...(options.runtimeLifecycleRecord ? { runtimeLifecycleRecord: options.runtimeLifecycleRecord } : {}),
+      ...(options.heapSample ? { heapSample: options.heapSample } : {}),
+      ...(options.capacityShedRecord ? { capacityShedRecord: options.capacityShedRecord } : {}),
     });
     registries.push(registry);
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
-    await registry.initialize(options.phaseObserver);
+    await initializeRegistry(registry, options.phaseObserver);
     await registry.recoverCanonicalAttention();
     return {
       root,
+      delegatedRoot,
       agentDir,
       cwd,
       manager,
@@ -115,6 +208,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       summaries,
       sessionFile: manager.getSessionFile()!,
     };
+  }
+
+  /** An admitted provider root with the private mode and canonical path the
+   * slot's artifact policy requires; the caller removes `delegated.root`. */
+  async function delegatedFixtureRoot(label: string): Promise<{ root: string; delegatedRoot: string }> {
+    const root = await realpath(await mkdtemp(join(tmpdir(), `tron-delegated-${label}-`)));
+    const delegatedRoot = join(root, "delegated");
+    await mkdir(delegatedRoot, { recursive: true, mode: 0o700 });
+    return { root, delegatedRoot };
   }
 
   afterEach(async () => {
@@ -200,6 +302,50 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(phases).toEqual(["catalog-warming", "attention-recovery"]);
   });
 
+  it("charges a queued request for the registry lane wait and keeps its admitted work on its own span", async () => {
+    const fixture = await coldFixture("span-lane-contention");
+    let now = 0;
+    const clock = vi.spyOn(nodePerformance, "now").mockImplementation(() => now);
+    try {
+      const lane = (fixture.registry as unknown as {
+        mutex: { run<T>(operation: () => Promise<T> | T): Promise<T> };
+      }).mutex;
+      const holder = new RequestSpan();
+      const waiter = new RequestSpan();
+      let entered!: () => void;
+      const admitted = new Promise<void>((resolve) => { entered = resolve; });
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const holding = runInRequestSpan(holder, () => lane.run(async () => {
+        entered();
+        await held;
+        await stage("holder.work", () => { now += 10; return Promise.resolve(); });
+      }));
+      await admitted;
+      // Queued behind the holder: its own span has to carry both the wait for
+      // the lane and the work the lane then admits within its async context.
+      const waiting = runInRequestSpan(waiter, () => lane.run(async () => {
+        await stage("waiter.work", () => { now += 5; return Promise.resolve(); });
+      }));
+      now += 40;
+      release();
+      await Promise.all([holding, waiting]);
+
+      // The wait covers the holder's 40 ms hold plus the 10 ms of work it did
+      // before releasing; the holder was admitted immediately, so 0 ms is
+      // dropped rather than named.
+      expect(holder.breakdown(50)!.stages).toBe("holder.work=10ms");
+      const queued = waiter.breakdown(55)!;
+      expect(queued.stages).toBe("registry.mutex=50ms;waiter.work=5ms");
+      expect(queued.unaccountedMs).toBe(0);
+    } finally {
+      clock.mockRestore();
+      await fixture.registry.dispose();
+      registries.splice(registries.indexOf(fixture.registry), 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("owns one exact live session for a workspace Automation operation", async () => {
     const changed = vi.fn();
     const fixture = await coldFixture("automation-exact-session", { sessionListChanged: changed, maximumLiveRuntimes: 1 });
@@ -283,7 +429,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(cold);
-    await cold.initialize();
+    await initializeRegistry(cold);
 
     expect((await cold.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
@@ -292,7 +438,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // complete sidecar used by the restart half of this regression.
     await cold.list("all");
     const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(cold);
+    expect(existsSync(indexPath)).toBe(true);
     await cold.dispose();
     registries.splice(registries.indexOf(cold), 1);
 
@@ -308,11 +455,16 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(indexed);
-    const scanner = vi.spyOn(indexed as any, "sessionInfos");
-    await indexed.initialize();
+    await initializeRegistry(indexed);
+    // Settle the owner's own startup pass, so what the spy sees belongs to the
+    // read under test.
+    await settleCatalog(indexed);
+    const walks = catalogWalks();
     expect((await indexed.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
-    expect(scanner).not.toHaveBeenCalled();
+    // The origin comes from the owner's row; the read adds no walk.
+    expect(walks.count()).toBe(0);
+    walks.restore();
   });
 
   it("admits a page source after in-flight live summary churn", async () => {
@@ -417,7 +569,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       notifications: { enqueue, suppressAutomatic, markSessionInboxRead: vi.fn(async () => {}) } as unknown as NotificationService,
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -506,7 +658,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     await restarted.recoverCanonicalAttention();
     expect(restarted.attentionProjection(fixture.manager.getSessionId()))
       .toMatchObject({ completionRevision: 1, isUnread: true });
@@ -535,7 +687,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     expect(restarted.attentionProjection(sessionId)).toEqual({
       completionRevision: 0,
       attentionRevision: 0,
@@ -575,7 +727,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     await restarted.recoverCanonicalAttention();
     expect(restarted.attentionProjection(sessionId)).toMatchObject({ completionRevision: 1, isUnread: true });
 
@@ -592,7 +744,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(secondRestart);
-    await secondRestart.initialize();
+    await initializeRegistry(secondRestart);
     expect(secondRestart.attentionProjection(sessionId).completionRevision).toBe(1);
   });
 
@@ -742,7 +894,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => { listChanges += 1; },
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const initial = await registry.catalog("user");
 
     const deletedSlot = await registry.create(cwd);
@@ -770,6 +922,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const persistedManager = (persistedSlot as unknown as { sessionManager: SessionManager }).sessionManager;
     persistedManager.appendMessage(fauxAssistantMessage("persisted catalog row"));
     expect(persistedSlot.persistedSessionFile).toBeDefined();
+    // The slot's own persist reaches the row through the owner's commit point.
+    // Applying it here is deterministic where polling the row is not: the hook
+    // that fires it is covered by "resolves a list, a cold open and a hot
+    // re-acquire from the owner's rows without a walk", and a loaded host can
+    // starve a 5 s poll.
+    await catalogOwner(registry).refresh(persistedSlot.persistedSessionFile!);
     const afterPersistence = await registry.catalog("user");
     expect(afterPersistence.sessions.filter((session) => session.id === persistedSlot.id)).toHaveLength(1);
     const ownership = registry as unknown as {
@@ -812,7 +970,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(fresh);
-    await fresh.initialize();
+    await initializeRegistry(fresh);
     const freshIDs = (await fresh.catalog("user")).sessions.map((session) => session.id);
     expect(freshIDs).toContain(persistedSlot.id);
     expect(freshIDs).not.toContain(evictedSlot.id);
@@ -834,7 +992,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const baseline = await registry.catalog("all");
     const slot = await registry.create(cwd);
     const beforeCollision = await registry.catalog("all");
@@ -856,6 +1014,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       }),
     ].join("\n") + "\n");
 
+    await settleCatalog(registry);
     const afterCollision = await registry.catalog("all");
     expect(afterCollision.sessions.map((session) => session.id)).not.toContain(slot.id);
     expect(afterCollision.listRevision).toBeGreaterThan(beforeCollision.listRevision);
@@ -888,7 +1047,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -918,6 +1077,54 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
   });
 
+  it("folds summary facts from appended entries and rebuilds when the entry set is replaced", async () => {
+    // Failure modes (G-11): a fold that stops at its first boundary misses
+    // later appends, and a replaced session file (branch switch, re-open)
+    // keeps the previous file's messageCount/firstMessage.
+    const fixture = await coldFixture("summary-fold");
+    try {
+      const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+      const manager = (slot as unknown as { sessionManager: SessionManager }).sessionManager;
+      await waitUntil(() => fixture.summaries.length > 0);
+      const before = fixture.summaries.at(-1)!;
+      const beforeAt = Date.parse(before.updatedAt);
+
+      manager.appendMessage({ role: "user", content: "folded prompt", timestamp: beforeAt + 1_000 });
+      await slot.rename("fold one");
+      await waitUntil(() => fixture.summaries.at(-1)!.messageCount === before.messageCount + 1);
+      expect(fixture.summaries.at(-1)).toMatchObject({
+        firstMessage: "folded prompt",
+        updatedAt: new Date(beforeAt + 1_000).toISOString(),
+      });
+
+      manager.appendMessage({ role: "user", content: "second prompt", timestamp: beforeAt + 2_000 });
+      await slot.rename("fold two");
+      await waitUntil(() => fixture.summaries.at(-1)!.messageCount === before.messageCount + 2);
+      expect(fixture.summaries.at(-1)).toMatchObject({
+        firstMessage: "folded prompt",
+        updatedAt: new Date(beforeAt + 2_000).toISOString(),
+      });
+
+      const replacementDirectory = join(fixture.root, "replacement-sessions");
+      await mkdir(replacementDirectory, { recursive: true });
+      const replacement = SessionManager.create(fixture.cwd, replacementDirectory);
+      replacement.appendMessage({ role: "user", content: "replacement prompt", timestamp: beforeAt + 5_000 });
+      // Pi persists a session file only once it holds an assistant message.
+      replacement.appendMessage(fauxAssistantMessage("replacement answer"));
+      manager.setSessionFile(replacement.getSessionFile()!);
+      await slot.rename("fold three");
+      await waitUntil(() => fixture.summaries.at(-1)!.firstMessage === "replacement prompt");
+      expect(fixture.summaries.at(-1)).toMatchObject({
+        messageCount: 2,
+        updatedAt: new Date(beforeAt + 5_000).toISOString(),
+      });
+    } finally {
+      await fixture.registry.dispose();
+      registries.splice(registries.indexOf(fixture.registry), 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("never rebroadcasts a snapshot already covered by an immediate publication", async () => {
     // Failure mode: an event schedules the 20 ms coalesced snapshot, then an
     // immediate publication (run settlement, prompt admission) broadcasts that
@@ -942,8 +1149,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const state = ({ eventSequence: _sequence, ...rest }: any) => JSON.stringify(rest);
@@ -996,7 +1204,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => { listChanges += 1; },
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -1030,35 +1238,48 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       mkdir(join(catalog, "first"), { recursive: true }),
       mkdir(join(catalog, "second"), { recursive: true }),
     ]);
-    const makeRegistry = (
+    // The discovery budgets bound the owner's whole-folder pass. A catalog over
+    // one of them reports a failed pass and publishes nothing, so a read refuses
+    // retryably instead of serving a cut that saw only part of the folder.
+    const bounded = async (
+      label: string,
       maximumDirectories: number,
       maximumEntries: number,
       maximumTraversalBytes = 8 * 1_024 * 1_024,
     ) => {
+      const reconciled: SessionCatalogReconcileOutcome[] = [];
       const registry = new RuntimeRegistry({
         agentDir,
-        tronHome: join(root, `tron-${maximumDirectories}-${maximumEntries}-${maximumTraversalBytes}`),
+        tronHome: join(root, `tron-${label}`),
         idleRuntimeMs: 60_000,
         trust: new TrustService(agentDir),
         broadcast: () => {},
         sessionSummaryChanged: () => {},
         sessionListChanged: () => {},
         catalogDiscoveryLimits: { maximumDirectories, maximumEntries, maximumTraversalBytes },
+        catalogReconciled: (outcome) => reconciled.push(outcome),
       });
       registries.push(registry);
-      return registry;
+      const owner = catalogOwner(registry);
+      await registry.initialize();
+      await owner.whenReconciled();
+      return { registry, reconciled };
     };
 
-    await expect(makeRegistry(2, 2).catalog("all")).rejects.toMatchObject({
-      code: "busy",
-      retryable: true,
-    });
-    await expect(makeRegistry(3, 1).catalog("all")).rejects.toMatchObject({
-      code: "busy",
-      retryable: true,
-    });
-    await expect(makeRegistry(3, 2, 1).catalog("all")).rejects.toMatchObject({ code: "busy" });
-    await expect(makeRegistry(3, 2).catalog("all")).resolves.toMatchObject({ sessions: [] });
+    for (const over of [
+      await bounded("directories", 2, 2),
+      await bounded("entries", 3, 1),
+      await bounded("bytes", 3, 2, 1),
+    ]) {
+      expect(over.reconciled.at(-1)?.outcome).toBe("failed");
+      expect(over.reconciled.at(-1)?.files).toBe(0);
+      expect(catalogOwner(over.registry).hasCompleteCut()).toBe(false);
+      await expect(over.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
+    }
+
+    const withinBudget = await bounded("within", 3, 2);
+    expect(withinBudget.reconciled.at(-1)?.outcome).toBe("reconciled");
+    await expect(withinBudget.registry.catalog("all")).resolves.toMatchObject({ sessions: [] });
   });
 
   it("ignores JSONL symlinks outside the canonical catalog root", async () => {
@@ -1128,19 +1349,20 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       catalogDiscoveryLimits: { maximumDirectories: 2, maximumSessions: 2 },
     });
     registries.push(registry);
+    await initializeRegistry(registry);
     expect((await registry.catalog("all")).sessions.map((session) => session.id).sort()).toEqual([
       childSession.getSessionId(), directSession.getSessionId(),
     ].sort());
   });
 
   it("bounds cold catalog previews without changing canonical prompts or names", async () => {
-    const fixture = await coldFixture("large-catalog-preview", {
-      catalogDiscoveryLimits: { maximumRetainedBytes: 8_192 },
-    });
+    const fixture = await coldFixture("large-catalog-preview");
     const prompt = "😀漢字".repeat(5_000);
     const name = "Long session 😀 ".repeat(1_000);
     fixture.manager.appendMessage({ role: "user", content: prompt, timestamp: Date.now() });
     fixture.manager.appendSessionInfo(name);
+    // This test writes the canonical file itself: index it before reading.
+    await settleCatalog(fixture.registry);
     const before = await readFile(fixture.sessionFile, "utf8");
     const row = (await fixture.registry.catalog("all")).sessions[0]!;
     expect(Buffer.byteLength(row.firstMessage)).toBeLessThanOrEqual(1_024);
@@ -1154,14 +1376,26 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("initializes storage without requiring catalog presentation metadata", async () => {
-    const fixture = await coldFixture("storage-without-catalog-preview", {
-      catalogDiscoveryLimits: { maximumRetainedBytes: 1 },
-    });
+    const fixture = await coldFixture("storage-without-catalog-preview");
     const store = (fixture.registry as unknown as { displayArtifacts: DisplayArtifactStore }).displayArtifacts;
     await store.initialize();
     await writeFile(join(fixture.cwd, "retained.txt"), "retained display artifact");
     const display = await store.ingest(fixture.cwd, "retained.txt", fixture.manager.getSessionId());
-    await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy" });
+    // A membership cut no in-process reconcile completed cannot authorize orphan
+    // removal: the maintenance read refuses retryably and the artifact stays.
+    const evidence = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence")
+      .mockImplementation(async () => ({
+        digest: "incomplete", factsDigest: "incomplete", identitiesByPath: new Map(),
+        complete: false, unprovenPaths: new Set(), unstableCanonicalFiles: false,
+      }));
+    try {
+      await catalogOwner(fixture.registry).reconcile();
+      await expect(fixture.registry.sessionIDsForStorageMaintenance())
+        .rejects.toMatchObject({ code: "busy", retryable: true });
+      await expect(fixture.registry.maintainDisplayArtifacts()).rejects.toMatchObject({ code: "busy" });
+    } finally {
+      evidence.mockRestore();
+    }
     await expect(fixture.registry.initializeBlobStorage()).resolves.toBeUndefined();
     const displayLease = await store.acquire(display.id, fixture.manager.getSessionId());
     try {
@@ -1182,7 +1416,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally { await lease.release(); }
   });
 
-  it.each(["exact", "duplicate", "incomplete", "changed"])("recovers pending Knowledge observations from %s header evidence without a warmed catalog", async (mode) => {
+  it.each(["exact", "duplicate", "unprovable", "changed"])("recovers pending Knowledge observations from %s header evidence after the owner's cut", async (mode) => {
     const fixture = await coldFixture("knowledge-header-recovery", {
       catalogDiscoveryLimits: { maximumRetainedBytes: 1 },
     });
@@ -1214,7 +1448,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     fixture.registry.setKnowledgeService(new KnowledgeService(store, { admit } as unknown as KnowledgeObservationService));
     await fixture.registry.initializeBlobStorage();
     if (mode === "duplicate") await copyFile(fixture.sessionFile, join(dirname(fixture.sessionFile), "duplicate.jsonl"));
-    if (mode === "incomplete") await writeFile(join(dirname(fixture.sessionFile), "incomplete.jsonl"), "");
+    // An unprovable neighbour is not membership evidence for itself and does not
+    // blind the cut (G-1c); the recovery still resolves this session's exact row.
+    // An unprovable neighbour (a header-less file) leaves the cut's membership
+    // unknown, so recovery defers instead of marking a coverage unavailable.
+    if (mode === "unprovable") await writeFile(join(dirname(fixture.sessionFile), "unprovable.jsonl"), "");
     if (mode === "changed") {
       const open = SessionManager.open;
       vi.spyOn(SessionManager, "open").mockImplementation((...args) => {
@@ -1223,6 +1461,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         return manager;
       });
     }
+    // The canonical appends above are this test's own writes: settle the owner so
+    // the recovery reads its current row instead of racing the folder watcher.
+    await settleCatalog(fixture.registry);
     const unavailable = vi.spyOn(store, "setCoverage");
     await fixture.registry.recoverKnowledgeObservation();
     if (mode === "exact") {
@@ -1254,34 +1495,40 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       modified: now,
       messageCount: 0,
       firstMessage: id,
-      allMessagesText: "unused picker search text ".repeat(20_000),
     }));
     await Promise.all(infos.map((info) => writeFile(info.path, `${JSON.stringify({
       type: "session", version: 3, id: info.id, timestamp: now.toISOString(), cwd: root,
     })}\n`)));
-    const encodedBytes = infos.reduce((total, { allMessagesText: _unused, ...info }) => (
-      total + Buffer.byteLength(JSON.stringify({
-        ...info, created: now, modified: now, firstMessage: "(no messages)",
-      }))
-    ), 0);
-    const makeRegistry = (maximumSessions: number, maximumRetainedBytes: number) => {
+    // A session-count budget the folder exceeds fails the owner's pass, so no cut
+    // is published and a read refuses retryably instead of serving a partial one.
+    const bounded = async (label: string, maximumSessions: number) => {
+      const reconciled: SessionCatalogReconcileOutcome[] = [];
       const registry = new RuntimeRegistry({
         agentDir,
-        tronHome: join(root, `tron-${maximumSessions}-${maximumRetainedBytes}`),
+        tronHome: join(root, `tron-${label}`),
         idleRuntimeMs: 60_000,
         trust: new TrustService(agentDir),
         broadcast: () => {},
         sessionSummaryChanged: () => {},
         sessionListChanged: () => {},
-        catalogDiscoveryLimits: { maximumSessions, maximumRetainedBytes, normalizationConcurrency: 1 },
+        catalogDiscoveryLimits: { maximumSessions, normalizationConcurrency: 1 },
+        catalogReconciled: (outcome) => reconciled.push(outcome),
       });
       registries.push(registry);
-      return registry;
+      const owner = catalogOwner(registry);
+      await registry.initialize();
+      await owner.whenReconciled();
+      return { registry, reconciled, owner };
     };
 
-    await expect(makeRegistry(1, encodedBytes).catalog("all")).rejects.toMatchObject({ code: "busy" });
-    await expect(makeRegistry(2, encodedBytes).catalog("all")).rejects.toMatchObject({ code: "busy" });
-    await expect(makeRegistry(2, encodedBytes + 1_024).catalog("all")).resolves.toMatchObject({
+    const tooSmall = await bounded("sessions-1", 1);
+    expect(tooSmall.reconciled.at(-1)).toMatchObject({ outcome: "failed" });
+    expect(tooSmall.owner.hasCompleteCut()).toBe(false);
+    await expect(tooSmall.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
+
+    const enough = await bounded("sessions-2", 2);
+    expect(enough.reconciled.at(-1)).toMatchObject({ outcome: "reconciled" });
+    await expect(enough.registry.catalog("all")).resolves.toMatchObject({
       sessions: [{ id: "first" }, { id: "second" }],
     });
   });
@@ -1291,18 +1538,22 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "sessions"), { recursive: true });
     const now = new Date("2026-01-01T00:00:00Z");
+    // The parent sorts last, so the pass's first header batch is two children
+    // and both normalize at once.
+    const parentPath = join(agentDir, "sessions", "z-parent.jsonl");
+    await writeFile(parentPath, `${JSON.stringify({
+      type: "session", version: 3, id: "parent", timestamp: now.toISOString(), cwd: root,
+    })}\n`);
+    // Each child names its parent, so the header phase resolves six parent paths
+    // through `canonicalSessionPath` while the pass is bounded at 2.
     const infos = Array.from({ length: 6 }, (_, index) => ({
       id: `session-${index}`,
       path: join(agentDir, "sessions", `session-${index}.jsonl`),
-      cwd: root,
-      created: now,
-      modified: now,
-      messageCount: 0,
-      firstMessage: `session ${index}`,
     }));
     await Promise.all(infos.map((info) => writeFile(info.path, `${JSON.stringify({
-      type: "session", version: 3, id: info.id, timestamp: now.toISOString(), cwd: root,
+      type: "session", version: 3, id: info.id, timestamp: now.toISOString(), cwd: root, parentSession: parentPath,
     })}\n`)));
+    const reconciled: SessionCatalogReconcileOutcome[] = [];
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -1312,6 +1563,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
       catalogDiscoveryLimits: { normalizationConcurrency: 2 },
+      catalogReconciled: (outcome) => reconciled.push(outcome),
     });
     registries.push(registry);
     const internals = registry as unknown as {
@@ -1319,53 +1571,56 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     let active = 0;
     let maximumActive = 0;
-    let release!: () => void;
-    let reachedCapacity!: () => void;
-    const capacity = new Promise<void>((resolve) => { reachedCapacity = resolve; });
-    const gate = new Promise<void>((resolve) => { release = resolve; });
     const canonicalize = vi.spyOn(internals, "canonicalSessionPath").mockImplementation(async (path) => {
       active += 1;
       maximumActive = Math.max(maximumActive, active);
-      if (active === 2) reachedCapacity();
-      await gate;
+      // Hold each call briefly so overlapping work is observable without ever
+      // blocking the owner's lane.
+      await new Promise((resolve) => setTimeout(resolve, 5));
       active -= 1;
       return resolve(path);
     });
 
     try {
-      const loading = registry.catalog("all");
-      await capacity;
+      const owner = catalogOwner(registry);
+      await registry.initialize();
+      // The first pass populates the durable rows, so the pass under measurement
+      // reuses them and its only normalizations are the header phase's own.
+      await owner.whenReconciled();
+      await owner.settled();
+      maximumActive = 0;
+
+      await owner.reconcile();
+      // The header phase resolves parent paths in batches of the configured
+      // width: two are in flight, never more.
       expect(maximumActive).toBe(2);
-      release();
-      await loading;
-      expect(maximumActive).toBe(2);
+      expect(reconciled.at(-1)?.outcome).toBe("reconciled");
+      expect(reconciled.at(-1)?.files).toBe(infos.length + 1);
+      expect((await registry.catalog("all")).sessions.map((session) => session.id).sort())
+        .toEqual([...infos.map((info) => info.id), "parent"].sort());
     } finally {
       canonicalize.mockRestore();
     }
   });
 
-  it("reuses one stable catalog acquisition without a second transcript-wide materialization", async () => {
+  it("resolves a list, a cold open and a hot re-acquire from the owner's rows without a walk", async () => {
     const fixture = await coldFixture("reuse");
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
 
     const catalog = await fixture.registry.catalog("user");
     expect(catalog.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
-    // The first cut builds the durable metadata index; subsequent operations
-    // reuse it without another transcript-wide SDK catalog helper.
-    expect(materialize).toHaveBeenCalledTimes(1);
     fixture.manager.appendMessage(fauxAssistantMessage("ordinary append after catalog"));
-
+    // The Gateway-owned append reaches its row at the owner's commit point.
+    await settleCatalog(fixture.registry);
+    const readsFrom = walks.count();
     expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(1);
     expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
-
-    // A hot slot not marked ambiguous by the latest full catalog bypasses
-    // both transcript materialization and global header validation.
-    const evidence = vi.spyOn(fixture.registry as any, "catalogStructureEvidence");
+    // A hot slot resolves against the same rows.
     expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(1);
-    expect(evidence).not.toHaveBeenCalled();
+    expect(walks.count()).toBe(readsFrom);
+    walks.restore();
   });
 
   it("reuses an on-disk catalog across a second registry without a body scan and advances one appended row", async () => {
@@ -1377,7 +1632,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     fixture.manager.appendMessage(fauxAssistantMessage("initial canonical body"));
     await fixture.registry.catalog("all");
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(fixture.registry);
+    expect(existsSync(indexPath)).toBe(true);
     await fixture.registry.dispose();
     const restarted = new RuntimeRegistry({
       agentDir: fixture.agentDir,
@@ -1390,66 +1646,67 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
-    const internals = restarted as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const scanner = vi.spyOn(internals, "sessionInfos");
+    await initializeRegistry(restarted);
+    await settleCatalog(restarted);
+    const walks = catalogWalks();
+    const before = walks.count();
     const append = vi.spyOn(CatalogMetadataIndex.prototype, "append");
-    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
     try {
       const unchanged = await restarted.catalog("all");
-      expect(scanner).not.toHaveBeenCalled();
       expect(unchanged.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(2);
       expect(unchanged.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // An external append advances one row from its own tail; the reader cut
+      // neither walks the folder nor re-parses a transcript.
       fixture.manager.appendMessage(fauxAssistantMessage("external append after restart"));
+      await settleCatalog(restarted);
+      const readsFrom = walks.count();
       const updated = await restarted.catalog("all");
-      expect(scanner).not.toHaveBeenCalled();
-      expect(append).toHaveBeenCalledTimes(1);
+      expect(append.mock.calls.length).toBeGreaterThan(0);
       expect(updated.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(3);
       expect(updated.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
+      expect(walks.count()).toBe(readsFrom);
     } finally {
-      scanner.mockRestore();
       append.mockRestore();
-      reconcile.mockRestore();
+      walks.restore();
     }
   });
 
-  it("keeps a live-owned index cut when the owner appends during reconciliation", async () => {
-    const fixture = await coldFixture("live-index-append-race");
-    await fixture.registry.catalog("all");
+  it("writes the durable catalog document from its owner, not from a reader cut", async () => {
+    const fixture = await coldFixture("owner-only-index-writer");
+    // The owner's own cut is what reaches the document; nothing else may write
+    // it, because a reader materialization parses its own summaries for the
+    // in-memory cut and their counts and sizes are not the ones the owner
+    // stamped. Those rows would hand the next startup content it must distrust.
+    await settleCatalog(fixture.registry);
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
-    await fixture.registry.acquire(fixture.manager.getSessionId());
-    const internals = fixture.registry as unknown as {
-      catalogStructuralIndex: unknown;
-      sessionInfos: () => Promise<unknown[]>;
-    };
-    // Force the same durable-index load path used by a cold registry while
-    // retaining the exact live slot ownership that permits its summary overlay.
-    internals.catalogStructuralIndex = undefined;
-    const scanner = vi.spyOn(internals, "sessionInfos");
-    const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
-    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
-    reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
-      const rows = await indexReconcile.apply(this, args);
-      fixture.manager.appendMessage(fauxAssistantMessage("append during index reconciliation"));
-      return rows;
-    });
+    expect(existsSync(indexPath)).toBe(true);
+    // With no document to load, the next read takes the full canonical
+    // materialization path — the one that used to persist a second copy.
+    await rm(indexPath, { force: true });
+    (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
+    const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
     try {
-      const listed = await fixture.registry.catalog("all");
-      expect(listed.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
-      expect(scanner).not.toHaveBeenCalled();
+      await fixture.registry.catalog("all");
+      // The reader-path write this case guards was fire-and-forget: it reached
+      // `save` only after awaiting one summary per row, so an assertion taken
+      // the moment `catalog()` returns cannot observe it and would pass against
+      // the very bug the case names. Flush that deferred chain first.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(save).not.toHaveBeenCalled();
+      // And the document the read removed is still gone, not rewritten a moment
+      // later by a caller other than its owner.
+      expect(existsSync(indexPath)).toBe(false);
     } finally {
-      reconcile.mockRestore();
-      scanner.mockRestore();
+      save.mockRestore();
     }
   });
 
-  it("rejects an unowned append that races durable-index reconciliation", async () => {
+    it("rejects an unowned append that races durable-index reconciliation", async () => {
     const fixture = await coldFixture("unowned-index-append-race");
     await fixture.registry.catalog("all");
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(fixture.registry);
+    expect(existsSync(indexPath)).toBe(true);
     // A restart is how a reader reaches the durable index with no in-memory cut.
     // The append is injected inside reconciliation because no public caller can
     // schedule work between the index read and its post-read evidence cut.
@@ -1465,18 +1722,19 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
-    const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
+    await initializeRegistry(restarted);
+    // The catalog owner reconciles behind the listener. Settle it so the
+    // injected append lands in the reader's reconciliation, which this case is
+    // about, rather than in background maintenance.
+    await settleCatalog(restarted);
     const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
-    reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
-      const rows = await indexReconcile.apply(this, args);
-      fixture.manager.appendMessage(fauxAssistantMessage("unowned append during index reconciliation"));
-      return rows;
-    });
     try {
       // The indexed row is one message stale and its file is not runtime-owned,
-      // so the cut must be retired and rebuilt: the published row carries the
+      // so the owner's next cut must re-read it: the published row carries the
       // appended body instead of the index's message count.
+      fixture.manager.appendMessage(fauxAssistantMessage("unowned append during index reconciliation"));
+      await settleCatalog(restarted);
+      expect(reconcile).toHaveBeenCalled();
       const listed = await restarted.catalog("all");
       expect(listed.sessions.find((session) => session.id === fixture.manager.getSessionId()))
         .toMatchObject({ messageCount: 2 });
@@ -1485,190 +1743,24 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("rejects an inode replacement that races durable-index reconciliation", async () => {
-    const fixture = await coldFixture("inode-index-replacement-race");
-    await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
-    const internals = fixture.registry as unknown as {
-      catalogStructuralIndex: unknown;
-      sessionInfos: () => Promise<unknown[]>;
-    };
-    internals.catalogStructuralIndex = undefined;
-    const scanner = vi.spyOn(internals, "sessionInfos");
-    // Requirement: a canonical file replaced under its indexed path during
-    // reconciliation retires the cached cut even when the bytes are unchanged,
-    // because the index is only valid for the exact file identity it read. That
-    // the materializer ran again is the only evidence the cut was not certified.
-    const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
-    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
-    reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
-      const rows = await indexReconcile.apply(this, args);
-      const replacement = `${fixture.sessionFile}.replacement`;
-      await copyFile(fixture.sessionFile, replacement);
-      await rename(replacement, fixture.sessionFile);
-      return rows;
-    });
-    try {
-      await fixture.registry.catalog("all");
-      expect(scanner).toHaveBeenCalled();
-    } finally {
-      reconcile.mockRestore();
-      scanner.mockRestore();
-    }
-  });
-
-  it.each([false, true])("publishes reconciled catalog membership without changing an older traversal (restart: %s)", async (restart) => {
-    const fixture = await coldFixture("catalog-membership-revision");
-    let registry = fixture.registry;
-    const pagination = new SessionListPaginationStore();
-    const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
-    try {
-      const second = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
-      second.appendMessage(fauxAssistantMessage("second catalog member"));
-      const originalIDs = [fixture.manager.getSessionId(), second.getSessionId()].sort();
-      await registry.pageSource("all");
-      // Wait for the actual sidecar transaction, not an elapsed delay or a
-      // partially published file, before testing its cold reconstruction.
-      await waitUntil(() => save.mock.results.length > 0);
-      await Promise.all(save.mock.results.map((result) => result.value));
-      if (restart) {
-        await registry.dispose();
-        registries.splice(registries.indexOf(registry), 1);
-        registry = new RuntimeRegistry({
-          agentDir: fixture.agentDir,
-          tronHome: join(fixture.root, "tron"),
-          idleRuntimeMs: 60_000,
-          modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
-          trust: new TrustService(fixture.agentDir),
-          broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-        });
-        registries.push(registry);
-        await registry.initialize();
-      }
-      const before = await registry.pageSource("all");
-      const first = await pagination.firstPage("old-reader", "all", before, 1);
-      expect(first.nextCursor).toBeDefined();
-      const scanner = vi.spyOn(registry as unknown as { sessionInfos: () => Promise<unknown[]> }, "sessionInfos");
-      try {
-        // These are distinct, inactive canonical files; no second runtime is
-        // opened on a session already owned by a live slot.
-        const added = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
-        added.appendMessage(fauxAssistantMessage("new catalog member"));
-        const afterAdd = await registry.pageSource("all");
-        const addedPage = await pagination.firstPage("new-reader", "all", afterAdd, 10);
-        expect(addedPage.sessions.map((row) => row.id).sort()).toEqual([...originalIDs, added.getSessionId()].sort());
-        expect(afterAdd.listRevision).toBeGreaterThan(before.listRevision);
-        expect(await registry.pageSource("all")).toBe(afterAdd);
-
-        await rm(fixture.sessionFile);
-        const afterRemove = await registry.pageSource("all");
-        const removedPage = await pagination.firstPage("new-reader", "all", afterRemove, 10);
-        expect(removedPage.sessions.map((row) => row.id).sort()).toEqual([second.getSessionId(), added.getSessionId()].sort());
-        expect(afterRemove.listRevision).toBeGreaterThan(afterAdd.listRevision);
-        expect(await registry.pageSource("all")).toBe(afterRemove);
-
-        const last = await pagination.nextPage("old-reader", "all", first.nextCursor!, 10);
-        expect([...first.sessions, ...last.sessions].map((row) => row.id).sort()).toEqual(originalIDs);
-        expect(last.listRevision).toBe(first.listRevision);
-        expect(last.nextCursor).toBeUndefined();
-        expect(pagination.activeLeaseCount).toBe(0);
-        expect(scanner).not.toHaveBeenCalled();
-      } finally { scanner.mockRestore(); }
-    } finally {
-      pagination.releaseClient("old-reader");
-      pagination.releaseClient("new-reader");
-      await Promise.all(save.mock.results.map((result) => result.value));
-      save.mockRestore();
-      await registry.dispose();
-      registries.splice(registries.indexOf(registry), 1);
-      await rm(fixture.root, { recursive: true, force: true });
-    }
-  });
-
-  it("retires a durable load invalidated before publication and falls back to a fresh canonical cut", async () => {
-    const fixture = await coldFixture("restart-index-publication-race");
-    fixture.manager.appendMessage(fauxAssistantMessage("indexed canonical body"));
-    await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
-    await fixture.registry.dispose();
-
-    const restarted = new RuntimeRegistry({
-      agentDir: fixture.agentDir,
-      tronHome: join(fixture.root, "tron"),
-      idleRuntimeMs: 60_000,
-      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
-      trust: new TrustService(fixture.agentDir),
-      broadcast: () => {},
-      sessionSummaryChanged: () => {},
-      sessionListChanged: () => {},
-    });
-    registries.push(restarted);
-    await restarted.initialize();
-    const internals = restarted as unknown as {
-      catalogMetadataIndex: CatalogMetadataIndex;
-      sessionInfos: () => Promise<unknown[]>;
-      invalidateCatalogAcquisition: () => void;
-      catalogStructuralIndex?: { structuralGeneration: number };
-      catalogStructuralGeneration: number;
-    };
-    const original = internals.catalogMetadataIndex.reconcile.bind(internals.catalogMetadataIndex);
-    let entered!: () => void;
-    let release!: () => void;
-    const suspended = new Promise<void>((resolve) => { entered = resolve; });
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const reconcile = vi.spyOn(internals.catalogMetadataIndex, "reconcile").mockImplementation(async (...arguments_) => {
-      entered();
-      await gate;
-      return original(...arguments_);
-    });
-    const scanner = vi.spyOn(internals, "sessionInfos");
-    // Requirement: a durable load invalidated before publication must retire the
-    // index instead of publishing a cut whose evidence generation is stale, and
-    // fall back to exactly one fresh canonical scan. No public caller can
-    // schedule that invalidation inside the publication window, so the generation
-    // fence and the scan count are the only observers.
-    try {
-      const listing = restarted.catalog("all");
-      await suspended;
-      internals.invalidateCatalogAcquisition();
-      release();
-      await expect(listing).resolves.toMatchObject({
-        sessions: expect.arrayContaining([expect.objectContaining({ id: fixture.manager.getSessionId() })]),
-      });
-      expect(scanner).toHaveBeenCalledTimes(1);
-      expect(internals.catalogStructuralIndex?.structuralGeneration).toBe(internals.catalogStructuralGeneration);
-    } finally {
-      release();
-      reconcile.mockRestore();
-      scanner.mockRestore();
-    }
-  });
-
-  it("fails closed with retryable busy when an unowned canonical file ends in a partial line", async () => {
+      it("keeps the last provable row when an unowned canonical file ends in a partial line", async () => {
     const fixture = await coldFixture("partial-final-line");
-    await fixture.registry.catalog("all");
+    const before = (await fixture.registry.catalog("all")).sessions
+      .find((session) => session.id === fixture.manager.getSessionId())!;
     await appendFile(fixture.sessionFile, "{\"type\":\"message\"");
-    await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const at = walks.count();
+    const after = (await fixture.registry.catalog("all")).sessions
+      .find((session) => session.id === fixture.manager.getSessionId())!;
+    // A partial tail is not membership evidence: the row keeps the counts of the
+    // exact prefix it proved, and the read neither walks nor refuses.
+    expect(after.messageCount).toBe(before.messageCount);
+    expect(walks.count()).toBe(at);
+    walks.restore();
   });
 
-  it("keeps a warmed disk index across live-only create and delete", async () => {
-    const fixture = await coldFixture("warm-live-membership");
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    await fixture.registry.catalog("user");
-    expect(materialize).toHaveBeenCalledTimes(1);
-    const live = await fixture.registry.create(fixture.cwd);
-    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id)).toContain(live.id);
-    expect(materialize).toHaveBeenCalledTimes(1);
-    await fixture.registry.delete(live.id);
-    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id)).not.toContain(live.id);
-    expect(materialize).toHaveBeenCalledTimes(1);
-  });
-
-  it("invalidates connected catalogs when cold attention has no live summary", async () => {
+    it("invalidates connected catalogs when cold attention has no live summary", async () => {
     const listChanged = vi.fn();
     const fixture = await coldFixture("cold-attention", { sessionListChanged: listChanged });
     const before = listChanged.mock.calls.length;
@@ -1717,6 +1809,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await mkdir(collisionDirectory, { recursive: true });
     const collision = SessionManager.create(fixture.cwd, collisionDirectory, { id: live.id });
     collision.appendMessage(fauxAssistantMessage("collision"));
+    // The claimant is an external writer: index it, then the ID is ambiguous.
+    await settleCatalog(fixture.registry);
     await expect(fixture.registry.setAttention(live.id, true)).rejects.toMatchObject({ code: "conflict" });
   });
 
@@ -1745,6 +1839,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       await mkdir(collisionDirectory, { recursive: true });
       const collision = SessionManager.create(fixture.cwd, collisionDirectory, { id: live.id });
       collision.appendMessage(fauxAssistantMessage("late collision"));
+      // The fence is the index at commit, not a walk: the claimant has to be
+      // indexed for the boundary to see it, and it still rejects the update.
+      await settleCatalog(fixture.registry);
       release();
       await expect(update).rejects.toMatchObject({ code: "conflict" });
       expect(fixture.registry.attentionProjection(live.id).isUnread).toBe(false);
@@ -1754,30 +1851,150 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("does not certify a cached index when traversal evidence is incomplete", async () => {
-    const fixture = await coldFixture("incomplete-index-evidence");
-    const internals = fixture.registry as unknown as {
-      sessionInfos: () => Promise<unknown[]>;
-      catalogStructureEvidence: () => Promise<{ digest: string; identitiesByPath: ReadonlyMap<string, unknown>; complete: boolean }>;
-    };
-    // Requirement: traversal evidence that is incomplete cannot validate the
-    // cached structural index, so the cut is rebuilt from canonical metadata
-    // instead of being certified. The rebuild shows up only as one extra
-    // materialization; every published row is identical either way.
-    const materialize = vi.spyOn(internals, "sessionInfos");
-    await fixture.registry.catalog("all");
-    expect(materialize).toHaveBeenCalledTimes(1);
-    const evidence = await internals.catalogStructureEvidence();
-    const evidenceSpy = vi.spyOn(internals, "catalogStructureEvidence")
-      .mockResolvedValue({ ...evidence, complete: false });
-    try {
-      await fixture.registry.catalog("all");
-      // Generic acquisition-budget incompleteness may use the stable full
-      // metadata fallback, but it is never certified as a reusable index.
-      expect(materialize).toHaveBeenCalledTimes(2);
-    } finally {
-      evidenceSpy.mockRestore();
+  // G-1c/B1: a file the scan read a header for but could not prove, with no
+  // stored row to keep, is unknown membership. Publishing that cut would report
+  // the session as absent and let every destructive caller drop its records and
+  // artifacts for a file that is still there (review probe-prune.mjs).
+  it("keeps the records of an unprovable session that has no stored row", async () => {
+    const fixture = await coldFixture("unproven-no-row");
+    const sessionId = fixture.manager.getSessionId();
+    await settleCatalog(fixture.registry);
+    await fixture.registry.setArchived(sessionId, true);
+    await settleCatalog(fixture.registry);
+    expect(fixture.registry.isArchived(sessionId)).toBe(true);
+    await fixture.registry.dispose();
+    registries.splice(registries.indexOf(fixture.registry), 1);
+    // The durable document is what would otherwise keep a row: drop it, then
+    // leave the transcript mid-append so no row can be rebuilt from the file.
+    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json"), { force: true });
+    const completeBytes = (await fsPromises.stat(fixture.sessionFile)).size;
+    await appendFile(fixture.sessionFile, '{"type":"message"');
+
+    const reconciled: SessionCatalogReconcileOutcome[] = [];
+    const restarted = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      catalogReconciled: (outcome) => reconciled.push(outcome),
+    });
+    registries.push(restarted);
+    await restarted.initialize();
+    const owner = catalogOwner(restarted);
+    await owner.whenReconciled();
+
+    // The pass proves nothing about that file, so it is not a complete cut: its
+    // rows are served, and no destructive caller and no "this session is gone"
+    // answer is authorized.
+    expect(reconciled.at(-1)).toMatchObject({ outcome: "incomplete" });
+    expect(reconciled.at(-1)!.unproven).toBeGreaterThan(0);
+    expect(owner.hasReconciledCut()).toBe(false);
+    expect(owner.hasUnknownMembership()).toBe(true);
+    expect(owner.unprovenSessionIds().has(sessionId)).toBe(true);
+    // Startup recovery keeps the record, maintenance refuses, and acquire refuses
+    // retryably instead of reporting the session as absent. The row cannot be
+    // built from a torn file, so the session is missing from the list until a
+    // pass can prove it — its records and artifacts are what must survive.
+    await restarted.recoverCanonicalAttention();
+    expect(restarted.isArchived(sessionId)).toBe(true);
+    await expect(restarted.sessionIDsForStorageMaintenance())
+      .rejects.toMatchObject({ code: "busy", retryable: true });
+    expect((await restarted.list("all")).map((session) => session.id)).not.toContain(sessionId);
+    await expect(restarted.acquire(sessionId)).rejects.toMatchObject({ code: "busy", retryable: true, diagnosticReason: "catalog_not_ready" });
+    await expect(restarted.delete(sessionId)).rejects.toMatchObject({ code: "busy", retryable: true });
+
+    // The torn append is rolled back, which proves the file again: the cut
+    // publishes and the session is still the archived session it was.
+    await truncate(fixture.sessionFile, completeBytes);
+    await settleCatalog(restarted);
+    expect(owner.hasReconciledCut()).toBe(true);
+    expect(restarted.isArchived(sessionId)).toBe(true);
+    expect((await restarted.list("all")).find((session) => session.id === sessionId)?.archivedAt).toBeDefined();
+    expect((await restarted.sessionIDsForStorageMaintenance()).has(sessionId)).toBe(true);
+    expect((await restarted.acquire(sessionId)).id).toBe(sessionId);
+  });
+
+  // G-1c/B2: automations.initialize() runs right after sessions.initialize(),
+  // which starts the catalog owner and returns before its first cut. Admission
+  // and recovery must wait for that cut instead of failing startup with a
+  // retryable busy (review probe-automation.mjs).
+  it.each([false, true])("admits an existing-session automation while the first cut runs (durable index: %s)", async (withDocument) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-startup-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const sessionDirectory = join(agentDir, "sessions", "workspace");
+    await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    let target = "";
+    for (let index = 0; index < 200; index += 1) {
+      const manager = SessionManager.create(cwd, sessionDirectory);
+      manager.appendMessage(fauxAssistantMessage("x".repeat(2_000)));
+      target ||= manager.getSessionId();
     }
+    const make = () => new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    if (withDocument) {
+      const seeded = make();
+      registries.push(seeded);
+      await initializeRegistry(seeded);
+      await settleCatalog(seeded);
+      await seeded.dispose();
+      registries.splice(registries.indexOf(seeded), 1);
+    }
+
+    const registry = make();
+    registries.push(registry);
+    const blocked: Array<[string, string]> = [];
+    const store = {
+      initialize: async () => {},
+      snapshot: () => [{
+        id: "automation-startup", activation: "active",
+        target: { kind: "existingSession", sessionId: target },
+      }],
+      blockTarget: async (sessionId: string, reason: string) => { blocked.push([sessionId, reason]); },
+    };
+    const scheduler = { recover: async () => {}, start: () => {} };
+    await registry.initialize();
+    const service = new AutomationService(
+      store as never,
+      scheduler as never,
+      registry,
+    );
+    await expect(service.initialize()).resolves.toBeUndefined();
+    expect(blocked).toEqual([]);
+  });
+
+  it("keeps the published rows through an incomplete pass and authorizes nothing destructive", async () => {
+    const fixture = await coldFixture("incomplete-index-evidence");
+    await settleCatalog(fixture.registry);
+    const published = (await fixture.registry.catalog("all")).sessions.map((session) => session.id);
+    const catalog = catalogOwner(fixture.registry);
+    const evidence = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence")
+      .mockImplementation(async () => ({
+        digest: "incomplete", factsDigest: "incomplete", identitiesByPath: new Map(),
+        complete: false, unprovenPaths: new Set(), unstableCanonicalFiles: false,
+      }));
+    try {
+      await catalog.reconcile();
+    } finally {
+      evidence.mockRestore();
+    }
+    // An incomplete traversal publishes nothing: the rows the last complete cut
+    // produced stay, and no destructive caller may act on them.
+    expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id)).toEqual(published);
+    expect(catalog.hasReconciledCut()).toBe(false);
+    await expect(fixture.registry.sessionIDsForStorageMaintenance())
+      .rejects.toMatchObject({ code: "busy", retryable: true });
   });
 
   it("reclaims reloadable idle runtimes under pressure while protecting visible sessions and drafts", async () => {
@@ -1786,10 +2003,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     fixture.registry.subscribe("phone", first.id);
     const secondManager = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
     secondManager.appendMessage(fauxAssistantMessage("reloadable idle"));
+    await settleCatalog(fixture.registry);
     const second = await fixture.registry.acquire(secondManager.getSessionId());
     const draft = await fixture.registry.create(fixture.cwd);
     const thirdManager = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
     thirdManager.appendMessage(fauxAssistantMessage("new visible selection"));
+    await settleCatalog(fixture.registry);
     const third = await fixture.registry.acquire(thirdManager.getSessionId());
     expect(second.isDisposed).toBe(true);
     expect(first.isDisposed).toBe(false);
@@ -1836,7 +2055,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     await registry.catalog("all");
 
     const first = registry.acquire(firstManager.getSessionId());
@@ -1852,174 +2071,138 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(secondSlot.id).toBe(secondManager.getSessionId());
   });
 
-  it("uses only bounded header evidence when cold acquisition has no reusable admission", async () => {
+  it("reads only the admitted file's own header when a cold open has no cached admission", async () => {
     const fixture = await coldFixture("uncached");
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
-    expect(materialize).not.toHaveBeenCalled();
-    expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
+    const headers = catalogHeaderReads();
+    try {
+      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
+      expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
+      // Membership is the owner's row; the open reads no other file and walks
+      // nothing.
+      expect(walks.count()).toBe(before);
+      expect(headers.paths().length).toBeGreaterThan(0);
+      expect(new Set(headers.paths().map((path) => basename(path)))).toEqual(new Set([basename(fixture.sessionFile)]));
+    } finally {
+      walks.restore();
+      headers.restore();
+    }
   });
 
   it("ignores jsonl-named directories during lightweight acquisition", async () => {
     const fixture = await coldFixture("jsonl-directory");
     await mkdir(join(fixture.agentDir, "sessions", "unrelated.jsonl"));
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
-      .toBe(fixture.manager.getSessionId());
-    expect(materialize).not.toHaveBeenCalled();
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
+    try {
+      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
+        .toBe(fixture.manager.getSessionId());
+      // A directory whose name ends in .jsonl is no row, and the open walks
+      // nothing to decide that.
+      expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id))
+        .toEqual([fixture.manager.getSessionId()]);
+      expect(walks.count()).toBe(before);
+    } finally {
+      walks.restore();
+    }
   });
 
-  it("ignores malformed non-session subagent artifacts without poisoning the catalog index", async () => {
-    const fixture = await coldFixture("ignored-artifacts");
+  it("keeps an unprovable artifact out of the index without blinding the cut", async () => {
+    const reconciled: SessionCatalogReconcileOutcome[] = [];
+    const fixture = await coldFixture("ignored-artifacts", { catalogReconciled: (outcome) => reconciled.push(outcome) });
     const artifactDirectory = join(fixture.agentDir, "sessions", "workspace", "subagent-artifacts");
     await mkdir(artifactDirectory, { recursive: true });
-    await writeFile(join(artifactDirectory, "worker.jsonl"), `${JSON.stringify({ recordType: "message", text: "diagnostic" })}\\n`);
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
+    await writeFile(join(artifactDirectory, "worker.jsonl"), `${JSON.stringify({ recordType: "message", text: "diagnostic" })}\n`);
+    reconciled.length = 0;
+    await settleCatalog(fixture.registry);
 
-    const first = await fixture.registry.catalog("all");
-    expect(first.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(1);
-    const second = await fixture.registry.catalog("all");
-    expect(second.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(1);
+    const listed = await fixture.registry.catalog("all");
+    expect(listed.sessions.map((session) => session.id)).toEqual([fixture.manager.getSessionId()]);
+    // A producer's artifact folder is ignored by the owner's traversal, so the
+    // pass still reconciles and adds no row for it.
+    expect(reconciled.at(-1)).toMatchObject({ outcome: "reconciled" });
+
+    const walks = catalogWalks();
+    const before = walks.count();
+    try {
+      expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id))
+        .toEqual([fixture.manager.getSessionId()]);
+      expect(walks.count()).toBe(before);
+    } finally {
+      walks.restore();
+    }
   });
 
-  it("coalesces concurrent fallback acquisition scans for one catalog generation", async () => {
-    const fixture = await coldFixture("coalesced-fallback");
-    await writeFile(join(fixture.agentDir, "sessions", "workspace", "malformed.jsonl"), `${"x".repeat(70_000)}\\n`);
-    // Requirement: concurrent fallback acquisitions for one catalog generation
-    // share a single physical scan, and a successor may start only once the
-    // first settles. Coalescing is a bound on work, so the scan count is the
-    // only observer that can show it.
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let entered!: () => void;
-    let release!: () => void;
-    const enteredScan = new Promise<void>((resolve) => { entered = resolve; });
-    const scanBarrier = new Promise<void>((resolve) => { release = resolve; });
-    let calls = 0;
-    const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
-      calls += 1;
-      if (calls === 1) {
-        entered();
-        await scanBarrier;
-      }
-      return original();
-    });
-    const acquire = (fixture.registry as unknown as { catalogAcquisition: () => Promise<unknown> }).catalogAcquisition
-      .bind(fixture.registry);
-    const first = acquire();
-    await enteredScan;
-    const second = acquire();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(calls).toBe(1);
-    release();
-    await Promise.all([first, second]);
-    expect(materialize).toHaveBeenCalledTimes(2);
-  });
-
-  it("falls back to stable SDK discovery for an unrelated malformed header", async () => {
-    const fixture = await coldFixture("malformed-fallback");
+    it("keeps an unrelated malformed header out of the cut without a fallback scan", async () => {
+    const reconciled: SessionCatalogReconcileOutcome[] = [];
+    const fixture = await coldFixture("malformed-fallback", { catalogReconciled: (outcome) => reconciled.push(outcome) });
     const unrelated = join(fixture.agentDir, "sessions", "unrelated");
     await mkdir(unrelated, { recursive: true });
     await writeFile(join(unrelated, "malformed.jsonl"), `${"x".repeat(70_000)}\n`);
-    const internals = fixture.registry as unknown as {
-      sessionInfos: () => Promise<unknown[]>;
-      catalogAcquisitionAdmission?: unknown;
-    };
-    // Requirement: an unrelated malformed header forces the stable SDK fallback
-    // and must leave no reusable admission behind, so the next acquisition
-    // revalidates rather than trusting evidence it could not complete. Both
-    // facts live in private state: the scan count and the absent admission.
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
-      .toBe(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(3);
-    expect(internals.catalogAcquisitionAdmission).toBeUndefined();
+    reconciled.length = 0;
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    try {
+      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
+        .toBe(fixture.manager.getSessionId());
+      // The unreadable neighbour is unproven: it neither forces a second
+      // discovery pass nor removes the admitted session from the cut, and its
+      // unknown membership keeps every destructive caller off this cut.
+      expect(reconciled.at(-1)).toMatchObject({ outcome: "incomplete" });
+      expect(reconciled.at(-1)!.unproven).toBeGreaterThan(0);
+      expect(catalogOwner(fixture.registry).hasReconciledCut()).toBe(false);
+      expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id))
+        .toEqual([fixture.manager.getSessionId()]);
+      expect(walks.count()).toBe(0);
+    } finally {
+      walks.restore();
+    }
   });
 
-  it("revalidates oversized SDK identities after fallback resolution", async () => {
-    const fixture = await coldFixture("oversized-fallback-identity");
-    const unrelatedDirectory = join(fixture.agentDir, "sessions", "unrelated-oversized");
-    const unrelatedFile = join(unrelatedDirectory, "unrelated.jsonl");
-    await mkdir(unrelatedDirectory, { recursive: true });
-    const originalLines = (await readFile(fixture.sessionFile, "utf8")).split("\n");
-    const originalHeader = JSON.parse(originalLines[0]!) as Record<string, unknown>;
-    originalLines[0] = JSON.stringify({
-      ...originalHeader,
-      id: "unrelated-oversized-session",
-      padding: "x".repeat(70_000),
-    });
-    await writeFile(unrelatedFile, originalLines.join("\n"));
-    const internals = fixture.registry as unknown as {
-      fallbackCatalogAcquisition: () => Promise<unknown>;
-      sessionInfos: () => Promise<unknown[]>;
-    };
-    const originalFallback = internals.fallbackCatalogAcquisition.bind(fixture.registry);
-    const fallback = vi.spyOn(internals, "fallbackCatalogAcquisition").mockImplementation(async () => {
-      const resolution = await originalFallback();
-      const mutatedLines = (await readFile(unrelatedFile, "utf8")).split("\n");
-      const mutatedHeader = JSON.parse(mutatedLines[0]!) as Record<string, unknown>;
-      mutatedLines[0] = JSON.stringify({ ...mutatedHeader, id: fixture.manager.getSessionId() });
-      await writeFile(unrelatedFile, mutatedLines.join("\n"));
-      return resolution;
-    });
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    await expect(fixture.registry.acquire(fixture.manager.getSessionId()))
-      .rejects.toMatchObject({ code: "busy", retryable: true });
-    expect(fallback).toHaveBeenCalledTimes(1);
-    expect(materialize).toHaveBeenCalledTimes(3);
-    expect(fixture.runtimeFactory).not.toHaveBeenCalled();
-  });
-
-  it("invalidates reusable acquisition when a duplicate or removal changes canonical membership", async () => {
+    it("invalidates reusable acquisition when a duplicate or removal changes canonical membership", async () => {
     const duplicateFixture = await coldFixture("duplicate-membership");
-    const duplicateInternals = duplicateFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const duplicateMaterialize = vi.spyOn(duplicateInternals, "sessionInfos");
-    await duplicateFixture.registry.catalog("all");
+    await settleCatalog(duplicateFixture.registry);
     const duplicateDirectory = join(duplicateFixture.agentDir, "sessions", "duplicate");
     await mkdir(duplicateDirectory, { recursive: true });
     await copyFile(
       duplicateFixture.sessionFile,
       join(duplicateDirectory, "duplicate.jsonl"),
     );
+    await settleCatalog(duplicateFixture.registry);
+    // One ID, two canonical files: neither may be resolved, so the list omits
+    // the ID entirely.
+    expect((await duplicateFixture.registry.catalog("all")).sessions).toHaveLength(0);
 
     await expect(duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).rejects.toMatchObject({
       code: "conflict",
     });
-    expect(duplicateMaterialize).toHaveBeenCalledTimes(1);
     expect(duplicateFixture.runtimeFactory).not.toHaveBeenCalled();
     await rm(join(duplicateDirectory, "duplicate.jsonl"));
+    await settleCatalog(duplicateFixture.registry);
     expect((await duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).id)
       .toBe(duplicateFixture.manager.getSessionId());
-    expect(duplicateMaterialize).toHaveBeenCalledTimes(1);
     const duplicateAgain = join(duplicateDirectory, "duplicate-again.jsonl");
     await copyFile(duplicateFixture.sessionFile, duplicateAgain);
-    await duplicateFixture.registry.catalog("all");
+    await settleCatalog(duplicateFixture.registry);
     await expect(duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).rejects.toMatchObject({
       code: "conflict",
     });
     await rm(duplicateAgain);
+    await settleCatalog(duplicateFixture.registry);
     expect((await duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).id)
       .toBe(duplicateFixture.manager.getSessionId());
 
     const removedFixture = await coldFixture("removed-membership");
-    const removedInternals = removedFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const removedMaterialize = vi.spyOn(removedInternals, "sessionInfos");
-    await removedFixture.registry.catalog("all");
+    await settleCatalog(removedFixture.registry);
     await rm(removedFixture.sessionFile);
+    await settleCatalog(removedFixture.registry);
 
     await expect(removedFixture.registry.acquire(removedFixture.manager.getSessionId())).rejects.toMatchObject({
       code: "not_found",
     });
-    expect(removedMaterialize).toHaveBeenCalledTimes(1);
     expect(removedFixture.runtimeFactory).not.toHaveBeenCalled();
   });
 
@@ -2061,6 +2244,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // canonical catalog are delegated sessions; any neighbouring depth or
     // basename stays an ordinary user session, and a contradictory parent
     // header keeps the reserved child immutable without publishing a row.
+    await settleCatalog(fixture.registry);
     const rows = new Map((await fixture.registry.catalog("all")).sessions.map((row) => [row.id, row]));
     expect(rows.get("fork")).toMatchObject({ kind: "subagent", parentSessionId: "parent" });
     expect(rows.get("fresh")).toMatchObject({ kind: "subagent" });
@@ -2096,7 +2280,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("rejects identity, cwd, or duplicate mutation before runtime creation", async () => {
-    for (const field of ["id", "cwd", "duplicate"] as const) {
+    for (const field of ["id", "cwd"] as const) {
       const fixture = await coldFixture(`${field}-race`);
       await fixture.registry.catalog("all");
       const replacementCwd = join(fixture.root, "replacement-workspace");
@@ -2107,31 +2291,39 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       const original = internals.catalogAcquisition.bind(fixture.registry);
       const admission = vi.spyOn(internals, "catalogAcquisition").mockImplementation(async () => {
         const acquired = await original();
-        if (field === "duplicate") {
-          const duplicateDirectory = join(fixture.agentDir, "sessions", "duplicate-gap");
-          await mkdir(duplicateDirectory, { recursive: true });
-          await copyFile(fixture.sessionFile, join(duplicateDirectory, "duplicate.jsonl"));
-        } else {
-          const lines = (await readFile(fixture.sessionFile, "utf8")).split("\n");
-          const header = JSON.parse(lines[0]!) as Record<string, unknown>;
-          lines[0] = JSON.stringify({
-            ...header,
-            [field]: field === "id" ? "replacement-session-id" : replacementCwd,
-          });
-          await writeFile(fixture.sessionFile, lines.join("\n"));
-        }
+        // The file changes after admission and before the commit fence, which
+        // re-reads this exact file's header.
+        const lines = (await readFile(fixture.sessionFile, "utf8")).split("\n");
+        const header = JSON.parse(lines[0]!) as Record<string, unknown>;
+        lines[0] = JSON.stringify({
+          ...header,
+          [field]: field === "id" ? "replacement-session-id" : replacementCwd,
+        });
+        await writeFile(fixture.sessionFile, lines.join("\n"));
         return acquired;
       });
 
       try {
         await expect(fixture.registry.acquire(fixture.manager.getSessionId())).rejects.toMatchObject({
-          code: field === "duplicate" ? "busy" : "conflict",
+          code: "conflict",
         });
         expect(fixture.runtimeFactory).not.toHaveBeenCalled();
       } finally {
         admission.mockRestore();
       }
     }
+
+    // A duplicate claimant that the owner has indexed makes the ID ambiguous, and
+    // no acquisition may create a runtime for it.
+    const duplicateFixture = await coldFixture("duplicate-race");
+    await settleCatalog(duplicateFixture.registry);
+    const duplicateDirectory = join(duplicateFixture.agentDir, "sessions", "duplicate-gap");
+    await mkdir(duplicateDirectory, { recursive: true });
+    await copyFile(duplicateFixture.sessionFile, join(duplicateDirectory, "duplicate.jsonl"));
+    await settleCatalog(duplicateFixture.registry);
+    await expect(duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId()))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect(duplicateFixture.runtimeFactory).not.toHaveBeenCalled();
   });
 
   it("opens a cold session while unrelated catalog files appear in the admission gap", async () => {
@@ -2163,7 +2355,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
   it("does not follow a session path replaced by a symlink during delete", async () => {
     const fixture = await coldFixture("delete-symlink-race");
-    await fixture.registry.catalog("all");
+    await settleCatalog(fixture.registry);
     const moved = `${fixture.sessionFile}.moved`;
     const external = join(fixture.root, "external.jsonl");
     const externalContent = `${JSON.stringify({
@@ -2171,23 +2363,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       timestamp: new Date().toISOString(), cwd: fixture.cwd,
     })}\n`;
     await writeFile(external, externalContent);
-    const internals = fixture.registry as unknown as {
-      catalogStructureEvidence: () => Promise<unknown>;
-    };
-    const original = internals.catalogStructureEvidence.bind(fixture.registry);
-    let replaced = false;
-    vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
-      const evidence = await original();
-      if (!replaced) {
-        replaced = true;
-        await rename(fixture.sessionFile, moved);
-        await symlink(external, fixture.sessionFile);
-      }
-      return evidence;
-    });
+    // The path is a symlink by the time the deletion commits: its own stat is the
+    // fence that refuses to follow it, and the aliased file is untouched.
+    await rename(fixture.sessionFile, moved);
+    await symlink(external, fixture.sessionFile);
 
     await expect(fixture.registry.delete(fixture.manager.getSessionId())).rejects.toMatchObject({
-      code: "busy", retryable: true,
+      code: "conflict",
     });
     expect(await readFile(external, "utf8")).toBe(externalContent);
     expect(existsSync(moved)).toBe(true);
@@ -2196,7 +2378,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   it("revalidates parent creation, duplicate identity, and topology changes in the delete gap", async () => {
     for (const mutation of ["parent", "duplicate", "topology"] as const) {
       const fixture = await coldFixture(`delete-catalog-gap-${mutation}`);
-      await fixture.registry.catalog("all");
+      await settleCatalog(fixture.registry);
       const mutationDirectory = join(fixture.agentDir, "sessions", `delete-gap-${mutation}`);
       const movedFile = join(mutationDirectory, "owner", "worker", "run-0", "session.jsonl");
       const internals = fixture.registry as unknown as {
@@ -2211,6 +2393,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
           })}\n`);
         } else if (mutation === "duplicate") {
           await copyFile(fixture.sessionFile, join(mutationDirectory, "duplicate.jsonl"));
+          // A claimant the owner has indexed is an ambiguity the commit sees.
+          await settleCatalog(fixture.registry);
         } else {
           await mkdir(dirname(movedFile), { recursive: true });
           await rename(fixture.sessionFile, movedFile);
@@ -2218,270 +2402,19 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         return original(...arguments_);
       });
 
-      await expect(fixture.registry.delete(fixture.manager.getSessionId())).rejects.toMatchObject({
-        code: "busy", retryable: true,
-      });
-      expect(existsSync(mutation === "topology" ? movedFile : fixture.sessionFile)).toBe(true);
-    }
-  });
-
-  it("retries lightweight acquisition without stamping invalidated evidence current", async () => {
-    const fixture = await coldFixture("lightweight-generation-race");
-    const internals = fixture.registry as unknown as {
-      buildCatalogAcquisition: (...arguments_: any[]) => Promise<unknown>;
-      catalogAcquisition: () => Promise<unknown>;
-      invalidateCatalogAcquisition: () => void;
-      catalogAcquisitionInvalidationGeneration: number;
-      catalogAcquisitionAdmission?: { invalidationGeneration: number };
-    };
-    const original = internals.buildCatalogAcquisition.bind(fixture.registry);
-    let calls = 0;
-    // Requirement: an acquisition invalidated while it was being built is retried
-    // exactly once, and only an admission carrying the current invalidation
-    // generation may stand as current. The attempt count and that generation are
-    // private, and no published row differs when the fence is wrong.
-    const build = vi.spyOn(internals, "buildCatalogAcquisition").mockImplementation(async (...arguments_) => {
-      const resolution = await original(...arguments_);
-      calls += 1;
-      if (calls === 1) internals.invalidateCatalogAcquisition();
-      return resolution;
-    });
-
-    await internals.catalogAcquisition();
-    expect(build).toHaveBeenCalledTimes(2);
-    expect(internals.catalogAcquisitionAdmission?.invalidationGeneration)
-      .toBe(internals.catalogAcquisitionInvalidationGeneration);
-  });
-
-  it("fails busy after a second lightweight acquisition invalidation", async () => {
-    const fixture = await coldFixture("repeated-lightweight-generation-race");
-    const internals = fixture.registry as unknown as {
-      catalogStructureEvidence: () => Promise<unknown>;
-      catalogAcquisition: () => Promise<unknown>;
-      invalidateCatalogAcquisition: () => void;
-      catalogAcquisitionAdmission?: unknown;
-    };
-    const original = internals.catalogStructureEvidence.bind(fixture.registry);
-    // Requirement: a second invalidation exhausts the retry and fails closed with
-    // a retryable busy, and nothing is cached as admitted. Both facts are private
-    // state; the caller-visible error is the same busy a capacity bound throws.
-    const evidence = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
-      const captured = await original();
-      internals.invalidateCatalogAcquisition();
-      return captured;
-    });
-
-    await expect(internals.catalogAcquisition()).rejects.toMatchObject({ code: "busy", retryable: true });
-    expect(evidence).toHaveBeenCalledTimes(2);
-    expect(internals.catalogAcquisitionAdmission).toBeUndefined();
-  });
-
-  it("cannot republish an acquisition invalidated during full materialization", async () => {
-    const fixture = await coldFixture("invalidation-race");
-    const internals = fixture.registry as unknown as {
-      sessionInfos: () => Promise<unknown[]>;
-      invalidateCatalogAcquisition: () => void;
-    };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let calls = 0;
-    // Requirement: a full materialization invalidated mid-flight is never
-    // published as the current cut; it is rebuilt once and the resulting
-    // admission then serves the next acquire without another scan. The bound on
-    // that work is only visible as a scan count.
-    const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
-      const infos = await original();
-      calls += 1;
-      if (calls === 1) internals.invalidateCatalogAcquisition();
-      return infos;
-    });
-
-    await fixture.registry.catalog("all");
-    expect(materialize).toHaveBeenCalledTimes(2);
-    await fixture.registry.acquire(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(2);
-  });
-
-  it("rejects a mutation in the final full-catalog publication gap", async () => {
-    const fixture = await coldFixture("final-publication-gap");
-    const internals = fixture.registry as unknown as {
-      publishCatalogAcquisition: (...arguments_: unknown[]) => Promise<boolean>;
-      invalidateCatalogAcquisition: () => void;
-      updateCatalogIdentity: (...arguments_: unknown[]) => void;
-      catalogAcquisitionAdmission?: unknown;
-    };
-    const original = internals.publishCatalogAcquisition.bind(fixture.registry);
-    const publication = vi.spyOn(internals, "publishCatalogAcquisition").mockImplementation(async (...arguments_) => {
-      const admitted = await original(...arguments_);
-      internals.invalidateCatalogAcquisition();
-      return admitted;
-    });
-    const identity = vi.spyOn(internals, "updateCatalogIdentity");
-
-    await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
-    expect(publication).toHaveBeenCalledTimes(1);
-    expect(identity).not.toHaveBeenCalled();
-    expect(internals.catalogAcquisitionAdmission).toBeUndefined();
-  });
-
-  it("fails busy without publishing after a second unstable full materialization", async () => {
-    const fixture = await coldFixture("repeated-instability");
-    const internals = fixture.registry as unknown as {
-      catalogStructureEvidence: () => Promise<{ digest: string; identitiesByPath: ReadonlyMap<string, unknown>; complete: boolean }>;
-      catalogAcquisition: () => Promise<unknown>;
-      sessionInfos: () => Promise<unknown[]>;
-      updateCatalogIdentity: (...arguments_: unknown[]) => void;
-      catalogAcquisitionAdmission?: unknown;
-    };
-    await internals.catalogAcquisition();
-    expect(internals.catalogAcquisitionAdmission).toBeDefined();
-    const originalEvidence = internals.catalogStructureEvidence.bind(fixture.registry);
-    let evidenceCall = 0;
-    const evidence = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
-      const current = await originalEvidence();
-      evidenceCall += 1;
-      return { ...current, digest: `${current.digest}-${evidenceCall}` };
-    });
-    const materialize = vi.spyOn(internals, "sessionInfos");
-    const publishIdentity = vi.spyOn(internals, "updateCatalogIdentity");
-
-    try {
-      await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
-      expect(materialize).toHaveBeenCalledTimes(2);
-      expect(publishIdentity).not.toHaveBeenCalled();
-      expect(internals.catalogAcquisitionAdmission).toBeUndefined();
-    } finally {
-      evidence.mockRestore();
-    }
-  });
-
-  it("retains the stable user cut during a real child-session write", async () => {
-    const children: SessionManager[] = [];
-    let mutateDuringDiscovery = false;
-    let mutationCount = 0;
-    const stageRecords: Array<{ stage: string; workID?: string; scope?: "user" | "all" }> = [];
-    const fixture = await coldFixture("user-catalog-child-churn", {
-      stageTiming: (stage, _durationMs, _outcome, metadata) => {
-        stageRecords.push({ stage, workID: metadata?.workID, scope: metadata?.scope });
-        if (mutateDuringDiscovery && stage === "catalog.metadata-materialize") {
-          mutationCount += 1;
-          for (const child of children) {
-            child.appendMessage(fauxAssistantMessage("child registration update"));
-          }
-        }
-      },
-    });
-    const first = await fixture.registry.catalog("user");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forksDirectory, { recursive: true });
-    for (let index = 0; index < 2; index += 1) {
-      const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-      child.appendMessage(fauxAssistantMessage(`child registration ${index}`));
-      children.push(child);
-    }
-    // Force the canonical materialization path instead of relying on the
-    // asynchronous acceleration-index save racing this test. The invariant
-    // under test is the stable user cut while child files mutate during the
-    // real metadata pass.
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
-    (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
-    await rm(indexPath, { force: true });
-    mutateDuringDiscovery = true;
-    try {
-      const userCut = await fixture.registry.catalog("user");
-      expect(mutationCount).toBeGreaterThan(0);
-      expect(userCut.sessions.map((session) => session.id)).toEqual(
-        first.sessions.map((session) => session.id),
-      );
-      const catalogStages = stageRecords.filter((record) => record.stage.startsWith("catalog."));
-      expect(catalogStages.length).toBeGreaterThan(0);
-      const workIDs = new Set(catalogStages.map((record) => record.workID));
-      expect(workIDs.size).toBeGreaterThan(0);
-      expect([...workIDs].every((workID) => workID !== undefined)).toBe(true);
-      expect(catalogStages.every((record) => record.scope === "user")).toBe(true);
-
-    } finally {
-      mutateDuringDiscovery = false;
-    }
-  });
-
-  it("retains user catalog and search admission while parallel delegated sessions append", async () => {
-    const fixture = await coldFixture("user-index-parallel-children");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forks, { recursive: true });
-    const children = Array.from({ length: 3 }, () => SessionManager.forkFrom(parentFile, fixture.cwd, forks));
-    children.forEach(child => child.appendMessage(fauxAssistantMessage("child starts")));
-    const internals = fixture.registry as any;
-    const scanner = vi.spyOn(internals, "sessionInfos");
-    const parentID = fixture.manager.getSessionId();
-    try {
-      expect((await fixture.registry.catalog("user")).sessions.map(row => row.id)).toEqual([parentID]);
-      expect(scanner).toHaveBeenCalledTimes(1);
-      children.forEach(child => child.appendMessage(fauxAssistantMessage("parallel child progress")));
-      const live = await fixture.registry.create(fixture.cwd);
-      const results = await Promise.all([
-        fixture.registry.catalog("user"), fixture.registry.catalog("user"), fixture.registry.readSearchCut(parentID),
-      ]);
-      for (const result of results.slice(0, 2) as Awaited<ReturnType<RuntimeRegistry["catalog"]>>[]) {
-        expect(result.sessions.map(row => row.id)).toEqual(expect.arrayContaining([parentID, live.id]));
-        expect(result.sessions).toHaveLength(2);
+      if (mutation === "parent") {
+        // A new unrelated parent file is not evidence about this session, so the
+        // deletion still commits: the index, not a whole-tree scan, is the
+        // membership authority.
+        await fixture.registry.delete(fixture.manager.getSessionId());
+        expect(existsSync(fixture.sessionFile)).toBe(false);
+      } else {
+        await expect(fixture.registry.delete(fixture.manager.getSessionId())).rejects.toMatchObject({
+          code: mutation === "duplicate" ? "conflict" : "not_found",
+        });
+        expect(existsSync(mutation === "topology" ? movedFile : fixture.sessionFile)).toBe(true);
       }
-      expect(results[2]).toMatchObject({ summary: { id: parentID } });
-      expect(scanner).toHaveBeenCalledTimes(1);
-      // A partial acceleration must never hide children from administration.
-      const all = await fixture.registry.catalog("all");
-      expect(all.sessions.map(row => row.id)).toEqual(expect.arrayContaining(children.map(child => child.getSessionId())));
-    } finally { scanner.mockRestore(); }
-  });
-
-  it("isolates an unfinished child append from unrelated catalog and cold-open reads", async () => {
-    const fixture = await coldFixture("partial-child-isolation");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const parallel = SessionManager.create(fixture.cwd, dirname(parentFile));
-    parallel.appendMessage(fauxAssistantMessage("parallel parent"));
-    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forks, { recursive: true });
-    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
-    child.appendMessage(fauxAssistantMessage("persisted child"));
-    await appendFile(child.getSessionFile()!, '{"type":"message"');
-    const internals = fixture.registry as any;
-    const fallback = vi.spyOn(internals, "fallbackCatalogAcquisition");
-    try {
-      const parentID = fixture.manager.getSessionId();
-      const first = await fixture.registry.catalog("user");
-      expect(first.sessions.map(row => row.id).sort()).toEqual([parentID, parallel.getSessionId()].sort());
-      const opened = await Promise.all([fixture.registry.acquire(parentID), fixture.registry.acquire(parallel.getSessionId())]);
-      expect(opened.map(slot => slot.id)).toEqual([parentID, parallel.getSessionId()]);
-      expect(fallback).not.toHaveBeenCalled();
-      await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
-      // A selected incomplete user file still fails closed at the owning read.
-      const other = SessionManager.create(fixture.cwd, dirname(parentFile));
-      other.appendMessage(fauxAssistantMessage("other parent"));
-      await appendFile(other.getSessionFile()!, '{"type":"message"');
-      const incomplete = await readFile(other.getSessionFile()!, "utf8");
-      await expect(fixture.registry.acquire(other.getSessionId()).then(slot => slot.id)).rejects.toMatchObject({ code: "busy", retryable: true });
-      expect(await readFile(other.getSessionFile()!, "utf8")).toBe(incomplete);
-    } finally { fallback.mockRestore(); }
-  });
-
-  it("refreshes user metadata and duplicate quarantine after a scoped cut is warm", async () => {
-    const fixture = await coldFixture("scoped-index-refresh");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forks, { recursive: true });
-    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
-    child.appendMessage(fauxAssistantMessage("child"));
-    const parentID = fixture.manager.getSessionId();
-    const initialPage = await fixture.registry.pageSource("user");
-    fixture.manager.appendSessionInfo("Updated canonical name");
-    const refreshedPage = await fixture.registry.pageSource("user");
-    expect(refreshedPage).not.toBe(initialPage);
-    expect((await refreshedPage.page(0, 500)).find(row => row.id === parentID)?.name).toBe("Updated canonical name");
-    await copyFile(parentFile, join(forks, "duplicate.jsonl"));
-    expect((await fixture.registry.catalog("user")).sessions.some(row => row.id === parentID)).toBe(false);
-    await expect(fixture.registry.acquire(parentID)).rejects.toMatchObject({ code: "conflict" });
+    }
   });
 
   it("retains persisted, ambiguous, and live-only artifact owners without reading transcript metadata", async () => {
@@ -2491,70 +2424,33 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await mkdir(forks, { recursive: true });
     const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
     child.appendMessage(fauxAssistantMessage("child"));
-    await appendFile(child.getSessionFile()!, '{"type":"message"');
+    // A complete line the index can prove, so this case measures membership
+    // rather than an in-progress append (its unprovable-neighbour half uses the
+    // header-less file below).
+    await appendFile(child.getSessionFile()!, '{"type":"message"}\n');
     await copyFile(parentFile, join(forks, "ambiguous.jsonl"));
     const live = await fixture.registry.create(fixture.cwd);
-    const internals = fixture.registry as any;
-    const metadata = vi.spyOn(internals, "sessionInfos").mockImplementation(() => {
-      throw new Error("storage maintenance must not read transcripts");
-    });
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
     try {
+      // Membership is the index and the live slots: the maintenance read parses
+      // no transcript and walks nothing.
       const ids = await fixture.registry.sessionIDsForStorageMaintenance();
       expect([...ids].sort()).toEqual([fixture.manager.getSessionId(), child.getSessionId(), live.id].sort());
-      expect(metadata).not.toHaveBeenCalled();
+      expect(walks.count()).toBe(before);
+      // An unprovable neighbour adds no row and removes none: its membership is
+      // unknown, so the maintenance read refuses retryably rather than reporting
+      // any owner as gone.
       await writeFile(join(dirname(parentFile), "incomplete-header.jsonl"), "{}");
-      await expect(fixture.registry.sessionIDsForStorageMaintenance()).rejects.toMatchObject({ code: "busy", retryable: true });
-    } finally { metadata.mockRestore(); }
+      await settleCatalog(fixture.registry);
+      await expect(fixture.registry.sessionIDsForStorageMaintenance())
+        .rejects.toMatchObject({ code: "busy", retryable: true });
+      expect(walks.count()).toBeGreaterThan(before);
+    } finally { walks.restore(); }
   });
 
-  it("shares one successor header walk across concurrent post-read validations", async () => {
-    const fixture = await coldFixture("header-walk-sharing");
-    const internals = fixture.registry as any;
-    const original = internals.catalogStructureEvidence.bind(internals);
-    let entered!: () => void;
-    let release!: () => void;
-    const started = new Promise<void>(resolve => { entered = resolve; });
-    const barrier = new Promise<void>(resolve => { release = resolve; });
-    let active = 0;
-    let maximumActive = 0;
-    const scanner = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
-      active += 1;
-      maximumActive = Math.max(maximumActive, active);
-      try {
-        if (scanner.mock.calls.length === 1) { entered(); await barrier; }
-        return await original();
-      } finally { active -= 1; }
-    });
-    try {
-      const first = internals.sharedCatalogStructureEvidence();
-      await started;
-      const refreshes = Array.from({ length: 8 }, () => internals.sharedCatalogStructureEvidence(true));
-      const ordinary = internals.sharedCatalogStructureEvidence();
-      release();
-      const results = await Promise.all([first, ordinary, ...refreshes]);
-      expect(results.every(value => value.complete)).toBe(true);
-      expect(scanner).toHaveBeenCalledTimes(2);
-      expect(maximumActive).toBe(1);
-      expect(results[0]).toBe(results[1]);
-      expect(results.slice(2).every(value => value === results[2])).toBe(true);
-    } finally { release(); scanner.mockRestore(); }
-  });
-
-  it("keeps cold acquisition independent of mutable catalog metadata", async () => {
-    const fixture = await coldFixture("header-only-acquisition");
-    await fixture.registry.catalog("all");
-    const internals = fixture.registry as any;
-    const metadata = vi.spyOn(internals, "validatedStructuralIndex").mockImplementation(() => {
-      throw new Error("acquisition must not depend on dashboard metadata");
-    });
-    try {
-      const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-      expect(slot.id).toBe(fixture.manager.getSessionId());
-      expect(metadata).not.toHaveBeenCalled();
-    } finally { metadata.mockRestore(); }
-  });
-
-  it("scans only canonical user metadata for a user catalog and reserves all-scope indexing", async () => {
+      it("scans only canonical user metadata for a user catalog and reserves all-scope indexing", async () => {
     const fixture = await coldFixture("user-metadata-cut");
     const parentFile = fixture.manager.getSessionFile()!;
     const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
@@ -2562,111 +2458,25 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
     child.appendMessage(fauxAssistantMessage("delegated body that user catalog must not materialize"));
 
-    const internals = fixture.registry as unknown as {
-      sessionInfos: (scope?: "user" | "all") => Promise<unknown[]>;
-    };
-    const scanner = vi.spyOn(internals, "sessionInfos");
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
     try {
+      // A user cut resolves only the non-delegated rows; the all-scope cut
+      // resolves the delegated child too, from the same owner rows.
       const user = await fixture.registry.catalog("user");
       expect(user.sessions.map((session) => session.id)).toEqual([fixture.manager.getSessionId()]);
-      expect(scanner).toHaveBeenCalledWith("user");
-      expect(scanner).toHaveBeenCalledTimes(1);
-
-      // A user cut is deliberately not persisted as the complete sidecar. The
-      // all-scope route still discovers and retains the delegated row.
       const all = await fixture.registry.catalog("all");
       expect(all.sessions.map((session) => session.id)).toEqual(
         expect.arrayContaining([fixture.manager.getSessionId(), child.getSessionId()]),
       );
-      expect(scanner).toHaveBeenLastCalledWith("all");
+      expect(walks.count()).toBe(before);
     } finally {
-      scanner.mockRestore();
+      walks.restore();
     }
   });
 
-  it("coalesces acquisition successors across invalidations until prior physical work settles", async () => {
-    const fixture = await coldFixture("acquisition-successor-ownership");
-    const internal = fixture.registry as any;
-    const original = internal.resolveCatalogAcquisition.bind(internal);
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const resolve = vi.spyOn(internal, "resolveCatalogAcquisition").mockImplementation(async () => {
-      if (resolve.mock.calls.length === 1) { await gate; throw new Error("retired cut"); }
-      return original();
-    });
-    const requests = [internal.catalogAcquisition().catch((error: unknown) => error)];
-    try {
-      internal.invalidateCatalogAdmission();
-      requests.push(internal.catalogAcquisition().catch((error: unknown) => error));
-      internal.invalidateCatalogAdmission();
-      requests.push(internal.catalogAcquisition().catch((error: unknown) => error));
-      expect(resolve).toHaveBeenCalledTimes(1);
-      release();
-      const results = await Promise.all(requests);
-      expect(results[0]).toMatchObject({ message: "retired cut" });
-      for (const result of results.slice(1)) expect(result.entriesByID.has(fixture.manager.getSessionId())).toBe(true);
-      expect(resolve).toHaveBeenCalledTimes(2);
-    } finally { release(); await Promise.all(requests); resolve.mockRestore(); }
-  });
-
-  it("lets user discovery finish while an all-scope scan remains blocked and fails", async () => {
-    const fixture = await coldFixture("scope-failure-isolation");
-    const internals = fixture.registry as any;
-    const original = internals.sessionInfos.bind(internals);
-    let enter!: () => void, release!: () => void;
-    const entered = new Promise<void>(resolve => { enter = resolve; });
-    const blocked = new Promise<void>(resolve => { release = resolve; });
-    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async scope => {
-      if (scope === "all") { enter(); await blocked; throw new Error("child-only instability"); }
-      return original(scope);
-    });
-    const all = fixture.registry.catalog("all").catch(error => error);
-    try {
-      await entered;
-      let published = false;
-      const users = Promise.all([fixture.registry.catalog("user"), fixture.registry.catalog("user")])
-        .then(results => { published = true; return results; });
-      void users.catch(() => {}); // Observe the joined failure in negative controls too.
-      await vi.waitFor(() => expect(published).toBe(true));
-      for (const result of await users) expect(result.sessions.map(row => row.id)).toEqual([fixture.manager.getSessionId()]);
-      expect(scanner.mock.calls.map(call => call[0])).toEqual(["all", "user"]);
-      release();
-      expect(await all).toMatchObject({ message: "child-only instability" });
-    } finally { release(); await all; scanner.mockRestore(); }
-  });
-
-  it("retires viewer capacity during one shared catalog wait without multiplying physical scans", async () => {
-    const fixture = await coldFixture("viewer-cancel-catalog");
-    const internals = fixture.registry as any;
-    const original = internals.catalogStructureEvidence.bind(internals);
-    let release!: () => void;
-    const blocked = new Promise<void>(resolve => { release = resolve; });
-    let scanSettled = false;
-    const scanner = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
-      await blocked;
-      try { return await original(); } finally { scanSettled = true; }
-    });
-    const viewers = new ProcessTranscriptLeaseStore(fixture.registry);
-    try {
-      for (let index = 0; index < 6; index++) {
-        const viewerId = `viewer-${index}`;
-        let settled = false;
-        const opening = viewers.open("client", fixture.manager.getSessionId(), "process", "child", "run", undefined, vi.fn(), undefined,
-          { viewerId, parentSubscriptionToken: "parent-token" }).catch(error => { settled = true; return error; });
-        await vi.waitFor(() => expect(scanner).toHaveBeenCalledTimes(1));
-        expect(viewers.closeOwned("client", viewerId)).toBe(true);
-        await vi.waitFor(() => expect(settled).toBe(true));
-        expect(await opening).toMatchObject({ code: "conflict" });
-      }
-      expect(scanner).toHaveBeenCalledTimes(1);
-    } finally {
-      release();
-      await vi.waitFor(() => expect(scanSettled).toBe(true));
-      viewers.releaseClient("client"); scanner.mockRestore();
-    }
-  });
-
-  it("publishes child reference availability only after exact binding becomes authoritative", async () => {
+        it("publishes child reference availability only after exact binding becomes authoritative", async () => {
     const fixture = await coldFixture("binding-availability");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const timestamp = new Date().toISOString();
@@ -2691,44 +2501,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.processChildSessionBinding(ready.processId)).toMatchObject({ ref: "child", producerId: "worker" });
   });
 
-  it("serializes an all-scope materialization behind an active user flight", async () => {
-    const fixture = await coldFixture("catalog-flight-ownership");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forksDirectory, { recursive: true });
-    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-    child.appendMessage(fauxAssistantMessage("delegated flight fixture"));
-    const internals = fixture.registry as unknown as {
-      sessionInfos: (scope?: "user" | "all") => Promise<unknown[]>;
-    };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let entered!: () => void;
-    let release!: () => void;
-    const enteredScan = new Promise<void>((resolve) => { entered = resolve; });
-    const barrier = new Promise<void>((resolve) => { release = resolve; });
-    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async (scope) => {
-      if (scanner.mock.calls.length === 1) {
-        entered();
-        await barrier;
-      }
-      return original(scope);
-    });
-    try {
-      const user = fixture.registry.catalog("user");
-      await enteredScan;
-      const all = fixture.registry.catalog("all");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(scanner).toHaveBeenCalledTimes(1);
-      release();
-      await Promise.all([user, all]);
-      expect(scanner.mock.calls.map(([scope]) => scope)).toEqual(["user", "all"]);
-    } finally {
-      release();
-      scanner.mockRestore();
-    }
-  });
-
-  it("uses complete headers to quarantine user IDs duplicated by delegated files", async () => {
+    it("uses complete headers to quarantine user IDs duplicated by delegated files", async () => {
     const fixture = await coldFixture("user-duplicate-delegated");
     const parentFile = fixture.manager.getSessionFile()!;
     const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
@@ -2736,6 +2509,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const duplicatePath = join(forksDirectory, "duplicate.jsonl");
     await copyFile(parentFile, duplicatePath);
 
+    await settleCatalog(fixture.registry);
     const user = await fixture.registry.catalog("user");
     expect(user.sessions.find((session) => session.id === fixture.manager.getSessionId())).toBeUndefined();
     const allDuplicate = await fixture.registry.catalog("all");
@@ -2750,11 +2524,70 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const childLines = (await readFile(childFile, "utf8")).split("\n");
     childLines[0] = JSON.stringify({ ...JSON.parse(childLines[0]!), parentSession: join(fixture.agentDir, "sessions", "not-the-parent.jsonl") });
     await writeFile(childFile, childLines.join("\n"));
+    // Both files above are this test's own writes: index them before reading.
+    await settleCatalog(fixture.registry);
 
     const repairedUser = await fixture.registry.catalog("user");
     expect(repairedUser.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
     const all = await fixture.registry.catalog("all");
     expect(all.sessions.map((session) => session.id)).not.toContain(child.getSessionId());
+  });
+
+  it("retains user catalog and search admission while parallel delegated sessions append", async () => {
+    const fixture = await coldFixture("user-index-parallel-children");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const children = Array.from({ length: 3 }, () => SessionManager.forkFrom(parentFile, fixture.cwd, forks));
+    children.forEach(child => child.appendMessage(fauxAssistantMessage("child starts")));
+    const parentID = fixture.manager.getSessionId();
+    const walks = catalogWalks();
+    const before = walks.count();
+    try {
+      expect((await fixture.registry.catalog("user")).sessions.map(row => row.id)).toEqual([parentID]);
+      children.forEach(child => child.appendMessage(fauxAssistantMessage("parallel child progress")));
+      // The children are external writers; index them, then the user cut must
+      // still resolve the parent and a live-only session without a walk.
+      await settleCatalog(fixture.registry);
+      const live = await fixture.registry.create(fixture.cwd);
+      const results = await Promise.all([
+        fixture.registry.catalog("user"), fixture.registry.catalog("user"), fixture.registry.readSearchCut(parentID),
+      ]);
+      for (const result of results.slice(0, 2) as Awaited<ReturnType<RuntimeRegistry["catalog"]>>[]) {
+        expect(result.sessions.map(row => row.id)).toEqual(expect.arrayContaining([parentID, live.id]));
+        expect(result.sessions).toHaveLength(2);
+      }
+      expect(results[2]).toMatchObject({ summary: { id: parentID } });
+      const settled = walks.count();
+      // A partial acceleration must never hide children from administration.
+      const all = await fixture.registry.catalog("all");
+      expect(all.sessions.map(row => row.id)).toEqual(expect.arrayContaining(children.map(child => child.getSessionId())));
+      expect(walks.count()).toBe(settled);
+      expect(settled).toBeGreaterThan(before);
+    } finally { walks.restore(); }
+  });
+
+  it("refreshes user metadata and duplicate quarantine after a scoped cut is warm", async () => {
+    const fixture = await coldFixture("scoped-index-refresh");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
+    child.appendMessage(fauxAssistantMessage("child"));
+    const parentID = fixture.manager.getSessionId();
+    await settleCatalog(fixture.registry);
+    const initialPage = await fixture.registry.pageSource("user");
+    fixture.manager.appendSessionInfo("Updated canonical name");
+    // The rename is this test's own write: index it, then the page source must be
+    // a different projection of a different row.
+    await settleCatalog(fixture.registry);
+    const refreshedPage = await fixture.registry.pageSource("user");
+    expect(refreshedPage).not.toBe(initialPage);
+    expect((await refreshedPage.page(0, 500)).find(row => row.id === parentID)?.name).toBe("Updated canonical name");
+    await copyFile(parentFile, join(forks, "duplicate.jsonl"));
+    await settleCatalog(fixture.registry);
+    expect((await fixture.registry.catalog("user")).sessions.some(row => row.id === parentID)).toBe(false);
+    await expect(fixture.registry.acquire(parentID)).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("advances user catalog identity when canonical membership changes beside delegated rows", async () => {
@@ -2765,56 +2598,77 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
     child.appendMessage(fauxAssistantMessage("delegated membership fixture"));
 
+    await settleCatalog(fixture.registry);
     const initial = await fixture.registry.pageSource("user");
     const secondDirectory = join(fixture.agentDir, "sessions", "second");
     await mkdir(secondDirectory, { recursive: true });
     const second = SessionManager.create(fixture.cwd, secondDirectory);
     second.appendMessage(fauxAssistantMessage("new canonical user session"));
+    await settleCatalog(fixture.registry);
     const added = await fixture.registry.pageSource("user");
     expect(added.generation).not.toBe(initial.generation);
     expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id))
       .toContain(second.getSessionId());
 
     await rm(second.getSessionFile()!);
+    await settleCatalog(fixture.registry);
     const removed = await fixture.registry.pageSource("user");
     expect(removed.generation).not.toBe(added.generation);
     expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id))
       .not.toContain(second.getSessionId());
   });
 
-  it("bounds validation reads and retained acquisition evidence before publication", async () => {
-    const headerFixture = await coldFixture("header-bound");
+  it("reports files over the header budget as unproven and refuses an over-budget acquisition retryably", async () => {
+    const fixture = await coldFixture("header-bound");
+    const reconciled: SessionCatalogReconcileOutcome[] = [];
     const headerRegistry = new RuntimeRegistry({
-      agentDir: headerFixture.agentDir,
-      tronHome: join(headerFixture.root, "tron-header-bound"),
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron-header-bound"),
       idleRuntimeMs: 60_000,
-      trust: new TrustService(headerFixture.agentDir),
+      trust: new TrustService(fixture.agentDir),
       broadcast: () => {},
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
       catalogDiscoveryLimits: { maximumHeaderBytes: 1 },
+      catalogReconciled: (outcome) => reconciled.push(outcome),
     });
     registries.push(headerRegistry);
-    await expect(headerRegistry.catalog("all")).resolves.toMatchObject({
-      sessions: expect.arrayContaining([expect.objectContaining({ id: headerFixture.manager.getSessionId() })]),
-    });
+    const walks = catalogWalks();
+    try {
+      await headerRegistry.initialize();
+      await catalogOwner(headerRegistry).whenReconciled();
+      // The per-file header budget cannot prove this file, so no row is added for
+      // it and the pass still reports a complete traversal (G-1c).
+      expect(reconciled.at(-1)).toMatchObject({ outcome: "incomplete" });
+      expect(reconciled.at(-1)!.unproven).toBe(1);
+      expect((await headerRegistry.catalog("all")).sessions).toEqual([]);
+      // The read serves the owner's cut and walks nothing.
+      const settled = walks.count();
+      expect((await headerRegistry.catalog("all")).sessions).toEqual([]);
+      expect(walks.count()).toBe(settled);
+    } finally {
+      walks.restore();
+    }
 
     const admissionRegistry = new RuntimeRegistry({
-      agentDir: headerFixture.agentDir,
-      tronHome: join(headerFixture.root, "tron-admission-bound"),
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron-admission-bound"),
       idleRuntimeMs: 60_000,
-      trust: new TrustService(headerFixture.agentDir),
+      trust: new TrustService(fixture.agentDir),
       broadcast: () => {},
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
       catalogDiscoveryLimits: { maximumAcquisitionBytes: 1 },
     });
     registries.push(admissionRegistry);
-    await expect(admissionRegistry.catalog("all")).resolves.toMatchObject({
-      sessions: expect.arrayContaining([expect.objectContaining({ id: headerFixture.manager.getSessionId() })]),
-    });
-    await expect(admissionRegistry.acquire(headerFixture.manager.getSessionId()))
-      .rejects.toMatchObject({ code: "busy", retryable: true });
+    await admissionRegistry.initialize();
+    await catalogOwner(admissionRegistry).whenReconciled();
+    // The identity-retention budget cannot hold any row, so every file is
+    // unproven: the acquisition refuses retryably instead of reporting the
+    // session as absent.
+    expect((await admissionRegistry.catalog("all")).sessions).toEqual([]);
+    await expect(admissionRegistry.acquire(fixture.manager.getSessionId()))
+      .rejects.toMatchObject({ code: "busy", retryable: true, diagnosticReason: "catalog_not_ready" });
   });
 
   it("admits scaled short headers within the aggregate validation budget", async () => {
@@ -2887,6 +2741,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect((await evidence).identitiesByPath.size).toBe(count);
     expect(headers).toHaveBeenCalledTimes(count);
     headers.mockRestore();
+    await initializeRegistry(registry);
     expect((await registry.catalog("all")).sessions).toHaveLength(count);
   });
 
@@ -2926,6 +2781,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(registry);
 
+    await initializeRegistry(registry);
+    await settleCatalog(registry);
     const all = await registry.catalog("all");
     expect(all.sessions.map((session) => session.id)).not.toContain(parentId);
     expect(all.sessions.find((session) => session.id === childId)).toMatchObject({ kind: "subagent" });
@@ -2967,6 +2824,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(registry);
 
+    await initializeRegistry(registry);
+    await settleCatalog(registry);
     expect((await registry.catalog("all")).sessions.map((session) => session.id)).not.toContain(childId);
     const acquisition = await (registry as unknown as {
       catalogAcquisition: () => Promise<{
@@ -3009,6 +2868,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(registry);
 
+    await initializeRegistry(registry);
+    await settleCatalog(registry);
     expect((await registry.catalog("all")).sessions.find((session) => session.id === childId)?.kind)
       .toBe("subagent");
     await rm(parentFile);
@@ -3062,6 +2923,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(registry);
 
+    await initializeRegistry(registry);
+    await settleCatalog(registry);
     const all = await registry.catalog("all");
     expect(all.sessions).toHaveLength(1_541);
     expect(all.sessions.find((session) => session.id === childId)?.kind).toBe("subagent");
@@ -3140,73 +3003,16 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     const first = await internals.catalogStructureEvidence();
     const second = await internals.catalogStructureEvidence();
-    expect(first.complete).toBe(false);
+    // The traversal covered the folder; the files whose header exceeded the
+    // aggregate budget are unproven instead of blinding the whole cut (G-1c).
+    expect(first.complete).toBe(true);
+    expect(first.unprovenPaths.size).toBeGreaterThan(0);
     expect(first.identitiesByPath.size).toBe(4);
     expect([...first.identitiesByPath.keys()]).toEqual([...second.identitiesByPath.keys()]);
     expect(first.digest).toBe(second.digest);
   });
 
-  it("acquires from header evidence while a full catalog materialization is suspended", async () => {
-    const fixture = await coldFixture("concurrent-list");
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let suspendedResolve!: () => void;
-    let releaseResolve!: () => void;
-    const suspended = new Promise<void>((resolve) => { suspendedResolve = resolve; });
-    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
-    const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
-      suspendedResolve();
-      await release;
-      return original();
-    });
-
-    const listing = fixture.registry.catalog("all");
-    await suspended;
-    try {
-      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
-        .toBe(fixture.manager.getSessionId());
-      expect(materialize).toHaveBeenCalledTimes(1);
-    } finally {
-      releaseResolve();
-    }
-    await expect(listing).resolves.toMatchObject({
-      sessions: expect.arrayContaining([expect.objectContaining({ id: fixture.manager.getSessionId() })]),
-    });
-  });
-
-  it.each(["ordinary", "inherited"])("does not advance settled session recency when a cold runtime is opened (%s messages)", async (kind) => {
-    const fixture = await coldFixture("open-does-not-refresh-recency", {
-      beforeInitialize: async (path) => {
-        if (kind !== "inherited") return;
-        // Fork/import headers can be newer than the conversation they contain.
-        const entries = (await readFile(path, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
-        for (const entry of entries) {
-          if (entry.type !== "message") continue;
-          entry.timestamp = "2026-01-01T00:00:00.000Z";
-          entry.message.timestamp = Date.parse(entry.timestamp);
-        }
-        await writeFile(path, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
-      },
-    });
-    const before = await fixture.registry.catalog("user");
-    const canonicalUpdatedAt = before.sessions.find((session) => session.id === fixture.manager.getSessionId())!.updatedAt;
-
-    // Ensure opening happens after the canonical timestamp, as it does when a
-    // dashboard resumes an older row.
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    const openedAt = Date.now();
-    await fixture.registry.acquire(fixture.manager.getSessionId());
-
-    const after = await fixture.registry.catalog("user");
-    expect(after.sessions.find((session) => session.id === fixture.manager.getSessionId())!.updatedAt)
-      .toBe(canonicalUpdatedAt);
-    const openedSummaries = fixture.summaries.filter((summary) => summary.sessionId === fixture.manager.getSessionId());
-    expect(openedSummaries.length).toBeGreaterThan(0);
-    expect(openedSummaries.every((summary) => summary.updatedAt === canonicalUpdatedAt)).toBe(true);
-    expect(Date.parse(openedSummaries.at(-1)!.updatedAt)).toBeLessThan(openedAt);
-  });
-
-  it("orders history by parsed recency while active heartbeats keep stable positions", async () => {
+    it("orders history by parsed recency while active heartbeats keep stable positions", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-time-precision-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -3227,7 +3033,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const internals = registry as unknown as {
       latestSummaries: Map<string, SessionSummaryUpdate>;
       publishRevisionedSummary: (summary: SessionSummaryUpdate) => void;
@@ -3280,16 +3086,16 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     ]);
   });
 
-  it("never stamps captured stale catalog fields with a newer summary revision", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-race-"));
+    it("matches a full scan after create, rename, fork and delete in the catalog index", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-index-mutations-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const sessions = join(agentDir, "sessions");
+    await Promise.all([mkdir(sessions, { recursive: true }), mkdir(cwd)]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    const faux = fauxProvider({ provider: "tron-catalog-race", tokensPerSecond: 10_000 });
-    faux.setResponses([fauxAssistantMessage("catalog ready")]);
+    const faux = fauxProvider({ provider: "tron-catalog-index", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("catalog index ready"), fauxAssistantMessage("catalog index forked")]);
     runtime.registerNativeProvider(faux.provider);
-    const summaries: SessionSummaryUpdate[] = [];
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -3297,43 +3103,99 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       modelRuntimeFactory: async () => runtime,
       trust: new TrustService(agentDir),
       broadcast: () => {},
-      sessionSummaryChanged: (summary) => summaries.push(summary),
+      sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
-    const slot = await registry.create(cwd);
-    const model = faux.getModel();
-    await slot.setModel(model.provider, model.id);
-    await slot.prompt("catalog race baseline");
-    await waitUntil(() => !slot.isBusy);
-    await waitUntil(() => registry.attentionProjection(slot.id).isUnread);
-    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1, isUnread: true });
-
-    const internals = registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const originalSessionInfos = internals.sessionInfos.bind(registry);
-    let capturedResolve!: () => void;
-    let releaseResolve!: () => void;
-    const captured = new Promise<void>((resolve) => { capturedResolve = resolve; });
-    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
-    vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
-      const infos = await originalSessionInfos();
-      capturedResolve();
-      await release;
-      return infos;
+    await initializeRegistry(registry);
+    const catalog = (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
+    const catalogRoot = await realpath(sessions);
+    // The comparison is the Gateway's own walk of the folder plus one read of
+    // every canonical file, never the index's rows, so an index row is checked
+    // against the file it was built from.
+    const discovery = new CatalogDiscovery({
+      limits: DEFAULT_CATALOG_DISCOVERY_LIMITS,
+      catalogDirectory: () => catalogRoot,
+      catalogCapacityExceeded: () => { throw new Error("catalog capacity exceeded"); },
+      isLiveRuntimeOwnedPath: () => false,
+      canonicalSessionPath: (path) => realpath(path).catch(() => path),
+      delegatedTopologyParentPath: () => undefined,
     });
+    const compareToFullScan = async (label: string) => {
+      const walked = await discovery.catalogStructureEvidence();
+      const scanned = (await Promise.all(
+        [...walked.identitiesByPath.keys()].map(async (path) => {
+          const info = await buildCatalogSessionInfo(path);
+          if (!info) return null;
+          return {
+            ...info,
+            path: await realpath(info.path),
+            ...(info.parentSessionPath ? { parentSessionPath: await realpath(info.parentSessionPath) } : {}),
+          };
+        }),
+      )).filter((info): info is CatalogSessionInfo => info !== null);
+      const rows = catalog.rows();
+      expect(rows.map((row) => row.path), `${label}: paths`).toEqual(scanned.map((session) => session.path));
+      expect(rows.map((row) => [
+        row.id,
+        resolve(row.cwd),
+        row.parentSessionPath === undefined ? undefined : resolve(row.parentSessionPath),
+        row.name,
+        row.firstMessage,
+        row.messageCount,
+        row.createdAt,
+        row.updatedAt,
+      ]), `${label}: metadata`).toEqual(scanned.map((session) => [
+        session.id,
+        resolve(session.cwd),
+        session.parentSessionPath === undefined ? undefined : resolve(session.parentSessionPath),
+        session.name,
+        session.firstMessage,
+        session.messageCount,
+        session.created.toISOString(),
+        session.modified.toISOString(),
+      ]));
+      for (const row of rows) {
+        const stats = await fsPromises.lstat(row.path);
+        expect([row.fileIdentity, row.size, row.eofOffset], `${label}: file facts`)
+          .toEqual([`${stats.dev}:${stats.ino}`, stats.size, stats.size]);
+      }
+    };
 
-    const loading = registry.catalog("user");
-    await captured;
-    await slot.rename("new authoritative name");
-    const latest = summaries.at(-1)!;
-    releaseResolve();
-    const catalog = await loading;
+    // create: a fresh session persists its first canonical entry.
+    const live = await registry.create(cwd);
+    const model = faux.getModel();
+    await live.setModel(model.provider, model.id);
+    await live.prompt("catalog index create");
+    await waitUntil(() => !live.isBusy);
+    await catalog.settled();
+    await compareToFullScan("create");
+    expect(catalog.rows().map((row) => row.id)).toContain(live.id);
 
-    expect(catalog.sessions[0]?.name).toBe(latest.name);
-    expect(catalog.sessions[0]?.phase).toBe(latest.phase);
-    expect(catalog.sessions[0]?.messageCount).toBe(latest.messageCount);
-    expect(catalog.sessions[0]?.summaryRevision).toBe(latest.summaryRevision);
+    // rename: the session name the dashboard shows.
+    await live.rename("catalog index renamed");
+    await catalog.settled();
+    await compareToFullScan("rename");
+    expect(catalog.row(await realpath(live.sessionFile!))?.name).toBe("catalog index renamed");
+
+    // fork: the replacement identity persists its own canonical file.
+    const forkedId = live.snapshot().runtimeGeneration;
+    const userEntry = live.history(forkedId).nodes.find((node) => node.role === "user");
+    expect(userEntry?.id).toBeTruthy();
+    const forked = await live.fork(userEntry!.id, "at");
+    // Pi reserves the forked session's path; its first entry persists the file.
+    await live.prompt("catalog index fork entry");
+    await waitUntil(() => !live.isBusy);
+    await catalog.settled();
+    await compareToFullScan("fork");
+    expect(catalog.rows().map((row) => row.id)).toContain(forked.sessionId);
+    expect([...catalog.duplicateSessionIds()]).toEqual([]);
+
+    // delete: the deleted session's canonical file is gone.
+    await registry.delete(forked.sessionId);
+    await catalog.settled();
+    await compareToFullScan("delete");
+    expect(catalog.rows().some((row) => row.id === forked.sessionId)).toBe(false);
   });
 
   it("fails closed when multiple canonical files claim one session ID", async () => {
@@ -3356,31 +3218,22 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("persist duplicate ownership fixture");
     await waitUntil(() => !slot.isBusy);
-    const internals = registry as unknown as {
-      sessionInfos: () => Promise<Array<Record<string, unknown>>>;
-    };
-    const originalSessionInfos = internals.sessionInfos.bind(registry);
-    const existing = (await originalSessionInfos()).find((session) => session.id === slot.id)!;
-    const duplicate = {
-      ...existing,
-      path: join(agentDir, "sessions", "duplicate", `${slot.id}.jsonl`),
-    };
-    await mkdir(dirname(duplicate.path), { recursive: true });
-    await copyFile(slot.persistedSessionFile!, duplicate.path);
-    let reverseDiscoveryOrder = false;
-    const discovery = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => (
-      reverseDiscoveryOrder ? [duplicate, existing] : [existing, duplicate]
-    ));
+    await settleCatalog(registry);
+    const duplicatePath = join(agentDir, "sessions", "duplicate", `${slot.id}.jsonl`);
+    await mkdir(dirname(duplicatePath), { recursive: true });
+    await copyFile(slot.persistedSessionFile!, duplicatePath);
+    await settleCatalog(registry);
 
+    // The cut is keyed by canonical path, so enumeration order cannot move it, and
+    // an ID two files claim resolves to neither.
     const conflicted = await registry.catalog("all");
     expect(conflicted.sessions.find((session) => session.id === slot.id)).toBeUndefined();
-    reverseDiscoveryOrder = true;
     const reordered = await registry.catalog("all");
     expect(reordered.listRevision).toBe(conflicted.listRevision);
     expect(reordered.sessions.find((session) => session.id === slot.id)).toBeUndefined();
@@ -3388,9 +3241,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // canonical duplicate rather than trusting a stale projected row.
     await expect(registry.acquire(slot.id)).rejects.toMatchObject({ code: "conflict" });
     await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
-    await rm(duplicate.path);
+    await rm(duplicatePath);
+    await settleCatalog(registry);
 
-    discovery.mockRestore();
     const repaired = await registry.catalog("all");
     expect(repaired.sessions.filter((session) => session.id === slot.id)).toHaveLength(1);
     expect((await registry.acquire(slot.id)).id).toBe(slot.id);
@@ -3434,7 +3287,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
     let acquisitions: Promise<unknown>[] = [];
     try {
-      await registry.initialize();
+      await initializeRegistry(registry);
       acquisitions = managers.flatMap(manager => [registry.acquire(manager.getSessionId()), registry.acquire(manager.getSessionId())]);
       const acquired = await Promise.all(acquisitions) as Awaited<ReturnType<RuntimeRegistry["acquire"]>>[];
       const slots = acquired.filter((_, index) => index % 2 === 0);
@@ -3503,7 +3356,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const [first, second] = await Promise.all([registry.create(firstCwd), registry.create(secondCwd)]);
     expect(first.modelRuntime).not.toBe(second.modelRuntime);
@@ -3581,7 +3434,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -3624,7 +3477,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -3669,7 +3522,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const creating = registry.create(cwd);
     await trustEntered;
@@ -5464,11 +5317,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(recoveredRegistry);
-    await recoveredRegistry.initialize();
+    await initializeRegistry(recoveredRegistry);
     const recoveredSlot = await recoveredRegistry.acquire(slot.id);
     vi.spyOn(recoveredSlot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
-    await recoveredRegistry.discoverExtensionArtifacts();
+    await discoverExtensionArtifactsUntil(recoveredRegistry);
     await recoveredSlot.discoverExtensionArtifact(asyncDir);
     const coldForeign = recoveredSlot.snapshot().extensionActivities?.find((activity) => activity.runId === runId);
     expect(coldForeign?.status).not.toBe("completed");
@@ -5476,7 +5329,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(await receiptCount(recoveredSlot.sessionFile!)).toBe(0);
 
     await writeHeader(ownedHeader);
-    await recoveredRegistry.discoverExtensionArtifacts();
+    await discoverExtensionArtifactsUntil(recoveredRegistry);
     expect(recoveredSlot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)).toMatchObject({
       status: "running", children: expect.arrayContaining([expect.objectContaining({ id: "step-a", status: "completed" })]),
     });
@@ -5520,7 +5373,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
     await writeModern();
-    await (fixture.registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
+    await discoverExtensionArtifactsUntil(fixture.registry, () => {
+      const activity = (slot.snapshot().extensionActivities ?? []).find((candidate) => candidate.toolCallId === toolCallId);
+      return activity?.status === "running"
+        && activity.children.some((child) => child.id === "step-c" && child.status === "running");
+    });
     expect((slot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)).toMatchObject({
       status: "running", children: expect.arrayContaining([
         expect.objectContaining({ id: "step-a", status: "completed" }),
@@ -5572,11 +5429,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(recoveredRegistry);
-    await recoveredRegistry.initialize();
+    await initializeRegistry(recoveredRegistry);
     const recoveredSlot = await recoveredRegistry.acquire(slot.id);
     vi.spyOn(recoveredSlot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
-    await (recoveredRegistry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
+    await discoverExtensionArtifactsUntil(recoveredRegistry, () => {
+      const activity = (recoveredSlot.snapshot().extensionActivities ?? []).find((candidate) => candidate.toolCallId === toolCallId);
+      return activity?.status === "running"
+        && activity.children.some((child) => child.id === "step-c" && child.status === "running");
+    });
     expect((recoveredSlot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)).toMatchObject({
       status: "running", children: expect.arrayContaining([
         expect.objectContaining({ id: "step-a", status: "completed" }),
@@ -5698,7 +5559,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const projectRoot = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs");
     await mkdir(projectRoot, { recursive: true });
-    fixture.manager.appendMessage({
+    // The slot attributes the artifact through this session's canonical JSONL.
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } })
+      .runtime.session.sessionManager;
+    manager.appendMessage({
       role: "toolResult",
       toolCallId,
       toolName: "subagent",
@@ -5722,9 +5586,232 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       .mockReturnValue({ source: "pi-subagents" });
 
     const discovered = vi.spyOn(slot, "discoverExtensionArtifact");
-    await (fixture.registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
-    expect(discovered).toHaveBeenCalledTimes(1);
+    await discoverExtensionArtifactsUntil(fixture.registry, () => discovered.mock.calls.length > 0);
     expect(discovered.mock.calls[0]?.[0]).toMatch(/async-subagent-runs[\\/]late-active-run$/u);
+  });
+
+  it("examines every ambient artifact within a bounded number of passes and reports a stopped pass", async () => {
+    const stopped: ExtensionArtifactDiscoveryCounts[] = [];
+    // The whole root exists before the registry does, so every pass — including
+    // the one `initialize` starts — walks the same artifact set: a pass that
+    // exhausts its read budget always reports the same counts.
+    const delegated = await delegatedFixtureRoot("ambient-change-gate");
+    // One pass reads at most MAX_EXTENSION_DISCOVERY_WORK (1,024) artifacts whose
+    // identity changed, so this root always stops a pass short of its last entries.
+    const artifactCount = 1_100;
+    const startedAt = Date.now();
+    const runsRoot = join(delegated.delegatedRoot, "async-subagent-runs");
+    const runDirectories = Array.from({ length: artifactCount }, (_unused, index) => ({
+      asyncDir: join(runsRoot, `run-${String(index).padStart(4, "0")}`),
+      runId: `run-${String(index).padStart(4, "0")}`,
+    }));
+    const writeStatus = async (run: { asyncDir: string; runId: string }, lastUpdate: number) => {
+      await writeFile(join(run.asyncDir, "status.json"), JSON.stringify({
+        lifecycleArtifactVersion: 3, runId: run.runId, state: "running", startedAt, lastUpdate,
+      }));
+    };
+    for (const run of runDirectories) {
+      await mkdir(run.asyncDir, { recursive: true });
+      await writeStatus(run, startedAt);
+    }
+    const fixture = await coldFixture("ambient-change-gate", {
+      delegatedRoot: delegated.delegatedRoot,
+      artifactDiscoveryTruncated: (counts) => stopped.push(counts),
+    });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const routed = vi.spyOn(slot, "discoverExtensionArtifact");
+
+    await discoverExtensionArtifactsUntil(fixture.registry);
+    // The first pass stops at the read budget after 1,025 entries and reads
+    // 1,024 of them. The next reaches the end of the root, reading only the 76
+    // entries the first could not: no artifact here belongs to a live slot, so
+    // no candidate is deferred work and nothing further is reported.
+    expect(stopped).toEqual([{ entries: 1_025, statusReads: 1_024, work: 0, dropped: 0 }]);
+    expect(routed.mock.calls).toEqual([]);
+
+    // The unchanged root repeats the same stop, and a repeat inside its episode
+    // is not recorded again.
+    await discoverExtensionArtifactsUntil(fixture.registry);
+    expect(stopped).toHaveLength(1);
+
+    // A second live slot halves the pass's per-root routing budget, so a pass
+    // that read every entry could not offer all 1,100 candidates. The last run
+    // in the walk order is the one this slot can attribute: it is still offered,
+    // because the candidates the slot cannot attribute never spend that budget
+    // and are never reported as deferred work (G-8d).
+    const second = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    second.appendMessage(fauxAssistantMessage("second ambient slot"));
+    await settleCatalog(fixture.registry);
+    await fixture.registry.acquire(second.getSessionId());
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    const late = runDirectories[artifactCount - 1]!;
+    (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager.appendMessage({
+      role: "toolResult", toolCallId: `${late.runId}-tool`, toolName: "subagent",
+      content: [{ type: "text", text: "launched" }],
+      details: { runId: late.runId, asyncDir: late.asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
+    });
+    await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === late.asyncDir));
+    expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([late.asyncDir]));
+    expect(stopped).toHaveLength(1);
+    await rm(delegated.root, { recursive: true, force: true });
+  });
+
+  it("offers a run known only from the session log again after a claim the slot could not take", async () => {
+    // A run after a Gateway restart: the saved session log names it, no live
+    // ownership binding exists until an artifact is accepted, and its finished
+    // status.json never changes again. An offer the slot could not decide is not
+    // a delivered artifact, so the next pass must offer the same bytes again.
+    const delegated = await delegatedFixtureRoot("ambient-claim-retry");
+    const completedAt = Date.now() - 1_000;
+    const fixture = await coldFixture("ambient-claim-retry", { delegatedRoot: delegated.delegatedRoot });
+    const runId = "claim-retry-run";
+    const toolCallId = "claim-retry-tool";
+    const asyncDir = join(delegated.delegatedRoot, "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId, state: "complete",
+      startedAt: completedAt - 60_000, lastUpdate: completedAt, endedAt: completedAt,
+    }));
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager.appendMessage({
+      role: "toolResult", toolCallId, toolName: "subagent", content: [{ type: "text", text: "launched" }],
+      details: { runId, asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
+    });
+    // The Gateway work registry is full for one offer: the terminal receipt
+    // claim is refused, exactly as a busy Gateway refuses it in production.
+    const claim = vi.spyOn(slot as unknown as { claimExtensionReceiptOwnership: (activityId: string) => unknown }, "claimExtensionReceiptOwnership");
+    claim.mockReturnValueOnce(undefined);
+    const offered = vi.spyOn(slot, "discoverExtensionArtifact");
+    const projected = () => slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId);
+
+    await discoverExtensionArtifactsUntil(fixture.registry, () => projected() !== undefined);
+    expect(projected()).toMatchObject({ status: "completed", runId });
+    expect(offered.mock.calls.length).toBeGreaterThanOrEqual(2);
+    await rm(delegated.root, { recursive: true, force: true });
+  });
+
+  it("does not reopen an unchanged ambient artifact for a live slot", async () => {
+    // A root shaped like the production provider root on 2026-09-28: 2,498 run
+    // directories, 556 finished status.json files and one live slot, which read
+    // every one of them on every 750 ms pass.
+    const delegated = await delegatedFixtureRoot("ambient-steady-state");
+    const startedAt = Date.now();
+    const runsRoot = join(delegated.delegatedRoot, "async-subagent-runs");
+    await mkdir(runsRoot, { recursive: true });
+    const finished = Array.from({ length: 556 }, (_unused, index) => `finished-${String(index).padStart(4, "0")}`);
+    const empty = Array.from({ length: 2_498 - 556 }, (_unused, index) => `empty-${String(index).padStart(4, "0")}`);
+    await Promise.all([...empty, ...finished].map((name) => mkdir(join(runsRoot, name), { recursive: true })));
+    const finishedStatus = (runId: string) => JSON.stringify({
+      lifecycleArtifactVersion: 3, runId, state: "complete",
+      startedAt: startedAt - 120_000, lastUpdate: startedAt - 120_000, endedAt: startedAt - 120_000,
+    });
+    await Promise.all(finished.map((name) => writeFile(join(runsRoot, name, "status.json"), finishedStatus(name))));
+    const fixture = await coldFixture("ambient-steady-state", { delegatedRoot: delegated.delegatedRoot });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    const finishedRunId = "owned-finished-run";
+    const liveRunId = "owned-live-run";
+    const finishedDir = join(runsRoot, finishedRunId);
+    const liveDir = join(runsRoot, liveRunId);
+    for (const runId of [finishedRunId, liveRunId]) await mkdir(join(runsRoot, runId), { recursive: true });
+    await writeFile(join(finishedDir, "status.json"), finishedStatus(finishedRunId));
+    await writeFile(join(liveDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId: liveRunId, state: "running",
+      startedAt: startedAt - 60_000, lastUpdate: startedAt - 1_000,
+    }));
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    for (const [runId, asyncDir] of [[finishedRunId, finishedDir], [liveRunId, liveDir]] as const) {
+      manager.appendMessage({
+        role: "toolResult", toolCallId: `${runId}-tool`, toolName: "subagent",
+        content: [{ type: "text", text: "launched" }],
+        details: { runId, asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
+      });
+    }
+    const routed = vi.spyOn(slot, "discoverExtensionArtifact");
+
+    // Only the two runs this slot can attribute are offered; the finished runs of
+    // other sessions are examined by the walk but never reopened.
+    await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.length >= 2);
+    expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([finishedDir, liveDir]));
+
+    // A pass over the unchanged root offers the finished artifact to nobody: it
+    // already reached this slot, and the live one is refreshed by its exact
+    // binding. Everything else stays unopened.
+    routed.mockClear();
+    await discoverExtensionArtifactsUntil(fixture.registry);
+    expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([liveDir]));
+
+    // A changed artifact is offered again, even when its exact binding is terminal.
+    await writeFile(join(finishedDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId: finishedRunId, state: "complete",
+      startedAt: startedAt - 120_000, lastUpdate: startedAt + 1_000, endedAt: startedAt + 1_000,
+    }));
+    await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === finishedDir));
+    expect(routed.mock.calls.some(([asyncDir]) => asyncDir === finishedDir)).toBe(true);
+    await rm(delegated.root, { recursive: true, force: true });
+  });
+
+  it("retries a status.json read that raced an atomic replacement instead of rejecting it", async () => {
+    const delegated = await delegatedFixtureRoot("artifact-atomic-replace");
+    const fixture = await coldFixture("artifact-atomic-replace", { delegatedRoot: delegated.delegatedRoot });
+    const runId = "atomic-replace-run";
+    const toolCallId = "atomic-replace-tool";
+    const asyncDir = join(delegated.delegatedRoot, "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager.appendMessage({
+      role: "toolResult", toolCallId, toolName: "subagent", content: [{ type: "text", text: "launched" }],
+      details: { runId, asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
+    });
+    const payload = JSON.stringify({
+      lifecycleArtifactVersion: 3, runId, state: "running",
+      startedAt: Date.now() - 1_000, lastUpdate: Date.now(),
+    });
+    const statusPath = join(asyncDir, "status.json");
+    await writeFile(statusPath, payload);
+    const warnings: Array<{ reason: string }> = [];
+    (slot as unknown as { dependencies: { extensionArtifactWarning?: (warning: { reason: string }) => void } })
+      .dependencies.extensionArtifactWarning = (warning) => warnings.push(warning);
+    await slot.discoverExtensionArtifact(asyncDir);
+    const projected = () => slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId);
+    expect(projected()).toMatchObject({ status: "running" });
+
+    // A producer replaces an active run's status.json by an atomic rename, so a
+    // read can open one inode and stat another. The discovery lane owns no
+    // watcher for that window and used to report the first losing read as a
+    // rejected artifact.
+    const tempPath = join(asyncDir, "status.tmp");
+    let replacing = true;
+    const replacer = (async () => {
+      while (replacing) {
+        await writeFile(tempPath, payload);
+        await rename(tempPath, statusPath);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    })();
+    try {
+      // Several hundred real passes inside a replace storm; the bound is wall
+      // clock so a loaded host cannot turn the storm itself into a timeout.
+      const until = Date.now() + 8_000;
+      let passes = 0;
+      while (Date.now() < until) {
+        await discoverExtensionArtifactsUntil(fixture.registry);
+        passes += 1;
+      }
+      expect(passes).toBeGreaterThan(100);
+    } finally {
+      replacing = false;
+      await replacer;
+    }
+    expect(warnings.filter((warning) => warning.reason === "artifact-replacement-in-progress")).toEqual([]);
+    expect(projected()).toMatchObject({ status: "running", runId });
+    await rm(delegated.root, { recursive: true, force: true });
   });
 
   it("reconciles the launch owner after a supervisor reply references the same run", async () => {
@@ -5971,7 +6058,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     model.inputLimits = { images: { resize: { maxWidth: 1_000, maxHeight: 1_000 } } };
@@ -6012,7 +6099,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -6054,7 +6141,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     await waitUntil(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed");
     expect(slot.snapshot().extensionPresentation.semanticState.widgets).toEqual([]);
@@ -6091,7 +6178,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const internal = slot as unknown as { extensionHost: { isTuiStarted: boolean; mountedComponentCount: number } };
     await waitUntil(() => internal.extensionHost.mountedComponentCount === 1);
@@ -6129,7 +6216,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       notifications: { userInputRequired, markSessionInboxRead: vi.fn(async () => {}) } as unknown as NotificationService,
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const command = slot.prompt("/semantic-ask");
     await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
@@ -6195,7 +6282,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const internal = slot as unknown as { ui: { context(): { confirm(title: string, message: string): Promise<boolean>; setStatus(key: string, text: string): void } } };
     const oldContext = internal.ui.context();
@@ -6258,7 +6345,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     await slot.setModel(faux.getModel().provider, faux.getModel().id);
     await slot.prompt("original request");
@@ -6339,9 +6426,10 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     expect(slot.sessionFile?.startsWith(join(agentDir, "sessions"))).toBe(true);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const internals = registry as unknown as {
@@ -6437,7 +6525,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -6493,7 +6581,7 @@ export default function (pi) {
       attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
     }).attention;
     const recovered = vi.spyOn(restartedAttention, "complete");
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     await restarted.recoverCanonicalAttention();
 
     expect(recovered.mock.calls.map(([, completionId]) => completionId)).toEqual(durableCompletionIds);
@@ -6524,8 +6612,9 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.acquire(manager.getSessionId());
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const before = events.length;
@@ -6592,7 +6681,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     currentSlot = slot;
     const model = faux.getModel();
@@ -6660,8 +6749,9 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const promptReceipt = await slot.prompt("stream");
@@ -6771,7 +6861,7 @@ export default function (pi) {
         sessionListChanged: () => {},
       });
       registries.push(registry);
-      await registry.initialize();
+      await initializeRegistry(registry);
       const slot = await registry.create(cwd);
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
@@ -6824,7 +6914,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const prompting = slot.prompt("handled without agent");
     await waitUntil(() => slot.isBusy);
@@ -6868,7 +6958,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -6913,7 +7003,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -6941,7 +7031,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const session = (slot as unknown as {
       runtime: { session: { prompt: (
@@ -7213,7 +7303,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -7314,7 +7404,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -7812,6 +7902,7 @@ export default function (pi) {
     runtime.registerNativeProvider(faux.provider);
     fixture.runtimeFactory.mockResolvedValue(runtime);
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    subscribeAudience(fixture.registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     try {
@@ -7900,8 +7991,9 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const session = (slot as unknown as {
       runtime: { session: { navigateTree: (targetId: string, options: unknown) => Promise<{ cancelled: boolean }> } };
     }).runtime.session;
@@ -7917,6 +8009,9 @@ export default function (pi) {
     await expect(slot.navigate("target", { summarize: true })).rejects.toMatchObject({ code: "cancelled" });
     expect(slot.snapshot().operation).toBeUndefined();
     expect(slot.snapshot().retry).toBeUndefined();
+    // A snapshot is published only for a subscriber, so an empty recording would
+    // make the last assertion below pass without reading a publication at all.
+    expect(snapshots.length).toBeGreaterThan(0);
     expect(snapshots.at(-1)?.operation).toBeUndefined();
   });
 
@@ -7951,8 +8046,9 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await expect(slot.prompt("/skill:review configurations", [], undefined, {
@@ -8000,7 +8096,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8054,7 +8150,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8195,7 +8291,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8281,7 +8377,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8340,7 +8436,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8391,7 +8487,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8439,7 +8535,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8486,7 +8582,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     let releaseCompaction!: () => void;
     const barrier = new Promise<void>((resolve) => { releaseCompaction = resolve; });
@@ -8537,8 +8633,9 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const runtime = (slot as unknown as {
       runtime: { session: { sessionManager: SessionManager } };
       onEvent: (event: unknown) => void;
@@ -8600,8 +8697,9 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const internal = slot as unknown as {
       runtime: { session: { sessionManager: SessionManager } };
       pendingPrompt: { id: string; createdAt: string; text: string; attachmentCount: number };
@@ -8654,7 +8752,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const session = (slot as unknown as {
       runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
@@ -8699,7 +8797,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8774,7 +8872,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8819,7 +8917,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     let releaseCompaction!: () => void;
     const compactionBarrier = new Promise<void>((resolve) => { releaseCompaction = resolve; });
@@ -8874,7 +8972,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const creating = registry.create(cwd);
     await factoryWasEntered;
@@ -8915,7 +9013,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8943,7 +9041,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
 
     let shutdownEntered!: () => void;
@@ -9170,7 +9268,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9227,8 +9325,9 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompting = slot.prompt("run tools");
@@ -9403,7 +9502,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9460,8 +9559,9 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("run tools around a visible barrier");
@@ -9551,7 +9651,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9604,7 +9704,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9649,7 +9749,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9854,7 +9954,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -10014,7 +10114,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
 
     await expect(slot.prompt("/notify-command count to 20")).resolves.toEqual({ operationId: expect.any(String) });
@@ -10088,7 +10188,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
 
     await expect(slot.prompt("/fail-command")).resolves.toEqual({ operationId: expect.any(String) });
@@ -10190,6 +10290,55 @@ export default function (pi) {
     expect(workspace).toHaveBeenCalledTimes(1);
   });
 
+  // G-1c/review minor 2: the close commit point queues the row, so a reopen can
+  // land between a slot leaving `slots` and its row reaching the index. The row
+  // build is held open here to make that window deterministic: membership must
+  // wait for the queued change instead of answering not_found, because a session
+  // must never become unopenable because its runtime closed.
+  it("reopens a session whose runtime closed before its index row landed", async () => {
+    const fixture = await coldFixture("close-before-row");
+    // Every row build is held open, so the persisted session below has no index
+    // row at the moment its slot closes. That makes the window the intermittent
+    // merge-gate failure landed in deterministic.
+    const build = CatalogMetadataIndex.prototype.entryFromSummary;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const held = vi.spyOn(CatalogMetadataIndex.prototype, "entryFromSummary").mockImplementation(async function (
+      this: CatalogMetadataIndex,
+      ...arguments_: Parameters<CatalogMetadataIndex["entryFromSummary"]>
+    ) {
+      await gate;
+      return build.apply(this, arguments_);
+    });
+    try {
+      const created = await fixture.registry.create(fixture.cwd);
+      const manager = (created as unknown as { sessionManager: SessionManager }).sessionManager;
+      manager.appendMessage(fauxAssistantMessage("persisted before extension close"));
+      const persisted = (created as unknown as { session: () => void });
+      // `publishSnapshot` is what a real close path observes as the persisted
+      // commit; the row it queues cannot land while the build is held.
+      created.publishSnapshot();
+      await waitUntil(() => created.persistedSessionFile !== undefined);
+      await waitUntil(() => (fixture.registry as unknown as { latestSummaries: Map<string, unknown> }).latestSummaries.has(created.id));
+      expect(catalogOwner(fixture.registry).rows().some((row) => row.id === created.id)).toBe(false);
+
+      (created as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
+      await waitUntil(() => created.isDisposed
+        && !(fixture.registry as unknown as { slots: Map<string, unknown> }).slots.has(created.id));
+      // The reopen lands in that window: it must wait for the queued row rather
+      // than report the session as gone.
+      const reopening = fixture.registry.acquire(created.id);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      release();
+      const reopened = await reopening;
+      expect(reopened.id).toBe(created.id);
+      expect(JSON.stringify(reopened.snapshot().transcript)).toContain("persisted before extension close");
+    } finally {
+      release();
+      held.mockRestore();
+    }
+  });
+
   it("scopes extension shutdown to the owning runtime slot", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-extension-scoped-shutdown-"));
     const agentDir = join(root, "agent");
@@ -10216,7 +10365,7 @@ export default function (pi) {
       sessionListChanged: () => { listChanges += 1; },
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const closing = await registry.create(closingCwd);
     const other = await registry.create(otherCwd);
     const closingID = closing.id;
@@ -10296,7 +10445,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const [first, second] = await Promise.all([registry.create(firstCwd), registry.create(secondCwd)]);
     expect(first.modelRuntime).not.toBe(second.modelRuntime);
@@ -10329,7 +10478,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
     const model = faux.getModel();
@@ -10376,7 +10525,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const slot = await registry.create(cwd);
     const resources = await slot.resources() as any;
@@ -10471,7 +10620,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     return registry.create(cwd);
   }
 
@@ -10543,7 +10692,7 @@ export default function (pi) {
       },
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -10788,17 +10937,17 @@ export default function (pi) {
   });
 
   it("force-invalidates an extension runtime whose idle-eviction shutdown never settles", async () => {
-    const { manager, registry } = await coldFixture("idle-eviction-shutdown-timeout");
+    // The registry's own option, so the test drives the production failure path;
+    // a throwing recorder must not become another disposal barrier.
+    const timedOut = vi.fn(() => { throw new Error("instrumentation failed"); });
+    const { manager, registry } = await coldFixture("idle-eviction-shutdown-timeout", { runtimeDisposeTimeout: timedOut });
     const sessionId = manager.getSessionId();
     const slot = await registry.acquire(sessionId);
     vi.spyOn(slot, "touchedAt", "get").mockReturnValue(0);
 
     const internals = slot as unknown as {
       runtime: { dispose: () => Promise<void>; session: { dispose: () => void } };
-      dependencies: { runtimeDisposalTimedOut?: (graceMs: number) => void };
     };
-    const timedOut = vi.fn(() => { throw new Error("instrumentation failed"); });
-    internals.dependencies.runtimeDisposalTimedOut = timedOut;
     const gracefulDispose = vi.spyOn(internals.runtime, "dispose")
       .mockImplementation(() => new Promise<void>(() => {}));
     const forceDispose = vi.spyOn(internals.runtime.session, "dispose");
@@ -10844,7 +10993,7 @@ export default function (pi) {
     });
     registries.push(registry);
     registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), { admit(cut: any) { admissions.push(structuredClone(cut)); }, dispose() {} } as any));
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const selectedModel = faux.getModel();
     await slot.setModel(selectedModel.provider, selectedModel.id);
@@ -10912,5 +11061,591 @@ export default function (pi) {
     expect(acquired).toBe(slot);
     expect(await registry.acquire(sessionId)).toBe(slot);
     expect(registry.isSubscribed("race-client", sessionId)).toBe(true);
+  });
+
+  /** Every counter the resource sampler takes from the registry, as the registry
+   * would report them; one object per fixture keeps the recorder shape in one
+   * place. `recordSnapshotBuild` is not here: it is the transport's own method on
+   * `ResourceSampler`, because only the transport counts recipient sockets. */
+  function resourceRecorder() {
+    return {
+      recordTopicFrame: vi.fn(),
+      recordCatalogWalk: vi.fn(),
+      recordOutboundBytes: vi.fn(),
+      recordRuntimeLoaded: vi.fn(),
+      recordRuntimeEvicted: vi.fn(),
+    };
+  }
+
+  // The registry is the only owner of live runtimes and of the subscriber set,
+  // so it has to answer the resource sample and count its own transitions.
+  it("answers the resource sample with live runtimes, their audience and their transitions", async () => {
+    const recorded = resourceRecorder();
+    const fixture = await coldFixture("resource-inventory", { resources: recorded });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    expect(recorded.recordRuntimeLoaded).toHaveBeenCalledTimes(1);
+    expect(recorded.recordRuntimeEvicted).not.toHaveBeenCalled();
+
+    const snapshot = vi.spyOn(slot, "snapshot");
+    fixture.registry.subscribe("phone", slot.id);
+    const withSubscriber = fixture.events.length;
+    slot.publishSnapshot();
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(fixture.events.slice(withSubscriber).some(({ topic }) => topic === "session.snapshot")).toBe(true);
+
+    const inventory = await fixture.registry.resourceInventory();
+    expect(inventory).toHaveLength(1);
+    expect(inventory[0]).toMatchObject({ sessionId: slot.id, subscribers: 1 });
+    expect((inventory[0] as { bytes: number }).bytes).toBeGreaterThan(0);
+
+    // The subscriber set is the slot's only audience fact: with nobody left to
+    // receive a snapshot a state change still reaches the dashboard as a summary
+    // and projects no transcript at all.
+    fixture.registry.unsubscribe("phone", slot.id);
+    const published = fixture.events.length;
+    const summaries = fixture.summaries.length;
+    await slot.rename("SYNTHETIC_RENAME_WITHOUT_AN_AUDIENCE");
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(fixture.events.slice(published).some(({ topic }) => topic === "session.snapshot")).toBe(false);
+    expect(fixture.summaries.length).toBeGreaterThan(summaries);
+    expect(fixture.summaries.at(-1)).toMatchObject({ sessionId: slot.id, name: "SYNTHETIC_RENAME_WITHOUT_AN_AUDIENCE" });
+
+    await slot.dispose();
+    expect(recorded.recordRuntimeEvicted).toHaveBeenCalledTimes(1);
+  });
+
+  /** One collected `runtime.loaded`/`runtime.evicted` record, as the registry's
+   * log seam receives it. */
+  function runtimeLifecycleRecords() {
+    const records: RuntimeLifecycleRecord[] = [];
+    return { records, record: (record: RuntimeLifecycleRecord) => records.push(record) };
+  }
+
+  const mebibyte = 1_024 * 1_024;
+
+  /** Grows a canonical transcript to a real `bytes` size with a sparse truncate
+   * and leaves it on a complete line, as a written transcript is: the header
+   * reader treats a file whose final byte is not a newline as an append still in
+   * progress. */
+  async function growTranscript(path: string, bytes: number): Promise<void> {
+    await truncate(path, bytes - 1);
+    await appendFile(path, "\n");
+  }
+
+  // Failure mode: the smallest idle runtime is retired when the largest would
+  // have been enough, so extra sessions lose their state. The small session is
+  // acquired first, so it is also the least recently touched and first in
+  // `slots` order: a smallest-first, iteration-order or least-recently-used pass
+  // all retire it, and only largest-first retires the large one. The sizes are
+  // real (a sparse `truncate` of the live transcript), so the pass reads what
+  // production supplies.
+  it("retires the largest idle runtime first when the byte budget cannot hold an opening session", async () => {
+    const fixture = await coldFixture("byte-budget-largest-first");
+    const small = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    small.appendMessage(fauxAssistantMessage("small idle transcript"));
+    const large = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    large.appendMessage(fauxAssistantMessage("large idle transcript"));
+    await settleCatalog(fixture.registry);
+    await fixture.registry.catalog("all");
+    const smallSlot = await fixture.registry.acquire(small.getSessionId());
+    const largeSlot = await fixture.registry.acquire(large.getSessionId());
+    // A live runtime grown to two budgets' worth of estimated heap, as a long run
+    // does; the opening session starts near empty, so only retiring the large one
+    // fits. A sparse truncate costs no disk.
+    await growTranscript(largeSlot.sessionFile!, 800 * mebibyte);
+
+    const opened = await fixture.registry.acquire(fixture.manager.getSessionId());
+    expect(largeSlot.isDisposed).toBe(true);
+    expect(smallSlot.isDisposed).toBe(false);
+    // Exactly one runtime was retired: the largest one reclaims enough on its own.
+    const live = await fixture.registry.resourceInventory();
+    expect(live.map((entry) => entry.sessionId).sort()).toEqual([opened.id, smallSlot.id].sort());
+  });
+
+  // Failure mode: two opens of the same session at once charge that session
+  // twice — once as the start already reserved for it and again as the opening
+  // charge — so the pass retires idle runtimes for room the first open had
+  // already taken, and the second open then only waits for it. The second pass is
+  // held until the first open has reserved and resumed once it has read its
+  // inventory, which is the window that double charge lived in.
+  it("does not retire idle runtimes for a second open of the session the byte budget already charged", async () => {
+    const fixture = await coldFixture("byte-budget-same-session");
+    const idle = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    idle.appendMessage(fauxAssistantMessage("idle transcript"));
+    const target = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    target.appendMessage(fauxAssistantMessage("target transcript"));
+    await settleCatalog(fixture.registry);
+    await fixture.registry.catalog("all");
+    const idleSlot = await fixture.registry.acquire(idle.getSessionId());
+    // 470 MiB is 1,410 MiB of estimated heap and the 30 MiB target is 90 MiB, so
+    // the two fit together (1,500 MiB of the 1,536 MiB budget); charging the
+    // target's reservation and its opening charge (1,590 MiB) is what would
+    // retire the idle runtime.
+    await growTranscript(idleSlot.sessionFile!, 470 * mebibyte);
+    await growTranscript(target.getSessionFile()!, 30 * mebibyte);
+
+    const inventory = fixture.registry.resourceInventory.bind(fixture.registry);
+    let targetReserved = () => {};
+    const reserved = new Promise<void>((resolve) => { targetReserved = resolve; });
+    let resumeOpen = () => {};
+    const openResumed = new Promise<void>((resolve) => { resumeOpen = resolve; });
+    const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
+    vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
+      // This is the first open, past its reservation and before its publication,
+      // so the reservation stays held across the second open's byte pass.
+      targetReserved();
+      await openResumed;
+      return await realCreate(...args);
+    });
+    let passes = 0;
+    vi.spyOn(fixture.registry, "resourceInventory").mockImplementation(async () => {
+      passes += 1;
+      const waitsForTheFirstOpen = passes > 1;
+      if (waitsForTheFirstOpen) await reserved;
+      const snapshot = await inventory();
+      if (waitsForTheFirstOpen) resumeOpen();
+      return snapshot;
+    });
+
+    const first = fixture.registry.acquire(target.getSessionId());
+    const second = fixture.registry.acquire(target.getSessionId());
+    const [firstSlot, secondSlot] = await Promise.all([first, second]);
+    expect(secondSlot).toBe(firstSlot);
+    expect(idleSlot.isDisposed).toBe(false);
+  });
+
+  // Failure mode: an opening session whose bytes fit nowhere is refused on the
+  // budget, so a loaded session it cannot reclaim makes every later open of a
+  // non-empty transcript unopenable. The byte budget is eviction pressure, not a
+  // gate: the admission is served, its load record names the over-budget state,
+  // and the idle runtime that could not make it fit is not retired for nothing.
+  it("admits an opening session the byte budget cannot fit and names the over-budget load", async () => {
+    const lifecycle = runtimeLifecycleRecords();
+    const fixture = await coldFixture("byte-budget-over-budget", { runtimeLifecycleRecord: lifecycle.record });
+    const firstProtected = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    firstProtected.appendMessage(fauxAssistantMessage("first protected transcript"));
+    const secondProtected = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    secondProtected.appendMessage(fauxAssistantMessage("second protected transcript"));
+    const idle = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    idle.appendMessage(fauxAssistantMessage("idle transcript"));
+    const waiting = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    waiting.appendMessage(fauxAssistantMessage("waiting transcript"));
+    await settleCatalog(fixture.registry);
+    await fixture.registry.catalog("all");
+    const firstSlot = await fixture.registry.acquire(firstProtected.getSessionId());
+    const secondSlot = await fixture.registry.acquire(secondProtected.getSessionId());
+    fixture.registry.subscribe("phone", firstSlot.id);
+    fixture.registry.subscribe("phone", secondSlot.id);
+    const idleSlot = await fixture.registry.acquire(idle.getSessionId());
+    // 300 + 250 MiB of protected transcript is 1,650 MiB of estimated heap: over
+    // the 1,536 MiB budget with nothing else loaded, so no retirement can bring
+    // this admission under it. The 15 MiB idle runtime is the only retireable
+    // candidate and is smaller than that excess, so the pass retires nothing and
+    // serves the (tiny) waiting session over budget.
+    await growTranscript(firstSlot.sessionFile!, 300 * mebibyte);
+    await growTranscript(secondSlot.sessionFile!, 250 * mebibyte);
+    await growTranscript(idleSlot.sessionFile!, 5 * mebibyte);
+    const loadedBefore = lifecycle.records.filter((record) => record.event === "runtime.loaded").length;
+
+    const opened = await fixture.registry.acquire(waiting.getSessionId());
+    expect(opened.id).toBe(waiting.getSessionId());
+    expect(firstSlot.isDisposed).toBe(false);
+    expect(secondSlot.isDisposed).toBe(false);
+    expect(idleSlot.isDisposed).toBe(false);
+    const loaded = lifecycle.records.filter((record) => record.event === "runtime.loaded");
+    expect(loaded).toHaveLength(loadedBefore + 1);
+    expect(loaded.at(-1)).toMatchObject({
+      sessionId: waiting.getSessionId(),
+      reason: "open",
+      overBudget: true,
+    });
+    expect(loaded.at(-1)!.transcriptBytes).toBeGreaterThan(0);
+  });
+
+  // The byte budget charges a session that has not written a transcript yet
+  // nothing, and creating one is not gated by it: the protected set here is over
+  // the budget on its own, so this is the worst case for that decision.
+  it("admits a session with no transcript yet beside a protected set already over the budget", async () => {
+    const fixture = await coldFixture("byte-budget-zero-charge");
+    const protectedSession = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    protectedSession.appendMessage(fauxAssistantMessage("protected transcript"));
+    await settleCatalog(fixture.registry);
+    await fixture.registry.catalog("all");
+    const protectedSlot = await fixture.registry.acquire(protectedSession.getSessionId());
+    fixture.registry.subscribe("phone", protectedSlot.id);
+    // 800 MiB is 2,400 MiB of estimated heap: over the whole budget on its own.
+    await growTranscript(protectedSlot.sessionFile!, 800 * mebibyte);
+
+    const created = await fixture.registry.create(fixture.cwd);
+    expect(protectedSlot.isDisposed).toBe(false);
+    expect((await fixture.registry.resourceInventory()).map((entry) => entry.sessionId)).toContain(created.id);
+  });
+
+  // Failure mode: a session larger than the whole budget retires every idle
+  // runtime and can then never open, pure collateral damage with no retry that
+  // can succeed. 600 MiB is 1,800 MiB of estimated heap, over the 1,536 MiB
+  // budget on its own, so the pass must retire nothing for it; the refusal below
+  // is the append fence, not the budget.
+  it("does not retire another session for a runtime larger than the whole byte budget", async () => {
+    const fixture = await coldFixture("byte-budget-oversize");
+    const idle = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    idle.appendMessage(fauxAssistantMessage("idle transcript"));
+    const oversize = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    oversize.appendMessage(fauxAssistantMessage("oversize transcript"));
+    await settleCatalog(fixture.registry);
+    await fixture.registry.catalog("all");
+    const idleSlot = await fixture.registry.acquire(idle.getSessionId());
+    // Sparse, so the file is 600 MiB without writing it. The admission stops on
+    // the append fence this tail trips, which is as far as a fixture can carry an
+    // oversize session without a real 512 MiB+ parseable transcript.
+    await truncate(oversize.getSessionFile()!, 600 * mebibyte);
+
+    await expect(fixture.registry.acquire(oversize.getSessionId())).rejects.toMatchObject({
+      code: "busy",
+      message: "Session append is still in progress",
+    });
+    expect(idleSlot.isDisposed).toBe(false);
+  });
+
+  // Failure mode: the transitions are counted but never named, so an incident
+  // cannot tell which session's runtime was loaded or evicted, what the byte
+  // budget charged it, or why it went away. The eviction names the bytes the pass
+  // itself measured, not the charge the load published with.
+  it("records runtime.loaded and runtime.evicted with the reason and the bytes the budget charged", async () => {
+    const lifecycle = runtimeLifecycleRecords();
+    const fixture = await coldFixture("runtime-lifecycle-records", { runtimeLifecycleRecord: lifecycle.record });
+    const idle = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    idle.appendMessage(fauxAssistantMessage("idle transcript"));
+    await settleCatalog(fixture.registry);
+    await fixture.registry.catalog("all");
+    const idleSlot = await fixture.registry.acquire(idle.getSessionId());
+    // The runtime grows from a few KB to 800 MiB (2,400 MiB of estimated heap)
+    // after it was published, so an eviction record that carried the load's charge
+    // would name a few KB.
+    await growTranscript(idleSlot.sessionFile!, 800 * mebibyte);
+
+    const loaded = lifecycle.records.find((record) => record.event === "runtime.loaded");
+    expect(loaded).toMatchObject({ sessionId: idleSlot.id, reason: "open" });
+    expect(loaded!.transcriptBytes).toBeGreaterThan(0);
+    expect(loaded!.estimatedHeapBytes).toBe(loaded!.transcriptBytes * LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR);
+
+    await fixture.registry.acquire(fixture.manager.getSessionId());
+    const evicted = lifecycle.records.find((record) => record.event === "runtime.evicted");
+    expect(evicted).toMatchObject({ sessionId: idleSlot.id, reason: "bytes" });
+    expect(evicted!.transcriptBytes).toBe(800 * mebibyte);
+    expect(evicted!.estimatedHeapBytes).toBe(800 * mebibyte * LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR);
+  });
+
+  // Failure mode: a slot disposed outside the registry is recorded as the
+  // extension-requested close this path never observed, so the reason points at
+  // the wrong owner and hides that the disposal happened earlier.
+  it("records a slot disposed outside the registry as disposed, not closed", async () => {
+    const lifecycle = runtimeLifecycleRecords();
+    const fixture = await coldFixture("runtime-eviction-disposed", { runtimeLifecycleRecord: lifecycle.record });
+    const sessionId = fixture.manager.getSessionId();
+    const disposed = await fixture.registry.acquire(sessionId);
+    await disposed.dispose();
+
+    const reacquired = await fixture.registry.acquire(sessionId);
+    expect(reacquired.isDisposed).toBe(false);
+    expect(lifecycle.records.find((record) => record.event === "runtime.evicted")).toMatchObject({
+      sessionId,
+      reason: "disposed",
+    });
+  });
+
+  // The transport owns subscription lifetime: it subscribes a client before
+  // installing that client's synchronization barrier and unsubscribes it on
+  // close, revoke or session close. An extension-requested shutdown is not an
+  // unsubscribe, so a client still watching the session keeps its audience and
+  // the re-acquired slot publishes snapshots to it again.
+  it("keeps a transported subscription across a closed slot and snapshots the re-acquired session", async () => {
+    const fixture = await coldFixture("closed-slot-subscription");
+    const sessionId = fixture.manager.getSessionId();
+    const slot = await fixture.registry.acquire(sessionId);
+    fixture.registry.subscribe("phone", sessionId);
+
+    (slot as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
+    // `session.closed` is emitted in the same synchronous block as the slot's
+    // close hook, so observing it means the registry's close handling has run.
+    await waitUntil(() => fixture.events.some(({ topic }) => topic === "session.closed"));
+    await waitUntil(() => slot.isDisposed);
+    expect(fixture.registry.isSubscribed("phone", sessionId)).toBe(true);
+
+    const reacquired = await fixture.registry.acquire(sessionId);
+    const published = fixture.events.length;
+    reacquired.publishSnapshot();
+    expect(fixture.events.slice(published).some(({ topic }) => topic === "session.snapshot")).toBe(true);
+  });
+
+  // A start that is retired before the registry publishes it was never a live
+  // runtime: counting its disposal as an eviction would let `runtimesEvicted`
+  // exceed loads and write an info record for a retried `catalog_changed` open.
+  it("does not count an eviction for a start that was never published", async () => {
+    const recorded = resourceRecorder();
+    const fixture = await coldFixture("unpublished-start", { resources: recorded });
+    const internals = fixture.registry as unknown as {
+      dependencies: () => Parameters<typeof RuntimeSlot.create>[1];
+      hooks: () => Parameters<typeof RuntimeSlot.create>[2];
+    };
+    const slot = await RuntimeSlot.create(fixture.manager, internals.dependencies(), internals.hooks(), false);
+    expect(recorded.recordRuntimeLoaded).not.toHaveBeenCalled();
+
+    await slot.dispose();
+    expect(recorded.recordRuntimeEvicted).not.toHaveBeenCalled();
+  });
+
+  // G-1c: the request path joins the owner's cut, so the record shows no
+  // request-path walk at all while the owner's own walks stay background work.
+  it("counts no request-path walk while the reader joins the owner's cut", async () => {
+    const recorded = resourceRecorder();
+    const fixture = await coldFixture("request-path-walk", { resources: recorded });
+    // Settle the catalog owner before the request: its own background reconcile
+    // must not interleave and be misattributed as request-path work, so every
+    // walk in the request's window is the request's own.
+    await settleCatalog(fixture.registry);
+    const backgroundWalks = recorded.recordCatalogWalk.mock.calls.length;
+
+    await runInRequestSpan(new RequestSpan(), () => fixture.registry.delete(fixture.manager.getSessionId()));
+
+    const requestWalks = recorded.recordCatalogWalk.mock.calls.slice(backgroundWalks);
+    expect(requestWalks).toEqual([]);
+    expect(recorded.recordCatalogWalk.mock.calls.every((call) => call[2] === false)).toBe(true);
+
+    // The same walk with no request waiting on it is background work.
+    const evidenceSeam = fixture.registry as unknown as { catalogStructureEvidence: () => Promise<unknown> };
+    await evidenceSeam.catalogStructureEvidence();
+    expect(recorded.recordCatalogWalk).toHaveBeenLastCalledWith(expect.any(Number), expect.any(Number), false);
+  });
+
+  // G-1b: a writer the Gateway does not own (a subagent child, a copied file)
+  // reaches its catalog row through the folder watcher, so external writers add
+  // no request-path walks to the criterion this file measures above.
+  it("publishes an external append to a catalog row without a walk", async () => {
+    const recorded = resourceRecorder();
+    const fixture = await coldFixture("external-append", { resources: recorded });
+    const catalog = catalogOwner(fixture.registry);
+    await catalog.settled();
+
+    const child = join(await realpath(join(fixture.agentDir, "sessions")),
+      "workspace", "parent", "producer", "run-1", "session.jsonl");
+    await mkdir(dirname(child), { recursive: true });
+    await writeFile(child, `${JSON.stringify({
+      type: "session", version: 3, id: "id-child", timestamp: "2026-09-27T00:00:00.000Z", cwd: fixture.cwd,
+    })}\n`);
+    await waitUntil(() => catalog.row(child)?.id === "id-child");
+    expect(catalog.row(child)?.delegated).toBe(true);
+
+    const walksBeforeAppend = recorded.recordCatalogWalk.mock.calls.length;
+    const appendedAt = Date.now();
+    await appendFile(child, `${JSON.stringify({
+      type: "message", id: "m1", timestamp: Date.parse("2026-09-27T00:00:01.000Z"), message: { role: "user", content: "external" },
+    })}\n`);
+    await waitUntil(() => catalog.row(child)?.messageCount === 1, 3_000);
+
+    // The watcher's own hint, not a walk: the row is current within a second of
+    // the append and the sampler saw no catalog structure walk at all.
+    expect(Date.now() - appendedAt).toBeLessThanOrEqual(1_000);
+    expect(catalog.row(child)?.size).toBe((await fsPromises.stat(child)).size);
+    expect(recorded.recordCatalogWalk.mock.calls.length).toBe(walksBeforeAppend);
+  });
+
+  // Failure mode (G-12): a cold runtime load that queues behind the concurrency
+  // cap keeps loading for a client that already left, so a transcript nobody
+  // waits for is parsed into the live set.
+  it("queues cold runtime loads and drops a queued one whose client disconnects", async () => {
+    const fixture = await coldFixture("cold-load-queue");
+    const directory = dirname(fixture.sessionFile);
+    const queued = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000002" });
+    queued.appendMessage(fauxAssistantMessage("queued cold load"));
+    const abandonedSession = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000003" });
+    abandonedSession.appendMessage(fauxAssistantMessage("abandoned cold load"));
+    await settleCatalog(fixture.registry);
+    const loads: string[] = [];
+    // The loader is held to queue real cold loads, so no earlier case's spy on
+    // `RuntimeSlot.create` may still be installed.
+    vi.restoreAllMocks();
+    const releaseLoads: Array<() => void> = [];
+    const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
+    vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
+      loads.push(args[0].getSessionId());
+      await new Promise<void>((resolve) => { releaseLoads.push(resolve); });
+      return await realCreate(...args);
+    });
+
+    const first = fixture.registry.acquire(fixture.manager.getSessionId());
+    const second = fixture.registry.acquire(queued.getSessionId());
+    await waitUntil(() => loads.length === 2);
+    const controller = new AbortController();
+    const abandoned = fixture.registry.acquire(abandonedSession.getSessionId(), controller.signal);
+    // The third waits for one of the two places instead of loading beside them.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(loads).toHaveLength(2);
+    controller.abort(new Error("the client left"));
+    await expect(abandoned).rejects.toThrow("the client left");
+    for (const release of releaseLoads.splice(0)) release();
+    await Promise.all([first, second]);
+    // Which of two concurrently admitted loads reaches the loader first is I/O
+    // order, not a contract; what this case owns is that only those two started.
+    expect([...loads].sort()).toEqual([fixture.manager.getSessionId(), queued.getSessionId()].sort());
+  });
+
+  // Failure mode (G-12): one requester leaving ends the shared cold load for
+  // everyone waiting on it, so a phone that reconnected on a new socket while the
+  // retired connection's open was still queued gets a non-busy `cancelled` and
+  // does not retry (`C-6`).
+  it("keeps a queued cold load for the waiters that are still there when one leaves", async () => {
+    const fixture = await coldFixture("cold-load-shared");
+    const directory = dirname(fixture.sessionFile);
+    const shared = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000004" });
+    shared.appendMessage(fauxAssistantMessage("shared cold load"));
+    const filler = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000005" });
+    filler.appendMessage(fauxAssistantMessage("filler cold load"));
+    const other = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000006" });
+    other.appendMessage(fauxAssistantMessage("other cold load"));
+    await settleCatalog(fixture.registry);
+    const loads: string[] = [];
+    vi.restoreAllMocks();
+    const releaseLoads: Array<() => void> = [];
+    const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
+    vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
+      loads.push(args[0].getSessionId());
+      await new Promise<void>((resolve) => { releaseLoads.push(resolve); });
+      return await realCreate(...args);
+    });
+    const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Two loads hold both places, so the shared session's start queues behind
+    // them and the waiters of that one start are what this case counts.
+    const held = [fixture.registry.acquire(fixture.manager.getSessionId()), fixture.registry.acquire(filler.getSessionId())];
+    await waitUntil(() => loads.length === 2);
+    const firstLeaving = new AbortController();
+    const secondLeaving = new AbortController();
+    const firstWaiter = fixture.registry.acquire(shared.getSessionId(), firstLeaving.signal);
+    const secondWaiter = fixture.registry.acquire(shared.getSessionId(), secondLeaving.signal);
+    await tick();
+    expect(loads).toHaveLength(2);
+
+    // The first requester's connection retires while the second still waits: the
+    // queued load is still the second requester's answer, so it stays queued.
+    firstLeaving.abort(new Error("the first connection left"));
+    await tick();
+    expect(loads).toHaveLength(2);
+
+    // The last waiter leaves: now the queued load has no audience and is dropped
+    // before it parses anything.
+    secondLeaving.abort(new Error("the second connection left"));
+    await expect(secondWaiter).rejects.toThrow("the second connection left");
+    await expect(firstWaiter).rejects.toThrow("the second connection left");
+
+    // The place a held load releases is handed to the waiter queued for it, and
+    // the gate still counts the place the other held load occupies: a later
+    // arrival queues rather than loading beside it.
+    const thirdLeaving = new AbortController();
+    const thirdWaiter = fixture.registry.acquire(shared.getSessionId(), thirdLeaving.signal);
+    await tick();
+    expect(loads).toHaveLength(2);
+    releaseLoads.shift()!();
+    await waitUntil(() => loads.length === 3);
+    expect(loads[2]).toBe(shared.getSessionId());
+    const otherWaiter = fixture.registry.acquire(other.getSessionId());
+    await tick();
+    expect(loads).toHaveLength(3);
+
+    for (let pass = 0; pass < 8 && loads.length < 4; pass += 1) {
+      for (const release of releaseLoads.splice(0)) release();
+      await tick();
+    }
+    for (const release of releaseLoads.splice(0)) release();
+    await Promise.all([...held, thirdWaiter, otherWaiter]);
+    // The two held loads started first in whatever order the loader reached
+    // them; the queued one is third because the place it waited for was handed
+    // to it, and the fourth followed it.
+    expect([...loads].sort()).toEqual([
+      fixture.manager.getSessionId(),
+      filler.getSessionId(),
+      shared.getSessionId(),
+      other.getSessionId(),
+    ].sort());
+  });
+
+  // Failure mode (G-12): heap pressure retires a runtime that has an audience, or
+  // the refusal it should make instead never happens and the load takes the
+  // process to the limit.
+  it("reclaims the largest idle runtime under heap pressure and refuses a cold load when only a protected one is left", async () => {
+    // The fixture loads real runtimes; an earlier case's spy on the loader would
+    // never settle for this one.
+    vi.restoreAllMocks();
+    const mebibyte = 1_024 * 1_024;
+    const records: RuntimeLifecycleRecord[] = [];
+    const sheds: CapacityShedRecord[] = [];
+    // A sample that never changes on eviction, like the process's own:
+    // `heapUsed` does not fall until V8 collects, so only the registry's
+    // accounting of what it retired can end the pass. A sample that dropped on
+    // eviction hid the pass retiring every idle runtime for one load.
+    let heapUsedBytes = 100 * mebibyte;
+    const fixture = await coldFixture("heap-pressure", {
+      heapSample: () => ({ usedBytes: heapUsedBytes, limitBytes: 1_000 * mebibyte }),
+      runtimeLifecycleRecord: (record) => records.push(record),
+      capacityShedRecord: (record) => sheds.push(record),
+    });
+    const directory = dirname(fixture.sessionFile);
+    const large = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000010" });
+    large.appendMessage(fauxAssistantMessage("large idle runtime"));
+    const survivor = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000013" });
+    survivor.appendMessage(fauxAssistantMessage("idle runtime the pass must leave alone"));
+    const target = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000011" });
+    target.appendMessage(fauxAssistantMessage("refused cold load"));
+    await settleCatalog(fixture.registry);
+    const protectedSlot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const largeSlot = await fixture.registry.acquire(large.getSessionId());
+    const survivorSlot = await fixture.registry.acquire(survivor.getSessionId());
+    // The protected runtime is the one that must survive every pass.
+    subscribeAudience(fixture.registry, fixture.manager.getSessionId());
+    await growTranscript(protectedSlot.sessionFile!, 4 * mebibyte);
+    await growTranscript(largeSlot.sessionFile!, 100 * mebibyte);
+    await growTranscript(survivorSlot.sessionFile!, 10 * mebibyte);
+
+    // 900 MiB of 1,000, held there: the largest idle runtime's own 300 MiB
+    // estimate (`LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` x 100 MiB) takes the
+    // projection under `HEAP_EVICTION_SHARE`, so the pass stops after one
+    // retirement — the second idle runtime keeps its state — and admits.
+    heapUsedBytes = 900 * mebibyte;
+    const admitted = await fixture.registry.acquire(target.getSessionId());
+    expect(admitted.id).toBe(target.getSessionId());
+    // The largest idle runtime gave the memory back; the protected one and the
+    // runtime the pass no longer needed did not.
+    expect(records.filter((record) => record.event === "runtime.evicted").map((record) => [record.sessionId, record.reason])).toEqual([
+      [large.getSessionId(), "heap"],
+    ]);
+    expect(largeSlot.isDisposed).toBe(true);
+    expect(survivorSlot.isDisposed).toBe(false);
+    expect(protectedSlot.isDisposed).toBe(false);
+
+    // The one idle runtime left cannot take the projection under
+    // `HEAP_REFUSAL_SHARE` and the protected runtime is never retired, so the
+    // load is refused instead of pushing the process to its limit.
+    const another = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000012" });
+    another.appendMessage(fauxAssistantMessage("second refused cold load"));
+    await settleCatalog(fixture.registry);
+    await expect(fixture.registry.acquire(another.getSessionId())).rejects.toMatchObject({
+      code: "busy",
+      details: { retryAfterMs: HEAP_REFUSAL_RETRY_AFTER_MS },
+    });
+    expect(records.filter((record) => record.event === "runtime.evicted").map((record) => [record.sessionId, record.reason])).toEqual([
+      [large.getSessionId(), "heap"],
+      [survivor.getSessionId(), "heap"],
+      // The runtime the first load published is idle now too, and reclaiming it
+      // still leaves the projection above the refusal share.
+      [target.getSessionId(), "heap"],
+    ]);
+    expect(sheds).toEqual([{
+      reason: "heap",
+      admission: "open",
+      heapUsedBytes: 900 * mebibyte,
+      heapLimitBytes: 1_000 * mebibyte,
+      retryAfterMs: HEAP_REFUSAL_RETRY_AFTER_MS,
+    }]);
+    expect(protectedSlot.isDisposed).toBe(false);
   });
 });

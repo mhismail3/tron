@@ -1249,12 +1249,17 @@ struct AppModelCatalogSyncTests {
         id: String,
         sessions: [SessionSummary],
         listRevision: Int,
+        projectionToken: String? = nil,
         nextCursor: String? = nil,
         archivedCount: Int? = nil
     ) -> Data {
         let encoded = try! JSONEncoder.gateway.encode(sessions)
         let rawSessions = try! JSONSerialization.jsonObject(with: encoded)
-        var result: [String: Any] = ["sessions": rawSessions, "listRevision": listRevision]
+        var result: [String: Any] = [
+            "sessions": rawSessions,
+            "listRevision": listRevision,
+            "projectionToken": projectionToken ?? "epoch-1:\(listRevision)",
+        ]
         if let nextCursor { result["nextCursor"] = nextCursor }
         if let archivedCount { result["archivedCount"] = archivedCount }
         return try! JSONSerialization.data(withJSONObject: [
@@ -1294,7 +1299,7 @@ struct AppModelCatalogSyncTests {
 
     private func helloFrame(capabilities: [String] = ["sessions.v1"]) -> Data {
         let listed = capabilities.map { "\"\($0)\"" }.joined(separator: ",")
-        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["#.utf8)
+        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["#.utf8)
             + Data(listed.utf8) + Data("]}".utf8)
     }
 

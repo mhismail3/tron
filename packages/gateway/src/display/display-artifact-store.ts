@@ -7,7 +7,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GatewayError } from "../errors.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
 import { readJson } from "../util/json.js";
 import type { BlobByteRange, BlobLease } from "../sessions/blob-store.js";
 
@@ -340,7 +340,7 @@ export class DisplayArtifactStore {
         createWriteStream(staging, { flags: "wx", mode: 0o600 }),
       );
       const stagedHandle = await open(staging, "r+");
-      try { await stagedHandle.sync(); }
+      try { await syncDurably(stagedHandle); }
       finally { await stagedHandle.close(); }
       const after = await opened.stat();
       const current = await lstat(source);

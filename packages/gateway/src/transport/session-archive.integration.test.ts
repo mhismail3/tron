@@ -142,6 +142,11 @@ async function fixture(options: {
       archiveDiagnostic,
     });
     await registry.initialize();
+    // The listener serves before the owner publishes its first cut, and a read
+    // refuses retryably until then (G-1c). The fixture waits so each case
+    // exercises its own subject instead of the catalog's startup.
+    await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } })
+      .sessionCatalog.whenPublished();
     await options.duringStartupRecovery?.(registry, cwd);
     await registry.recoverCanonicalAttention();
     // The search owner is optional in the Gateway, so only the traversal that
@@ -213,7 +218,7 @@ async function fixture(options: {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await until(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await until(() => frames.some((frame) => frame.type === "hello"), "hello");
     const send = (id: string, method: string, params: object) => socket.send(JSON.stringify({ type: "request", id, method, params }));
     return {
@@ -226,12 +231,24 @@ async function fixture(options: {
       },
     };
   };
+  /** The fixture writes canonical files itself, so it is an external writer to
+   * the catalog: the reader no longer walks the folder, and forcing the owner's
+   * cut is the deterministic equivalent of waiting the folder watcher out.
+   * Without it a read right after a write races the watcher's own debounce. */
+  const settle = async (): Promise<void> => {
+    const owner = (current!.registry as unknown as {
+      sessionCatalog: { reconcile(): Promise<void>; settled(): Promise<void> };
+    }).sessionCatalog;
+    await owner.reconcile();
+    await owner.settled();
+  };
   /** A canonical, persisted session with no live runtime, created the way the
    * pinned SDK creates one. */
-  const coldSession = (label: string): { id: string; file: string } => {
+  const coldSession = async (label: string): Promise<{ id: string; file: string }> => {
     const manager = SessionManager.create(cwd, sessionDirectory);
     manager.appendMessage(fauxAssistantMessage(`${label} canonical response`));
     const file = manager.getSessionFile()!;
+    await settle();
     return { id: manager.getSessionId(), file };
   };
   /** A canonical session written directly instead of through the pinned
@@ -254,9 +271,10 @@ async function fixture(options: {
         },
       }),
     ].join("\n") + "\n", "utf8");
+    await settle();
     return { id, file, entryId };
   };
-  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, connect, coldSession, rawSession, restart, current: () => current! };
+  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, connect, coldSession, rawSession, settle, restart, current: () => current! };
 }
 
 /** An extension-owned trigger that starts a turn of its own. */
@@ -314,7 +332,10 @@ const list = async (client: Client, archived: "exclude" | "only", extra: Record<
   const response = await client.request(`list-${archived}-${Math.random().toString(36).slice(2, 8)}`, "session.list", { scope: "user", archived, ...extra });
   expect(response.ok, JSON.stringify(response)).toBe(true);
   return response.result as {
-    sessions: Array<{ id: string; archivedAt?: string; phase?: string; updatedAt?: string }>;
+    sessions: Array<{ id: string; archivedAt?: string; phase?: string; updatedAt?: string; isUnread?: boolean; attentionRevision?: number }>;
+    listRevision: number;
+    projectionToken: string;
+    notModified?: boolean;
     archivedCount?: number;
     nextCursor?: string;
   };
@@ -367,6 +388,23 @@ const listChangedFrames = (client: Client) =>
 /** Snapshots a subscribed client actually received for one session, newest last. */
 const snapshotFrames = (client: Client, sessionId: string) =>
   client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.snapshot" && frame.sessionId === sessionId);
+
+/** The authoritative state a subscribed client received for one session, newest
+ * last, however the outbound queue delivered it: as its own `session.snapshot`,
+ * or — when a newer snapshot of the same runtime generation superseded an
+ * unsent one, and the queue covered the dropped sequence with a
+ * `session.rebaseline` (`G-4`) — as the snapshot nested inside that rebaseline.
+ * Both make the client install that state, so a case asserting on the state a
+ * client ends up with must read both. */
+const deliveredAuthorityFrames = (client: Client, sessionId: string) =>
+  client.frames.flatMap((frame) => {
+    if (frame.type !== "event" || frame.sessionId !== sessionId) return [];
+    if (frame.topic === "session.snapshot") return [frame];
+    if (frame.topic === "session.rebaseline" && frame.payload?.snapshot !== undefined) {
+      return [{ ...frame, topic: "session.snapshot", payload: frame.payload.snapshot }];
+    }
+    return [];
+  });
 
 const latestSnapshot = (client: Client, sessionId: string) =>
   snapshotFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
@@ -448,8 +486,8 @@ describe("session archive over the real Gateway", () => {
   archiveCase("archives an idle session without touching its canonical file", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const archived = f.coldSession("archived");
-    const visible = f.coldSession("visible");
+    const archived = await f.coldSession("archived");
+    const visible = await f.coldSession("visible");
     const before = await readFile(archived.file, "utf8");
     const beforeRow = (await list(client, "exclude")).sessions.find((session) => session.id === archived.id);
     expect(beforeRow?.updatedAt).toBeDefined();
@@ -492,7 +530,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("keeps one receipt, one timestamp and one archived row for a replayed command", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("replay");
+    const session = await f.coldSession("replay");
     const first = await client.request("archive-first", "session.archive.set", {
       commandId: "archive-command-replay", sessionId: session.id, archived: true,
     });
@@ -517,12 +555,129 @@ describe("session archive over the real Gateway", () => {
     };
   });
 
+  archiveCase("answers an unchanged projection token without rows and re-reads after the projection moves", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const phone = await f.connect();
+    const session = await f.rawSession("revision", "revision-session");
+    const other = await f.rawSession("revision-other", "revision-other-session");
+    const third = await f.rawSession("revision-third", "revision-third-session");
+    const first = await list(client, "exclude");
+    expect(first.sessions.map((row) => row.id)).toEqual(expect.arrayContaining([session.id, other.id, third.id]));
+    const token = first.projectionToken;
+    expect(token).toContain(":");
+
+    // An equal token is a complete revalidation of the client's rows, so the
+    // answer carries neither rows nor a count.
+    const unchanged = await list(client, "exclude", { projectionToken: token });
+    expect(unchanged).toMatchObject({ notModified: true, projectionToken: token, sessions: [] });
+    expect(unchanged.listRevision).toBe(first.listRevision);
+    expect(unchanged.nextCursor).toBeUndefined();
+    expect(unchanged.archivedCount).toBeUndefined();
+
+    // A cold row's attention moves `catalogProjectionGeneration` only: the
+    // structural revision is unchanged, so a token that covered membership
+    // alone would falsely revalidate rows this client no longer holds.
+    const attention = await phone.request(`attention-${session.id}`, "session.attention.set", {
+      commandId: "revision-attention-command", sessionId: session.id, unread: true,
+    });
+    expect(attention.ok, JSON.stringify(attention)).toBe(true);
+    const afterAttention = await list(client, "exclude", { projectionToken: token });
+    expect(afterAttention.notModified).toBeUndefined();
+    expect(afterAttention.listRevision).toBe(first.listRevision);
+    expect(afterAttention.projectionToken).not.toBe(token);
+    expect(afterAttention.sessions.find((row) => row.id === session.id)?.isUnread).toBe(true);
+
+    // A client holding a superseded token must still receive the rows.
+    const attentionToken = afterAttention.projectionToken;
+    await openSession(client, session.id);
+    await archiveSession(client, session.id, "revision-archive-command");
+    const afterArchive = await list(client, "exclude", { projectionToken: attentionToken });
+    expect(afterArchive.notModified).toBeUndefined();
+    expect(afterArchive.sessions.map((row) => row.id)).not.toContain(session.id);
+    const archivedToken = afterArchive.projectionToken;
+    const revalidated = await list(client, "exclude", { projectionToken: archivedToken });
+    expect(revalidated).toMatchObject({ notModified: true, projectionToken: archivedToken });
+
+    // The conditional answer belongs to the first page only: a cursored page is
+    // already bound to the projection its lease admitted.
+    const paged = await list(client, "exclude", { limit: 1 });
+    expect(paged.nextCursor).toBeDefined();
+    const continued = await client.request("revision-cursor", "session.list", {
+      scope: "user", archived: "exclude", limit: 1, cursor: paged.nextCursor, projectionToken: paged.projectionToken,
+    });
+    expect(continued.ok, JSON.stringify(continued)).toBe(true);
+    const continuedResult = continued.result as { sessions: unknown[]; notModified?: boolean };
+    expect(continuedResult.notModified).toBeUndefined();
+    expect(continuedResult.sessions).toHaveLength(1);
+
+    // An empty token is a client error, never a silent full read.
+    const malformed = await client.request("revision-malformed", "session.list", {
+      scope: "user", archived: "exclude", projectionToken: "",
+    });
+    expect(malformed).toMatchObject({ ok: false, error: { code: "invalid_request" } });
+
+    // A restart starts a new runtime epoch while every revision begins again at
+    // zero, so a token retained across it can never revalidate those rows.
+    await f.restart();
+    const replacement = await f.connect();
+    const restarted = await list(replacement, "exclude", { projectionToken: archivedToken });
+    expect(restarted.notModified).toBeUndefined();
+    expect(restarted.sessions.length).toBeGreaterThan(0);
+    return {
+      token,
+      attentionToken,
+      archivedToken,
+      afterAttentionRevision: afterAttention.listRevision,
+      firstRevision: first.listRevision,
+      restartedToken: restarted.projectionToken,
+      continuedRowCount: continuedResult.sessions.length,
+      malformedTokenCode: (malformed as { error: { code: string } }).error.code,
+    };
+  });
+
+  archiveCase("moves the projection token when an acknowledged recovery clears a cold row's marker", async () => {
+    const f = await fixture();
+    const session = await f.coldSession("recovered-automation");
+    // A recovered automation run's marker is restored at startup, and a row
+    // with no live summary and no slot reads its phase from that set alone.
+    const { RunMarkerStore } = await import("../sessions/run-markers.js");
+    const operationId = "automation:10000000-0000-4000-8000-0000000000a9";
+    await new RunMarkerStore(f.root).mark(session.id, operationId);
+    const restarted = await f.restart();
+    const client = await f.connect();
+    const first = await list(client, "exclude");
+    const row = first.sessions.find((candidate) => candidate.id === session.id);
+    expect(row?.phase).toBe("interrupted");
+    const token = first.projectionToken;
+    expect((await list(client, "exclude", { projectionToken: token })).notModified).toBe(true);
+
+    // The user acknowledges the recovery. Nothing structural moves: the row
+    // changes phase, which only a token covering the whole row overlay can
+    // carry, so an owner naming the old token must be answered with rows.
+    const listChangesBefore = f.listChanged.mock.calls.length;
+    await restarted.registry.clearAutomationMarker(session.id, operationId);
+    expect(f.listChanged.mock.calls.length).toBeGreaterThan(listChangesBefore);
+    const after = await list(client, "exclude", { projectionToken: token });
+    expect(after.notModified).toBeUndefined();
+    expect(after.sessions.find((candidate) => candidate.id === session.id)?.phase).toBe("idle");
+    expect(after.projectionToken).not.toBe(token);
+    // The row it now serves revalidates in turn.
+    expect((await list(client, "exclude", { projectionToken: after.projectionToken })).notModified).toBe(true);
+    return {
+      phaseBefore: row?.phase,
+      phaseAfter: after.sessions.find((candidate) => candidate.id === session.id)?.phase,
+      tokenMoved: after.projectionToken !== token,
+      listChanges: f.listChanged.mock.calls.length - listChangesBefore,
+    };
+  });
+
   archiveCase("binds a list cursor to its archive filter and orders the archived list newest first", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const older = f.coldSession("cursor-archived-older");
-    const visible = f.coldSession("cursor-visible");
-    const visibleOther = f.coldSession("cursor-visible-other");
+    const older = await f.coldSession("cursor-archived-older");
+    const visible = await f.coldSession("cursor-visible");
+    const visibleOther = await f.coldSession("cursor-visible-other");
     const archive = (id: string, commandId: string) => client.request(commandId, "session.archive.set", {
       commandId, sessionId: id, archived: true,
     });
@@ -531,7 +686,7 @@ describe("session archive over the real Gateway", () => {
     // Archive timestamps are the ordering source, so the two commits must not
     // share one millisecond.
     await new Promise((resolve) => setTimeout(resolve, 5));
-    const newer = f.coldSession("cursor-archived-newer");
+    const newer = await f.coldSession("cursor-archived-newer");
     const secondArchived = await archive(newer.id, "archive-command-cursor-newer");
     expect(secondArchived.ok).toBe(true);
     expect((await list(client, "only")).sessions.map((row) => row.id)).toEqual([newer.id, older.id]);
@@ -570,7 +725,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("rejects archiving a session that is running or working through detached subagents", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("busy");
+    const session = await f.coldSession("busy");
     let release!: () => void;
     const barrier = new Promise<void>((resolve) => { release = resolve; });
     f.faux.setResponses([async () => { await barrier; return fauxAssistantMessage("finished"); }]);
@@ -625,8 +780,8 @@ describe("session archive over the real Gateway", () => {
     // whole request.
     const f = await fixture({ extensions: [{ name: "hold.ts", source: holdCommandExtension }] });
     const client = await f.connect();
-    const held = f.coldSession("lane-holder");
-    const unrelated = f.coldSession("lane-bystander");
+    const held = await f.coldSession("lane-holder");
+    const unrelated = await f.coldSession("lane-bystander");
     await openSession(client, held.id);
 
     const holding = client.request("lane-hold-prompt", "session.prompt", {
@@ -668,7 +823,7 @@ describe("session archive over the real Gateway", () => {
     // told to stop a session that is not running.
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("transient-blocker");
+    const session = await f.coldSession("transient-blocker");
     await openSession(client, session.id);
     const work = (f.current().registry as unknown as {
       workRegistry: { begin(admission: { kind: string; method: string; sessionId: string; hostEpoch: string }): { settle(): void } };
@@ -698,7 +853,7 @@ describe("session archive over the real Gateway", () => {
     // request's transient entry.
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("automation-lease");
+    const session = await f.coldSession("automation-lease");
     await openSession(client, session.id);
     const lease = await f.current().registry.acquireAutomationLease(session.id);
     try {
@@ -717,7 +872,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("rejects archiving a session waiting for a real user interaction", async () => {
     const f = await fixture({ extensions: [{ name: "select-hold.ts", source: selectCommandExtension }] });
     const client = await f.connect();
-    const session = f.coldSession("waiting-interaction");
+    const session = await f.coldSession("waiting-interaction");
     await openSession(client, session.id);
     const command = client.request("waiting-command", "session.prompt", {
       commandId: "waiting-command-command", sessionId: session.id, text: "/select-hold",
@@ -833,7 +988,7 @@ describe("session archive over the real Gateway", () => {
     // already started.
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("unarchive-running");
+    const session = await f.coldSession("unarchive-running");
     await openSession(client, session.id);
     let release!: () => void;
     const barrier = new Promise<void>((resolve) => { release = resolve; });
@@ -860,7 +1015,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("keeps archive state across a Gateway restart and an open", async () => {
     const f = await fixture();
     const first = await f.connect();
-    const session = f.coldSession("restart");
+    const session = await f.coldSession("restart");
     const archived = await first.request("restart-archive", "session.archive.set", {
       commandId: "restart-archive-command", sessionId: session.id, archived: true,
     });
@@ -887,7 +1042,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("keeps a renamed session archived and forks an unarchived child", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const parent = f.coldSession("fork-parent");
+    const parent = await f.coldSession("fork-parent");
     await client.request("fork-archive", "session.archive.set", {
       commandId: "fork-archive-command", sessionId: parent.id, archived: true,
     });
@@ -926,13 +1081,14 @@ describe("session archive over the real Gateway", () => {
   archiveCase("rejects archiving a runtime-owned subagent session", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const parent = f.coldSession("subagent-parent");
+    const parent = await f.coldSession("subagent-parent");
     const childDirectory = join(f.sessionDirectory, parent.id, "worker", "run-0");
     await mkdir(childDirectory, { recursive: true });
     const childId = "runtime-owned-subagent-child";
     await writeFile(join(childDirectory, "session.jsonl"), `${JSON.stringify({
       type: "session", version: 3, id: childId, timestamp: new Date().toISOString(), cwd: f.cwd,
     })}\n`);
+    await f.settle();
     const rejected = await client.request("subagent-archive-request", "session.archive.set", {
       commandId: "subagent-archive-command", sessionId: childId, archived: true,
     });
@@ -944,7 +1100,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("deletes an archived session and never resurrects its archive record", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("delete");
+    const session = await f.coldSession("delete");
     await client.request("delete-archive", "session.archive.set", {
       commandId: "delete-archive-command", sessionId: session.id, archived: true,
     });
@@ -966,6 +1122,7 @@ describe("session archive over the real Gateway", () => {
       type: "message", id: "recreated-entry", timestamp: Date.now(),
       message: { role: "assistant", content: [{ type: "text", text: "re-created" }] },
     })}\n`);
+    await f.settle();
     const afterRecreate = await list(client, "exclude");
     expect(afterRecreate.sessions.map((row) => row.id)).toContain(session.id);
     expect(afterRecreate.archivedCount).toBe(0);
@@ -1006,7 +1163,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("carries archive state on the opened snapshot and republishes it on every change", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("snapshot-archive");
+    const session = await f.coldSession("snapshot-archive");
     // Archive before the session is ever opened: the projection belongs to the
     // session, not to a subscription, so the first authoritative snapshot for
     // an archived session already carries it.
@@ -1051,7 +1208,7 @@ describe("session archive over the real Gateway", () => {
     const f = await fixture();
     const first = await f.connect();
     const second = await f.connect();
-    const session = f.coldSession("prompt-unarchive");
+    const session = await f.coldSession("prompt-unarchive");
     await openSession(first, session.id);
     await archiveSession(first, session.id, "prompt-archive-command");
     expect(await listedIds(first, "exclude")).not.toContain(session.id);
@@ -1083,7 +1240,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("clears archive state when Bash is admitted", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("bash-unarchive");
+    const session = await f.coldSession("bash-unarchive");
     await openSession(client, session.id);
     await archiveSession(client, session.id, "bash-archive-command");
 
@@ -1105,7 +1262,7 @@ describe("session archive over the real Gateway", () => {
     // can actually summarize, so the admitted work is observable end to end.
     const f = await fixture({ settings: { compaction: { enabled: true, reserveTokens: 1_024, keepRecentTokens: 0 } } });
     const client = await f.connect();
-    const session = f.coldSession("compaction-unarchive");
+    const session = await f.coldSession("compaction-unarchive");
     await openSession(client, session.id);
     f.faux.setResponses([
       fauxAssistantMessage(`History for compaction. ${"detail ".repeat(200)}`),
@@ -1146,7 +1303,7 @@ describe("session archive over the real Gateway", () => {
     const client = await f.connect();
     // The export owner is initialized by the Gateway's storage-warming stage.
     await f.current().registry.initializeBlobStorage();
-    const session = f.coldSession("refused-compaction");
+    const session = await f.coldSession("refused-compaction");
     await openSession(client, session.id);
     await archiveSession(client, session.id, "refused-compaction-archive");
 
@@ -1189,7 +1346,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("clears archive state for an automation-owned prompt on an existing session", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("automation-unarchive");
+    const session = await f.coldSession("automation-unarchive");
     await openSession(client, session.id);
     await archiveSession(client, session.id, "automation-archive-command");
     f.faux.setResponses([fauxAssistantMessage("scheduled response")]);
@@ -1223,7 +1380,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("treats a queued prompt as busy for archive admission", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("queued-unarchive");
+    const session = await f.coldSession("queued-unarchive");
     await openSession(client, session.id);
     let release!: () => void;
     const barrier = new Promise<void>((resolve) => { release = resolve; });
@@ -1260,7 +1417,7 @@ describe("session archive over the real Gateway", () => {
     // boundary that can restore visibility, and it must do so immediately.
     const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
-    const session = f.coldSession("backstop-unarchive");
+    const session = await f.coldSession("backstop-unarchive");
     await openSession(client, session.id);
     await archiveSession(client, session.id, "backstop-archive-command");
     expect(await listedIds(client, "exclude")).not.toContain(session.id);
@@ -1301,7 +1458,7 @@ describe("session archive over the real Gateway", () => {
     // membership change rather than from the durable write.
     const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
-    const session = f.coldSession("backstop-write-failure");
+    const session = await f.coldSession("backstop-write-failure");
     await openSession(client, session.id);
     await archiveSession(client, session.id, "backstop-failure-archive-command");
     const listChangesBefore = listChangedFrames(client);
@@ -1344,7 +1501,7 @@ describe("session archive over the real Gateway", () => {
     // test fixture — must be able to assume this owner is done writing.
     const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
-    const session = f.coldSession("dispose-drain");
+    const session = await f.coldSession("dispose-drain");
     await openSession(client, session.id);
     await archiveSession(client, session.id, "dispose-drain-archive-command");
     const registry = f.current().registry;
@@ -1392,7 +1549,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("re-archives a pending restoration with its own timestamp", async () => {
     const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
-    const session = f.coldSession("pending-restoration");
+    const session = await f.coldSession("pending-restoration");
     await openSession(client, session.id);
     const first = await archiveSession(client, session.id, "pending-archive-command");
     const restoreRemovals = failArchiveRemovals(f.current().registry);
@@ -1430,7 +1587,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("rejects a prompt retryably when archive state cannot be cleared", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("persist-failure");
+    const session = await f.coldSession("persist-failure");
     await openSession(client, session.id);
     await archiveSession(client, session.id, "failure-archive-command");
     const registry = f.current().registry as unknown as {
@@ -1474,7 +1631,7 @@ describe("session archive over the real Gateway", () => {
     // open inside the commit makes that gap observable.
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("lane-hold");
+    const session = await f.coldSession("lane-hold");
     await openSession(client, session.id);
     const registry = f.current().registry as unknown as {
       archive: { archive(sessionId: string): Promise<string> };
@@ -1525,7 +1682,7 @@ describe("session archive over the real Gateway", () => {
   archiveCase("never commits an archive over a run that admission already admitted", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("race");
+    const session = await f.coldSession("race");
     await openSession(client, session.id);
     const registry = f.current().registry as unknown as {
       archive: { archivedAt(sessionId: string): string | undefined };
@@ -1603,7 +1760,7 @@ describe("session archive over the real Gateway", () => {
     // request wrote.
     const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
-    const session = f.coldSession("started-during-write");
+    const session = await f.coldSession("started-during-write");
     await openSession(client, session.id);
     const store = (f.current().registry as unknown as {
       archive: { archive(sessionId: string): Promise<string> };
@@ -1663,7 +1820,7 @@ describe("session archive over the real Gateway", () => {
     // change.
     const f = await fixture({ extensions: [{ name: "switch.ts", source: switchCommandExtension }] });
     let client = await f.connect();
-    const target = f.coldSession("switch-target");
+    const target = await f.coldSession("switch-target");
     await openSession(client, target.id);
     await client.request("switch-target-prompt", "session.prompt", {
       commandId: "switch-target-prompt-command", sessionId: target.id, text: "target turn",
@@ -1682,7 +1839,7 @@ describe("session archive over the real Gateway", () => {
     expect(await attentionRecord(f.root, target.id)).toEqual(attentionBefore);
     expect(await archivedRecord(f.root, target.id)).toEqual(archiveBefore);
 
-    const source = f.coldSession("switch-source");
+    const source = await f.coldSession("switch-source");
     await openSession(client, source.id);
     const registry = f.current().registry as unknown as { slots: Map<string, unknown> };
     expect([...registry.slots.keys()]).toEqual([source.id]);
@@ -1762,8 +1919,8 @@ describe("command-driven session replacement over the real Gateway", () => {
     }[kind];
     const f = await fixture({ extensions: [{ name: "replace.ts", source: replacingCommandExtension(call, options.afterReplace) }] });
     const client = await f.connect();
-    const target = f.coldSession("replacement-target");
-    const origin = f.coldSession("replacement-origin");
+    const target = await f.coldSession("replacement-target");
+    const origin = await f.coldSession("replacement-origin");
     await openSession(client, origin.id);
     const registry = f.current().registry as unknown as { slots: Map<string, { sessionFile?: string }> };
     const response = await client.request(`replace-${kind}`, "session.prompt", {
@@ -1792,11 +1949,15 @@ describe("command-driven session replacement over the real Gateway", () => {
     const markers = join(r.f.root, "gateway", "runtime-markers");
     const markerFiles = await import("node:fs/promises").then((fs) => fs.readdir(markers).catch(() => [] as string[]));
     expect(markerFiles.filter((name) => name.startsWith(r.origin.id))).toEqual([]);
-    // The origin's subscriber follows the identity change.
-    await until(() => snapshotFrames(r.client, r.replacementId).length > 0, "replacement snapshot delivered");
+    // The origin's subscriber follows the identity change and receives the
+    // replacement's authoritative state, whether the queue delivered it as the
+    // snapshot itself or as the `session.rebaseline` covering a sequence a
+    // newer snapshot superseded.
+    await until(() => deliveredAuthorityFrames(r.client, r.replacementId).length > 0, "replacement snapshot delivered");
     // The command is settled: the replacement is idle and no row for it (a
-    // fork inherits one) is projected as still running.
-    const replacementSnapshot = snapshotFrames(r.client, r.replacementId).at(-1)!.payload as {
+    // fork inherits one) is projected as still running by the newest authority
+    // the client received.
+    const replacementSnapshot = deliveredAuthorityFrames(r.client, r.replacementId).at(-1)!.payload as {
       transcript: Array<{ semantic?: { operationId?: string; lifecycle?: string } }>;
     };
     expect(replacementSnapshot.transcript.filter((item) => item.semantic?.operationId === r.operationId
@@ -1849,8 +2010,8 @@ describe("command-driven session replacement over the real Gateway", () => {
     });
     const f = await fixture({ extensions: [{ name: "replace.ts", source: replacingCommandExtension("await ctx.switchSession(args.trim());") }] });
     const client = await f.connect();
-    const target = f.coldSession("retry-target");
-    const origin = f.coldSession("retry-origin");
+    const target = await f.coldSession("retry-target");
+    const origin = await f.coldSession("retry-origin");
     await openSession(client, origin.id);
     const registry = f.current().registry as unknown as { slots: Map<string, unknown> };
     const response = await client.request("retry", "session.prompt", {
@@ -1874,8 +2035,8 @@ describe("command-driven session replacement over the real Gateway", () => {
       { name: "refuse.ts", source: refuseSwitchExtension },
     ] });
     const client = await f.connect();
-    const target = f.coldSession("refused-target");
-    const origin = f.coldSession("refused-origin");
+    const target = await f.coldSession("refused-target");
+    const origin = await f.coldSession("refused-origin");
     await openSession(client, origin.id);
     const response = await client.request("refused", "session.prompt", {
       commandId: "refused-command", sessionId: origin.id, text: `/replace ${target.file}`,

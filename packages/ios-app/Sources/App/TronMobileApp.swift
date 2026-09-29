@@ -7,14 +7,16 @@ private final class GatewayPathDiagnosticsObserver {
     private let monitor = NWPathMonitor()
     private let delivery = GatewayPathDiagnosticCoalescer()
     private let record: @MainActor @Sendable (String) -> Void
-    private let pathHint: @MainActor @Sendable (Bool) -> Void
+    private let pathHint: @MainActor @Sendable (Bool, String?) -> Void
 
     init(model: AppModel) {
         record = { [weak model] in model?.lifecycleRecordDiagnostic(event: "path.changed", message: $0) }
-        pathHint = { [weak model] satisfied in model?.lifecycleNotePathHint(satisfied: satisfied) }
+        pathHint = { [weak model] satisfied, signature in
+            model?.lifecycleNotePathHint(satisfied: satisfied, signature: signature)
+        }
         monitor.pathUpdateHandler = { [delivery, record, pathHint] path in
             GatewayNetworkPathSnapshot.shared.update(interfaces: Self.interfaces(path))
-            Task { @MainActor in pathHint(path.status == .satisfied) }
+            Task { @MainActor in pathHint(path.status == .satisfied, Self.routeSignature(path)) }
             Self.offer(Self.facts(path), delivery: delivery, record: record)
         }
         monitor.start(queue: DispatchQueue(label: "tron.gateway.path-monitor"))
@@ -23,7 +25,9 @@ private final class GatewayPathDiagnosticsObserver {
     func setSceneActive(_ active: Bool) {
         delivery.setActive(active)
         if active {
-            pathHint(monitor.currentPath.status == .satisfied)
+            // The scene activation re-reads the same path: it forwards that
+            // reading's signature so it cannot pass as a route change (C-3).
+            pathHint(monitor.currentPath.status == .satisfied, Self.routeSignature(monitor.currentPath))
             Self.offer(Self.facts(monitor.currentPath), delivery: delivery, record: record)
         }
     }
@@ -56,6 +60,14 @@ private final class GatewayPathDiagnosticsObserver {
         ]
         let used = interfaces.filter { path.usesInterfaceType($0.0) }.map(\.1).joined(separator: ",")
         return used.isEmpty ? "unknown" : used
+    }
+
+    /// What the lifecycle reads as a route's identity: the interfaces this path
+    /// uses. A status, flag or cost-only update — and a scene activation
+    /// re-reading the same path — keeps this the same, so it cannot read as a
+    /// path change and restart a grown backoff (C-3).
+    private nonisolated static func routeSignature(_ path: NWPath) -> String {
+        interfaces(path)
     }
 
     deinit {
@@ -107,7 +119,7 @@ struct TronMobileApp: App {
                 SceneRootView(model: hostedModel, colorScheme: nil)
                     .environment(hostedModel)
                     .tronPresentation()
-                    .task { await hostedModel.start(sceneIsActive: true) }
+                    .task { await hostedModel.start(scenePhase: .active) }
             }
         }
     }
@@ -145,7 +157,7 @@ struct TronMobileApp: App {
                     pathDiagnostics.setSceneActive(scenePhase == .active)
                     configurePushNotifications()
                     await RetiredNotificationBadge.clear()
-                    await model.start(sceneIsActive: scenePhase == .active)
+                    await model.start(scenePhase: appScenePhase(scenePhase))
                     await reconcilePushNotifications()
                 }
                 .onChange(of: model.connectionState) { old, new in
@@ -191,17 +203,18 @@ struct TronMobileApp: App {
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active {
+                    switch appScenePhase(phase) {
+                    case .active:
                         pathDiagnostics.setSceneActive(true)
                         Task {
                             await RetiredNotificationBadge.clear()
                             await reconcilePushNotifications()
                         }
                         model.becameActive()
-                    } else if phase == .inactive {
+                    case .inactive:
                         pathDiagnostics.setSceneActive(false)
                         model.becameInactive()
-                    } else if phase == .background {
+                    case .background:
                         pathDiagnostics.setSceneActive(false)
                         backgroundCheckpoints.retain(model.enteredBackground())
                     }
@@ -223,10 +236,22 @@ struct TronMobileApp: App {
     }
 
     @MainActor
+    private func appScenePhase(_ phase: ScenePhase) -> AppModel.AppScenePhase {
+        switch phase {
+        case .active: .active
+        case .inactive: .inactive
+        case .background: .background
+        @unknown default: .inactive
+        }
+    }
+
+    @MainActor
     private func reconcilePushNotifications() async {
         await pushNotifications.reconcile(
             profile: model.profiles.selected,
             connected: model.connectionState == .connected,
+            gatewayRuntimeEpoch: model.gatewayInfo?.runtimeEpoch,
+            pushRegistrationRevision: model.gatewayInfo?.pushRegistrationRevision,
             client: model.client
         )
         model.pushNotificationReadiness = pushNotifications.readiness

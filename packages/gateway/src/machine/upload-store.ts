@@ -7,7 +7,7 @@ import {
 import { basename, dirname, extname, join } from "node:path";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
 import { readJson } from "../util/json.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
@@ -265,7 +265,7 @@ export class UploadStore {
             offset += bytesWritten;
           }
         }
-        await handle.sync();
+        await syncDurably(handle);
       } finally {
         await handle.close();
       }
@@ -469,7 +469,7 @@ export class UploadStore {
   /** fsync one owned path, file or directory, after a publication boundary. */
   private async syncPath(path: string): Promise<void> {
     const handle = await open(path, "r");
-    try { await handle.sync(); }
+    try { await syncDurably(handle); }
     finally { await handle.close(); }
   }
 

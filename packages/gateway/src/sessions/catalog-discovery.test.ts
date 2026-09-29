@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, opendir, readdir, realpath, rm, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, visitConcurrently } from "./catalog-discovery.js";
+import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, visitConcurrently } from "./catalog-discovery.js";
 
 const roots: string[] = [];
 
@@ -53,14 +53,20 @@ describe("catalog discovery", () => {
       } : async (directory) => opendir(directory),
     });
 
+    // The walk's own cut and one read per candidate file, the two seams every
+    // catalog reader shares; a reversed directory walk must not reorder either.
+    const catalogIds = async (instance: CatalogDiscovery): Promise<string[]> => {
+      const evidence = await instance.catalogStructureEvidence();
+      const infos = await Promise.all([...evidence.identitiesByPath.keys()].map((path) => buildCatalogSessionInfo(path)));
+      return infos.filter((info) => info !== null).map((info) => info!.id);
+    };
     const forward = discovery(false);
     const reverse = discovery(true);
     const forwardEvidence = await forward.catalogStructureEvidence();
     const reverseEvidence = await reverse.catalogStructureEvidence();
     expect(reverseEvidence.digest).toBe(forwardEvidence.digest);
     expect(reverseEvidence.factsDigest).toBe(forwardEvidence.factsDigest);
-    expect((await reverse.sessionInfos("all")).map((session) => session.id))
-      .toEqual((await forward.sessionInfos("all")).map((session) => session.id));
-    expect((await forward.sessionInfos("all")).map((session) => session.id)).toEqual(["alpha", "middle", "zeta"]);
+    expect(await catalogIds(reverse)).toEqual(await catalogIds(forward));
+    expect(await catalogIds(forward)).toEqual(["alpha", "middle", "zeta"]);
   });
 });

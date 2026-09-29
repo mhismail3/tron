@@ -235,6 +235,14 @@ stderr before executing Node, so launcher messages and Node aborts survive the
 process that produced them. That stream, the Gateway's own
 `gateway.jsonl` rotation, and every cap are owned by
 [observability](../../gateway/docs/observability.md).
+The launcher execs exactly `<payload>/runtime/node-<arch>
+--max-old-space-size=4096 <payload>/app/dist/index.js` followed by the
+LaunchAgent's (or `scripts/tron dev`'s) arguments. Stable admission,
+registration repair and Debug admission compare the live process's `ps` command
+line with that one list (`StableGatewayProvenance.launchArguments`), and
+`scripts/tron mac verify` compares the same string, so a launcher argv change
+changes all of them together. `GatewayLauncherArgvTests` runs the built
+launcher and fails when the Swift side disagrees with it.
 Quitting `Tron.app` does not stop accepted work. Quit and async command/uninstall
 exits request AppKit termination through `ApplicationTermination` on the main
 run loop, outside the main dispatch queue. AppKit's `.terminateLater` nested loop
@@ -243,7 +251,31 @@ is not a fix because its callback still occupies that queue. The isolated real
 AppKit subprocess in `MenuBarTerminationTests` verifies successful termination,
 cancel/retry, and watchdog failures for direct-task and dispatch-queue negative
 controls without starting Tron services. `ServerStatusPoller` probes the Tron Gateway protocol and combines
-health with registration state. Menu controls can pause, resume, restart,
+health with registration state. Its 30 s cycle pings every time — that ping is
+the liveness probe that decides Running — but it pays for the fail-closed
+Stable admission only when the runtime fence changes: launchd's live pid plus
+that process's start identity, and the payload selection and manifest stamps
+(the selected payload's manifest when a readable selection names one, and the
+bundled fallback's either way). A restart
+under the same payload therefore re-admits, and a selection or manifest change
+re-validates the immutable tree and its fingerprint. Only an admission is
+reused: a refusal is re-proved on the next cycle, and a fence that cannot stamp
+the selection pointer or a manifest re-probes, so one transient
+listener read or an update restart cannot pin "needs repair". The reuse also
+republishes the fence's own elapsed time, so a long-lived reuse cannot freeze
+the menu's uptime. The poll reuses one
+live Tailscale resolution for a bounded window (about five minutes) and refreshes
+the owner-only cache when the address changed, so it no longer makes Tailscale
+reload its network extension every 30 s; every explicit user action (pairing,
+restart, log and feedback capture, menu presentation) still resolves live and
+runs the full admission. Menu presentation and post-action refreshes run that
+full admission against the poll's own cache and record what it finds, so a
+failure an explicit check detects replaces the cached admission instead of
+being overwritten by it on the next cycle. A refused admission is shown as
+Update required; its reason, which `observer.state-changed` records as `why`,
+names the check that refused (`StableGatewayObserver.Refusal`), and the menu
+still offers Pause next to a single Repair, so the reinstall sequence below
+stays possible. Menu controls can pause, resume, restart,
 inspect bounded persisted Gateway logs, show a fresh pairing invitation, and
 uninstall. Log and feedback capture resolve a validated
 Tailscale host from live state or the bounded owner-only Tailscale cache and pass

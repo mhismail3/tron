@@ -89,10 +89,10 @@ struct GatewayClientTransportTests {
             machineId: "machine", deviceId: "device"
         )
         let fixtures: [(GatewayProfile, String)] = [
-            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","capabilities":[]}"#),
-            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"dev","capabilities":[]}"#),
-            (debug, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#),
-            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#),
+            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","capabilities":[]}"#),
+            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"dev","capabilities":[]}"#),
+            (debug, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#),
+            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#),
         ]
         for (target, frame) in fixtures {
             let socket = ScriptedGatewaySocket()
@@ -103,6 +103,31 @@ struct GatewayClientTransportTests {
             }
             await client.close()
         }
+    }
+
+    @Test("hello replaces the LAN endpoints and pin the profile will hold")
+    func helloCarriesLanAdvertisement() async throws {
+        let pin = Data(repeating: 7, count: 32).base64EncodedString()
+        let advertised = ScriptedGatewaySocket()
+        let advertisedClient = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: advertised).factory)
+        await advertised.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[],"lanEndpoints":[{"host":"192.168.1.24","port":9847},{"host":"bad/entry","port":9847}],"lanPin":"\#(pin)"}"#.utf8))
+
+        let identity = try await advertisedClient.connectForLifecycle(profile: profile, token: "token")
+        // One entry this phone cannot dial is dropped; the leg stays usable.
+        #expect(identity.info.lanEndpoints == [GatewayLanEndpoint(host: "192.168.1.24", port: 9_847)])
+        #expect(identity.info.lanPin == pin)
+        await advertisedClient.close()
+
+        // A Gateway that advertises no lane leaves the profile with no LAN leg
+        // rather than a stale one.
+        let silent = ScriptedGatewaySocket()
+        let silentClient = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: silent).factory)
+        await silent.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+
+        let silentIdentity = try await silentClient.connectForLifecycle(profile: profile, token: "token")
+        #expect(silentIdentity.info.lanEndpoints.isEmpty)
+        #expect(silentIdentity.info.lanPin == nil)
+        await silentClient.close()
     }
 
     @Test("always-on AppLog records repeated RPC completions at debug level")
@@ -133,6 +158,154 @@ struct GatewayClientTransportTests {
         #expect(records.count == 2)
         #expect(records.allSatisfy { $0.level == "debug" && ($0.profileID == nil || $0.profileID == "machine") })
         await client.close()
+    }
+
+    @Test("a timed-out disposable read sends a cancel frame, a mutation does not")
+    func timedOutReadSendsCancelFrame() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000012")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000013")!,
+                ]).source
+            )
+            let appLog = AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "cancel-app-log-\(UUID().uuidString).jsonl"))
+            await client.installAppLog(appLog)
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            // The Gateway never answers, so the request times out and the phone
+            // tells the Gateway to stop computing the read it abandoned.
+            let read = Task { try await client.requestValue("session.open", EmptyParams(), timeout: .seconds(30)) }
+            try await clock.expireRequest(on: socket, sentCount: 2, after: .seconds(30))
+            do {
+                _ = try await valueOfOwnedTask(read)
+                Issue.record("the abandoned read unexpectedly answered")
+            } catch let failure as GatewayPossiblySentError {
+                #expect(failure.failure.code == "possibly_sent")
+            }
+            try await socket.waitUntilSent(count: 3)
+            let cancelFrame = try #require(await socket.sentFrames().last)
+            let cancel = try #require(try JSONSerialization.jsonObject(with: cancelFrame) as? [String: Any])
+            #expect(cancel["type"] as? String == "cancel")
+            #expect(cancel["id"] as? String == "00000000-0000-0000-0000-000000000012")
+
+            // An admitted mutation keeps its owner: the phone never cancels it,
+            // whatever it does with its own wait.
+            let mutation = Task { try await client.requestValue("session.prompt", EmptyParams(), timeout: .seconds(30)) }
+            try await clock.expireRequest(on: socket, sentCount: 4, after: .seconds(30))
+            do {
+                _ = try await valueOfOwnedTask(mutation)
+                Issue.record("the abandoned mutation unexpectedly answered")
+            } catch let failure as GatewayPossiblySentError {
+                #expect(failure.failure.code == "possibly_sent")
+            }
+            await Task.yield()
+            #expect(await socket.sentFrames().count == 4)
+
+            let cancellations = await appLog.snapshot().filter { $0.event == "rpc.cancelled" }
+            #expect(cancellations.count == 1)
+            #expect(cancellations.first?.message == "session.open")
+            #expect(cancellations.first?.outcome == "cancelled")
+            #expect(cancellations.first?.level == "debug")
+            await client.close()
+        }
+    }
+
+    @Test("a shed disposable read is retried after the Gateway's hint, a mutation is not")
+    func shedReadRetriesAfterHint() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                // The connection consumes the first identity, so the shed read is
+                // the second, its retry the third and the mutation the fourth.
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000021")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000022")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000023")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000024")!,
+                ]).source
+            )
+            let appLog = AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "retry-after-app-log-\(UUID().uuidString).jsonl"))
+            await client.installAppLog(appLog)
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            // The Gateway sheds the read with a hint; the phone waits it out and
+            // asks again under a new identity.
+            let read = Task { try await client.requestValue("session.list", EmptyParams()) }
+            try await socket.waitUntilSent(count: 2)
+            await socket.enqueue(shedResponseFrame(id: "00000000-0000-0000-0000-000000000022", retryAfterMs: 1))
+            try await socket.waitUntilSent(count: 3)
+            let retry = try #require(await socket.sentFrames().last)
+            let frame = try #require(try JSONSerialization.jsonObject(with: retry) as? [String: Any])
+            #expect(frame["method"] as? String == "session.list")
+            #expect(frame["id"] as? String == "00000000-0000-0000-0000-000000000023")
+            await socket.enqueue(responseFrame(id: "00000000-0000-0000-0000-000000000023", result: .array([])))
+            _ = try await valueOfOwnedTask(read)
+
+            // An admitted mutation is never retried, even with the same hint.
+            let mutation = Task { try await client.requestValue("session.prompt", EmptyParams()) }
+            try await socket.waitUntilSent(count: 4)
+            await socket.enqueue(shedResponseFrame(id: "00000000-0000-0000-0000-000000000024", retryAfterMs: 1))
+            do {
+                _ = try await valueOfOwnedTask(mutation)
+                Issue.record("the shed mutation unexpectedly answered")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "busy")
+            }
+            await Task.yield()
+            #expect(await socket.sentFrames().count == 4)
+
+            let retries = await appLog.snapshot().filter { $0.event == "rpc.retry-after" }
+            #expect(retries.count == 1)
+            #expect(retries.first?.message == "session.list")
+            #expect(retries.first?.code == "busy")
+            #expect(retries.first?.durationMs == 1)
+            #expect(retries.first?.outcome == "retrying")
+            await client.close()
+        }
+    }
+
+    @Test("a cancel frame cannot overtake the request it cancels")
+    func cancelFrameFollowsItsRequest() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket(deliversSendsAfterCancellation: true)
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+            // The request's own write is still in flight when its wait is abandoned.
+            await socket.suspendSends()
+            let read = Task { try await client.requestValue("session.open", EmptyParams()) }
+            try await socket.waitUntilSendInvoked(count: 2)
+            read.cancel()
+            do {
+                _ = try await valueOfOwnedTask(read)
+                Issue.record("the abandoned read unexpectedly answered")
+            } catch let failure as GatewayPossiblySentError {
+                #expect(failure.failure.code == "possibly_sent")
+            }
+            // The cancel waits for that write: a frame that jumped ahead of it
+            // would name a request the Gateway never admitted and do nothing.
+            try await Task.sleep(for: .milliseconds(50))
+            #expect(await socket.sendInvocationCount() == 2)
+            await socket.releaseSend()
+            try await socket.waitUntilSent(count: 3)
+            let frames = await socket.sentFrames()
+            #expect(frames.count == 3)
+            let request = try #require(try JSONSerialization.jsonObject(with: frames[1]) as? [String: Any])
+            let cancel = try #require(try JSONSerialization.jsonObject(with: frames[2]) as? [String: Any])
+            #expect(request["method"] as? String == "session.open")
+            #expect(cancel["type"] as? String == "cancel")
+            #expect(cancel["id"] as? String == request["id"] as? String)
+            await client.close()
+        }
     }
 
     @Test("typed response decoding reports the RPC method and sanitized missing-key path")
@@ -405,8 +578,8 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("handshake timeout advances on the injected monotonic clock")
-    func virtualHandshakeTimeout() async throws {
+    @Test("the hello deadline advances on the injected monotonic clock")
+    func virtualHelloTimeout() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
             let socket = ScriptedGatewaySocket()
@@ -422,9 +595,11 @@ struct GatewayClientTransportTests {
 
             let connection = Task { try await client.connect(profile: profile, token: "token") }
             defer { connection.cancel() }
+            // This socket opens at once, so the wait the deadline owns is the
+            // hello one that follows the write.
             try await socket.waitUntilSent(count: 1)
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(15))
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.helloDeadline)
+            clock.advance(by: GatewayConnectionPolicy.helloDeadline)
 
             do {
                 _ = try await valueOfOwnedTask(connection)
@@ -543,8 +718,8 @@ struct GatewayClientTransportTests {
         await client.close()
     }
 
-    @Test("handshake deadline closes a socket stalled in hello send")
-    func stalledHelloSendIsRetiredAtDeadline() async throws {
+    @Test("a stall before the socket opens ends at the transport-open deadline")
+    func transportOpenStallIsRetiredAtItsDeadline() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
             let socket = ScriptedGatewaySocket(suspendsSend: true)
@@ -555,13 +730,64 @@ struct GatewayClientTransportTests {
             let connection = Task { try await client.connect(profile: profile, token: "token") }
             defer { connection.cancel() }
             try await socket.waitUntilSendInvoked(count: 1)
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(15))
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.transportOpenDeadline)
+            clock.advance(by: GatewayConnectionPolicy.transportOpenDeadline)
             for _ in 0..<10 { await Task.yield() }
             try await socket.waitUntilCloseInvoked()
             await socket.releaseSend()
             await #expect(throws: GatewayFailure.self) { try await valueOfOwnedTask(connection) }
             #expect(await socket.closeInvocationCount() >= 1)
+            #expect(await client.activeConnectionID() == nil)
+            await client.close()
+        }
+    }
+
+    @Test("a socket that opened but never answers hello keeps the hello deadline")
+    func slowHelloKeepsItsOwnDeadline() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock
+            )
+            let connection = Task { try await client.connect(profile: profile, token: "token") }
+            defer { connection.cancel() }
+            try await socket.waitUntilSendInvoked(count: 1)
+            // The hello write completed, so the socket is open: the pending wait
+            // is the hello bound, and the transport bound has no answer to end.
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.helloDeadline)
+            clock.advance(by: GatewayConnectionPolicy.transportOpenDeadline)
+            for _ in 0..<10 { await Task.yield() }
+            #expect(await socket.closeInvocationCount() == 0)
+            // A Mac that answers late, but inside its own bound, is admitted.
+            await socket.enqueue(helloFrame())
+            let info = try await valueOfOwnedTask(connection)
+            #expect(info.machineId == "machine")
+            await client.close()
+        }
+    }
+
+    @Test("a socket that opened and then went silent ends at the hello deadline")
+    func silentHelloEndsAtTheHelloDeadline() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock
+            )
+            let connection = Task { try await client.connect(profile: profile, token: "token") }
+            defer { connection.cancel() }
+            try await socket.waitUntilSendInvoked(count: 1)
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.helloDeadline)
+            clock.advance(by: GatewayConnectionPolicy.transportOpenDeadline)
+            for _ in 0..<10 { await Task.yield() }
+            #expect(await socket.closeInvocationCount() == 0)
+            clock.advance(by: GatewayConnectionPolicy.helloDeadline)
+            for _ in 0..<10 { await Task.yield() }
+            try await socket.waitUntilCloseInvoked()
+            await #expect(throws: GatewayFailure.self) { try await valueOfOwnedTask(connection) }
             #expect(await client.activeConnectionID() == nil)
             await client.close()
         }
@@ -575,8 +801,9 @@ struct GatewayClientTransportTests {
             let store = IOSClientDiagnosticStore(defaults: try #require(UserDefaults(suiteName: suite)))
             let clock = ManualClock()
             // A path that never reaches the Mac stalls the hello write on an
-            // unopened socket; a Mac that accepts but never answers stalls the
-            // hello read on an open one. Both time out at the same deadline.
+            // unopened socket and gives up at the transport-open bound; a Mac
+            // that accepts but never answers stalls the hello read on an open
+            // socket and gives up at the hello bound.
             let socket = opens
                 ? ScriptedGatewaySocket(metadata: .init(closeCode: nil, httpStatusCode: nil, transportOpenMilliseconds: 42))
                 : ScriptedGatewaySocket(suspendsSend: true, metadata: .init(closeCode: nil, httpStatusCode: nil, waitedForConnectivity: true))
@@ -589,8 +816,9 @@ struct GatewayClientTransportTests {
             let connection = Task { try await client.connect(profile: profile, token: "token") }
             defer { connection.cancel() }
             try await socket.waitUntilSendInvoked(count: 1)
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(15))
+            let deadline = opens ? GatewayConnectionPolicy.helloDeadline : GatewayConnectionPolicy.transportOpenDeadline
+            try await clock.waitUntilSleeping(count: 1, duration: deadline)
+            clock.advance(by: deadline)
             for _ in 0..<10 { await Task.yield() }
             try await socket.waitUntilCloseInvoked()
             if !opens { await socket.releaseSend() }
@@ -642,7 +870,65 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("handshake timeout closes before a cancellation-insensitive hello receive can finish")
+    // Failure modes (O-1 correlation key): the hello omits or mis-populates
+    // `diagnostics`; the Gateway's connectionId is missing from the success
+    // record or from later records of the same epoch; a successor epoch
+    // inherits its predecessor's Gateway ID; a hello without connectionId
+    // fails the handshake.
+    @Test("hello carries the correlation key and connection records name the Gateway connection")
+    func helloCorrelationKey() async throws {
+        try await withTestWatchdog {
+            let suite = "TronCorrelation.\(UUID())"
+            defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            let store = IOSClientDiagnosticStore(defaults: try #require(UserDefaults(suiteName: suite)))
+            let first = ScriptedGatewaySocket()
+            let second = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [first, second]).factory,
+                diagnosticStore: store
+            )
+            do {
+                await first.enqueue(helloFrame(connectionID: "gateway-connection-1"))
+                let initial = try await client.connectForLifecycle(profile: profile, token: "token")
+                #expect(try await decodedValue(in: first, index: 0).objectValue?["diagnostics"] == .object([
+                    "clientId": .string(client.diagnosticOwnerID),
+                    "attemptId": .string("initial"),
+                    "epoch": .string(String(initial.id)),
+                ]))
+                #expect(initial.gatewayConnectionID == "gateway-connection-1")
+
+                // The key is diagnostic: a Gateway that omits it still admits.
+                await second.enqueue(helloFrame())
+                let replacement = try await client.reconnectForLifecycle(
+                    profile: profile, token: "token", attemptID: "fixture-attempt"
+                )
+                #expect(try await decodedValue(in: second, index: 0).objectValue?["diagnostics"] == .object([
+                    "clientId": .string(client.diagnosticOwnerID),
+                    "attemptId": .string("fixture-attempt"),
+                    "epoch": .string(String(replacement.id)),
+                ]))
+                #expect(replacement.gatewayConnectionID == nil)
+                await client.close()
+                await store.flush()
+
+                let records = await store.load()
+                    .filter { $0.record.event == "gateway.connection" }
+                    .map(\.record.message)
+                let initialRecords = records.filter { $0.contains("connectionID=\(initial.id) ") }
+                #expect(initialRecords.contains { $0.hasPrefix("stage=hello-receive outcome=success") })
+                #expect(initialRecords.contains { $0.hasPrefix("stage=transport ") })
+                #expect(initialRecords.allSatisfy { $0.contains("gatewayConnectionId=gateway-connection-1") })
+                let replacementRecords = records.filter { $0.contains("connectionID=\(replacement.id) ") }
+                #expect(replacementRecords.contains { $0.hasPrefix("stage=hello-receive outcome=success") })
+                #expect(replacementRecords.allSatisfy { !$0.contains("gatewayConnectionId=") })
+            } catch {
+                await client.close()
+                throw error
+            }
+        }
+    }
+
+    @Test("hello deadline closes before a cancellation-insensitive hello receive can finish")
     func stalledHelloReceiveClosesBeforeLateCallback() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
@@ -654,8 +940,8 @@ struct GatewayClientTransportTests {
             let connection = Task { try await client.connect(profile: profile, token: "token") }
             defer { connection.cancel() }
             try await socket.waitUntilSendInvoked(count: 1)
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(15))
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.helloDeadline)
+            clock.advance(by: GatewayConnectionPolicy.helloDeadline)
             for _ in 0..<10 { await Task.yield() }
             try await socket.waitUntilCloseInvoked()
             await socket.enqueue(helloFrame())
@@ -940,6 +1226,107 @@ struct GatewayClientTransportTests {
             try await socket.waitUntilPingInvoked(count: 2)
             #expect(await client.info?.machineId == "machine")
             await client.close()
+        }
+    }
+
+    @Test("a pong queued behind inbound data does not retire the link")
+    func inboundDataAnswersQueuedPong() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket(suspendsPing: true)
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                let connectionID = try #require(await client.activeConnectionID())
+                var events = client.events.makeAsyncIterator()
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
+                clock.advance(by: GatewayConnectionPolicy.clientPingInterval)
+                try await socket.waitUntilPingInvoked(count: 1)
+                // The probe's own deadline must be registered before the clock
+                // moves, or the frame below lands before the probe exists.
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPongDeadline)
+
+                // A large frame is still arriving at the 8 s deadline, so this
+                // probe's pong is queued behind it; the frame reaching the app
+                // at 15 s is the same proof that the transport is alive.
+                clock.advance(by: .seconds(5))
+                await socket.enqueue(eventFrame(topic: "session.summary", payload: .object([:])))
+                #expect(await events.next()?.event.topic == "session.summary")
+                clock.advance(by: .seconds(3))
+
+                // The deadline passed in data, not in silence, so the epoch
+                // survives and waits for the next shared grid tick. The probe
+                // leaves one debug record so a run that sees no `pong_timeout`
+                // retirement can still tell the excuse path ran.
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(2))
+                #expect(await client.activeConnectionID() == connectionID)
+                #expect(await socket.pingInvocationCount() == 1)
+                let liveness = await client.diagnostics().filter { $0.stage == .liveness }
+                #expect(liveness.count == 1)
+                #expect(liveness.first?.outcome == .excused)
+                #expect(liveness.first?.reason == .pingTimeout)
+                #expect(liveness.first?.durationMilliseconds == 8_000)
+
+                clock.advance(by: .seconds(2))
+                try await socket.waitUntilPingInvoked(count: 2)
+                #expect(await client.info?.machineId == "machine")
+                await client.close()
+            } catch {
+                await client.close()
+                throw error
+            }
+        }
+    }
+
+    @Test("silence after data retires the link within eighteen seconds of the last frame")
+    func silenceAfterDataRetiresWithinBound() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket(suspendsPing: true)
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                let connectionID = try #require(await client.activeConnectionID())
+                var events = client.events.makeAsyncIterator()
+                // The first grid tick probes at 10 s even though data is
+                // arriving; the frame at 10.5 s answers that probe.
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
+                clock.advance(by: GatewayConnectionPolicy.clientPingInterval)
+                try await socket.waitUntilPingInvoked(count: 1)
+                // The probe's own deadline must be registered before the clock
+                // moves, or the frame below lands before the probe exists.
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPongDeadline)
+                clock.advance(by: .milliseconds(500))
+                await socket.enqueue(eventFrame(topic: "session.summary", payload: .object([:])))
+                #expect(await events.next()?.event.topic == "session.summary")
+                // That frame proves liveness for the first probe, so the wait
+                // re-arms at the next grid tick (20 s).
+                clock.advance(by: .milliseconds(7_500))
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(2))
+
+                // Silence from 10.5 s: no frame answers the probe at 20 s, so
+                // the link is retired at that probe's 28 s deadline, 17.5 s
+                // after the last frame and inside the 18 s bound.
+                clock.advance(by: .seconds(2))
+                try await socket.waitUntilPingInvoked(count: 2)
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPongDeadline)
+                clock.advance(by: GatewayConnectionPolicy.clientPongDeadline)
+                try await socket.waitUntilClosed()
+
+                let diagnostics = await client.diagnostics()
+                let probe = try #require(diagnostics.first { $0.stage == .liveness })
+                #expect(probe.reason == .pingTimeout)
+                #expect(probe.durationMilliseconds == 8_000)
+                let retirement = try #require(diagnostics.first { $0.stage == .transport && $0.connectionID == connectionID })
+                #expect(retirement.durationMilliseconds == 28_000)
+                #expect(retirement.reason == .pingTimeout)
+                await client.close()
+            } catch {
+                await client.close()
+                throw error
+            }
         }
     }
 
@@ -1503,6 +1890,102 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("a genuine ping failure after inbound data still retires the epoch")
+    func pingFailureAfterInboundDataStillRetires() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket(suspendsPing: true)
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                let connectionID = try #require(await client.activeConnectionID())
+                var events = client.events.makeAsyncIterator()
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
+                clock.advance(by: GatewayConnectionPolicy.clientPingInterval)
+                try await socket.waitUntilPingInvoked(count: 1)
+                // The probe's own deadline must be registered before the clock
+                // moves, or the frame below lands before the probe exists.
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPongDeadline)
+
+                // A frame arrives after the probe was sent, which is exactly
+                // the shape an excused deadline leaves behind. This probe then
+                // fails on the send path itself, so only `pong_timeout` may be
+                // excused and the epoch has to retire.
+                clock.advance(by: .seconds(3))
+                await socket.enqueue(eventFrame(topic: "session.summary", payload: .object([:])))
+                #expect(await events.next()?.event.topic == "session.summary")
+                await socket.releasePing(throwing: GatewayFailure(
+                    code: "disconnected", message: "ping failed", retryable: true, details: nil
+                ))
+
+                try await socket.waitUntilClosed()
+                #expect(await client.activeConnectionID() == nil)
+                let diagnostics = await client.diagnostics()
+                let probe = try #require(diagnostics.first { $0.stage == .liveness })
+                #expect(probe.outcome == .failure)
+                #expect(probe.reason == .transport)
+                #expect(!diagnostics.contains { $0.stage == .liveness && $0.outcome == .excused })
+                let retirement = try #require(diagnostics.first { $0.stage == .transport && $0.connectionID == connectionID })
+                #expect(retirement.reason == .transport)
+                await client.close()
+            } catch {
+                await client.close()
+                throw error
+            }
+        }
+    }
+
+    @Test("a late clock wake excuses a probe the frame answered and returns to the shared grid")
+    func lateClockWakeProbesOnce() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket(suspendsPing: true)
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                let connectionID = try #require(await client.activeConnectionID())
+                var events = client.events.makeAsyncIterator()
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
+
+                // A suspension wakes the sleep 50 s late. That wakeup owes one
+                // probe, and the next one is the next grid tick (70 s), not one
+                // per missed interval.
+                clock.advance(by: .seconds(60))
+                try await socket.waitUntilPingInvoked(count: 1)
+                // The probe's own deadline must be registered before the clock
+                // moves, or the frame below lands before the probe exists.
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPongDeadline)
+
+                // The probe's pong is queued behind a frame still arriving at
+                // the deadline, so the late wake excuses the probe instead of
+                // retiring a link that is carrying data.
+                clock.advance(by: .seconds(3))
+                await socket.enqueue(eventFrame(topic: "session.summary", payload: .object([:])))
+                #expect(await events.next()?.event.topic == "session.summary")
+                clock.advance(by: .seconds(5))
+
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(2))
+                #expect(await socket.pingInvocationCount() == 1)
+                #expect(await client.activeConnectionID() == connectionID)
+                let liveness = await client.diagnostics().filter { $0.stage == .liveness }
+                #expect(liveness.count == 1)
+                #expect(liveness.first?.outcome == .excused)
+
+                // The next probe is the next grid tick (70 s), and the wait
+                // stops owing probes for the intervals the suspension skipped.
+                clock.advance(by: .seconds(2))
+                try await socket.waitUntilPingInvoked(count: 2)
+                #expect(await client.info?.machineId == "machine")
+                await client.close()
+            } catch {
+                await client.close()
+                throw error
+            }
+        }
+    }
+
     @Test("session list request records bounded RPC outcome with request correlation")
     func sessionListRequestRecordsRPCDiagnostic() async throws {
         try await withTestWatchdog {
@@ -1530,6 +2013,7 @@ struct GatewayClientTransportTests {
                     result: .object([
                         "sessions": .array([]),
                         "listRevision": .number(1),
+                        "projectionToken": .string("epoch-1:1"),
                     ])
                 ))
                 _ = try await valueOfOwnedTask(request)
@@ -1613,8 +2097,25 @@ struct GatewayClientTransportTests {
         return try JSONDecoder.gateway.decode(JSONValue.self, from: frames[index])
     }
 
-    private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+    private func helloFrame(connectionID: String? = nil) -> Data {
+        let connection = connectionID.map { #","connectionId":"\#($0)""# } ?? ""
+        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]\#(connection)}"#.utf8)
+    }
+
+    /// The Gateway's own `busy` answer for a shed read (`G-12`), with the retry
+    /// hint the phone is expected to honour.
+    private func shedResponseFrame(id: String, retryAfterMs: Int) -> Data {
+        try! JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"),
+            "id": .string(id),
+            "ok": .bool(false),
+            "error": .object([
+                "code": .string("busy"),
+                "message": .string("session.list did not answer within 5000ms"),
+                "retryable": .bool(true),
+                "details": .object(["retryAfterMs": .number(Double(retryAfterMs))]),
+            ]),
+        ]))
     }
 
     private func responseFrame(id: String, result: JSONValue) -> Data {

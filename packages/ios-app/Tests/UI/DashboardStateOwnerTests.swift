@@ -171,14 +171,14 @@ struct DashboardStateOwnerTests {
         ) == Set([secondRemote.id]))
 
         let matchingInfo = GatewayInfo(
-            gatewayVersion: "1", piVersion: "1", protocolVersion: 5, minProtocolVersion: 5,
+            gatewayVersion: "1", piVersion: "1", protocolVersion: 6, minProtocolVersion: 6,
             machineId: other.machineId, machineGroupID: other.machineGroupID,
             machineName: "Other", capabilities: []
         )
         #expect(DashboardGatewayConnectionPool.admitsIdentity(matchingInfo, for: other))
         #expect(!DashboardGatewayConnectionPool.admitsIdentity(
             GatewayInfo(
-                gatewayVersion: "1", piVersion: "1", protocolVersion: 5, minProtocolVersion: 5,
+                gatewayVersion: "1", piVersion: "1", protocolVersion: 6, minProtocolVersion: 6,
                 machineId: "wrong", machineGroupID: other.machineGroupID,
                 machineName: "Other", capabilities: []
             ),
@@ -203,7 +203,7 @@ struct DashboardStateOwnerTests {
             let pool = DashboardGatewayConnectionPool(clientFactory: {
                 GatewayClient(socketFactory: socketFactory.factory)
             })
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
 
             pool.reconcile(
                 profiles: [selected, remote],
@@ -244,6 +244,77 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
+    @Test("a refreshed LAN advertisement does not restart a background connection")
+    func lanAdvertisementDoesNotRestartPoolEntry() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            var advertised = remote
+            advertised.lanEndpoints = [try #require(GatewayLanEndpoint(host: "fd00::4", port: 9_847))]
+            advertised.lanPin = "JEmgCK6cjn6zQe6FLvuOu2GErCFbEldD4cViMU8odVc="
+            let relocated = GatewayProfile(
+                id: advertised.id, label: advertised.label, host: "moved.test", port: advertised.port,
+                machineId: advertised.machineId, machineGroupID: advertised.machineGroupID,
+                deviceId: advertised.deviceId, isEnabled: advertised.isEnabled,
+                lanEndpoints: advertised.lanEndpoints, lanPin: advertised.lanPin
+            )
+
+            let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+            let socketFactory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let pool = DashboardGatewayConnectionPool(clientFactory: {
+                GatewayClient(socketFactory: socketFactory.factory)
+            })
+            await sockets[0].enqueue(Self.remoteHelloFrame())
+            await sockets[1].enqueue(Self.remoteHelloFrame())
+
+            pool.reconcile(
+                profiles: [selected, remote],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            // The hello reply satisfies the handshake and the catalog read that
+            // follows it: the entry is connected and holds no connection of its
+            // own to replace.
+            try await sockets[0].waitUntilSent(count: 2)
+
+            // E-3b replaces the advertisement on every hello of the focused
+            // connection. A background entry dials the saved endpoint, so a
+            // newer advertisement must not cost it a reconnect.
+            pool.reconcile(
+                profiles: [selected, advertised],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            for _ in 0..<20 { await Task.yield() }
+            try await Task.sleep(for: .milliseconds(20))
+            #expect(socketFactory.requests.count == 1)
+            #expect(!(await sockets[0].closed()))
+
+            // What an entry does depend on still restarts it.
+            pool.reconcile(
+                profiles: [selected, relocated],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            try await sockets[1].waitUntilSent(count: 1)
+            #expect(socketFactory.requests.count == 2)
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    private static func remoteHelloFrame() -> Data {
+        Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+    }
+
+    @MainActor
     @Test("secondary catalog retries past warning threshold without another invalidation")
     func secondaryCatalogRetryConvergesWithoutInvalidation() async throws {
         try await withTestWatchdog { @MainActor in
@@ -264,7 +335,7 @@ struct DashboardStateOwnerTests {
                 clock: clock.clock
             )
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -328,7 +399,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -409,7 +480,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -486,7 +557,7 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: socketFactory.factory) }
             )
             pool.delegate = recorder
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await oldSocket.enqueue(hello)
             pool.reconcile(
                 profiles: [selected, remote], selectedProfileID: selected.id,
@@ -524,6 +595,76 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
+    @Test("a secondary reconnect answered unchanged republishes its catalog authority")
+    func secondaryReconnectUnchangedRepublishesAuthority() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let oldSocket = ScriptedGatewaySocket()
+            let replacement = ScriptedGatewaySocket()
+            let socketFactory = ScriptedGatewaySocketFactory(sockets: [oldSocket, replacement])
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: socketFactory.factory) }
+            )
+            pool.delegate = recorder
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            await oldSocket.enqueue(hello)
+            pool.reconcile(
+                profiles: [selected, remote], selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            try await oldSocket.waitUntilSent(count: 2)
+            let initial = try Self.requestFrame(await oldSocket.sentFrames()[1])
+            await oldSocket.enqueue(Self.catalogResponse(
+                id: initial.id, sessions: [summary(revision: 1)], listRevision: 1,
+                projectionToken: "epoch-one:1"
+            ))
+            try await Self.waitUntil {
+                recorder.updates.last?.sessions.first?.summaryRevision == 1
+                    && recorder.updates.last?.state == .connected
+            }
+
+            // The epoch retires. The profile leaves the dashboard and the
+            // container can no longer read its rows, which the pool reports as
+            // an authoritative-catalog change.
+            await replacement.enqueue(hello)
+            await oldSocket.enqueue(Self.stoppingEvent())
+
+            // The replacement connection names the retained token, and the
+            // Gateway answers unchanged: no rows, no new membership. The rows
+            // stay exactly as they were, but the state and the container's
+            // authority must still be republished for this replacement epoch.
+            try await replacement.waitUntilSent(count: 2)
+            let publicationsAfterRetirement = recorder.authoritativeCatalogPublications.count
+            let reconnectedFrame = try JSONDecoder.gateway.decode(
+                JSONValue.self, from: await replacement.sentFrames()[1]
+            ).objectValue
+            #expect(reconnectedFrame?["method"]?.stringValue == "session.list")
+            #expect(reconnectedFrame?["params"]?.objectValue?["projectionToken"]?.stringValue == "epoch-one:1")
+            let reconnectedID = try #require(reconnectedFrame?["id"]?.stringValue)
+            await replacement.enqueue(Self.catalogResponse(
+                id: reconnectedID, sessions: [], listRevision: 1,
+                projectionToken: "epoch-one:1", notModified: true
+            ))
+            try await Self.waitUntil {
+                recorder.authoritativeCatalogPublications.count > publicationsAfterRetirement
+                    && recorder.updates.last?.state == .connected
+            }
+            #expect(recorder.updates.last?.sessions.first?.summaryRevision == 1)
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
     @Test("a dashboard connection retries transient failures past the removed attempt allowance")
     func secondaryReconnectHasNoAttemptBudget() async throws {
         try await withTestWatchdog { @MainActor in
@@ -536,18 +677,86 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
                 clock: clock.clock
             )
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await sockets[11].enqueue(hello)
+            for socket in sockets[0...10] {
+                await socket.failNextSend(GatewayFailure(
+                    code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+                ))
+            }
             pool.reconcile(profiles: [remote], selectedProfileID: nil, token: { _ in "fixture" })
-            for index in 0...10 {
-                try await sockets[index].waitUntilSent(count: 1)
-                await sockets[index].failPendingReceivers(URLError(.networkConnectionLost))
-                try await sockets[index].waitUntilClosed()
-                try await clock.waitUntilSleeping(count: 1)
-                clock.advance(by: .seconds(60))
+            // Twelve attempts, each served by the pump's clock: this profile is
+            // unreachable after three of them, so the waits escalate to the
+            // pool's five-minute cap, and the twelfth still connects. No attempt
+            // allowance stops the retries.
+            for attempt in 1...12 {
+                _ = try await Self.secondsUntilRequest(
+                    attempt, clock: clock, factory: factory, limit: 320
+                )
             }
             try await sockets[11].waitUntilSent(count: 2)
             #expect(factory.requests.count == 12)
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a reconnect after a failed initial connect reads the live socket's events")
+    func failedInitialConnectReconnectConsumesEvents() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            // The first socket fails its hello, so the initial connect fails and
+            // the entry's task ends in that failure branch without ever reading
+            // the event stream. The next socket completes a handshake, so the
+            // entry is live again: its live socket's events have to be read by
+            // somebody, or `session.summary`, `system.stopping` and
+            // `transport.disconnected` are delivered to nobody.
+            let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            pool.delegate = recorder
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            await sockets[0].failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+            ))
+            await sockets[1].enqueue(hello)
+            await sockets[2].enqueue(hello)
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+
+            // Attempt 1 fails; the wait that follows ends on the manual clock
+            // and attempt 2 connects on the second socket.
+            _ = try await Self.secondsUntilRequest(1, clock: clock, factory: factory, limit: 40)
+            _ = try await Self.secondsUntilRequest(2, clock: clock, factory: factory, limit: 40)
+            try await sockets[1].waitUntilSent(count: 2)
+            let catalog = try Self.requestFrame(await sockets[1].sentFrames()[1])
+            await sockets[1].enqueue(Self.catalogResponse(
+                id: catalog.id, sessions: [summary(revision: 1)], listRevision: 1
+            ))
+            try await recorder.waitForState(.connected, profileID: profile.id)
+            #expect(recorder.updates.last?.sessions.first?.summaryRevision == 1)
+
+            // The reconnected socket's live summaries reach the dashboard.
+            await sockets[1].enqueue(Self.summaryEvent(revision: 2, phase: .running))
+            try await Self.waitUntil {
+                recorder.updates.last?.sessions.first?.summaryRevision == 2
+            }
+
+            // Its control events reach it too: a Gateway restart retires the
+            // live epoch and reconnects at once, which a socket nobody reads
+            // never does.
+            await sockets[1].enqueue(Self.stoppingEvent())
+            _ = try await Self.secondsUntilRequest(3, clock: clock, factory: factory, limit: 40)
+            #expect(factory.requests.count == 3)
+
             pool.retire()
             await pool.waitForRetirement()
         }
@@ -584,6 +793,550 @@ struct DashboardStateOwnerTests {
             pool.notePathHint(profileID: profile.id, satisfied: true)
             try await sockets[1].waitUntilSent(count: 1)
             #expect(factory.requests.count == 2)
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("an unreachable secondary profile backs off to one attempt per five minutes")
+    func unreachableSecondaryProfileBacksOff() async throws {
+        try await withTestWatchdog(timeout: .seconds(30)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            // Every attempt gets a socket whose hello write fails: the shape of a
+            // Mac that is not listening on that port.
+            let sockets = (0..<12).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            pool.delegate = recorder
+            for socket in sockets {
+                await socket.failNextSend(GatewayFailure(
+                    code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+                ))
+            }
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+
+            // Attempt 1 is the initial connect. Each later attempt is one socket
+            // from the factory, so the seconds the pump spends waiting for it are
+            // the wait the entry served before that attempt.
+            var waits: [Int] = []
+            for attempt in 1...9 {
+                waits.append(try await Self.secondsUntilRequest(
+                    attempt, clock: clock, factory: factory, limit: 320
+                ))
+            }
+            #expect(waits[0] <= 3, "waits: \(waits)")
+            // Below the unreachable threshold the entry keeps the standard
+            // progression (2 s, then ×1.7), so a blip is retried promptly
+            // without the wait being pinned at the base interval.
+            #expect(waits[1] <= 2, "waits: \(waits)")
+            #expect(waits[2] > waits[1], "waits: \(waits)")
+            #expect(waits[2] <= 6, "waits: \(waits)")
+            // The third consecutive failed attempt marks the profile
+            // unreachable: every wait after it is longer than the one before it,
+            // until the curve reaches `POOL_MAX_RETRY`.
+            for index in 3...6 {
+                #expect(waits[index] > waits[index - 1], "waits: \(waits)")
+            }
+            // Backed off: one attempt per `POOL_MAX_RETRY`, never faster.
+            for wait in waits[6...] {
+                #expect(wait >= 300, "a backed-off wait was \(wait) s: \(waits)")
+            }
+            // Nine attempts over about twenty simulated minutes; the standard
+            // 15-second curve would have made roughly seventy in that window.
+            #expect(waits.reduce(0, +) > 1_000, "waits: \(waits)")
+
+            // The profile the user sees is unreachable, not merely reconnecting.
+            let states = recorder.updates.filter { $0.profileID == profile.id }.map(\.state)
+            #expect(states.contains { $0.label.hasPrefix("No path to this Mac") })
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a parked unreachable retry resumes on path return and a retired profile reconnects at once")
+    func unreachableSecondaryProfileRetriesAtOnce() async throws {
+        try await withTestWatchdog { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let sockets = (0..<8).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            for socket in sockets {
+                await socket.failNextSend(GatewayFailure(
+                    code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+                ))
+            }
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            _ = try await Self.secondsUntilRequest(1, clock: clock, factory: factory, limit: 40)
+            // Let the curve escalate, so the parked wait is a long one.
+            for attempt in 1...4 {
+                _ = try await Self.secondsUntilRequest(
+                    attempt + 1, clock: clock, factory: factory, limit: 320
+                )
+            }
+            #expect(factory.requests.count == 5)
+            try await Task.sleep(for: .milliseconds(20))
+
+            // The network goes away and comes back. The unsatisfied hint parks
+            // the escalated wait; the return hint is a real path change, so it
+            // starts the next attempt at once, without advancing the clock
+            // through it.
+            try await clock.waitUntilSleeping(count: 1)
+            pool.notePathHint(profileID: profile.id, satisfied: false)
+            pool.notePathHint(profileID: profile.id, satisfied: true)
+            try await Self.waitUntil { factory.requests.count == 6 }
+            try await Task.sleep(for: .milliseconds(20))
+
+            // Scene retirement parks recovery and removes every entry, so the
+            // next foreground reconcile starts them again and connects at once.
+            pool.retire()
+            await pool.waitForRetirement()
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            try await Self.waitUntil { factory.requests.count == 7 }
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a lost network parks a pool retry and the path return resumes it")
+    func lostNetworkParksPoolRetryUntilPathReturns() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let sockets = (0..<4).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let (log, cleanup) = Self.makeAppLog()
+            defer { cleanup() }
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock,
+                appLog: log
+            )
+            await sockets[0].failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+            ))
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            _ = try await Self.waitForRecords(log, event: "gateway.attempt", count: 1)
+
+            // Attempt 2 is in flight — its transport opened and its hello was
+            // sent, so the entry holds no wait to cancel — when the network goes
+            // away. Nothing cancels the retry attempt 2 is about to schedule.
+            _ = try await Self.secondsUntilRequest(2, clock: clock, factory: factory, limit: 40)
+            try await sockets[1].waitUntilSent(count: 1)
+            pool.notePathHint(profileID: profile.id, satisfied: false)
+
+            // Attempt 2 ends on the handshake deadline, and its wait runs out
+            // while the network is still gone.
+            var ticks = 0
+            while await Self.recordCount(log, event: "gateway.attempt") < 2, ticks < 40 {
+                clock.advance(by: .seconds(1))
+                ticks += 1
+                for _ in 0..<8 { await Task.yield() }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            #expect(ticks < 40, "attempt 2 never finished")
+            for _ in 0..<10 {
+                clock.advance(by: .seconds(1))
+                for _ in 0..<8 { await Task.yield() }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            #expect(factory.requests.count == 2, "no attempt may start with the path gone")
+
+            // The parked entry is named as such: the watchdog must not read a
+            // returned loop's task as recovery still progressing.
+            for _ in 0..<30 {
+                clock.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+                for _ in 0..<8 { await Task.yield() }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            let stalls = try await Self.waitForRecords(log, event: "reconnect.stalled", count: 1)
+            #expect(stalls.count == 1, "the parked entry must be named once")
+            #expect(
+                stalls.first?.message.contains("guard=pathUnsatisfied") == true,
+                "stalls: \(stalls.map(\.message))"
+            )
+
+            // A real path return retries at once, without advancing the clock.
+            pool.notePathHint(profileID: profile.id, satisfied: true)
+            try await Self.waitUntil { factory.requests.count == 3 }
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a repeated satisfied path notice does not cut a pool profile's escalated backoff")
+    func satisfiedPathNoticeDoesNotCutPoolBackoff() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let sockets = (0..<8).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            for socket in sockets {
+                await socket.failNextSend(GatewayFailure(
+                    code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+                ))
+            }
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            _ = try await Self.secondsUntilRequest(1, clock: clock, factory: factory, limit: 40)
+            for attempt in 1...4 {
+                _ = try await Self.secondsUntilRequest(
+                    attempt + 1, clock: clock, factory: factory, limit: 320
+                )
+            }
+            #expect(factory.requests.count == 5)
+            try await Task.sleep(for: .milliseconds(20))
+            try await clock.waitUntilSleeping(count: 1)
+
+            // A scene activation, and every network-monitor update while the
+            // path is available, arrives as a satisfied notice on an unchanged
+            // path. The escalated wait it did not change must stand: pumping the
+            // clock through the next ten seconds may not produce an attempt.
+            pool.notePathHint(profileID: profile.id, satisfied: true)
+            for _ in 0..<10 {
+                clock.advance(by: .seconds(1))
+                for _ in 0..<8 { await Task.yield() }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            #expect(factory.requests.count == 5, "the backoff was cut short")
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a pool profile that dropped after connecting keeps backing off")
+    func secondaryDropThenClosedPortKeepsBackingOff() async throws {
+        try await withTestWatchdog(timeout: .seconds(30)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            // The first socket completes a handshake, so the entry connects;
+            // every socket after the drop is a closed port. The dashboard's
+            // no-path classifier stops counting never-opened attempts as soon as
+            // one attempt of the outage opened a transport, so the retry curve
+            // may not read that counter.
+            let sockets = (0..<9).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            await sockets[0].enqueue(hello)
+            for socket in sockets[1...] {
+                await socket.failNextSend(GatewayFailure(
+                    code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+                ))
+            }
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            try await sockets[0].waitUntilSent(count: 2)
+
+            // The admitted connection drops — the client's own receive failure
+            // creates the disconnect event, as a real transport loss does — and
+            // the port stays closed.
+            await sockets[0].failPendingReceivers(URLError(.networkConnectionLost))
+            try await Self.waitUntil { pool.state(for: profile.id) == .reconnecting }
+            #expect(factory.requests.count == 1)
+
+            // Attempt 1 already happened; each later attempt is one socket from
+            // the factory, so the seconds the pump spends waiting for it are the
+            // wait the entry served before that attempt.
+            var waits: [Int] = []
+            for attempt in 2...9 {
+                waits.append(try await Self.secondsUntilRequest(
+                    attempt, clock: clock, factory: factory, limit: 320
+                ))
+            }
+            // The standard progression runs up to the threshold, so the drop
+            // itself never pins the wait at the base interval: only the first
+            // retry may still be the base interval.
+            #expect(waits.dropFirst().filter { $0 <= 3 }.count <= 1, "waits: \(waits)")
+            // The wait grows past the standard cap and then escalates.
+            for index in 3...5 {
+                #expect(waits[index] > waits[index - 1], "waits: \(waits)")
+            }
+            #expect(waits.last! >= 300, "waits: \(waits)")
+            // A Mac that went to sleep settles at one attempt per five minutes.
+            for wait in waits[6...] {
+                #expect(wait >= 300, "waits: \(waits)")
+            }
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a pool profile whose transports open but never answer hello keeps backing off")
+    func handshakeFailuresBackOffWithoutPinning() async throws {
+        try await withTestWatchdog(timeout: .seconds(30)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            // Every socket opens and swallows the hello, so each attempt ends on
+            // the shared 15-second handshake deadline. That diagnostic records an
+            // opened transport, which is the other shape C-5 let wait two
+            // seconds for ever.
+            let sockets = (0..<6).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+
+            var waits: [Int] = []
+            for attempt in 1...6 {
+                waits.append(try await Self.secondsUntilRequest(
+                    attempt, clock: clock, factory: factory, limit: 320
+                ))
+            }
+            #expect(waits[0] <= 2, "waits: \(waits)")
+            // Each measurement starts when the previous attempt started, and
+            // every entry costs the handshake deadline, so the wait the entry
+            // served is the measured value minus that deadline. A two-second pin
+            // would leave every one of them at two seconds.
+            let servedWaits = waits.dropFirst().map { $0 - 15 }
+            #expect(servedWaits.first! <= 3, "waits: \(waits)")
+            for index in 2..<servedWaits.count {
+                #expect(servedWaits[index] > servedWaits[index - 1], "waits: \(waits)")
+            }
+            #expect(servedWaits.last! >= 80, "waits: \(waits)")
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a pool profile the Gateway answers with 503 keeps backing off")
+    func busyUpgradeFailuresBackOffWithoutPinning() async throws {
+        try await withTestWatchdog(timeout: .seconds(30)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            // Every socket is admitted, sends its hello, and then answers the
+            // upgrade with 503: the attempt fails as `busy` after the transport
+            // opened, which is the third shape C-5 pinned at two seconds.
+            let sockets = (0..<6).map { _ in
+                ScriptedGatewaySocket(metadata: .init(closeCode: nil, httpStatusCode: 503))
+            }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            for socket in sockets {
+                await socket.failPendingReceivers(URLError(.badServerResponse))
+            }
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+
+            var waits: [Int] = []
+            for attempt in 1...6 {
+                waits.append(try await Self.secondsUntilRequest(
+                    attempt, clock: clock, factory: factory, limit: 320
+                ))
+            }
+            #expect(waits[0] <= 2, "waits: \(waits)")
+            // A two-second pin would leave every later wait at the base
+            // interval; the curve has to grow past it and escalate.
+            #expect(waits.dropFirst().filter { $0 <= 3 }.count <= 1, "waits: \(waits)")
+            #expect(waits.last! >= 80, "waits: \(waits)")
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a pool profile's attempts and episodes are recorded once per outage")
+    func poolAttemptsAndEpisodesAreRecorded() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let failing = ScriptedGatewaySocket()
+            let connecting = ScriptedGatewaySocket()
+            let factory = ScriptedGatewaySocketFactory(sockets: [failing, connecting])
+            let clock = ManualClock()
+            let (log, cleanup) = Self.makeAppLog()
+            defer { cleanup() }
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock,
+                appLog: log
+            )
+            pool.delegate = recorder
+            await failing.failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+            ))
+            await connecting.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","connectionId":"5bf6a9a2-0000-4000-8000-0000000000c5","capabilities":[]}"#.utf8))
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+
+            let failed = try await Self.waitForRecords(log, event: "gateway.attempt", count: 1)
+            #expect(failed[0].profileID == profile.id)
+            #expect(failed[0].outcome == "failure")
+            #expect(failed[0].message.contains("profile=\(profile.id)"))
+            #expect(failed[0].message.contains("owner=pool"))
+            #expect(failed[0].message.contains("attemptId=initial"))
+            #expect(failed[0].message.contains("stageReached=transport-open"))
+            #expect(failed[0].message.contains("reason=timeout"))
+            #expect(failed[0].message.contains("foreground=true"))
+
+            // The retry opens the replacement connection and closes the outage.
+            clock.advance(by: .seconds(3))
+            let attempts = try await Self.waitForRecords(log, event: "gateway.attempt", count: 2)
+            #expect(attempts[1].outcome == "success")
+            #expect(attempts[1].message.contains("stageReached=connected"))
+            #expect(attempts[1].message.contains("delayBeforeMs=3000"))
+            #expect(attempts[1].message.contains("gatewayConnectionId=5bf6a9a2-0000-4000-8000-0000000000c5"))
+            let episodes = try await Self.waitForRecords(log, event: "connection.episode", count: 1)
+            #expect(episodes[0].profileID == profile.id)
+            #expect(episodes[0].outcome == "connected")
+            #expect(episodes[0].message.contains("attempts=2"))
+            #expect(episodes[0].message.contains("causes=timeout"))
+            #expect(episodes[0].message.contains("endedBy=connected"))
+            #expect(episodes[0].message.contains("foregroundMs=3000"))
+            #expect(episodes[0].message.contains("maxGapBetweenAttemptsMs=3000"))
+
+            // Answer the catalog read so the only remaining work is the drop.
+            try await connecting.waitUntilSent(count: 2)
+            let catalog = try Self.requestFrame(await connecting.sentFrames()[1])
+            #expect(catalog.method == "session.list")
+            await connecting.enqueue(Self.catalogResponse(
+                id: catalog.id, sessions: [summary(revision: 1)], listRevision: 1
+            ))
+            for _ in 0..<200 where pool.state(for: profile.id) != .connected {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let state = pool.state(for: profile.id)
+            let frames = await connecting.sentFrames().count
+            #expect(state == .connected, "state was \(String(describing: state)) with \(frames) frames sent")
+            #expect(await Self.recordCount(log, event: "connection.episode") == 1)
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test(
+        "retiring the pool names why the open episode ended",
+        arguments: [(GatewayEpisodeEnd.background, "endedBy=background"), (.stopped, "endedBy=stopped")]
+    )
+    func retiringPoolNamesItsEndedBy(endedBy: GatewayEpisodeEnd, expected: String) async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let failing = ScriptedGatewaySocket()
+            let factory = ScriptedGatewaySocketFactory(sockets: [failing, ScriptedGatewaySocket()])
+            let clock = ManualClock()
+            let (log, cleanup) = Self.makeAppLog()
+            defer { cleanup() }
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock,
+                appLog: log
+            )
+            await failing.failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+            ))
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            _ = try await Self.waitForRecords(log, event: "gateway.attempt", count: 1)
+
+            // Scene retirement parks every pool entry while a projection
+            // retirement (a profile switch, removal, pairing or teardown) stops
+            // it; the episode it was explaining ends for that reason.
+            pool.retire(endedBy: endedBy)
+            await pool.waitForRetirement()
+            let episodes = try await Self.waitForRecords(log, event: "connection.episode", count: 1)
+            #expect(episodes[0].profileID == profile.id)
+            #expect(episodes[0].outcome == endedBy.rawValue)
+            #expect(episodes[0].message.contains(expected))
+            #expect(episodes[0].message.contains("attempts=1"))
+            #expect(episodes[0].message.contains("causes=timeout"))
+        }
+    }
+
+    @MainActor
+    @Test("a parked pool entry names the guard that is holding its recovery")
+    func parkedPoolEntryNamesItsStallGuard() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let (log, cleanup) = Self.makeAppLog()
+            defer { cleanup() }
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock,
+                appLog: log
+            )
+            await sockets[0].failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+            ))
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            _ = try await Self.waitForRecords(log, event: "gateway.attempt", count: 1)
+
+            // The path is gone while the entry has an outage to explain: the
+            // watchdog must name that, not report a generic silent gap.
+            pool.notePathHint(profileID: profile.id, satisfied: false)
+            for _ in 0..<30 {
+                clock.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+                for _ in 0..<8 { await Task.yield() }
+                _ = try? await Task.sleep(for: .milliseconds(1))
+            }
+            let stalls = try await Self.waitForRecords(log, event: "reconnect.stalled", count: 1)
+            #expect(stalls[0].profileID == profile.id)
+            #expect(stalls[0].message.contains("guard=pathUnsatisfied"))
+            #expect(await Self.recordCount(log, event: "reconnect.stalled") == 1)
+
             pool.retire()
             await pool.waitForRetirement()
         }
@@ -637,8 +1390,8 @@ struct DashboardStateOwnerTests {
             let pool = DashboardGatewayConnectionPool(clientFactory: {
                 GatewayClient(socketFactory: factory.factory)
             })
-            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
-            let helloB = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine-b","machineGroupID":"group-b","machineName":"B","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let helloB = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-b","machineGroupID":"group-b","machineName":"B","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await aOld.enqueue(helloA)
             pool.reconcile(profiles: [profileA], selectedProfileID: nil, token: { _ in "token-a" })
             try await aOld.waitUntilSent(count: 2)
@@ -679,7 +1432,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
             }
             let ownedClients = clients
-            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             // Give the second injected client unsettled physical close work so
             // the two retirement boundaries can be released independently.
             await second.enqueue(helloA)
@@ -766,14 +1519,21 @@ struct DashboardStateOwnerTests {
         id: String,
         sessions: [SessionSummary],
         listRevision: Int,
+        projectionToken: String? = nil,
         nextCursor: String? = nil,
-        archivedCount: Int? = nil
+        archivedCount: Int? = nil,
+        notModified: Bool = false
     ) -> Data {
         let encoded = try! JSONEncoder.gateway.encode(sessions)
         let rawSessions = try! JSONSerialization.jsonObject(with: encoded)
-        var result: [String: Any] = ["sessions": rawSessions, "listRevision": listRevision]
+        var result: [String: Any] = [
+            "sessions": rawSessions,
+            "listRevision": listRevision,
+            "projectionToken": projectionToken ?? "epoch-1:\(listRevision)",
+        ]
         if let nextCursor { result["nextCursor"] = nextCursor }
         if let archivedCount { result["archivedCount"] = archivedCount }
+        if notModified { result["notModified"] = true }
         return try! JSONSerialization.data(withJSONObject: [
             "type": "response", "id": id, "ok": true, "result": result,
         ])
@@ -819,6 +1579,59 @@ struct DashboardStateOwnerTests {
             }
             try await Task.sleep(for: .milliseconds(1))
         }
+    }
+
+    /// Advances the pool's clock one second at a time until the factory has
+    /// served `target` connections, returning how many seconds that took. Each
+    /// pool attempt opens one socket, so the result is the wait the entry served
+    /// before that attempt.
+    @MainActor
+    private static func secondsUntilRequest(
+        _ target: Int,
+        clock: ManualClock,
+        factory: ScriptedGatewaySocketFactory,
+        limit: Int
+    ) async throws -> Int {
+        var elapsed = 0
+        while factory.requests.count < target {
+            guard elapsed < limit else {
+                throw GatewayFailure(
+                    code: "timeout", message: "attempt \(target) never arrived",
+                    retryable: true, details: nil
+                )
+            }
+            clock.advance(by: .seconds(1))
+            elapsed += 1
+            for _ in 0..<8 { await Task.yield() }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        return elapsed
+    }
+
+    private static func makeAppLog() -> (AppLog, () -> Void) {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "dashboard-pool-records-\(UUID().uuidString).jsonl")
+        let cleanup = {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: url.appendingPathExtension("1"))
+        }
+        return (AppLog(fileURL: url), cleanup)
+    }
+
+    private static func recordCount(_ log: AppLog, event: String) async -> Int {
+        await log.snapshot().filter { $0.event == event }.count
+    }
+
+    private static func waitForRecords(
+        _ log: AppLog, event: String, count: Int
+    ) async throws -> [AppLogRecord] {
+        for _ in 0..<600 {
+            let values = await log.snapshot().filter { $0.event == event }
+            if values.count >= count { return values }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("timed out waiting for \(count) \(event) record(s)")
+        return await log.snapshot().filter { $0.event == event }
     }
 
     @Test("server filter defaults to all and preserves explicit selections")
@@ -945,8 +1758,8 @@ struct DashboardStateOwnerTests {
         var owner = SessionCatalogCoordinator()
         let first = owner.beginLoad()
         let second = owner.beginLoad()
-        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first)
-        let secondPublished = owner.publishAuthoritative([summary(revision: 2)], admission: second)
+        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, projectionToken: "epoch-1:1")
+        let secondPublished = owner.publishAuthoritative([summary(revision: 2)], admission: second, projectionToken: "epoch-1:1")
         #expect(!firstPublished)
         #expect(secondPublished)
         #expect(owner.sessions.first?.summaryRevision == 2)
@@ -971,11 +1784,41 @@ struct DashboardStateOwnerTests {
         #expect(owner.admits(replacement, key: replacementKey))
     }
 
+    @Test("a retained projection token survives a reconnect and drops on a profile switch")
+    func projectionTokenScope() {
+        var owner = SessionCatalogCoordinator()
+        let load = owner.beginLoad()
+        let published = owner.publishAuthoritative(
+            [summary(revision: 1)],
+            admission: load,
+            projectionToken: "gateway-epoch:4:0:user:exclude:0"
+        )
+        #expect(published)
+        #expect(owner.projectionToken == "gateway-epoch:4:0:user:exclude:0")
+
+        // The token carries the Gateway runtime epoch, so a replacement
+        // connection can revalidate the held rows instead of reloading them.
+        owner.markDisconnected()
+        #expect(owner.projectionToken == "gateway-epoch:4:0:user:exclude:0")
+        let reconnect = owner.beginLoad(key: SessionCatalogLoadKey(
+            profileID: "remote", lifecycleGeneration: 2, connectionID: 9
+        ))
+        let confirmed = owner.confirmUnchanged(admission: reconnect)
+        #expect(confirmed)
+        #expect(owner.freshness == .live)
+        #expect(owner.sessions.map(\.id) == ["session"])
+
+        // A profile switch retires the projection, so its rows can never be
+        // claimed against another Gateway's catalog.
+        owner.invalidateLoads()
+        #expect(owner.projectionToken == nil)
+    }
+
     @Test("newer live summaries survive an older authoritative catalog page")
     func liveSummaryOverlay() {
         var owner = SessionCatalogCoordinator()
         let first = owner.beginLoad()
-        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first)
+        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, projectionToken: "epoch-1:1")
         let updated = owner.apply(update(
             revision: 3,
             phase: .running,
@@ -989,7 +1832,7 @@ struct DashboardStateOwnerTests {
         #expect(stale == .stale)
 
         let refresh = owner.beginLoad()
-        let refreshed = owner.publishAuthoritative([summary(revision: 2)], admission: refresh)
+        let refreshed = owner.publishAuthoritative([summary(revision: 2)], admission: refresh, projectionToken: "epoch-1:1")
         #expect(refreshed)
         #expect(owner.sessions.first?.summaryRevision == 3)
         #expect(owner.sessions.first?.phase == .running)
@@ -1006,7 +1849,7 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.isEmpty)
 
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.sessions.first?.phase == .idle)
     }
@@ -1036,7 +1879,7 @@ struct DashboardStateOwnerTests {
     func attentionProjection() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         let appliedAttention = owner.applyAttention(
             sessionID: "session",
@@ -1071,7 +1914,7 @@ struct DashboardStateOwnerTests {
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([
             summary(revision: 1, phase: .running, waitingForUser: true),
-        ], admission: load)
+        ], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.activity(for: "session") == .waitingForUser)
 
@@ -1104,7 +1947,7 @@ struct DashboardStateOwnerTests {
                 foregroundPhase: .idle,
                 hasActiveSubagents: true
             ),
-        ], admission: load)
+        ], admission: load, projectionToken: "epoch-1:1")
 
         #expect(published)
         #expect(owner.activity(for: "session") == .subagentsWorking)
@@ -1129,7 +1972,7 @@ struct DashboardStateOwnerTests {
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([
             summary(revision: 1, phase: .running),
-        ], admission: load)
+        ], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.freshness == .live)
         #expect(owner.activity(for: "session") == .active)
@@ -1141,7 +1984,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.activity(for: "session") == .resuming)
         let disconnectedPublish = owner.publishAuthoritative(
             [summary(revision: 2, phase: .running)],
-            admission: pendingBeforeDisconnect
+            admission: pendingBeforeDisconnect,
+            projectionToken: "epoch-1:1"
         )
         #expect(!disconnectedPublish)
 
@@ -1152,7 +1996,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.activity(for: "session") == .resuming)
         let cachedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
-            admission: pendingBeforeCache
+            admission: pendingBeforeCache,
+            projectionToken: "epoch-1:1"
         )
         #expect(!cachedPublish)
 
@@ -1165,7 +2010,7 @@ struct DashboardStateOwnerTests {
     func removal() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         let updated = owner.apply(update(revision: 2, phase: .running))
         #expect(published)
         #expect(updated == .updated)
@@ -1174,7 +2019,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.isEmpty)
         let removedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
-            admission: pendingBeforeRemoval
+            admission: pendingBeforeRemoval,
+            projectionToken: "epoch-1:1"
         )
         #expect(!removedPublish)
         let unknown = owner.apply(update(revision: 2, phase: .idle))
@@ -1188,7 +2034,8 @@ struct DashboardStateOwnerTests {
         owner.replaceForFacade([summary(revision: 1)])
         let replacedPublish = owner.publishAuthoritative(
             [summary(revision: 2)],
-            admission: beforeReplacement
+            admission: beforeReplacement,
+            projectionToken: "epoch-1:1"
         )
         #expect(!replacedPublish)
 
@@ -1196,7 +2043,8 @@ struct DashboardStateOwnerTests {
         owner.clear()
         let clearedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
-            admission: beforeClear
+            admission: beforeClear,
+            projectionToken: "epoch-1:1"
         )
         #expect(!clearedPublish)
         #expect(owner.sessions.isEmpty)
@@ -1207,7 +2055,7 @@ struct DashboardStateOwnerTests {
     func catalogIndexIntegrity() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.hasConsistentIndex())
         let updated = owner.apply(update(revision: 2, phase: .running))
@@ -1225,7 +2073,7 @@ struct DashboardStateOwnerTests {
     func archivedRowsLeaveUntilAPageReturnsThem() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, archivedCount: 1)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1", archivedCount: 1)
         #expect(published)
         #expect(owner.archivedCount == 1)
 
@@ -1240,7 +2088,7 @@ struct DashboardStateOwnerTests {
 
         // Only an authoritative exclude page proves the row is visible again.
         let refreshed = owner.beginLoad()
-        let republished = owner.publishAuthoritative([summary(revision: 3)], admission: refreshed, archivedCount: 0)
+        let republished = owner.publishAuthoritative([summary(revision: 3)], admission: refreshed, projectionToken: "epoch-1:1", archivedCount: 0)
         #expect(republished)
         #expect(owner.sessions.map(\.id) == ["session"])
         let visibleUpdate = owner.apply(update(revision: 4, phase: .idle))
@@ -1253,7 +2101,7 @@ struct DashboardStateOwnerTests {
     func archivedCountRetention() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([], admission: load, archivedCount: 3)
+        let published = owner.publishAuthoritative([], admission: load, projectionToken: "epoch-1:1", archivedCount: 3)
         #expect(published)
         #expect(owner.archivedCount == 3)
 
@@ -1362,7 +2210,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":["session-archive.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":["session-archive.v1"]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,

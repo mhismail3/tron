@@ -17,7 +17,7 @@ final class SessionSearchTransportTests: XCTestCase {
         defer {
             Task { @MainActor in await model.teardown(); await client.close(); defaults.removePersistentDomain(forName: defaultsName) }
         }
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: profile, token: "token")
         try await Task.sleep(for: .milliseconds(100))
         let target = SessionSearchProfileTarget(profileID: profile.id, label: profile.label, capabilities: ["session-search.v1"], isSelected: true)
@@ -52,7 +52,7 @@ final class SessionSearchTransportTests: XCTestCase {
         defer {
             Task { @MainActor in await model.teardown(); await client.close(); defaults.removePersistentDomain(forName: defaultsName) }
         }
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: profile, token: "token")
         try await Task.sleep(for: .milliseconds(100))
         let target = SessionSearchProfileTarget(profileID: profile.id, label: profile.label, capabilities: ["session-search.v1"], isSelected: true)
@@ -105,7 +105,7 @@ final class SessionSearchTransportTests: XCTestCase {
         defer {
             Task { @MainActor in await model.teardown(); await client.close(); defaults.removePersistentDomain(forName: defaultsName) }
         }
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: profile, token: "token")
         let first = Task { try await model.setSessionSearchRemoteRanking(true, profileID: profile.id) }
         let firstIndex = try await waitForRequest(method: "session.search.policy.set", on: socket)
@@ -136,7 +136,7 @@ final class SessionSearchTransportTests: XCTestCase {
         defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
         defaults.set(profile.id, forKey: "selectedGateway.v1")
         let model = AppModel(client: client, profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: defaultsName)))
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: profile, token: "token")
         let restore = Task { await model.restoreSessionSearchPolicy(profileID: profile.id, force: true) }
         let getIndex = try await waitForRequest(method: "session.search.policy.get", on: socket)
@@ -158,7 +158,7 @@ final class SessionSearchTransportTests: XCTestCase {
         let socket = ScriptedGatewaySocket()
         let pool = DashboardGatewayConnectionPool(clientFactory: { GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory) })
         let profile = GatewayProfile(id: "background", label: "Background", host: "gateway.test", port: 9847, machineId: "machine", machineGroupID: "group", deviceId: "device")
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineGroupID":"group","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineGroupID":"group","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
         for _ in 0..<100 where pool.requestAdmission(for: profile.id) == nil { try await Task.sleep(for: .milliseconds(10)) }
         let coordinator = SessionSearchCoordinator()
@@ -198,7 +198,7 @@ final class SessionSearchTransportTests: XCTestCase {
         defer {
             Task { @MainActor in await model.teardown(); await client.close(); defaults.removePersistentDomain(forName: defaultsName) }
         }
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: profile, token: "token")
         model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .connected)
         model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .connected)
@@ -217,7 +217,7 @@ final class SessionSearchTransportTests: XCTestCase {
         defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
         defaults.set(profile.id, forKey: "selectedGateway.v1")
         let model = AppModel(client: client, profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: defaultsName)))
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: profile, token: "token")
         let restore = Task { await model.restoreSessionSearchPolicy(profileID: profile.id, force: true) }
         let requestIndex = try await waitForRequest(method: "session.search.policy.get", on: socket)
@@ -231,7 +231,7 @@ final class SessionSearchTransportTests: XCTestCase {
         XCTAssertTrue(model.sessionSearchConsent(for: profile.id))
         model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .offline)
         XCTAssertTrue(model.sessionSearchConsent(for: profile.id), "A retired secondary cannot invalidate focused consent")
-        await replacement.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        await replacement.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
         try await model.connectHostedGateway(profile: profile, token: "token")
         XCTAssertFalse(model.sessionSearchConsent(for: profile.id), "Old connection consent cannot authorize remote disclosure")
         let refreshed = Task { await model.restoreSessionSearchPolicy(profileID: profile.id) }

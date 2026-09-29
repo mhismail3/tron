@@ -862,6 +862,11 @@ for ((i=1; i<=$#; i++)); do
   if [[ \"${!i}\" == -resultBundlePath ]]; then j=$((i + 1)); bundle=\"${!j}\"; fi
 done
 if [[ \" $* \" == *' test-without-building '* ]]; then
+  if [[ -n \"${FAKE_XCODE_ENV_LOG:-}\" ]]; then
+    printf '%s\\n' \\
+      \"TRON_SOURCE_REVISION=${TEST_RUNNER_TRON_SOURCE_REVISION:-}\" \\
+      \"TRON_SOURCE_DIRTY=${TEST_RUNNER_TRON_SOURCE_DIRTY:-}\" > \"$FAKE_XCODE_ENV_LOG\"
+  fi
   if [[ \"${FAKE_RUNNER_MODE:-success}\" != missing-bundle && -n \"$bundle\" ]]; then mkdir -p \"$bundle\"; fi
   if [[ \"${FAKE_RUNNER_MODE:-success}\" == timeout ]]; then sleep 30; fi
   exit \"${FAKE_XCODE_STATUS:-0}\"
@@ -1094,6 +1099,19 @@ exit 0
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.latest_metadata()["source"], self.source_identity())
 
+    def test_run_passes_the_source_revision_and_its_state_to_the_test_process(self) -> None:
+        # The parity gate records the revision its frames came from and refuses a
+        # tree that is not a clean commit, so both facts have to reach the hosted
+        # process: a revision alone cannot reproduce frames from a dirty tree.
+        log = self.root / "xcode-environment.log"
+        result = self.invoke(override={"FAKE_XCODE_ENV_LOG": str(log)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        identity = self.source_identity()
+        self.assertEqual(log.read_text().splitlines(), [
+            f"TRON_SOURCE_REVISION={identity['revision']}",
+            f"TRON_SOURCE_DIRTY={'true' if identity['dirty'] else 'false'}",
+        ])
+
     def test_default_products_directory_is_scoped_to_this_worktree(self) -> None:
         home = self.root / "home"
         result = self.invoke(command="status", home=home)
@@ -1239,6 +1257,80 @@ exit 0
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(len(self.simctl_calls("create")), 1)
         self.assertEqual(json.loads((lane / "simulator.json").read_text())["udid"], marker["udid"])
+
+    # T-3: one lane's lease must cover every run on that lane's simulator.
+    # Failure modes these two cases target, written before the code:
+    #
+    # 1. A lane named on the command line is not carried into the command the
+    #    holder starts, so the command leases the named lane while provisioning
+    #    the default lane's simulator, and a run on that simulator no longer
+    #    serializes with the holder's lease.
+    # 2. A descendant of a leased command that names another lane runs on that
+    #    lane's simulator while holding no lease on it, because it inherits the
+    #    holder's `TRON_IOS_TEST_LOCK_HELD` and skips the locker entirely.
+    # 3. The holder's command compares its own lane path against the lease's
+    #    spelling instead of the file both name, so a state directory written
+    #    with a trailing slash, `//` or `./` is refused even though it is this
+    #    lane's own lease.
+    #
+    # Failure mode 3 was added after the review of the first attempt, which
+    # compared strings and refused every such spelling.
+    def test_a_lane_named_on_the_command_line_is_the_lane_that_provisions(self) -> None:
+        """Failure mode 1: the holder's command keeps the lane it was given."""
+        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        # The default lane lives under this fixture's HOME; nothing may appear
+        # there for a command that named another lane.
+        default_state = self.root / "home/.tron/internal/ios-test"
+        result = self.invoke(
+            extra_args=["--lane", "alpha", *owner],
+            discovery_root=self.root,
+            override={"TRON_IOS_TEST_STATE_DIR": ""},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lane = self.root / "ios-test-alpha"
+        marker = json.loads((lane / "simulator.json").read_text())
+        self.assertEqual(marker["name"], "Tron iOS Tests (alpha)")
+        self.assertEqual(self.device_entry(marker["udid"])["name"], "Tron iOS Tests (alpha)")
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        self.assertTrue((lane / "lease.lock").exists())
+        self.assertFalse(default_state.exists())
+        self.assertFalse((self.state / "lease.lock").exists())
+
+    def test_a_state_directory_spelled_differently_is_still_this_lanes_lease(self) -> None:
+        """Failure mode 3: the guard compares files, not the spellings of paths."""
+        # The locker tidies `--lock` through pathlib, so the child's own
+        # `$STATE_ROOT/lease.lock` reaches it with a trailing slash, `//` or
+        # `./` intact. Every leased command (build, run, checkpoint, prepare,
+        # diagnose, clean) would be refused if the guard compared strings.
+        # `$TMPDIR` on macOS ends in `/`, so this is the common spelling.
+        spellings = [
+            f"{self.state}/",
+            f"{self.state.parent}//{self.state.name}",
+            f"{self.state.parent}/./{self.state.name}",
+        ]
+        for spelling in spellings:
+            with self.subTest(spelling=spelling):
+                result = self.invoke(
+                    extra_args=["--only-testing", "TronMobileTests/StubTests"],
+                    override={"TRON_IOS_TEST_STATE_DIR": spelling},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue((self.state / "simulator.json").exists())
+                self.device_entry(self.owned_udid())
+
+    def test_an_inherited_lease_that_covers_another_lane_is_refused(self) -> None:
+        """Failure mode 2: a command never runs on a lane its lease does not hold."""
+        other = self.root / "ios-test-other/lease.lock"
+        result = self.invoke(
+            extra_args=["--only-testing", "TronMobileTests/StubTests"],
+            override={"TRON_IOS_TEST_LOCK_HELD": "1", "TRON_IOS_TEST_LEASE_LOCK": str(other)},
+        )
+        self.assertEqual(result.returncode, 74, result.stderr)
+        self.assertIn(str(other), result.stderr)
+        self.assertIn(str(self.state / "lease.lock"), result.stderr)
+        self.assertEqual(self.simctl_calls("create"), [])
+        self.assertEqual(self.simctl_calls("boot"), [])
+        self.assertFalse((self.state / "simulator.json").exists())
 
     def test_lane_remove_keeps_a_live_worktrees_products_and_reclaims_a_deleted_worktrees(self) -> None:
         """Failure mode 3: products follow the recorded worktree's existence."""

@@ -19,16 +19,25 @@ the archive contract in the Gateway README.
 Lexical index initialization is bounded and recoverable: an oversized or
 malformed session is omitted with partial coverage rather than preventing
 Gateway listen. Local semantic qualification/indexing runs as an owned,
-abortable background task with aggregate work, vector-count, and vector-byte
-limits; lexical search remains usable while it is indexing.
+abortable background task with aggregate work, vector-count, vector-byte and
+per-start time limits; lexical search remains usable while it is indexing, and a
+pass that reaches its time budget publishes explicit partial semantic coverage.
 
 The SQLite database under Gateway cache is an acceleration only: it stores
-bounded postings and passage identity, never canonical message bodies. Each
-process discards the previous index before rebuilding it from canonical JSONL,
-which remains the only transcript authority; warm-up starts after
-session-registry recovery and before automation recovery, and startup never
-integrity-checks an index it will discard. Open sessions are read through their
-existing `RuntimeSlot`; cold sessions are complete-file reads after catalog
+bounded postings, passage identity, and each indexed session's reuse facts
+(the catalog's `fileIdentity`, size and mtime), never canonical message bodies.
+It is persisted across restarts and reused only while the catalog owner still
+reports exactly those facts for that session: an unchanged corpus is warmed
+without reading a transcript, and only what the catalog proves changed is
+parsed again. A row written without a verified catalog cut (an on-demand
+refresh of a session that changed while the Gateway was running) is re-derived
+on the next start rather than trusted, and a build that cannot read the rows as
+its own discards them and rebuilds from canonical JSONL, which remains the only
+transcript authority. Warm-up starts after session-registry recovery and before
+automation recovery; it runs in bounded slices that hand the event loop back
+between them, and startup never integrity-checks an index it will discard. Open
+sessions are read through their existing `RuntimeSlot`; cold sessions are
+complete-file reads after catalog
 admission. The complete cold graph is validated before the SDK-selected branch
 is retained. Hidden, delegated, tool, thinking, and abandoned-branch entries are
 not indexed. Malformed, oversized, or interrupted files report partial coverage
@@ -47,15 +56,18 @@ allowances named `microCents` are one-millionth of a cent (1e-6 cents); the
 qualified 64,000-token request ceiling reserves 268,800 microCents. Spending
 reservations live in a separate durable SQLite ledger
 (`session-search-jev-allowance.sqlite`) with idempotent settlement, not the
-disposable search index; existing-ledger schema/authority rows are validated
+search index; existing-ledger schema/authority rows are validated
 before any mutation, and corruption fails closed for Jev only without blocking
 core Gateway startup.
 Cancellation after dispatch retains a pending reservation because provider
 settlement is uncertain; pending and historical rows have bounded retention.
 Lexical posting admission uses UTF-8 byte estimates with storage headroom and
-reports actual owned SQLite file bytes. An actual over-bound disposable SQLite
+reports actual owned SQLite file bytes. An actual over-bound SQLite
 file is quarantined and recreated at the index owner boundary, so a later small
-replacement can recover. Initial semantic indexing and per-session vector
+replacement can recover. One document's postings are inserted in slices that
+hand the event loop back, and a summary publication marks its session dirty
+instead of deleting index rows inline, so neither a reindex nor another owner's
+publication holds the loop. Initial semantic indexing and per-session vector
 refreshes remain serialized, while lexical dirty replacement is independent of
 helper I/O; per-session dirty generations retain invalidations that arrive
 during a refresh. Policy updates

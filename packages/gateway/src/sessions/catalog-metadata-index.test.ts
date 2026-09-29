@@ -1,5 +1,5 @@
-import { appendFile, mkdtemp, readdir, readFile, rename, truncate, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { appendFile, chmod, mkdtemp, readdir, readFile, rename, symlink, truncate, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CatalogMetadataIndex,
@@ -27,11 +27,14 @@ const summary = (path: string): CatalogMetadataIndexSummary => ({
   createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", messageCount: 0,
 });
 
-const reconcileSaved = (
+// The proven rows of one reconcile. `undefined` still means the durable
+// document itself was unusable; a candidate the pass could not prove is
+// reported in `unproven` beside the rows it did prove.
+const reconcileSaved = async (
   index: CatalogMetadataIndex,
   catalog: string,
   rows: readonly NonNullable<Awaited<ReturnType<CatalogMetadataIndex["entryFromSummary"]>>>[],
-) => index.reconcile(
+) => (await index.reconcile(
   catalog,
   rows.map((row) => ({
     path: row.path,
@@ -42,7 +45,7 @@ const reconcileSaved = (
     mtimeMs: row.mtimeMs,
   })),
   async () => undefined,
-);
+))?.rows;
 
 afterEach(async () => {
   const { rm } = await import("node:fs/promises");
@@ -170,14 +173,14 @@ describe("CatalogMetadataIndex", () => {
     const secondRow = (await index.entryFromSummary({ ...summary(second), id: "second" }))!;
     await index.save(f.catalog, [first, secondRow]);
     await writeFile(f.path, `${await readFile(f.path, "utf8")}${JSON.stringify({ type: "message", message: { role: "user", content: "new" }, timestamp: "2026-01-01T00:01:00.000Z" })}\n`);
-    const rows = await index.reconcile(f.catalog, [
+    const rows = (await index.reconcile(f.catalog, [
       { path: f.path, id: "session", cwd: "/workspace", fileIdentity: first.fileIdentity, size: (await (await import("node:fs/promises")).stat(f.path)).size, mtimeMs: (await (await import("node:fs/promises")).stat(f.path)).mtimeMs },
       { path: second, id: "second", cwd: "/workspace", fileIdentity: secondRow.fileIdentity, size: secondRow.size, mtimeMs: secondRow.mtimeMs },
     ], async (candidate) => ({
       id: candidate.id, path: candidate.path, cwd: candidate.cwd,
       firstMessage: candidate.id === "session" ? "new" : "(no messages)",
       createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:01:00.000Z", messageCount: candidate.id === "session" ? 1 : 99,
-    }));
+    })))?.rows;
     expect(rows).toHaveLength(2);
     expect(rows?.find((row) => row.id === "second")?.messageCount).toBe(0);
     expect(rows?.find((row) => row.id === "session")?.messageCount).toBe(1);
@@ -213,7 +216,7 @@ describe("CatalogMetadataIndex", () => {
     let entered = 0;
     let releaseBatch!: () => void;
     const batchGate = new Promise<void>((resolve) => { releaseBatch = resolve; });
-    const rebuilt = await index.reconcile(f.catalog, candidates, async (candidate) => {
+    const rebuilt = (await index.reconcile(f.catalog, candidates, async (candidate) => {
       inFlight += 1;
       maximumInFlight = Math.max(maximumInFlight, inFlight);
       entered += 1;
@@ -232,9 +235,60 @@ describe("CatalogMetadataIndex", () => {
         updatedAt: "2027-02-02T02:02:02.000Z",
         messageCount: 0,
       };
-    });
+    }))?.rows;
     expect(rebuilt).toHaveLength(rows.length);
     expect(maximumInFlight).toBe(16);
+  });
+
+  it("stops a pass at the first file it cannot prove when its caller asks", async () => {
+    // Requirement: the pre-index acquisition path throws its whole cut away when
+    // one candidate is unprovable, so parsing the candidates after that one can
+    // only cost a cold list time. A caller that says "stop at the first unproven
+    // file" must end the pass there and still see every remaining candidate
+    // reported as unproven.
+    const f = await fixture();
+    const index = new CatalogMetadataIndex(f.gateway);
+    const files = [f.path];
+    for (let number = 1; number < 24; number += 1) {
+      const path = join(f.catalog, `session-${number}.jsonl`);
+      await writeFile(path, `${JSON.stringify({ type: "session", version: 3, id: `session-${number}`, timestamp: "2026-01-01T00:00:00.000Z", cwd: "/workspace" })}\n`);
+      files.push(path);
+    }
+    const rows = (await Promise.all(files.map((path, number) => index.entryFromSummary({
+      ...summary(path), id: number === 0 ? "session" : `session-${number}`,
+    })))).filter((row): row is NonNullable<typeof row> => row !== undefined);
+    await index.save(f.catalog, rows);
+    // Rewrite every session in place with the same byte length, so every
+    // candidate is stale and reaches the rebuild callback this test observes.
+    for (const path of files) {
+      const header = JSON.parse((await readFile(path, "utf8")).trim()) as Record<string, string>;
+      await writeFile(path, `${JSON.stringify({ ...header, timestamp: "2027-02-02T02:02:02.000Z" })}\n`);
+    }
+    const candidates = rows.map((row) => ({
+      path: row.path, id: row.id, cwd: row.cwd, fileIdentity: row.fileIdentity, size: row.size, mtimeMs: row.mtimeMs,
+    }));
+    const unprovable = candidates[1]!.path;
+    const rebuilt: string[] = [];
+    const reconciled = await index.reconcile(f.catalog, candidates, async (candidate) => {
+      rebuilt.push(candidate.path);
+      // The second candidate's file proves unreadable, like a transcript whose
+      // last line is still being written.
+      if (candidate.path === unprovable) return undefined;
+      return {
+        id: candidate.id,
+        path: candidate.path,
+        cwd: candidate.cwd,
+        firstMessage: "rewritten",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2027-02-02T02:02:02.000Z",
+        messageCount: 0,
+      };
+    }, ({ unproven }) => unproven > 0);
+    // 16 is RECONCILE_CONCURRENCY: the batch that held the unprovable file ran,
+    // and the batch after it was never parsed.
+    expect(rebuilt).toHaveLength(16);
+    expect(reconciled?.rows).toHaveLength(15);
+    expect(reconciled?.unproven).toEqual([unprovable, ...candidates.slice(16).map((candidate) => candidate.path)]);
   });
 
   it("updates exact summary fields from newline-complete appended bytes", async () => {
@@ -297,7 +351,7 @@ describe("CatalogMetadataIndex", () => {
     await writeFile(f.path, original.replace("2026-01-01", "2027-01-01"));
     const firstFacts = await (await import("node:fs/promises")).stat(f.path);
     const rebuilt: string[] = [];
-    const rows = await index.reconcile(f.catalog, [
+    const rows = (await index.reconcile(f.catalog, [
       {
         path: f.path, id: first.id, cwd: first.cwd, fileIdentity: first.fileIdentity,
         size: firstFacts.size, mtimeMs: firstFacts.mtimeMs,
@@ -311,22 +365,48 @@ describe("CatalogMetadataIndex", () => {
       return candidate.id === first.id
         ? { ...summary(candidate.path), id: candidate.id, createdAt: "2027-01-01T00:00:00.000Z" }
         : { ...summary(candidate.path), id: candidate.id };
-    });
+    }))?.rows;
     expect(rows?.map((row) => row.id).sort()).toEqual(["second", "session"]);
     expect(rebuilt.sort()).toEqual(["second", "session"]);
   });
 
-  it("does not reconcile a sidecar row over a partial canonical final line", async () => {
+  it("reports a partial canonical final line per file without discarding its siblings", async () => {
     const f = await fixture();
     const index = new CatalogMetadataIndex(f.gateway);
+    const sibling = join(f.catalog, "sibling.jsonl");
+    await writeFile(sibling, `${JSON.stringify({ type: "session", version: 3, id: "sibling", timestamp: "2026-01-01T00:00:00.000Z", cwd: "/workspace" })}\n`);
     const row = (await index.entryFromSummary(summary(f.path)))!;
-    await index.save(f.catalog, [row]);
+    const siblingRow = (await index.entryFromSummary({ ...summary(sibling), id: "sibling" }))!;
+    await index.save(f.catalog, [row, siblingRow]);
+    // A crash mid-append leaves a partial final line. Its own row cannot be
+    // proven, but that must not throw away the sibling whose row did verify.
     await writeFile(f.path, `${await readFile(f.path, "utf8")}{\"type\":\"message\"`);
     const facts = await (await import("node:fs/promises")).stat(f.path);
-    await expect(index.reconcile(f.catalog, [{
+    const reconciled = await index.reconcile(f.catalog, [{
       path: row.path, id: row.id, cwd: row.cwd, fileIdentity: row.fileIdentity,
       size: facts.size, mtimeMs: facts.mtimeMs,
-    }], async () => summary(f.path))).resolves.toBeUndefined();
+    }, {
+      path: sibling, id: siblingRow.id, cwd: siblingRow.cwd,
+      fileIdentity: siblingRow.fileIdentity, size: siblingRow.size, mtimeMs: siblingRow.mtimeMs,
+    }], async () => summary(f.path));
+    expect(reconciled?.rows.map((entry) => entry.id)).toEqual(["sibling"]);
+    expect(reconciled?.unproven).toEqual([resolve(row.path)]);
+  });
+
+  it("refuses a summary the file outgrew between its parse and its stamp", async () => {
+    const f = await fixture();
+    const index = new CatalogMetadataIndex(f.gateway);
+    const { stat } = await import("node:fs/promises");
+    const parsedSize = (await stat(f.path)).size;
+    await appendFile(f.path, `${JSON.stringify({
+      type: "message", timestamp: "2026-01-02T00:00:00.000Z", message: { role: "user", content: "later" },
+    })}\n`);
+    // The counts describe the prefix the source parsed. Stamping the row with
+    // the later size would claim an offset past a message it never counted, and
+    // every later append would start from there.
+    expect(await index.entryFromSummary({ ...summary(f.path), parsedSize })).toBeUndefined();
+    expect(await index.entryFromSummary({ ...summary(f.path), parsedSize: (await stat(f.path)).size }))
+      .toMatchObject({ messageCount: 0, eofOffset: (await stat(f.path)).size });
   });
 
   it("serializes concurrent saves and keeps the final document valid", async () => {
@@ -373,11 +453,34 @@ describe("CatalogMetadataIndex", () => {
     const row = await index.entryFromSummary(summary(f.path));
     expect(row).toBeDefined();
     await rename(f.path, `${f.path}.real`);
-    await (await import("node:fs/promises")).symlink(`${f.path}.real`, f.path);
+    await symlink(`${f.path}.real`, f.path);
     expect(await index.entryFromSummary(summary(f.path))).toBeUndefined();
     const blocked = join(f.root, "blocked");
     await writeFile(blocked, "file");
     const failing = new CatalogMetadataIndex(join(blocked, "gateway"));
     await expect(failing.save(f.catalog, [])).rejects.toBeDefined();
+  });
+
+  // The index write is fire-and-forget outside any request span, so these
+  // handled failures have no breakdown to ride on.
+  it("reports save, append and rebuild failures to its owner", async () => {
+    const f = await fixture();
+    const failures: Array<{ stage: string; durationMs: number }> = [];
+    const index = new CatalogMetadataIndex(f.gateway, (stage, durationMs) => { failures.push({ stage, durationMs }); });
+    const row = (await index.entryFromSummary(summary(f.path)))!;
+    expect(row).toBeDefined();
+
+    // A document over the index byte bound keeps the canonical scan instead.
+    expect(await index.save(f.catalog, [{ ...row, firstMessage: "x".repeat(CATALOG_METADATA_INDEX_MAX_BYTES) }])).toBe(false);
+
+    // A canonical file that cannot be read back for its appended metadata, then
+    // for a rebuild either.
+    await chmod(f.path, 0o000);
+    expect(await index.append(row)).toBeUndefined();
+    expect(await index.entryFromSummary(summary(f.path))).toBeUndefined();
+    await chmod(f.path, 0o600);
+
+    expect(failures.map((failure) => failure.stage)).toEqual(["save", "append", "rebuild"]);
+    expect(failures.every((failure) => Number.isFinite(failure.durationMs) && failure.durationMs >= 0)).toBe(true);
   });
 });

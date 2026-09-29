@@ -45,7 +45,7 @@ make_payload() {
   printf '%s\n' '#!/usr/bin/env node' > "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   chmod 755 "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   ln -s ../@earendil-works/pi-coding-agent/dist/cli.js "$root/app/node_modules/.bin/pi"
-  printf '%s\n' '#!/bin/sh' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' '[ "$(command -v npm)" = "$TRON_GATEWAY_PAYLOAD_ROOT/runtime/bin-arm64/npm" ] || exit 11' "[ \"\$TRON_GATEWAY_SEARCH_EMBEDDING_HELPER\" = \"$SEARCH_HELPER\" ] || { printf 'search helper mismatch: %s\\n' \"\$TRON_GATEWAY_SEARCH_EMBEDDING_HELPER\" >&2; exit 12; }" '[ "${TRON_FIXTURE_WRITE_STDERR:-0}" != 1 ] || printf "fixture Gateway stderr\\n" >&2' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
+  printf '%s\n' '#!/bin/sh' '[ "$1" = "--max-old-space-size=4096" ] || exit 13' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' '[ "$(command -v npm)" = "$TRON_GATEWAY_PAYLOAD_ROOT/runtime/bin-arm64/npm" ] || exit 11' "[ \"\$TRON_GATEWAY_SEARCH_EMBEDDING_HELPER\" = \"$SEARCH_HELPER\" ] || { printf 'search helper mismatch: %s\\n' \"\$TRON_GATEWAY_SEARCH_EMBEDDING_HELPER\" >&2; exit 12; }" '[ "${TRON_FIXTURE_WRITE_STDERR:-0}" != 1 ] || printf "fixture Gateway stderr\\n" >&2' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
   # Keep each fake runtime over the canonical minimum size without embedding
   # NUL bytes that would make the shell fixture itself invalid.
   dd if=/dev/zero bs=1024 count=1025 2>/dev/null | tr '\\0' '#' >> "$root/runtime/node-arm64"
@@ -70,7 +70,7 @@ make_payload() {
   ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-arm64/pi"
   ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-x64/pi"
   fingerprint="$("$HASH" "$root")"
-  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"5","minProtocolVersion":"5","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$epoch" "$fingerprint" > "$root/manifest.json"
+  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"6","minProtocolVersion":"6","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$epoch" "$fingerprint" > "$root/manifest.json"
   chmod -R a-w "$root"
 }
 

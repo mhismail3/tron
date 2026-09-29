@@ -19,6 +19,9 @@ package enum GatewayConnectionDiagnosticStage: String, Sendable {
 package enum GatewayConnectionDiagnosticOutcome: String, Sendable {
     case success
     case failure
+    /// A liveness probe that missed its deadline but was answered by an inbound
+    /// frame. It leaves a debug record and never retires an epoch.
+    case excused
 }
 
 enum GatewayConnectionDiagnosticReason: String, Sendable {
@@ -43,6 +46,8 @@ package struct GatewayConnectionDiagnostic: Sendable {
     let clientID: String?
     let attemptID: String?
     let connectionID: Int?
+    /// The Gateway's `connectionId` from this epoch's hello, once received.
+    let gatewayConnectionID: String?
     let timestamp: String
     let profileID: String?
     let profileLabel: String?
@@ -87,6 +92,7 @@ package struct GatewayConnectionDiagnostic: Sendable {
         clientID: String? = nil,
         attemptID: String? = nil,
         connectionID: Int? = nil,
+        gatewayConnectionID: String? = nil,
         timestamp: String,
         profileID: String?,
         profileLabel: String?,
@@ -129,6 +135,7 @@ package struct GatewayConnectionDiagnostic: Sendable {
         self.clientID = clientID
         self.attemptID = attemptID
         self.connectionID = connectionID
+        self.gatewayConnectionID = gatewayConnectionID
         self.timestamp = timestamp
         self.profileID = profileID
         self.profileLabel = profileLabel
@@ -194,6 +201,16 @@ package enum GatewayDiagnosticFailure {
         if error is CancellationError { return "cancelled" }
         guard let failure = error as? GatewayFailure else { return "transport" }
         return normalizedCode(failure.code)
+    }
+
+    /// The Gateway's own error code when the Gateway answered. A typed failure
+    /// (for example `conflict`, `busy` or `forbidden`) must never be reported as
+    /// `transport`, which is reserved for a failure that never reached the
+    /// Gateway. Bounded so a malformed code cannot inflate a record.
+    package static func answerCode(_ error: Error) -> String {
+        guard let failure = error as? GatewayFailure,
+              !failure.code.isEmpty, failure.code.utf8.count <= 64 else { return code(error) }
+        return failure.code
     }
 
     package static func normalizedCode(_ code: String) -> String {

@@ -13,8 +13,12 @@ iterations never enter the attribution. Frames Instruments could not
 symbolicate are named as unresolved addresses per image, never dropped.
 
 Exports are streamed: a host-wide Time Profiler export of a loaded Mac runs to
-gigabytes, so rows are read one at a time and only values defined once (and
-referenced later) are retained.
+gigabytes, so rows are read one at a time and every value carrying an `id` is
+kept once, however often later rows repeat it by reference. A host-wide
+recording's whole process tree is held to `EXPORT_PEAK_BUDGET_BYTES`: `xctrace
+export` builds its result in memory before it applies `--xpath` and macOS caps
+no child's address space, so a trace whose export is projected past that budget
+is refused before any export starts.
 """
 
 from __future__ import annotations
@@ -44,6 +48,25 @@ TOP_SYMBOLS = 25
 TOP_THREADS = 15
 TOP_VIEWS = 30
 EXPORT_TIMEOUT_SECONDS = 900
+# The profiler's memory budget for one host-wide traced scenario: the whole
+# process tree (`xctrace export` plus this parser) must stay under it. xctrace's
+# export child cannot be bounded -- it builds the whole table in memory even
+# when `--xpath` selects few rows (a row predicate did not lower its 1.2 GiB
+# peak on a 75 MiB trace) and macOS caps no child address space (`ulimit -v`
+# and `ulimit -d` are rejected, and `resource.setrlimit(RLIMIT_AS)` fails) -- so
+# a trace too large to export inside this budget is refused instead of
+# exported, which is the only guarantee this profiler can give.
+EXPORT_PEAK_BUDGET_BYTES = 2 * 1024 ** 3
+# Peak bytes of that tree per trace byte, sampled with `files/hardening/e-2/peak.py`
+# over host-wide `--all-processes` Time Profiler recordings: 17.4-18.2 on four
+# runs of a 75.3 MiB trace, 18.5 on a 131.7 MiB one, 18.0 on a 55.5 MiB one and
+# 13.7 on a 338.7 MiB one; the parser's peak never overlapped the export's, so
+# the tree peak is the number to project. The observed ratio has not exceeded
+# 18.5, and 20 rounds that up with headroom for the next host. Only such a
+# recording has been measured: a `tron-profile device` capture records one
+# attached process and its ratio is unknown, so it is not held to this budget
+# (see `attribute`'s `host_wide`).
+EXPORT_PEAK_BYTES_PER_TRACE_BYTE = 20
 
 # Scenario template name -> (recording target, xctrace --template or None for
 # the blank template, extra --instrument names).
@@ -64,6 +87,12 @@ DEVICE_TEMPLATES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "power-profiler": ("Power Profiler", ("os_signpost",)),
 }
 
+
+def records_all_processes(template: str) -> bool:
+    """True when `template` records every process on this Mac (`--all-processes`)."""
+    return template in TEMPLATES and TEMPLATES[template][0] == "host"
+
+
 UNRESOLVED_ADDRESS = re.compile(r"^0x[0-9a-fA-F]+$")
 
 
@@ -74,36 +103,27 @@ class AttributionError(Exception):
 # ------------------------------------------------------------------ export ---
 
 class Table:
-    """One exported xctrace table: column mnemonics and a shared id map.
+    """One exported xctrace table: the column mnemonics, indexed by position.
 
-    xctrace writes each distinct value once with an `id` and later repeats it
-    as `<element ref="id"/>`, possibly many rows later; `cell()` returns the
-    defining element so callers never see a bare reference. A `<sentinel/>`
-    cell (no value) reads as None.
+    `iter_rows` hands rows to callers with every reference already replaced by
+    its defining element. A `<sentinel/>` cell (no value) reads as None.
     """
 
-    def __init__(self, schema: str, columns: list[str], elements: dict[str, ElementTree.Element]) -> None:
+    def __init__(self, schema: str, columns: list[str]) -> None:
         self.schema = schema
         self.columns = columns
-        self._elements = elements
         self._index = {name: position for position, name in enumerate(columns)}
 
-    def resolve(self, element: ElementTree.Element | None) -> ElementTree.Element | None:
-        if element is None:
-            return None
-        reference = element.get("ref")
-        if reference is not None:
-            resolved = self._elements.get(reference)
-            if resolved is None:
-                raise AttributionError(f"{self.schema}: reference to undefined element id {reference}")
-            element = resolved
-        return None if element.tag == "sentinel" else element
+    @staticmethod
+    def value(element: ElementTree.Element | None) -> ElementTree.Element | None:
+        """The element itself, or None for an absent or `<sentinel/>` cell."""
+        return None if element is None or element.tag == "sentinel" else element
 
     def cell(self, row: list[ElementTree.Element], column: str) -> ElementTree.Element | None:
         position = self._index.get(column)
         if position is None or position >= len(row):
             return None
-        return self.resolve(row[position])
+        return self.value(row[position])
 
     def has(self, *columns: str) -> bool:
         return all(column in self._index for column in columns)
@@ -115,9 +135,13 @@ Rows = Iterable[tuple[Table, list[ElementTree.Element]]]
 def iter_rows(source: bytes | str | Path) -> Iterator[tuple[Table, list[ElementTree.Element]]]:
     """Stream `(table, row cells)` from `xctrace export --xpath` output.
 
-    `source` is the XML itself (bytes/str) or a path to it. Each row is
-    detached once consumed; elements carrying an `id` stay in the shared map
-    because later rows may reference them.
+    `source` is the XML itself (bytes/str) or a path to it. xctrace writes each
+    distinct value once with an `id` and repeats it as `<element ref="id"/>`,
+    possibly many rows later, so elements carrying an `id` stay in a map. When
+    an element ends, each reference among its children is replaced by the
+    shared definition: memory then grows with distinct values, not with
+    references (a host-wide export repeats frames ~15 M times, which kept per
+    reference took the profiler past 5 GB). Each row is detached once consumed.
     """
     stream = Path(source).open("rb") if isinstance(source, Path) else io.BytesIO(
         source.encode() if isinstance(source, str) else source)
@@ -135,12 +159,20 @@ def iter_rows(source: bytes | str | Path) -> Iterator[tuple[Table, list[ElementT
                 elif element.tag == "node":
                     node, table = element, None
                 continue
+            for position, child in enumerate(element):
+                reference = child.get("ref")
+                if reference is not None:
+                    definition = elements.get(reference)
+                    if definition is None:
+                        raise AttributionError(f"{table.schema if table else 'export'}: reference to undefined "
+                                               f"element id {reference}")
+                    element[position] = definition
             identifier = element.get("id")
             if identifier is not None:
                 elements[identifier] = element
             if element.tag == "schema" and node is not None:
                 columns = [column.findtext("mnemonic") or "" for column in element.findall("col")]
-                table = Table(element.get("name") or "", columns, elements)
+                table = Table(element.get("name") or "", columns)
             elif element.tag == "row":
                 if table is None:
                     raise AttributionError("xctrace export row precedes its <schema>; the export format changed")
@@ -166,6 +198,39 @@ def text(element: ElementTree.Element | None) -> str | None:
     if element is None:
         return None
     return element.get("fmt") or element.text
+
+
+def trace_size_bytes(trace: Path) -> int:
+    """Bytes the recording occupies on disk (a `.trace` is a bundle/directory)."""
+    if not trace.is_dir():
+        return trace.stat().st_size
+    return sum(path.stat().st_size for path in trace.rglob("*") if path.is_file())
+
+
+def projected_export_peak_bytes(trace_bytes: int) -> int:
+    """The tree peak the export of a `trace_bytes`-byte host-wide trace is expected to reach."""
+    return trace_bytes * EXPORT_PEAK_BYTES_PER_TRACE_BYTE
+
+
+def checked_export_budget(trace: Path) -> dict[str, int]:
+    """Refuse a host-wide trace whose export cannot stay inside the profiler's budget.
+
+    Returns the numbers carried by the attribution document. `xctrace export`
+    reads the whole trace table into memory before it writes or filters
+    anything (see the constants above), so this check is what keeps a traced
+    scenario bounded, and it must run before the first export starts. It runs
+    after the recording, so a refused scenario has already spent its simulator
+    time and keeps its trace.
+    """
+    size = trace_size_bytes(trace)
+    projected = projected_export_peak_bytes(size)
+    if projected > EXPORT_PEAK_BUDGET_BYTES:
+        raise AttributionError(
+            f"refusing to export {trace.name}: the trace is {size / 1048576:.0f} MiB and its xctrace export is "
+            f"projected at {projected / 1024 ** 3:.1f} GiB, over the {EXPORT_PEAK_BUDGET_BYTES / 1024 ** 3:.1f} GiB "
+            f"budget ({EXPORT_PEAK_BYTES_PER_TRACE_BYTE} bytes of tree peak per trace byte measured on host-wide "
+            f"recordings); record a shorter trace (a smaller --window-seconds or --iterations) on a quieter host")
+    return {"traceBytes": size, "projectedPeakBytes": projected, "budgetBytes": EXPORT_PEAK_BUDGET_BYTES}
 
 
 def run_bounded(command: list[str], timeout: float) -> subprocess.CompletedProcess[bytes]:
@@ -257,7 +322,7 @@ def _pid(table: Table, row: list[ElementTree.Element], column: str) -> int | Non
     process = table.cell(row, column)
     if process is None:
         return None
-    pid = table.resolve(process.find("pid"))
+    pid = table.value(process.find("pid"))
     value = number(pid)
     return int(value) if value is not None else None
 
@@ -287,7 +352,7 @@ def frame_symbol(frame: ElementTree.Element, table: Table) -> tuple[str, str, bo
     unresolved app or test frames stay visible in the ranking instead of
     vanishing.
     """
-    binary = table.resolve(frame.find("binary"))
+    binary = table.value(frame.find("binary"))
     image = binary.get("name") if binary is not None and binary.get("name") else "unknown image"
     name = frame.get("name") or ""
     if not name or UNRESOLVED_ADDRESS.match(name):
@@ -407,10 +472,10 @@ def summarize_time_profile(rows: Rows, windows: list[tuple[float, float]] | None
 def _frames(table: Table, stack: ElementTree.Element | None) -> list[ElementTree.Element]:
     if stack is None:
         return []
-    backtrace = stack if stack.tag == "backtrace" else table.resolve(stack.find("backtrace"))
+    backtrace = stack if stack.tag == "backtrace" else table.value(stack.find("backtrace"))
     if backtrace is None:
         return []
-    return [frame for frame in (table.resolve(child) for child in backtrace.findall("frame")) if frame is not None]
+    return [frame for frame in (table.value(child) for child in backtrace.findall("frame")) if frame is not None]
 
 
 # -------------------------------------------------------------- signposts ---
@@ -508,14 +573,20 @@ def summarize_numeric_tables(rows_by_schema: dict[str, Rows]) -> dict[str, Any]:
 # ------------------------------------------------------------------ driver ---
 
 def attribute(trace: Path, template: str, pid: int | None, windows_epoch: list[tuple[float, float]] | None,
-              top: int = TOP_SYMBOLS, discarded_epoch: list[tuple[float, float]] | None = None) -> dict[str, Any]:
+              top: int = TOP_SYMBOLS, discarded_epoch: list[tuple[float, float]] | None = None,
+              *, host_wide: bool) -> dict[str, Any]:
     """Export `trace` and build the attribution document.
 
     `windows_epoch` are the measured windows as wall-clock seconds (scenario
     traces); None attributes the whole recording (device attach).
     `discarded_epoch` are windows XCTest ran but did not report (warm-up);
     their samples are counted apart, neither measured nor "outside".
+    `host_wide` states that the recording covers every process on this Mac
+    (`scripts/tron-profile-ios`'s host mode): only those traces are checked
+    against `EXPORT_PEAK_BUDGET_BYTES`, because the ratio behind it was
+    measured on them and not on a capture of one attached process.
     """
+    budget = checked_export_budget(trace) if host_wide else None
     toc = export_toc(trace)
     schemas = toc_schemas(toc)
     warnings: list[str] = []
@@ -536,6 +607,8 @@ def attribute(trace: Path, template: str, pid: int | None, windows_epoch: list[t
         "tables": schemas,
         "warnings": warnings,
     }
+    if budget is not None:
+        document["export"] = budget
     if windows and windows[0][0] < 0:
         raise AttributionError("the first measured window starts before the recording; the capture missed part of it")
     if "time-profile" in schemas:
@@ -571,6 +644,10 @@ def markdown(document: dict[str, Any], top: int = 15) -> str:
              f"- Trace: `{document['trace']}`",
              f"- Scope: {document['scope']}"
              + (f" ({len(document['windows'])} windows)" if document["windows"] else "")]
+    if "export" in document:
+        export = document["export"]
+        lines.append(f"- Export budget: {export['traceBytes'] / 1048576:.1f} MiB trace, projected tree peak "
+                     f"{export['projectedPeakBytes'] / 1024 ** 3:.2f} GiB of {export['budgetBytes'] / 1024 ** 3:.2f} GiB")
     for warning in document["warnings"]:
         lines.append(f"- Warning: {warning}")
     profile = document.get("time_profile")
@@ -655,11 +732,16 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--skip-windows", type=int, default=1,
                         help="leading windows to drop (XCTest's discarded first iteration; default 1)")
     parser.add_argument("--output-dir", type=Path, help="default: the trace's directory")
+    parser.add_argument("--device-capture", action="store_true",
+                        help="the trace is a `tron-profile device` capture of one attached process; the export "
+                             "budget is calibrated on host-wide `--all-processes` recordings, so it is not applied")
     arguments = parser.parse_args(argv)
     try:
         windows, discarded = load_windows(arguments.windows, None, arguments.skip_windows) \
             if arguments.windows else (None, None)
-        document = attribute(arguments.trace, arguments.template, arguments.pid, windows, discarded_epoch=discarded)
+        document = attribute(arguments.trace, arguments.template, arguments.pid, windows,
+                             discarded_epoch=discarded,
+                             host_wide=records_all_processes(arguments.template) and not arguments.device_capture)
         paths = write(document, arguments.output_dir or arguments.trace.parent)
     except AttributionError as error:
         print(f"error: {error}", file=sys.stderr)

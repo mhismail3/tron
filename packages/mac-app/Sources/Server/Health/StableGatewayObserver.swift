@@ -24,23 +24,39 @@ enum StableGatewayObserver {
         }
     }
 
+    /// The admission check that refused a runtime. The status poller puts it in
+    /// the Update required reason, which `observer.state-changed` records, so a
+    /// refusal is diagnosable from the wrapper's log alone.
+    enum Refusal: String, Error, Equatable, Sendable {
+        case serviceNotEnabled = "the Tron Agent Login Items service is not enabled"
+        case noRuntime = "launchd reports no running Gateway process"
+        case noPayload = "neither the selected nor the bundled Gateway payload validates"
+        case listener = "the launchd Gateway process is not the only listener on the Gateway port"
+        case processCommand = "the Gateway command line is not the one this app's launcher execs"
+        case launchIdentity = "the Gateway was not started by this app's helper with its supervision and channel markers"
+        case authenticatedIdentity = "the Gateway's authenticated identity does not match its payload manifest"
+    }
+
     static func observe(
         info: ServerPingInfo,
         manager: LiveLaunchAgentManager = LiveLaunchAgentManager(profile: .stable),
         fileManager: FileManager = .default
-    ) async -> Admission? {
-        guard ExistingInstallDetector.serviceStatus(label: TronGatewayProfile.stable.launchAgentLabel) == .enabled,
-              let runtime = await manager.runtimeInfo(label: TronGatewayProfile.stable.launchAgentLabel),
-              let payload = activePayload(fileManager: fileManager) else { return nil }
+    ) async -> Result<Admission, Refusal> {
+        guard ExistingInstallDetector.serviceStatus(label: TronGatewayProfile.stable.launchAgentLabel) == .enabled else {
+            return .failure(.serviceNotEnabled)
+        }
+        guard let runtime = await manager.runtimeInfo(label: TronGatewayProfile.stable.launchAgentLabel),
+              let pid = runtime.pid else { return .failure(.noRuntime) }
+        guard let payload = activePayload(fileManager: fileManager) else { return .failure(.noPayload) }
         let listeners = await ServerProcessProbe.listenerPIDs(port: TronGatewayProfile.stable.port)
-        guard validates(
+        if let refused = refusal(
             runtimeInfo: runtime,
             listenerPIDs: listeners,
             payload: payload,
             info: info,
             expectedHelperPath: TronPaths.serverHelperBinary(profile: .stable).path
-        ), let pid = runtime.pid else { return nil }
-        return Admission(processID: pid, uptime: runtime.uptime, payload: payload, info: info)
+        ) { return .failure(refused) }
+        return .success(Admission(processID: pid, uptime: runtime.uptime, payload: payload, info: info))
     }
 
     /// Re-pings and re-admits immediately before pairing data is read. A
@@ -74,24 +90,96 @@ enum StableGatewayObserver {
         return GatewayPayloadResolver.resolve(external: external, bundled: bundled)
     }
 
-    static func validates(
+    /// The runtime fence an observer re-proves before it may reuse an admission:
+    /// the live launchd process identity plus the payload selection stamps. It
+    /// is a change detector — a changed selection, a changed manifest, or a
+    /// changed process runs the full fail-closed check again.
+    struct RuntimeFence: Equatable, Sendable {
+        let process: LaunchAgentProcessFence
+        let selection: PayloadSelectionStamp
+        /// The active payload's manifest: the selected payload's when a readable
+        /// selection names one, otherwise the bundled fallback's.
+        let manifest: PayloadSelectionStamp
+        /// The bundled payload's manifest, stamped unconditionally. A selection
+        /// that names a version whose manifest exists but does not validate
+        /// falls back to the bundled payload, so replacing the app bundle must
+        /// move the fence even though the selection did not change.
+        let bundledManifest: PayloadSelectionStamp
+
+        /// Returns `nil` when launchd owns no such process, or when a file the
+        /// fence must stamp exists but cannot be read safely. Such a fence would
+        /// compare equal to the next unreadable one, so a caller that cannot
+        /// prove the runtime runs the full check instead of reusing.
+        static func read(
+            label: String,
+            store: GatewayPayloadStore,
+            bundledPayloadRoot: URL,
+            processFence: @Sendable (String) async -> LaunchAgentProcessFence? = {
+                await LaunchAgentRuntimeReader.readProcessFence(label: $0)
+            }
+        ) async -> Self? {
+            guard let process = await processFence(label),
+                  let selection = PayloadSelectionStamp.read(store.currentManifestURL),
+                  let bundled = PayloadSelectionStamp.read(
+                      bundledPayloadRoot.appendingPathComponent("manifest.json")
+                  ),
+                  let manifest = manifestStamp(selection: selection, store: store, bundled: bundled) else {
+                return nil
+            }
+            return Self(process: process, selection: selection, manifest: manifest, bundledManifest: bundled)
+        }
+
+        /// `nil` when a manifest the fence must stamp exists but cannot be read
+        /// safely. An absent selected manifest falls back to the bundled one,
+        /// matching `activePayload`'s resolution of the active payload.
+        private static func manifestStamp(
+            selection: PayloadSelectionStamp,
+            store: GatewayPayloadStore,
+            bundled: PayloadSelectionStamp
+        ) -> PayloadSelectionStamp? {
+            guard let version = selectedVersion(selection) else { return bundled }
+            guard let selected = PayloadSelectionStamp.read(
+                store.versionRoot(version).appendingPathComponent("manifest.json")
+            ) else { return nil }
+            return selected.exists ? selected : bundled
+        }
+
+        /// A path hint for the manifest leg only. The strict selection checks
+        /// stay in `GatewayPayloadValidator.validateSelection`.
+        private static func selectedVersion(_ stamp: PayloadSelectionStamp) -> String? {
+            guard stamp.exists,
+                  let selection = try? JSONDecoder().decode(GatewayPayloadSelection.self, from: stamp.bytes),
+                  GatewayPayloadStore.validComponent(
+                    selection.version, maximumLength: GatewayPayloadStore.versionComponentLimit
+                  ) else { return nil }
+            return selection.version
+        }
+    }
+
+    /// The first check that refuses the runtime, or nil when it is admitted.
+    static func refusal(
         runtimeInfo: LaunchAgentRuntimeInfo?,
         listenerPIDs: Set<Int>,
         payload: GatewayPayloadValidationResult,
         info: ServerPingInfo,
         expectedHelperPath: String,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
-    ) -> Bool {
+    ) -> Refusal? {
         let profile = TronGatewayProfile.stable
-        guard let runtimeInfo,
-              let pid = runtimeInfo.pid,
-              listenerPIDs == Set([pid]),
-              StableGatewayProvenance.validates(runtimeInfo, payload: payload,
-                  expectedHelperPath: expectedHelperPath, fileExists: fileExists),
-              authenticatedIdentity(info, matches: payload.manifest, channel: profile.channel) else {
-            return false
+        guard let runtimeInfo, let pid = runtimeInfo.pid else { return .noRuntime }
+        guard listenerPIDs == Set([pid]) else { return .listener }
+        // Named apart from the rest of provenance: the command line is the half
+        // of the contract another language (the launcher) decides.
+        guard StableGatewayProvenance.processCommand(
+            runtimeInfo.processCommand, owns: payload.root, expectedHost: "tailscale", profile: profile
+        ) else { return .processCommand }
+        guard StableGatewayProvenance.validates(
+            runtimeInfo, payload: payload, expectedHelperPath: expectedHelperPath, fileExists: fileExists
+        ) else { return .launchIdentity }
+        guard authenticatedIdentity(info, matches: payload.manifest, channel: profile.channel) else {
+            return .authenticatedIdentity
         }
-        return true
+        return nil
     }
 
     static func authenticatedIdentity(

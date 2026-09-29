@@ -8,6 +8,7 @@ import { GatewayError } from "../errors.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
+import { drainDurableWriteStats } from "../util/durable-json.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { withInvocationContext } from "../extensions/owner-attribution.js";
 
@@ -80,6 +81,37 @@ describe("knowledge connectors", () => {
     // names the Keychain service and sends the user to the agent for the account.
     const capability = (await owner.snapshot()).capabilities.find(item => item.connectionId === "personal" && item.id === "read");
     expect(capability).toMatchObject({ availability: "unavailable", detail: "Credential missing or rejected. Check the Mac Keychain item (service 'Tron Connector Credentials'); ask the agent for the exact account." });
+  });
+
+  it("starts no durable write when a read observes the same provider admission", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-connection-read-observation-")); roots.push(root);
+    const owner = new ConnectionOwner(root);
+    const setup = await owner.execute({ kind: "setup.begin", commandId: command("read-observe-begin"), instanceId: "personal", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+    await owner.execute({ kind: "setup.complete", commandId: command("read-observe-complete"), operationId: setup.operationId, instanceId: "personal", providerAccountId: "42", scope: "0", credentialRef: "connector:raindrop:test-account", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+    let user = { user: { _id: 42, email: "owner@example.test" } };
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const extension = new KnowledgeConnectorExtension(store, {
+      connections: owner,
+      credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:test-account", "synthetic-raindrop-token"]])),
+      http: async url => url.endsWith("/user") ? response(user) : response({ items: [] }),
+      sleep: async () => {},
+    });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("read-observe-config"), connector: "raindrop", connectionId: "personal", enabled: true } });
+    const read = { operation: "knowledge.raindrop.read", request: { commandId: command("read-observe-read"), connectionId: "personal", read: { operation: "bookmarks", collectionId: "0", perpage: 1 } } } as const;
+    await extension.invoke(read);
+    expect((await owner.snapshot()).instances[0]).toMatchObject({ health: "ready", credentialAvailability: "available", providerIdentity: "admitted", providerDisplayName: "owner@example.test" });
+    // The next read reuses the same `/user` verification against the same
+    // revision, so it re-observes unchanged state: no fsync behind the await.
+    drainDurableWriteStats();
+    await extension.invoke(read);
+    expect(drainDurableWriteStats().count).toBe(0);
+    // A read that sees a different provider identity still persists it before
+    // its response, so a real transition cannot be lost by the skip.
+    user = { user: { _id: 42, email: "renamed@example.test" } };
+    drainDurableWriteStats();
+    await extension.invoke(read);
+    expect(drainDurableWriteStats().count).toBe(2);
+    expect((await owner.snapshot()).instances[0]).toMatchObject({ health: "ready", providerIdentity: "admitted", providerDisplayName: "renamed@example.test" });
   });
 
   it("does not debit or contact X when its credential is unavailable", async () => {

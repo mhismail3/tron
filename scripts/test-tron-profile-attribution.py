@@ -22,15 +22,26 @@ could still point an agent at the wrong owner without any simulator:
 8. The self-test accepts a traced control run whose known workload function is
    not among the top self-time symbols, or whose windows are misplaced so the
    workload shows up outside them.
+9. Parsing retains memory per reference instead of per definition: every
+   `<frame ref>` inside a retained backtrace stays its own element, so a
+   host-wide export (15 M frame references on a loaded Mac) takes the profiler
+   past 5 GB.
+10. A trace whose export cannot stay inside the profiler's memory budget is
+    exported anyway, a trace that fits is refused, or the refusal does not
+    name the trace's own size. `xcrun xctrace export` takes the same memory
+    whatever `--xpath` selects, so the budget is the only bound a host-wide
+    recording's profiler has.
 """
 
 from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import os
 from pathlib import Path
 import sys
 import tempfile
+import tracemalloc
 import unittest
 from unittest import mock
 
@@ -172,6 +183,31 @@ class ExportParsing(unittest.TestCase):
         with self.assertRaises(attribution.AttributionError):
             list(attribution.iter_rows("<trace-toc/>"))
 
+    def test_retained_memory_does_not_grow_with_references(self) -> None:
+        # 2,000 distinct stacks, each 1 new leaf over the same 199 shared
+        # frames: 398,000 frame references to 2,199 frame definitions.
+        samples = Samples()
+        shared = [(f"caller{depth}()", "UIKitCore") for depth in range(199)]
+        rows = [samples.row(time, MAIN, [(f"leaf{time}()", "TronMobile"), *shared]) for time in range(2_000)]
+        with tempfile.TemporaryDirectory() as directory:
+            export = Path(directory) / "time-profile.xml"
+            export.write_text(result("time-profile", TIME_PROFILE_COLUMNS, rows))
+            del rows
+            tracemalloc.start()
+            try:
+                summary = attribution.summarize_time_profile(attribution.iter_rows(export), None, 42)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+        # Kept per reference, this export peaked at 174 MB (166 MiB); each
+        # reference resolved to its shared definition once, 6.9 MB (6.6 MiB).
+        self.assertLess(peak, 24 * 1024 * 1024)
+        self.assertEqual(summary["samples"], 2_000)
+        # Every shared frame, reached only through references, is in every sample.
+        total = summary["all_threads"]["total"]
+        self.assertEqual(len(total), attribution.TOP_SYMBOLS)
+        self.assertTrue(all(row["symbol"].startswith("caller") and row["share"] == 1.0 for row in total))
+
     def test_recursion_counts_once_toward_total_time(self) -> None:
         samples = Samples()
         rows = [samples.row(1, MAIN, [("layout()", "SwiftUI"), ("layout()", "SwiftUI"), ("main", "TronMobile")])]
@@ -197,14 +233,63 @@ class ExportParsing(unittest.TestCase):
             samples.row(3_000_000_000, MAIN, [("measured()", "TronMobile")]),
         ])
         toc = attribution.ElementTree.fromstring(TOC)
-        with mock.patch.object(attribution, "export_toc", return_value=toc), \
-                mock.patch.object(attribution, "export_rows", side_effect=lambda *_: attribution.iter_rows(rows)):
-            document = attribution.attribute(Path("x.trace"), "time-profiler", 42, [(TOC_EPOCH + 2.5, TOC_EPOCH + 3.5)])
-            self.assertEqual([row["symbol"] for row in document["time_profile"]["all_threads"]["self"]], ["measured()"])
-            self.assertIsNone(document["signposts"])
-            self.assertTrue(any("signposts unavailable" in warning for warning in document["warnings"]))
-            with self.assertRaisesRegex(attribution.AttributionError, "starts before the recording"):
-                attribution.attribute(Path("x.trace"), "time-profiler", 42, [(TOC_EPOCH - 1, TOC_EPOCH + 3.5)])
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / "x.trace"
+            trace.touch()
+            with mock.patch.object(attribution, "export_toc", return_value=toc), \
+                    mock.patch.object(attribution, "export_rows",
+                                      side_effect=lambda *_: attribution.iter_rows(rows)):
+                document = attribution.attribute(trace, "time-profiler", 42, [(TOC_EPOCH + 2.5, TOC_EPOCH + 3.5)],
+                                                 host_wide=True)
+                self.assertEqual([row["symbol"] for row in document["time_profile"]["all_threads"]["self"]],
+                                 ["measured()"])
+                self.assertIsNone(document["signposts"])
+                self.assertTrue(any("signposts unavailable" in warning for warning in document["warnings"]))
+                with self.assertRaisesRegex(attribution.AttributionError, "starts before the recording"):
+                    attribution.attribute(trace, "time-profiler", 42, [(TOC_EPOCH - 1, TOC_EPOCH + 3.5)],
+                                          host_wide=True)
+
+    def test_the_export_budget_is_a_boundary_on_the_trace_size(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "idle-dashboard.trace"
+            (bundle / "Trace1.run").mkdir(parents=True)
+            store = bundle / "Trace1.run" / "store"
+            store.touch()
+            # The largest trace the budget admits, one byte over and one under it:
+            # a real 55.5 MiB control-cpu trace projects 1.1 GiB and passes.
+            largest = attribution.EXPORT_PEAK_BUDGET_BYTES // attribution.EXPORT_PEAK_BYTES_PER_TRACE_BYTE
+            os.truncate(store, largest + 1)
+            with mock.patch.object(attribution, "export_toc") as toc:
+                with self.assertRaises(attribution.AttributionError) as refusal:
+                    attribution.attribute(bundle, "time-profiler", 42, None, host_wide=True)
+                toc.assert_not_called()
+            message = str(refusal.exception)
+            self.assertIn("refusing to export idle-dashboard.trace", message)
+            self.assertIn(f"the trace is {(largest + 1) / 1048576:.0f} MiB", message)
+            os.truncate(store, largest)
+            budget = attribution.checked_export_budget(bundle)
+            self.assertEqual(budget["traceBytes"], largest)
+            self.assertLessEqual(budget["projectedPeakBytes"], budget["budgetBytes"])
+
+    def test_a_device_capture_is_not_held_to_the_host_wide_budget(self) -> None:
+        # A device capture records one attached process and its export-to-trace
+        # ratio is unmeasured, so a trace over the host-wide budget still exports.
+        rows = result("time-profile", TIME_PROFILE_COLUMNS, [])
+        toc = attribution.ElementTree.fromstring(TOC.replace('<table schema="time-profile"/>', ""))
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "power.trace"
+            bundle.mkdir()
+            (bundle / "store").touch()
+            os.truncate(bundle / "store",
+                        attribution.EXPORT_PEAK_BUDGET_BYTES // attribution.EXPORT_PEAK_BYTES_PER_TRACE_BYTE + 1)
+            with mock.patch.object(attribution, "export_toc", return_value=toc), \
+                    mock.patch.object(attribution, "export_rows",
+                                      side_effect=lambda *_: attribution.iter_rows(rows)):
+                document = attribution.attribute(bundle, "power-profiler", 42, None, host_wide=False)
+        self.assertNotIn("export", document)
+        self.assertFalse(attribution.records_all_processes("power-profiler"))
+        self.assertTrue(attribution.records_all_processes("time-profiler"))
+        self.assertFalse(attribution.records_all_processes("swiftui"))
 
     def test_self_test_requires_the_control_workload_in_the_top_self_symbols(self) -> None:
         def document(symbols: list[str]) -> dict:

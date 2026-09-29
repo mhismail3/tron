@@ -1,4 +1,5 @@
 import { abortableRead } from "../util/abortable-read.js";
+import { offLoop, stage } from "./request-span.js";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
@@ -23,6 +24,7 @@ import {
   PROCESS_TRANSCRIPT_CAPABILITY,
 } from "../sessions/process-activity.js";
 import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
+import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
 import {
   WorkspaceInspectionService,
@@ -63,7 +65,7 @@ import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, providerUsageSupported, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { KnowledgeStoreError } from "../knowledge/knowledge-store.js";
+import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
@@ -78,6 +80,30 @@ const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;
  * safeJson intentionally clips ordinary strings; applying it here would make
  * base64 and its advertised byte offsets disagree. Keep this boundary typed and
  * bounded so the native/frame limits still govern the enclosing response. */
+/** Preview batches carry base64 like object reads, so they cross the same exact
+ * byte boundary instead of safeJson's string clipping. */
+function projectKnowledgePreviewBatch(value: unknown): JsonValue {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("internal", "Knowledge preview batch response is invalid");
+  const items = (value as { items?: unknown }).items;
+  if (!Array.isArray(items) || items.length > KNOWLEDGE_PREVIEW_BATCH_ITEMS) throw new GatewayError("internal", "Knowledge preview batch response is invalid");
+  let total = 0;
+  return { items: items.map(entry => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("internal", "Knowledge preview batch item is invalid");
+    const item = entry as Record<string, unknown>;
+    if (typeof item.recordId !== "string" || item.recordId.length > 200 || typeof item.hash !== "string" || !/^[a-f0-9]{64}$/.test(item.hash)) throw new GatewayError("internal", "Knowledge preview batch item is invalid");
+    if (item.base64 === undefined) {
+      if (!["forbidden", "missing", "too-large"].includes(item.unavailable as string)) throw new GatewayError("internal", "Knowledge preview batch item is invalid");
+      return { recordId: item.recordId, hash: item.hash, unavailable: item.unavailable as string };
+    }
+    if (typeof item.base64 !== "string") throw new GatewayError("internal", "Knowledge preview batch item is invalid");
+    const bytes = Buffer.from(item.base64, "base64");
+    if (bytes.byteLength > KNOWLEDGE_PREVIEW_MAX_BYTES || total + bytes.byteLength > KNOWLEDGE_PREVIEW_BATCH_BYTES
+      || bytes.toString("base64") !== item.base64) throw new GatewayError("internal", "Knowledge preview batch item exceeds its bound");
+    total += bytes.byteLength;
+    return { recordId: item.recordId, hash: item.hash, base64: item.base64 };
+  }) };
+}
+
 function projectKnowledgeObjectChunk(value: unknown): JsonValue {
   if (value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("internal", "Knowledge object response is invalid");
@@ -103,8 +129,6 @@ function projectKnowledgeObjectChunk(value: unknown): JsonValue {
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
-/** A session open slower than this is visible to the user as a stalled chat. */
-const SLOW_SESSION_OPEN_WARNING_MS = 1_000;
 const PROVIDER_CATALOG_MAX_STRING_BYTES = 4 * 1_048_576;
 const PROVIDER_CATALOG_MAX_FIELD_CHARACTERS = 100_000;
 
@@ -188,9 +212,18 @@ const restartDrainMethods = new Set([
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
-  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.search", "knowledge.recall",
+  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall",
   "connections.list",
 ]);
+
+/** One session export at a time (`G-12`): an export streams a whole transcript
+ * through the loop and the disk, so a second concurrent one halves the speed of
+ * both while doubling what the host holds. */
+const MAXIMUM_CONCURRENT_SESSION_EXPORTS = 1;
+/** Two workspace inspections at once (`G-12`): each spawns git or walks a
+ * directory tree, and a client can ask for several while scrolling; the rest
+ * wait their turn instead of competing for the same disk. */
+const MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS = 2;
 
 export interface ClientContext {
   id: string;
@@ -274,6 +307,10 @@ export class GatewayService {
   private readonly automationPages = new AutomationPaginationStore();
   private readonly workspaceInspector: WorkspaceInspectionService;
   private readonly providerUsage: ProviderUsageOwner;
+  /** The named caps that queue rather than refuse (`G-12`); an admitted
+   * mutation or prompt is never behind them. */
+  private readonly exportGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_SESSION_EXPORTS);
+  private readonly workspaceGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS);
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
@@ -337,6 +374,13 @@ export class GatewayService {
       machineName: config.machineName,
       gatewayChannel: this.updateService.channel,
       ...runtimeIdentity(),
+      // A reconnecting phone compares this against the registration it
+      // acknowledged: the value changes whenever this Gateway's stored grants
+      // do, including when the relay disables a grant at runtime, which no
+      // event announces (G-7).
+      ...(this.dependencies.notifications
+        ? { pushRegistrationRevision: this.dependencies.notifications.registrationRevision }
+        : {}),
       capabilities: [
         ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
         "sessions.v1",
@@ -378,7 +422,7 @@ export class GatewayService {
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
-        ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1"] : []),
+        ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
         ...(this.dependencies.sessionSearch ? ["session-search.v1"] : []),
       ],
@@ -398,6 +442,7 @@ export class GatewayService {
       case "knowledge.list":
       case "knowledge.read":
       case "knowledge.object.read":
+      case "knowledge.previews.read":
       case "knowledge.search":
       case "knowledge.recall":
       case "knowledge.connector.status":
@@ -405,7 +450,9 @@ export class GatewayService {
 
         const knowledge = this.requireKnowledge();
         const result = await knowledge.invoke({ operation: method, request: params } as KnowledgeAction);
-        return method === "knowledge.object.read" ? projectKnowledgeObjectChunk(result) : safeJson(result);
+        if (method === "knowledge.object.read") return projectKnowledgeObjectChunk(result);
+        if (method === "knowledge.previews.read") return projectKnowledgePreviewBatch(result);
+        return safeJson(result);
       }
       case "connections.list": {
         if (!this.dependencies.connections) throw new GatewayError("unsupported", "Connection management is unavailable");
@@ -649,19 +696,39 @@ export class GatewayService {
         });
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
+        // Identical registrations are naturally idempotent and write nothing at
+        // all, so they are answered before the receipt owner opens one.
+        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
+        if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
+        const notifications = this.requireNotifications();
+        // `commandId` stays required here so an unchanged registration is still
+        // addressed by the same command identity a retried request repeats.
+        void string(params.commandId, "commandId", { min: 8, max: 160 });
+        const input = {
+          deviceId: client.identity,
+          installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
+          grantId: string(params.grantId, "grantId", { min: 8, max: 160 }),
+          secret: string(params.secret, "secret", { min: 43, max: 171 }),
+          previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
+          relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
+          ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
+        };
+        // An identical registration is naturally idempotent and writes nothing,
+        // not even a command receipt, so it is answered before the receipt owner
+        // opens one. This check is read-only and runs outside the identity lane,
+        // so it is not ordered with this device's lane operations: an identical
+        // upsert racing a remove or a revoke is answered from the snapshot the
+        // check read rather than from behind that lane mutation. It cannot bring
+        // a grant back — it only decides to skip the write — and a grant the
+        // relay disabled is still visible because the status is read after the
+        // decision.
+        if (await notifications.registrationIsCurrent(input)) {
+          return safeJson(await notifications.status(client.identity));
+        }
+        // An admitted registration keeps the existing order: the per-device lane
+        // wraps the operation inside its receipt, so an accepted mutation is
+        // owned by the work registry before it waits for the lane.
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {
-          const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
-          if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
-          const notifications = this.requireNotifications();
-          const input = {
-            deviceId: client.identity,
-            installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
-            grantId: string(params.grantId, "grantId", { min: 8, max: 160 }),
-            secret: string(params.secret, "secret", { min: 43, max: 171 }),
-            previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
-            relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
-            ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
-          };
           if (!await this.dependencies.devices.hasDevice(client.identity)) {
             throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
           }
@@ -909,6 +976,11 @@ export class GatewayService {
           : oneOf(params.archived, "archived", ["exclude", "only"] as const);
         const cursor = optionalString(params.cursor, "cursor", 96);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
+        // Conditional first page (G-7): a client that already holds this exact
+        // projection revalidates it without a row projection. A cursor
+        // traversal is already bound to the projection its first page admitted,
+        // so only an uncursored request may name one.
+        const clientProjectionToken = optionalString(params.projectionToken, "projectionToken", 512);
         this.requireObserverAdmission(client);
         if (cursor !== undefined) {
           const page = await this.sessionListPages.nextPage(client.id, scope, cursor, limit, archived);
@@ -922,6 +994,21 @@ export class GatewayService {
           this.dependencies.sessions.pageSource(scope, archived),
           client.signal,
         );
+        if (clientProjectionToken !== undefined && clientProjectionToken === source.projectionToken) {
+          if (client.isRevoked()) {
+            this.sessionListPages.releaseClient(client.id);
+            throw new GatewayError("unauthenticated", "This device is no longer authorized");
+          }
+          // The token covers structural identity, archive membership, the
+          // visible archived count and every mutable row overlay, so an equal
+          // token means the client's rows are still exactly this projection.
+          return safeJson({
+            sessions: [],
+            listRevision: source.listRevision,
+            projectionToken: source.projectionToken,
+            notModified: true,
+          });
+        }
         const page = await this.sessionListPages.firstPage(client.id, scope, source, limit, archived);
         if (client.isRevoked()) {
           this.sessionListPages.releaseClient(client.id);
@@ -992,34 +1079,36 @@ export class GatewayService {
       }
       case "session.open": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
-        const startedAt = performance.now();
-        const slot = await this.dependencies.sessions.acquire(sessionId);
+        // A cold open's runtime load is the most expensive disposable read the
+        // Gateway serves, so its wait is abandonable and checked before the
+        // snapshot is built. The registry's shared start is not abandoned with
+        // it: a retry (or another connection) joins the runtime load already in
+        // progress instead of starting a second one (`C-6`).
+        const slot = await abortableRead(client.signal, () => this.dependencies.sessions.acquire(sessionId, client.signal));
         // Join the exact canonical completion barrier before snapshotting. The
         // response and completionRevision therefore describe one admitted cut.
-        await slot.reconcileAttention();
-        const acquiredAt = performance.now();
+        await abortableRead(client.signal, () => slot.reconcileAttention());
+        client.signal?.throwIfAborted();
         // Acquire can overlap a canonical fork rekey. From this synchronous
         // boundary onward, use the slot's admitted identity for subscription,
         // snapshot, and attention so one response cannot mix parent and child.
         const canonicalSessionId = slot.id;
         const syncToken = client.beginSynchronization(canonicalSessionId);
+        // The request span measures acquire, the snapshot build and the response
+        // serialization; a slow open needs no record of its own.
         const snapshot = slot.snapshot();
         if (snapshot.sessionId !== canonicalSessionId) {
           throw new GatewayError("conflict", "Session identity changed while opening", true);
         }
         client.establishSynchronization(canonicalSessionId, snapshot);
-        const completedAt = performance.now();
-        this.dependencies.logger.log(
-          completedAt - startedAt >= SLOW_SESSION_OPEN_WARNING_MS ? "warning" : "info",
-          `Session open prepared in ${Math.max(0, Math.round(completedAt - startedAt))}ms (acquire ${Math.max(0, Math.round(acquiredAt - startedAt))}ms, snapshot ${Math.max(0, Math.round(completedAt - acquiredAt))}ms)`,
-          { event: "session.open.prepared", source: "sessions", sessionId: canonicalSessionId, durationMs: completedAt - startedAt },
-        );
-        return safeJson({
+        // Sanitizing the response is real request work over the whole snapshot;
+        // the span names it instead of leaving it in `unaccountedMs`.
+        return stage("response.encode", () => safeJson({
           session: snapshot,
           syncToken,
           subscriptionToken: syncToken,
           completionRevision: this.dependencies.sessions.attentionProjection(canonicalSessionId).completionRevision,
-        });
+        }));
       }
       case "session.presentation.set": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
@@ -1446,7 +1535,12 @@ export class GatewayService {
       }
       case "session.export": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await slot.export(oneOf(params.format, "format", ["html", "jsonl"] as const)));
+        // A queued export whose client left is dropped before it starts: the
+        // export is a read nobody would receive (`G-12`).
+        return safeJson(await this.exportGate.run(
+          client.signal,
+          () => slot.export(oneOf(params.format, "format", ["html", "jsonl"] as const)),
+        ));
       }
       case "session.context":
         return (await this.openedSlot(client, params)).context();
@@ -1731,60 +1825,60 @@ export class GatewayService {
 
       case "session.workspace.inspect": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.inspect(slot.cwd));
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.inspect(slot.cwd)));
       }
       case "session.workspace.list": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.list(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.list(
           slot.cwd,
           optionalString(params.path, "path", 4_096),
-        ));
+        )));
       }
       case "session.workspace.file": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.file(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.file(
           slot.cwd,
           string(params.path, "path", { min: 1, max: 4_096 }),
-        ));
+        )));
       }
       case "session.workspace.git.diff": {
         const slot = await this.openedSlot(client, params);
         const scope = params.scope === undefined
           ? "current"
           : oneOf(params.scope, "scope", ["current", "staged", "unstaged"] as const);
-        return safeJson(await this.workspaceInspector.diff(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.diff(
           slot.cwd,
           string(params.path, "path", { min: 1, max: 4_096 }),
           scope as WorkspaceDiffScope,
-        ));
+        )));
       }
       case "session.workspace.git.history.list": {
         const slot = await this.openedSlot(client, params);
         const scope = params.scope === undefined
           ? "currentBranch"
           : oneOf(params.scope, "scope", ["currentBranch", "allReferences"] as const);
-        return safeJson(await this.workspaceInspector.historyList(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.historyList(
           slot.cwd,
           client.id,
           scope as WorkspaceHistoryScope,
           optionalString(params.cursor, "cursor", 2_048),
           params.limit === undefined ? 40 : integer(params.limit, "limit", 1, 100),
-        ));
+        )));
       }
       case "session.workspace.git.history.get": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.historyGet(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.historyGet(
           slot.cwd,
           string(params.oid, "oid", { min: 40, max: 64 }),
-        ));
+        )));
       }
       case "session.workspace.git.history.diff": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.historyDiff(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.historyDiff(
           slot.cwd,
           string(params.oid, "oid", { min: 40, max: 64 }),
           string(params.path, "path", { min: 1, max: 4_096 }),
-        ));
+        )));
       }
 
       case "terminal.list": {
@@ -2021,13 +2115,17 @@ export class GatewayService {
         ? await this.dependencies.receipts.status(client.identity, method, commandId)
         : undefined;
       if (prior?.status === "completed" && prior.result !== undefined) return this.knowledgeReceiptResult(prior.result);
+      // The operation is the part that waits away from the loop (a shell command,
+      // a compaction, a model, a package install), so it runs off the request's
+      // share of the loop: a background slice must not be paused for a request
+      // whose loop is idle for minutes.
       const result = await this.dependencies.receipts.execute(
         client.identity,
         method,
         commandId,
         knowledgeMutation
-          ? async () => this.knowledgeReceiptSafe(await operation())
-          : () => operation(work?.token),
+          ? async () => this.knowledgeReceiptSafe(await offLoop(operation))
+          : () => offLoop(() => operation(work?.token)),
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
     } finally {

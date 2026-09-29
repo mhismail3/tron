@@ -5,7 +5,7 @@ import Testing
 @Suite("LiveLaunchAgentManager")
 struct LiveLaunchAgentManagerTests {
     private static let helper = "/fixture/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
-    private static let command = "/fixture/Tron.app/Contents/Resources/Gateway/runtime/node-arm64 /fixture/Tron.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port 9847"
+    private static let command = "/fixture/Tron.app/Contents/Resources/Gateway/runtime/node-arm64 --max-old-space-size=4096 /fixture/Tron.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port 9847"
     private static var healthy: LaunchAgentRuntimeInfo {
         LaunchAgentRuntimeInfo(
             pid: 42, parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
@@ -125,7 +125,7 @@ struct LiveLaunchAgentManagerTests {
             runtimeInfo: runtime, expectedHelperPath: Self.helper, fileExists: { _ in true }
         ))
         runtime.bundleProgram = "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
-        runtime.processCommand = "/fixture/Other.app/Contents/Resources/Gateway/runtime/node-arm64 /fixture/Other.app/Contents/Resources/Gateway/app/dist/index.js --port 9847"
+        runtime.processCommand = "/fixture/Other.app/Contents/Resources/Gateway/runtime/node-arm64 --max-old-space-size=4096 /fixture/Other.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port 9847"
         #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
             runtimeInfo: runtime, expectedHelperPath: Self.helper, fileExists: { _ in true }
         ))

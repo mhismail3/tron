@@ -75,6 +75,10 @@ async function fixture() {
       calls.push(["remove", id]);
       return registered.delete(id);
     },
+    // The real service answers this from its stored grant; the stub keeps the
+    // default `false` so every existing case exercises the durable path, and a
+    // case that cares about the receipt-free answer overrides it.
+    async registrationIsCurrent() { return false; },
     async status(id?: string) {
       calls.push(["status", id]);
       return status(id);
@@ -87,11 +91,12 @@ async function fixture() {
       return paired.delete(deviceId);
     }),
   };
+  const receipts = { execute: vi.fn(async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation()) };
   const service = new GatewayService({
     config: { tronHome: root }, notifications, devices,
-    receipts: { execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() },
+    receipts,
   } as any);
-  return { service, calls, devices, notifications, registered, upserts };
+  return { service, calls, devices, notifications, registered, upserts, receipts };
 }
 
 describe("Gateway push registration RPC", () => {
@@ -175,6 +180,31 @@ describe("Gateway push registration RPC", () => {
       commandId: "command_read_all_keyed", through: "1.notification_abcdefgh", revision: "revision-abcdefgh",
     })).rejects.toMatchObject({ code: "invalid_request" });
     expect(calls).toEqual([]);
+  });
+
+  it("answers an identical registration without opening a command receipt", async () => {
+    const { service, calls, notifications, receipts, upserts } = await fixture();
+    const request = pushFixture.gatewayUpsert.request;
+    await expect(service.invoke(client(), "push.registration.upsert", request)).resolves.toMatchObject({ deviceRegistered: true });
+    expect(receipts.execute).toHaveBeenCalledTimes(1);
+    receipts.execute.mockClear();
+    calls.length = 0;
+    upserts.length = 0;
+
+    // The reconnect re-sends the same registration. It writes nothing at all,
+    // so it is answered before the receipt owner opens one.
+    vi.spyOn(notifications, "registrationIsCurrent").mockResolvedValue(true);
+    const answer = await service.invoke(client(), "push.registration.upsert", request);
+    expect(answer).toEqual(pushFixture.gatewayUpsert.expectedStatus);
+    expect(receipts.execute).not.toHaveBeenCalled();
+    expect(upserts).toHaveLength(0);
+    expect(calls).toEqual([["status", "device_abcdefgh"]]);
+
+    // A retried request repeats the command identity; the answer is the stored
+    // grant's same status, so the reply is idempotent without a receipt.
+    const retried = await service.invoke(client(), "push.registration.upsert", request);
+    expect(retried).toEqual(answer);
+    expect(receipts.execute).not.toHaveBeenCalled();
   });
 
   it("orders upsert then remove for one mobile identity before releasing the lane", async () => {
