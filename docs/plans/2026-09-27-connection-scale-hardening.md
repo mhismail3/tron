@@ -1,7 +1,7 @@
 # Connection and scale hardening
 
 - **Started:** 2026-09-27
-- **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Status:** Active (Phase 1 merged to `main` early on 2026-09-28 at the user's request; remaining Phase 1 work continues on `hardening/integration`, merged to `main` again at R-1)
 - **Last updated:** 2026-09-28, G-12 review round 1 addressed: a shared cold start no longer carries one requester's signal (the queued load is dropped only when its last waiter leaves), the heap pass measures progress from its own accounting, and the deadline table is limited to the reads the plan names (see the handoff)
 - **Last updated:** 2026-09-28, G-8a/G-8d/T-1 Done: an unchanged extension artifact costs one `stat` and no read, the ambient pass stays bound and reports a stop, and both read lanes retry a replace before warning (see the handoff)
 - **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
@@ -9936,3 +9936,20 @@ recovery gaps; all three were fixed on the same branch.
   `personal-info-guard.sh` pass.
 - Deviation: the plan's file paths for moved iOS files were updated to `Core/`
   so the plan matches the tree, as MS-3b did on `main`.
+
+### Early merge to main · 2026-09-28 · orchestrator
+
+- Result: at the user's request, `hardening/integration` (Phase 1 so far,
+  protocol 6) was merged into `main` once, ahead of R-1, after merging the
+  latest `main` (iOS module split MS-3b, paused-subagent settlement) into it
+  and re-running the gates: Gateway `tsc` clean, registry + session-archive +
+  sync-protocol 290/290, paused-subagent/process-activity suites 69/69, iOS
+  full unit plan 1,835/1,835 (`20260929T021733Z-run.ZwLHv2`), protocol
+  contract, source policy, profiler and triage tests pass.
+- Deviation from the branch model: `main` now carries protocol 6 and every
+  Done Phase 1 row. The Mac app and iOS app built from `main` must be installed
+  together. Remaining rows (E-3c, E-3d, G-3a, T-5, F-2, O-6a/O-6b baselines)
+  continue on `hardening/integration`, branched from this `main`, and R-1
+  merges them once more.
+- For the next agent: the plan copy on `main` and on `hardening/integration`
+  are identical at this point; keep updating the integration copy until R-1.
