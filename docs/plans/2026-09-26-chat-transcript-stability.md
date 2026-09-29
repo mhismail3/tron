@@ -945,3 +945,28 @@ pass only through eager-only repairs, stop and report.
   covered by the gate's frames, not by a device check; F1's device check stays
   on CT-7 as the audit asked.
 - Changes: `ChatEntranceRows.swift`, `ChatRowStabilityTests.swift`.
+
+### CT-27 stage A3 (F5) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: `ChatIncrementalContentGrowthHost` now owns a height only while the row
+  is streaming or a growth animation is in flight. A settled row leaves
+  `presentedHeight` nil, so its layout is always its content's natural height and
+  a width, Dynamic Type or document change cannot lay it out once at a stale,
+  clipped height. The pinned height is released when a stream ends, deferred
+  through `isAnimatingGrowth` and two `onChange` re-entries so ending a stream
+  cannot truncate the last growth animation's frames. `install` still measures
+  every row (the measurement feeds the identity/width bookkeeping) but writes no
+  height for a settled one.
+- Evidence (lane ct27):
+  - Parity gate 7/7 (44.6 s): `streaming-tail-growth` worst 0.04034 against 0.065,
+    `queued-card-to-sent-row` 0.02564, `tool-chip-entrance` 0.05231 — the
+    streaming and replacement motion evidence is unchanged within the gate.
+  - `ChatRowStabilityTests` 2/2 (2.7 s), same counters as A2
+    (`postMountResizes=0`, `remounts=9/9`, `semanticFrameCallbacks=275`).
+- Deviations: this fix has no hosted height oracle. Its cost is a state write and
+  one relayout per mount, and the height it pinned was always the natural height,
+  so no sampled row frame differs before or after it; the parity gate and the
+  journey counters are the evidence, and the F13 counter still reads zero. The
+  audit's `semanticFrameCallbackCount` proof therefore does not discriminate here
+  (275 before, 275 after on this journey).
+- Changes: `ChatEntranceRows.swift`.
