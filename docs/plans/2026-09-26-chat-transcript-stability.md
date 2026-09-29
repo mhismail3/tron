@@ -3264,7 +3264,7 @@ was removed or released by hand. Retained run/profile roots and live-worktree
 build products are separate from the deleted lane's simulator/state.
 
 
-### CT-23 device evaluation build · 2026-09-30 · worker lane ct23b
+### CT-23 device evaluation build · 2026-09-29 · worker lane ct23b
 
 User-approved evaluation only; CT-23 remains blocked for production cutover.
 Implementation and validation are owned in `/private/tmp/tron-ct23b`; no Gateway
@@ -3293,3 +3293,163 @@ of this preference; Release must not contain the preference or row. Validate the
 compile boundaries with LocalDevice/Release builds, preserve hosted integration
 gates in both orientations, and leave real Settings/relaunch comparison explicitly
 on the user's device checklist. No isolated tests or production test hooks added.
+
+#### Evaluation artifact and clean evidence
+
+Implementation commits (all committed before evidence): `28f9142d8` guards the
+hosted probe; `9172a19ec` corrects the two diagnostic-coordinate consumers;
+`dc0387e9d` adds the LocalDevice-only preference/row and launch freeze. All runs
+below have clean source identity `dc0387e9d` in `/private/tmp/tron-ct23b`.
+No tests, expectations, tolerances, reference images or watchdogs were changed.
+The existing hosted integration journeys and non-hosted compile checks are the
+regressions; no isolated tests were added.
+
+**Device-evaluation artifact prepared, not installed. Production cutover remains
+blocked.** Signed generic-device builds both succeeded using project signing,
+without `CODE_SIGNING_ALLOWED=NO`. The LocalDevice artifact additionally passes
+`scripts/validate-ios-artifact.py --configuration LocalDevice --require-profile`.
+Read-only `scripts/verify-gateway-protocol-contract.py` confirms source, this iOS
+artifact and `/Applications/Tron.app` all use Gateway protocol v6 (minimum v6).
+No Gateway action is required or authorized by this work.
+
+Build root: `~/Library/Developer/Tron/ios/ct23-device-evaluation/`.
+The prepared signed app is
+`LocalDevice/Build/Products/LocalDevice-iphoneos/TronMobile.app` under that root;
+its `TronBuildIdentity.json` records `dc0387e9d`, `dirty:false`.
+`local-device-build.log`, `release-build.log`, and `hosted-build.log` retain build
+output. Binary string inspection finds the evaluation key/label in LocalDevice
+and neither in Release. Release's build is **compile validation only**: the
+optional signed-artifact validator fails its development `aps-environment`
+against Release's production requirement under the available project signing.
+This is not a distribution-ready Release artifact; no signing policy was changed.
+
+Generic-device compile commands, from the worktree root:
+
+```bash
+scripts/tron ios generate
+xcodebuild build -project packages/ios-app/TronMobile.xcodeproj \
+  -scheme 'Tron Device' -configuration LocalDevice \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath "$HOME/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice"
+xcodebuild build -project packages/ios-app/TronMobile.xcodeproj \
+  -scheme 'Tron Release' -configuration Release \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath "$HOME/Library/Developer/Tron/ios/ct23-device-evaluation/Release"
+TRON_IOS_TEST_LANE=ct23b scripts/tron-ios-test build
+```
+
+Hosted artifacts below are under `~/Library/Developer/Tron/ios/test-runs/`;
+each retains `metadata.json`, `test.log`, `summary.json`, and `TestResults.xcresult`.
+
+| Gate | Result | Run |
+| --- | --- | --- |
+| Origin page-barrier/prepend | 1/1 pass; unchanged ≤2 pt excursion gate | `20260929T211210Z-run.MRW8Qv` |
+| Full `ChatViewScrollHarnessTests`, origin, once | 72 tests / 29 issues; all classified below, not green | `20260929T211235Z-run.ShLPKQ` |
+| Four bottom journeys, origin, once each in that full run | 0 blank/uncovered at all 72/340/90/68 boundaries; minimum visible fraction 1.0; settled clearance 12.0 pt | Same full run; no redundant second bottom run |
+| Focused origin keyboard, detached, staged catch-up | 3/3 pass; 24 ramp boundaries, worst gap 1.9 pt, distance/aligned gates pass; detached movement 0.0 in streaming/show/hide/page phases, same ID/instance, zero keyboard commands | `20260929T211731Z-run.fVTops` |
+| Origin unchanged parity | **7/10 scenarios**, 3 issues: opened history 0.02826; ordinary-send pinned 0.02564; keyboard pinned 0.02550 and dismissal 0.02504 (stable bound 0.025) | Same focused origin run |
+| Focused today keyboard, detached, catch-up and parity | 5/5 tests; parity **10/10 scenarios**; detached movement 0.0. Keyboard still reproduces today's known one blank boundary and 96,304.3 pt ramp excursion, then settles at 12.3 pt; not a bottom-coverage pass | `20260929T211902Z-run.CFRO0b` |
+| Focused failure triage, origin | cancellation, forced retained displacement and detached authority replacement all reproduce, 3/3 fail; not labeled flakes | `20260929T212046Z-run.STgKmR` |
+
+An initial prepend invocation omitted Swift Testing's `()` selector suffix:
+`20260929T211144Z-run.n3ZIly` ran zero tests and the runner correctly rejected it.
+It supplies no passing evidence; the corrected invocation above executed one.
+Parity report copies are retained as `parity-origin-report.json` and
+`parity-end-report.json` under the build root so today's run does not overwrite
+origin's report. Source-policy checks (3 tests) and full personal-info guard pass.
+
+Reproduce the full run and the corrected page gate:
+
+```bash
+TRON_IOS_TEST_LANE=ct23b TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin \
+  scripts/tron-ios-test run \
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/hostedPrependBarrier()'
+TRON_IOS_TEST_LANE=ct23b TRON_IOS_TEST_TIER=ui-validation \
+  TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin scripts/tron-ios-test run \
+  --only-testing TronMobileTests/ChatViewScrollHarnessTests
+```
+
+For the focused journeys/parity, run once with `origin` and once with `end`:
+
+```bash
+TRON_IOS_TEST_LANE=ct23b TRON_IOS_TEST_TIER=ui-validation \
+  TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin scripts/tron-ios-test run \
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/safeAreaKeyboardInsetKeepsNewestRowAtComposer()' \
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/detachedReaderHoldsItsTopRowThroughStreamingKeyboardAndPage()' \
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/stagedCatchUpLandsAtTheNewestEnd()' \
+  --only-testing TronMobileTests/ChatVisualParityTests
+```
+
+#### Full-origin failure triage (every remaining issue)
+
+“Retired mechanism” here means disabled on origin, **not** permission to delete
+its tests yet. CT-19 must replace the mechanism-specific waits with visible
+behavior gates while removing the mechanism and today's path together. These
+failures do not establish that all downstream assertions, never reached, pass.
+
+| Case (issue count) | Classification and inspected cause |
+| --- | --- |
+| `ordinarySendKeepsStableTail` (1 watchdog) | Retired mechanism: waits for a materialization command and subsequent target release; origin issues neither. |
+| `resumedMultilineSendSettlesDuringKeyboardResize` (1) | Retired mechanism: requires the materialization target-release increment. |
+| `mixedHeightLazyHistorySendSettlesOnNativeTail` (1) | Retired mechanism: requires exactly one materialization command; origin records zero. |
+| `resumedSendAcknowledgementSuccessor` (6 watchdogs, all parameters) | Retired mechanism: every sent-row wait also requires 1–2 materialization commands (and lease release phase). |
+| `managedSheetFreezesCoveredChat` (1 watchdog) | Retired mechanism: uncover waits for the old target-release increment in addition to visible newest content. |
+| `openingDeadlineRevalidatesOwner` (3 watchdogs, all owners) | Retired mechanism: holds the estimated-end post-reveal settlement/deadline callback; origin never enters that owner. |
+| `displacedRetainedResume` (1 watchdog, repeats focused) | Retired mechanism: deliberately moves the native offset 180 pt while retaining pinned intent, then invokes foreground's physical-tail repair. Origin explicitly disables that repair; final clearance is −168 pt. This is not evidence that spontaneous native displacement is impossible; device foreground/reader continuity remains required. |
+| `pastEndRepairReturnsToTail` (4) | Retired mechanism: demands repair/command increments at two boundaries; origin records zero. |
+| `unifiedResponseAndNotificationSettlement` (2), `ordinaryDiscreteInsertionEntrance` (2), `toolGroupTopologySettlement` (1) | Retired mechanism: demand two materialization commands for insertion/settlement; origin records zero. |
+| `displayedInstallOwnsRunningToolEntrance` (2) | Retired mechanism: expects the same two commands and the materialization handoff trace; neither exists on origin. |
+| `flippedTranscriptWithoutCounterFlippedRowsFailsTheOracle` (1) | Retired measurement assumption: its auxiliary precondition reads the native maximum as newest; origin is pinned at native minimum (difference 3006 pt). Actual window-oracle negative expectations pass; no gate was removed. |
+| `displayCardContextMenuResolvesAtTheCard` (1) | **Real behavior, reported/open:** actual SwiftUI preview container renders flipped on origin. Known blocker, not fixed. |
+| `cancelledReadyFrame` (1, repeats focused) | **Real diagnostic behavior, reported/open:** cancellation in origin's covered-frame await ends the first-ready interval as `discarded`, not the test's `cancelled`. Source is `completePositionedOpening`'s origin catch. Intervals still close; no user-facing opening failure was demonstrated by this assertion. |
+| `retainedDetachedAuthorityReplacement` (1 watchdog, repeats focused) | **Real behavior gate, reported/open:** after authority replacement and the harness's programmatic return to native newest, the old cut remains anchored; no new projection install arrives. Final old row is visible at 12 pt, coordinator mode remains anchored. The helper sends an offset, not a native pan phase; real manual-return semantics versus helper insufficiency are unresolved. Do not dismiss as retired or claim detached replacement passes. |
+
+Total: **26 retired-mechanism/measurement issues + 3 real-behavior issues**.
+**Flakes: none established in this run.** Covered-catalog cases and prepend pass
+this checkpoint; earlier watchdogs are not silently carried forward as failures.
+Origin's parity regressions/residuals above also remain real failing acceptance
+gates; ordinary-send repeat stability was already open, and the new keyboard
+stable-frame failure is reported rather than rerun away or the reference loosened.
+
+#### User-owned install, toggle and device checklist
+
+Run only when the user is ready to install, from this exact worktree:
+
+```bash
+cd /private/tmp/tron-ct23b
+scripts/tron-ios-device install
+```
+
+The helper builds the canonical `Tron Device` / `LocalDevice` app, verifies the
+then-current Stable Gateway protocol and installs/launches on the selected phone.
+It may rebuild into its normal incremental products rather than reuse the generic
+whole-module compile artifact. No protocol bypass or device performance scheme
+is needed. The agent has **not** run this command or installed anything.
+
+Flipped is **on by default**. In Settings → Data & Diagnostics, switch
+**Flipped chat transcript (evaluation)** off for today's path or on for origin.
+The footer says **Applies after relaunch**: fully quit/relaunch between modes;
+changing it never changes an already launched chat. Confirm the default and both
+relaunch selections on device (compile checks do not prove Settings interaction).
+This preference, row and compile condition retire at CT-19, not in Release.
+
+Compare both modes on the same phone, especially:
+
+- Blank screens on foreground/resync and send under very tall newest replies.
+- Keyboard open/close while pinned and while scrolled up; reading row and position
+  hold. Include manual return to newest after a detached authority reconnect.
+- Streaming and tall new-row **first-frame** coverage, not just settled pinning.
+- Long-press menus on **messages and display cards**. Known: the display-card
+  preview container renders flipped; prompt-menu hosted geometry passes.
+- VoiceOver reading order and three-finger scrolling both directions; hosted
+  priority checks are not an accessibility-tree/scroll-action proof.
+- Status-bar tap: known origin behavior goes to **newest**, not oldest history.
+- **Navigation-bar fade side by side**, using the toggle and relaunch; origin
+  suppresses the native pinned-edge effect. Record accept/reject, not inference
+  from hosted parity or a still image.
+- Opening speed, foreground continuity, and anything that looks or feels different
+  from today. Device keyboard timing, interaction animation and energy are unproven.
+
+After evidence is finished, release this worker's lane with
+`scripts/tron-ios-test lane-remove ct23b`; never remove another session's lane.
+Review remains a separate required gate; this handoff is not production approval.
