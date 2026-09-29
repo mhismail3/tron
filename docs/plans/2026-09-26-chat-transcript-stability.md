@@ -1152,3 +1152,95 @@ pass only through eager-only repairs, stop and report.
 - For the next agent: the parity gate needs this scenario too (stage B2), and the
   manifest needs a per-scenario `recordedFrom` before any reference is recorded
   from this branch (F9).
+
+### CT-25 stage B2 · 2026-09-29 · chat scroll session (worker lanes)
+
+- Result: the parity gate now covers the keyboard's own inset path, the short
+  transcript and the oldest row, and its reference carries the provenance F9
+  asked for (P0-1's parity half, F9).
+
+  **Three new scenarios**, taking the gate from seven to ten:
+  - `keyboard-safe-area-inset` drives the harness keyboard transition (stage B1)
+    over the mixed history: pinned rest, the show transition's eight intermediate
+    insets, the composer's multi-line growth and clearing at full keyboard, the
+    dismissal's eight intermediate insets, and the settled rest. `resize` changes
+    the whole window, which the flip does not touch; this scenario changes only
+    the composer's inset, which is the edge CT-23 has to re-apply swapped.
+  - `short-transcript-at-rest` records a four-row history that does not fill the
+    screen (newest row on the composer, blank space above it). No CT-12 scenario
+    covered it, and a flip that anchors the wrong edge puts it at the visual top.
+  - `oldest-row-at-visual-top` scrolls the real reader to the oldest loaded row
+    of a 60-row history with 40 earlier messages, so the 12 pt top padding and the
+    earlier-messages row are in the frames.
+
+  **Provenance.** The manifest schema is now `tron.chat-visual-parity.v2`: every
+  scenario names the source revision its frames came from, and verification
+  refuses a manifest naming a revision `ChatVisualParityReference.recordedRevisions`
+  (a reviewed set) does not list. A scenario the committed reference lacks is
+  recorded, merged with every existing entry left byte-identical, and the run then
+  *fails*, so the new revision has to be added to that reviewed set before the
+  gate passes again. A recording run takes the worktree's revision from
+  `TRON_SOURCE_REVISION`, which `scripts/tron-ios-test` now passes through the
+  `TEST_RUNNER_` prefix the project already documents; a bare `xcodebuild` run can
+  verify but cannot record. The seven CT-12/CT-14 entries are recorded from
+  `eed1e15a5` (CT-14's own commit, the last to write the manifest, on the
+  unchanged chat before any container change); the three CT-25 entries from
+  `2297defc9`, this stage's branch state. Every existing frame is byte-identical —
+  `python3` comparison of the committed manifest against `HEAD` confirmed the
+  seven entries' frames unchanged.
+- Evidence (lane ct25, products from this worktree's own source state, all under
+  `~/Library/Developer/Tron/ios/test-runs/`):
+  - Recording run `20260929T022650Z-run.Pdb8pN` (60.5 s, exit 65 by design):
+    `PARITY-RECORD scenario=keyboard-safe-area-inset frames=27 revision=2297defc…`,
+    `short-transcript-at-rest frames=8`, `oldest-row-at-visual-top frames=6`,
+    `manifest=…/build/parity-reference/manifest.json scenarios=10 added=3`. The
+    manifest copy was committed; the seven untouched entries are byte-identical.
+  - Three consecutive verification runs, all ten scenarios pass, 58.9/59.4/61.4 s
+    (`20260929T022846Z-run.tE5yLE`, `20260929T023010Z-run.7oz1eN`,
+    `20260929T023149Z-run.rYiCDz`):
+
+    | scenario | worst diff, three runs | bound |
+    | --- | --- | --- |
+    | opened-long-history-at-rest | 0.00671 / 0.00587 / 0.00372 | 0.025 |
+    | ordinary-send-keyboard-up | 0.05252 / 0.05167 / 0.01497 | 0.065 |
+    | streaming-tail-growth | 0.03681 / 0.03505 / 0.04149 | 0.065 |
+    | queued-card-to-sent-row | 0.05046 / 0.05070 / 0.02759 | 0.065 |
+    | tool-chip-entrance | 0.02039 / 0.02723 / 0.01962 | 0.065 |
+    | earlier-page-load-at-rest | 0.00579 / 0.00564 / 0.00336 | 0.065 |
+    | detached-reader-catch-up | 0.00597 / 0.00599 / 0.00382 | 0.065 |
+    | keyboard-safe-area-inset (new) | 0.02861 / 0.02848 / 0.01215 | 0.065 |
+    | short-transcript-at-rest (new) | 0.00714 / 0.00720 / 0.00282 | 0.025 |
+    | oldest-row-at-visual-top (new) | 0.00294 / 0.00475 / 0.00305 | 0.025 |
+
+  - `scripts/test-ios-test-infrastructure.py`: 86 tests pass in 192 s, so the
+    runner's new `env TEST_RUNNER_TRON_SOURCE_REVISION=…` prefix keeps the
+    documented run path intact.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`packages/ios-app/Tests/UI/ChatVisualParityTests.swift`,
+  `packages/ios-app/Tests/Fixtures/ChatVisualParityManifest.json`,
+  `packages/ios-app/Tests/UI/ChatViewScrollHarnessTests.swift`,
+  `scripts/tron-ios-test`, `packages/ios-app/docs/development.md`, this plan).
+- Deviations:
+  - `snapNativeTranscriptOffsetToWholePoint` is **kept**, and this is the measured
+    reason F9 allows. The snap was removed and the three new scenarios re-recorded
+    without it: the gate still passed ten of ten in three runs
+    (`20260929T021319Z-run.f24B71`, `20260929T021515Z-run.oDO7I7`, and the
+    re-recording run `20260929T021733Z-run.ZwLHv2`) — but the *existing*
+    opened-long-history reference's stable frames then measured 0.01892 against
+    their 0.025 bound in one of the three (`20260929T022222Z-run.DaAr6a`), where
+    with the snap they measure 0.0037-0.0067. The snap is therefore still carrying
+    the existing reference's determinism, and this stage must not re-record that
+    reference: F9's removal belongs with CT-23's exact origin, which is where the
+    plan's stage A handoff already placed it. The new scenarios' reference was
+    re-recorded *with* the snap (its own recording run above).
+  - The provenance rule is a reviewed revision set, not a comparison against the
+    CT-23 base: a test process has no git ancestry to ask, so "recorded at or
+    after the CT-23 base" is enforced as "recorded from a revision the review
+    named", and a re-recording cannot pass until that review happens. The rule and
+    its limit are stated in `ChatVisualParityReference` and in
+    `packages/ios-app/docs/development.md`.
+- For the next agent: the gate's reference now grows one scenario at a time;
+  `README`-level gate docs live in the parity section of
+  `packages/ios-app/docs/development.md`. F9's `snapNativeTranscriptOffsetToWholePoint`
+  removal is still owed by CT-23.

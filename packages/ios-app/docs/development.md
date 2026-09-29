@@ -765,6 +765,25 @@ refuses the next prompt meanwhile (`submission_in_progress`), so the first
 baseline materialized one tail for three submissions; with the acknowledgement all
 three materialize, and the fixture asserts it (`materialize:3`).
 
+The CT-24 field shapes (`ct24ResyncUnderVeryTallNewestReplies`,
+`ct24SendUnderVeryTallNewestReplies`) drive the two 2026-09-28 device incidents
+the same way — a reconnect resync that installs more very tall replies, and a send
+whose newest replies are very tall — and gate their bottom coverage with the CT-2
+shapes. `safeAreaKeyboardInsetKeepsNewestRowAtComposer` drives the keyboard's own
+input instead of a window resize: `KeyboardInsetTransition` posts the keyboard
+notification UIKit posts (duration, curve, end frame, as `ChatKeyboardObserver`
+reads them) and moves the bottom safe area through the curve values
+`CAMediaTimingFunction` reports for it, one driven boundary per step, with a
+multi-line draft growing the composer between the transitions. Its
+`CT25-KEYBOARD-METRICS` line records, per boundary, the gap between the composer's
+top edge and the newest row's bottom edge in window coordinates, and its gate is
+the settled position: after each transition the newest row must return to the
+pinned tail. The ramp's own excursion is recorded rather than gated because the
+layout transaction's clock owns those frames and reproduces them differently run
+to run; `keyboardInsetOverFlippedTranscriptFailsTheComposerGate` is the control
+that the settled gate fails when the transcript is flipped without its rows
+counter-flipped.
+
 ```bash
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/ct2ManyTallRepliesMetrics()' \
@@ -798,24 +817,36 @@ TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
 `ChatVisualParityTests.recordedReferenceFramesMatchRenderedTranscript` is the
 CT-12 visual parity gate, extended by CT-14 to sample every display frame of the
 chat's transitions. It renders the actual `ChatView` in the same fixed 390x844
-hosted window and captures one frame at every driven display boundary of seven
+hosted window and captures one frame at every driven display boundary of ten
 scenarios: an opened long mixed history at rest, an ordinary send with the
 keyboard modelled as the viewport contraction the coordinator consumes
 (outgoing entrance, composer collapse, dismissal), the tail assistant row's
 streaming growth, a queued card's replacement by its sent row, a tool chip's
-entrance and completion, an earlier-page load at rest, and a detached reader's
-catch-up. It exists so a candidate transcript container can be measured against
+entrance and completion, an earlier-page load at rest, a detached reader's
+catch-up, the keyboard's own bottom safe-area inset transition with a multi-line
+composer growth (CT-25), a short transcript that does not fill the screen, and a
+reader at the oldest loaded row. It exists so a candidate transcript container can be measured against
 the chat as it renders today, before that container ships. The gate runs only in the `UIValidation` test plan, through the same
 `UIValidationTier` gate.
 
 The reference is `Tests/Fixtures/ChatVisualParityManifest.json`: one fingerprint
 per captured boundary, recorded from the unchanged chat. A fingerprint is the
 mean luminance of each 2-point row band of the rendered transcript region plus
-each 8-point column band, base64-encoded; the committed file is 225 KB for 385
+each 8-point column band, base64-encoded; the committed file is 250 KB for 426
 frames. Per-frame PNG artifacts are retained under the git-ignored
 `build/parity-reference/<scenario>/`, and every verify run writes
 `build/parity-reference/report.json`: every frame's diff, the rendered frame it
 matched, and the bound it was judged against, worst first.
+
+The reference carries its provenance. Every scenario records the source revision
+its frames came from, and verification refuses a manifest that names a revision
+`ChatVisualParityReference.recordedRevisions` does not list. A scenario the
+committed reference does not already hold is recorded, merged into the manifest
+with every existing entry left byte-identical, and the run then fails: the new
+revision has to be added to that reviewed set for the gate to pass again. So a
+reference re-recorded from the candidate container — CT-23's flipped transcript
+included — cannot judge it, and adding a scenario is a reviewable two-step
+rather than a silent one.
 
 The capture is the gate's frame clock, so its cost decides how much of a
 transition is compared. It renders the transcript region — below the navigation
@@ -852,8 +883,11 @@ can: the transcript's native offset is snapped to a whole point before a frame
 is rendered, a rendered frame may be re-aligned by up to 2 points vertically in
 half-point steps, a rendered frame may be matched to a recorded frame one
 boundary away, and each scenario settles on the rendered pixels (not the
-recorder's layout sample stream) before its fixed frame sequence begins. The
-suite runs in about 45 s.
+recorder's layout sample stream) before its fixed frame sequence begins. CT-25
+measured removing the offset snap: the gate stayed green in three runs, but the
+opened-long-history reference's stable frames moved to 0.019 of their 0.025
+bound, so the snap still carries that reference's determinism and its removal
+belongs with CT-23's exact origin. The suite runs in about 60 s.
 
 What the gate cannot resolve, measured on this lane: the exact rise and duration
 of a sub-60 ms-phase transition. A frame must force a screen update to carry the
@@ -876,8 +910,8 @@ committed reference on this branch:
 
 | Control | Result |
 | --- | --- |
-| row spacing 8 to 10 points | fails all seven scenarios, 0.040-0.055 against 0.025 |
-| Markdown rendered as plain text | fails all seven scenarios, 0.040-0.056 against 0.025 |
+| row spacing 8 to 10 points | fails every scenario (seven at the time), 0.040-0.055 against 0.025 |
+| Markdown rendered as plain text | fails every scenario (seven at the time), 0.040-0.056 against 0.025 |
 | queued-card shrink turned instant | not rejected: worst frame 0.026, inside the 0.065 transition bound |
 | composer collapse turned instant | not rejected: worst frame 0.055, inside the 0.065 transition bound |
 | send entrance rise 20 to 14 points | not rejected: about 0.010 against 0.015 of noise |
@@ -889,14 +923,16 @@ tightly and transform-motion parity only coarsely. A candidate container that
 changes a row's animated height is judged by the hosted continuity evidence named
 above, not by these pixels.
 
-Recording is a switch, not a flag: the gate verifies while
-`Tests/Fixtures/ChatVisualParityManifest.json` exists and records when it does
-not, so a candidate branch compares against the recorded reference unless it
-deliberately re-records one.
+Recording is per scenario: the gate records a scenario the committed reference
+does not hold yet, leaves every entry it does hold alone, and fails the run that
+grew the reference. It needs the worktree's revision, which
+`scripts/tron-ios-test` passes as `TRON_SOURCE_REVISION`; a bare `xcodebuild`
+run can verify but cannot record.
 
 ```bash
-# record a reference (writes build/parity-reference/manifest.json; commit a copy)
-mv packages/ios-app/Tests/Fixtures/ChatVisualParityManifest.json /tmp/parity-reference.json
+# add a scenario: build, run the gate, commit the manifest copy with the
+# revision the recording printed added to
+# ChatVisualParityReference.recordedRevisions, then build and verify
 scripts/tron-ios-test build
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing 'TronMobileTests/ChatVisualParityTests/recordedReferenceFramesMatchRenderedTranscript()'

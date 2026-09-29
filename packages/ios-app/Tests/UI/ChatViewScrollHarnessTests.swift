@@ -5135,21 +5135,34 @@ final class ChatViewScrollHarness {
         hostingController.view.layoutIfNeeded()
     }
 
-    /// Drive the keyboard's inset transition, posting the keyboard notification
-    /// UIKit posts and then moving the bottom safe area through the curve's own
-    /// values. One driven display boundary per step, so a journey samples the
-    /// keyboard's intermediate frames deterministically; the returned samples
-    /// are the gap between the composer's top edge and the newest row's bottom
-    /// edge at each of those boundaries, in window coordinates.
+    /// The keyboard transition's own beginning: one end-frame notification, as
+    /// UIKit posts one when a keyboard starts moving.
+    func beginKeyboardInset(_ transition: KeyboardInsetTransition) {
+        postKeyboardFrame(transition)
+    }
+
+    /// One step of a keyboard inset transition: the bottom safe area at `step` of
+    /// `transition.boundaries`, on the curve's own values. A caller that captures
+    /// between steps gets the keyboard's intermediate frames.
+    func applyKeyboardInset(_ transition: KeyboardInsetTransition, step: Int) {
+        let progress = Double(step) / Double(max(1, transition.boundaries))
+        applyKeyboardInset(
+            transition.height * Self.keyboardProgress(progress, curve: transition.curve)
+        )
+    }
+
+    /// Drive the keyboard's inset transition: the notification UIKit posts, then
+    /// the bottom safe area through the curve's own values, one driven display
+    /// boundary per step. A journey samples the keyboard's intermediate frames
+    /// deterministically; the returned samples are the gap between the composer's
+    /// top edge and the newest row's bottom edge at each of those boundaries, in
+    /// window coordinates.
     @discardableResult
     func driveKeyboardInset(_ transition: KeyboardInsetTransition) async throws -> [KeyboardBoundarySample] {
-        postKeyboardFrame(transition)
+        beginKeyboardInset(transition)
         var samples: [KeyboardBoundarySample] = []
         for step in 1...max(1, transition.boundaries) {
-            let progress = Double(step) / Double(max(1, transition.boundaries))
-            applyKeyboardInset(
-                transition.height * Self.keyboardProgress(progress, curve: transition.curve)
-            )
+            applyKeyboardInset(transition, step: step)
             try await driveFrameBoundary()
             samples.append(try keyboardBoundarySample())
         }

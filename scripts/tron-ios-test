@@ -611,7 +611,16 @@ run_tests() {
     echo "error: run '$0 build' in this worktree before running tests" >&2
     return "$EXIT_RUNNER"
   fi
+  # The tests own some source-identity claims of their own (the parity gate's
+  # reference provenance). `TEST_RUNNER_`-prefixed xcodebuild environment is the
+  # only form that reaches a hosted test process, so the revision this command is
+  # running against travels with it.
+  local source_revision
+  source_revision="$(printf '%s' "$source_identity" | python3 -c \
+    'import json, sys; print(json.load(sys.stdin)["revision"])')" \
+    || die "cannot read this worktree's source revision"
   local -a test_command=(
+    /usr/bin/env "TEST_RUNNER_TRON_SOURCE_REVISION=$source_revision"
     xcodebuild test-without-building
     -project "$IOS/TronMobile.xcodeproj"
     -scheme "$test_scheme"

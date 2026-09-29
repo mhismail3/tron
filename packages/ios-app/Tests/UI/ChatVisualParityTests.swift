@@ -234,8 +234,18 @@ struct ChatVisualParityManifest: Codable, Equatable {
 
     struct Scenario: Codable, Equatable {
         let id: String
+        /// The source revision this scenario's frames were recorded from. The
+        /// gate refuses a reference recorded from any revision
+        /// `ChatVisualParityReference.recordedRevisions` does not name, so a
+        /// reference re-recorded from the container under test cannot judge it.
+        let recordedFrom: String
         let frames: [Frame]
     }
+
+    /// The only schema this gate reads. The manifest carries provenance as of
+    /// CT-25, which a v1 record cannot: a v1 file is re-recorded rather than
+    /// silently trusted without it.
+    static let schema = "tron.chat-visual-parity.v2"
 
     let schema: String
     let fingerprint: FingerprintSpec
@@ -246,6 +256,39 @@ struct ChatVisualParityManifest: Codable, Equatable {
     let window: [Int]
     let systemVersion: String
     let scenarios: [Scenario]
+}
+
+/// The provenance rule the committed reference lives under.
+///
+/// A reference is only a reference if it was recorded before the container it
+/// judges. Every scenario in the manifest names the source revision its frames
+/// came from, and verification refuses any revision this reviewed set does not
+/// name. A recording run writes the revision it ran from, so a reference
+/// re-recorded from the candidate container — CT-23's flipped transcript
+/// included — cannot pass the gate until the change that re-records it also adds
+/// its revision here, in the review that owns the CT-12 rule in
+/// `packages/ios-app/docs/development.md`: the reference is recorded from the
+/// current path before a container change, never from the candidate.
+enum ChatVisualParityReference {
+    /// One entry per reviewed recording session.
+    static let recordedRevisions: Set<String> = [
+        // CT-12's reference, re-recorded per display frame by CT-14 on the
+        // unchanged chat before any container change.
+        "eed1e15a5de1a4ef0f66e338f89e9be7508e266c",
+        // The CT-25 scenarios (safe-area keyboard inset, short transcript,
+        // oldest row at the visual top), recorded on the same path.
+        "2297defc9efd0bfd3478544d566433e59e78ce3e",
+    ]
+
+    /// The source revision this run is running against, as
+    /// `scripts/tron-ios-test` passes it through `TEST_RUNNER_`. A bare
+    /// `xcodebuild test-without-building` has no revision to record with, so the
+    /// gate verifies the committed reference there and refuses to record a new
+    /// one.
+    static var runRevision: String? {
+        let revision = ProcessInfo.processInfo.environment["TRON_SOURCE_REVISION"]
+        return (revision?.isEmpty == false) ? revision : nil
+    }
 }
 
 /// The gate's JSON report: the worst frames per scenario and their diff
@@ -300,11 +343,19 @@ enum ChatVisualParityStore {
     static let referenceURL = packageRoot.appending(path: "Tests/Fixtures/ChatVisualParityManifest.json")
     static let artifactsRoot = packageRoot.appending(path: "build/parity-reference")
 
-    /// A missing committed manifest is the recording mode's whole switch: the
-    /// gate verifies against it when it exists and records it when it does not,
-    /// so no scheme variable or hidden flag decides what a run means.
+    /// The mode a run is in is decided by the committed reference itself: a
+    /// scenario it does not already hold is recorded, and every scenario it holds
+    /// is verified. There is no scheme variable or hidden flag, so what a run
+    /// means is reviewable from the manifest it read.
     static var isRecording: Bool {
-        !FileManager.default.fileExists(atPath: referenceURL.path)
+        (try? readManifest()) == nil
+    }
+
+    /// Whether the committed reference already holds this scenario's frames: the
+    /// recording mode's per-scenario question, which decides whether a run writes
+    /// this scenario's PNG artifacts.
+    static func holdsReference(for id: String) -> Bool {
+        (try? readManifest())?.scenarios.contains { $0.id == id } ?? false
     }
 
     static func scenarioDirectory(_ id: String) -> URL {
@@ -364,6 +415,10 @@ final class ChatVisualParityRunner {
     /// settled native offset moves by a fraction of a point run to run, so the
     /// offset is snapped to a whole point first: what the gate compares is then a
     /// deterministic function of the layout rather than of the lazy estimate.
+    /// CT-25 measured removing it (see the plan's stage B2 entry): the gate stays
+    /// green, but the existing opened-long-history reference's stable frames move
+    /// to 0.019 of their 0.025 bound, so the snap still carries the reference's
+    /// determinism and F9's removal belongs with CT-23's exact origin.
     func capture(_ phase: String) {
         try? harness.snapNativeTranscriptOffsetToWholePoint()
         let rendered = harness.renderedParityFrame(
@@ -385,6 +440,19 @@ final class ChatVisualParityRunner {
     /// index means the same boundary in every run.
     func advance(_ phase: String, boundaries: Int) async throws {
         for _ in 0..<boundaries {
+            try await harness.driveFrameBoundary()
+            capture(phase)
+        }
+    }
+
+    /// Drive the keyboard's own inset transition, capturing one frame per step:
+    /// the keyboard's intermediate positions are the input CT-23's swapped inset
+    /// margins have to reproduce, and `resize(height:)` — which every other
+    /// scenario's keyboard stands in with — never produced them.
+    func driveKeyboardInset(_ transition: KeyboardInsetTransition, phase: String) async throws {
+        harness.beginKeyboardInset(transition)
+        for step in 1...max(1, transition.boundaries) {
+            harness.applyKeyboardInset(transition, step: step)
             try await harness.driveFrameBoundary()
             capture(phase)
         }
@@ -448,6 +516,9 @@ struct ChatVisualParityScenario {
             ChatVisualParityScenario(id: "tool-chip-entrance", run: toolChipEntrance),
             ChatVisualParityScenario(id: "earlier-page-load-at-rest", run: earlierPageLoadAtRest),
             ChatVisualParityScenario(id: "detached-reader-catch-up", run: detachedReaderCatchUp),
+            ChatVisualParityScenario(id: "keyboard-safe-area-inset", run: keyboardSafeAreaInset),
+            ChatVisualParityScenario(id: "short-transcript-at-rest", run: shortTranscriptAtRest),
+            ChatVisualParityScenario(id: "oldest-row-at-visual-top", run: oldestRowAtVisualTop),
         ]
     }
 }
@@ -474,7 +545,7 @@ private func runScenario(
     let runner = ChatVisualParityRunner(
         id: id,
         harness: harness,
-        recordsArtifacts: ChatVisualParityStore.isRecording
+        recordsArtifacts: !ChatVisualParityStore.holdsReference(for: id)
     )
     do {
         _ = try await harness.recorder.waitUntil { $0.observation.isReady }
@@ -842,10 +913,95 @@ private func detachedReaderCatchUp() async throws -> ChatVisualParityRunner {
 
 // MARK: - The gate
 
+/// (h) The keyboard's own inset transition over a mixed history, with a
+/// multi-line composer growth. `resize(height:)` — which the other keyboard
+/// scenario stands in with — changes the whole window, which the flip does not
+/// touch; a keyboard changes only the composer's own bottom safe area, which is
+/// exactly the edge CT-23 has to re-apply swapped. Frames: the pinned rest, the
+/// show transition's intermediate insets, the composer's own growth at full
+/// keyboard, the dismissal's intermediate insets and the settled rest.
+@MainActor
+private func keyboardSafeAreaInset() async throws -> ChatVisualParityRunner {
+    let snapshot = try parityMixedHistory(rowCount: 60)
+    return try await runScenario(
+        id: "keyboard-safe-area-inset",
+        snapshot: snapshot,
+        submitsPrompts: true
+    ) { run in
+        let harness = run.harness
+        try await run.settle()
+        try await run.advance("pinned", boundaries: 2)
+        try await run.driveKeyboardInset(.show(boundaries: 8), phase: "keyboard-up")
+        try await run.settle()
+        try await run.advance("keyboard-up-settled", boundaries: 2)
+        try harness.setComposerDraftText(
+            "First line of the draft\nSecond line\nThird line\nFourth line"
+        )
+        try await run.settle()
+        try await run.advance("composer-growth", boundaries: 2)
+        try harness.setComposerDraftText("")
+        try await run.settle()
+        try await run.advance("composer-cleared", boundaries: 2)
+        try await run.driveKeyboardInset(.hide(boundaries: 8), phase: "keyboard-dismissal")
+        try await run.settle()
+        try await run.advance("dismissal-settled", boundaries: 3)
+        #expect(
+            harness.isPinnedToBottom(),
+            "the keyboard scenario settled on the pinned bottom: \(parityPinnedDescription(harness))"
+        )
+    }
+}
+
+/// (i) A short transcript that does not fill the screen: the newest row rests on
+/// the composer with blank space above it. None of the seven CT-12 scenarios
+/// covers it, and a flip that anchors the wrong edge shows the newest rows at the
+/// visual top with the old top padding under the composer.
+@MainActor
+private func shortTranscriptAtRest() async throws -> ChatVisualParityRunner {
+    let snapshot = try parityShortHistory(rowCount: 4, earlierMessages: 0)
+    return try await runScenario(
+        id: "short-transcript-at-rest",
+        snapshot: snapshot,
+        submitsPrompts: false
+    ) { run in
+        try await run.settle()
+        try await run.advance("rest", boundaries: 8)
+        let clearance = try #require(run.harness.newestRowClearance())
+        #expect(
+            clearance >= -2 && clearance <= 32,
+            "the short transcript rests on the composer: \(parityPinnedDescription(run.harness))"
+        )
+    }
+}
+
+/// (j) A reader scrolled to the oldest loaded row: the transcript's 12 pt top
+/// padding and the earlier-messages row are what the frames carry. Every CT-12
+/// scenario starts from the tail, so the far end of the content — where the flip
+/// moves its top padding and the earlier-messages row — was never recorded.
+@MainActor
+private func oldestRowAtVisualTop() async throws -> ChatVisualParityRunner {
+    let snapshot = try parityShortHistory(rowCount: 60, earlierMessages: 40)
+    return try await runScenario(
+        id: "oldest-row-at-visual-top",
+        snapshot: snapshot,
+        submitsPrompts: false
+    ) { run in
+        try await run.settle()
+        // A visual distance past the whole history puts the real reader at the
+        // oldest end; `scrollReader` clamps to the transcript's legal range.
+        try run.harness.scrollReader(byVisualPoints: 10_000_000)
+        try await run.settle(stableBoundaries: 24)
+        try await run.advance("oldest", boundaries: 6)
+        #expect(!run.harness.isPinnedToBottom(), "the reader left the pinned bottom")
+    }
+}
+
 @MainActor
 enum ChatVisualParityGate {
     static func run() async throws {
-        let recording = ChatVisualParityStore.isRecording
+        let committed = try? ChatVisualParityStore.readManifest()
+        let recorded = Set(committed?.scenarios.map(\.id) ?? [])
+        let missing = ChatVisualParityScenario.all.filter { !recorded.contains($0.id) }
         var runs: [ChatVisualParityRunner] = []
         for scenario in ChatVisualParityScenario.all {
             do {
@@ -854,53 +1010,107 @@ enum ChatVisualParityGate {
                 Issue.record("visual parity scenario \(scenario.id) did not run: \(error)")
             }
         }
-        if recording {
-            try record(runs)
-        } else {
-            try verify(runs)
+        guard missing.isEmpty, let committed else {
+            try record(committed: committed, runs: runs, recording: missing)
+            return
         }
+        try verify(runs, against: committed)
     }
 
-    private static func record(_ runs: [ChatVisualParityRunner]) throws {
+    /// Record the scenarios the committed reference does not have yet, merge them
+    /// into it, and fail the run. Every entry the reference already holds stays
+    /// byte-identical: CT-25's rule is that a new scenario is recorded from the
+    /// current path, never that the existing reference is re-recorded. Failing
+    /// after writing is deliberate: a grown reference cannot pass in the run that
+    /// grew it, so `ChatVisualParityReference.recordedRevisions` has to name this
+    /// recording for the gate to pass again, which is the review that makes the
+    /// new frames reviewable.
+    private static func record(
+        committed: ChatVisualParityManifest?,
+        runs: [ChatVisualParityRunner],
+        recording missing: [ChatVisualParityScenario]
+    ) throws {
+        guard let revision = ChatVisualParityReference.runRevision else {
+            let message: String = "the parity reference was not recorded: this run has no "
+                + "source revision (run it through scripts/tron-ios-test, which passes the "
+                + "revision it runs against)"
+            Issue.record(Comment(rawValue: message))
+            return
+        }
+        let recordedRuns = missing.isEmpty
+            ? runs
+            : runs.filter { run in missing.contains { $0.id == run.id } }
+        let additions = recordedRuns.map { run in
+            ChatVisualParityManifest.Scenario(
+                id: run.id,
+                recordedFrom: revision,
+                frames: run.frames.map { frame in
+                    ChatVisualParityManifest.Frame(
+                        index: frame.index,
+                        phase: frame.phase,
+                        width: frame.fingerprint.width,
+                        height: frame.fingerprint.height,
+                        rows: ChatVisualParityBytes(frame.fingerprint.rows),
+                        columns: ChatVisualParityBytes(frame.fingerprint.columns)
+                    )
+                }
+            )
+        }
         let manifest = ChatVisualParityManifest(
-            schema: "tron.chat-visual-parity.v1",
-            fingerprint: .init(
+            schema: ChatVisualParityManifest.schema,
+            fingerprint: committed?.fingerprint ?? .init(
                 rowStep: ChatVisualParitySpec.rowStep,
                 columnStep: ChatVisualParitySpec.columnStep,
                 pointsPerPixel: ChatVisualParitySpec.pointsPerPixel,
                 alignmentPoints: ChatVisualParitySpec.alignmentPoints,
                 matchWindow: ChatVisualParitySpec.matchWindow
             ),
-            tolerance: ChatVisualParitySpec.tolerance,
-            transitionTolerance: ChatVisualParitySpec.transitionTolerance,
-            window: [390, 844],
-            systemVersion: UIDevice.current.systemVersion,
-            scenarios: runs.map { run in
-                ChatVisualParityManifest.Scenario(
-                    id: run.id,
-                    frames: run.frames.map { frame in
-                        ChatVisualParityManifest.Frame(
-                            index: frame.index,
-                            phase: frame.phase,
-                            width: frame.fingerprint.width,
-                            height: frame.fingerprint.height,
-                            rows: ChatVisualParityBytes(frame.fingerprint.rows),
-                            columns: ChatVisualParityBytes(frame.fingerprint.columns)
-                        )
-                    }
-                )
-            }
+            tolerance: committed?.tolerance ?? ChatVisualParitySpec.tolerance,
+            transitionTolerance: committed?.transitionTolerance
+                ?? ChatVisualParitySpec.transitionTolerance,
+            window: committed?.window ?? [390, 844],
+            systemVersion: committed?.systemVersion ?? UIDevice.current.systemVersion,
+            scenarios: (committed?.scenarios ?? [])
+                + additions.filter { addition in
+                    !(committed?.scenarios.contains { $0.id == addition.id } ?? false)
+                }
         )
         try ChatVisualParityStore.writeManifest(manifest)
-        for run in runs {
-            print("PARITY-RECORD scenario=\(run.id) frames=\(run.frames.count) artifacts=\(ChatVisualParityStore.scenarioDirectory(run.id).path)")
+        for run in recordedRuns {
+            print("PARITY-RECORD scenario=\(run.id) frames=\(run.frames.count) revision=\(revision) artifacts=\(ChatVisualParityStore.scenarioDirectory(run.id).path)")
             #expect(!run.frames.isEmpty, "\(run.id) recorded no frames")
         }
-        print("PARITY-RECORD manifest=\(ChatVisualParityStore.artifactsRoot.appending(path: "manifest.json").path) scenarios=\(runs.count)")
+        print("PARITY-RECORD manifest=\(ChatVisualParityStore.artifactsRoot.appending(path: "manifest.json").path) scenarios=\(manifest.scenarios.count) added=\(additions.count) copyTo=\(ChatVisualParityStore.referenceURL.path)")
+        let grew: String = "the committed parity reference grew by \(additions.count) "
+            + "scenario(s) recorded from \(revision); add that revision to "
+            + "ChatVisualParityReference.recordedRevisions, commit the manifest, and re-run "
+            + "to verify"
+        Issue.record(Comment(rawValue: grew))
     }
 
-    private static func verify(_ runs: [ChatVisualParityRunner]) throws {
-        let manifest = try ChatVisualParityStore.readManifest()
+    private static func verify(
+        _ runs: [ChatVisualParityRunner],
+        against manifest: ChatVisualParityManifest
+    ) throws {
+        guard manifest.schema == ChatVisualParityManifest.schema else {
+            Issue.record(
+                "the committed reference is \(manifest.schema), which carries no provenance; re-record it"
+            )
+            return
+        }
+        let unreviewed = manifest.scenarios.filter {
+            !ChatVisualParityReference.recordedRevisions.contains($0.recordedFrom)
+        }
+        guard unreviewed.isEmpty else {
+            let provenance = unreviewed
+                .map { "\($0.id)@\($0.recordedFrom)" }
+                .joined(separator: ", ")
+            let message: String = "the committed reference holds frames recorded from an "
+                + "unreviewed revision (\(provenance)); a reference re-recorded from the "
+                + "container under test cannot judge it"
+            Issue.record(Comment(rawValue: message))
+            return
+        }
         guard manifest.fingerprint.rowStep == ChatVisualParitySpec.rowStep,
               manifest.fingerprint.columnStep == ChatVisualParitySpec.columnStep,
               manifest.fingerprint.pointsPerPixel == ChatVisualParitySpec.pointsPerPixel,
