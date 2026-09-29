@@ -124,6 +124,17 @@ package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
         return "\(displayId):\(revision)"
     }
 
+    /// The identity an inline card's disclosure phase is keyed by. The content
+    /// revision is deliberately absent: a later revision presents newer content
+    /// under the same display, and a card the reader collapsed must stay
+    /// collapsed. A live view keeps its own producer generation, so two live
+    /// views that share a view generation never share one phase.
+    package var disclosureIdentity: String {
+        guard let liveView else { return displayId }
+        let producer = kind == .nativeLive ? "native" : "browser"
+        return "\(displayId):\(producer):\(liveView.viewId):\(liveView.generation)"
+    }
+
     private enum CodingKeys: String, CodingKey {
         case schema, displayId, revision, title, caption, altText, kind, presentation,
              eligibleSurfaces, fallbackText, artifact, remoteURL, liveView

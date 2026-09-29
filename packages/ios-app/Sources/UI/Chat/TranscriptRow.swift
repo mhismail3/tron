@@ -90,6 +90,24 @@ enum AutomationPromptPresentationPolicy {
     }
 }
 
+/// What `TranscriptRow` has to show for a projected item. The kernel asks this
+/// before it installs a row, because a row whose body is `EmptyView` still costs
+/// a padded lazy child: it takes part in realization, entrance bookkeeping and
+/// tail anchoring while showing nothing. A `customEntry` that is not a command
+/// lifecycle, and a summary/model/thinking/label receipt whose typed
+/// presentation the adapter declined, render nothing, so they are not rows. It
+/// is the same branch the row itself takes, kept next to it so the two cannot
+/// drift.
+enum TranscriptRowPresentationPolicy {
+    static func rendersRow(for item: TranscriptItem) -> Bool {
+        switch item.kind {
+        case .message, .bash, .customMessage: true
+        case .customEntry: item.semantic?.kind == .command
+        case .compaction, .branchSummary, .modelChange, .thinkingChange, .label: false
+        }
+    }
+}
+
 struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     var streaming = false
@@ -148,7 +166,9 @@ struct TranscriptRow: View, Equatable {
                 } else {
                     // appendEntry/custom entries are extension state, not chat
                     // content. Only typed Gateway receipts have a transcript
-                    // presentation; unadapted state remains absent.
+                    // presentation; unadapted state remains absent, and
+                    // `TranscriptRowPresentationPolicy` keeps the kernel from
+                    // installing the empty row.
                     EmptyView()
                 }
             case .compaction, .branchSummary, .modelChange, .thinkingChange, .label:
@@ -464,10 +484,25 @@ private struct ThinkingBlock: View {
     let label: String?
     let animatesInsertion: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
+    #if HOSTED_TEST
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+    #endif
 
+    /// The paragraph's measured height and the four reference lines' measured
+    /// height. Each has one purpose, and neither can move a mounted row: the
+    /// reference height decides the overflow flag (the tail mask, the tap target
+    /// and the accessibility trait), and the content height is the trace
+    /// layout's animatable input, which is how the viewport and the tail offset
+    /// interpolate together while the trace streams. The layout measures its own
+    /// subviews in the pass that places them, so its first frame is exact.
     @State private var contentHeight: CGFloat = 0
-    @State private var maximumHeight: CGFloat = 0
-    @State private var showingDetails = false
+    @State private var referenceHeight: CGFloat = 0
+    /// Whether a measurement has landed for this trace. A mount's first
+    /// measurement is the height the layout already placed the trace at, so the
+    /// update that publishes it is not growth and must not animate; every later
+    /// change is the trace's own growth.
+    @State private var hasMeasuredTrace = false
 
     init(
         segments: [ChatThinkingSegment],
@@ -484,17 +519,7 @@ private struct ThinkingBlock: View {
     private var isOverflowing: Bool {
         ChatThinkingTraceLayoutPolicy.isOverflowing(
             contentHeight: contentHeight,
-            maximumHeight: maximumHeight
-        )
-    }
-
-    private var traceHeight: CGFloat {
-        guard maximumHeight > 0, contentHeight > 0 else {
-            return ChatThinkingTraceLayoutPolicy.initialViewportHeight(lineCount: segments.count)
-        }
-        return ChatThinkingTraceLayoutPolicy.viewportHeight(
-            contentHeight: contentHeight,
-            maximumHeight: maximumHeight
+            maximumHeight: referenceHeight
         )
     }
 
@@ -508,27 +533,43 @@ private struct ThinkingBlock: View {
             }
             traceViewport(inline: inline)
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    guard isOverflowing else { return }
-                    showingDetails = true
-                }
+                .onTapGesture { openDetails() }
+                #if HOSTED_TEST
+                // The detail action a hosted test activates; a tap cannot be
+                // injected into a SwiftUI gesture.
+                .modifier(HostedToolActionProbeModifier(
+                    id: "thinking-detail:\(traceIdentity)",
+                    action: openDetails
+                ))
+                #endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibleParagraph)
-        .accessibilityAddTraits(isOverflowing ? .isButton : [])
-        .accessibilityHint(isOverflowing ? "Double-tap to view the full thinking trace" : "")
-        .overlay(alignment: .topLeading) { measurementProbe(inline: inline) }
-        .tronManagedSheet(
-            isPresented: $showingDetails,
-            identity: "chat.thinking-trace.\(traceIdentity)"
-        ) {
-            ThinkingTraceDetailSheet(
-                inline: inline,
-                identity: traceIdentity,
+        .accessibilityAddTraits(admitsDetailAction ? .isButton : [])
+        .accessibilityHint(admitsDetailAction ? "Double-tap to view the full thinking trace" : "")
+    }
+
+    /// The full trace belongs to the transcript, not to this row: streaming
+    /// pushes the row out of lazy realization, and the sheet must outlive it.
+    /// The route carries the trace's identity and the content this row resolved,
+    /// and the sheet follows the install's own content from there.
+    private func openDetails() {
+        guard isOverflowing, let sheetRoutes else { return }
+        sheetRoutes.present(.thinkingTrace(ChatThinkingTraceSheetRoute(
+            identity: traceIdentity,
+            opened: ChatThinkingTraceContent(
+                segments: segments,
+                preparedText: preparedText,
                 streaming: animatesInsertion
             )
-        }
+        )))
+    }
+
+    /// A row rendered without a transcript host offers no detail action, so its
+    /// trait and hint never claim one.
+    private var admitsDetailAction: Bool {
+        isOverflowing && sheetRoutes != nil
     }
 
     private var accessibleParagraph: String {
@@ -538,48 +579,131 @@ private struct ThinkingBlock: View {
     }
 
     private var traceIdentity: String {
-        "thinking-run:\(segments.first?.id ?? "empty")"
+        ChatThinkingTraceContent.identity(of: segments)
     }
 
     /// The compact row is a tail projection, not a nested scroll surface:
-    /// full content stays authoritative and measured while only the latest
-    /// four measured lines are presented in the visible viewport.
+    /// full content stays authoritative while only the latest four measured
+    /// lines are presented in the visible viewport. The tail layout measures
+    /// both subviews in the pass that places them, so a freshly mounted row is
+    /// already at its final height and only the trace's own source growth
+    /// animates.
     private func traceViewport(inline: MarkdownPresentation.Inline) -> some View {
-        ZStack(alignment: .topLeading) {
+        ThinkingTailLayout(contentHeight: contentHeight) {
             paragraph(inline: inline)
-                .offset(y: -tailOffset)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measured in
+                    installMeasurement(&contentHeight, measured)
+                }
+                #if HOSTED_TEST
+                // Where the layout placed the paragraph in the viewport it owns.
+                // Its top edge is the tail offset the trace slides by.
+                .onGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.frame(in: .named(Self.traceMotionSpace)).minY
+                } action: { offset in
+                    hostedRecorder?.recorder?.recordThinkingTraceParagraphOffset(
+                        id: traceIdentity,
+                        offset: offset
+                    )
+                }
+                #endif
+            referenceLines
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measured in
+                    installMeasurement(&referenceHeight, measured)
+                }
         }
-        .frame(height: traceHeight, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .animation(
-            reduceMotion ? nil : .smooth(
-                duration: ChatScrollCoordinator.liveGrowthAnimationDuration
-            ),
-            value: CGSize(width: traceHeight, height: tailOffset)
+            reduceMotion || !hasMeasuredTrace
+                ? nil
+                : .smooth(duration: ChatScrollCoordinator.liveGrowthAnimationDuration),
+            value: animatedTraceMotion
         )
         .clipped()
         .mask(tailMask)
+        .onChange(of: contentHeight, initial: true) { _, measured in
+            guard measured > 0, !hasMeasuredTrace else { return }
+            hasMeasuredTrace = true
+        }
+        #if HOSTED_TEST
+        .coordinateSpace(name: Self.traceMotionSpace)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            hostedRecorder?.recorder?.recordThinkingTraceViewport(
+                id: traceIdentity,
+                height: height
+            )
+        }
+        .background {
+            ChatHostedThinkingTraceProbe(
+                id: traceIdentity,
+                contentHeight: contentHeight,
+                referenceHeight: referenceHeight,
+                overflowing: isOverflowing
+            )
+        }
+        #endif
         .accessibilityHidden(true)
     }
 
-    private var tailOffset: CGFloat {
-        ChatThinkingTraceLayoutPolicy.tailOffset(
+    #if HOSTED_TEST
+    private static let traceMotionSpace = "chat-thinking-trace-motion"
+    #endif
+
+    /// The one value whose change animates this trace: the viewport it presents
+    /// and the tail offset it slides by, both derived from the content height the
+    /// layout interpolates. It is the same pair the frame-and-offset animation
+    /// this replaces keyed on, and it matters that it is derived from the
+    /// measurement rather than from the trace's source: the source grows in the
+    /// install that suppresses row animations, while the measurement lands in the
+    /// layout pass that must interpolate.
+    private var animatedTraceMotion: CGSize {
+        guard contentHeight > 0, referenceHeight > 0 else { return .zero }
+        let viewport = ChatThinkingTraceLayoutPolicy.viewportHeight(
             contentHeight: contentHeight,
-            viewportHeight: traceHeight
+            maximumHeight: referenceHeight
         )
+        return CGSize(
+            width: viewport,
+            height: ChatThinkingTraceLayoutPolicy.tailOffset(
+                contentHeight: contentHeight,
+                viewportHeight: viewport
+            )
+        )
+    }
+
+    private func installMeasurement(_ storage: inout CGFloat, _ measured: CGFloat) {
+        guard ChatThinkingTraceLayoutPolicy.admitsMeasurement(
+            current: storage,
+            candidate: measured
+        ) else { return }
+        storage = measured
+    }
+
+    /// The viewport's reference height: the four measured lines the policy
+    /// bounds the compact trace to.
+    private var referenceLines: some View {
+        Text(Array(
+            repeating: "Ag",
+            count: ChatThinkingTraceLayoutPolicy.maximumLines
+        ).joined(separator: "\n"))
+        .font(TronFont.body(12))
+        .italic()
+        .lineSpacing(0)
+        .fixedSize(horizontal: false, vertical: true)
+        .hidden()
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder
     private var tailMask: some View {
         if ChatThinkingTraceLayoutPolicy.showsEarlierContent(
             contentHeight: contentHeight,
-            maximumHeight: maximumHeight
+            maximumHeight: referenceHeight
         ) {
-            let fadeHeight = min(20, max(1, traceHeight * 0.35))
+            let fadeHeight = min(20, max(1, viewportHeight * 0.35))
             LinearGradient(
                 stops: [
                     .init(color: .black.opacity(0.38), location: 0),
-                    .init(color: .black, location: min(1, fadeHeight / max(1, traceHeight))),
+                    .init(color: .black, location: min(1, fadeHeight / max(1, viewportHeight))),
                     .init(color: .black, location: 1)
                 ],
                 startPoint: .top,
@@ -588,6 +712,13 @@ private struct ThinkingBlock: View {
         } else {
             Color.black
         }
+    }
+
+    private var viewportHeight: CGFloat {
+        ChatThinkingTraceLayoutPolicy.viewportHeight(
+            contentHeight: contentHeight,
+            maximumHeight: referenceHeight
+        )
     }
 
     private func paragraph(inline: MarkdownPresentation.Inline) -> some View {
@@ -604,99 +735,128 @@ private struct ThinkingBlock: View {
     }
 
     private var preparedInline: MarkdownPresentation.Inline {
-        let source = segments.map(\.text).joined(separator: "\n")
-        var attributed = AttributedString()
-        var allPrepared = true
-        for (index, segment) in segments.enumerated() {
-            if index > 0 { attributed += AttributedString("\n") }
-            guard let prepared = preparedText.thinkingInline(
-                identity: segment.id,
-                source: segment.text
-            ), let value = prepared.attributedString else {
-                allPrepared = false
-                break
-            }
-            attributed += value
-        }
-        if allPrepared {
-            return MarkdownPresentation.Inline(source: source, attributedString: attributed)
-        }
-        // Explicitly paged history can exceed the asynchronously warmed tail.
-        // Lazily realized older thinking rows still receive the same exact
-        // Markdown semantics through the bounded cold-parser fallback.
-        return MarkdownPresentation.Inline(source: source, reflowSoftLineBreaks: false)
-    }
-
-    private func measurementText(inline: MarkdownPresentation.Inline) -> some View {
-        Text(inline.attributedString ?? AttributedString(inline.source))
-            .font(TronFont.body(12))
-            .italic()
-            .lineSpacing(0)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func measurementProbe(inline: MarkdownPresentation.Inline) -> some View {
-        VStack(spacing: 0) {
-            measurementText(inline: inline)
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: ChatThinkingTraceMetricsKey.self,
-                            value: ChatThinkingTraceMetrics(contentHeight: geometry.size.height)
-                        )
-                    }
-                }
-            Text("Ag\nAg\nAg\nAg")
-                .font(TronFont.body(12))
-                .italic()
-                .lineSpacing(0)
-                .fixedSize(horizontal: false, vertical: true)
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: ChatThinkingTraceMetricsKey.self,
-                            value: ChatThinkingTraceMetrics(maximumHeight: geometry.size.height)
-                        )
-                    }
-                }
-        }
-        .hidden()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .onPreferenceChange(ChatThinkingTraceMetricsKey.self) { metrics in
-            if ChatThinkingTraceLayoutPolicy.admitsMeasurement(
-                current: contentHeight,
-                candidate: metrics.contentHeight
-            ) {
-                contentHeight = metrics.contentHeight
-            }
-            if ChatThinkingTraceLayoutPolicy.admitsMeasurement(
-                current: maximumHeight,
-                candidate: metrics.maximumHeight
-            ) {
-                maximumHeight = metrics.maximumHeight
-            }
-        }
+        ChatThinkingTraceContent.inline(of: segments, preparedText: preparedText)
     }
 }
 
-private struct ChatThinkingTraceMetrics: Equatable {
-    var contentHeight: CGFloat = 0
-    var maximumHeight: CGFloat = 0
+/// The compact thinking trace: the paragraph clipped to four measured reference
+/// lines, scrolled to its tail. Both subviews are measured in the pass that
+/// places them, so a mounted row is at its final height in its first frame —
+/// the estimate this replaces left the first mount of a trace 50 pt short and
+/// only a later remount reached the measured viewport.
+///
+/// The viewport height and the paragraph's tail offset are both derived from one
+/// content height, exactly as the frame and offset this replaces were: while the
+/// trace streams, the layout's animatable `contentHeight` interpolates and the
+/// row grows continuously, and a trace past four lines slides its tail instead
+/// of jumping a line per token. A zero `contentHeight` is the first pass of a
+/// mount: the layout then uses the paragraph height it just measured, so no
+/// estimate is ever committed.
+private struct ThinkingTailLayout: Layout, Animatable {
+    /// The trace's content height to interpolate, or zero on the first pass of a
+    /// mount, where the layout's own synchronous measurement is exact.
+    var contentHeight: CGFloat
 
-    init(contentHeight: CGFloat = 0, maximumHeight: CGFloat = 0) {
-        self.contentHeight = contentHeight
-        self.maximumHeight = maximumHeight
+    var animatableData: CGFloat {
+        get { contentHeight }
+        set { contentHeight = newValue }
     }
-}
 
-private struct ChatThinkingTraceMetricsKey: PreferenceKey {
-    static let defaultValue = ChatThinkingTraceMetrics()
+    struct Cache {
+        var width: CGFloat?
+        var paragraphHeight: CGFloat?
+        var referenceHeight: CGFloat?
+    }
 
-    static func reduce(value: inout ChatThinkingTraceMetrics, nextValue: () -> ChatThinkingTraceMetrics) {
-        let next = nextValue()
-        if next.contentHeight > 0 { value.contentHeight = next.contentHeight }
-        if next.maximumHeight > 0 { value.maximumHeight = next.maximumHeight }
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        // A payload or Dynamic Type change invalidates both measurements;
+        // animating `contentHeight` alone does not, so one exact measurement
+        // serves every frame of the growth interpolation.
+        cache = Cache()
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) -> CGSize {
+        let width = proposal.width ?? Self.naturalWidth(subviews)
+        let measured = measure(width: width, subviews: subviews, cache: &cache)
+        return CGSize(width: width, height: viewportHeight(measured))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) {
+        let measured = measure(width: bounds.width, subviews: subviews, cache: &cache)
+        let viewport = viewportHeight(measured)
+        // The paragraph keeps its natural height and is offset so its tail —
+        // the newest text — is what the viewport shows. The offset comes from the
+        // same content height as the viewport, so both move in one interpolation:
+        // an offset derived from the paragraph's own, already-measured height
+        // would jump a line per token while the viewport animated.
+        subviews[0].place(
+            at: CGPoint(
+                x: bounds.minX,
+                y: bounds.minY - ChatThinkingTraceLayoutPolicy.tailOffset(
+                    contentHeight: contentHeight(measured),
+                    viewportHeight: viewport
+                )
+            ),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: measured.paragraph)
+        )
+        guard subviews.count > 1 else { return }
+        subviews[1].place(
+            at: CGPoint(x: bounds.minX, y: bounds.minY),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: measured.reference)
+        )
+    }
+
+    private func viewportHeight(_ measured: (paragraph: CGFloat, reference: CGFloat)) -> CGFloat {
+        ChatThinkingTraceLayoutPolicy.viewportHeight(
+            contentHeight: contentHeight(measured),
+            maximumHeight: measured.reference
+        )
+    }
+
+    /// The one height the viewport and the tail offset are derived from: the
+    /// interpolated content height, or — on the first pass of a mount, before any
+    /// measurement has been published — the exact height of the paragraph the
+    /// same pass measured.
+    private func contentHeight(_ measured: (paragraph: CGFloat, reference: CGFloat)) -> CGFloat {
+        contentHeight > 0 ? contentHeight : measured.paragraph
+    }
+
+    private func measure(
+        width: CGFloat,
+        subviews: Subviews,
+        cache: inout Cache
+    ) -> (paragraph: CGFloat, reference: CGFloat) {
+        if cache.width == width,
+           let paragraph = cache.paragraphHeight,
+           let reference = cache.referenceHeight {
+            return (paragraph, reference)
+        }
+        let measurement = ProposedViewSize(width: width, height: nil)
+        let paragraph = subviews[0].sizeThatFits(measurement).height
+        let reference = subviews.count > 1
+            ? subviews[1].sizeThatFits(measurement).height
+            : 0
+        cache.width = width
+        cache.paragraphHeight = paragraph
+        cache.referenceHeight = reference
+        return (paragraph, reference)
+    }
+
+    private static func naturalWidth(_ subviews: Subviews) -> CGFloat {
+        subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
     }
 }
 
@@ -707,6 +867,9 @@ struct ThinkingTraceDetailSheet: View {
     let identity: String
     let streaming: Bool
     @Environment(\.dismiss) private var dismiss
+    #if HOSTED_TEST
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+    #endif
 
     private let title = "Thinking"
     /// Scroll target for tail following; a completed trace never scrolls here.
@@ -737,6 +900,17 @@ struct ThinkingTraceDetailSheet: View {
                 }
                 .defaultScrollAnchor(.top)
                 .tronScrollEdgeChrome()
+                #if HOSTED_TEST
+                // What this sheet is actually showing: its source length and its
+                // own scroll position, recorded per scroll-geometry change.
+                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, offset in
+                    hostedRecorder?.recorder?.recordThinkingSheet(
+                        id: identity,
+                        sourceUTF16Length: inline.source.utf16.count,
+                        scrollOffset: offset
+                    )
+                }
+                #endif
                 .onAppear {
                     // A completed trace starts at its beginning. Scrolling to it
                     // here would drop the content padding out of view and start

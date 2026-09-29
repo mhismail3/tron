@@ -9,6 +9,9 @@ struct AttachmentImageFilePreview: @unchecked Sendable {
 struct AttachmentPDFPreview: @unchecked Sendable {
     let document: PDFDocument
     let pageCount: Int
+    /// The PDF source bytes `PDFDocument` retains, so the prepared value's store
+    /// accounting is the memory it actually holds.
+    let sourceBytes: Int
 }
 
 enum AttachmentFilePreviewKind: Equatable, Sendable {
@@ -31,6 +34,24 @@ enum AttachmentFilePreviewContent: Sendable {
 struct PreparedAttachmentFilePreview: Sendable {
     let content: AttachmentFilePreviewContent
     let isTruncated: Bool
+}
+
+extension PreparedAttachmentFilePreview: ChatInlineArtifact {
+    /// The retained document's own bytes: the decoded image, the PDF source the
+    /// `PDFDocument` holds, or the decoded text the renderer keeps.
+    var accountedBytes: Int {
+        switch content {
+        case .image(let preview):
+            guard let image = preview.image.cgImage else { return 0 }
+            return image.bytesPerRow * image.height
+        case .markdown(let document):
+            return document.source.utf8.count
+        case .plainText(let text), .code(let text):
+            return text.utf8.count
+        case .pdf(let preview):
+            return preview.sourceBytes
+        }
+    }
 }
 
 enum AttachmentFilePreviewError: Error, Equatable, Sendable {
@@ -131,7 +152,8 @@ enum AttachmentFilePreviewPolicy {
             return PreparedAttachmentFilePreview(
                 content: .pdf(AttachmentPDFPreview(
                     document: document,
-                    pageCount: document.pageCount
+                    pageCount: document.pageCount,
+                    sourceBytes: data.count
                 )),
                 isTruncated: false
             )

@@ -2879,6 +2879,7 @@ struct ChatViewScrollHarnessTests {
                             == compacted.eventSequence
                         && ($0.observation.scrollSettledDistance ?? .infinity)
                             <= ChatTranscriptGeometry.catchUpDistance
+                        && !$0.observation.visibleRowIDs.isEmpty
                         && $0.nativePinnedAtBottom
                 }
                 #expect(compactionSettled.observation.animatedEntranceCount
@@ -4498,6 +4499,9 @@ final class ChatViewScrollHarness {
     let recorder: PresentedFrameRecorder
     let signposts: RecordingPerformanceSignposts
     let probe: ChatHostedProbe
+    /// The mounted callbacks a hosted test activates through the control that
+    /// owns them (a SwiftUI button cannot be tapped from the harness).
+    let toolActionProbe = HostedToolActionProbe()
 
     private struct Dependencies {
         let suiteName: String
@@ -4528,16 +4532,22 @@ final class ChatViewScrollHarness {
         displayFrameScheduler: DisplayFrameScheduler,
         performanceSignposts: (any PerformanceSignposting)? = nil,
         enablesPresentationCover: Bool = false,
-        installsSubscribedSnapshot: Bool = true
+        installsSubscribedSnapshot: Bool = true,
+        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
+        mediaFetch: ChatMediaFetch? = nil
     ) throws {
-        let dependencies = try Self.makeDependencies(enablesComposerSubmission: false)
+        let dependencies = try Self.makeDependencies(
+            enablesComposerSubmission: false,
+            mediaFetch: mediaFetch
+        )
         try self.init(
             snapshot: snapshot,
             displayFrameScheduler: displayFrameScheduler,
             performanceSignposts: performanceSignposts,
             dependencies: dependencies,
             installsSubscribedSnapshot: installsSubscribedSnapshot,
-            enablesPresentationCover: enablesPresentationCover
+            enablesPresentationCover: enablesPresentationCover,
+            scrollCallbackMode: scrollCallbackMode
         )
     }
 
@@ -4547,9 +4557,13 @@ final class ChatViewScrollHarness {
         performanceSignposts: (any PerformanceSignposting)? = nil,
         enablesPresentationCover: Bool = false,
         usesRealOpening: Bool = false,
-        unansweredRPCMethods: Set<String> = []
+        unansweredRPCMethods: Set<String> = [],
+        mediaFetch: ChatMediaFetch? = nil
     ) async throws -> ChatViewScrollHarness {
-        let dependencies = try makeDependencies(enablesComposerSubmission: true)
+        let dependencies = try makeDependencies(
+            enablesComposerSubmission: true,
+            mediaFetch: mediaFetch
+        )
         guard let socket = dependencies.socket, let profile = dependencies.profile else {
             throw HarnessError.invalidAuthorityBoundary
         }
@@ -4580,7 +4594,8 @@ final class ChatViewScrollHarness {
     }
 
     private static func makeDependencies(
-        enablesComposerSubmission: Bool
+        enablesComposerSubmission: Bool,
+        mediaFetch: ChatMediaFetch? = nil
     ) throws -> Dependencies {
         let suiteName = "ChatViewScrollHarnessTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -4623,7 +4638,8 @@ final class ChatViewScrollHarness {
             cache: SnapshotCache(root: cacheRoot),
             composerUpload: { _, _, data in try await uploads.upload(data) },
             composerSend: composerSend,
-            composerDraftStore: ComposerDraftStore(root: cacheRoot.appending(path: "drafts"))
+            composerDraftStore: ComposerDraftStore(root: cacheRoot.appending(path: "drafts")),
+            chatMediaFetch: mediaFetch
         )
         return Dependencies(
             suiteName: suiteName,
@@ -4644,7 +4660,8 @@ final class ChatViewScrollHarness {
         dependencies: Dependencies,
         installsSubscribedSnapshot: Bool,
         enablesPresentationCover: Bool = false,
-        usesRealOpening: Bool = false
+        usesRealOpening: Bool = false,
+        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic
     ) throws {
         self.snapshot = snapshot
         transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
@@ -4676,7 +4693,7 @@ final class ChatViewScrollHarness {
             throw HarnessError.invalidAuthorityBoundary
         }
 
-        let probe = ChatHostedProbe()
+        let probe = ChatHostedProbe(scrollCallbackMode: scrollCallbackMode)
         if !usesRealOpening {
             probe.fixtureOpenPresentation = { [model] in
                 guard let target = model.presentationTarget(for: snapshot.sessionId),
@@ -4696,6 +4713,7 @@ final class ChatViewScrollHarness {
                 )
             }
             .environment(model)
+            .environment(\.hostedToolActionProbe, toolActionProbe)
         )
         hostingController = UIHostingController(rootView: enablesPresentationCover
             ? AnyView(HarnessManagedSurface(content: root, cover: cover))
@@ -4789,6 +4807,15 @@ final class ChatViewScrollHarness {
         try? await DisplayFrameScheduler.displayLink.nextFrame()
     }
 
+    /// The mounted chat's media owner, so a hosted test can read what it
+    /// retained for an exact artifact identity.
+    var chatMedia: ChatMediaLoader { model.chatMedia }
+
+    /// The exact media identity the mounted chat resolves for one artifact.
+    func chatMediaIdentity(blobID: String) -> ChatMediaIdentity? {
+        model.chatMediaIdentity(blobID: blobID, sessionID: snapshot.sessionId)
+    }
+
     func composerWidth() throws -> CGFloat {
         guard let textView = Self.textViews(in: hostingController.view).first else {
             throw HarnessError.missingComposer
@@ -4807,6 +4834,11 @@ final class ChatViewScrollHarness {
         return !presented.isBeingPresented && presented.transitionCoordinator == nil
     }
     var uncoverTransitionSettled: Bool { hostingController.presentedViewController == nil }
+
+    /// Whether the hosted chat has a sheet presented. A transcript row's detail
+    /// sheet is presented above the rows, so it must outlive the row that asked
+    /// for it.
+    var presentsManagedSheet: Bool { hostingController.presentedViewController != nil }
     func waitForCoverTransition(presented: Bool) async throws {
         for _ in 0..<180 {
             if presented ? coverTransitionSettled : uncoverTransitionSettled { return }

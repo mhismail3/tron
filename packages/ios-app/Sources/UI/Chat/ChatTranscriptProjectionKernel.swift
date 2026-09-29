@@ -1186,7 +1186,7 @@ enum ChatTranscriptProjectionKernel {
                 ) {
                     flushTools()
                     appendRendered(.notification(notification), origin: .canonical)
-                } else if tools.isEmpty {
+                } else if tools.isEmpty, TranscriptRowPresentationPolicy.rendersRow(for: item) {
                     flushTools()
                     appendRendered(.transcript(item), origin: .canonical)
                 } else {

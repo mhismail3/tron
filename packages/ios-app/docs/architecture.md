@@ -357,7 +357,11 @@ projection installation: entries older than the retirement boundary are removed,
 epoch remains admissible for its successor build even when retirement delivery is delayed.
 One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entries into ordered
 raw atoms and then globally assembles call/result joins, bootstrap filtering, barriers, grouping,
-and semantic maps. Message presentation IDs and required content/thinking-run ordinals arrive from
+and semantic maps. It installs a row only when that row has a presentation: a `customEntry` that is
+not a command lifecycle, or a summary/model/thinking/label receipt the adapter did not adapt into a
+typed presentation, renders `EmptyView`, and an empty lazy child still costs realization, entrance
+bookkeeping and tail anchoring. `TranscriptRowPresentationPolicy` is the row's own branch, kept next
+to it so the kernel and the row cannot disagree about what exists. Message presentation IDs and required content/thinking-run ordinals arrive from
 the Gateway and are never rewritten: the same semantic row, thinking run, and prepared-text source
 therefore survive live-to-canonical settlement even though the canonical entry ID changes. When one
 snapshot briefly retains a streaming assistant after its matching presentation ID becomes canonical,
@@ -920,6 +924,12 @@ use the same block boundaries to reflow prose only, leaving lists, quotes, code,
 verbatim without adding Markdown styling. Thinking traces opt out because their line boundaries
 carry their own meaning. Table sizing, horizontal scrolling, ragged-row padding, and block identities
 remain unchanged.
+A row that leaves the lazy window and returns is a new mount, and every horizontal offset is
+deliberately a mount-local view state: the code block's and the table's horizontal scroll position and
+the prompt attachment strip's scroll position reset to their leading edge, and an inline video tears
+down its player and staged file on disappearance, so it resumes muted at the beginning rather than
+retaining a scrub position. No transcript owner restores them; retaining one would require a second
+authority for a scroll offset per block identity.
 Block and list identities combine exact content with UTF-8 source ranges, so equal duplicates remain
 distinct. Code-header progress is eligible only for the one unterminated fence while its owning response
 is still streaming; closed fences settle immediately and every fence is terminal when the response settles.
@@ -1704,7 +1714,13 @@ Canonical Automation prompts remain ordinary model-input user entries, but an ex
 Visible `custom_message` entries are conversation input rather than tool activity. They use a distinct right-aligned interactive glass container whose complete rounded geometry is one hit target. The generic compact row is deliberately schema-stable—**Producer · Context** plus one admitted finite lifecycle status, or **Received** when no single standard status exists—and never includes message text, raw custom type, objectives, or arbitrary detail values. Exact subagent message categories instead use a seafoam **Subagent** chip: supervisor `reason` maps to **Progress Update** or **Needs Attention**, and control `event.type` maps to **Needs Attention** or **Still Working**. Unknown fields on those known types use **Update**. Exact `subagent-wait-subscription` messages use the same seafoam chip and **Wait Update**, without claiming that a wake means success. A `subagent-notify` message says **Result Received**, never **Completed**, because its emitter does not supply structured status and can report failed, paused, or mixed results. These are message-category labels only, not producer evidence; their sheet is titled **Subagent update**, while its Origin metadata retains the canonical producer and confidence unchanged. `InboundContextPresentationTests` covers exact types, malformed fields, and truthful unknown origins. Its medium/large technical sheet shares the standard technical-detail title, close control, role-matched color, blur, metadata-card, and drill-in JSON presentation used by tool details while exposing the full message, canonical identity, delivery semantics, message type, context payload, and exact extension attribution when available. When canonical producer evidence is absent, the generic compact row omits the producer instead of exposing an internal “Unattributed” label; the detail sheet reports **Unknown source** and technical origin remains `unknown`. iOS never promotes custom type, title, text, or timestamp into invented producer attribution.
 
 Every tool chip owns a tappable, top-anchored detail sheet, including
-read/write/edit and filesystem search tools. Inline chips use the same native
+read/write/edit and filesystem search tools. `ChatTranscriptSheetRoutes.swift`
+has the transcript present that sheet, and a wrapped thinking trace's and a
+transcript event's detail with it, above the rows rather than inside the row that
+asked for it, so streaming a row out of the lazily rendered window cannot dismiss
+its detail (`ChatRowStabilityTests.toolDetailOutlivesItsStreamingRow`). The row
+asks through the environment's route owner and re-resolves its run against each
+installed projection; a row rendered outside a transcript has no detail action. Inline chips use the same native
 interactive Liquid Glass touch response as the composer; their Button owns only
 activation and the visible rounded hit shape, while transcript scrolling remains
 authoritative for drags. Tool-state projection updates are admitted synchronously
