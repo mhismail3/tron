@@ -1282,14 +1282,26 @@ struct ChatViewScrollHarnessTests {
     // the same process. Removed with the stage-2 handoff.
     @MainActor
     final class CT23RenderDiagnosis {
-        var base: [String: ChatVisualParityFingerprint] = [:]
-        var variants: [(String, ChatVisualParityFingerprint)] = []
+        var regions: [String: ChatVisualParityFingerprint] = [:]
+        var navBands: [String: [Double]] = [:]
     }
 
     @Test("CT-23 diagnosis: the rendered transcript on both orientations", .enabled(if: UIValidationTier.isActive))
     func ct23RenderDiagnosis() async throws {
         try await withTestWatchdog(timeout: .seconds(240)) {
             let diagnosis = CT23RenderDiagnosis()
+            /// One variant: which of the scroll view's automatic edge effects are hidden.
+            struct Variant {
+                let name: String
+                let topHidden: Bool
+                let bottomHidden: Bool
+            }
+            let variants = [
+                Variant(name: "base", topHidden: false, bottomHidden: false),
+                Variant(name: "no-edge-effect", topHidden: true, bottomHidden: true),
+                Variant(name: "no-top-edge", topHidden: true, bottomHidden: false),
+                Variant(name: "no-bottom-edge", topHidden: false, bottomHidden: true),
+            ]
             for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
                 let label = orientation.presentsNewestRowFirst ? "origin" : "end"
                 var snapshot = try SessionScenarioBuilder(seed: 1_281).openingTail(targetEncodedBytes: 10_000)
@@ -1306,66 +1318,67 @@ struct ChatViewScrollHarnessTests {
                 }
                 snapshot.transcriptStart = 0
                 snapshot.transcriptTotal = snapshot.transcript.count
-                var steps: [(String, Bool)] = [("base", true), ("stale-screen-update", false)]
-                if orientation.presentsNewestRowFirst {
-                    steps = [
-                        ("base", true),
-                        ("stale-screen-update", false),
-                        ("no-edge-effect", true),
-                        ("edge-effect-restored", true),
-                        ("offset-plus-half", true),
-                        ("offset-restored", true),
-                    ]
-                }
                 try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
                     _ = try await harness.recorder.waitUntil { $0.observation.isReady }
                     for _ in 0..<40 { try await harness.driveFrameBoundary() }
                     try harness.snapNativeTranscriptOffsetToWholePoint()
                     print("CT23-DIAG orientation=\(label) \(try harness.ct23DiagnosisScrollViewState())")
                     print("CT23-DIAG orientation=\(label) \(harness.ct23DiagnosisRowPixels())")
-                    for (name, afterScreenUpdates) in steps {
-                        switch name {
-                        case "no-edge-effect":
-                            try harness.ct23DiagnosisSetEdgeEffectsHidden(true)
-                            try await harness.driveFrameBoundary()
-                        case "edge-effect-restored":
-                            try harness.ct23DiagnosisSetEdgeEffectsHidden(false)
-                            try await harness.driveFrameBoundary()
-                        case "offset-plus-half":
-                            try harness.ct23DiagnosisShiftOffset(by: 0.5)
-                        case "offset-restored":
-                            try harness.ct23DiagnosisShiftOffset(by: -0.5)
-                        default:
-                            break
-                        }
-                        let fingerprint = Self.ct23DiagnosisCapture(
-                            harness, label: label, name: name,
-                            afterScreenUpdates: afterScreenUpdates
+                    for variant in variants {
+                        try harness.ct23DiagnosisSetEdgeEffectsHidden(
+                            top: variant.topHidden, bottom: variant.bottomHidden
                         )
-                        if name == "base" {
-                            diagnosis.base[label] = fingerprint
-                        } else {
-                            diagnosis.variants.append(("\(label)-\(name)", fingerprint))
-                        }
+                        try await harness.driveFrameBoundary()
+                        let capture = Self.ct23DiagnosisCapture(
+                            harness, label: label, name: variant.name
+                        )
+                        let key = "\(label)-\(variant.name)"
+                        diagnosis.regions[key] = capture.region
+                        diagnosis.navBands[key] = capture.navigationBand
                     }
+                    try harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
+                    try await harness.driveFrameBoundary()
+                    // The mechanism probe: today's path is at the scroll view's
+                    // maximum offset when it is pinned; the flipped path pins at
+                    // the origin edge. Pull the upright scroll view past its top
+                    // edge so this run says whether "at the origin edge" is what
+                    // the automatic effect treats as a full-viewport wash.
+                    if !orientation.presentsNewestRowFirst {
+                        try harness.ct23DiagnosisShiftOffset(by: -40)
+                        let capture = Self.ct23DiagnosisCapture(
+                            harness, label: label, name: "past-top-edge"
+                        )
+                        diagnosis.regions["\(label)-past-top-edge"] = capture.region
+                        diagnosis.navBands["\(label)-past-top-edge"] = capture.navigationBand
+                        try harness.ct23DiagnosisShiftOffset(by: 40)
+                        try harness.snapNativeTranscriptOffsetToWholePoint()
+                    }
+                    harness.ct23DiagnosisAttachWholeWindow(named: "\(label)-final")
                 }
             }
-            let reference = await MainActor.run { diagnosis.base["end"] }
-            let originCapture = await MainActor.run { diagnosis.base["origin"] }
-            let variants = await MainActor.run { diagnosis.variants }
-            if let origin = originCapture {
-                let value = ChatVisualParityFingerprint.magnitude(
-                    origin, reference!, alignmentPoints: ChatVisualParitySpec.alignmentPoints
-                )
-                print("CT23-DIAG compare=origin-base-vs-end-base magnitude="
-                    + String(format: "%.5f shift=%.1f", value.magnitude, value.shift))
+            let measurements = await MainActor.run {
+                (regions: diagnosis.regions, navBands: diagnosis.navBands)
             }
-            for (name, fingerprint) in variants {
+            let reference = measurements.regions["end-base"]
+            let referenceNav = measurements.navBands["end-base"] ?? []
+            func navDistance(_ candidate: [Double], _ recorded: [Double]) -> Double {
+                guard candidate.count == recorded.count, !candidate.isEmpty else { return .infinity }
+                let squared = zip(candidate, recorded).reduce(0.0) { partial, pair in
+                    let delta = (pair.0 - pair.1) / 255
+                    return partial + delta * delta
+                }
+                return (squared / Double(candidate.count)).squareRoot()
+            }
+            for key in measurements.regions.keys.sorted() {
+                guard let region = measurements.regions[key] else { continue }
                 let value = ChatVisualParityFingerprint.magnitude(
-                    fingerprint, reference!, alignmentPoints: ChatVisualParitySpec.alignmentPoints
+                    region, reference!, alignmentPoints: ChatVisualParitySpec.alignmentPoints
                 )
-                print("CT23-DIAG compare=\(name)-vs-end-base magnitude="
-                    + String(format: "%.5f shift=%.1f", value.magnitude, value.shift))
+                let navBand = navDistance(measurements.navBands[key] ?? [], referenceNav)
+                print("CT23-DIAG compare=\(key)-vs-end-base"
+                    + " magnitude=\(String(format: "%.5f", value.magnitude))"
+                    + " shift=\(String(format: "%.1f", value.shift))"
+                    + " navBand=\(String(format: "%.5f", navBand))")
             }
         }
     }
@@ -3905,26 +3918,25 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    /// CT-23 stage-2 diagnosis (temporary): render the transcript's parity region,
-    /// retain the PNG as a test attachment and return its fingerprint.
+    /// CT-23 stage-2 diagnosis (temporary): render the transcript's parity region
+    /// and the navigation band, retain the PNGs as test attachments and return
+    /// both measurements.
     @MainActor
     private static func ct23DiagnosisCapture(
         _ harness: ChatViewScrollHarness,
         label: String,
-        name: String,
-        afterScreenUpdates: Bool
-    ) -> ChatVisualParityFingerprint {
+        name: String
+    ) -> (region: ChatVisualParityFingerprint, navigationBand: [Double]) {
         let rendered = harness.renderedParityFrame(
             scale: ChatVisualParitySpec.renderScale,
             rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
             columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
-            includingPNG: true,
-            afterScreenUpdates: afterScreenUpdates
+            includingPNG: true
         )
         if let png = rendered.png {
             Attachment.record(png, named: "ct23-\(label)-\(name).png")
         }
-        return ChatVisualParityFingerprint(rendered)
+        return (ChatVisualParityFingerprint(rendered), harness.renderedNavigationBandGrid())
     }
 
     private func withHarness(
@@ -5443,11 +5455,18 @@ final class ChatViewScrollHarness {
         return "count=\(rows.count) " + values.joined(separator: " ")
     }
 
-    /// The scroll view's current edge-effect state, so a variant can put it back.
-    func ct23DiagnosisSetEdgeEffectsHidden(_ hidden: Bool) throws {
+    /// One variant of the automatic scroll edge effect's state.
+    func ct23DiagnosisSetEdgeEffectsHidden(top: Bool, bottom: Bool) throws {
         let scrollView = try nativeTranscriptScrollView()
-        scrollView.topEdgeEffect.isHidden = hidden
-        scrollView.bottomEdgeEffect.isHidden = hidden
+        scrollView.topEdgeEffect.isHidden = top
+        scrollView.bottomEdgeEffect.isHidden = bottom
+    }
+
+    /// The whole hosted window as a retained attachment: the navigation band and
+    /// the composer edge are outside the parity gate's own region.
+    func ct23DiagnosisAttachWholeWindow(named name: String) {
+        let image = renderedWindowImage(scale: 1)
+        if let data = image.pngData() { Attachment.record(data, named: "ct23-\(name)-window.png") }
     }
 
     /// Shift the native offset by `points` without any product input, for the
