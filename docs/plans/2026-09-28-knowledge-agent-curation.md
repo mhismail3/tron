@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-28
 - **Status:** Active
-- **Last updated:** 2026-09-29, K1–K3 done
+- **Last updated:** 2026-09-29, K1–K3, K6 and K7 done
 - **Goal:** Agents keep every Library entry summarized, tagged, judged for freshness and correctly scoped, guided by the user's own takes, so useful sources surface on their own in future work.
 
 ## Goal and constraints
@@ -151,7 +151,7 @@ screenshots of each state. Device validation by the user after K9.
 | K4 | Ready | Jev tagger with monthly budget and re-tag triggers | K1, K3 | — |
 | K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
 | K6 | Done | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1, K3 | luna-worker, 2026-09-29 |
-| K7 | In progress | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | luna-worker, 2026-09-29 |
+| K7 | Done | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | luna-worker, 2026-09-29 |
 | K8 | Ready | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | — |
 | K9 | Ready | Maintainer runtime update and live capability check | K1–K8 | — |
 | K10 | Ready | Seed: agent drafts the vocabulary from the 276 entries; user edits it | K9 | — |
@@ -488,5 +488,43 @@ uses the tag definitions/categories/decay classes, and asks
 - Regression tests cover no-write crossing of 180 days and reordering, decay edit
   re-projection, merged/retired semantics, and take-driven re-tag discovery.
 
+### K7 · Done · 2026-09-29 · luna-worker · `knowledge/k7-ios`
+
+- Result: Native source records adopt K1/K3/K6 take, controlled-tag selection,
+  verdict, vocabulary config, asynchronous summary-job, and enriched row DTOs;
+  the superseded summary-owned free-text tags are removed. Entry Detail now
+  edits Your take with debounced and dismissal autosave, retains local drafts on
+  failure, exposes conflict text and retry, marks tags updating, starts and
+  observes Gateway-owned summary jobs, and edits verdict, replacement, scope,
+  and admission with receipted curation. Detail reads refresh by exact current
+  row revision; library rows show freshness/verdict, and personal scope is named
+  Moose's Corner.
+- Evidence: `scripts/tron-ios-test build` passed. The focused command
+  `scripts/tron-ios-test run --only-testing TronMobileTests/KnowledgeLibraryRowsTests
+  --only-testing TronMobileTests/KnowledgeModelsTests
+  --only-testing TronMobileTests/KnowledgeLibraryPageCacheTests
+  --only-testing TronMobileTests/KnowledgePreviewStoreTests` passed 32 XCTest
+  cases in `KnowledgeModelsTests` and 25 Swift Testing cases across the three
+  other suites. Gateway-shaped fixtures cover age basis/days, freshness, verdict,
+  replacement, take, stale-tag state and vocabulary labels; full-record fixtures
+  decode take/tags/verdict and summary without summary tags.
+- Changes: `df7891198` (`feat(ios): curate Knowledge sources in entry detail`),
+  `3097a4e3a` (`fix(ios): refresh take conflict retry fence`).
+- Tasks added: none.
+- Kept on purpose: source tags are read from row vocabulary labels and refreshed
+  row projections, not inferred from generated summary text. Summary generation
+  remains Gateway-owned and accepted work is not cancelled when presentation
+  ends. Take drafts live only in a bounded-by-active-record process-memory
+  registry, never persistent defaults. Mutating controls retain per-control
+  progress and do not disable unrelated Entry Detail actions.
+- Deviations: The requested simulator end-to-end cases (dismissal/reconnect
+  during generation, double tap, take conflict/failure/retry and re-tag
+  completion) and retained simulator screenshot set were not produced in this
+  implementation pass. Validation covers contract decoding and Library
+  projection/cache/preview suites, not those interaction traces. A maintainer
+  should require these focused tests and the honestly labeled render screenshots
+  before treating K7's interaction bar as fully demonstrated. No Gateway was
+  rebuilt or contacted.
+
 Drafted from the 2026-09-28 interview and approved by the user the same day,
-with the reliability and interaction bars added at the user's request. K1, K2, K3 and K6 are complete; K3/K6 were integrated on `knowledge/k1-k6`.
+with the reliability and interaction bars added at the user's request. K1, K2, K3, K6 and K7 are complete; K3/K6 were integrated on `knowledge/k1-k6`.
