@@ -1351,32 +1351,72 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    // The safe-area scenario's own negative control. Flipping the transcript the
-    // way CT-23 will, without the rows counter-flipped, is exactly the failure the
-    // keyboard gate exists to catch: the newest row leaves the composer edge, and
-    // because this is the composer's own inset the failure survives the whole
-    // transition instead of only one of its frames.
-    @Test("a keyboard inset over a flipped transcript fails the composer gate")
-    func keyboardInsetOverFlippedTranscriptFailsTheComposerGate() async throws {
+    // The safe-area scenario's own negative control, and a different failure from
+    // the mirrored-transcript control above: the keyboard's inset lands at the
+    // transcript's *far* edge instead of the composer's. CT-23's flipped
+    // transcript applies the keyboard as a swapped content margin, so an
+    // implementation that reserves the height at the wrong end leaves the pinned
+    // row one keyboard height away from the composer while every row keeps its
+    // own orientation and order. The rows are untouched here, so this isolates the
+    // inset's edge; the mirrored control above cannot, because it fails with or
+    // without a keyboard.
+    @Test("a keyboard inset reserved at the transcript's far edge fails the composer gate")
+    func keyboardInsetAtWrongEdgeFailsTheComposerGate() async throws {
         try await withTestWatchdog(timeout: .seconds(30)) {
             try await withHarness(seed: 1_272) { harness in
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.isReady && $0.nativeSettledAtBottom
                 }
-                try harness.flipNativeTranscriptWithoutCounterFlippingRows()
-                try await harness.driveKeyboardInset(.show())
-                let settled = try await harness.newestRowSettledAtComposer()
+                let samples = try await harness.driveKeyboardInsetAtWrongEdge(.show())
+                // The keyboard's own transition ran: the composer moved with its
+                // inset, so what the gate rejects below is the inset's edge and
+                // not a missing transition.
+                let composerTops = samples.compactMap(\.composerTop)
+                let composerTravel = (composerTops.min().flatMap { minimum in
+                    composerTops.max().map { $0 - minimum }
+                }) ?? 0
+                #expect(
+                    composerTravel > 200,
+                    "the keyboard's own inset moved the composer \(ct2Number(composerTravel)) pt"
+                )
+                let settled = try #require(samples.last)
                 let clearance = try #require(settled.clearance)
                 #expect(
-                    !harness.isPinnedToBottom(),
-                    "the flipped transcript's newest row left the pinned band: \(harness.pinnedDescription())"
+                    abs(clearance - TranscriptWindowOracle.tailSpacing) > 6,
+                    "the wrong-edge inset's newest row settled \(ct2Number(clearance)) pt from the composer"
                 )
                 #expect(
-                    abs(clearance - TranscriptWindowOracle.tailSpacing) > 6,
-                    "the flipped transcript's newest row settled \(ct2Number(clearance)) pt from the composer"
+                    !TranscriptWindowOracle.isPinned(
+                        in: harness.visibleRootView, tolerance: TranscriptWindowOracle.profilingTolerance
+                    ),
+                    "the wrong-edge inset left the transcript pinned: \(harness.pinnedDescription())"
                 )
             }
         }
+    }
+
+    // The window oracle's orientation read, as a failure mode: a container that
+    // flips the scroll view *and* an ancestor renders upright, so the read has to
+    // multiply the signs along the layer chain instead of stopping at the first
+    // negative `m22`. Reading it as flipped would send `scrollReader`'s newest end
+    // and every pinned check the wrong way on exactly that container.
+    @Test("the orientation read multiplies the flip along the layer chain")
+    func orientationReadMultipliesTheFlipAlongTheChain() {
+        let root = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let scrollView = UIScrollView(frame: root.bounds)
+        root.addSubview(scrollView)
+        #expect(!TranscriptWindowOracle.isFlipped(scrollView))
+        // The flip CT-23 puts on the transcript's own scroll view.
+        scrollView.layer.setAffineTransform(CGAffineTransform(scaleX: 1, y: -1))
+        #expect(TranscriptWindowOracle.isFlipped(scrollView))
+        // The same flip on an ancestor instead.
+        scrollView.layer.setAffineTransform(.identity)
+        root.layer.setAffineTransform(CGAffineTransform(scaleX: 1, y: -1))
+        #expect(TranscriptWindowOracle.isFlipped(scrollView))
+        // A flip on both layers renders the content upright: two flips are not a
+        // flip.
+        scrollView.layer.setAffineTransform(CGAffineTransform(scaleX: 1, y: -1))
+        #expect(!TranscriptWindowOracle.isFlipped(scrollView))
     }
 
     // The bottom-coverage gate's own failure modes, in isolation: it must not
@@ -2010,14 +2050,13 @@ struct ChatViewScrollHarnessTests {
     // offset applied outside a row's counter-flip, so the reveal's rise would
     // become a drop while every earlier check still passed (the reveal oracle is
     // deliberately insensitive to direction, and the parity gate cannot resolve a
-    // sub-60 ms phase). Two measurements, because they carry different halves of
-    // the motion: the committed position of the newest row's edge (layout-true,
-    // and the amplitude — measured as the reveal's 8 pt step), and the
-    // luminance-weighted vertical centre of the entering region (the pixels the
-    // reader sees, sign-carrying). The send's 20 pt rise is not measurable here:
-    // the row's entrance translate is never committed between display boundaries
-    // in the rendered tree and the row marker does not carry it, which is why
-    // CT-12 and CT-14 already leave entrance motion to the device checklist.
+    // sub-60 ms phase). The gate is the committed position of the newest row's
+    // bottom edge, in window coordinates: layout-true, and the amplitude —
+    // measured as the reveal's 8 pt step, 786.7 → 778.7 pt in every run. The
+    // rendered pixels were measured for the same gate and rejected (CT-25 stage
+    // B4): content realization moves the entering region's luminance centre 74 pt
+    // over the same frames, so the 8 pt rise is invisible inside it, and the
+    // send's 20 pt rise is never committed between display boundaries at all.
     @Test("the opening reveal moves the transcript upward")
     func hostedOpeningRevealRisesUpward() async throws {
         try await withTestWatchdog(timeout: .seconds(25)) { @MainActor in
@@ -2029,50 +2068,46 @@ struct ChatViewScrollHarnessTests {
                                   enablesPresentationCover: true, usesRealOpening: true) { harness in
                 gate.condition = { harness.probe.openingPhase?() == .presenting }
                 try await gate.waitUntilHeld()
-                let bounds = harness.visibleRootView.bounds
-                let composerTop = harness.transcriptBottom().composerTop ?? bounds.height
-                // A band of transcript text above the composer: the entering
-                // region the reveal moves, without the composer's own material.
-                let region = CGRect(x: 30, y: composerTop - 300, width: 330, height: 180)
-                let covered = harness.verticalProfile(in: region, rowStep: 2)
                 var edges: [CGFloat] = []
-                var centres: [CGFloat] = []
                 gate.release()
                 for _ in 0..<12 {
                     try await DisplayFrameScheduler.displayLink.nextFrame()
-                    let profile = harness.verticalProfile(in: region, rowStep: 2)
                     if let edge = harness.transcriptBottom().newestRowBottomEdge {
                         edges.append(edge)
                     }
-                    if let centre = ChatViewScrollHarness.inkCentre(of: profile, above: covered) {
-                        centres.append(centre)
-                    }
                 }
                 #expect(harness.probe.openingPhase?() == .ready)
-
-                // The committed amplitude: the reveal steps the transcript up by
-                // its 8 pt rise once the physical lift settles.
-                let firstEdge = try #require(edges.first)
-                let settledEdge = try #require(edges.last)
-                #expect(
-                    abs((firstEdge - settledEdge) - 8) <= 3,
-                    "the reveal stepped the newest row's edge from \(firstEdge) to \(settledEdge)"
-                )
-                #expect(
-                    zip(edges, edges.dropFirst()).allSatisfy { $1 <= $0 + 0.5 },
-                    "the newest row's edge never moved down: \(edges)"
-                )
-
-                // The rendered centre of the entering region, recorded per frame.
-                // It is not the gate: measured here, content realization moves it
-                // 74 pt upward over the same frames (657.1 → 583.4) with ±10 pt
-                // wiggles, so an 8 pt direction would be invisible inside it. The
-                // committed edge above carries the direction and the amplitude;
-                // `centres.count` only proves the entering ink was measurable.
-                #expect(centres.count >= 3, "the reveal's entering ink was sampled \(centres.count) times")
-                print("CT25-MOTION-OPENING edges=\(edges.map { String(format: "%.1f", Double($0)) }) centres=\(centres.map { String(format: "%.1f", Double($0)) })")
+                if let failure = OpeningRevealDirection.failure(edges: edges) {
+                    Issue.record(Comment(rawValue: failure))
+                }
+                print("CT25-MOTION-OPENING edges=\(edges.map { String(format: "%.1f", Double($0)) })")
             }
         }
+    }
+
+    // The gate's own failure mode, in isolation: the reveal inverted. The
+    // sequence the gate accepts (CT-25 stage B4's three runs) must pass, and the
+    // same frames with the reveal inverted — the edge stepping *down* by the
+    // lift, and never monotone upward — must fail. Three hosted runs of the
+    // inverted product offset (both `.offset(y: 8)` modifiers negated, reverted
+    // afterwards) failed at the watchdog instead: the inverted offsets leave the
+    // opening unsettled, so the harness never samples and the assertions never
+    // ran. This pins what those runs would have reported.
+    @Test("the opening reveal's direction gate rejects a drop")
+    func openingRevealDirectionGateRejectsADrop() {
+        let risen: [CGFloat] = [
+            786.7, 786.7, 786.7, 785.0, 781.6, 780.3, 779.1, 778.7, 778.7, 778.7, 778.7, 778.7,
+        ]
+        #expect(OpeningRevealDirection.failure(edges: risen) == nil)
+        let dropped = Array(risen.reversed())
+        #expect(
+            OpeningRevealDirection.failure(edges: dropped) != nil,
+            "the inverted reveal must fail the direction gate"
+        )
+        // The lift is the amplitude, so a reveal that does not move at all is not
+        // a reveal either; and an empty sequence is not a measurement.
+        #expect(OpeningRevealDirection.failure(edges: [778.7, 778.7, 778.7]) != nil)
+        #expect(OpeningRevealDirection.failure(edges: []) != nil)
     }
 
     @Test("hosted opening render stays opaque before one monotonic transcript reveal")
@@ -3384,7 +3419,11 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.isReady && $0.observation.projectionInstallCount >= 1
                 }
-                try await harness.detachReaderByRealScroll()
+                // Mid-history, not at the oldest end: the status-bar detach sits
+                // at the content's far edge, where streaming, the keyboard and a
+                // page load could not move the anchor even if the invariant were
+                // broken. 1.5 viewports up is a reader who is actually reading.
+                try await harness.detachReaderMidHistory()
                 #expect(
                     harness.probeObservation.isDetached,
                     "the real scroll detached the reader: \(harness.pinnedDescription())"
@@ -3477,6 +3516,142 @@ struct ChatViewScrollHarnessTests {
                 )
                 #expect(harness.probeObservation.isDetached, "the reader stayed away")
                 print("CT25-DETACH-METRICS anchor=\(anchor.physicalID) startY=\(ct2Number(anchor.windowMinY)) movements=\(movements.joined(separator: ","))")
+            }
+        }
+    }
+
+    // The two synthetic fixtures this work replaced (`drivenCoordinatorExecutor`,
+    // `shrinkDoesNotFollow`) also asserted three things no CT-25 journey covers.
+    // The written failure modes they stand for: a pinned transcript that needs an
+    // application position write to follow its own content growth or shrink; a
+    // detached viewport whose restructure is admitted as projection work while the
+    // reader is away; and a reader who takes the viewport back while a catch-up is
+    // in flight and must stay away with their unread state. They are measured here
+    // on the real view, through the window oracle, instead of on injected geometry.
+    @Test("pinned content growth and shrink keep the tail with no position write")
+    func pinnedGrowthAndShrinkWriteNoPosition() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            try await withHarness(seed: 1_277) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeSettledAtBottom
+                }
+                // A content change may publish the new terminal row's own exact
+                // realization lease. Every other command is the application
+                // correcting a position the pinned layout should keep by itself, so
+                // the count of commands that are not leases must not move.
+                let nonLeaseCommands = ready.observation.scrollCommandCount
+                    - ready.observation.tailMaterializationCommandCount
+                let installBaseline = ready.observation.projectionInstallCount
+                let semanticID = "pinned-growth-turn"
+
+                var grown = harness.snapshot
+                grown.transcript.append(try harnessAssistantMessage(
+                    id: "pinned-growth-row",
+                    presentationID: semanticID,
+                    text: Array(
+                        repeating: "The pinned reply grows while the reader stays at the tail.",
+                        count: 6
+                    ).joined(separator: "\n\n")
+                ))
+                grown.transcriptTotal = (grown.transcriptTotal ?? grown.transcript.count - 1) + 1
+                grown.revision += 1
+                grown.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(grown)
+                let grew = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > installBaseline
+                        && $0.observation.rowFrames[semanticID] != nil
+                        && $0.nativePinnedAtBottom
+                }
+                #expect(
+                    grew.nativePinnedAtBottom,
+                    "the grown tail: \(harness.pinnedDescription())"
+                )
+                #expect(
+                    grew.observation.scrollCommandCount - grew.observation.tailMaterializationCommandCount
+                        == nonLeaseCommands,
+                    "pinned growth published a position write: \(harness.pinnedDescription())"
+                )
+
+                // The same row arrives shorter: rows may get their own lease, and
+                // the tail must stay at the composer either way.
+                var shrunk = grown
+                shrunk.transcript[shrunk.transcript.count - 1] = try harnessAssistantMessage(
+                    id: "pinned-growth-row",
+                    presentationID: semanticID,
+                    text: "The pinned reply settles shorter."
+                )
+                shrunk.revision += 1
+                shrunk.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(shrunk)
+                let shrank = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > grew.observation.projectionInstallCount
+                        && $0.nativePinnedAtBottom
+                }
+                #expect(
+                    shrank.nativePinnedAtBottom,
+                    "the shrunk tail: \(harness.pinnedDescription())"
+                )
+                #expect(
+                    shrank.observation.scrollCommandCount - shrank.observation.tailMaterializationCommandCount
+                        == nonLeaseCommands,
+                    "pinned shrink published a position write: \(harness.pinnedDescription())"
+                )
+                #expect(
+                    TranscriptWindowOracle.isPinned(
+                        in: harness.visibleRootView, tolerance: TranscriptWindowOracle.pinnedTolerance
+                    ),
+                    "the settled tail holds the pinned band: \(harness.pinnedDescription())"
+                )
+            }
+        }
+    }
+
+    @Test("a detached restructure admits no projection work and a re-interaction stays away with unread")
+    func detachedRestructureAdmitsNoProjectionWork() async throws {
+        try await withTestWatchdog(timeout: .seconds(30)) {
+            try await withHarness(seed: 1_278) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeSettledAtBottom
+                }
+                try await harness.detachReaderMidHistory()
+                #expect(
+                    harness.probeObservation.isDetached,
+                    "the real scroll detached the reader: \(harness.pinnedDescription())"
+                )
+                let installs = harness.probeObservation.projectionInstallCount
+                let work = harness.probeObservation.projectionWorkAdmissionCount
+                let commands = harness.probeObservation.scrollCommandCount
+
+                // The restructure a detached reader can still see: the keyboard's
+                // own inset cycle changes the container the estimate is derived
+                // from. The projection stays frozen while the reader is away, so
+                // nothing may be admitted and nothing may be written.
+                try await harness.driveKeyboardInset(.show())
+                try await harness.driveKeyboardInset(.hide())
+                try await harness.driveFrameBoundary()
+                #expect(
+                    harness.probeObservation.projectionWorkAdmissionCount == work,
+                    "the detached restructure admitted projection work: \(harness.pinnedDescription())"
+                )
+                #expect(harness.probeObservation.projectionInstallCount == installs)
+                #expect(
+                    harness.probeObservation.scrollCommandCount == commands,
+                    "the detached restructure wrote a scroll command: \(harness.pinnedDescription())"
+                )
+                #expect(harness.probeObservation.isDetached)
+
+                // A response arrives while the reader is away, the catch-up is
+                // admitted, and the reader takes the viewport back before it
+                // settles: they are still away, with the unread still theirs.
+                harness.driveSemanticResponse()
+                #expect(harness.probeObservation.hasUnread)
+                harness.driveCatchUp(reduceMotion: true)
+                harness.drivePhase(from: .idle, to: .interacting, geometry: nil)
+                #expect(
+                    harness.probeObservation.isDetached,
+                    "the catch-up's re-interaction returned the reader to the tail: \(harness.pinnedDescription())"
+                )
+                #expect(harness.probeObservation.hasUnread)
             }
         }
     }
@@ -3633,6 +3808,41 @@ struct ChatViewScrollHarnessTests {
             throw error
         }
         await harness.close()
+    }
+}
+
+/// The opening reveal's direction gate, as a pure decision so its failure mode is
+/// pinnable: the committed position of the newest row's bottom edge, in window
+/// coordinates, must never move down across the reveal and must step up by the
+/// reveal's own physical lift. A flip of the transcript inverts any offset applied
+/// outside a row's counter-flip, which turns the whole sequence into a drop.
+///
+/// The hosted journey calls this on the frames it samples; the negative control
+/// calls it on the measured sequence and its reversal, which is what an inverted
+/// reveal reports.
+enum OpeningRevealDirection {
+    /// The reveal's physical lift, in points, and how far the measured step may
+    /// differ from it: 786.7 → 778.7 pt in every CT-25 run.
+    static let lift: CGFloat = 8
+    static let liftTolerance: CGFloat = 3
+    /// The downward drift one boundary may carry without counting as a move down:
+    /// the lazy stack's own sub-point settle.
+    static let driftTolerance: CGFloat = 0.5
+
+    /// Why `edges` is not an upward reveal, or `nil` when it is. `edges` is the
+    /// newest row's bottom edge at each sampled display boundary, in window
+    /// coordinates.
+    static func failure(edges: [CGFloat]) -> String? {
+        guard let first = edges.first, let settled = edges.last else {
+            return "the reveal sampled no newest-row edge"
+        }
+        guard abs((first - settled) - lift) <= liftTolerance else {
+            return "the reveal stepped the newest row's edge from \(first) to \(settled)"
+        }
+        guard zip(edges, edges.dropFirst()).allSatisfy({ $1 <= $0 + driftTolerance }) else {
+            return "the newest row's edge moved down: \(edges)"
+        }
+        return nil
     }
 }
 
@@ -4784,6 +4994,33 @@ final class ChatViewScrollHarness {
         }
     }
 
+    /// Detach the reader part-way up the loaded history, the way a reader who
+    /// scrolls up and stops does: move the real transcript scroll view `viewports`
+    /// viewports above the pinned tail and report the pan's own phase callbacks,
+    /// which is the coordinator path that reads a viewport in motion as direct
+    /// ownership. `detachReaderByRealScroll` exercises the status-bar path, which
+    /// lands at the oldest loaded row (its heuristic needs a visual top inside 2
+    /// pt of the window's) and leaves the reader at the content's far edge, where
+    /// nothing above it can move it. A mid-history reader is the position the
+    /// streaming, keyboard and page-load phases have to hold.
+    func detachReaderMidHistory(
+        byViewports viewports: CGFloat = 1.5,
+        boundaries: Int = 60
+    ) async throws {
+        let scrollView = try nativeTranscriptScrollView()
+        try scrollReader(byVisualPoints: viewports * scrollView.bounds.height)
+        // One boundary so the coordinator's own geometry is the real mid-history
+        // viewport before the phase callbacks arrive: a pinned position left in
+        // its evidence would read the retreat as a bottom rubber band.
+        try await driveFrameBoundary()
+        drivePhase(from: .idle, to: .interacting, geometry: nil)
+        drivePhase(from: .interacting, to: .idle, geometry: nil)
+        for _ in 0..<boundaries {
+            if probeObservation.isDetached, readerAnchor() != nil { return }
+            try await driveFrameBoundary()
+        }
+    }
+
     /// Return the reader to the pinned tail through the real scroll view.
     func returnReaderToPinnedTail(boundaries: Int = 40) async throws {
         try scrollReader(byVisualPoints: 0)
@@ -4922,90 +5159,6 @@ final class ChatViewScrollHarness {
             animated: false
         )
         scrollView.layoutIfNeeded()
-    }
-
-    // MARK: - Motion direction
-
-    /// One rendered region reduced to its rows' mean luminance, with the region's
-    /// own top edge: the input the motion-direction probe reduces to a
-    /// luminance-weighted vertical centre.
-    struct RenderedVerticalProfile: Sendable, Equatable {
-        /// The region's top edge in the hosting view's own coordinates.
-        let regionTop: CGFloat
-        /// Points per profile row.
-        let rowStep: Int
-        /// Mean luminance of each row band of the region, top row first.
-        let rowMeans: [Double]
-    }
-
-    /// The mean luminance of every `rowStep`-point row of `region`, rendered from
-    /// the current hierarchy. The region is small — the band an entrance moves
-    /// through — so this costs a fraction of the parity gate's capture and can be
-    /// sampled between display boundaries.
-    func verticalProfile(in region: CGRect, rowStep: Int = 2) -> RenderedVerticalProfile {
-        let view = hostingController.view!
-        let clipped = region.intersection(view.bounds)
-        guard !clipped.isNull, clipped.height >= CGFloat(rowStep) else {
-            return RenderedVerticalProfile(regionTop: region.minY, rowStep: rowStep, rowMeans: [])
-        }
-        let image = renderedImage(in: clipped, scale: 1, afterScreenUpdates: true)
-        guard let cgImage = image.cgImage,
-              let data = cgImage.dataProvider?.data,
-              let bytes = CFDataGetBytePtr(data) else {
-            return RenderedVerticalProfile(regionTop: region.minY, rowStep: rowStep, rowMeans: [])
-        }
-        let bytesPerPixel = cgImage.bitsPerPixel / 8
-        let height = cgImage.height
-        let width = cgImage.width
-        var rowMeans: [Double] = []
-        rowMeans.reserveCapacity(height / rowStep + 1)
-        var y = 0
-        while y < height {
-            let upper = min(height, y + rowStep)
-            var sum = 0.0
-            for row in y..<upper {
-                let line = row * cgImage.bytesPerRow
-                for x in 0..<width {
-                    let offset = line + x * bytesPerPixel
-                    sum += (Double(bytes[offset]) + Double(bytes[offset + 1])
-                        + Double(bytes[offset + 2])) / 3
-                }
-            }
-            rowMeans.append(sum / Double((upper - y) * width))
-            y = upper
-        }
-        return RenderedVerticalProfile(
-            regionTop: clipped.minY, rowStep: rowStep, rowMeans: rowMeans
-        )
-    }
-
-    /// The luminance-weighted vertical centre, in the hosting view's own
-    /// coordinates, of the ink `profile` carries above `reference`: `sum(y · w) /
-    /// sum(w)` over the rows where the frame is brighter than the reference.
-    ///
-    /// A vertical move shifts this by the move; a fade that scales the entering
-    /// ink uniformly does not move it at all, which is why direction is readable
-    /// from it even while the entrance is mid-fade. `nil` when nothing in the
-    /// region is brighter than the reference, which is how a covered frame or a
-    /// region the entrance has not reached reports.
-    static func inkCentre(
-        of profile: RenderedVerticalProfile,
-        above reference: RenderedVerticalProfile
-    ) -> CGFloat? {
-        guard profile.rowMeans.count == reference.rowMeans.count,
-              let first = profile.rowMeans.first else { return nil }
-        var weight = 0.0
-        var moment = 0.0
-        for (index, mean) in profile.rowMeans.enumerated() {
-            // A band's own height, so a partly clipped last row cannot dominate.
-            let delta = mean - reference.rowMeans[index] - 0.5
-            guard delta > 0 else { continue }
-            let y = profile.regionTop + CGFloat(index * profile.rowStep) + CGFloat(profile.rowStep) / 2
-            weight += delta
-            moment += delta * Double(y)
-        }
-        guard weight > 0, moment > 0, first.isFinite else { return nil }
-        return CGFloat(moment / weight)
     }
 
     func isNativeTranscriptInteractionEnabled() throws -> Bool {
@@ -5345,6 +5498,45 @@ final class ChatViewScrollHarness {
             samples.append(try keyboardBoundarySample())
         }
         return samples
+    }
+
+    /// The safe-area scenario's negative control: the keyboard's own transition
+    /// with its height reserved at the transcript's *far* edge. CT-23's flipped
+    /// transcript has to apply the keyboard as a swapped content margin — the
+    /// height has to land at the visual bottom, where the composer's edge is — so
+    /// a wrong-edge application leaves the pinned row one keyboard height away
+    /// from the composer while the rows keep their orientation and order. The
+    /// inset itself is the real one, stepped through the curve's own values, so
+    /// the composer moves with it exactly as it does in the journey.
+    @discardableResult
+    func driveKeyboardInsetAtWrongEdge(
+        _ transition: KeyboardInsetTransition
+    ) async throws -> [KeyboardBoundarySample] {
+        beginKeyboardInset(transition)
+        var samples: [KeyboardBoundarySample] = []
+        for step in 1...max(1, transition.boundaries) {
+            let progress = Double(step) / Double(max(1, transition.boundaries))
+            applyKeyboardInset(transition, step: step)
+            try await driveFrameBoundary()
+            try reserveKeyboardHeightAtTranscriptFarEdge(
+                transition.height * Self.keyboardProgress(progress, curve: transition.curve)
+            )
+            samples.append(try keyboardBoundarySample())
+        }
+        return samples
+    }
+
+    /// Test-only: reserve `height` at the transcript's far edge instead of the
+    /// composer's, the way a wrongly swapped keyboard margin does. The real
+    /// scroll view cannot be positioned past its legal bottom — `setContentOffset`
+    /// and a drag both stop there — so the reservation is applied as the scroll
+    /// view's own translation, which is the geometry the wrong edge produces and
+    /// which the window oracle reads like any other row position. The composer
+    /// sits outside the scroll view, so its own edge is untouched.
+    func reserveKeyboardHeightAtTranscriptFarEdge(_ height: CGFloat) throws {
+        let scrollView = try nativeTranscriptScrollView()
+        scrollView.transform = CGAffineTransform(translationX: 0, y: -height)
+        scrollView.layoutIfNeeded()
     }
 
     /// The bottom safe area a keyboard owns, applied without a notification:
@@ -5777,15 +5969,21 @@ enum TranscriptWindowOracle {
     }
 
     /// Whether the transcript's scroll view is laid out newest-first (CT-23's
-    /// flip), read from the render tree: the flip is a vertical scale of -1 on
-    /// the scroll view's own layer or on one of its ancestors up to the window.
+    /// flip), read from the render tree: a vertical scale of -1 on the scroll
+    /// view's own layer or on one of its ancestors up to the window. The signs
+    /// multiply along the chain, because a flip on the scroll view and another on
+    /// an ancestor renders the content upright — reading the first negative
+    /// `m22` alone would call a doubly flipped container flipped and send every
+    /// orientation-dependent branch (`scrollReader`'s newest end, the pinned
+    /// checks) the wrong way.
     static func isFlipped(_ scrollView: UIScrollView) -> Bool {
         var layer: CALayer? = scrollView.layer
+        var flipped = false
         while let current = layer {
-            if current.transform.m22 < 0 { return true }
+            if current.transform.m22 < 0 { flipped.toggle() }
             layer = current.superlayer
         }
-        return false
+        return flipped
     }
 
     /// This fixed-window harness has one full-size transcript viewport. Its

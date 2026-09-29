@@ -275,9 +275,6 @@ enum ChatVisualParityReference {
         // CT-12's reference, re-recorded per display frame by CT-14 on the
         // unchanged chat before any container change.
         "eed1e15a5de1a4ef0f66e338f89e9be7508e266c",
-        // The CT-25 scenarios (safe-area keyboard inset, short transcript,
-        // oldest row at the visual top), recorded on the same path.
-        "2297defc9efd0bfd3478544d566433e59e78ce3e",
     ]
 
     /// The source revision this run is running against, as
@@ -288,6 +285,21 @@ enum ChatVisualParityReference {
     static var runRevision: String? {
         let revision = ProcessInfo.processInfo.environment["TRON_SOURCE_REVISION"]
         return (revision?.isEmpty == false) ? revision : nil
+    }
+
+    /// Whether this run's source tree is proven clean, as `scripts/tron-ios-test`
+    /// passes it through `TEST_RUNNER_`: `nil` when the runner did not state it.
+    /// A recording names the revision its frames came from, and that revision has
+    /// to contain the scenario code that produced them, so the gate refuses to
+    /// record from a dirty tree (and from an unstated one) — CT-25's first three
+    /// scenarios were recorded that way and named a revision whose frames it
+    /// cannot reproduce.
+    static var runSourceIsClean: Bool? {
+        switch ProcessInfo.processInfo.environment["TRON_SOURCE_DIRTY"] {
+        case "true": false
+        case "false": true
+        default: nil
+        }
     }
 }
 
@@ -1020,6 +1032,11 @@ enum ChatVisualParityGate {
     /// grew it, so `ChatVisualParityReference.recordedRevisions` has to name this
     /// recording for the gate to pass again, which is the review that makes the
     /// new frames reviewable.
+    ///
+    /// A recording also has to be reproducible, so the run has to prove the source
+    /// it is running against is a commit: a dirty tree records frames no commit
+    /// contains (CT-25's first three scenarios did exactly that), and an unstated
+    /// source state is not proof of a clean one.
     private static func record(
         committed: ChatVisualParityManifest?,
         runs: [ChatVisualParityRunner],
@@ -1029,6 +1046,14 @@ enum ChatVisualParityGate {
             let message: String = "the parity reference was not recorded: this run has no "
                 + "source revision (run it through scripts/tron-ios-test, which passes the "
                 + "revision it runs against)"
+            Issue.record(Comment(rawValue: message))
+            return
+        }
+        guard ChatVisualParityReference.runSourceIsClean == true else {
+            let message: String = "the parity reference was not recorded: this run's source "
+                + "tree is not proven clean, so its revision does not contain the frames "
+                + "being recorded (commit the worktree and run it through "
+                + "scripts/tron-ios-test on that commit)"
             Issue.record(Comment(rawValue: message))
             return
         }

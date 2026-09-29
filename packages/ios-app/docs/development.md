@@ -864,7 +864,10 @@ with every existing entry left byte-identical, and the run then fails: the new
 revision has to be added to that reviewed set for the gate to pass again. So a
 reference re-recorded from the candidate container — CT-23's flipped transcript
 included — cannot judge it, and adding a scenario is a reviewable two-step
-rather than a silent one.
+rather than a silent one. A recording also has to be reproducible, so the gate
+refuses one whose source state is not a clean commit: a revision alone does not
+reproduce frames recorded from uncommitted work, and CT-25's first three
+scenarios were recorded that way, naming a revision that does not contain them.
 
 The capture is the gate's frame clock, so its cost decides how much of a
 transition is compared. It renders the transcript region — below the navigation
@@ -943,21 +946,26 @@ above, not by these pixels.
 
 Recording is per scenario: the gate records a scenario the committed reference
 does not hold yet, leaves every entry it does hold alone, and fails the run that
-grew the reference. It needs the worktree's revision, which
-`scripts/tron-ios-test` passes as `TRON_SOURCE_REVISION`; a bare `xcodebuild`
-run can verify but cannot record.
+grew the reference. It needs the worktree's revision and a proven clean source
+state, which `scripts/tron-ios-test` passes as `TRON_SOURCE_REVISION` and
+`TRON_SOURCE_DIRTY`; a bare `xcodebuild` run can verify but cannot record, and
+neither can a run from a worktree with uncommitted changes.
 
 ```bash
-# add a scenario: build, run the gate, commit the manifest copy with the
-# revision the recording printed added to
-# ChatVisualParityReference.recordedRevisions, then build and verify
+# add a scenario: commit the scenario code first, because a recording refuses a
+# tree whose state is not a commit, and build the products it will run from
+git add -A && git commit -m 'ios(tests): <the scenario under test>'
+git status --porcelain          # empty: the run has to be stamped clean
 scripts/tron-ios-test build
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing 'TronMobileTests/ChatVisualParityTests/recordedReferenceFramesMatchRenderedTranscript()'
 cp packages/ios-app/build/parity-reference/manifest.json \
    packages/ios-app/Tests/Fixtures/ChatVisualParityManifest.json
 
-# verify against the committed reference
+# commit the manifest with the revision the recording printed added to
+# ChatVisualParityReference.recordedRevisions, then rebuild and verify: the
+# products have to come from the committed state the verification runs against
+git add -A && git commit -m 'ios(tests): record <scenario> from <revision>'
 scripts/tron-ios-test build
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing 'TronMobileTests/ChatVisualParityTests/recordedReferenceFramesMatchRenderedTranscript()'

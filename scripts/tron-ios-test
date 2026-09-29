@@ -613,14 +613,20 @@ run_tests() {
   fi
   # The tests own some source-identity claims of their own (the parity gate's
   # reference provenance). `TEST_RUNNER_`-prefixed xcodebuild environment is the
-  # only form that reaches a hosted test process, so the revision this command is
-  # running against travels with it.
-  local source_revision
+  # only form that reaches a hosted test process, so the source state this command
+  # is running against travels with it: the revision, and whether the worktree had
+  # uncommitted changes. A test that records names both, because a dirty tree's
+  # revision does not contain the code that produced its frames.
+  local source_revision source_dirty
   source_revision="$(printf '%s' "$source_identity" | python3 -c \
     'import json, sys; print(json.load(sys.stdin)["revision"])')" \
     || die "cannot read this worktree's source revision"
+  source_dirty="$(printf '%s' "$source_identity" | python3 -c \
+    'import json, sys; print("true" if json.load(sys.stdin)["dirty"] else "false")')" \
+    || die "cannot read this worktree's source state"
   local -a test_command=(
     /usr/bin/env "TEST_RUNNER_TRON_SOURCE_REVISION=$source_revision"
+    "TEST_RUNNER_TRON_SOURCE_DIRTY=$source_dirty"
     xcodebuild test-without-building
     -project "$IOS/TronMobile.xcodeproj"
     -scheme "$test_scheme"
