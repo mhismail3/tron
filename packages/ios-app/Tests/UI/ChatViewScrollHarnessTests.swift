@@ -1329,6 +1329,9 @@ struct ChatViewScrollHarnessTests {
                 try await measurePhase(phaseLengths[0])
                 let showRamp = try await harness.driveKeyboardInset(show)
                 samples.append(contentsOf: showRamp)
+                for (index, sample) in showRamp.enumerated() {
+                    print(sample.insetDiagnosticLine(boundary: "show-\(index + 1)"))
+                }
                 let shownSettled = try await harness.newestRowSettledAtComposer()
                 try harness.setComposerDraftText(
                     "First line of the draft\nSecond line\nThird line\nFourth line"
@@ -1337,6 +1340,9 @@ struct ChatViewScrollHarnessTests {
                 try harness.setComposerDraftText("")
                 let hideRamp = try await harness.driveKeyboardInset(hide)
                 samples.append(contentsOf: hideRamp)
+                for (index, sample) in hideRamp.enumerated() {
+                    print(sample.insetDiagnosticLine(boundary: "hide-\(index + 1)"))
+                }
                 let hiddenSettled = try await harness.newestRowSettledAtComposer()
                 try await measurePhase(phaseLengths[4])
 
@@ -4620,6 +4626,22 @@ struct KeyboardBoundarySample {
     let composerTop: CGFloat?
     let composerHeight: CGFloat
     let coverage: TranscriptBottomCoverage
+    let sourceMargins: EdgeInsets
+    let contentOffsetY: CGFloat
+    let adjustedInset: UIEdgeInsets
+    let contentInset: UIEdgeInsets
+
+    func insetDiagnosticLine(boundary: String) -> String {
+        "CT23-INSET-DIAG boundary=\(boundary) marginTop=\(ct2Number(sourceMargins.top))"
+            + " marginBottom=\(ct2Number(sourceMargins.bottom))"
+            + " offset=\(ct2Number(contentOffsetY))"
+            + " adjustedTop=\(ct2Number(adjustedInset.top))"
+            + " adjustedBottom=\(ct2Number(adjustedInset.bottom))"
+            + " contentTop=\(ct2Number(contentInset.top))"
+            + " contentBottom=\(ct2Number(contentInset.bottom))"
+            + " expectedPinnedOffset=\(ct2Number(-adjustedInset.top))"
+            + " offsetMinusPinned=\(ct2Number(contentOffsetY + adjustedInset.top))"
+    }
 }
 
 /// One journey's bottom-coverage gate evidence, folded from its samples.
@@ -6090,6 +6112,16 @@ final class ChatViewScrollHarness {
         let bottom = transcriptBottom()
         let rows = TranscriptWindowOracle.rows(in: hostingController.view)
         let composer = TranscriptWindowOracle.composerFrame(in: hostingController.view)
+        let scrollView = try nativeTranscriptScrollView()
+        let safeArea = hostingController.view.safeAreaInsets
+        let sourceMargins = ChatTranscriptOrientation.selected.scrollMargins(
+            for: EdgeInsets(
+                top: safeArea.top,
+                leading: safeArea.left,
+                bottom: safeArea.bottom,
+                trailing: safeArea.right
+            )
+        )
         return KeyboardBoundarySample(
             clearance: bottom.clearance,
             composerTop: composer?.minY ?? bottom.composerTop,
@@ -6099,7 +6131,11 @@ final class ChatViewScrollHarness {
                 uncoveredBand: !bottom.isBandCovered,
                 visibleRowFraction: bottom.visibleRowFraction,
                 newestRowClearance: bottom.clearance
-            )
+            ),
+            sourceMargins: sourceMargins,
+            contentOffsetY: scrollView.contentOffset.y,
+            adjustedInset: scrollView.adjustedContentInset,
+            contentInset: scrollView.contentInset
         )
     }
 
