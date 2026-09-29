@@ -175,15 +175,16 @@ struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content:
         }
         if animates {
             let animation = Animation.smooth(duration: ChatIncrementalContentGrowthPolicy.duration)
-            var transaction = Transaction(animation: animation)
-            transaction.admitsChatIncrementalGrowthAnimation = true
             isAnimatingGrowth = true
-            withTransaction(transaction) {
-                withAnimation(animation, completionCriteria: .logicallyComplete) {
-                    presentedHeight = measurement.height
-                } completion: {
-                    isAnimatingGrowth = false
-                }
+            withAnimation(animation, completionCriteria: .logicallyComplete) {
+                // The growth marker travels with the height write itself:
+                // `chatStableTranscriptUpdates` reads it to keep a projection
+                // change in the same update from erasing this animation.
+                var transaction = Transaction(animation: animation)
+                transaction.admitsChatIncrementalGrowthAnimation = true
+                withTransaction(transaction) { presentedHeight = measurement.height }
+            } completion: {
+                isAnimatingGrowth = false
             }
         } else {
             var transaction = Transaction()

@@ -1074,3 +1074,17 @@ pass only through eager-only repairs, stop and report.
   `postMountResizes=0` is the measurement those changes will be judged against.
 - For the next agent: the branch is ready for review; F1's device check for the
   Liquid Glass press region stays on the CT-7 checklist.
+
+### CT-27 stage A follow-up · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: F5's growth animation now writes its height with the transaction that
+  carries the animation *and* `admitsChatIncrementalGrowthAnimation`, instead of
+  wrapping the write in a fresh `withAnimation` transaction. `withAnimation`
+  supplies only the completion that clears `isAnimatingGrowth`, so a projection
+  change in the same update cannot make `chatStableTranscriptUpdates` erase the
+  growth animation by dropping the marker.
+- Evidence (lane ct27): parity gate 7/7 (44.8 s), `streaming-tail-growth` worst
+  0.03677 against 0.065; `ChatRowStabilityTests` 4/4 (3.7 s); harness
+  `shortStreamingResponseClearsComposer` and `streamingBurstLatestProjection`
+  pass.
+- Changes: `ChatEntranceRows.swift`.
