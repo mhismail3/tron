@@ -178,6 +178,14 @@ export interface SourceTagSelection {
 /** How useful an entry still is. A judgement, never capture evidence. */
 export type SourceVerdict = "evergreen" | "dated" | "superseded" | "archive";
 
+export interface SourceTake {
+  /** One user-owned, confirmed note. Each replacement is a new record revision. */
+  text: string;
+  confirmed: true;
+  producer: { actor: "user" };
+  updatedAt: string;
+}
+
 export interface SourceVerdictState {
   verdict: SourceVerdict;
   /** Required for `superseded`: the entry that replaces this one. */
@@ -221,6 +229,8 @@ export interface SourceContent {
   assessment?: SourceAssessment;
   /** Explicitly generated content summary, separate from the intake assessment. */
   summary?: SourceSummary;
+  /** One editable user-owned note; revisions preserve its history. */
+  take?: SourceTake;
   /** Vocabulary tag selection; see `SourceTagSelection`. */
   tags?: SourceTagSelection;
   /** Usefulness verdict; see `SourceVerdictState`. */
@@ -516,6 +526,14 @@ export interface KnowledgeRecallRequest {
   includeArchived?: boolean;
   includePending?: boolean;
   limit?: number;
+}
+
+export interface KnowledgeSourceTakeRequest {
+  commandId: string;
+  recordId: string;
+  expectedRevision: string;
+  /** Empty explicitly clears Your take. */
+  text: string;
 }
 
 export interface KnowledgeRecallResponse {
@@ -924,6 +942,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.source.summarize"; request: KnowledgeSourceSummaryRequest }
   | { operation: "knowledge.source.admission"; request: KnowledgeSourceAdmissionRequest }
   | { operation: "knowledge.source.curate"; request: KnowledgeCurationRequest }
+  | { operation: "knowledge.source.take"; request: KnowledgeSourceTakeRequest }
   | { operation: "knowledge.curation.jobs"; request: KnowledgeCurationJobRequest }
   | { operation: "knowledge.correction"; request: KnowledgeCorrectionRequest }
   | { operation: "knowledge.forget"; request: KnowledgeForgetRequest }

@@ -15,7 +15,7 @@ import {
   type KnowledgePreviewBatchResponse, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
-  type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse,
+  type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse, type KnowledgeSourceTakeRequest,
   type SourceAdmission, type SourceContent,
   type KnowledgeCurationItem, type KnowledgeCurationOperation, type KnowledgeCurationStored,
   type KnowledgeRelation, type SourceCurationProducer, type SourceVerdictState, assertKnowledgeTagId,
@@ -213,7 +213,7 @@ export const EMPTY_TAG_VOCABULARY: KnowledgeTagVocabulary = { revision: 0, isAct
  * stored selections unreadable. A later owner that adds an input (the user's
  * take) extends this and re-tags; a stored digest then no longer matches. */
 export function curationInputsDigest(content: SourceContent): string {
-  return createHash("sha256").update(JSON.stringify({ title: content.title, text: content.text ?? "", verdict: content.verdict?.verdict ?? null })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ title: content.title, text: content.text ?? "", verdict: content.verdict?.verdict ?? null, take: content.take?.text ?? null })).digest("hex");
 }
 /** The fields one curation operation wrote, read back from its committed
  * revision. Bounded by the item bounds, so a batch outcome stays small. */
@@ -1293,6 +1293,28 @@ export class KnowledgeStore {
       if (current.kind !== "source") throw conflict("Source revision is unavailable");
       const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, admission } }, request.expectedRevision);
+    });
+  }
+  /** The user-owned take has its own fast, typed write path: no model work,
+   * no agent-supplied producer, and the stale response includes the current
+   * note so a client can preserve and reconcile its local draft. */
+  async setSourceTake(request: KnowledgeSourceTakeRequest): Promise<KnowledgeMutationResult> {
+    if (typeof request.text !== "string" || request.text.length > 4_000) throw invalid("Your take must be at most 4000 characters");
+    return this.mutate("knowledge.source.take", request.commandId, request, async (state, paths) => {
+      const head = state.records.get(request.recordId);
+      const current = head ? await this.readRecord(paths, request.recordId, head.latestRevisionId) : null;
+      if (!current || current.kind !== "source" || this.recordExcluded(state, current)) throw conflict("Source is unavailable for Your take");
+      if (current.revisionId !== request.expectedRevision) throw new GatewayError("conflict", "Source revision changed; keep the draft and reconcile with the current take", false, {
+        currentRevision: current.revisionId, currentTake: current.content.take?.text ?? "",
+      });
+      const text = request.text.trim();
+      const take = text ? { text, confirmed: true as const, producer: { actor: "user" as const }, updatedAt: now() } : undefined;
+      if (current.content.take?.text === take?.text) return { record: current, stateRevision: state.stateRevision };
+      const { take: _previousTake, ...content } = current.content;
+      return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope,
+        provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}),
+        content: { ...content, ...(take ? { take } : {}) },
+      }, current.revisionId);
     });
   }
   /** One agent- or user-authored interpretation on a source. Each item is its

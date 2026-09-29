@@ -112,6 +112,16 @@ response small enough for both the RPC frame and the model-visible tool bound.
 `unchanged` means the write was already committed: identical values never create
 a new revision.
 
+Your take is one optional confirmed user-authored note on each source.
+`knowledge.source.take` accepts the source ID, exact expected revision, command ID
+and bounded text; the server supplies user provenance, and an empty value
+explicitly clears the note. Each save is a short receipted revision with no model
+call, so immutable record history preserves prior takes. A stale write returns a
+conflict with both the current revision and current take; clients retain their
+typed draft and reconcile rather than overwriting another edit. Only the
+user-facing RPC mutation writes Your take; the agent knowledge tool may read it
+but cannot write it.
+
 The **tag vocabulary** belongs to Knowledge configuration: its IDs, labels,
 definitions, decay classes and tagging guidelines. Until a vocabulary is
 installed, no tag ID is active and every tag write is refused as `unknown-tag`

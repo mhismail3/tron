@@ -485,6 +485,7 @@ export class KnowledgeService {
       }
       case "knowledge.source.summarize": return this.summarize(action.request);
       case "knowledge.source.curate": return this.curate(action.request);
+      case "knowledge.source.take": return this.store.setSourceTake(action.request);
       case "knowledge.curation.jobs": return this.summaryJobs(action.request);
       case "knowledge.source.triage": {
         const config = await this.store.config();
