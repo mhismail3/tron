@@ -75,6 +75,7 @@
 - **Last updated:** 2026-09-28, T-2 review round 1 addressed: the kill is another worktree's run on the same default-lane simulator, and T-3 tracks the lease that did not serialize them
 
 - **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes the session state a newer snapshot re-states with the one `session.rebaseline` that covers it, fencing one-shot frames a snapshot cannot restore (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
+- **Last updated:** 2026-09-29, T-6 Done: neither registry load flake was a product race — the large-streamed-write case spent its 5 s `waitUntil` guard on 3,188 provider chunks (its 51 KB arguments and assertions unchanged, chunk size pinned), and the discovery helper capped its wait for a running pass at 5 s (it now waits for the pass to end and keeps the deadline for its own retries); see the handoff
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -648,7 +649,7 @@ rows are in priority order.
 | T-5 | Done | `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` hit its 5 s watchdog once in the full iOS run on `419a67a53` ("blocked on a wait that ignores cancellation"); passes alone 3/3. Check whether it waits on a write-log index a C-6 cancel frame can shift (as F-1 found) and make it robust. **Blocked on validation only:** the scenario no longer indexes the write log by position (it finds each read by method and scope), but the owned iOS lane was leased by another worker for this whole session, so the suite was never compiled or run; see the handoff | F-1 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | F-2 | Done | O-6b `bandwidth` page leg fails on integration with `session.sync` conflict "Session synchronization is no longer owned by this token" (run `20260928T235606Z-multi-session-471100`); `--cases none` passes. Decide driver artifact (concurrent page mounts on one connection) vs Gateway regression (C-6/G-12 barrier handling) and fix at the owner. **Fixed in the driver** (F-2 second pass): the earlier "Gateway regression" reading came from matching the refusal to the wrong frame — the first `session.open`+`session.sync` on the fresh connection succeeds (104-byte answer, then a successful `session.presentation.set`), and the refusals are the six concurrent page lanes racing the Gateway's documented one-presentation-per-mobile-connection rule. The same conflict storm (264) is present in the `--cases bandwidth` run cited as passing, so the reconnect is not the trigger; the lane now abandons a superseded page with the phone's own `cancel` frame instead of synchronizing it. Repro `--cases blackhole,bandwidth` is green (run `20260929T073639Z-multi-session-e06f2e`: `link_use` 0.993, `max_in_flight` 6, zero `session.sync` conflicts); see the handoff | O-6b | orchestrator-dispatched deepseek-worker, 2026-09-29 (second pass on branch `hardening/f-2`) |
 | F-3 | Claimed | A protocol mismatch reads as a generic transport failure on the phone: the Gateway closes 1008 without a machine-readable reason, so the phone retries forever and shows no "update this Mac" state (2026-09-29, a protocol-5 MacBook Pro profile left the Knowledge dashboard loading). Send a typed close reason for protocol mismatch; the phone stops retrying that profile and shows which side needs updating | E-3b | orchestrator-dispatched deepseek-worker, 2026-09-29 |
-| T-6 | Claimed | Load flakes in `runtime-registry.integration.test.ts`: "keeps a large streamed write visible through snapshot recovery and canonical handoff" (fails intermittently on `main` too) and "does not reopen an unchanged ambient artifact for a live slot" (G-8a, failed once in a combined run, passes alone 3/3). Make both deterministic | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| T-6 | Done | Load flakes in `runtime-registry.integration.test.ts`: "keeps a large streamed write visible through snapshot recovery and canonical handoff" (fails intermittently on `main` too) and "does not reopen an unchanged ambient artifact for a live slot" (G-8a, failed once in a combined run, passes alone 3/3). Make both deterministic | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-29 (branch `hardening/t-6`; neither was a product race: the write case spent its 5 s `waitUntil` guard streaming 3,188 provider chunks, and the discovery helper capped its wait for a running pass at 5 s — see the handoff) |
 | C-7 | Done | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/c-7`; the connection epoch now owns its event reader) |
 
 ### Phase 2 — Release and one evaluation day
@@ -10384,3 +10385,49 @@ recovery gaps; all three were fixed on the same branch.
 - Deviation: F-2 was dispatched to this lane with T-5; the two are unrelated and
   the T-5 change (iOS test) does not touch the Gateway, so nothing here depends on
   an unvalidated edit.
+
+### T-6 · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/t-6`)
+
+- Result: both cases are deterministic, and neither flake was a product race.
+  (1) "keeps a large streamed write visible through snapshot recovery and
+  canonical handoff" spent 4.3–5.4 s of its 5 s `waitUntil(() => !slot.isBusy)`
+  guard streaming the same 51 KB write: the faux provider's default 12–20
+  character chunks make 3,188 chunks, each paying a real ~1.7 ms `setTimeout`
+  floor, so the case sat ~0.7 s from its own guard and any host load tipped it
+  over. The write's size and every assertion stay; only the provider's chunk size
+  changed (`tokenSize: { min: 32, max: 32 }`, 400 chunks).
+  (2) "does not reopen an unchanged ambient artifact for a live slot" failed as
+  `extension artifact discovery stayed in flight`: `discoverExtensionArtifactsUntil`
+  capped its wait for an *interval* pass at 5 s, and one pass over this case's
+  production-shaped root (2,498 entries, 558 `status.json`) is 90–216 ms idle but
+  far longer on a loaded host. The helper now waits for the running pass to end
+  and keeps its 5 s `deadline` for the retries it starts itself, so
+  "did not settle" stays bounded and the test's own timeout reports a pass that
+  never ends.
+- Evidence: reproduction on the pre-change file — whole file twice in parallel:
+  run B failed test 1 at `waitUntil` (line 6692); 12 targeted runs of test 2 under
+  two parallel whole-file runs: run 11 failed `stayed in flight` (line 5738). The
+  same case measured by the helper's own probe: an interval pass takes 141–334 ms
+  to wait out and a pass 90–216 ms idle (test 2 alone 2.4 s). The single frame
+  test 1 asserts on is unchanged by the pacing: the finalized declaration with a
+  4,238-byte argument preview, `streaming` equal to the published frame
+  (`declarations` was already length 1 before the change, at every chunk size
+  from 4 to the default). After the change: `npx vitest run
+  src/sessions/runtime-registry.integration.test.ts` **245/245, three runs in
+  parallel, 127.9–129.5 s of tests**; 8/8 targeted runs of each case under three
+  parallel whole-file runs; test 1 alone 647–756 ms of test time (4.34–5.4 s
+  before). Merge gate on this branch (already up to date with
+  `hardening/integration` `18185b61f`): six-file transport set **134/134**,
+  `npx tsc --noEmit -p .` clean, `python3 scripts/check-documentation-policy.py`
+  and `scripts/personal-info-guard.sh` pass.
+- Changes: `packages/gateway/src/sessions/runtime-registry.integration.test.ts`
+  only (the discovery helper's barrier and the write case's provider pacing). No
+  product code and no owning doc change: no behavior changed.
+- Keeping on purpose: the 51 KB write, the 2,498-directory fixture, and every
+  assertion of both cases.
+- For the next agent: the discovery helper's remaining 5 s is a *retry* budget
+  for predicates, not a pass budget. The ambient pass itself is bounded per pass
+  by entries (4,096) and reads (1,024), not by time, and one pass over a
+  production-shaped root costs one `stat` per entry every 750 ms — measured here
+  at 90–216 ms idle. A future row that wants pass *latency* bounded, rather than
+  pass *work*, starts there; the two cases are deterministic without it.
