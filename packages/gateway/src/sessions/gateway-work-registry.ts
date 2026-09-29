@@ -16,6 +16,7 @@ const gatewayWorkKinds = [
   "automation-dispatch",
   "automation-terminal-persistence",
   "knowledge-observation",
+  "knowledge-curation",
   "mcp-tool-call",
 ] as const;
 

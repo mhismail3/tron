@@ -41,6 +41,7 @@ export type AdministrativeDrainBlockerCategory =
   | "automation-dispatch"
   | "automation-terminal-persistence"
   | "knowledge-observation"
+  | "knowledge-curation"
   | "mcp-tool-call";
 
 export interface AdministrativeDrainBlockerSummary {
