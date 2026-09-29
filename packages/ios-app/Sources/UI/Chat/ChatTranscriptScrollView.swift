@@ -733,7 +733,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // geometry observations. On the flipped path, the inset adapter reads
         // safe areas before this transform and applies them as content margins.
         .chatTranscriptInsets(orientation, safeAreaInsets: safeAreaInsets)
-        .chatTranscriptOrientation(orientation)
         // The sheet a row asked for is presented here, outside the lazy stack, so
         // streaming a row out of realization cannot dismiss it. The resolver is
         // the same installed projection the rows are rendered from, so the

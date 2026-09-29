@@ -309,6 +309,8 @@ private struct ChatTranscriptInsetsModifier: ViewModifier {
                 .contentMargins(.bottom, margins.bottom, for: .scrollContent)
                 .contentMargins(.top, margins.top, for: .scrollIndicators)
                 .contentMargins(.bottom, margins.bottom, for: .scrollIndicators)
+                .chatTranscriptOrientation(orientation)
+                .ignoresSafeArea(.all, edges: .vertical)
         } else {
             content
         }
