@@ -663,7 +663,11 @@ rows are in priority order.
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| R-1 | Ready | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | |
+| R-1 | Done | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | orchestrator, 2026-09-29: merged to `main` with four known misses the user accepted in writing (see handoff); F-4..F-7 own them |
+| F-4 | Ready | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | |
+| F-5 | Ready | Prompt admission p99 ~610 ms against 250 ms in `multi-session` | R-1 | |
+| F-6 | Ready | Event loop p99 ~38 ms against 20 ms, max up to 1.4 s under load; attribute with a CPU profile | R-1 | |
+| F-7 | Ready | Warm `session.open` p99 ~335 ms against 300 ms | R-1 | |
 | R-2 | Ready | User installs the Mac Release build and the iOS build; agent verifies the deployment | R-1 | E-3d owes one user action: prove the LAN kill switch on the installed release (`launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off`, user restarts the Gateway, `lan.listener state=disabled reason=setting_off` appears) |
 | R-3 | Ready | User runs Tron normally for at least 24 hours, then exports phone logs | R-2 | |
 | R-4 | Ready | Analyse the day with the triage tool; check real-use exit criteria; open Phase 3 rows | R-3 | Read `lan.listener` transitions and `transport=lan` on `http.upgrade` to see whether the lane carried the day (E-3d) |
@@ -1847,6 +1851,14 @@ Read the numbers as one sample per case.
   baseline, not something the leg is tuned for.
 
 ## Handoff log
+
+### 2026-09-29 — R-1 release candidate (orchestrator)
+
+- Gates on `hardening/integration` after the final `main` merge (no conflicts): Gateway build + tsc clean; 710/710 across transport, config, client, session-archive and runtime-registry; `scripts/ios-gateway-e2e-test all` green (162 s) and `run-lan` green (108 s); full iOS unit run 1,976 passed, 2 failed — `ChatViewScrollHarnessTests/displacedRetainedResume` and `resourcePickerSourceSelection`, which fail identically on a clean `main` worktree (from `main`'s transcript work, not this plan).
+- Candidate `multi-session` runs (3 iterations each, all cases): `20260929T111158Z-multi-session-b0aca7` (host load 3→1) and `20260929T113821Z-multi-session-6ff73f` (load up to 15). The alternating `main` runs (`…d0ed0e`, `…2e6140`) failed in iteration 1 on the pre-F-2 driver's `session.sync` conflict, so there is no same-host `main` pair; the provisional column stands.
+- Met: `session.list` p99 94–127 ms (one 1.5 s iteration under load); cold large open p99 ~530 ms; catalog walks 0; blackhole recovery 17–70 ms; restart reconnect max 5.8–7.2 s with 0 requests over 1 s in the quiet run (G-13's criterion; 1 in one loaded iteration); pong misses 0 outside the stream case.
+- Missed (user accepted in writing 2026-09-29, "Merge now, fix misses after"): bandwidth-stream ping-to-pong ~24 s / 2 misses per run (F-4); prompt admission p99 ~610 ms (F-5); event-loop p99 ~38 ms and max 217 ms quiet / 1.4 s loaded (F-6); warm open p99 ~335 ms (F-7).
+- Installed for rollback: Mac app 0.1.0 (8); launcher still logs a refused stale external selection of `0.1.0-beta.7-source-1790559163986`.
 
 ### Draft · 2026-09-27 · connection investigation session
 
