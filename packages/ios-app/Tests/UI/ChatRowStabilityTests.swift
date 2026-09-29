@@ -265,6 +265,13 @@ private struct RowStabilityReport {
 
     var phases: [String] = []
     var heightsByPhase: [String: [String: CGFloat]] = [:]
+    /// The native transcript row heights at every display frame of the journey,
+    /// grouped by the row's physical mount. A settled row must present one
+    /// height per mount: a second height inside one mount is a measurement or
+    /// animation that landed after the row was admitted (FM-F3b), and a height
+    /// that differs between mounts is a row that laid out from an estimate
+    /// until it was remounted (FM-F2a).
+    var mountHeights: [String: [UUID: RowMountHeight]] = [:]
     var postMountResizeCount = 0
     var maximumPostMountResize: CGFloat = 0
     var resizedRows: [String] = []
@@ -286,6 +293,23 @@ private struct RowStabilityReport {
         phases.append(phase)
         heightsByPhase[phase] = RowStabilityFixture.rowIDs.reduce(into: [:]) { values, id in
             values[id] = observation.rowFrames[id]?.height
+        }
+        collectNativeHeights(harness)
+    }
+
+    /// Drains the retained display-frame samples into the per-mount height
+    /// history. Called at every phase boundary so the recorder's bounded window
+    /// cannot drop the frames a finding happens in.
+    @MainActor
+    private mutating func collectNativeHeights(_ harness: ChatViewScrollHarness) {
+        for sample in harness.recorder.samples {
+            for row in sample.nativeRows where RowStabilityFixture.rowIDs.contains(row.semanticID) {
+                guard row.frame.height.isFinite, row.frame.height > 1 else { continue }
+                var mounts = mountHeights[row.semanticID, default: [:]]
+                mounts[row.instance, default: RowMountHeight(frameIndex: sample.frameIndex)]
+                    .record(height: row.frame.height)
+                mountHeights[row.semanticID] = mounts
+            }
         }
     }
 
@@ -328,6 +352,49 @@ private struct RowStabilityReport {
         RowStabilityFixture.rowIDs.count { (appearanceCounts[$0] ?? 0) > 1 }
     }
 
+    /// Rows that presented a height once and a different one at a later display
+    /// frame under the same physical mount: a measurement or animation that
+    /// arrived after the row mounted (FM-F3b). `stability-entrance` is not
+    /// counted, because its admission owns its height by design (FM-F1's
+    /// animation) and the probe excludes it too.
+    var withinMountVariantRows: [String: String] {
+        mountHeights
+            .filter { $0.key != RowStabilityFixture.entranceRowID }
+            .reduce(into: [:]) { values, entry in
+                let changed = entry.value.values.filter { $0.changeCount > 0 }
+                guard !changed.isEmpty else { return }
+                let maximum = changed.map(\.maximumChange).max() ?? 0
+                values[entry.key] = "\(changed.count)/\(entry.value.count)@\(rowStabilityNumber(maximum))"
+            }
+    }
+
+    /// Rows whose height differed between two of their physical mounts: the
+    /// first mount laid the row out from an estimate, and only a later mount
+    /// reached the measured height (FM-F2a). The entrance row is excluded for
+    /// the same reason as above.
+    var crossMountVariantRows: [String: String] {
+        mountHeights
+            .filter { $0.key != RowStabilityFixture.entranceRowID }
+            .reduce(into: [:]) { values, entry in
+                let heights = entry.value.values.map(\.latestHeight)
+                guard let low = heights.min(), let high = heights.max(),
+                      high - low > 0.5 else { return }
+                values[entry.key] = "\(rowStabilityNumber(low))..\(rowStabilityNumber(high))"
+            }
+    }
+    /// Rows whose frame height differed between two journey phases: the row's
+    /// own geometric height changed while the journey only scrolled (FM-F2a and
+    /// FM-F3b are both visible here, because the phase capture reads the row's
+    /// published frame rather than a native mount).
+    var phaseVariantRows: [String: String] {
+        RowStabilityFixture.rowIDs.reduce(into: [:]) { values, id in
+            let heights = phases.compactMap { heightsByPhase[$0]?[id] }
+            guard let low = heights.min(), let high = heights.max(),
+                  high - low > 0.5 else { return }
+            values[id] = "\(rowStabilityNumber(low))..\(rowStabilityNumber(high))"
+        }
+    }
+
     /// One line in the same spirit as the CT-2 fixtures: every field the
     /// journey reports, so two runs diff directly.
     var line: String {
@@ -338,6 +405,9 @@ private struct RowStabilityReport {
             + " resizedRows=\(resizedRows.count)\(resizedRows.isEmpty ? "" : ":\(resizedRows.joined(separator: ","))")"
             + " remountedRows=\(remountedRows.count)\(remountedRows.isEmpty ? "" : ":\(remountedRows.joined(separator: ","))")"
             + " remounts=\(remountedRowCount)/\(RowStabilityFixture.rowIDs.count)"
+            + " withinMountVariants=\(rowStabilityVariantSummary(withinMountVariantRows))"
+            + " crossMountVariants=\(rowStabilityVariantSummary(crossMountVariantRows))"
+            + " phaseVariants=\(rowStabilityVariantSummary(phaseVariantRows))"
             + " collapsedStaysCollapsed=\(collapsedStaysCollapsed)"
             + " inlineDisplaysPrepared=\(inlineDisplaysPrepared)"
             + " inlineDisplaysStable=\(inlineDisplaysStable)"
@@ -361,6 +431,9 @@ private struct RowStabilityReport {
             maximumPostMountResize: maximumPostMountResize,
             resizedRows: resizedRows,
             remountedRows: remountedRows,
+            withinMountVariantRows: withinMountVariantRows,
+            crossMountVariantRows: crossMountVariantRows,
+            phaseVariantRows: phaseVariantRows,
             collapsedStaysCollapsed: collapsedStaysCollapsed,
             inlineDisplaysPrepared: inlineDisplaysPrepared,
             inlineDisplaysStable: inlineDisplaysStable,
@@ -379,6 +452,10 @@ private struct RowStabilityReport {
                     identityInstances: identityInstanceCounts[id] ?? 0,
                     appearances: appearanceCounts[id] ?? 0,
                     disappearances: disappearanceCounts[id] ?? 0,
+                    mounts: (mountHeights[id] ?? [:]).values
+                        .sorted { $0.frameIndex < $1.frameIndex }
+                        .map { Payload.Mount(frameIndex: $0.frameIndex, first: $0.firstHeight,
+                                            latest: $0.latestHeight, changes: $0.changeCount) },
                     heightsByPhase: heightsByPhase.reduce(into: [:]) { values, entry in
                         if let height = entry.value[id] { values[entry.key] = height }
                     }
@@ -388,6 +465,13 @@ private struct RowStabilityReport {
     }
 
     private struct Payload: Encodable {
+        struct Mount: Encodable {
+            let frameIndex: Int
+            let first: CGFloat?
+            let latest: CGFloat
+            let changes: Int
+        }
+
         struct Row: Encodable {
             let semanticID: String
             let kind: String
@@ -398,6 +482,7 @@ private struct RowStabilityReport {
             let identityInstances: Int
             let appearances: Int
             let disappearances: Int
+            let mounts: [Mount]
             let heightsByPhase: [String: CGFloat]
         }
 
@@ -407,6 +492,9 @@ private struct RowStabilityReport {
         let maximumPostMountResize: CGFloat
         let resizedRows: [String]
         let remountedRows: [String]
+        let withinMountVariantRows: [String: String]
+        let crossMountVariantRows: [String: String]
+        let phaseVariantRows: [String: String]
         let collapsedStaysCollapsed: Bool
         let inlineDisplaysPrepared: Bool
         let inlineDisplaysStable: Bool
@@ -415,6 +503,41 @@ private struct RowStabilityReport {
         let semanticFrameCallbackCount: Int
         let rows: [Row]
     }
+}
+
+/// One physical mount's native row heights across display frames. A settled row
+/// presents one height per mount; the second height is the row measuring or
+/// animating itself after it was admitted.
+private struct RowMountHeight {
+    let frameIndex: Int
+    private(set) var firstHeight: CGFloat?
+    private(set) var latestHeight: CGFloat
+    private(set) var changeCount = 0
+    private(set) var maximumChange: CGFloat = 0
+    init(frameIndex: Int) {
+        self.frameIndex = frameIndex
+        self.latestHeight = 0
+    }
+
+    mutating func record(height: CGFloat) {
+        guard firstHeight != nil else {
+            firstHeight = height
+            latestHeight = height
+            return
+        }
+        if abs(height - latestHeight) > 0.5 {
+            changeCount += 1
+            maximumChange = max(maximumChange, abs(height - latestHeight))
+        }
+        latestHeight = height
+    }
+}
+
+private func rowStabilityVariantSummary(_ values: [String: String]) -> String {
+    guard !values.isEmpty else { return "0" }
+    return "\(values.count):" + values.sorted { $0.key < $1.key }
+        .map { "\($0.key)=\($0.value)" }
+        .joined(separator: ",")
 }
 
 private func rowStabilityNumber(_ value: CGFloat) -> String {
