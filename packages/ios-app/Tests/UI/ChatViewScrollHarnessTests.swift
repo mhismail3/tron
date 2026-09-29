@@ -1280,11 +1280,16 @@ struct ChatViewScrollHarnessTests {
     // orientations in one run, so the parity wash's mechanism is measurable and
     // the candidate can be bisected against the crisp today's-path capture in
     // the same process. Removed with the stage-2 handoff.
+    @MainActor
+    final class CT23RenderDiagnosis {
+        var base: [String: ChatVisualParityFingerprint] = [:]
+        var variants: [(String, ChatVisualParityFingerprint)] = []
+    }
+
     @Test("CT-23 diagnosis: the rendered transcript on both orientations", .enabled(if: UIValidationTier.isActive))
     func ct23RenderDiagnosis() async throws {
         try await withTestWatchdog(timeout: .seconds(240)) {
-            var captures: [String: ChatVisualParityFingerprint] = [:]
-            var variants: [(String, ChatVisualParityFingerprint)] = []
+            let diagnosis = CT23RenderDiagnosis()
             for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
                 let label = orientation.presentsNewestRowFirst ? "origin" : "end"
                 var snapshot = try SessionScenarioBuilder(seed: 1_281).openingTail(targetEncodedBytes: 10_000)
@@ -1301,52 +1306,66 @@ struct ChatViewScrollHarnessTests {
                 }
                 snapshot.transcriptStart = 0
                 snapshot.transcriptTotal = snapshot.transcript.count
+                var steps: [(String, Bool)] = [("base", true), ("stale-screen-update", false)]
+                if orientation.presentsNewestRowFirst {
+                    steps = [
+                        ("base", true),
+                        ("stale-screen-update", false),
+                        ("no-edge-effect", true),
+                        ("edge-effect-restored", true),
+                        ("offset-plus-half", true),
+                        ("offset-restored", true),
+                    ]
+                }
                 try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
                     _ = try await harness.recorder.waitUntil { $0.observation.isReady }
                     for _ in 0..<40 { try await harness.driveFrameBoundary() }
                     try harness.snapNativeTranscriptOffsetToWholePoint()
                     print("CT23-DIAG orientation=\(label) \(try harness.ct23DiagnosisScrollViewState())")
                     print("CT23-DIAG orientation=\(label) \(harness.ct23DiagnosisRowPixels())")
-                    func capture(_ name: String, afterScreenUpdates: Bool = true) {
-                        let rendered = harness.renderedParityFrame(
-                            scale: ChatVisualParitySpec.renderScale,
-                            rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
-                            columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
-                            includingPNG: true,
+                    for (name, afterScreenUpdates) in steps {
+                        switch name {
+                        case "no-edge-effect":
+                            try harness.ct23DiagnosisSetEdgeEffectsHidden(true)
+                            try await harness.driveFrameBoundary()
+                        case "edge-effect-restored":
+                            try harness.ct23DiagnosisSetEdgeEffectsHidden(false)
+                            try await harness.driveFrameBoundary()
+                        case "offset-plus-half":
+                            try harness.ct23DiagnosisShiftOffset(by: 0.5)
+                        case "offset-restored":
+                            try harness.ct23DiagnosisShiftOffset(by: -0.5)
+                        default:
+                            break
+                        }
+                        let fingerprint = Self.ct23DiagnosisCapture(
+                            harness, label: label, name: name,
                             afterScreenUpdates: afterScreenUpdates
                         )
-                        if let png = rendered.png {
-                            Attachment.record(png, named: "ct23-\(label)-\(name).png")
+                        if name == "base" {
+                            diagnosis.base[label] = fingerprint
+                        } else {
+                            diagnosis.variants.append(("\(label)-\(name)", fingerprint))
                         }
-                        let fingerprint = ChatVisualParityFingerprint(rendered)
-                        if name == "base" { captures[label] = fingerprint } else { variants.append(("\(label)-\(name)", fingerprint)) }
-                    }
-                    capture("base")
-                    if orientation.presentsNewestRowFirst {
-                        try harness.ct23DiagnosisSetEdgeEffectsHidden(true)
-                        try await harness.driveFrameBoundary()
-                        capture("no-edge-effect")
-                        try harness.ct23DiagnosisSetEdgeEffectsHidden(false)
-                        try await harness.driveFrameBoundary()
-                        capture("edge-effect-restored")
-                        try harness.ct23DiagnosisShiftOffset(by: 0.5)
-                        capture("offset-plus-half")
-                        try harness.ct23DiagnosisShiftOffset(by: -0.5)
-                        capture("offset-restored")
-                        capture("stale-screen-update", afterScreenUpdates: false)
                     }
                 }
             }
-            func magnitude(_ candidate: ChatVisualParityFingerprint) -> String {
-                guard let reference = captures["end"] else { return "no-reference" }
+            let reference = await MainActor.run { diagnosis.base["end"] }
+            let originCapture = await MainActor.run { diagnosis.base["origin"] }
+            let variants = await MainActor.run { diagnosis.variants }
+            if let origin = originCapture {
                 let value = ChatVisualParityFingerprint.magnitude(
-                    candidate, reference, alignmentPoints: ChatVisualParitySpec.alignmentPoints
+                    origin, reference!, alignmentPoints: ChatVisualParitySpec.alignmentPoints
                 )
-                return String(format: "%.5f shift=%.1f", value.magnitude, value.shift)
+                print("CT23-DIAG compare=origin-base-vs-end-base magnitude="
+                    + String(format: "%.5f shift=%.1f", value.magnitude, value.shift))
             }
-            print("CT23-DIAG compare=origin-base-vs-end-base magnitude=\(magnitude(captures["origin"] ?? captures["end"]!))")
             for (name, fingerprint) in variants {
-                print("CT23-DIAG compare=\(name)-vs-end-base magnitude=\(magnitude(fingerprint))")
+                let value = ChatVisualParityFingerprint.magnitude(
+                    fingerprint, reference!, alignmentPoints: ChatVisualParitySpec.alignmentPoints
+                )
+                print("CT23-DIAG compare=\(name)-vs-end-base magnitude="
+                    + String(format: "%.5f shift=%.1f", value.magnitude, value.shift))
             }
         }
     }
@@ -3884,6 +3903,28 @@ struct ChatViewScrollHarnessTests {
                 harness.releasePrependPage()
             }
         }
+    }
+
+    /// CT-23 stage-2 diagnosis (temporary): render the transcript's parity region,
+    /// retain the PNG as a test attachment and return its fingerprint.
+    @MainActor
+    private static func ct23DiagnosisCapture(
+        _ harness: ChatViewScrollHarness,
+        label: String,
+        name: String,
+        afterScreenUpdates: Bool
+    ) -> ChatVisualParityFingerprint {
+        let rendered = harness.renderedParityFrame(
+            scale: ChatVisualParitySpec.renderScale,
+            rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
+            columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
+            includingPNG: true,
+            afterScreenUpdates: afterScreenUpdates
+        )
+        if let png = rendered.png {
+            Attachment.record(png, named: "ct23-\(label)-\(name).png")
+        }
+        return ChatVisualParityFingerprint(rendered)
     }
 
     private func withHarness(
