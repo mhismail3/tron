@@ -953,6 +953,21 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     ) -> some View {
         let hasEarlierMessages = (installed?.sourceWindow.originalStart ?? 0) > 0
         let newestFirst = orientation.presentsNewestRowFirst
+        // The accessibility order of the transcript's elements. VoiceOver reads
+        // the accessibility tree's own order, which follows the view order: the
+        // origin-anchored spine's view order is its visual order reversed, so
+        // every element takes the priority the owner computes for its position.
+        // Today's spine needs none, so today's path builds no map and applies no
+        // modifier. The map is bounded by the installed page
+        // (`ChatTranscriptPageRequest.maximumItemCount`) and is built once per
+        // body evaluation on the development path only.
+        let voiceOverSpinePositions: [String: Int] = newestFirst
+            ? Dictionary(
+                uniqueKeysWithValues: physicalRows?.enumerated().map { offset, row in
+                    (row.id, offset)
+                } ?? []
+            )
+            : [:]
         VStack(alignment: .leading, spacing: 0) {
             if newestFirst {
                 tailMarker(terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance)
@@ -976,6 +991,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             installed: installed
                         )
                         .chatTranscriptOrientation(orientation)
+                        .chatTranscriptVoiceOverOrder(
+                            orientation,
+                            spinePosition: voiceOverSpinePositions[row.id] ?? 0
+                        )
                     }
                     if newestFirst, hasEarlierMessages {
                         earlierMessagesRow(
@@ -987,6 +1006,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         // only sizes the scroll range: a page load moves nothing
                         // on screen.
                         .chatTranscriptOrientation(orientation)
+                        .chatTranscriptVoiceOverOrder(
+                            orientation,
+                            spinePosition: physicalRows.count
+                        )
                     }
                 }
             }

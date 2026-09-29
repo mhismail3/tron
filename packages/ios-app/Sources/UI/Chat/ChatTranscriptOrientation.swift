@@ -178,6 +178,25 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
         return (pinnedModelOffsetY - modelOffsetY) - geometry.bottomInset
     }
 
+    /// The accessibility sort priority for the element at `spinePosition` of the
+    /// transcript's content spine, which makes VoiceOver read the transcript in
+    /// the order the reader sees it.
+    ///
+    /// VoiceOver reads a container's elements in the accessibility tree's own
+    /// order, and that order follows the view order. Today's spine presents the
+    /// oldest row first, which is also its visual order, so its elements need no
+    /// priority at all (every element keeps the default `0`, and today's path is
+    /// untouched). The origin-anchored spine presents the newest row first, so
+    /// its view order is the reverse of its visual order: VoiceOver would read
+    /// the transcript bottom-up and scroll it backwards. A sort priority is
+    /// relative within the element's own accessibility container and sorts
+    /// highest-first, so the spine's own position is the value that puts the
+    /// oldest element first and the newest last.
+    func voiceOverSortPriority(forSpinePosition spinePosition: Int) -> Double {
+        guard presentsNewestRowFirst else { return 0 }
+        return Double(spinePosition)
+    }
+
     /// The transcript position a spine index reports: a row's position counted
     /// from the transcript's visual top, which is the position every diagnostic
     /// that names a row's place in the transcript reports. Today's spine presents
@@ -272,6 +291,24 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
 /// the scroll view's own safe area measured 166 pt at keyboard-up and 277.7 pt
 /// with the four-line draft, added to the margin, so the newest row settled
 /// 166-290 pt above the composer instead of at it.
+/// The CT-23 accessibility order. It is the same decision as the render flip:
+/// today's transcript's view order already is its visual order and the modifier
+/// applies nothing, while the origin-anchored transcript's reversed view order
+/// is put back into the visual order here, through the one owner's priority. A
+/// view that asks the owner for its own priority is the only caller, so no
+/// caller branches on the flip.
+private struct ChatTranscriptVoiceOverOrderModifier: ViewModifier {
+    let priority: Double
+
+    func body(content: Content) -> some View {
+        if priority == 0 {
+            content
+        } else {
+            content.accessibilitySortPriority(priority)
+        }
+    }
+}
+
 private struct ChatTranscriptOrientationModifier: ViewModifier {
     let orientation: ChatTranscriptOrientation
 
@@ -289,5 +326,19 @@ extension View {
     /// it to its scroll view and each row applies it to its own element.
     func chatTranscriptOrientation(_ orientation: ChatTranscriptOrientation) -> some View {
         modifier(ChatTranscriptOrientationModifier(orientation: orientation))
+    }
+
+    /// Gives this transcript element the accessibility order the reader sees:
+    /// the priority the orientation owner computes for the element's own
+    /// position in the content spine.
+    func chatTranscriptVoiceOverOrder(
+        _ orientation: ChatTranscriptOrientation,
+        spinePosition: Int
+    ) -> some View {
+        modifier(
+            ChatTranscriptVoiceOverOrderModifier(
+                priority: orientation.voiceOverSortPriority(forSpinePosition: spinePosition)
+            )
+        )
     }
 }
