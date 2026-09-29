@@ -5858,7 +5858,6 @@ final class ChatViewScrollHarness {
     /// applied margin, so SwiftUI correctly preserves that detached offset on
     /// later inset changes instead of following the composer.
     func snapNativeTranscriptOffsetToWholePoint() throws {
-        guard orientation.pinsToEstimatedOrigin else { return }
         let scrollView = try nativeTranscriptScrollView()
         let snapped = scrollView.contentOffset.y.rounded()
         guard abs(snapped - scrollView.contentOffset.y) > 0.01 else { return }
