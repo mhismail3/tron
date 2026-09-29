@@ -102,10 +102,13 @@ labeled sampled; linked pages are never inferred as covered.
 Your take autosaves after a short idle pause and when the sheet is dismissed.
 A failed save keeps a process-local draft with Retry; a stale-revision conflict
 shows the Gateway's current take and keeps the draft available for deliberate
-retry against the latest revision. A successful take write marks tags as
-updating until the background tag job and refreshed row projection report the
-new vocabulary selections. Verdict, placement and admission use receipted
-`knowledge.source.curate` operations; free-form tags and client-side summary
+retry against the latest revision. A successful take write leaves the row's
+canonical `tagsStale` projection intact. The **Updating tags** indicator is shown
+only while the Gateway-owned K4 tag-job query reports that source's job as
+running; the refreshed row projection then reports the new vocabulary selections.
+If no job can start or the job fails, the sheet shows the stale/re-tagging state
+instead of a timer-based progress claim. Verdict, placement and admission use
+receipted `knowledge.source.curate` operations; free-form tags and client-side summary
 writes are not supported. Each async presentation read is fenced by its
 presentation activity and Gateway identity, while accepted mutations remain
 owned by the Gateway receipt/job authority.

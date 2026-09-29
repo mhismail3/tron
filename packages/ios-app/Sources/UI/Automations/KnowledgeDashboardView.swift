@@ -1300,8 +1300,11 @@ struct KnowledgeDetailView: View {
     @State private var takeError: String?
     @State private var takeCurrentText: String?
     @State private var takeCommandID = UUID().uuidString.lowercased()
+    @State private var takeEditGeneration = 0
     @State private var takeExpectedRevision: String
     @State private var summaryJob: KnowledgeCurationJob?
+    @State private var taggingJob: KnowledgeCurationJob?
+    @State private var jobsRequestGeneration = 0
     @State private var summaryError: String?
     @State private var summaryCommandID: String?
     @State private var sourceConfig: KnowledgeConfig?
@@ -1472,23 +1475,34 @@ struct KnowledgeDetailView: View {
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsLayout()
         .task(id: "citations-\(currentRecord.id):\(currentRecord.revisionId)") { await loadCitationTitles() }
-        .task(id: "summary-jobs-\(origin.profileID ?? "none")-\(currentRecord.id)-\(String(describing: model.connectionState))") { await observeSummaryJobs() }
+        .task(id: "curation-jobs-\(origin.profileID ?? "none")-\(currentRecord.id)-\(String(describing: model.connectionState))-\(jobsRequestGeneration)") { await observeCurationJobs() }
         .task(id: takeDraft) {
             guard takeError == nil, case .source(let source) = currentRecord.content, takeDraft != (source.take?.text ?? "") else { return }
             try? await Task.sleep(for: .milliseconds(650))
             guard !Task.isCancelled else { return }
-            await saveTakeDraft()
+            // The idle timer is presentation work; once it fires, the accepted
+            // receipt-owned mutation must survive later edits cancelling this task.
+            Task { @MainActor in await saveTakeDraft() }
         }
         .task(id: "source-config-\(origin.profileID ?? "none")") { await loadSourceConfig() }
         .task(id: "source-row-\(currentRecord.id)") { await refreshSourceRow() }
+        .onChange(of: model.knowledgeInvalidationRevision) { _, _ in
+            jobsRequestGeneration &+= 1
+            Task { @MainActor in await refreshSourceRow() }
+        }
         .onChange(of: takeDraft) { _, value in
-            if case .source(let source) = currentRecord.content, value == (source.take?.text ?? "") { return }
+            takeEditGeneration &+= 1
             let command = UUID().uuidString.lowercased()
             takeCommandID = command
             takeCurrentText = nil
             takeExpectedRevision = currentRecord.revisionId
-            KnowledgeTakeDraftRegistry.shared.set(.init(text: value, commandID: command, expectedRevision: currentRecord.revisionId, error: nil, currentText: nil), profileID: origin.profileID, recordID: currentRecord.id)
             takeError = nil
+            if case .source(let source) = currentRecord.content, value == (source.take?.text ?? "") {
+                if !takeSaving { KnowledgeTakeDraftRegistry.shared.clear(profileID: origin.profileID, recordID: currentRecord.id) }
+                else { KnowledgeTakeDraftRegistry.shared.set(.init(text: value, commandID: command, expectedRevision: currentRecord.revisionId, error: nil, currentText: nil), profileID: origin.profileID, recordID: currentRecord.id) }
+                return
+            }
+            KnowledgeTakeDraftRegistry.shared.set(.init(text: value, commandID: command, expectedRevision: currentRecord.revisionId, error: nil, currentText: nil), profileID: origin.profileID, recordID: currentRecord.id)
         }
         .tronSettingsVisualTheme(accent: .tronKnowledge)
         .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
@@ -1637,9 +1651,16 @@ struct KnowledgeDetailView: View {
                     Text(takeSaving ? "Saving…" : (source.take == nil ? "Private note · used to guide tagging and retrieval" : "Saved \(humanDate(source.take!.updatedAt))"))
                         .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                     Spacer()
-                    if tagsStale || takeSaving {
-                        Text("Tags updating")
+                    if taggingJob?.status == "running" {
+                        Text("Updating tags")
                             .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                    } else if tagsStale {
+                        Text("Needs re-tagging")
+                            .font(TronTypography.caption).foregroundStyle(Color.tronAmber)
+                    }
+                    if taggingJob?.status == "failed" {
+                        Text(taggingJob?.reason ?? "Re-tagging failed; your current tags are unchanged.")
+                            .font(TronTypography.caption).foregroundStyle(Color.tronAmber)
                     }
                 }
                 if let takeCurrentText {
@@ -1953,6 +1974,7 @@ struct KnowledgeDetailView: View {
                 let started = try await model.knowledge.summarize(sourceID: sourceID, expectedRevision: revision, commandID: commandID)
                 guard model.knowledgePresentationIdentity == identity else { return }
                 summaryJob = started.job
+                jobsRequestGeneration &+= 1
                 if activity.allowsPresentationPublication {
                     currentRecord = started.record
                     await onChanged()
@@ -1965,17 +1987,15 @@ struct KnowledgeDetailView: View {
         }
     }
 
-    private func observeSummaryJobs() async {
+    private func observeCurationJobs() async {
         guard model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
         let identity = origin
-        for _ in 0..<80 {
+        for attempt in 0..<30 {
             do {
                 let response = try await model.knowledge.curationJobs(sourceID: currentRecord.id)
                 guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
-                if let tagJob = response.jobs.first(where: { $0.operation == "tags" }) {
-                    tagsStale = tagJob.status != "done"
-                    if tagJob.status == "done" { await refreshSourceRow() }
-                }
+                taggingJob = response.jobs.first(where: { $0.operation == "tags" })
+                if taggingJob?.status == "done" { await refreshSourceRow() }
                 if let job = response.jobs.first(where: { $0.operation == "summary" }) {
                     summaryJob = job
                     if job.status == "done", let revision = job.revisionId {
@@ -1987,10 +2007,16 @@ struct KnowledgeDetailView: View {
                     }
                     if job.status == "failed" { return }
                 }
+                let summaryRunning = summaryJob?.status == "running"
+                let tagsRunning = taggingJob?.status == "running"
+                // A take write schedules K4's job asynchronously. A short bounded
+                // status poll lets its owner publish the job before showing the
+                // stale-row fallback; the indicator itself is never timer-derived.
+                if !summaryRunning && !tagsRunning && (!tagsStale || attempt >= 10) { return }
             } catch {
                 guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             }
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
         }
     }
@@ -2002,6 +2028,7 @@ struct KnowledgeDetailView: View {
         takeSaving = true
         takeError = nil
         let submitted = takeDraft
+        let submittedGeneration = takeEditGeneration
         let commandID = takeCommandID
         let revision = takeExpectedRevision
         do {
@@ -2011,9 +2038,23 @@ struct KnowledgeDetailView: View {
                 currentRecord = result.record
                 takeExpectedRevision = result.record.revisionId
                 if takeDraft == submitted { takeDraft = saved.take?.text ?? ""; KnowledgeTakeDraftRegistry.shared.clear(profileID: origin.profileID, recordID: currentRecord.id) }
-                tagsStale = true
             }
+            let newerDraftRemains = takeDraft != submitted
             takeSaving = false
+            jobsRequestGeneration &+= 1
+            if newerDraftRemains {
+                let generation = takeEditGeneration
+                KnowledgeTakeDraftRegistry.shared.set(.init(text: takeDraft, commandID: takeCommandID, expectedRevision: result.record.revisionId, error: nil, currentText: nil), profileID: origin.profileID, recordID: currentRecord.id)
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(650))
+                    guard !Task.isCancelled, takeEditGeneration == generation, !takeSaving else { return }
+                    await saveTakeDraft()
+                }
+            } else if takeEditGeneration != submittedGeneration {
+                // The draft changed while this receipt was settling and then
+                // returned to the just-saved text; the receipt is authoritative.
+                KnowledgeTakeDraftRegistry.shared.clear(profileID: origin.profileID, recordID: currentRecord.id)
+            }
             await onChanged()
             await refreshSourceRow()
         } catch {

@@ -547,20 +547,30 @@ with the reliability and interaction bars added at the user's request. K1–K4, 
   verdict, vocabulary config, asynchronous summary-job, and enriched row DTOs;
   the superseded summary-owned free-text tags are removed. Entry Detail now
   edits Your take with debounced and dismissal autosave, retains local drafts on
-  failure, exposes conflict text and retry, marks tags updating, starts and
-  observes Gateway-owned summary jobs, and edits verdict, replacement, scope,
-  and admission with receipted curation. Detail reads refresh by exact current
+  failure, exposes conflict text and retry, reflects K4's queried tag-job status
+  with canonical stale-row fallback, starts and observes Gateway-owned summary
+  jobs, and edits verdict, replacement, scope, and admission with receipted
+  curation. Debounced take edits hand off to an uncancelled receipt-owned task;
+  edits made during an accepted write resave against its returned revision. Detail reads refresh by exact current
   row revision; library rows show freshness/verdict, and personal scope is named
   Moose's Corner.
 - Evidence: `scripts/tron-ios-test build` passed. The focused command
-  `scripts/tron-ios-test run --only-testing TronMobileTests/KnowledgeLibraryRowsTests
+  `scripts/tron-ios-test run --only-testing TronMobileTests/KnowledgeDetailInteractionTests
+  --only-testing TronMobileTests/KnowledgeLibraryRowsTests
   --only-testing TronMobileTests/KnowledgeModelsTests
-  --only-testing TronMobileTests/KnowledgeLibraryPageCacheTests
-  --only-testing TronMobileTests/KnowledgePreviewStoreTests` passed 32 XCTest
-  cases in `KnowledgeModelsTests` and 25 Swift Testing cases across the three
-  other suites. Gateway-shaped fixtures cover age basis/days, freshness, verdict,
-  replacement, take, stale-tag state and vocabulary labels; full-record fixtures
-  decode take/tags/verdict and summary without summary tags.
+  --only-testing TronMobileTests/KnowledgePreviewStoreTests` passed 35 XCTest
+  cases (3 interaction cases, 32 existing model/row/preview cases). New
+  `KnowledgeDetailInteractionTests` cases passed:
+  `testSummaryStartIsImmediateAndReceiptCanBeQueriedAndReplayed`,
+  `testTakeConflictReturnsCurrentTextRetryRevisionAndTagJobStatus`, and
+  `testTypingDuringAcceptedTakeSaveSchedulesLatestDraftAgainstReturnedRevision`.
+  They cover immediate summary receipts and job replay, take conflict details and
+  retry revision, K4 tag-job projection, and an in-flight TextEditor edit saved
+  against the accepted write's returned revision. Gateway-shaped fixtures cover
+  age basis/days, freshness, verdict, replacement, take, stale-tag state and
+  vocabulary labels; full-record fixtures decode take/tags/verdict and summary
+  without summary tags. Build/result bundles are retained under
+  `~/Library/Developer/Tron/ios/test-runs/`.
 - Changes: `df7891198` (`feat(ios): curate Knowledge sources in entry detail`),
   `3097a4e3a` (`fix(ios): refresh take conflict retry fence`).
 - Tasks added: none.
@@ -570,7 +580,14 @@ with the reliability and interaction bars added at the user's request. K1–K4, 
   ends. Take drafts live only in a bounded-by-active-record process-memory
   registry, never persistent defaults. Mutating controls retain per-control
   progress and do not disable unrelated Entry Detail actions.
-- Deviations: The initial K7 commit did not include interaction traces/screenshots; this task is actively closing those acceptance gaps before K7 can be marked Done.
+- Deviations / remaining acceptance: the initial K7 commit omitted interaction
+  traces/screenshots. This follow-up adds the three focused Gateway/UI tests and
+  fixes take-edit cancellation, but does not yet demonstrate dismissal/reconnect
+  and double-tap behavior, conflict/failure Retry UI, retag completion through
+  `knowledge.changed`, or the eight requested retained simulator screenshots.
+  No screenshot files exist yet under
+  `~/.tron/workspace/files/k7-screenshots/`. K7 therefore remains In
+  progress; do not hand off as accepted or mark Done.
 
 
 ### K8 · Done · 2026-09-29 · luna-worker · `knowledge/k8-multi-collection`
