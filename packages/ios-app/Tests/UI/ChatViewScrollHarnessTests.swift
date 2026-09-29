@@ -1724,13 +1724,17 @@ struct ChatViewScrollHarnessTests {
                     let root = harness.visibleRootView
                     let rows = TranscriptWindowOracle.rows(in: root).filter(\.isOnScreen)
                     var resolving: [String] = []
+                    var displayConfiguration: (TranscriptWindowOracle.Row, UIContextMenuConfiguration)?
                     for row in rows {
                         let location = CGPoint(x: row.windowFrame.midX, y: row.windowFrame.minY + 12)
-                        if delegate.contextMenuInteraction(
+                        if let configuration = delegate.contextMenuInteraction(
                             bridge.interaction,
                             configurationForMenuAtLocation: bridge.view.convert(location, from: nil)
-                        ) != nil {
+                        ) {
                             resolving.append(row.semanticID)
+                            if row.semanticID.contains("display") {
+                                displayConfiguration = (row, configuration)
+                            }
                         }
                     }
                     // The display card is the only row with a SwiftUI
@@ -1740,15 +1744,7 @@ struct ChatViewScrollHarnessTests {
                         resolving.count == 1 && resolving.first?.contains("display") == true,
                         "\(orientation): the card's menu resolves at \(resolving)"
                     )
-                    guard let display = rows.first(where: { $0.isOnScreen && $0.semanticID.contains("display") }) else {
-                        Issue.record("\(orientation): the display card's source frame must be mounted")
-                        return
-                    }
-                    let displayPoint = CGPoint(x: display.windowFrame.midX, y: display.windowFrame.minY + 12)
-                    guard let configuration = delegate.contextMenuInteraction(
-                        bridge.interaction,
-                        configurationForMenuAtLocation: bridge.view.convert(displayPoint, from: nil)
-                    ) else {
+                    guard let (display, configuration) = displayConfiguration else {
                         Issue.record("\(orientation): the display card's menu configuration must resolve")
                         return
                     }
