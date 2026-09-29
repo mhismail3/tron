@@ -1427,3 +1427,157 @@ pass only through eager-only repairs, stop and report.
   hosted harness cannot force.
 - Not in CT-27: F6/F7's flip probes, CT-25's oracle foundation and CT-26's hot
   path remain for their own tasks.
+
+### Review fixes (CT-27 review) · 2026-09-29 · chat scroll session (worker lane ct27)
+
+- Result: every blocking and non-blocking finding in the CT-27 review is fixed on
+  `ct-27-rows` (not merged, not pushed), one commit per finding:
+  `2e165adce` (inline artifacts, capacity, slot leak), `f405dd6c4` (detail sheets
+  follow the install), `7bd65bb63` (thinking growth motion), `70a6d4087`
+  (disclosure identity, settled clip, informational pills), `534ea6717`
+  (revision-bump guard), `4989adcb0` (informational pill activation). All products
+  were rebuilt from this worktree; every cited run is stamped `dirty: false` at
+  `4989adcb0`.
+- Findings, fixes and evidence:
+  - **P0 inline artifacts over 1 MB never rendered.** The loader retains prepared
+    inline artifacts in a bounded store and hands anything above one megabyte to
+    its caller, but both cards rendered only from the store, so a large PDF or
+    HTML loaded and then showed its placeholder forever. Each card now holds the
+    value its own load returns and reads the store only for the first frame after
+    a remount.
+    Evidence: new `oversizedInlineArtifactRendersInItsCard` mounts a 3,150,578-byte
+    inline PDF (the fixture itself prepares through the card's own policy) and
+    reports `published=3150578 expected=3150578 fetches=1`; on the pre-fix code
+    the card published nothing and the fixture timed out.
+  - **P1 eviction stranded a mounted card.** Same ownership change: the mounted
+    card owns its value, so the store's 8-artifact/4-MB bound and its eviction now
+    reach remounts only. Evidence: the same fixture's card starts no second
+    request (`fetches=1`) and `inlineDisplayKeepsPreparedDocumentAcrossScroll`
+    keeps its prepared height across a real scroll out and back (`before`/`after`
+    216.0, fetches 1,1).
+  - **P1 capacity produced permanent failures.** A card that arrived when all four
+    inline flights were busy threw `capacityExceeded` and (after one retry) failed
+    for good. Requests now wait for a slot in arrival order; the one-shot retry in
+    both cards is deleted. Evidence: `ChatMediaLoaderTests."an inline artifact
+    request waits for a slot instead of failing"` starts one more card than the
+    ceiling with every fetch held, then all of them complete; pre-fix the fifth
+    threw `capacityExceeded`.
+  - **P2 flight slots leaked on a failed flight whose waiter was cancelled.** A
+    failed flight now retires even when the waiter that observes it was cancelled.
+    Evidence: `ChatMediaLoaderTests."a failed inline flight whose waiter was
+    cancelled releases its slot"` reports `inlineArtifactFlights=0` and loads the
+    next artifact; pre-fix it reported 4 leaked flights and the next load threw
+    `capacityExceeded`.
+  - **P1 hoisted sheets froze their content.** A thinking-trace or event detail
+    route carried the content its row resolved at tap time, so an open sheet never
+    followed later installs and the trace sheet's tail-follow was dead code. The
+    route now carries the identity its row presented (plus what the row resolved as
+    a fallback) and the host resolves the content from the install it owns:
+    `ChatTranscriptDetailResolution` serves the main transcript and the read-only
+    child transcript, `ChatThinkingTraceContent` is the one assembly of a trace's
+    inline, and the display moved off `ThinkingBlock`. Evidence: new
+    `thinkingDetailFollowsLiveTraceContent` opens the trace from its row's own
+    control and grows the newest row through two installs: `opened=185 longest=1910
+    samples=3 offset=0.0->734.0` (the sheet shows the 60-line trace and follows its
+    tail); pre-fix the same fixture reported `opened=185 longest=185 samples=1
+    offset=0.0->0.0`.
+  - **P1 thinking growth motion changed.** The viewport came from the layout's
+    animatable content height while the tail offset came from the height the same
+    pass had measured, and the animation was keyed on `sourceLength`, which
+    changes in the install that suppresses row animations. Both values now come
+    from the one interpolated content height and the animation is keyed on that
+    pair (the frame-and-offset pair the animation this replaces keyed on), with the
+    mount's first measurement explicitly not animating.
+    - **Deviation from the instruction line.** The supervisor asked for
+      "ThinkingTailLayout must not take a geometry→state input" as well. That is
+      not implementable together with F2's invariant: an animated row height or
+      tail offset is a view-level animatable value, so one must come from a
+      previously measured height, and removing the input restores main's first-mount
+      estimate and its `phaseVariants=1` (stage B1). The supervisor approved
+      Option A (keep the input, derive both values from it) and asked for this
+      deviation to be recorded with its reason.
+    - Evidence: new `thinkingTraceGrowthMotionMatchesTheFrameAndOffsetAnimation`
+      samples the trace's own rendered geometry at every display boundary through
+      four installed projections. Under four lines the viewport grows 16.7 → 49.7 pt
+      through 27 intermediate frames (largest step 4.0 pt) with the tail flush at
+      0; past four lines the viewport stays pinned at 66.0 while the tail slides
+      −16.3 → −98.7 through 44 frames (largest step 12.4 pt). The same fixture on
+      the pre-fix code reports one intermediate frame for the viewport (largest
+      step 16.7), two for the tail (largest step 33.0), and an under-four tail
+      oscillating between 0 and −16.3 every frame. Sequences are written to
+      `packages/ios-app/build/row-stability/trace-motion.json`.
+    - Not run: the numeric **main-side** comparison the supervisor asked for. This
+      harness has no thinking-trace geometry probe on `main` and the scenario uses
+      branch-only harness APIs, so the comparison is reported as branch sequences
+      plus the pre-fix control above; the motion is preserved by construction
+      (one animation key of the same derived pair on the same 0.16 s curve). A
+      main-side port is the honest way to close that gap.
+  - **P2 disclosure identity included the revision.** The phase key is now
+    `DisplayProjection.disclosureIdentity` (the display's own identity, and for a
+    live view its display plus producer generation), so a content revision cannot
+    re-expand a collapsed card and two live views never share one phase.
+    Evidence: `collapsedInlineDisplayKeepsPhaseAndMotion` installs a revision-2
+    display after the reader collapsed the card and reports `expanded=222.0
+    collapsed=36.7 afterRevision=36.7`. Correction: this harness keeps the card
+    collapsed even with the revision in the key, so that assertion guards the
+    invariant rather than reproducing the re-expansion; the pre-fix key is
+    observable in the collapse control's identity (`display-collapse:<callID>:1`
+    versus `<callID>`), which is what the journey's own control lookup uses.
+  - **P2 the 128 pt settled clip trimmed row overflow.** `settledOverflow` is now
+    the bound of a display card's own expansion (its inline viewport, its header
+    and the row's effect gutter) instead of 128 pt, which cut a card that keeps its
+    expanded layer at natural height while its own host animates from the
+    collapsed pill. Evidence: new `settledEntranceClipKeepsRowOverflow` renders a
+    settled entrance row whose content reports 44 pt and draws 400 pt: the fixture
+    red is visible at 80 and 300 pt (`settledOverflow=388.0`); pre-fix (128) the
+    same fixture was trimmed past ~200 pt.
+  - **P2 informational pills carried an activation action.** The interaction now
+    takes an optional action; a notice that owns no detail action passes none and
+    declares it does not respond to user interaction.
+    - Deviation: the action is still attached at every value rather than being
+      removed by a branch. A branch at that seam rebuilt the pill's own surface —
+      `truncatedNoticeKeepsOnePillStructure` measured two pill instances for one
+      notice while the branch was in place — so the F10 guard and the single
+      structure were kept and the actionless pill is expressed as
+      `accessibilityRespondsToUserInteraction(false)`. VoiceOver confirmation is a
+      device check and is added to the CT-7 checklist below.
+    Evidence: `truncatedNoticeKeepsOnePillStructure` passes with one pill instance
+    (`rowIdentityInstanceCounts["embedded-notice"] == 1`).
+  - **P2 F4 and F12 had no handoff evidence.**
+    - F4 (`a0e81d907`) inline display loads per identity: `ChatRowStabilityTests`
+      `twoAdjacentInlineDisplaysBothPrepare` reports `prepared=2/2 heights=216.0,216.0
+      fetches=1,1` and `inlineDisplayKeepsPreparedDocumentAcrossScroll` reports
+      `before=216.0,216.0 after=216.0,216.0 fetches=1,1 appearances=2,2`, so two
+      adjacent cards prepare independently, each fetches its own artifact exactly
+      once, and a card that leaves and re-enters the window renders what its
+      identity already prepared. The new oversized-PDF fixture adds the boundary
+      above the retention ceiling (`fetches=1`, published by the card itself).
+    - F12 (`3b2ac8f79`) projection-less entries are filtered in the kernel:
+      `ChatTranscriptProjectionKernelTests` (65 tests in the 144-test run)
+      covers the added assertion, and the journey's `excludedRows=1` with
+      `installedProjectionRowCount > RowStabilityFixture.rowIDs.count` is the
+      hosted counterpart (a summary/model/thinking receipt is never installed as a
+      padded lazy child).
+- Runs (all lane ct27, products rebuilt from this worktree, `dirty: false` at
+  `4989adcb0`, run directories under `~/Library/Developer/Tron/ios/test-runs/`):
+  - `ChatRowStabilityTests` 14/14 in 14.6 s (`20260929T094534Z-run.ANbawH`).
+  - Parity gate 7/7 in 45.6 s (`20260929T094638Z-run.a5ONuo`): worst transitions
+    `ordinary-send-keyboard-up` 0.05483, `queued-card-to-sent-row` 0.03885,
+    `streaming-tail-growth` 0.03579, `tool-chip-entrance` 0.03273 against the
+    0.065 transition bound; at-rest worst 0.01319 against 0.025.
+  - `ChatMediaLoaderTests` (25), `ChatTranscriptPresentationStoreTests` (54),
+    `ChatTranscriptProjectionKernelTests` (65) and `ThinkingTraceSheetTests`: 144
+    tests in 3 Swift Testing suites plus that XCTest suite, all passing
+    (`20260929T094818Z-run.7cVw8Z`).
+  - `SessionSheetPresentationTests` 23/23 in 67.3 s
+    (`20260929T095057Z-run.blK32l`).
+- Not done here, deliberately: `ChatRowStabilityTests` is **not** ported to
+  CT-25's oracle (the supervisor merges CT-25 first), and the branch does not
+  otherwise touch `ChatViewScrollHarnessTests.swift` beyond the probe seams CT-27
+  already owned. The CT-25/CT-27 conflicts the review lists (harness parameters,
+  `displaceNativeTranscriptFromTail` and the compacted-settlement predicate) are
+  still open for the merge.
+- On the CT-7 device checklist (added): device VoiceOver confirmation that an
+  informational notice offers no activation and a detail-bearing notice still
+  does, that a card above the retention ceiling renders on device, and that a
+  trace's tail slides smoothly while it streams.
