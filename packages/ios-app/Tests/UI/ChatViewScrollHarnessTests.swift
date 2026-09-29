@@ -1276,58 +1276,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    // TEMPORARY (CT-23 stage 2 diagnosis): what the automatic top edge effect's
-    // band is computed from, on both orientations: a long history, a short one
-    // (content shorter than the viewport), and the long one with the keyboard's
-    // own inset driven up.
-    @Test("CT-23 diagnosis: what the edge effect's band follows", .enabled(if: UIValidationTier.isActive))
-    func ct23EdgeEffectBandSource() async throws {
-        try await withTestWatchdog(timeout: .seconds(300)) {
-            for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
-                let label = orientation.presentsNewestRowFirst ? "origin" : "end"
-                for shape in ["long", "short"] {
-                    var snapshot = try SessionScenarioBuilder(seed: 1_283).openingTail(targetEncodedBytes: 10_000)
-                    snapshot.acceptsQueuedPrompts = false
-                    let rowCount = shape == "long" ? 40 : 4
-                    snapshot.transcript = try (0..<rowCount).map { index in
-                        try harnessRichAssistantMessage(
-                            id: "band-source-\(index)",
-                            presentationID: "band-source-turn-\(index)",
-                            thinkingLines: [],
-                            text: shape == "long" && index.isMultiple(of: 4)
-                                ? harnessTallEstimateRowText(index)
-                                : "Band source row \(index) stays one line."
-                        )
-                    }
-                    snapshot.transcriptStart = 0
-                    snapshot.transcriptTotal = snapshot.transcript.count
-                    try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
-                        _ = try await harness.recorder.waitUntil { $0.observation.isReady }
-                        for _ in 0..<40 { try await harness.driveFrameBoundary() }
-                        try harness.snapNativeTranscriptOffsetToWholePoint()
-                        try harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
-                        try await harness.driveFrameBoundary()
-                        let state = await MainActor.run { harness.ct23DiagnosisScrollViewState() }
-                        let band = await MainActor.run { harness.ct23DiagnosisEffectBand() }
-                        print("CT23-BAND-SOURCE orientation=\(label) shape=\(shape) \(state)")
-                        print("CT23-BAND-SOURCE orientation=\(label) shape=\(shape) band=\(band)")
-                        if shape == "long" {
-                            harness.beginKeyboardInset(.show(boundaries: 8))
-                            for step in 1...8 {
-                                harness.applyKeyboardInset(.show(boundaries: 8), step: step)
-                                try await harness.driveFrameBoundary()
-                            }
-                            let keyboardState = await MainActor.run { harness.ct23DiagnosisScrollViewState() }
-                            let keyboardBand = await MainActor.run { harness.ct23DiagnosisEffectBand() }
-                            print("CT23-BAND-SOURCE orientation=\(label) shape=long-keyboard \(keyboardState)")
-                            print("CT23-BAND-SOURCE orientation=\(label) shape=long-keyboard band=\(keyboardBand)")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // The keyboard's own input, which no journey drove before: the bottom safe
     // area moves through the keyboard's intermediate positions while the history
     // keeps tall replies in its measured set. `resize(height:)` changes the whole
@@ -1473,6 +1421,47 @@ struct ChatViewScrollHarnessTests {
                     ),
                     "the wrong-edge inset left the transcript pinned: \(harness.pinnedDescription())"
                 )
+            }
+        }
+    }
+
+    // The origin-anchored transcript's one piece of chrome (CT-23 stage 2): the
+    // automatic scroll edge effect at the pinned end.
+    //
+    // iOS 26 sizes that effect's band from the scroll view's own geometry, and
+    // under the flip it makes the band the whole scroll view viewport instead of
+    // the bar-sized one: measured 844 pt against 170.8 pt (106 pt with the hard
+    // style) for every style, scroll position, content size and inset, with the
+    // band's position (the visual top) unchanged. Drawn at that size it is a
+    // whole-viewport wash — 0.105 of the parity gate's difference against 0.018
+    // with it suppressed, and visible on the simulator's own screen — while the
+    // chat's own top blur is unchanged by the flip and still owns the chrome.
+    // So the origin-anchored path suppresses the pinned end's effect and today's
+    // path must keep the effect it has always drawn: this is the test that fails
+    // if the suppression is dropped or applied to the other path.
+    @Test("only the origin-anchored transcript suppresses the pinned end's scroll edge effect")
+    func originAnchoredTranscriptSuppressesPinnedEndScrollEdgeEffect() async throws {
+        try await withTestWatchdog(timeout: .seconds(40)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_284)
+                .openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, orientation: .newestAtOrigin) { harness in
+                let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+                #expect(
+                    scrollView.topEdgeEffect.isHidden,
+                    "the origin-anchored transcript suppresses the pinned end's automatic effect"
+                )
+                #expect(
+                    !scrollView.bottomEdgeEffect.isHidden,
+                    "the origin-anchored transcript leaves the other edge's effect alone"
+                )
+            }
+            try await withHarness(snapshot: snapshot, orientation: .newestAtEnd) { harness in
+                let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+                #expect(
+                    !scrollView.topEdgeEffect.isHidden,
+                    "today's transcript keeps the edge effect it has always drawn"
+                )
+                #expect(!scrollView.bottomEdgeEffect.isHidden)
             }
         }
     }
@@ -5332,96 +5321,6 @@ final class ChatViewScrollHarness {
         let scrollView = try nativeTranscriptScrollView()
         return scrollView.isScrollEnabled && scrollView.isUserInteractionEnabled
             && scrollView.panGestureRecognizer.isEnabled
-    }
-
-    /// TEMPORARY (CT-23 stage 2 diagnosis): force one of the automatic scroll
-    /// edge effects on or off.
-    func ct23DiagnosisSetEdgeEffectsHidden(top: Bool, bottom: Bool) throws {
-        let scrollView = try nativeTranscriptScrollView()
-        scrollView.topEdgeEffect.isHidden = top
-        scrollView.bottomEdgeEffect.isHidden = bottom
-    }
-
-    /// TEMPORARY (CT-23 stage 2 diagnosis): the native transcript view's own
-    /// geometry, so the band can be related to it.
-    func ct23DiagnosisScrollViewState() -> String {
-        guard let scrollView = Self.nativeTranscriptScrollView(in: hostingController.view) else {
-            return "no-scroll-view"
-        }
-        return "offset=\(String(format: "%.2f", Double(scrollView.contentOffset.y)))"
-            + " content=\(String(format: "%.2f", Double(scrollView.contentSize.height)))"
-            + " bounds=\(String(format: "%.2f", Double(scrollView.bounds.height)))"
-            + " inset=\(String(format: "%.2f/%.2f", Double(scrollView.adjustedContentInset.top), Double(scrollView.adjustedContentInset.bottom)))"
-    }
-
-    /// TEMPORARY (CT-23 stage 2 diagnosis): the effect layers' window frames, so
-    /// the band the system drew can be read off directly.
-    func ct23DiagnosisEffectBand() -> String {
-        guard let window = hostingController.view.window,
-              let scrollView = Self.nativeTranscriptScrollView(in: hostingController.view) else {
-            return "no-scroll-view"
-        }
-        var found: [String] = []
-        func walk(_ layer: CALayer, depth: Int) {
-            guard depth <= 5 else { return }
-            let name = String(describing: type(of: layer))
-            if name.contains("Backdrop") || name.contains("Blur") || name.contains("Edge") {
-                let rect = layer.convert(layer.bounds, to: window.layer)
-                found.append("\(name)\(String(format: "(%.1f,%.1f,%.1f,%.1f)", Double(rect.minX), Double(rect.minY), Double(rect.width), Double(rect.height)))o\(String(format: "%.2f", Double(layer.opacity)))h\(layer.isHidden)")
-            }
-            for sublayer in layer.sublayers ?? [] { walk(sublayer, depth: depth + 1) }
-        }
-        walk(scrollView.layer, depth: 0)
-        return found.joined(separator: " ")
-    }
-
-    /// TEMPORARY (CT-23 stage 2 diagnosis): move the raft of the transcript by
-    /// `points` without any product input.
-    func ct23DiagnosisShiftOffset(by points: CGFloat) throws {
-        let scrollView = try nativeTranscriptScrollView()
-        scrollView.setContentOffset(
-            CGPoint(x: scrollView.contentOffset.x, y: scrollView.contentOffset.y + points),
-            animated: false
-        )
-        scrollView.layoutIfNeeded()
-    }
-
-    /// TEMPORARY (CT-23 stage 2 diagnosis): the effect-carrying layers of the
-    /// transcript's scroll view subtree, with their frames in the scroll view's
-    /// own coordinate space and in the window's.
-    func ct23DiagnosisEffectLayers() throws -> String {
-        let scrollView = try nativeTranscriptScrollView()
-        guard let window = hostingController.view.window else { return "no-window" }
-        var lines: [String] = []
-        func walk(_ layer: CALayer, depth: Int) {
-            guard depth <= 4 else { return }
-            let name = String(describing: type(of: layer))
-            let interesting = ["Effect", "Backdrop", "Blur", "Glass", "Material", "ScrollEdge", "Gradient"]
-            if interesting.contains(where: { name.contains($0) }) || layer.name != nil {
-                let inScroll = frameCorner(layer, in: scrollView.layer)
-                let inWindow = frameCorner(layer, in: window.layer)
-                lines.append("\(name)@depth\(depth)"
-                    + " scroll=\(inScroll) window=\(inWindow)"
-                    + " anchor=\(layer.anchorPoint) size=\(layer.bounds.size)"
-                    + " hidden=\(layer.isHidden) opacity=\(layer.opacity)"
-                    + " name=\(layer.name ?? "-")")
-            }
-            for sublayer in layer.sublayers ?? [] { walk(sublayer, depth: depth + 1) }
-        }
-        walk(scrollView.layer, depth: 0)
-        for subview in scrollView.subviews {
-            let name = String(describing: type(of: subview))
-            lines.append("VIEW \(name) frame=\(subview.frame) hidden=\(subview.isHidden) alpha=\(subview.alpha)")
-        }
-        return lines.joined(separator: " | ")
-    }
-
-    private func frameCorner(_ layer: CALayer, in other: CALayer) -> String {
-        let rect = layer.convert(layer.bounds, to: other)
-        return String(
-            format: "(%.1f,%.1f,%.1f,%.1f)",
-            Double(rect.minX), Double(rect.minY), Double(rect.width), Double(rect.height)
-        )
     }
 
     private func nativeTranscriptScrollView() throws -> UIScrollView {
