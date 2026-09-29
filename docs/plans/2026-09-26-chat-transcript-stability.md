@@ -3258,6 +3258,7 @@ this incident is **not closed**. Retained trace bundles and their
 6. CT-19 deletion list remains deferred until the owning gates and user decisions
    pass; neither today's path nor its five estimated-end mechanisms were removed.
 
-Lane cleanup: `scripts/tron-ios-test lane-remove ct23b` is the final tooling-owned
-cleanup action; no simulator is released by hand. The retained run/profile roots
-above are separate from the lane's simulator/state.
+Lane cleanup completed with `scripts/tron-ios-test lane-remove ct23b`;
+`status --all` confirms no ct23b lane and no booted simulator. No other lane
+was removed or released by hand. Retained run/profile roots and live-worktree
+build products are separate from the deleted lane's simulator/state.
