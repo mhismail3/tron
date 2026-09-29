@@ -44,8 +44,9 @@ whose starts occur in that turn's admitted entries, not all earlier turns.
 (capability `knowledge-library-rows.v1`) and return bounded rows
 (`{rows, nextCursor?, stateRevision}`) instead of full records. A row carries
 identity, scope, timestamps, title, canonical URI, the user-facing original URI,
-media type, capture disposition, admission, provider save/publication times, the
-preview reference, and the current generated summary text. The saved text and raw
+media type, capture disposition, admission, provider save/publication times,
+freshness, the age basis/days, current verdict/replacement, and `hasTake`/`tagsStale`,
+the preview reference, and the current generated summary text. The saved text and raw
 bytes are never part of a page, which is what makes a complete page possible:
 fifty 200,000-character sources are a few kilobytes of rows, where the same page
 of full records cannot carry five of them. `ids` (1..64) refreshes exact rows in
@@ -72,9 +73,9 @@ preview exceeds 512,000 bytes (or the 4 MB batch bound) returns its own
 exact base64 byte boundary as object reads, not the presentation projection.
 
 `knowledge.search` returns `nextCursor` for either projection. A scored page is
-ordered by score, recency and identity; its cursor binds the query, filters,
-projection and exact state revision, because such a page cannot be resumed across
-a corpus change without skipping or repeating rows. A cursor from an older state
+ordered by relevance, source freshness, recency and identity; its cursor binds
+the query, filters, projection and exact state revision, because such a page
+cannot be resumed across a corpus change without skipping or repeating rows. A cursor from an older state
 revision fails with `conflict` so the client reloads the first page.
 
 ## Curation and enrichment
@@ -123,7 +124,25 @@ user-facing RPC mutation writes Your take; the agent knowledge tool may read it
 but cannot write it.
 
 The **tag vocabulary** belongs to Knowledge configuration: its IDs, labels,
-definitions, decay classes and tagging guidelines. Until a vocabulary is
+definitions, decay classes and tagging guidelines. Freshness is a bounded
+catalog projection, not a body-read step: a confirmed user verdict wins; absent
+a verdict, all tags must resolve through the vocabulary's decay-class accessor
+or the result is `unknown`. An `ages` selection is `aging` at 120 days and `stale`
+at 180 days; `does-not-age` is `fresh`. The age clock uses the recovered original
+`sourceSavedAt`; only when it is absent does it use `capturedAt`, with `ageBasis`
+explicitly set to `capturedAt`. The head stores the save/capture instant and decay
+class, so rows recompute age against the current clock and search can use a
+freshness tie-break without reading bodies. Ranking is relevance first, then
+freshness, then recency/identity; superseded items are stale but remain visible
+with their `supersededBy` replacement.
+
+Agent `knowledge` search/recall excludes personal-scope Sources by default while
+leaving observations and notes at their existing scope behavior. An explicit
+`scope: "personal"` requests those Sources. Archived Sources are excluded unless
+`includeArchived` is explicit. Agent-facing Source results include the save date,
+age, freshness, verdict, replacement and bounded Your take; the tool instruction
+asks agents to cite age and prefer the user's take. RPC callers retain their
+explicit scope/filter authority. Until a vocabulary is
 installed, no tag ID is active and every tag write is refused as `unknown-tag`
 rather than inventing a taxonomy. A selection records the vocabulary revision it
 was validated against and `curationInputsDigest` (SHA-256 of the record's own
@@ -172,11 +191,13 @@ request makes concurrent duplicates share one charge.
 Record heads carry the bounded source row projection plus source admission and
 owner scope, so a page partitions by kind, scope and admission and renders rows
 without loading a body. Heads are derived data with one owner, `headFor`.
-`CATALOG_STORAGE_VERSION` 3 admits that projection: ordinary reads refuse an older
-manifest with an explicit row-projection upgrade state instead of presenting an
-unprojected head, and the explicit startup `upgradeStorage()` step rebuilds every
-head from its latest committed revision in one transaction, fsyncs the catalog and
-writes the new manifest last. The rebuild is idempotent and preserves exact
+`CATALOG_STORAGE_VERSION` 4 admits that projection and its freshness/take fields:
+ordinary reads refuse an older manifest with an explicit row-projection upgrade
+state instead of presenting an unprojected head, and the explicit startup
+`upgradeStorage()` step rebuilds every head from its latest committed revision
+in one transaction, fsyncs the catalog and writes the new manifest last. Version
+4 rebuilds version-3 row heads from immutable revisions; version-2 catalogs use
+the same derivation. The rebuild is idempotent and preserves exact
 revision ownership and retained object hashes; a failure leaves the previous
 manifest authoritative and is reported as `knowledge.upgrade-failed`. Failed
 publication leaves only uncommitted immutable files, which are not readable
@@ -210,6 +231,11 @@ paging, and public pagination/search across multiple pages with deleted anchors.
 `knowledge-catalog.scale.test.ts` retains the 10,005-record, over-four-MiB
 fixture; it checks exact body-read counts, full-history continuation,
 late-corpus search/recall, scoped recovery, and actual SQLite date-index plans.
+`knowledge-take-freshness.scale.test.ts` exercises source list/search/recall and
+row projection over 12,600 catalog heads and 440 sources, with latency budgets
+and the same bounded row/body separation. On the focused scale run, measured
+latencies were 5 ms row listing, 216 ms row search, 109 ms full-record listing,
+173 ms full-record search, and 162 ms recall (one run, host-dependent).
 The default Raindrop pagination test crosses the real 50-item provider page
 boundary with 51 items; the more expensive all-incomplete-head recovery case is
 in `raindrop-intake-multipage.scale.test.ts`. Run both exact scale regressions

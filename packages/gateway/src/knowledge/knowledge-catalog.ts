@@ -60,8 +60,16 @@ function validSourceRow(value: unknown): boolean {
   const optional = (key: string): boolean => row[key] === undefined || (typeof row[key] === "string" && (row[key] as string).length <= 4_096);
   return typeof row.title === "string" && row.title.length <= 4_096
     && ["complete", "partial", "metadata-only", "inaccessible", "failed", "reference-only"].includes(row.captureDisposition as string)
-    && ["uri", "originalUri", "mediaType", "sourceSavedAt", "sourcePublishedAt", "summary"].every(optional)
+    && ["uri", "originalUri", "mediaType", "sourceSavedAt", "sourcePublishedAt", "summary", "supersededBy"].every(optional)
     && (row.summary === undefined || (row.summary as string).length <= 280)
+    && (row.ageBasis === "sourceSavedAt" || row.ageBasis === "capturedAt")
+    && typeof row.ageDays === "number" && Number.isSafeInteger(row.ageDays) && row.ageDays >= 0
+    && typeof row.ageSince === "string" && Number.isFinite(Date.parse(row.ageSince))
+    && ["ages", "does-not-age", "unknown"].includes(row.decayClass as string)
+    && typeof row.freshnessRank === "number" && Number.isInteger(row.freshnessRank) && row.freshnessRank >= 0 && row.freshnessRank <= 3
+    && ["fresh", "aging", "stale", "unknown"].includes(row.freshness as string)
+    && (row.verdict === undefined || ["evergreen", "dated", "superseded", "archive"].includes(row.verdict as string))
+    && typeof row.hasTake === "boolean" && typeof row.tagsStale === "boolean"
     && (row.preview === undefined || (typeof row.preview === "object" && row.preview !== null && !Array.isArray(row.preview)));
 }
 

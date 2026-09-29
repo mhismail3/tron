@@ -444,6 +444,9 @@ export interface KnowledgeListRequest {
 
 /** One library row. Source text and raw bytes are never part of a page: they
  * stay behind an exact `knowledge.read`/`knowledge.object.read`. */
+export type SourceFreshness = "fresh" | "aging" | "stale" | "unknown";
+export type SourceAgeBasis = "sourceSavedAt" | "capturedAt";
+
 export interface KnowledgeSourceRow {
   id: string;
   revisionId: string;
@@ -460,6 +463,13 @@ export interface KnowledgeSourceRow {
   captureDisposition: KnowledgeCaptureDisposition;
   admission?: SourceAdmission;
   sourceSavedAt?: string;
+  ageBasis: SourceAgeBasis;
+  ageDays: number;
+  freshness: SourceFreshness;
+  verdict?: SourceVerdict;
+  supersededBy?: string;
+  hasTake: boolean;
+  tagsStale: boolean;
   /** Never present for connector providers whose legacy save time was once
    * misfiled as publication time. */
   sourcePublishedAt?: string;
@@ -494,6 +504,8 @@ export interface KnowledgeSearchRequest {
   query: string;
   kind?: KnowledgeRecordKind;
   scope?: KnowledgeScope;
+  /** Agent retrieval may hide personal sources without hiding personal notes or observations. */
+  excludePersonalSources?: boolean;
   includeArchived?: boolean;
   includePending?: boolean;
   /** Optional server-side partition for source search projections. */
@@ -523,6 +535,8 @@ export interface KnowledgeRecallRequest {
   sessionId?: string;
   entryId?: string;
   scope?: KnowledgeScope;
+  /** Agent retrieval may hide personal sources without hiding personal notes or observations. */
+  excludePersonalSources?: boolean;
   includeArchived?: boolean;
   includePending?: boolean;
   limit?: number;
@@ -1064,6 +1078,12 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
     assertTimestamp(content.capturedAt, "capturedAt");
     if (content.sourcePublishedAt !== undefined) assertTimestamp(content.sourcePublishedAt, "sourcePublishedAt");
     if (content.sourceSavedAt !== undefined) assertTimestamp(content.sourceSavedAt, "sourceSavedAt");
+    if (content.take !== undefined) {
+      const take = content.take as Record<string, unknown>;
+      if (!take || typeof take !== "object" || Array.isArray(take) || Object.keys(take).some(key => !["text", "confirmed", "producer", "updatedAt"].includes(key)) || take.confirmed !== true || !take.producer || (take.producer as Record<string, unknown>).actor !== "user" || Object.keys(take.producer as Record<string, unknown>).length !== 1) throw new Error("Your take must be a confirmed user-authored note");
+      boundedString(take.text, "Your take", 4_000); if (!take.text) throw new Error("Your take cannot be empty; omit it to clear explicitly");
+      assertTimestamp(take.updatedAt, "Your take updatedAt");
+    }
     if (content.mediaType !== undefined) boundedString(content.mediaType, "source media type", 160);
     if (content.identity !== undefined) {
       const identity = content.identity as Record<string, unknown>;
