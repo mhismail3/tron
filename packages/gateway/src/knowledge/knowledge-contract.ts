@@ -144,13 +144,47 @@ export interface SourceRepresentation {
   mediaType?: string;
 }
 
+/** Who produced one interpretation. `model` is a caller-supplied label; it is
+ * not attestation that a model actually ran. */
+export interface SourceCurationProducer {
+  actor: "user" | "agent" | "connector" | "import" | "system";
+  model?: string;
+}
+
 export interface SourceSummary {
   text: string;
-  tags: Array<{ label: string; kind: "semantic" | "keyword" }>;
   generatedAt: string;
   sourceRevisionId: string;
+  /** SHA-256 of this record's `{title, text}`; see `sourceEvidenceDigest`. */
   evidenceDigest: string;
   coverage: "full" | "sampled";
+  producer: SourceCurationProducer;
+}
+
+/** Vocabulary tag selection. The vocabulary itself belongs to Knowledge
+ * configuration; this only records which of its tags were chosen, by whom, and
+ * against which inputs. */
+export interface SourceTagSelection {
+  tagIds: string[];
+  /** Vocabulary edition the IDs were validated against. */
+  vocabularyRevision: number;
+  /** SHA-256 of the record's own taggable inputs at publication; see
+   * `curationInputsDigest`. */
+  inputsDigest: string;
+  assignedAt: string;
+  producer: SourceCurationProducer;
+}
+
+/** How useful an entry still is. A judgement, never capture evidence. */
+export type SourceVerdict = "evergreen" | "dated" | "superseded" | "archive";
+
+export interface SourceVerdictState {
+  verdict: SourceVerdict;
+  /** Required for `superseded`: the entry that replaces this one. */
+  supersededBy?: string;
+  reason?: string;
+  decidedAt: string;
+  producer: SourceCurationProducer;
 }
 
 export interface SourceContent {
@@ -187,6 +221,10 @@ export interface SourceContent {
   assessment?: SourceAssessment;
   /** Explicitly generated content summary, separate from the intake assessment. */
   summary?: SourceSummary;
+  /** Vocabulary tag selection; see `SourceTagSelection`. */
+  tags?: SourceTagSelection;
+  /** Usefulness verdict; see `SourceVerdictState`. */
+  verdict?: SourceVerdictState;
 }
 
 export interface ObservationRange {
@@ -586,6 +624,127 @@ export interface KnowledgeSourceAdmissionRequest {
   reason?: string;
 }
 
+/** One bounded batch of interpretation writes. Every item carries its own
+ * expected revision; the owner derives each item's evidence binding itself and
+ * never accepts a caller-supplied digest or revision binding. */
+export type KnowledgeCurationOperation = "summary" | "tags" | "verdict" | "placement" | "relation";
+
+/** Typed, actionable refusal of one curation item. It never aborts the batch;
+ * the caller records the code and continues with the next item. */
+export type KnowledgeCurationCode =
+  | "stale-revision"
+  | "unknown-record"
+  | "excluded"
+  | "forgotten"
+  | "invalid-input"
+  | "unknown-tag"
+  | "command-id-reuse"
+  | "budget-exhausted"
+  | "unavailable"
+  | "cancelled";
+
+export class KnowledgeCurationRefusal extends Error {
+  constructor(readonly code: KnowledgeCurationCode, message: string, readonly currentRevision?: string) {
+    super(message);
+    this.name = "KnowledgeCurationRefusal";
+  }
+}
+
+export const KNOWLEDGE_CURATION_MAX_ITEMS = 25;
+export const KNOWLEDGE_CURATION_MAX_TAGS = 24;
+/** One summary, matching the generation bound. */
+export const KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS = 8_000;
+/** A batch's combined summary text, so one response stays bounded. */
+export const KNOWLEDGE_CURATION_MAX_BATCH_SUMMARY_CHARS = 32_000;
+
+export interface KnowledgeCurationItem {
+  recordId: string;
+  expectedRevision: string;
+  /** `summary` only: text the caller produced. */
+  summary?: { text: string; coverage: "full" | "sampled" };
+  /** `tags` only. */
+  tagIds?: string[];
+  /** `verdict` only. */
+  verdict?: { verdict: SourceVerdict; supersededBy?: string; reason?: string };
+  /** `placement` only; at least one of scope or admission. */
+  placement?: { scope?: KnowledgeScope; admission?: SourceAdmission; reason?: string };
+  /** `relation` only. */
+  relation?: { type: KnowledgeRelation["type"]; recordId: string; action: "add" | "remove" };
+}
+
+export interface KnowledgeCurationRequest {
+  commandId: string;
+  operation: KnowledgeCurationOperation;
+  producer: SourceCurationProducer;
+  items: KnowledgeCurationItem[];
+}
+
+/** What one curation item wrote, read back from its committed revision. */
+export interface KnowledgeCurationStored {
+  summary?: { text: string; coverage: "full" | "sampled"; sourceRevisionId: string };
+  tagIds?: string[];
+  vocabularyRevision?: number;
+  verdict?: SourceVerdict;
+  supersededBy?: string;
+  scope?: KnowledgeScope;
+  admission?: SourceAdmission;
+  relations?: string[];
+}
+
+export interface KnowledgeCurationOutcome {
+  recordId: string;
+  status: "applied" | "unchanged" | "conflict" | "failed" | "skipped";
+  /** The revision this item wrote, or the unchanged committed one. */
+  revisionId?: string;
+  /** Present on `conflict`: the committed revision to re-read before retrying. */
+  currentRevision?: string;
+  code?: KnowledgeCurationCode;
+  reason?: string;
+  stored?: KnowledgeCurationStored;
+}
+
+export interface KnowledgeCurationResponse {
+  commandId: string;
+  operation: KnowledgeCurationOperation;
+  applied: number;
+  outcomes: KnowledgeCurationOutcome[];
+  stateRevision: number;
+}
+
+/** Owned background interpretation work. State is process-local; the durable
+ * outcome is the committed revision, so a restart loses only `running`. */
+export interface KnowledgeCurationJob {
+  commandId: string;
+  operation: "summary" | "tags";
+  sourceId: string;
+  status: "running" | "done" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  revisionId?: string;
+  code?: KnowledgeCurationCode;
+  reason?: string;
+}
+
+export interface KnowledgeCurationJobRequest {
+  commandId?: string;
+  sourceId?: string;
+  status?: KnowledgeCurationJob["status"];
+  limit?: number;
+}
+
+export interface KnowledgeCurationJobResponse {
+  jobs: KnowledgeCurationJob[];
+  running: number;
+  failed: number;
+}
+
+/** Starting a summary replaces nothing: the job is accepted, this reply carries
+ * its current state, and `knowledge.curation.jobs` reports later state. */
+export interface KnowledgeSourceSummaryStart {
+  job: KnowledgeCurationJob;
+  record: KnowledgeRecord;
+}
+
 export interface KnowledgeRaindropIntakeRequest {
   commandId: string;
   connectionId?: string;
@@ -764,6 +923,8 @@ export type KnowledgeAction =
   | { operation: "knowledge.source.triage"; request: KnowledgeTriageRequest }
   | { operation: "knowledge.source.summarize"; request: KnowledgeSourceSummaryRequest }
   | { operation: "knowledge.source.admission"; request: KnowledgeSourceAdmissionRequest }
+  | { operation: "knowledge.source.curate"; request: KnowledgeCurationRequest }
+  | { operation: "knowledge.curation.jobs"; request: KnowledgeCurationJobRequest }
   | { operation: "knowledge.correction"; request: KnowledgeCorrectionRequest }
   | { operation: "knowledge.forget"; request: KnowledgeForgetRequest }
   | { operation: "knowledge.exclusion"; request: KnowledgeExclusionRequest }
@@ -824,6 +985,19 @@ function assertEvidence(value: unknown): asserts value is KnowledgeEvidenceRef {
   }
   if (item.objectHash !== undefined && (typeof item.objectHash !== "string" || !HASH.test(item.objectHash))) throw new Error("Invalid evidence object hash");
   if (item.locator !== undefined && (typeof item.locator !== "string" || item.locator.length > 512)) throw new Error("Invalid evidence locator");
+}
+
+function assertCurationProducer(value: unknown): asserts value is SourceCurationProducer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid curation producer");
+  const producer = value as Record<string, unknown>;
+  if (!["user", "agent", "connector", "import", "system"].includes(producer.actor as string)) throw new Error("Invalid curation producer actor");
+  if (producer.model !== undefined) boundedString(producer.model, "curation producer model", 200);
+}
+
+/** Tag IDs are opaque vocabulary identifiers; the vocabulary decides which of
+ * them are active, not their spelling here. */
+export function assertKnowledgeTagId(value: unknown, label = "tag id"): asserts value is string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{1,64}$/.test(value) || value === "." || value === "..") throw new Error(`Invalid ${label}`);
 }
 
 export function validateKnowledgeRecord(value: unknown): KnowledgeRecord {
@@ -894,11 +1068,39 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       const summary = content.summary as Record<string, unknown>;
       if (!summary || typeof summary !== "object" || Array.isArray(summary)) throw new Error("Invalid source summary");
       boundedString(summary.text, "source summary", 8_000);
-      if (!Array.isArray(summary.tags) || summary.tags.length > 12 || summary.tags.some(tag => !tag || typeof tag !== "object" || Array.isArray(tag) || typeof (tag as Record<string, unknown>).label !== "string" || !((tag as Record<string, unknown>).label as string).trim() || ((tag as Record<string, unknown>).label as string).length > 64 || !["semantic", "keyword"].includes((tag as Record<string, unknown>).kind as string))) throw new Error("Invalid source summary tags");
+      assertCurationProducer(summary.producer);
       assertTimestamp(summary.generatedAt, "source summary generatedAt");
       if (typeof summary.sourceRevisionId !== "string" || !REVISION.test(summary.sourceRevisionId)) throw new Error("Invalid source summary revision");
       if (typeof summary.evidenceDigest !== "string" || !HASH.test(summary.evidenceDigest)) throw new Error("Invalid source summary evidence digest");
       if (!["full", "sampled"].includes(summary.coverage as string)) throw new Error("Invalid source summary coverage");
+    }
+    if (content.tags !== undefined) {
+      const tags = content.tags as Record<string, unknown>;
+      if (!tags || typeof tags !== "object" || Array.isArray(tags)) throw new Error("Invalid source tags");
+      if (!Array.isArray(tags.tagIds) || tags.tagIds.length > 24) throw new Error("Invalid source tag selection");
+      const seen = new Set<string>();
+      for (const id of tags.tagIds) {
+        assertKnowledgeTagId(id);
+        if (seen.has(id)) throw new Error("Duplicate source tag id");
+        seen.add(id);
+      }
+      if (!Number.isSafeInteger(tags.vocabularyRevision) || (tags.vocabularyRevision as number) < 0) throw new Error("Invalid source tag vocabulary revision");
+      if (typeof tags.inputsDigest !== "string" || !HASH.test(tags.inputsDigest)) throw new Error("Invalid source tag inputs digest");
+      assertTimestamp(tags.assignedAt, "source tags assignedAt");
+      assertCurationProducer(tags.producer);
+    }
+    if (content.verdict !== undefined) {
+      const verdict = content.verdict as Record<string, unknown>;
+      if (!verdict || typeof verdict !== "object" || Array.isArray(verdict)) throw new Error("Invalid source verdict");
+      if (!["evergreen", "dated", "superseded", "archive"].includes(verdict.verdict as string)) throw new Error("Invalid source verdict value");
+      if (verdict.supersededBy !== undefined) {
+        assertKnowledgeId(verdict.supersededBy, "verdict replacement id");
+        if (verdict.verdict !== "superseded") throw new Error("Only a superseded verdict names a replacement");
+      }
+      if (verdict.verdict === "superseded" && verdict.supersededBy === undefined) throw new Error("A superseded verdict requires the replacement record");
+      if (verdict.reason !== undefined) boundedString(verdict.reason, "source verdict reason", 2_000);
+      assertTimestamp(verdict.decidedAt, "source verdict decidedAt");
+      assertCurationProducer(verdict.producer);
     }
     if (content.assessment !== undefined) {
       const assessment = content.assessment as Record<string, unknown>;

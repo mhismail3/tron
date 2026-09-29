@@ -10,13 +10,16 @@ import { durableAtomicWriteJson, durableRemove, syncDurably } from "../util/dura
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
   DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, OBSERVATION_ATTENTION_DISPOSITIONS, OBSERVATION_COVERAGE_DISPOSITIONS, knowledgeScopeEligible, normalizeKnowledgeSourceUrl,
-  type KnowledgeConfig, type KnowledgeEvidenceRef, type KnowledgeListRequest,
+  type KnowledgeConfig, type KnowledgeEvidenceRef, type KnowledgeListRequest, type KnowledgeScope,
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgePreviewBatchRequest,
   type KnowledgePreviewBatchResponse, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
   type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse,
   type SourceAdmission, type SourceContent,
+  type KnowledgeCurationItem, type KnowledgeCurationOperation, type KnowledgeCurationStored,
+  type KnowledgeRelation, type SourceCurationProducer, type SourceVerdictState, assertKnowledgeTagId,
+  KnowledgeCurationRefusal, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS,
   type KnowledgeNoteMutationRequest, type KnowledgeCoverageDismissRequest,
   type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
   validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
@@ -193,6 +196,36 @@ function catalogState(control: CatalogControl, catalog?: KnowledgeCatalog): Know
  * current evidence interpretation only while its digest still matches. */
 export function sourceEvidenceDigest(title: string, text: string): string {
   return createHash("sha256").update(JSON.stringify({ title, text })).digest("hex");
+}
+/** The active tag vocabulary. Knowledge configuration owns it (its IDs,
+ * definitions, decay classes, and guidelines); the store only asks whether an
+ * ID is active and which edition a selection was made against. Until a
+ * vocabulary is installed, no tag ID is active and every tag write is refused
+ * with `unknown-tag`, rather than silently inventing a taxonomy. */
+export interface KnowledgeTagVocabulary {
+  revision: number;
+  isActiveTag(id: string): boolean;
+}
+export const EMPTY_TAG_VOCABULARY: KnowledgeTagVocabulary = { revision: 0, isActiveTag: () => false };
+/** Digest of the record's own taggable inputs: its saved title and readable
+ * text plus its current verdict. The vocabulary edition is recorded separately
+ * on the selection, so editing the vocabulary flags re-tagging without making
+ * stored selections unreadable. A later owner that adds an input (the user's
+ * take) extends this and re-tags; a stored digest then no longer matches. */
+export function curationInputsDigest(content: SourceContent): string {
+  return createHash("sha256").update(JSON.stringify({ title: content.title, text: content.text ?? "", verdict: content.verdict?.verdict ?? null })).digest("hex");
+}
+/** The fields one curation operation wrote, read back from its committed
+ * revision. Bounded by the item bounds, so a batch outcome stays small. */
+export function curationStored(record: KnowledgeRecord & { kind: "source" }, operation: KnowledgeCurationOperation): KnowledgeCurationStored {
+  const content = record.content;
+  switch (operation) {
+    case "summary": return content.summary ? { summary: { text: content.summary.text, coverage: content.summary.coverage, sourceRevisionId: content.summary.sourceRevisionId } } : {};
+    case "tags": return content.tags ? { tagIds: [...content.tags.tagIds], vocabularyRevision: content.tags.vocabularyRevision } : {};
+    case "verdict": return content.verdict ? { verdict: content.verdict.verdict, ...(content.verdict.supersededBy ? { supersededBy: content.verdict.supersededBy } : {}) } : {};
+    case "placement": return { scope: record.scope, ...(content.admission ? { admission: content.admission.status } : {}) };
+    case "relation": return { relations: record.relations.map(relation => `${relation.type}:${relation.recordId}`).slice(0, 32) };
+  }
 }
 function httpUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -503,7 +536,7 @@ export class KnowledgeStore {
   private readonly connectorContext = new AsyncLocalStorage<string | undefined>();
   /** Command-scoped summary generations that are already in flight. */
   private readonly summaryInFlight = new Map<string, Promise<KnowledgeMutationResult>>();
-  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: (change: KnowledgeChange) => void, private readonly connectorEnvelope?: KnowledgeConnectorEnvelopeResolver) {
+  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: (change: KnowledgeChange) => void, private readonly connectorEnvelope?: KnowledgeConnectorEnvelopeResolver, private readonly tagVocabulary: KnowledgeTagVocabulary = EMPTY_TAG_VOCABULARY) {
     this.mutex = KnowledgeStore.workspaceLocks.get(workspace) ?? new AsyncMutex(); KnowledgeStore.workspaceLocks.set(workspace, this.mutex);
   }
 
@@ -1261,6 +1294,122 @@ export class KnowledgeStore {
       const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, admission } }, request.expectedRevision);
     });
+  }
+  /** One agent- or user-authored interpretation on a source. Each item is its
+   * own receipted mutation, so a batch is not atomic: one refusal or conflict
+   * never rolls back another item, and a replay returns exactly the revision
+   * that item wrote. The owner derives every evidence binding itself; a caller
+   * can never supply the digest or revision a stored interpretation claims. */
+  async curateSource(input: { commandId: string; operation: KnowledgeCurationOperation; producer: SourceCurationProducer; item: KnowledgeCurationItem }): Promise<KnowledgeMutationResult> {
+    const request = { operation: input.operation, producer: input.producer, item: input.item };
+    try {
+      return await this.mutate("knowledge.source.curate", input.commandId, request, async (state, paths) => {
+        const head = state.records.get(input.item.recordId);
+        if (!head) throw new KnowledgeCurationRefusal("unknown-record", `Knowledge record ${input.item.recordId} is not available`);
+        if (state.suppressions.get(input.item.recordId)?.forgotten) throw new KnowledgeCurationRefusal("forgotten", "Knowledge record was forgotten and cannot be curated");
+        if (head.latestRevisionId !== input.item.expectedRevision) throw new KnowledgeCurationRefusal("stale-revision", `Knowledge record revision changed; expected ${input.item.expectedRevision} but ${head.latestRevisionId} is committed`, head.latestRevisionId);
+        const current = await this.readRecord(paths, input.item.recordId, head.latestRevisionId);
+        if (current.kind !== "source") throw new KnowledgeCurationRefusal("invalid-input", "Knowledge curation applies to source records only");
+        if (this.recordExcluded(state, current)) throw new KnowledgeCurationRefusal("excluded", "Knowledge record is excluded from retrieval");
+        const next = this.curatedSource(state, input.operation, input.producer, input.item, current);
+        if (next.scope === current.scope && JSON.stringify(next.content) === JSON.stringify(current.content) && JSON.stringify(next.relations) === JSON.stringify(current.relations)) {
+          return { record: current, stateRevision: state.stateRevision } satisfies KnowledgeMutationResult;
+        }
+        return this.putRecord(state, paths, {
+          kind: "source", id: current.id, createdAt: current.createdAt, scope: next.scope,
+          provenance: current.provenance, relations: next.relations,
+          ...(current.temporal ? { temporal: current.temporal } : {}), content: next.content,
+        }, current.revisionId);
+      });
+    } catch (error) {
+      // The receipt fence refuses a changed payload under a reused command ID.
+      // Report that as its own action, so an agent knows to start a new command
+      // instead of retrying a payload the owner will never accept.
+      if (error instanceof GatewayError && error.code === "conflict" && error.message.includes("already used for a different knowledge mutation")) {
+        throw new KnowledgeCurationRefusal("command-id-reuse", "This command ID already recorded a different curation payload; start a new command ID instead of changing it");
+      }
+      throw error;
+    }
+  }
+  /** The one place that builds curated content from a caller's item. Every
+   * operation rejects the other operations' fields, so a payload is never
+   * partially understood. */
+  private curatedSource(state: KnowledgeState, operation: KnowledgeCurationOperation, producer: SourceCurationProducer, item: KnowledgeCurationItem, current: KnowledgeRecord & { kind: "source" }): { scope: KnowledgeScope; content: SourceContent; relations: KnowledgeRelation[] } {
+    const content = current.content;
+    const only = (allowed: keyof KnowledgeCurationItem) => {
+      for (const field of ["summary", "tagIds", "verdict", "placement", "relation"] as const) {
+        if (field !== allowed && item[field] !== undefined) throw new KnowledgeCurationRefusal("invalid-input", `The ${operation} operation does not accept ${field}`);
+      }
+    };
+    const id = (value: unknown, label: string): string => { try { assertKnowledgeId(value as string, label); return value as string; } catch (error) { throw new KnowledgeCurationRefusal("invalid-input", error instanceof Error ? error.message : `Invalid ${label}`); } };
+    const decided = now();
+    switch (operation) {
+      case "summary": {
+        only("summary");
+        const input = item.summary;
+        if (!input || typeof input.text !== "string" || typeof input.coverage !== "string") throw new KnowledgeCurationRefusal("invalid-input", "A summary operation requires summary text and its coverage");
+        const text = input.text.trim();
+        if (!text || input.text.length > KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS) throw new KnowledgeCurationRefusal("invalid-input", `Summary text must be 1..${KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS} characters`);
+        if (input.coverage !== "full" && input.coverage !== "sampled") throw new KnowledgeCurationRefusal("invalid-input", "Summary coverage must be full or sampled");
+        return { scope: current.scope, relations: current.relations, content: { ...content, summary: { text, coverage: input.coverage, generatedAt: decided, sourceRevisionId: current.revisionId, evidenceDigest: sourceEvidenceDigest(content.title, content.text ?? ""), producer } } };
+      }
+      case "tags": {
+        only("tagIds");
+        if (!Array.isArray(item.tagIds) || item.tagIds.length > KNOWLEDGE_CURATION_MAX_TAGS) throw new KnowledgeCurationRefusal("invalid-input", `A tag selection carries at most ${KNOWLEDGE_CURATION_MAX_TAGS} tag IDs`);
+        const ids = item.tagIds.map(value => id(value, "tag id"));
+        if (new Set(ids).size !== ids.length) throw new KnowledgeCurationRefusal("invalid-input", "A tag selection repeats a tag ID");
+        if (!Number.isSafeInteger(this.tagVocabulary.revision) || this.tagVocabulary.revision < 0) throw new KnowledgeCurationRefusal("unavailable", "The Knowledge tag vocabulary is unavailable");
+        for (const value of ids) {
+          if (!this.tagVocabulary.isActiveTag(value)) throw new KnowledgeCurationRefusal("unknown-tag", this.tagVocabulary.revision === 0 ? `Unknown tag ${value}: no tag vocabulary is installed` : `Unknown tag ${value}: it is not in vocabulary revision ${this.tagVocabulary.revision}`);
+        }
+        return { scope: current.scope, relations: current.relations, content: { ...content, tags: { tagIds: ids, vocabularyRevision: this.tagVocabulary.revision, inputsDigest: curationInputsDigest(content), assignedAt: decided, producer } } };
+      }
+      case "verdict": {
+        only("verdict");
+        const input = item.verdict;
+        if (!input || !["evergreen", "dated", "superseded", "archive"].includes(input.verdict as string)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict operation requires evergreen, dated, superseded, or archive");
+        if (input.reason !== undefined && (typeof input.reason !== "string" || input.reason.length > 2_000)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict reason is at most 2000 characters");
+        let supersededBy: string | undefined;
+        if (input.supersededBy !== undefined) {
+          supersededBy = id(input.supersededBy, "verdict replacement id");
+          if (input.verdict !== "superseded") throw new KnowledgeCurationRefusal("invalid-input", "Only a superseded verdict names a replacement");
+          if (supersededBy === current.id) throw new KnowledgeCurationRefusal("invalid-input", "An entry cannot supersede itself");
+          if (!state.records.get(supersededBy) || state.suppressions.get(supersededBy)?.forgotten) throw new KnowledgeCurationRefusal("invalid-input", `Replacement entry ${supersededBy} is unavailable`);
+        } else if (input.verdict === "superseded") {
+          throw new KnowledgeCurationRefusal("invalid-input", "A superseded verdict requires the entry that replaces this one");
+        }
+        const verdict: SourceVerdictState = { verdict: input.verdict, ...(supersededBy ? { supersededBy } : {}), ...(input.reason ? { reason: input.reason } : {}), decidedAt: decided, producer };
+        return { scope: current.scope, relations: current.relations, content: { ...content, verdict } };
+      }
+      case "placement": {
+        only("placement");
+        const input = item.placement;
+        if (!input || (input.scope === undefined && input.admission === undefined)) throw new KnowledgeCurationRefusal("invalid-input", "A placement operation requires scope, admission, or both");
+        if (input.scope !== undefined && input.scope !== "personal" && input.scope !== "research") throw new KnowledgeCurationRefusal("invalid-input", "Scope must be personal or research");
+        if (input.admission !== undefined && !["pending", "retained", "archived"].includes(input.admission as string)) throw new KnowledgeCurationRefusal("invalid-input", "Admission must be pending, retained, or archived");
+        if (input.reason !== undefined && (typeof input.reason !== "string" || input.reason.length > 2_000)) throw new KnowledgeCurationRefusal("invalid-input", "A placement reason is at most 2000 characters");
+        return {
+          scope: input.scope ?? current.scope, relations: current.relations,
+          content: { ...content, ...(input.admission === undefined ? {} : { admission: { status: input.admission, ...(input.reason ? { reason: input.reason } : {}), decidedAt: decided } }) },
+        };
+      }
+      case "relation": {
+        only("relation");
+        const input = item.relation;
+        if (!input || (input.action !== "add" && input.action !== "remove")) throw new KnowledgeCurationRefusal("invalid-input", "A relation operation requires add or remove");
+        if (!["supports", "contradicts", "corrects", "supersedes", "derivedFrom", "related"].includes(input.type as string)) throw new KnowledgeCurationRefusal("invalid-input", "Invalid relation type");
+        const target = id(input.recordId, "relation record id");
+        if (target === current.id) throw new KnowledgeCurationRefusal("invalid-input", "An entry cannot relate to itself");
+        if (!state.records.get(target) || state.suppressions.get(target)?.forgotten) throw new KnowledgeCurationRefusal("invalid-input", `Related entry ${target} is unavailable`);
+        const present = current.relations.some(relation => relation.type === input.type && relation.recordId === target);
+        // Relations are identity-qualified by type and target, so an add of an
+        // existing edge and a remove of an absent one are both no-ops.
+        const relations = input.action === "add"
+          ? (present ? current.relations : [...current.relations, { type: input.type, recordId: target }])
+          : current.relations.filter(relation => !(relation.type === input.type && relation.recordId === target));
+        return { scope: current.scope, relations, content };
+      }
+    }
   }
   async captureSource(request: SourceRecordWriteRequest): Promise<KnowledgeMutationResult> {
     const { signal, ...receiptRequest } = request;
