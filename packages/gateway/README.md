@@ -2299,8 +2299,10 @@ failure never changes the successful provider refresh result. A non-forced
 request skips release-date fetching while data is younger than 12 hours; the iOS
 Model Catalog Refresh action sends `force: true`, so it bypasses freshness. The Gateway
 uses conditional ETag/Last-Modified requests, caps response and persisted data at
-32 MiB, shares concurrent fetches, and aborts on shutdown. `PI_OFFLINE=1` disables
-these network requests. A release-date failure is reported additively as
+32 MiB, shares concurrent fetches, and aborts on shutdown. `PI_OFFLINE=1`, `PI_OFFLINE=true`, or `PI_OFFLINE=yes` disables
+these network requests. Refresh coverage follows the providers exposed by the
+runtime handling the request (global or session-local), plus alias targets; the
+background refresh covers global providers. A release-date failure is reported additively as
 `releaseDates.error`, never fails the existing refresh result or discards usable
 dates. When fetched dates change, `models.catalogChanged` tells connected clients
 to reload `model.list`.
@@ -2310,9 +2312,8 @@ The vendored baseline is maintained manually with
 decide provider coverage and uses the same provider/date/alias normalization as
 the runtime service. Month-precision releases normalize to the first day of the
 month. The script requires installed `packages/gateway/node_modules`; `--check`
-verifies the checked-in baseline without writing. Runtime coverage comes from the
-providers exposed by the running `ModelRuntime`, including extension providers,
-plus alias targets. Providers that re-export another vendor's models resolve
+verifies the checked-in baseline without writing. Runtime refresh coverage comes from the providers exposed by the active
+`ModelRuntime`, including extension providers, plus alias targets. Providers that re-export another vendor's models resolve
 through `packages/gateway/src/providers/model-release-date-aliases.json`.
 
 ### Prompt attachments and request size

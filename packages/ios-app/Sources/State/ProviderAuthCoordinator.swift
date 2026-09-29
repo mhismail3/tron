@@ -390,7 +390,7 @@ final class ProviderAuthCoordinator {
     }
 
     @discardableResult
-    func refreshCatalog(target: ProviderCatalogTarget) async -> Bool {
+    func refreshCatalog(target: ProviderCatalogTarget, reportErrors: Bool = true) async -> Bool {
         guard !Task.isCancelled else { return false }
         let admission = beginCatalogLoad(target: target)
         do {
@@ -432,7 +432,7 @@ final class ProviderAuthCoordinator {
             return true
         } catch {
             guard admits(admission) else { return false }
-            delegate?.providerAuthCoordinatorSurface(error)
+            if reportErrors { delegate?.providerAuthCoordinatorSurface(error) }
             return false
         }
     }
@@ -839,9 +839,8 @@ final class ProviderAuthCoordinator {
 
     /// Release-date changes invalidate the model catalog projection, including an open picker.
     func noteModelCatalogChanged() {
-        invalidationGeneration &+= 1
         for target in Array(catalogByTarget.keys) {
-            Task { await refreshCatalog(target: target) }
+            Task { await refreshCatalog(target: target, reportErrors: false) }
         }
     }
 

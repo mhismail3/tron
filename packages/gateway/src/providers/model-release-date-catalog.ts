@@ -15,6 +15,7 @@ type PersistedCatalog = {
   etag?: string;
   lastModified?: string;
   dates: Record<string, string>;
+  providers: string[];
 };
 type Log = (level: "warning" | "info", message: string, metadata?: Record<string, unknown>) => void;
 
@@ -25,6 +26,7 @@ export class ModelReleaseDateCatalog {
   private fetchedAt: number | undefined;
   private etag: string | undefined;
   private lastModified: string | undefined;
+  private coveredProviders = new Set<string>();
   private loaded: Promise<void> | undefined;
   private inFlight: Promise<{ updated: number; error?: string }> | undefined;
   private timer: NodeJS.Timeout | undefined;
@@ -54,19 +56,22 @@ export class ModelReleaseDateCatalog {
       ?? (aliasKey === undefined ? undefined : this.fetchedDates.get(aliasKey) ?? this.baselineDates.get(aliasKey));
   }
 
-  start(signal?: AbortSignal): void {
+  start(): void {
     if (this.timer || this.disposed) return;
-    void this.runBackground(signal);
-    this.timer = setInterval(() => void this.runBackground(signal), REFRESH_INTERVAL_MS);
+    void this.runBackground();
+    this.timer = setInterval(() => void this.runBackground(), REFRESH_INTERVAL_MS);
     this.timer.unref();
   }
 
-  async refresh(options: { force?: boolean; signal?: AbortSignal } = {}): Promise<{ updated: number; error?: string }> {
+  async refresh(options: { force?: boolean; signal?: AbortSignal; providers?: Iterable<string> } = {}): Promise<{ updated: number; error?: string }> {
     await this.load();
-    if (process.env.PI_OFFLINE === "1") return { updated: 0, error: "offline mode" };
+    if (isOffline()) return { updated: 0, error: "offline mode" };
     if (this.inFlight) return this.inFlight;
-    if (!options.force && this.isFresh()) return { updated: 0 };
-    const operation = this.fetchAndPersist(options.signal);
+    const requestedProviders = new Set(options.providers ?? this.options.providers());
+    const missingCoverage = [...requestedProviders].some(provider => !this.coveredProviders.has(provider));
+    if (!options.force && this.isFresh() && !missingCoverage) return { updated: 0 };
+    const providers = new Set([...this.coveredProviders, ...requestedProviders]);
+    const operation = this.fetchAndPersist(options.signal, providers);
     this.inFlight = operation;
     try { return await operation; } finally { if (this.inFlight === operation) this.inFlight = undefined; }
   }
@@ -78,9 +83,9 @@ export class ModelReleaseDateCatalog {
     this.timer = undefined;
   }
 
-  private async runBackground(signal?: AbortSignal): Promise<void> {
-    if (this.disposed || process.env.PI_OFFLINE === "1") return;
-    try { await this.refresh(signal ? { signal } : {}); }
+  private async runBackground(): Promise<void> {
+    if (this.disposed || isOffline()) return;
+    try { await this.refresh(); }
     catch (error) { this.options.log("warning", "Background model release-date refresh failed", { reason: error instanceof Error ? error.message : String(error) }); }
   }
 
@@ -98,6 +103,8 @@ export class ModelReleaseDateCatalog {
         const fetchedAt = typeof saved?.fetchedAt === "string" ? Date.parse(saved.fetchedAt) : Number.NaN;
         if (!saved || typeof saved !== "object" || !Number.isFinite(fetchedAt) || fetchedAt > Date.now() + 5 * 60_000
           || !saved.dates || typeof saved.dates !== "object" || Array.isArray(saved.dates)
+          || !Array.isArray(saved.providers) || saved.providers.length > 10_000
+          || saved.providers.some(provider => typeof provider !== "string" || provider.length > 120)
           || (saved.etag !== undefined && (typeof saved.etag !== "string" || saved.etag.length > 4_096))
           || (saved.lastModified !== undefined && (typeof saved.lastModified !== "string" || saved.lastModified.length > 4_096))
           || Object.keys(saved.dates).length > 250_000) throw new Error("invalid catalog shape");
@@ -108,6 +115,7 @@ export class ModelReleaseDateCatalog {
         }
         for (const [key, value] of Object.entries(normalized)) this.fetchedDates.set(key, value);
         this.fetchedAt = fetchedAt;
+        this.coveredProviders = new Set(saved.providers);
         if (typeof saved.etag === "string") this.etag = saved.etag;
         if (typeof saved.lastModified === "string") this.lastModified = saved.lastModified;
       } catch (error) {
@@ -117,18 +125,22 @@ export class ModelReleaseDateCatalog {
     await this.loaded;
   }
 
-  private async fetchAndPersist(signal?: AbortSignal): Promise<{ updated: number; error?: string }> {
+  private async fetchAndPersist(signal: AbortSignal | undefined, providers: Set<string>): Promise<{ updated: number; error?: string }> {
     const controller = new AbortController();
     this.activeController = controller;
     const abort = () => controller.abort(signal?.reason);
     signal?.addEventListener("abort", abort, { once: true });
     const timeout = setTimeout(() => controller.abort(new Error("model release-date request timed out")), REQUEST_TIMEOUT_MS);
     timeout.unref();
-    const work = this.options.workRegistry?.begin({ kind: "administrative-provider-package-operation", hostEpoch: this.options.workRegistry.runtimeEpoch, cancellation: () => controller.abort() });
+    let work: { settle(): void } | undefined;
     try {
+      work = this.options.workRegistry?.begin({ kind: "administrative-provider-package-operation", hostEpoch: this.options.workRegistry.runtimeEpoch, cancellation: () => controller.abort() });
       const headers: Record<string, string> = {};
-      if (this.etag) headers["If-None-Match"] = this.etag;
-      else if (this.lastModified) headers["If-Modified-Since"] = this.lastModified;
+      const hasCoverage = [...providers].every(provider => this.coveredProviders.has(provider));
+      if (hasCoverage) {
+        if (this.etag) headers["If-None-Match"] = this.etag;
+        else if (this.lastModified) headers["If-Modified-Since"] = this.lastModified;
+      }
       const response = await fetch(RELEASE_DATE_SOURCE, { headers, signal: controller.signal });
       if (response.status === 304) {
         this.fetchedAt = Date.now();
@@ -140,31 +152,35 @@ export class ModelReleaseDateCatalog {
       const text = await readBoundedBody(response, MAX_FILE_BYTES);
       const parsed = JSON.parse(text) as unknown;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("models.dev payload is not a provider catalog");
-      const providerNames = [...this.options.providers()];
+      const providerNames = [...providers];
       if (!providerNames.some(provider => {
         const entry = (parsed as Record<string, unknown>)[provider];
         return !!entry && typeof entry === "object" && !!(entry as { models?: unknown }).models
           && typeof (entry as { models: unknown }).models === "object";
       })) throw new Error("models.dev payload contains no runtime provider catalogs");
       const result = releaseDatesFromCatalog(parsed, providerNames, this.aliases);
+      if (result.unrecognizedDateCount > 0) throw new Error(`models.dev payload contains ${result.unrecognizedDateCount} unrecognized release dates`);
       const previous = new Map(this.fetchedDates);
-      const keys = new Set([...this.baselineDates.keys(), ...previous.keys(), ...Object.keys(result.dates)]);
+      const refreshedProviders = new Set([...providers, ...Object.values(this.aliases)]);
+      const nextFetched = new Map([...previous].filter(([key]) => !refreshedProviders.has(key.slice(0, key.indexOf("/")))));
+      for (const [key, value] of Object.entries(result.dates)) nextFetched.set(key, value);
+      const keys = new Set([...this.baselineDates.keys(), ...previous.keys(), ...nextFetched.keys()]);
       const effective = (key: string, fetched: Map<string, string>): string | undefined => fetched.get(key) ?? this.baselineDates.get(key);
-      const nextFetched = new Map(Object.entries(result.dates));
       let updated = 0;
       for (const key of keys) if (effective(key, previous) !== effective(key, nextFetched)) updated++;
       this.fetchedDates.clear(); for (const [key, value] of nextFetched) this.fetchedDates.set(key, value);
-      const oldFetchedAt = this.fetchedAt, oldEtag = this.etag, oldLastModified = this.lastModified;
+      const oldFetchedAt = this.fetchedAt, oldEtag = this.etag, oldLastModified = this.lastModified, oldCoveredProviders = this.coveredProviders;
       this.fetchedAt = Date.now();
       this.etag = response.headers.get("etag") ?? this.etag;
       this.lastModified = response.headers.get("last-modified") ?? this.lastModified;
+      this.coveredProviders = new Set(refreshedProviders);
       try { await this.persist(); } catch (error) {
         this.fetchedDates.clear(); for (const [key, value] of previous) this.fetchedDates.set(key, value);
-        this.fetchedAt = oldFetchedAt; this.etag = oldEtag; this.lastModified = oldLastModified;
+        this.fetchedAt = oldFetchedAt; this.etag = oldEtag; this.lastModified = oldLastModified; this.coveredProviders = oldCoveredProviders;
         throw error;
       }
       if (updated > 0) this.options.broadcast?.();
-      this.options.log("info", updated ? "Model release-date refresh updated" : "Model release-date refresh unchanged", { updated, providers: result.providers, unrecognizedDates: result.unknown.length });
+      this.options.log("info", updated ? "Model release-date refresh updated" : "Model release-date refresh unchanged", { updated, providers: result.providers, unrecognizedDates: result.unrecognizedDateCount, unknownDateSamples: result.unknown });
       return { updated };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -183,10 +199,15 @@ export class ModelReleaseDateCatalog {
       fetchedAt: new Date(this.fetchedAt ?? Date.now()).toISOString(),
       ...(this.etag ? { etag: this.etag } : {}),
       ...(this.lastModified ? { lastModified: this.lastModified } : {}),
+      providers: [...this.coveredProviders].sort(),
       dates: Object.fromEntries([...this.fetchedDates].sort(([a], [b]) => a.localeCompare(b))),
     };
     await durablePublishBoundedJson(this.path, document, MAX_FILE_BYTES);
   }
+}
+
+function isOffline(): boolean {
+  return /^(1|true|yes)$/i.test(process.env.PI_OFFLINE ?? "");
 }
 
 function isValidReleaseDate(value: string): boolean {

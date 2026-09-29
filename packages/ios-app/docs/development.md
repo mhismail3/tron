@@ -290,7 +290,9 @@ rendered pixels). The whole card, including its empty
 space, is the tap target: the rail gives each plain button label the card's content shape.
 Recent order and membership belong to the Gateway's bounded recent-model history read through
 `model.recent` and refreshed by the `models.recentChanged` event; a ref that has left the
-available catalog is dropped rather than displayed. Latest orders the available catalog by the
+available catalog is dropped rather than displayed. Release-date updates arrive through
+`models.catalogChanged`, which reloads loaded model catalogs without invalidating provider settings.
+Latest orders the available catalog by the
 Gateway's optional `releaseDate` (newest first, display-name ties) and keeps the alias only when
 its pinned release shares that date, while both stay selectable in the provider section; models
 without a (well-formed) date never enter the rail. Provider sections lead with the selected

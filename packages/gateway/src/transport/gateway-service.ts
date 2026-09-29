@@ -291,7 +291,6 @@ export interface GatewayServiceDependencies {
   sessionSearch?: SessionSearchService;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
-  modelReleaseDates?: ModelReleaseDateCatalog;
 }
 
 export class GatewayService {
@@ -332,7 +331,7 @@ export class GatewayService {
       (data, mimeType) => dependencies.sessions.registerWorkspaceBlob(data, mimeType),
     );
     this.providerUsage = dependencies.providerUsage ?? new ProviderUsageOwner();
-    this.modelReleaseDates = dependencies.modelReleaseDates ?? new ModelReleaseDateCatalog({
+    this.modelReleaseDates = new ModelReleaseDateCatalog({
       tronHome: dependencies.config?.tronHome ?? process.cwd(),
       providers: () => dependencies.modelRuntime.getProviders().map(provider => provider.id),
       log: (level, message, metadata) => dependencies.logger?.log(level, message, { event: "model.release-dates", source: "model-release-dates", ...metadata }),
@@ -1833,10 +1832,11 @@ export class GatewayService {
                 force: params.force === undefined ? false : boolean(params.force, "force"),
                 signal: controller.signal,
               });
-              const releaseDates = this.modelReleaseDates.refresh({
+              const releaseDates = Promise.resolve().then(() => this.modelReleaseDates.refresh({
                 force: params.force === undefined ? false : boolean(params.force, "force"),
                 signal: controller.signal,
-              });
+                providers: modelRuntime.getProviders().map(provider => provider.id),
+              })).catch(error => ({ updated: 0, error: error instanceof Error ? error.message : String(error) }));
               const modelRefresh = params.sessionId === undefined
                 ? this.dependencies.globalProviderResources.withStableSnapshot(refresh, controller.signal)
                 : refresh();
