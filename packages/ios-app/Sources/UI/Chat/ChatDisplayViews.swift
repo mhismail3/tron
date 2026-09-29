@@ -968,6 +968,8 @@ private struct DisplayTextArtifactView: View {
     let context: DisplayRenderContext
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @State private var loadedIdentity: ChatMediaIdentity?
+    @State private var loadedDocument: PreparedAttachmentFilePreview?
     @State private var failed = false
 
     var body: some View {
@@ -989,12 +991,14 @@ private struct DisplayTextArtifactView: View {
         )) { await load() }
     }
 
-    /// The loader retains the prepared document for its exact artifact identity,
-    /// so a card that mounted again renders real content in its first frame
-    /// instead of a placeholder that changes the row's height when the payload
-    /// arrives.
+    /// What this card shows: the document its own load published, or — only for
+    /// the first frame after a remount — the document the loader retained for
+    /// this exact identity. The mounted card owns its value, so the loader's
+    /// bounded store can evict the identity under it without sending the card
+    /// back to a placeholder that resizes the row.
     private var prepared: PreparedAttachmentFilePreview? {
         guard let identity = mediaIdentity else { return nil }
+        if loadedIdentity == identity, let loadedDocument { return loadedDocument }
         return model.chatMedia.retainedInlineArtifact(
             for: identity,
             as: PreparedAttachmentFilePreview.self
@@ -1047,36 +1051,32 @@ private struct DisplayTextArtifactView: View {
             failed = true
             return
         }
-        failed = false
-        // The retained document is the source of truth for this identity: a
-        // mounted card renders it without starting a second request.
+        // The document this card already holds, or the loader's retained one for
+        // this identity, is the answer: a mounted card starts no second request.
         if prepared != nil { return }
-        var retried = false
-        while true {
-            do {
-                _ = try await model.chatMedia.inlineArtifact(for: identity) { payload in
-                    try await AttachmentFilePreviewPolicy.prepare(
-                        data: payload.data,
-                        name: artifact.name,
-                        mimeType: artifact.mimeType
-                    )
-                }
-                return
-            } catch {
-                // A retired surface or a superseded request publishes nothing.
-                // A dependency that dropped this identity's work while the card
-                // is still mounted and still current (memory pressure) asks once
-                // more instead of keeping its placeholder forever.
-                let current = !Task.isCancelled
-                    && presentationActivity.allowsPresentationPublication
-                    && mediaIdentity == identity
-                if current, !retried {
-                    retried = true
-                    continue
-                }
-                if current { failed = true }
-                return
+        failed = false
+        do {
+            let document = try await model.chatMedia.inlineArtifact(for: identity) { payload in
+                try await AttachmentFilePreviewPolicy.prepare(
+                    data: payload.data,
+                    name: artifact.name,
+                    mimeType: artifact.mimeType
+                )
             }
+            // A retired surface or a superseded identity publishes nothing.
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
+            loadedIdentity = identity
+            loadedDocument = document
+        } catch is CancellationError {
+            // Interrupted work publishes nothing, so the next activation asks
+            // again instead of keeping a placeholder forever.
+        } catch {
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
+            failed = true
         }
     }
 }
@@ -1115,6 +1115,8 @@ private struct DisplayHTMLArtifactView: View {
     let display: DisplayProjection
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @State private var loadedIdentity: ChatMediaIdentity?
+    @State private var loadedHTML: String?
     @State private var failed = false
 
     var body: some View {
@@ -1138,10 +1140,13 @@ private struct DisplayHTMLArtifactView: View {
         return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
     }
 
-    /// Prepared markup the loader retains for this exact source, so a remount
-    /// renders it instead of re-fetching and re-preparing under the reader.
+    /// Prepared markup this card loaded itself, or — only for the first frame
+    /// after a remount — the markup the loader retained for this exact source.
+    /// Markup above the loader's per-value ceiling is never retained, and the
+    /// card that prepared it still renders it.
     private var html: String? {
         guard let identity = mediaIdentity else { return nil }
+        if loadedIdentity == identity, let loadedHTML { return loadedHTML }
         return model.chatMedia.retainedInlineArtifact(for: identity, as: PreparedDisplayHTML.self)?.source
     }
 
@@ -1153,32 +1158,29 @@ private struct DisplayHTMLArtifactView: View {
             failed = true
             return
         }
-        failed = false
         if html != nil { return }
-        var retried = false
-        while true {
-            do {
-                _ = try await model.chatMedia.inlineArtifact(for: identity) { payload in
-                    guard let source = String(data: payload.data, encoding: .utf8) else {
-                        throw CocoaError(.fileReadCorruptFile)
-                    }
-                    return PreparedDisplayHTML(source: source)
+        failed = false
+        do {
+            let source = try await model.chatMedia.inlineArtifact(for: identity) { payload in
+                guard let source = String(data: payload.data, encoding: .utf8) else {
+                    throw CocoaError(.fileReadCorruptFile)
                 }
-                return
-            } catch {
-                // A retired surface or a superseded request publishes nothing; a
-                // dependency that dropped this identity's work while the card is
-                // still mounted and current asks once more.
-                let current = !Task.isCancelled
-                    && presentationActivity.allowsPresentationPublication
-                    && mediaIdentity == identity
-                if current, !retried {
-                    retried = true
-                    continue
-                }
-                if current { failed = true }
-                return
+                return PreparedDisplayHTML(source: source)
             }
+            // A retired surface or a superseded identity publishes nothing.
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
+            loadedIdentity = identity
+            loadedHTML = source.source
+        } catch is CancellationError {
+            // Interrupted work publishes nothing, so the next activation asks
+            // again instead of keeping a placeholder forever.
+        } catch {
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
+            failed = true
         }
     }
 }

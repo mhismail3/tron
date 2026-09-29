@@ -72,12 +72,15 @@ enum ChatMediaPolicy {
     static let maximumRetainedInlineArtifacts = 8
     static let maximumRetainedInlineArtifactBytes = 4 * 1_024 * 1_024
     /// A prepared artifact above this ceiling is handed to its caller and not
-    /// retained: one large decoded document must not occupy the store.
+    /// retained: one large decoded document must not occupy the store. The card
+    /// that loaded it holds the value itself, so a value this size renders for as
+    /// long as its own card is mounted.
     static let maximumRetainedInlineArtifactValueBytes = 1 * 1_024 * 1_024
     /// Inline artifact requests are independent per identity, so one card's
     /// automatic load cannot cancel another's. The shared preparation slot still
     /// admits one fetch/decode working set at a time; this ceiling bounds how
-    /// many payloads can wait for it.
+    /// many identities prepare at once. A card that arrives when every slot is
+    /// busy waits for one in arrival order rather than failing.
     static let maximumInlineArtifactFlights = 4
 
     static func admitsEncodedByteCount(_ count: Int) -> Bool {
@@ -294,6 +297,14 @@ final class ChatMediaLoader {
     private var previewFlight: PreviewFlight?
     private var inlineArtifacts: [ChatMediaIdentity: RetainedInlineArtifact] = [:]
     private var inlineArtifactFlights: [ChatMediaIdentity: InlineArtifactFlight] = [:]
+    /// Slots held by the flights above, one per flight. A waiter is handed its
+    /// slot when it resumes, so a card that arrives in that moment cannot take
+    /// the same slot and push the flights past the ceiling.
+    private var inlineArtifactSlotsInUse = 0
+    /// Inline artifact requests that cannot start yet, oldest first. A card
+    /// waits in this queue instead of failing its load.
+    private var inlineArtifactSlotWaiters: [UInt64: CheckedContinuation<Void, Never>] = [:]
+    private var inlineArtifactSlotWaiterOrder: [UInt64] = []
     private var retainedInlineArtifactBytes = 0
     private var decodedThumbnailBytes = 0
     private var ordinal: UInt64 = 0
@@ -303,6 +314,7 @@ final class ChatMediaLoader {
     private var hostedThumbnailFlightWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     private var hostedPreviewLeaseWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     private var hostedFilePreviewWaiters: [CheckedContinuation<Void, Never>] = []
+    private var hostedInlineArtifactFlightWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     #endif
 
     init(
@@ -387,38 +399,66 @@ final class ChatMediaLoader {
         guard admits(identity) else { throw ChatMediaLoadError.staleIdentity }
         if let retained = retainedInlineArtifact(for: identity, as: A.self) { return retained }
 
-        let flight: InlineArtifactFlight
         if let existing = inlineArtifactFlights[identity] {
-            flight = existing
-        } else {
-            guard inlineArtifactFlights.count < ChatMediaPolicy.maximumInlineArtifactFlights else {
-                throw ChatMediaLoadError.capacityExceeded
-            }
-            ordinal &+= 1
-            let token = ordinal
-            let invalidationGeneration = self.invalidationGeneration
-            let fetch = self.fetch
-            let workLimiter = self.workLimiter
-            let task = Task<any ChatInlineArtifact, Error> { [weak self] in
-                let payload = try await workLimiter.run {
-                    let payload = try await fetch(identity)
-                    guard ChatMediaPolicy.admitsEncodedByteCount(payload.data.count) else {
-                        throw ChatMediaLoadError.encodedPayloadTooLarge
-                    }
-                    return payload
-                }
-                try Task.checkCancellation()
-                let artifact = try await prepare(payload)
-                guard let self, !Task.isCancelled,
-                      self.invalidationGeneration == invalidationGeneration,
-                      self.admits(identity) else { throw ChatMediaLoadError.staleIdentity }
-                self.retainInlineArtifact(artifact, for: identity)
-                return artifact
-            }
-            flight = InlineArtifactFlight(token: token, task: task)
-            inlineArtifactFlights[identity] = flight
+            return try await inlineArtifact(joining: existing, identity: identity)
         }
 
+        await acquireInlineArtifactSlot()
+        // Acquiring a slot suspends, so this identity's work may have started or
+        // finished while this request waited: the retained value or the flight
+        // that exists now is the one answer for it.
+        do {
+            try Task.checkCancellation()
+            guard admits(identity) else { throw ChatMediaLoadError.staleIdentity }
+            if let retained = retainedInlineArtifact(for: identity, as: A.self) {
+                releaseInlineArtifactSlot()
+                return retained
+            }
+            if let existing = inlineArtifactFlights[identity] {
+                releaseInlineArtifactSlot()
+                return try await inlineArtifact(joining: existing, identity: identity)
+            }
+        } catch {
+            // The handed slot goes to the next waiter instead of leaking.
+            releaseInlineArtifactSlot()
+            throw error
+        }
+
+        ordinal &+= 1
+        let token = ordinal
+        let invalidationGeneration = self.invalidationGeneration
+        let fetch = self.fetch
+        let workLimiter = self.workLimiter
+        let task = Task<any ChatInlineArtifact, Error> { [weak self] in
+            let payload = try await workLimiter.run {
+                let payload = try await fetch(identity)
+                guard ChatMediaPolicy.admitsEncodedByteCount(payload.data.count) else {
+                    throw ChatMediaLoadError.encodedPayloadTooLarge
+                }
+                return payload
+            }
+            try Task.checkCancellation()
+            let artifact = try await prepare(payload)
+            guard let self, !Task.isCancelled,
+                  self.invalidationGeneration == invalidationGeneration,
+                  self.admits(identity) else { throw ChatMediaLoadError.staleIdentity }
+            self.retainInlineArtifact(artifact, for: identity)
+            return artifact
+        }
+        let flight = InlineArtifactFlight(token: token, task: task)
+        inlineArtifactFlights[identity] = flight
+        hostedNotifyMediaCounts()
+        return try await inlineArtifact(joining: flight, identity: identity)
+    }
+
+    /// One waiter's view of one flight. Every waiter observes the same work, and
+    /// the token-guarded retire releases the flight and its slot exactly once —
+    /// including when the waiter that retires it was cancelled, so a flight that
+    /// already ended cannot keep holding a slot.
+    private func inlineArtifact<A: ChatInlineArtifact>(
+        joining flight: InlineArtifactFlight,
+        identity: ChatMediaIdentity
+    ) async throws -> A {
         do {
             let artifact = try await flight.task.value
             retireInlineArtifactFlight(identity: identity, token: flight.token)
@@ -427,16 +467,44 @@ final class ChatMediaLoader {
             guard let typed = artifact as? A else { throw ChatMediaLoadError.staleIdentity }
             return typed
         } catch {
-            if !Task.isCancelled {
-                retireInlineArtifactFlight(identity: identity, token: flight.token)
-            }
+            retireInlineArtifactFlight(identity: identity, token: flight.token)
             throw error
         }
+    }
+
+    /// Takes one of the bounded inline artifact slots, or waits for one. The wait
+    /// is a queue, not a retry: the caller resumes once, in arrival order, when a
+    /// slot is handed to it.
+    private func acquireInlineArtifactSlot() async {
+        guard inlineArtifactSlotsInUse >= ChatMediaPolicy.maximumInlineArtifactFlights else {
+            inlineArtifactSlotsInUse += 1
+            return
+        }
+        ordinal &+= 1
+        let token = ordinal
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            inlineArtifactSlotWaiters[token] = continuation
+            inlineArtifactSlotWaiterOrder.append(token)
+        }
+    }
+
+    /// Hands this caller's slot to the oldest waiter, or frees it when nobody is
+    /// waiting. A waiting card starts its own flight in the order it mounted.
+    private func releaseInlineArtifactSlot() {
+        while let token = inlineArtifactSlotWaiterOrder.first {
+            inlineArtifactSlotWaiterOrder.removeFirst()
+            guard let continuation = inlineArtifactSlotWaiters.removeValue(forKey: token) else { continue }
+            continuation.resume()
+            return
+        }
+        inlineArtifactSlotsInUse = max(0, inlineArtifactSlotsInUse - 1)
     }
 
     private func retireInlineArtifactFlight(identity: ChatMediaIdentity, token: UInt64) {
         guard inlineArtifactFlights[identity]?.token == token else { return }
         inlineArtifactFlights[identity] = nil
+        releaseInlineArtifactSlot()
+        hostedNotifyMediaCounts()
     }
 
     private func retainInlineArtifact(_ artifact: any ChatInlineArtifact, for identity: ChatMediaIdentity) {
@@ -736,6 +804,9 @@ final class ChatMediaLoader {
         inlineArtifactFlights.values.forEach { $0.task.cancel() }
         thumbnailFlights.removeAll(keepingCapacity: false)
         previewFlight = nil
+        // Cancelling a flight completes every waiter on it, and each of those
+        // hands its slot to the next queued card, so the queue drains and no
+        // waiting card is left holding a slot the loader no longer owns.
         inlineArtifactFlights.removeAll(keepingCapacity: false)
         thumbnails.removeAll(keepingCapacity: false)
         inlineArtifacts.removeAll(keepingCapacity: false)
@@ -829,6 +900,11 @@ final class ChatMediaLoader {
         if previewFlight?.kind == .file { return }
         await withCheckedContinuation { hostedFilePreviewWaiters.append($0) }
     }
+
+    func hostedWaitForInlineArtifactFlightCount(_ count: Int) async {
+        if inlineArtifactFlights.count >= count { return }
+        await withCheckedContinuation { hostedInlineArtifactFlightWaiters.append((count, $0)) }
+    }
     #endif
 
     private func hostedNotifyMediaCounts() {
@@ -836,6 +912,9 @@ final class ChatMediaLoader {
         let readyThumbnail = hostedThumbnailFlightWaiters.filter { thumbnailFlights.count >= $0.0 }
         hostedThumbnailFlightWaiters.removeAll { thumbnailFlights.count >= $0.0 }
         readyThumbnail.forEach { $0.1.resume() }
+        let readyInline = hostedInlineArtifactFlightWaiters.filter { inlineArtifactFlights.count >= $0.0 }
+        hostedInlineArtifactFlightWaiters.removeAll { inlineArtifactFlights.count >= $0.0 }
+        readyInline.forEach { $0.1.resume() }
         let previewCount = previewFlight?.leases.count ?? 0
         let readyPreview = hostedPreviewLeaseWaiters.filter { previewCount >= $0.0 }
         hostedPreviewLeaseWaiters.removeAll { previewCount >= $0.0 }
