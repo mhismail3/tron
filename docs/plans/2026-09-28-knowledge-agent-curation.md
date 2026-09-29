@@ -217,7 +217,10 @@ summary, bounded clean text, the user's take, verdict, tag definitions and
 guidelines. Threshold and ties defined and tested. Monthly budget ($5) persisted
 with reservations and settlement; the tagger stops cleanly when exhausted.
 Re-tag triggers: new entry, summary change, Your take change, vocabulary or
-guideline change (bulk, with a cost estimate first).
+guideline change (bulk, with a cost estimate first). Install the budget through
+K1's `KnowledgeCurationGate`, which receives the batch operation: refuse only
+operations that spend Jev budget, and reserve at Jev dispatch, not at
+publication of an already-computed selection.
 
 ### K5 — Summaries at intake
 

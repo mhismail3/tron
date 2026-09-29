@@ -217,7 +217,7 @@ describe("Knowledge curation", () => {
     const store = new KnowledgeStore(new TronWorkspace(root), undefined, undefined, vocabulary);
     const budget = { remaining: 2 };
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => summarizer, undefined,
-      () => budget.remaining > 0 ? (budget.remaining -= 1, { ok: true } as const) : ({ ok: false, code: "budget-exhausted" as const, reason: "Monthly tagging budget is spent" }));
+      operation => operation !== "tags" ? { ok: true } as const : budget.remaining > 0 ? (budget.remaining -= 1, { ok: true } as const) : ({ ok: false, code: "budget-exhausted" as const, reason: "Monthly tagging budget is spent" }));
     const records = await Promise.all([1, 2, 3, 4, 5].map(index => capture(store, index)));
     const response = await curate(service, "tags", other("batch-budget"), records.map(record => ({ id: record.id, revisionId: record.revisionId, tagIds: ["memory"] })));
     expect(statuses(response)).toEqual(["applied", "applied", "skipped", "skipped", "skipped"]);
@@ -226,6 +226,10 @@ describe("Knowledge curation", () => {
     // A skipped item is never dispatched, so it stays untouched.
     expect((await store.read(records[2]!.id))?.content.tags).toBeUndefined();
     expect(budget.remaining).toBe(0);
+    // A spent tagging budget never blocks a free edit.
+    const current = await Promise.all(records.map(async record => (await store.read(record.id))!.revisionId));
+    const verdicts = await curate(service, "verdict", other("batch-budget-verdicts"), records.map((record, index) => ({ id: record.id, revisionId: current[index]!, verdict: "evergreen" })));
+    expect(verdicts.applied).toBe(5);
   });
 
   it("reports an unusable item without discarding the rest of the batch", async () => {
@@ -290,7 +294,7 @@ describe("Knowledge curation", () => {
     const budget = { remaining: 10_000 };
     // A restarted process is a new owner instance over the same durable
     // workspace: receipts, revisions and the catalog all come back from disk.
-    const open = () => { const store = new KnowledgeStore(workspace, undefined, undefined, vocabulary); return { store, service: new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => summarizer, undefined, () => budget.remaining > 0 ? (budget.remaining -= 1, { ok: true } as const) : ({ ok: false, code: "budget-exhausted" as const, reason: "Monthly tagging budget is spent" }), new KnowledgeCurationJobs(64, 30_000)) }; };
+    const open = () => { const store = new KnowledgeStore(workspace, undefined, undefined, vocabulary); return { store, service: new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => summarizer, undefined, operation => operation !== "tags" ? { ok: true } as const : budget.remaining > 0 ? (budget.remaining -= 1, { ok: true } as const) : ({ ok: false, code: "budget-exhausted" as const, reason: "Monthly tagging budget is spent" }), new KnowledgeCurationJobs(64, 30_000)) }; };
     const first = open();
     const records = await Promise.all(Array.from({ length: 25 }, (_, index) => capture(first.store, 100 + index)));
     const batch = other("acceptance-batch");
@@ -320,12 +324,13 @@ describe("Knowledge curation", () => {
     phases.push({ name: "replay", ...counts(replay) });
     expect(replay.outcomes.filter(outcome => outcome.status === "applied").map(outcome => `${outcome.recordId}@${outcome.revisionId}`)).toEqual(appliedAfterResume);
 
-    // Phase 4: a spent budget stops the batch instead of dispatching the rest.
+    // Phase 4: a spent tagging budget stops a re-tag batch instead of
+    // dispatching the rest, while free verdict edits still apply.
     const revisions = await Promise.all(records.map(async record => (await second.store.read(record.id, undefined, true, true, true))!.revisionId));
-    const verdicts = await curate(second.service, "verdict", other("acceptance-verdicts"), records.map((record, index) => ({ id: record.id, revisionId: revisions[index]!, verdict: "evergreen" })));
-    const afterVerdicts = await Promise.all(records.map(async record => (await second.store.read(record.id, undefined, true, true, true))!.revisionId));
     budget.remaining = 5;
-    const stopped = await curate(second.service, "verdict", other("acceptance-budget-stop"), records.map((record, index) => ({ id: record.id, revisionId: afterVerdicts[index]!, verdict: "dated" })));
+    const stopped = await curate(second.service, "tags", other("acceptance-budget-stop"), records.map((record, index) => ({ id: record.id, revisionId: revisions[index]!, tagIds: ["evaluation"] })));
+    const afterRetag = await Promise.all(records.map(async record => (await second.store.read(record.id, undefined, true, true, true))!.revisionId));
+    const verdicts = await curate(second.service, "verdict", other("acceptance-verdicts"), records.map((record, index) => ({ id: record.id, revisionId: afterRetag[index]!, verdict: "evergreen" })));
     phases.push({ name: "budget-stop", ...counts(stopped) });
     expect(stopped.applied).toBe(5);
     expect(stopped.outcomes.filter(outcome => outcome.status === "skipped")).toHaveLength(20);
@@ -333,11 +338,14 @@ describe("Knowledge curation", () => {
     // The other writer's summary survived, and only the pre-stop items changed.
     const conflictedAfter = await second.store.read(conflicted.id, undefined, true, true, true);
     expect(conflictedAfter?.content.summary?.text).toBe("A user note written first");
-    expect(conflictedAfter?.content.tags).toBeUndefined();
-    const tagged = (await Promise.all(records.map(record => second.store.read(record.id, undefined, true, true, true)))).filter(record => record?.content.tags?.tagIds.length === 1).length;
-    const dated = (await Promise.all(records.map(record => second.store.read(record.id, undefined, true, true, true)))).filter(record => record?.content.verdict?.verdict === "dated").length;
+    const final = await Promise.all(records.map(record => second.store.read(record.id, undefined, true, true, true)));
+    const tagged = final.filter(record => record?.content.tags?.tagIds.length === 1).length;
+    const retagged = final.filter(record => record?.content.tags?.tagIds[0] === "evaluation").length;
+    const evergreen = final.filter(record => record?.content.verdict?.verdict === "evergreen").length;
     expect(tagged).toBe(24);
-    expect(dated).toBe(5);
+    expect(conflictedAfter?.content.tags).toBeUndefined();
+    expect(retagged).toBe(5);
+    expect(evergreen).toBe(25);
     expect(verdicts.applied).toBe(25);
 
     const report = {
@@ -346,8 +354,9 @@ describe("Knowledge curation", () => {
       items: records.length,
       phases,
       taggedRecords: tagged,
+      retaggedBeforeBudgetStop: retagged,
       conflictedRecordPreservedUserSummary: conflictedAfter?.content.summary?.text === "A user note written first",
-      datedRecords: dated,
+      verdictsAppliedWhileBudgetSpent: evergreen,
       stateRevision: stopped.stateRevision,
     };
     const path = join(root, "knowledge-curation-outcome.json");

@@ -201,11 +201,13 @@ export interface KnowledgeExtensionSeam {
   connector?: (action: KnowledgeAction, signal?: AbortSignal) => Promise<unknown>;
 }
 
-/** Consulted before each curation item. A refusal stops the batch: that item and
- * every later one are reported `skipped` with this code instead of being
- * attempted, so a paid producer cannot keep dispatching after its budget is
- * spoken for. The tagging owner installs the budget here. */
-export type KnowledgeCurationGate = () => { ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string };
+/** Consulted before each curation item with that batch's operation. A refusal
+ * stops the batch: that item and every later one are reported `skipped` with
+ * this code instead of being attempted, so a paid producer cannot keep
+ * dispatching after its budget is spoken for. The tagging owner installs the
+ * budget here and must refuse only operations that spend it: a spent tagging
+ * budget never blocks free edits such as verdicts, placement or relations. */
+export type KnowledgeCurationGate = (operation: KnowledgeCurationRequest["operation"]) => { ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string };
 
 export interface KnowledgeGenerationModel extends SourceAssessmentModel {
   reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal }): Promise<string>;
@@ -330,7 +332,7 @@ export class KnowledgeService {
     let stateRevision: number | undefined;
     for (const item of request.items) {
       if (stop) { outcomes.push({ recordId: item.recordId, status: "skipped", code: stop.code, reason: stop.reason }); continue; }
-      const gate = this.curationGate?.();
+      const gate = this.curationGate?.(request.operation);
       if (gate && !gate.ok) { stop = { code: gate.code, reason: gate.reason }; outcomes.push({ recordId: item.recordId, status: "skipped", code: gate.code, reason: gate.reason }); continue; }
       const refusal = curationItemRefusal(request.operation, item);
       if (refusal) { outcomes.push({ recordId: item.recordId, status: "failed", code: refusal.code, reason: refusal.reason }); continue; }

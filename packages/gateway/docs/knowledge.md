@@ -119,10 +119,12 @@ rather than inventing a taxonomy. A selection records the vocabulary revision it
 was validated against and `curationInputsDigest` (SHA-256 of the record's own
 title, readable text and current verdict), so editing the vocabulary flags
 re-tagging without making stored selections unreadable, while a change to the
-evidence itself does. The **curation gate** is consulted before each item; a
-refusal stops the batch and reports that item and every later one as `skipped`
-with the code, which is how the paid tagging owner stops dispatching once its
-budget is spoken for.
+evidence itself does. The **curation gate** is consulted before each item with
+the batch's operation; a refusal stops the batch and reports that item and every
+later one as `skipped` with the code, which is how the paid tagging owner stops
+dispatching once its budget is spoken for. It refuses only operations that spend
+the budget: a spent tagging budget never blocks free edits such as verdicts,
+placement or relations.
 
 Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
 owned background work, not a request that waits for a model: the call accepts a
