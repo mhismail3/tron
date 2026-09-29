@@ -343,17 +343,12 @@ enum ChatVisualParityStore {
     static let referenceURL = packageRoot.appending(path: "Tests/Fixtures/ChatVisualParityManifest.json")
     static let artifactsRoot = packageRoot.appending(path: "build/parity-reference")
 
-    /// The mode a run is in is decided by the committed reference itself: a
-    /// scenario it does not already hold is recorded, and every scenario it holds
-    /// is verified. There is no scheme variable or hidden flag, so what a run
-    /// means is reviewable from the manifest it read.
-    static var isRecording: Bool {
-        (try? readManifest()) == nil
-    }
-
-    /// Whether the committed reference already holds this scenario's frames: the
-    /// recording mode's per-scenario question, which decides whether a run writes
-    /// this scenario's PNG artifacts.
+    /// Whether the committed reference already holds this scenario's frames. A run
+    /// records the scenarios it does not hold and verifies the ones it does, so
+    /// this is the gate's whole mode question — there is no scheme variable or
+    /// hidden flag, and what a run means is reviewable from the manifest it read.
+    /// It is also what decides whether the run writes this scenario's PNG
+    /// artifacts.
     static func holdsReference(for id: String) -> Bool {
         (try? readManifest())?.scenarios.contains { $0.id == id } ?? false
     }
