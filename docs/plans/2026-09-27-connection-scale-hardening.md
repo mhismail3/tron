@@ -642,8 +642,8 @@ rows are in priority order.
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-4 | Done | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28; the killer is XCTest's per-test execution-time allowance (XCTestCore reports `Restarting after unexpected exit, crash, or test timeout`) SIGKILLing the app (`Test crashed with signal kill`), and the test it lands on is the process's CPU-heaviest because `IOSClientDiagnosticBuffer.redactedMessage` matched URLs super-quadratically (3 ms at 512 characters, 654 ms at 4,096; the export test 8.646-10.297 s -> 0.072 s); see the T-4 handoff |
-| T-5 | Claimed | `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` hit its 5 s watchdog once in the full iOS run on `419a67a53` ("blocked on a wait that ignores cancellation"); passes alone 3/3. Check whether it waits on a write-log index a C-6 cancel frame can shift (as F-1 found) and make it robust | F-1 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
-| F-2 | Claimed | O-6b `bandwidth` page leg fails on integration with `session.sync` conflict "Session synchronization is no longer owned by this token" (run `20260928T235606Z-multi-session-471100`); `--cases none` passes. Decide driver artifact (concurrent page mounts on one connection) vs Gateway regression (C-6/G-12 barrier handling) and fix at the owner | O-6b | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| T-5 | Blocked | `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` hit its 5 s watchdog once in the full iOS run on `419a67a53` ("blocked on a wait that ignores cancellation"); passes alone 3/3. Check whether it waits on a write-log index a C-6 cancel frame can shift (as F-1 found) and make it robust. **Blocked on validation only:** the scenario no longer indexes the write log by position (it finds each read by method and scope), but the owned iOS lane was leased by another worker for this whole session, so the suite was never compiled or run; see the handoff | F-1 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| F-2 | Blocked | O-6b `bandwidth` page leg fails on integration with `session.sync` conflict "Session synchronization is no longer owned by this token" (run `20260928T235606Z-multi-session-471100`); `--cases none` passes. Decide driver artifact (concurrent page mounts on one connection) vs Gateway regression (C-6/G-12 barrier handling) and fix at the owner. **Decided: Gateway regression** (reproduced `--cases blackhole,bandwidth` 2/2; `--cases bandwidth` alone passes; the refusal is the first `session.sync` on the fresh connection the mobile opens after the Gateway's heartbeat close of its blackholed socket, 243 conflicts on that one connection). Root cause not landed in the budget; see the handoff | O-6b | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | F-3 | Claimed | A protocol mismatch reads as a generic transport failure on the phone: the Gateway closes 1008 without a machine-readable reason, so the phone retries forever and shows no "update this Mac" state (2026-09-29, a protocol-5 MacBook Pro profile left the Knowledge dashboard loading). Send a typed close reason for protocol mismatch; the phone stops retrying that profile and shows which side needs updating | E-3b | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | C-7 | Done | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/c-7`; the connection epoch now owns its event reader) |
 
@@ -10047,3 +10047,77 @@ recovery gaps; all three were fixed on the same branch.
   persists it, covered by `logger.test.ts` ("persists the protocol version a
   refused hello asked for", red first with `expected undefined to be 5`); the
   field reaches the installed app with the next Mac build.
+
+### T-5 · Blocked · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/t-5`)
+
+- Result: `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` no
+  longer addresses the write log by position. The pair of reads each catalog
+  load sends is found by method and scope and reserved, so an extra frame (a
+  `cancel` control frame or a read the model appends for a reason the scenario
+  did not pin) can no longer shift a tracked read: before, a shifted index
+  answered the wrong request, the load the scenario meant to answer was never
+  answered, and the scenario's `await load.value` ignored the watchdog's
+  cancellation - the reported "blocked on a wait that ignores cancellation",
+  since awaiting a child `Task`'s value does not observe the waiter's
+  cancellation. A read that never reaches the socket now fails with a named
+  `ScriptedReadMissing` instead of expiring the watchdog. The two `.global`
+  pairs the scenario answers out of order stay distinguishable because each
+  discovered read is reserved; which of `provider.list`/`model.list` is written
+  first is not fixed (they are spawned concurrently), and neither was the old
+  test's assumption - it filtered by method.
+- What the check found: this scenario cannot be shown to receive a C-6 `cancel`
+  frame - every load's Task is awaited, the scripted socket answers every
+  request, `model.recent` and `auth.*` are never cancelled - so the shift class
+  here is any read the model appends, not a cancel frame specifically. The fix
+  covers both, and the addressing no longer depends on which class it was.
+- Blocked on: validation. Every attempt at `scripts/tron-ios-test build` and
+  `run` returned `error: iOS test simulator is already leased` for this
+  worktree's whole session (first a stale-content holder, then the E-3c worker
+  on the default lane, `pid 22138`), so the edited file was never compiled and
+  the suite was never run. The change must be built and run
+  (`scripts/tron-ios-test build` then `scripts/tron-ios-test run
+  --only-testing TronMobileTests/AppModelInvalidationTests`) before it is merged.
+- For the next agent: with the writes found by identity, the remaining
+  positional assumption in the same file is `settingsResponsesRemainKeyed`,
+  which still indexes frames 1-4 and 3-5 absolutely and has the same shape.
+
+### F-2 · Blocked · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/t-5`)
+
+- Decided: **Gateway regression**, not a driver artifact. Concurrent page mounts
+  on one connection are not the trigger: `scripts/tron-profile gateway
+  --scenario multi-session --no-build --iterations 1 --catalog-files 300
+  --catalog-mib 256 --mixed-seconds 60 --cases bandwidth` passes
+  (`20260929T061808Z-multi-session-9ebc17`), while the same command with
+  `--cases blackhole,bandwidth` fails 2/2 (`20260929T062215Z-multi-session-cbeb96`,
+  and the row's original `20260928T235606Z-multi-session-471100`). The trigger is
+  the mobile's fresh connection after the Gateway closes its blackholed socket by
+  heartbeat timeout (`connection.heartbeat-timeout`), not the page leg itself.
+- Evidence (all three runs agree): the mobile reconnects, `connection.opened`
+  records a new connection id, and the **first** `session.open` on it is answered
+  (604179 bytes in `cbeb96`), the `session.sync` that immediately follows with
+  that response's `syncToken` is refused with `conflict` "Session synchronization
+  is no longer owned by this token" 0.7 ms later, and 243 more `session.sync`
+  refusals follow on that one connection until the run ends. The open response
+  and the refused sync are on the same socket (the driver's timeline shows no
+  reconnect between them), so `server.ts`'s `completeSynchronization` refuses a
+  token its own `beginSynchronization` had just installed for that connection.
+  `session.progress` frames arrive unquarantined right after the refusal, so the
+  session's `SessionSyncBarrier` was already gone - the synchronization was
+  revoked, not merely mismatched. No `gateway.shed`, `transport.resyncRequired` or
+  other warning record precedes it.
+- Repro artifact: `~/Library/Developer/Tron/profiles/gateway/20260929T062215Z-multi-session-cbeb96`
+  (`driver-iteration-1.log` names the failure; `fixture/gateway.jsonl` carries the
+  243 `rpc.error session.sync` records on `640e5b53`).
+- Left: the root cause. Candidates narrowed by the evidence, in the transport
+  barrier paths (`src/transport/server.ts`): the open handler's
+  `releaseOwnSynchronizations` (`finally`, when `rpcOutcome` is not success),
+  `revokeAbandonedOpen`, and `beginSynchronization`'s deterministic replacement
+  of an installed token. The failing open is the first mount on a connection that
+  replaces one the Gateway closed itself, which points at a revoke that outlives
+  the connection that owned the open, or at a delivered open response whose
+  barrier is released before its `session.sync` can commit. Start from a focused
+  `sync-protocol.integration.test.ts` case that reproduces "open answered, then
+  the sync of that same token refused" before touching the code.
+- Deviation: F-2 was dispatched to this lane with T-5; the two are unrelated and
+  the T-5 change (iOS test) does not touch the Gateway, so nothing here depends on
+  an unvalidated edit.
