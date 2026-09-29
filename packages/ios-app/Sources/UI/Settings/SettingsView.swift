@@ -11,6 +11,10 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    #if TRON_TRANSCRIPT_ORIENTATION_EVALUATION
+    @AppStorage(ChatTranscriptOrientation.evaluationDefaultsKey)
+    private var flippedTranscriptEvaluation = true
+    #endif
     @State private var showsNotifications = false
     @State private var hasRefreshedNotificationBadge = false
 
@@ -118,7 +122,19 @@ struct SettingsView: View {
                         settingsLink("Logs", summary: "Recent diagnostics from paired Mac gateways", icon: "text.alignleft", accent: .tronBlue) {
                             GatewayLogsSettingsView()
                         }
+                        #if TRON_TRANSCRIPT_ORIENTATION_EVALUATION
+                        settingsDivider(accent: .tronBlue)
+                        TronToggleRow(
+                            icon: "arrow.up.arrow.down",
+                            title: "Flipped chat transcript (evaluation)",
+                            accent: .tronBlue,
+                            isOn: $flippedTranscriptEvaluation
+                        )
+                        #endif
                     }
+                    #if TRON_TRANSCRIPT_ORIENTATION_EVALUATION
+                    .tronSettingsCaption("Applies after relaunch")
+                    #endif
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)

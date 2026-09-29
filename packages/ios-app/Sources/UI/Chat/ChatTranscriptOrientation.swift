@@ -22,18 +22,23 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// The newest row sits at the content origin, which is exact.
     case newestAtOrigin
 
-    /// The development switch. Today's path is the default, and only a hosted
-    /// build (including optimized DevicePerformance) can select the origin-anchored
-    /// path: a whole hosted run selects it
-    /// with `TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`, so one suite runs both
-    /// ways against the same committed reference.
+    #if TRON_TRANSCRIPT_ORIENTATION_EVALUATION
+    // LocalDevice-only preference and Settings row retire together at CT-19.
+    static let evaluationDefaultsKey = "tron.transcript.flippedEvaluation"
+    #endif
+
+    /// One selection per launch. Hosted runs keep their environment override;
+    /// LocalDevice evaluation defaults to origin; Release keeps today's path.
     static let selected: ChatTranscriptOrientation = {
         #if HOSTED_TEST
-        if ProcessInfo.processInfo.environment["TRON_CHAT_TRANSCRIPT_ORIENTATION"] == "origin" {
-            return .newestAtOrigin
-        }
-        #endif
+        return ProcessInfo.processInfo.environment["TRON_CHAT_TRANSCRIPT_ORIENTATION"] == "origin"
+            ? .newestAtOrigin : .newestAtEnd
+        #elseif TRON_TRANSCRIPT_ORIENTATION_EVALUATION
+        return (UserDefaults.standard.object(forKey: evaluationDefaultsKey) as? Bool ?? true)
+            ? .newestAtOrigin : .newestAtEnd
+        #else
         return .newestAtEnd
+        #endif
     }()
 
     /// The vertical render scale the transcript applies. Every element of the

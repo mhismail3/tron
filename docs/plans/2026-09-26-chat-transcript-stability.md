@@ -3279,6 +3279,17 @@ lifecycle, device installation, or upstream Git action is authorized.
   the spine's last index. Existing `hostedPrependBarrier` (≤2 pt excursion),
   terminal opening, and full origin harness are the regressions; no bounds or
   expectations changed. This corrects diagnostics, not observed reader movement.
-- Step 3: temporary LocalDevice-only launch preference and diagnostics toggle;
-  hosted environment selection and Release's current path must remain intact.
+- Step 3: LocalDevice alone compiles the evaluation preference and diagnostics
+  toggle. The app eagerly freezes the static selection at launch (not first chat),
+  defaulting to origin. Hosted selection still uses only the environment; Release
+  keeps today and compiles neither the key nor Settings row. Owning development
+  documentation describes the comparison and CT-19 removal.
 - Evidence and user-owned install/checklist handoff follow below after clean commits.
+
+Evaluation selection failure modes (before implementation): absent preference
+must select origin; false must select today; changing Settings must not mutate
+an already launched session; hosted environment selection must remain independent
+of this preference; Release must not contain the preference or row. Validate the
+compile boundaries with LocalDevice/Release builds, preserve hosted integration
+gates in both orientations, and leave real Settings/relaunch comparison explicitly
+on the user's device checklist. No isolated tests or production test hooks added.
