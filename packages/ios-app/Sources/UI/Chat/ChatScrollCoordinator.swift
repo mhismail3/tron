@@ -436,19 +436,12 @@ final class ChatScrollCoordinator {
     }
 
     private func semanticFrame(for renderedID: String) -> SemanticFrameSample? {
-        guard let sample = rawSemanticFrames[renderedID] else { return nil }
-        return SemanticFrameSample(
-            layoutEpoch: sample.layoutEpoch,
-            revision: sample.revision,
-            rawFrame: orientation.transcriptFrame(
-                sample.rawFrame,
-                containerHeight: geometry.containerHeight
-            )
-        )
+        rawSemanticFrames[renderedID]
     }
 
     func semanticFrameChanged(renderedID: String, layoutEpoch: Int, frame: CGRect) {
         guard layoutEpoch == self.layoutEpoch else { return }
+        let frame = orientation.transcriptFrame(frame, containerHeight: geometry.containerHeight)
         // Rows and the tail marker report the scroll view's own frames. On the
         // origin-anchored path those measure upward from the visual bottom, so
         // every consumer below — the reader's anchor row, the marker's
