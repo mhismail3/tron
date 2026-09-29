@@ -105,6 +105,55 @@ extension EnvironmentValues {
     }
 }
 
+/// The compact thinking trace's own measurements. `contentHeight` is the
+/// paragraph's measured height, `referenceHeight` the four reference lines', and
+/// `overflowing` the flag the tap target, the mask and the accessibility trait
+/// read.
+struct ChatHostedThinkingTraceMeasurement: Equatable, Sendable {
+    let contentHeight: CGFloat
+    let referenceHeight: CGFloat
+    let overflowing: Bool
+}
+
+/// A trace's measurements, so a hosted test can see that a mounted wrapped trace
+/// measured itself and reads as overflowing: without them the rewrite would
+/// silently lose the tap target and the tail fade.
+struct ChatHostedThinkingTraceProbe: View {
+    let id: String
+    let contentHeight: CGFloat
+    let referenceHeight: CGFloat
+    let overflowing: Bool
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .allowsHitTesting(false)
+            .onChange(of: measurement, initial: true) { _, value in
+                hostedRecorder?.recorder?.recordThinkingTrace(
+                    id: id,
+                    contentHeight: value.contentHeight,
+                    referenceHeight: value.referenceHeight,
+                    overflowing: value.overflowing
+                )
+            }
+    }
+
+    private var measurement: Measurement {
+        Measurement(
+            contentHeight: contentHeight,
+            referenceHeight: referenceHeight,
+            overflowing: overflowing
+        )
+    }
+
+    private struct Measurement: Equatable {
+        let contentHeight: CGFloat
+        let referenceHeight: CGFloat
+        let overflowing: Bool
+    }
+}
+
 struct ChatHostedScrollState: Sendable {
     let isDetached: Bool
     let hasUnread: Bool
@@ -142,6 +191,8 @@ struct ChatHostedObservation: Sendable {
     /// shows up here as a second instance for the same row.
     let rowIdentityInstanceCounts: [String: Int]
     let rowIdentityMountCounts: [String: Int]
+    /// The compact thinking traces' own measurements per trace identity.
+    let thinkingTraceMeasurements: [String: ChatHostedThinkingTraceMeasurement]
     let scrollSettledDistance: CGFloat?
     let scrollCommandCount: Int
     let tailMaterializationCommandCount: Int
@@ -230,6 +281,7 @@ final class ChatHostedProbe {
     private var rowMountCounters: [String: Int] = [:]
     private var rowIdentityInstances: [String: [UUID]] = [:]
     private var rowIdentityMountCounts: [String: Int] = [:]
+    private var thinkingTraceMeasurements: [String: ChatHostedThinkingTraceMeasurement] = [:]
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
     private var tailMaterializationCommandCount = 0
@@ -314,6 +366,7 @@ final class ChatHostedProbe {
             excludedRowStabilityIDs: excludedRowStabilityIDs.sorted(),
             rowIdentityInstanceCounts: rowIdentityInstances.mapValues(\.count),
             rowIdentityMountCounts: rowIdentityMountCounts,
+            thinkingTraceMeasurements: thinkingTraceMeasurements,
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
             tailMaterializationCommandCount: tailMaterializationCommandCount,
@@ -600,6 +653,21 @@ final class ChatHostedProbe {
             }
             rowIdentityMountCounts[id, default: 0] &+= 1
         }
+        revision &+= 1
+    }
+
+    /// The compact thinking trace's own measurements. A trace that never
+    /// received them would keep its estimated viewport and lose its tap target
+    /// and tail fade, so this is the rewrite's own oracle.
+    func recordThinkingTrace(id: String, contentHeight: CGFloat, referenceHeight: CGFloat, overflowing: Bool) {
+        guard !id.isEmpty else { return }
+        let measurement = ChatHostedThinkingTraceMeasurement(
+            contentHeight: contentHeight,
+            referenceHeight: referenceHeight,
+            overflowing: overflowing
+        )
+        guard thinkingTraceMeasurements[id] != measurement else { return }
+        thinkingTraceMeasurements[id] = measurement
         revision &+= 1
     }
 

@@ -120,6 +120,31 @@ struct ChatRowStabilityTests {
                     report.remountedRowCount > 0,
                     "no fixture row left the lazy range, so the journey never remounted one"
                 )
+                // A settled row's height comes from its content, not from when
+                // it was measured: the thinking trace's estimate left its first
+                // mount 50 pt short of the measured viewport and only a remount
+                // reached it (F2).
+                let phaseVariants = report.phaseVariantRows
+                #expect(
+                    phaseVariants.isEmpty,
+                    "a settled row changed height between phases: \(phaseVariants)"
+                )
+                // The rewrite measures the trace in the layout that places it;
+                // without those measurements the trace loses its tap target and
+                // its tail fade, which nothing else observes.
+                let traces = harness.probeObservation.thinkingTraceMeasurements
+                #expect(traces.count == 1, "the fixture has one thinking run: \(traces.keys.sorted())")
+                let trace = try #require(traces.values.first,
+                    "the wrapped thinking trace never reported its measurements")
+                #expect(
+                    trace.overflowing,
+                    "a wrapped thinking trace must read as overflowing: \(trace)"
+                )
+                #expect(trace.referenceHeight > 0, "the reference lines were never measured")
+                #expect(
+                    trace.contentHeight > trace.referenceHeight,
+                    "the wrapped paragraph is taller than its four reference lines: \(trace)"
+                )
                 print(report.line)
                 try report.write()
                 print("ROW-STABILITY report=\(RowStabilityReport.reportURL.path)")

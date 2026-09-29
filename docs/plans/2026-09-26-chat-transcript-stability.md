@@ -1088,3 +1088,24 @@ pass only through eager-only repairs, stop and report.
   `shortStreamingResponseClearsComposer` and `streamingBurstLatestProjection`
   pass.
 - Changes: `ChatEntranceRows.swift`.
+
+### CT-27 stage B1 (measurement) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: the measurement the stage's fixes are judged by. The journey now drains
+  the native row samples at every phase boundary into a per-mount height history
+  and reports the variants it finds: `withinMountVariants` (a row that presented
+  a second height under one physical mount), `crossMountVariants` (a row whose
+  height differs between mounts) and `phaseVariants` (a row whose published frame
+  height differs between journey phases).
+- Measured on stage A's code (lane ct27, run `20260929T011256Z-run.8jSUBv`, 1.5 s):
+  `withinMountVariants=2` — both inline markdown display rows changed 242 → 222 pt
+  under one mount (20 pt, F3's measured height arriving after admission) — and
+  `phaseVariants=1: stability-thinking=82.7..132.7` (F2: the thinking trace's
+  first mount committed the 16 pt line-estimate viewport and only a later remount
+  reached the measured 66 pt one, a 50 pt difference between the row's own
+  published heights).
+- Why the A1 counter missed both: its record restarts at every physical mount and
+  drops excluded frames, so a height that settles after a remount and a mount that
+  only ever presents the estimate are invisible to it.
+- This commit adds no assertion; it records what today's code does.
+- Changes: `ChatRowStabilityTests.swift`.

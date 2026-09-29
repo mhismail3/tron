@@ -124,18 +124,6 @@ enum ChatThinkingTraceLayoutPolicy {
         return min(contentHeight, maximumHeight)
     }
 
-    /// Estimates the bounded trace viewport until TextKit has supplied its
-    /// first measurement. A zero-height preference is not evidence that the
-    /// trace has no content; using the normal fallback for every admitted line
-    /// can create a one-frame height flash when the hidden probe reports wraps.
-    static func initialViewportHeight(
-        lineCount: Int = 1,
-        fallbackLineHeight: CGFloat = Self.fallbackLineHeight
-    ) -> CGFloat {
-        let boundedLines = min(max(lineCount, 1), maximumLines)
-        return max(1, fallbackLineHeight) * CGFloat(boundedLines)
-    }
-
     static func tailOffset(contentHeight: CGFloat, viewportHeight: CGFloat) -> CGFloat {
         max(0, contentHeight - viewportHeight)
     }
