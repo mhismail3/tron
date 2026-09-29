@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import TronMobileCore
 @testable import TronMobile
 
 /// Retained extension content is presentation-only and derived from the

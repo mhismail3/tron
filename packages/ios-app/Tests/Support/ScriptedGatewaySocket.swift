@@ -1,5 +1,6 @@
 import Foundation
 import Synchronization
+@testable import TronMobileCore
 @testable import TronMobile
 
 actor ScriptedGatewaySocket: GatewaySocketConnection {

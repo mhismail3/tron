@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 enum InAppNoticeKey: String, Hashable, Sendable {
     case gatewayRestart

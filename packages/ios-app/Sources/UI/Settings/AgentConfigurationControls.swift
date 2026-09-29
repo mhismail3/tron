@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Shared model and reasoning controls used by both persisted defaults and a
 /// live session. Both setting capsules use the same anchored slider host.

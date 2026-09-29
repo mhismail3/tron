@@ -65,6 +65,7 @@ import {
   hasExtensionLifecycleProjectionProperty,
   inspectExtensionLifecycleProjection,
   lifecycleProjectionArtifact,
+  observedPausedProcessTerminalAt,
   parseExtensionLifecycleProjectionHeader,
 } from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -4087,8 +4088,14 @@ export class RuntimeRegistry {
       const value = admitExtensionLifecycleArtifact(parsed, { exactOwnedLegacy: true });
       if (!value) return undefined;
       const state = value.state ?? value.status;
-      const active = state === "queued" || state === "running" || state === "pending"
-        || state === "detached" || state === "paused";
+      const runId = typeof value.runId === "string" ? value.runId : undefined;
+      // A settled paused artifact owns no live work: it must not outrank
+      // live artifacts for the bounded discovery budget. Without the
+      // proof (or a run identity to bind it) the artifact stays active.
+      const settledPaused = state === "paused" && runId !== undefined
+        && observedPausedProcessTerminalAt(value, runId) !== undefined;
+      const active = !settledPaused && (state === "queued" || state === "running" || state === "pending"
+        || state === "detached" || state === "paused");
       const timestamps = [value.lastUpdate, value.startedAt, value.endedAt]
         .filter((item): item is number => typeof item === "number" && Number.isSafeInteger(item) && item >= 0);
       return { active, timestamp: Math.max(0, ...timestamps) };

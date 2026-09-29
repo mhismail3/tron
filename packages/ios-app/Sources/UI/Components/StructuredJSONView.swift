@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import TronMobileCore
 
 enum StructuredJSONPathComponent: Hashable, Sendable {
     case key(String)

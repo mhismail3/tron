@@ -1,5 +1,6 @@
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @Suite("New session source control")
 struct SessionSourceControlTests {

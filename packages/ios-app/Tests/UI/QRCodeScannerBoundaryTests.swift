@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @MainActor
 @Suite("QR scanner system-service boundaries")

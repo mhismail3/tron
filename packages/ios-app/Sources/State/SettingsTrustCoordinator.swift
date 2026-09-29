@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 @MainActor
 protocol SettingsTrustCoordinatorDelegate: AnyObject {

@@ -1,0 +1,830 @@
+import Foundation
+import TronMobileCore
+
+package struct ContentPart: Codable, Hashable, Sendable, Identifiable {
+    package struct Attachment: Codable, Hashable, Sendable {
+        package let name: String
+        package let mimeType: String
+        package let size: Int
+
+        package init(name: String, mimeType: String, size: Int) {
+            self.name = name
+            self.mimeType = mimeType
+            self.size = size
+        }
+    }
+
+    package enum Kind: String, Codable, Sendable { case text, thinking, image, toolCall }
+    package let id: String
+    package let ordinal: Int
+    package let thinkingRunOrdinal: Int?
+    package let type: Kind
+    package let text: String?
+    package let attachment: Attachment?
+    let redacted: Bool?
+    package let mimeType: String?
+    package let blobId: String?
+    package let toolCallId: String?
+    package let name: String?
+    package let label: String?
+    package let arguments: JSONValue?
+    package let toolSegmentId: String?
+    package let groupId: String?
+    package let groupIndex: Int?
+    package let groupCount: Int?
+    package let groupFinalized: Bool?
+}
+
+extension ContentPart {
+    package init(
+        id: String,
+        ordinal: Int,
+        thinkingRunOrdinal: Int?,
+        type: Kind,
+        text: String?,
+        attachment: Attachment?,
+        redacted: Bool?,
+        mimeType: String?,
+        blobId: String?,
+        toolCallId: String?,
+        name: String?,
+        arguments: JSONValue?
+    ) {
+        self.id = id
+        self.ordinal = ordinal
+        self.thinkingRunOrdinal = thinkingRunOrdinal
+        self.type = type
+        self.text = text
+        self.attachment = attachment
+        self.redacted = redacted
+        self.mimeType = mimeType
+        self.blobId = blobId
+        self.toolCallId = toolCallId
+        self.name = name
+        label = nil
+        self.arguments = arguments
+        toolSegmentId = nil
+        groupId = nil
+        groupIndex = nil
+        groupCount = nil
+        groupFinalized = nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, ordinal, thinkingRunOrdinal, type, text, attachment, redacted,
+             mimeType, blobId, toolCallId, name, label, arguments,
+             toolSegmentId, groupId, groupIndex, groupCount, groupFinalized
+    }
+
+    package init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        ordinal = try values.decode(Int.self, forKey: .ordinal)
+        type = try values.decode(Kind.self, forKey: .type)
+        thinkingRunOrdinal = try values.decodeIfPresent(Int.self, forKey: .thinkingRunOrdinal)
+        if type == .thinking, thinkingRunOrdinal == nil {
+            throw DecodingError.keyNotFound(
+                CodingKeys.thinkingRunOrdinal,
+                .init(
+                    codingPath: values.codingPath,
+                    debugDescription: "Thinking content requires a stable run ordinal"
+                )
+            )
+        }
+        text = try values.decodeIfPresent(String.self, forKey: .text)
+        attachment = try values.decodeIfPresent(Attachment.self, forKey: .attachment)
+        redacted = try values.decodeIfPresent(Bool.self, forKey: .redacted)
+        mimeType = try values.decodeIfPresent(String.self, forKey: .mimeType)
+        blobId = try values.decodeIfPresent(String.self, forKey: .blobId)
+        toolCallId = try values.decodeIfPresent(String.self, forKey: .toolCallId)
+        name = try values.decodeIfPresent(String.self, forKey: .name)
+        label = try values.decodeIfPresent(String.self, forKey: .label)
+        arguments = try values.decodeIfPresent(JSONValue.self, forKey: .arguments)
+        toolSegmentId = try values.decodeIfPresent(String.self, forKey: .toolSegmentId)
+        groupId = try values.decodeIfPresent(String.self, forKey: .groupId)
+        groupIndex = try values.decodeIfPresent(Int.self, forKey: .groupIndex)
+        groupCount = try values.decodeIfPresent(Int.self, forKey: .groupCount)
+        groupFinalized = try values.decodeIfPresent(Bool.self, forKey: .groupFinalized)
+        if let toolSegmentId, type != .toolCall || toolSegmentId.isEmpty {
+            throw DecodingError.dataCorruptedError(
+                forKey: .toolSegmentId,
+                in: values,
+                debugDescription: "Tool segment identity must be nonempty and owned by a tool call"
+            )
+        }
+        let identityFieldsPresent = [groupId != nil, groupIndex != nil, groupCount != nil]
+        if identityFieldsPresent.contains(true) || groupFinalized == true {
+            guard type == .toolCall,
+                  identityFieldsPresent.allSatisfy({ $0 }),
+                  let groupId, !groupId.isEmpty,
+                  let groupIndex, groupIndex >= 0,
+                  let groupCount, groupCount > 0, groupIndex < groupCount,
+                  groupFinalized == true else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .groupId,
+                    in: values,
+                    debugDescription: "Tool invocation group metadata must be complete, finalized, and in bounds"
+                )
+            }
+        } else if groupFinalized == false, type != .toolCall {
+            throw DecodingError.dataCorruptedError(
+                forKey: .groupFinalized,
+                in: values,
+                debugDescription: "Only provisional tool calls may carry groupFinalized=false"
+            )
+        }
+    }
+
+    package func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(ordinal, forKey: .ordinal)
+        try values.encodeIfPresent(thinkingRunOrdinal, forKey: .thinkingRunOrdinal)
+        try values.encode(type, forKey: .type)
+        try values.encodeIfPresent(text, forKey: .text)
+        try values.encodeIfPresent(attachment, forKey: .attachment)
+        try values.encodeIfPresent(redacted, forKey: .redacted)
+        try values.encodeIfPresent(mimeType, forKey: .mimeType)
+        try values.encodeIfPresent(blobId, forKey: .blobId)
+        try values.encodeIfPresent(toolCallId, forKey: .toolCallId)
+        try values.encodeIfPresent(name, forKey: .name)
+        try values.encodeIfPresent(label, forKey: .label)
+        try values.encodeIfPresent(arguments, forKey: .arguments)
+        try values.encodeIfPresent(toolSegmentId, forKey: .toolSegmentId)
+        try values.encodeIfPresent(groupId, forKey: .groupId)
+        try values.encodeIfPresent(groupIndex, forKey: .groupIndex)
+        try values.encodeIfPresent(groupCount, forKey: .groupCount)
+        try values.encodeIfPresent(groupFinalized, forKey: .groupFinalized)
+    }
+}
+
+private protocol TranscriptPayload: Codable, Hashable, Sendable {
+    var id: String { get }
+    var parentId: String? { get }
+    var timestamp: String { get }
+}
+
+package struct TranscriptForkBoundary: Codable, Hashable, Sendable {
+    package enum Kind: String, Codable, Hashable, Sendable { case sessionFork, subagentFork }
+    package let kind: Kind
+    package let inheritedAnchorId: String
+    package let gapOrdinal: Int
+
+    init(kind: Kind, inheritedAnchorId: String, gapOrdinal: Int) throws {
+        guard !inheritedAnchorId.isEmpty, inheritedAnchorId.utf8.count <= 512,
+              gapOrdinal >= 0 else {
+            throw GatewayFailure(code: "invalid_response", message: "Invalid transcript fork boundary", retryable: true, details: nil)
+        }
+        self.kind = kind; self.inheritedAnchorId = inheritedAnchorId; self.gapOrdinal = gapOrdinal
+    }
+
+    package init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try values.decode(Kind.self, forKey: .kind)
+        let inheritedAnchorId = try values.decode(String.self, forKey: .inheritedAnchorId)
+        let gapOrdinal = try values.decode(Int.self, forKey: .gapOrdinal)
+        guard !inheritedAnchorId.isEmpty, inheritedAnchorId.utf8.count <= 512,
+              gapOrdinal >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .inheritedAnchorId, in: values, debugDescription: "Invalid transcript fork boundary")
+        }
+        self.kind = kind; self.inheritedAnchorId = inheritedAnchorId; self.gapOrdinal = gapOrdinal
+    }
+
+    private enum CodingKeys: String, CodingKey { case kind, inheritedAnchorId, gapOrdinal }
+}
+
+package struct ExtensionToolOrigin: Codable, Hashable, Sendable {
+    /// Legacy public source fallback. It is never a filesystem path or grouping
+    /// key when more than one admitted owner claims it.
+    let source: String
+    /// Exact opaque owner identity, when supplied by the Gateway.
+    package let owner: ExtensionOwner?
+
+    package init(source: String, owner: ExtensionOwner? = nil) {
+        self.source = source
+        self.owner = owner
+    }
+
+    private enum CodingKeys: String, CodingKey { case source, owner }
+
+    package init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        source = try values.decode(String.self, forKey: .source)
+        guard !source.isEmpty, source.utf8.count <= 8_192,
+              !source.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f }) else {
+            throw DecodingError.dataCorruptedError(forKey: .source, in: values, debugDescription: "Extension origin source is invalid")
+        }
+        owner = try values.decodeIfPresent(ExtensionOwner.self, forKey: .owner)
+        if let owner {
+            guard !owner.source.isEmpty, owner.source.utf8.count <= 8_192 else {
+                throw DecodingError.dataCorruptedError(forKey: .owner, in: values, debugDescription: "Extension owner source is invalid")
+            }
+        }
+    }
+
+    package func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(source, forKey: .source)
+        try values.encodeIfPresent(owner, forKey: .owner)
+    }
+}
+
+package enum ChatDirection: String, Codable, Sendable { case inboundContext, agentOutput, agentInvocation, ambientStatus, hiddenInternal }
+package enum ChatContextEffect: String, Codable, Sendable { case none, modelInput, hiddenModelInput, toolResult }
+package enum ChatDelivery: String, Codable, Sendable { case stored, nextTurn, steer, followUp, triggeredTurn, continuedTurn, beforeAgentStart, toolResult, unknown }
+package enum ChatOriginKind: String, Codable, Sendable { case user, subagent, `extension`, process, gateway, assistant, unknown }
+package enum ChatSemanticKind: String, Codable, Sendable { case prompt, resourcePrompt, command, message, tool, status, state, unknown }
+package enum ChatSemanticVisibility: String, Codable, Sendable { case visible, hidden }
+
+package enum ChatOriginConfidence: String, Codable, Sendable { case boundary, receipt, adapter, unknown }
+
+private func admitsSemanticString(_ value: String, maximumBytes: Int) -> Bool {
+    !value.isEmpty && value.utf8.count <= maximumBytes
+        && !value.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f }
+}
+
+package struct ChatOrigin: Codable, Hashable, Sendable {
+    package let kind: ChatOriginKind
+    package let ownerId: String?
+    package let title: String?
+    package let confidence: ChatOriginConfidence
+
+    private enum CodingKeys: String, CodingKey { case kind, ownerId, title, confidence }
+
+    package init(kind: ChatOriginKind, ownerId: String? = nil, title: String? = nil, confidence: ChatOriginConfidence) {
+        self.kind = kind; self.ownerId = ownerId; self.title = title; self.confidence = confidence
+    }
+
+    package init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try values.decode(ChatOriginKind.self, forKey: .kind)
+        ownerId = try values.decodeIfPresent(String.self, forKey: .ownerId)
+        title = try values.decodeIfPresent(String.self, forKey: .title)
+        confidence = try values.decode(ChatOriginConfidence.self, forKey: .confidence)
+        guard ownerId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
+              title.map({ admitsSemanticString($0, maximumBytes: 512) }) ?? true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .ownerId,
+                in: values,
+                debugDescription: "Chat origin metadata is invalid or oversized"
+            )
+        }
+    }
+}
+
+package struct ChatSemanticMetadata: Codable, Hashable, Sendable {
+    let version: Int
+    package let direction: ChatDirection
+    package let contextEffect: ChatContextEffect
+    package let delivery: ChatDelivery
+    package let visibility: ChatSemanticVisibility
+    package let kind: ChatSemanticKind
+    package let origin: ChatOrigin
+    package let invocationId: String?
+    package let operationId: String?
+    let sequence: Int
+    package let lifecycle: InvocationLifecycle?
+    package let resourceInvocation: ComposerResourceInvocation?
+    package let submittedText: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case version, direction, contextEffect, delivery, visibility, kind, origin,
+             invocationId, operationId, sequence, lifecycle, resourceInvocation, submittedText
+    }
+
+    package init(
+        version: Int = 1,
+        direction: ChatDirection,
+        contextEffect: ChatContextEffect,
+        delivery: ChatDelivery,
+        visibility: ChatSemanticVisibility,
+        kind: ChatSemanticKind,
+        origin: ChatOrigin,
+        invocationId: String? = nil,
+        operationId: String? = nil,
+        sequence: Int,
+        lifecycle: InvocationLifecycle? = nil,
+        resourceInvocation: ComposerResourceInvocation? = nil,
+        submittedText: String? = nil
+    ) {
+        self.version = version; self.direction = direction; self.contextEffect = contextEffect
+        self.delivery = delivery; self.visibility = visibility; self.kind = kind; self.origin = origin
+        self.invocationId = invocationId; self.operationId = operationId; self.sequence = sequence
+        self.lifecycle = lifecycle; self.resourceInvocation = resourceInvocation; self.submittedText = submittedText
+    }
+
+    package init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        direction = try values.decode(ChatDirection.self, forKey: .direction)
+        contextEffect = try values.decode(ChatContextEffect.self, forKey: .contextEffect)
+        delivery = try values.decode(ChatDelivery.self, forKey: .delivery)
+        visibility = try values.decode(ChatSemanticVisibility.self, forKey: .visibility)
+        kind = try values.decode(ChatSemanticKind.self, forKey: .kind)
+        origin = try values.decode(ChatOrigin.self, forKey: .origin)
+        invocationId = try values.decodeIfPresent(String.self, forKey: .invocationId)
+        operationId = try values.decodeIfPresent(String.self, forKey: .operationId)
+        sequence = try values.decode(Int.self, forKey: .sequence)
+        lifecycle = try values.decodeIfPresent(InvocationLifecycle.self, forKey: .lifecycle)
+        resourceInvocation = try values.decodeIfPresent(ComposerResourceInvocation.self, forKey: .resourceInvocation)
+        submittedText = try values.decodeIfPresent(String.self, forKey: .submittedText)
+        guard version == 1, sequence >= 0,
+              submittedText.map({ $0.utf8.count <= 192 * 1_024 }) ?? true,
+              invocationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
+              operationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
+              resourceInvocation.map(\.isTransportValid) ?? true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .version,
+                in: values,
+                debugDescription: "Chat semantic metadata is invalid or oversized"
+            )
+        }
+    }
+}
+
+package struct MessageTranscriptItem: TranscriptPayload {
+    let id: String
+    let parentId: String?
+    let timestamp: String
+    let kind: TranscriptItem.Kind
+    package let role: TranscriptItem.Role
+    let presentationId: String
+    package let content: [ContentPart]
+    let provider: String?
+    let modelId: String?
+    let stopReason: String?
+    let errorMessage: String?
+    package let toolCallId: String?
+    let toolName: String?
+    let toolLabel: String?
+    let isError: Bool?
+    let details: JSONValue?
+    let display: DisplayProjection?
+    let usage: JSONValue?
+    let startedAt: String?
+    let completedAt: String?
+    let durationMs: Int?
+    let lastProgressAt: String?
+    let progressSequence: Int?
+    let toolSegmentId: String?
+    let semantic: ChatSemanticMetadata?
+    var extensionOrigin: ExtensionToolOrigin? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, stopReason,
+             errorMessage, toolCallId, toolName, toolLabel, isError, details, display, usage, startedAt,
+             completedAt, durationMs, lastProgressAt, progressSequence, toolSegmentId, semantic, extensionOrigin
+    }
+
+    package init(
+        id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind, role: TranscriptItem.Role,
+        presentationId: String, content: [ContentPart], provider: String? = nil, modelId: String? = nil,
+        stopReason: String? = nil, errorMessage: String? = nil, toolCallId: String? = nil, toolName: String? = nil,
+        toolLabel: String? = nil, isError: Bool? = nil, details: JSONValue? = nil,
+        display: DisplayProjection? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
+        completedAt: String? = nil, durationMs: Int? = nil, lastProgressAt: String? = nil,
+        progressSequence: Int? = nil, toolSegmentId: String? = nil,
+        semantic: ChatSemanticMetadata? = nil,
+        extensionOrigin: ExtensionToolOrigin? = nil
+    ) {
+        self.id = id; self.parentId = parentId; self.timestamp = timestamp; self.kind = kind; self.role = role
+        self.presentationId = presentationId; self.content = content; self.provider = provider; self.modelId = modelId
+        self.stopReason = stopReason; self.errorMessage = errorMessage; self.toolCallId = toolCallId; self.toolName = toolName
+        self.toolLabel = toolLabel; self.isError = isError; self.details = details; self.display = display
+        self.usage = usage; self.startedAt = startedAt; self.completedAt = completedAt
+        self.durationMs = durationMs; self.lastProgressAt = lastProgressAt; self.progressSequence = progressSequence
+        self.toolSegmentId = toolSegmentId
+        self.semantic = semantic
+        self.extensionOrigin = extensionOrigin
+    }
+
+    package init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        parentId = try values.decodeIfPresent(String.self, forKey: .parentId)
+        timestamp = try values.decode(String.self, forKey: .timestamp)
+        kind = try values.decode(TranscriptItem.Kind.self, forKey: .kind)
+        role = try values.decode(TranscriptItem.Role.self, forKey: .role)
+        presentationId = try values.decode(String.self, forKey: .presentationId)
+        let decodedContent = try values.decode([ContentPart].self, forKey: .content)
+        let grouped = Dictionary(grouping: decodedContent.filter { $0.groupId != nil }, by: { $0.groupId! })
+        for parts in grouped.values {
+            guard let expectedCount = parts.first?.groupCount,
+                  parts.allSatisfy({
+                      $0.groupCount == expectedCount
+                          && $0.toolSegmentId == parts.first?.toolSegmentId
+                  }),
+                  parts.count == expectedCount,
+                  Set(parts.compactMap(\.groupIndex)) == Set(0..<expectedCount) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .content, in: values,
+                    debugDescription: "Tool invocation group metadata is inconsistent"
+                )
+            }
+        }
+        content = decodedContent
+        provider = try values.decodeIfPresent(String.self, forKey: .provider)
+        modelId = try values.decodeIfPresent(String.self, forKey: .modelId)
+        stopReason = try values.decodeIfPresent(String.self, forKey: .stopReason)
+        errorMessage = try values.decodeIfPresent(String.self, forKey: .errorMessage)
+        toolCallId = try values.decodeIfPresent(String.self, forKey: .toolCallId)
+        toolName = try values.decodeIfPresent(String.self, forKey: .toolName)
+        toolLabel = try values.decodeIfPresent(String.self, forKey: .toolLabel)
+        isError = try values.decodeIfPresent(Bool.self, forKey: .isError)
+        details = try values.decodeIfPresent(JSONValue.self, forKey: .details)
+        display = try values.decodeIfPresent(DisplayProjection.self, forKey: .display)
+        if let display {
+            // Gateway admits provider-bound browser results before projection;
+            // raw extension details are never native display authority.
+            guard role == .toolResult,
+                  toolName == "display" || (toolName == "agent_browser" && display.kind == .browserLive) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .display,
+                    in: values,
+                    debugDescription: "Display metadata requires a display result or a live-browser agent_browser result"
+                )
+            }
+        }
+        usage = try values.decodeIfPresent(JSONValue.self, forKey: .usage)
+        startedAt = try values.decodeIfPresent(String.self, forKey: .startedAt)
+        completedAt = try values.decodeIfPresent(String.self, forKey: .completedAt)
+        durationMs = try values.decodeIfPresent(Int.self, forKey: .durationMs)
+        lastProgressAt = try values.decodeIfPresent(String.self, forKey: .lastProgressAt)
+        progressSequence = try values.decodeIfPresent(Int.self, forKey: .progressSequence)
+        toolSegmentId = try values.decodeIfPresent(String.self, forKey: .toolSegmentId)
+        semantic = try values.decodeIfPresent(ChatSemanticMetadata.self, forKey: .semantic)
+        if let toolSegmentId, role != .toolResult || toolSegmentId.isEmpty {
+            throw DecodingError.dataCorruptedError(
+                forKey: .toolSegmentId,
+                in: values,
+                debugDescription: "Only a tool result may carry nonempty tool segment identity"
+            )
+        }
+        extensionOrigin = try values.decodeIfPresent(ExtensionToolOrigin.self, forKey: .extensionOrigin)
+    }
+}
+
+package struct BashTranscriptItem: TranscriptPayload {
+    let id: String
+    let parentId: String?
+    let timestamp: String
+    let kind: TranscriptItem.Kind
+    let command: String
+    let output: String
+    let exitCode: Int?
+    let cancelled: Bool
+    let truncated: Bool
+    let fullOutputPath: String?
+    let excludeFromContext: Bool?
+    let startedAt: String?
+    let completedAt: String?
+    let durationMs: Int?
+
+    package init(
+        id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind,
+        command: String, output: String, exitCode: Int?, cancelled: Bool, truncated: Bool,
+        fullOutputPath: String?, excludeFromContext: Bool?, startedAt: String?, completedAt: String?,
+        durationMs: Int?
+    ) {
+        self.id = id
+        self.parentId = parentId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.command = command
+        self.output = output
+        self.exitCode = exitCode
+        self.cancelled = cancelled
+        self.truncated = truncated
+        self.fullOutputPath = fullOutputPath
+        self.excludeFromContext = excludeFromContext
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.durationMs = durationMs
+    }
+}
+
+package struct CustomMessageTranscriptItem: TranscriptPayload {
+    let id: String
+    let parentId: String?
+    let timestamp: String
+    let kind: TranscriptItem.Kind
+    let customType: String
+    let content: [ContentPart]
+    let details: JSONValue?
+    let semantic: ChatSemanticMetadata?
+}
+
+package struct CustomEntryTranscriptItem: TranscriptPayload {
+    let id: String
+    let parentId: String?
+    let timestamp: String
+    let kind: TranscriptItem.Kind
+    let customType: String
+    let data: JSONValue?
+    let semantic: ChatSemanticMetadata?
+}
+
+package struct SummaryTranscriptItem: TranscriptPayload {
+    let id: String
+    let parentId: String?
+    let timestamp: String
+    let kind: TranscriptItem.Kind
+    let presentationId: String?
+    let summary: String
+    let tokensBefore: Int?
+    let details: JSONValue?
+    let usage: JSONValue?
+    let fromHook: Bool?
+
+    package init(
+        id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind,
+        presentationId: String?, summary: String, tokensBefore: Int?, details: JSONValue?,
+        usage: JSONValue?, fromHook: Bool?
+    ) {
+        self.id = id
+        self.parentId = parentId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.presentationId = presentationId
+        self.summary = summary
+        self.tokensBefore = tokensBefore
+        self.details = details
+        self.usage = usage
+        self.fromHook = fromHook
+    }
+}
+
+package struct ModelChangeTranscriptItem: TranscriptPayload {
+    let id: String
+    let parentId: String?
+    let timestamp: String
+    let kind: TranscriptItem.Kind
+    let modelRef: ModelRef
+}
+
+package struct ThinkingChangeTranscriptItem: TranscriptPayload {
+    let id: String
+    let parentId: String?
+    let timestamp: String
+    let kind: TranscriptItem.Kind
+    let level: String
+
+    package init(id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind, level: String) {
+        self.id = id
+        self.parentId = parentId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.level = level
+    }
+}
+
+package struct LabelTranscriptItem: TranscriptPayload {
+    let id: String
+    let parentId: String?
+    let timestamp: String
+    let kind: TranscriptItem.Kind
+    let targetId: String
+    let label: String?
+
+    package init(
+        id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind,
+        targetId: String, label: String?
+    ) {
+        self.id = id
+        self.parentId = parentId
+        self.timestamp = timestamp
+        self.kind = kind
+        self.targetId = targetId
+        self.label = label
+    }
+}
+
+/// A discriminated Gateway transcript value. Each Pi entry kind decodes into
+/// a shape that cannot accidentally accept fields belonging to another kind.
+package enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
+    package enum Kind: String, Codable, Sendable {
+        case message, bash, customMessage, customEntry, compaction, branchSummary, modelChange, thinkingChange, label
+    }
+    package enum Role: String, Codable, Sendable { case user, assistant, toolResult }
+
+    case message(MessageTranscriptItem)
+    case bash(BashTranscriptItem)
+    case customMessage(CustomMessageTranscriptItem)
+    case customEntry(CustomEntryTranscriptItem)
+    case summary(SummaryTranscriptItem)
+    case modelChange(ModelChangeTranscriptItem)
+    case thinkingChange(ThinkingChangeTranscriptItem)
+    case label(LabelTranscriptItem)
+
+    private enum CodingKeys: String, CodingKey { case kind }
+
+    package init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .message:
+            let message = try MessageTranscriptItem(from: decoder)
+            guard !message.presentationId.isEmpty else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .kind,
+                    in: container,
+                    debugDescription: "Message presentation identity cannot be empty"
+                )
+            }
+            try Self.validateContentOrdinals(message.content, container: container)
+            self = .message(message)
+        case .bash: self = .bash(try BashTranscriptItem(from: decoder))
+        case .customMessage:
+            let message = try CustomMessageTranscriptItem(from: decoder)
+            try Self.validateContentOrdinals(message.content, container: container)
+            self = .customMessage(message)
+        case .customEntry: self = .customEntry(try CustomEntryTranscriptItem(from: decoder))
+        case .compaction, .branchSummary:
+            let summary = try SummaryTranscriptItem(from: decoder)
+            guard summary.presentationId.map({ !$0.isEmpty && $0.utf8.count <= 200 }) != false else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .kind,
+                    in: container,
+                    debugDescription: "Summary presentation identity must be nonempty and bounded"
+                )
+            }
+            self = .summary(summary)
+        case .modelChange: self = .modelChange(try ModelChangeTranscriptItem(from: decoder))
+        case .thinkingChange: self = .thinkingChange(try ThinkingChangeTranscriptItem(from: decoder))
+        case .label: self = .label(try LabelTranscriptItem(from: decoder))
+        }
+    }
+
+    private static func validateContentOrdinals(
+        _ content: [ContentPart],
+        container: KeyedDecodingContainer<CodingKeys>
+    ) throws {
+        let ordinals = content.map(\.ordinal)
+        guard ordinals.allSatisfy({ $0 >= 0 }), Set(ordinals).count == ordinals.count,
+              content.allSatisfy({ ($0.thinkingRunOrdinal ?? 0) >= 0 }),
+              validToolGroups(in: content) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: container,
+                debugDescription: "Projected content ordinals and finalized tool groups must be unique and valid"
+            )
+        }
+    }
+
+    private static func validToolGroups(in content: [ContentPart]) -> Bool {
+        let grouped = Dictionary(grouping: content.compactMap { part in
+            part.groupId == nil ? nil : part
+        }, by: { $0.groupId! })
+        for parts in grouped.values {
+            guard let expectedCount = parts.first?.groupCount,
+                  parts.allSatisfy({ $0.toolSegmentId == parts.first?.toolSegmentId }),
+                  parts.count == expectedCount,
+                  Set(parts.compactMap(\.groupIndex)) == Set(0..<expectedCount) else { return false }
+            let positions = parts.compactMap { part in
+                content.firstIndex(where: { $0.id == part.id })
+            }
+            guard let first = positions.min(), positions.count == expectedCount,
+                  positions.sorted() == Array(first..<(first + expectedCount)) else { return false }
+        }
+        return true
+    }
+
+    package func encode(to encoder: Encoder) throws {
+        switch self {
+        case .message(let value): try value.encode(to: encoder)
+        case .bash(let value): try value.encode(to: encoder)
+        case .customMessage(let value): try value.encode(to: encoder)
+        case .customEntry(let value): try value.encode(to: encoder)
+        case .summary(let value): try value.encode(to: encoder)
+        case .modelChange(let value): try value.encode(to: encoder)
+        case .thinkingChange(let value): try value.encode(to: encoder)
+        case .label(let value): try value.encode(to: encoder)
+        }
+    }
+
+    package var id: String { payload.id }
+    package var parentId: String? { payload.parentId }
+    package var timestamp: String { payload.timestamp }
+    package var kind: Kind {
+        switch self {
+        case .message: .message
+        case .bash: .bash
+        case .customMessage: .customMessage
+        case .customEntry: .customEntry
+        case .summary(let value): value.kind
+        case .modelChange: .modelChange
+        case .thinkingChange: .thinkingChange
+        case .label: .label
+        }
+    }
+    package var role: Role? { if case .message(let value) = self { value.role } else { nil } }
+    package var presentationId: String {
+        switch self {
+        case .message(let value): value.presentationId
+        case .summary(let value): value.presentationId ?? value.id
+        default: id
+        }
+    }
+    package var content: [ContentPart]? {
+        switch self {
+        case .message(let value): value.content
+        case .customMessage(let value): value.content
+        default: nil
+        }
+    }
+    package var provider: String? { if case .message(let value) = self { value.provider } else { nil } }
+    package var modelId: String? { if case .message(let value) = self { value.modelId } else { nil } }
+    var stopReason: String? { if case .message(let value) = self { value.stopReason } else { nil } }
+    package var errorMessage: String? { if case .message(let value) = self { value.errorMessage } else { nil } }
+    package var toolCallId: String? { if case .message(let value) = self { value.toolCallId } else { nil } }
+    package var toolName: String? { if case .message(let value) = self { value.toolName } else { nil } }
+    package var toolLabel: String? { if case .message(let value) = self { value.toolLabel } else { nil } }
+    package var extensionOrigin: ExtensionToolOrigin? { if case .message(let value) = self { value.extensionOrigin } else { nil } }
+    package var toolSegmentId: String? { if case .message(let value) = self { value.toolSegmentId } else { nil } }
+    package var isError: Bool? { if case .message(let value) = self { value.isError } else { nil } }
+    package var display: DisplayProjection? { if case .message(let value) = self { value.display } else { nil } }
+    package var details: JSONValue? {
+        switch self {
+        case .message(let value): value.details
+        case .customMessage(let value): value.details
+        case .summary(let value): value.details
+        default: nil
+        }
+    }
+    var usage: JSONValue? {
+        switch self {
+        case .message(let value): value.usage
+        case .summary(let value): value.usage
+        default: nil
+        }
+    }
+    package var startedAt: String? {
+        switch self {
+        case .message(let value): value.startedAt
+        case .bash(let value): value.startedAt
+        default: nil
+        }
+    }
+    package var completedAt: String? {
+        switch self {
+        case .message(let value): value.completedAt
+        case .bash(let value): value.completedAt
+        default: nil
+        }
+    }
+    package var durationMs: Int? {
+        switch self {
+        case .message(let value): value.durationMs
+        case .bash(let value): value.durationMs
+        default: nil
+        }
+    }
+    package var lastProgressAt: String? { if case .message(let value) = self { value.lastProgressAt } else { nil } }
+    package var progressSequence: Int? { if case .message(let value) = self { value.progressSequence } else { nil } }
+    package var command: String? { if case .bash(let value) = self { value.command } else { nil } }
+    package var output: String? { if case .bash(let value) = self { value.output } else { nil } }
+    package var exitCode: Int? { if case .bash(let value) = self { value.exitCode } else { nil } }
+    package var cancelled: Bool? { if case .bash(let value) = self { value.cancelled } else { nil } }
+    package var truncated: Bool? { if case .bash(let value) = self { value.truncated } else { nil } }
+    var fullOutputPath: String? { if case .bash(let value) = self { value.fullOutputPath } else { nil } }
+    package var customType: String? {
+        switch self {
+        case .customMessage(let value): value.customType
+        case .customEntry(let value): value.customType
+        default: nil
+        }
+    }
+    package var semantic: ChatSemanticMetadata? {
+        switch self {
+        case .message(let value): value.semantic
+        case .customMessage(let value): value.semantic
+        case .customEntry(let value): value.semantic
+        default: nil
+        }
+    }
+    package var customData: JSONValue? { if case .customEntry(let value) = self { value.data } else { nil } }
+    package var summary: String? { if case .summary(let value) = self { value.summary } else { nil } }
+    package var tokensBefore: Int? { if case .summary(let value) = self { value.tokensBefore } else { nil } }
+    package var modelRef: ModelRef? { if case .modelChange(let value) = self { value.modelRef } else { nil } }
+    package var level: String? { if case .thinkingChange(let value) = self { value.level } else { nil } }
+    var targetId: String? { if case .label(let value) = self { value.targetId } else { nil } }
+    package var label: String? { if case .label(let value) = self { value.label } else { nil } }
+
+    package var text: String {
+        content?.compactMap { part in
+            part.type == .text && part.attachment == nil ? part.text : nil
+        }.joined() ?? summary ?? output ?? ""
+    }
+
+    private var payload: any TranscriptPayload {
+        switch self {
+        case .message(let value): value
+        case .bash(let value): value
+        case .customMessage(let value): value
+        case .customEntry(let value): value
+        case .summary(let value): value
+        case .modelChange(let value): value
+        case .thinkingChange(let value): value
+        case .label(let value): value
+        }
+    }
+}

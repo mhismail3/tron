@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 private struct CanonicalResourceSessionIDKey: EnvironmentKey {
     static let defaultValue: String? = nil

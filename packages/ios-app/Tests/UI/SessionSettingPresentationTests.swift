@@ -1,4 +1,5 @@
 import Testing
+@testable import TronMobileCore
 @testable import TronMobile
 
 @Suite("Session setting presentation")

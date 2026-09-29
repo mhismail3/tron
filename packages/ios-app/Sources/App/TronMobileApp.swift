@@ -1,5 +1,6 @@
 import Network
 import SwiftUI
+import TronMobileCore
 
 @MainActor
 private final class GatewayPathDiagnosticsObserver {

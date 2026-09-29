@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum CommandLifecyclePresentationPolicy {
     static func title(origin: String, command: String) -> String {

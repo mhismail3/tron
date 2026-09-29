@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 private enum ManageSessionDestination: String, Identifiable {
     case agentInstructions, projectResources, history, processHistory, terminal, workspace

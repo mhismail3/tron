@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum SessionForkPosition: String, Equatable, Sendable { case before, at }
 enum SessionForkChoicePolicy {

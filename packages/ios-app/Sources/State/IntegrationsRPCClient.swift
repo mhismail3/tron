@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Typed client for the connection-instance owner. It only receives redacted
 /// projections; credential values remain in the Mac-owned secure store while

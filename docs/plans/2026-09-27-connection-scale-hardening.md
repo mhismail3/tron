@@ -442,7 +442,7 @@ At most one in-flight task per zone. Tasks listed in order.
 | Slot | `packages/gateway/src/sessions/runtime-slot.ts` | O-3, O-5, G-3, G-11 |
 | Catalog | `packages/gateway/src/sessions/catalog-discovery.ts`, `packages/gateway/src/sessions/catalog-metadata-index.ts` | G-1a, G-1b, G-1c |
 | Phone lifecycle | `packages/ios-app/Sources/State/GatewayLifecycleCoordinator.swift`, `packages/ios-app/Sources/State/AppModel.swift` | O-4, C-1, C-2, C-3, G-7, E-3c |
-| Phone client | `packages/ios-app/Sources/Gateway/GatewayClient.swift`, `packages/ios-app/Sources/Gateway/GatewaySocketTransport.swift` | O-1, O-4, C-3, C-4, C-6, G-12, E-3c |
+| Phone client | `packages/ios-app/Core/Gateway/GatewayClient.swift`, `packages/ios-app/Core/Gateway/GatewaySocketTransport.swift` | O-1, O-4, C-3, C-4, C-6, G-12, E-3c |
 | Phone pool | `packages/ios-app/Sources/State/DashboardGatewayConnectionPool.swift` | C-5 |
 | Launcher | `packages/mac-app/scripts/tron-gateway-launcher.c` | G-9, G-5 |
 | Profiler | `scripts/tron-profile-gateway`, `scripts/tron-profile-gateway-driver.mjs` | O-6a, O-6b, G-13 |
@@ -694,7 +694,7 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 
 - **Goal:** join any phone record to the Gateway's records for the same
   connection attempt without guessing.
-- **Owning files:** `packages/ios-app/Sources/Gateway/GatewayClient.swift`
+- **Owning files:** `packages/ios-app/Core/Gateway/GatewayClient.swift`
   (`establishConnection` builds hello), `packages/gateway/src/transport/server.ts`
   (`onMessage` handles hello; connection records), the Gateway hello payload
   producer (`GatewayService.info()` in
@@ -800,10 +800,10 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Goal:** a phone export explains every second of every episode, however long
   ago it happened within the log's retention.
 - **Owning files:** `packages/ios-app/Sources/State/GatewayLifecycleCoordinator.swift`,
-  `packages/ios-app/Sources/Gateway/GatewayClient.swift`,
+  `packages/ios-app/Core/Gateway/GatewayClient.swift`,
   `packages/ios-app/Sources/State/AppModel.swift` (`lifecycleRecordDiagnostic`,
-  scene handling), `packages/ios-app/Sources/Support/AppLog.swift`,
-  `packages/ios-app/Sources/Support/IOSClientDiagnostics.swift`.
+  scene handling), `packages/ios-app/Core/Support/AppLog.swift`,
+  `packages/ios-app/Core/Support/IOSClientDiagnostics.swift`.
 - **Do:**
   1. `gateway.attempt` (AppLog, info) per attempt: `profile` (selected or pool),
      `attemptId`, `retry`, `stageReached`, `reason`, `interfaces`,
@@ -1037,7 +1037,7 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 
 - **Goal:** recover within one attempt of the path returning (D-4).
 - **Owning files:** `packages/ios-app/Core/Gateway/GatewayConnectionPolicy.swift`,
-  `packages/ios-app/Sources/Gateway/GatewayClient.swift` (handshake deadline),
+  `packages/ios-app/Core/Gateway/GatewayClient.swift` (handshake deadline),
   `packages/ios-app/Sources/State/GatewayLifecycleCoordinator.swift`,
   `packages/protocol-fixtures/gateway-connection-contract.json`.
 - **Do:**
@@ -1064,7 +1064,7 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 ### C-4 — Truer liveness
 
 - **Goal:** a busy link is never torn down for a queued pong (D-4).
-- **Owning files:** `packages/ios-app/Sources/Gateway/GatewayClient.swift`
+- **Owning files:** `packages/ios-app/Core/Gateway/GatewayClient.swift`
   (`startLivenessWait`), `packages/ios-app/Core/Gateway/GatewayConnectionPolicy.swift`,
   `packages/protocol-fixtures/gateway-connection-contract.json`,
   `packages/gateway/src/transport/connection-policy.ts` (parity only).
@@ -1098,7 +1098,7 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Owning files:** `packages/gateway/src/transport/server.ts` (`onMessage`,
   `requestControllers`, `pendingSessionOpens`),
   `packages/gateway/src/transport/gateway-service.ts` (read handlers),
-  `packages/ios-app/Sources/Gateway/GatewayClient.swift` (`expire`,
+  `packages/ios-app/Core/Gateway/GatewayClient.swift` (`expire`,
   `cancelRequest`).
 - **Do:**
   1. Protocol: frame `{ type: "cancel", id }`. The phone sends it when a
@@ -1301,7 +1301,7 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Owning files:** `packages/gateway/src/transport/server.ts`,
   `packages/gateway/src/transport/gateway-service.ts`,
   `packages/gateway/src/sessions/runtime-registry.ts`,
-  `packages/ios-app/Sources/Gateway/GatewayClient.swift` (honour the hint).
+  `packages/ios-app/Core/Gateway/GatewayClient.swift` (honour the hint).
 - **Do:**
   1. Server-side deadline per disposable read method, in one table of named
      constants (initial: `session.list` 5 s, `session.open` before commit 10 s,
@@ -1487,8 +1487,8 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Goal:** the phone learns LAN endpoints and the pin only over an already
   authenticated channel.
 - **Owning files:** `packages/gateway/src/transport/server.ts` (pairing and
-  hello), `packages/ios-app/Sources/Gateway/GatewayProfile.swift`,
-  `packages/ios-app/Sources/Gateway/GatewayProfileStore.swift`.
+  hello), `packages/ios-app/Core/Gateway/GatewayProfile.swift`,
+  `packages/ios-app/Core/Gateway/GatewayProfileStore.swift`.
 - **Do:** pairing response and hello include `lanEndpoints: [{ host, port }]`
   and `lanPin` (SHA-256 of the certificate's public key). The phone stores them
   with the profile and replaces them on every hello.
@@ -1501,8 +1501,8 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 
 - **Goal:** at home the phone connects over LAN; any leg's loss costs at most
   one liveness interval.
-- **Owning files:** `packages/ios-app/Sources/Gateway/GatewayClient.swift`,
-  `packages/ios-app/Sources/Gateway/GatewaySocketTransport.swift` (pin check in
+- **Owning files:** `packages/ios-app/Core/Gateway/GatewayClient.swift`,
+  `packages/ios-app/Core/Gateway/GatewaySocketTransport.swift` (pin check in
   the URLSession delegate), `packages/ios-app/Sources/State/GatewayLifecycleCoordinator.swift`,
   `packages/ios-app/Sources/Info.plist` (`NSLocalNetworkUsageDescription`).
 - **Do:**
@@ -6543,7 +6543,7 @@ file was restored byte-for-byte (`shasum -a 256 -c`) before the passing run.
 `scripts/personal-info-guard.sh` pass.
 
 Deviations added this round: `GatewayReconnectSchedule.adopt(delayPolicy:)` in
-`packages/ios-app/Sources/Support/ReconnectDelayPolicy.swift` (a shared support
+`packages/ios-app/Core/Support/ReconnectDelayPolicy.swift` (a shared support
 type, outside the pool zone; a policy swap has to keep the nominal delay the
 standard phase reached, and a fresh schedule would restart at the base
 interval), and the `owner` field on `GatewayConnectionAttempt` plus its
@@ -9013,7 +9013,7 @@ wait).
     token, a hash, a parameter value), so this is a production cost, not a test
     artifact: `AppModel.exportDiagnostics` redacts up to 1,000 rows on the main
     actor.
-- Changes: `packages/ios-app/Sources/Support/IOSClientDiagnostics.swift` only.
+- Changes: `packages/ios-app/Core/Support/IOSClientDiagnostics.swift` only.
   `redactURLs` walks the scheme runs and offers the pattern only the windows a
   match can start in (first letter of a run followed by `://` and a non-empty
   body); the pattern still decides the match, so the three other patterns, the
@@ -9889,3 +9889,50 @@ recovery gaps; all three were fixed on the same branch.
 - Deviation: the interim install comes from `hardening/integration`, not
   `main`; R-1 still merges once to `main` for the final release.
 - Tasks added: T-5, F-2.
+
+### Main merge (iOS module split MS-3b) · 2026-09-28 · integration worker
+
+- Result: `hardening/integration` merges `main` `c892ce017` before the release.
+  Thirteen conflicted files resolved: the iOS files keep every hardening
+  behaviour (protocol 6 / minimum 6, `transportOpenDeadline` 5 s plus
+  `helloDeadline` 15 s with `handshakeDeadline` gone, the cancel frame and the
+  disposable-read shed policy, `GatewayLanPin` and the LAN advertisement,
+  `restartForPathChange`/`adopt`, the AppLog `operation.*`/`rpc.*` records, the
+  `IOSClientDiagnostics` excused-liveness and client-work records,
+  `gatewayConnectionId`) under main's `Core/` paths, `package` access and
+  Foundation-only rule. `GatewayLanPin.swift` lives at
+  `Core/Gateway/GatewayLanPin.swift`: Core may import CryptoKit and Security,
+  and only the app test host reads it beyond Core.
+- `runtime-registry.ts` keeps the pass/counts discovery refactor and gains
+  main's paused-subagent settlement: `readAmbientExtensionArtifact` now derives
+  `settledPaused` from `observedPausedProcessTerminalAt`, so a settled paused
+  artifact no longer outranks live ones for the bounded discovery budget.
+  `packages/gateway/docs/observability.md` keeps the hardening rows with
+  main's paths.
+- Access widened only where the compiler required it, following MS-3b's rule:
+  `ReconnectDelayPolicy.init`/`multiplier`/`maximumSeconds` (the dashboard pool
+  builds its own curves), `PerformanceSignposting.endOpenIntervalsAtBackground`
+  (its requirement takes the protocol's `package` level, so the default
+  implementation and `AppLogSignposts`'s witness do too),
+  `GatewayDiagnosticFailure.answerCode`, `IOSClientDiagnosticBuffer.redactedMessage`,
+  `GatewayLanEndpoint`, `GatewayProfile.lanEndpoints`/`lanPin`/`adoptLanAdvertising`,
+  `GatewayProfileStore.adoptLanAdvertising`, `GatewayInfo.lanEndpoints`/`lanPin`/
+  `pushRegistrationRevision`, `GPS`-free `GatewayProfile` members, the
+  `GatewayFailure` init and `answeredByGateway`, and
+  `GatewayConnectionIdentity.gatewayConnectionID`. Files the app or tests reach
+  across the new module boundary that were added after MS-3b (the episode
+  recorder, its tests, the mounted-restoration hosted test) import
+  `TronMobileCore`; `Sources/{Gateway,Models,Support}` leave no file, duplicate
+  or stale path literal behind, including in `connection-resilience.md`.
+- Evidence: Gateway `tsc --noEmit` clean; `runtime-registry.integration`,
+  `session-archive.integration`, `sync-protocol.integration` 290/290;
+  `paused-subagent.integration`, `process-activity`, `process-activity-recency`,
+  `extension-run-projection`, `extension-lifecycle-coordinator`, `restart-drain`,
+  `administrative-drain-snapshot`, `extension-activity-recency` 69/69; iOS full
+  unit plan 1,835 tests / 148 suites pass, no T-5 occurrence
+  (`~/Library/Developer/Tron/ios/test-runs/20260929T021733Z-run.ZwLHv2`).
+  `check-documentation-policy.py`, `test-gateway-protocol-contract.py`,
+  `packages/ios-app/scripts/test-source-policy.sh` (Foundation-only Core) and
+  `personal-info-guard.sh` pass.
+- Deviation: the plan's file paths for moved iOS files were updated to `Core/`
+  so the plan matches the tree, as MS-3b did on `main`.

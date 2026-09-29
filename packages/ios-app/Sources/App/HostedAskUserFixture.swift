@@ -2,6 +2,7 @@
 import Foundation
 import PhotosUI
 import SwiftUI
+import TronMobileCore
 
 /// A deterministic, test-only host for the rendered Ask User route. It keeps
 /// the real managed sheet and AppModel mutation owner in the loop while the

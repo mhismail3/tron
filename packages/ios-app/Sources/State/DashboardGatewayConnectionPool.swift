@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 enum DashboardCatalogRetryPolicy {
     static let unavailableNoticeAfterFailures = 3

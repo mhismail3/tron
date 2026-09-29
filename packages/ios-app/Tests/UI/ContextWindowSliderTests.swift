@@ -1,6 +1,7 @@
 import Testing
 import CoreGraphics
 @testable import TronMobile
+@testable import TronMobileCore
 
 struct ContextWindowSliderTests {
     private func scale(maximum: Int = 1_050_000, defaultValue: Int = 272_000, minimum: Int = 37_408) -> ContextWindowSliderScale {

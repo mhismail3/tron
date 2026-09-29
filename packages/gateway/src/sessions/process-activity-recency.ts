@@ -1,4 +1,4 @@
-import type { SessionProcessActivity } from "../protocol/types.js";
+import type { SessionProcessActivity, SessionProcessLifecycle } from "../protocol/types.js";
 import { RecencyDeadlines, systemRecencyClock, type RecencyClock } from "./recency-deadlines.js";
 
 export const PROCESS_ACTIVITY_RECENT_MS = 5 * 60 * 1_000;
@@ -15,6 +15,22 @@ export type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) 
 
 const terminalStates = new Set(["completed", "failed", "stopped", "rejected", "interrupted"]);
 const MAX_TERMINAL_TOMBSTONES = 2_048;
+
+/** A paused row is settled only once the Gateway has observed its exact
+ * process-terminal proof; the projection carries that observation instant as
+ * `terminalAt`. Settled paused rows keep their `paused` state for presentation
+ * but own no live work and age out exactly like finished rows. A paused row
+ * without that proof is still winding down and stays active. */
+export function isSettledProcessLifecycle(lifecycle: SessionProcessLifecycle): boolean {
+  return terminalStates.has(lifecycle.state)
+    || lifecycle.state === "paused" && lifecycle.terminalAt !== undefined;
+}
+
+/** Live process ownership: work Tron can still observe or abort. */
+export function isActiveProcessLifecycle(lifecycle: SessionProcessLifecycle): boolean {
+  return !isSettledProcessLifecycle(lifecycle)
+    && (lifecycle.state === "queued" || lifecycle.state === "running" || lifecycle.state === "paused");
+}
 
 /** Gateway-owned five-minute partition for disposable process presentation.
  * Canonical history is read independently and is never removed here. */
@@ -74,7 +90,7 @@ export class ProcessActivityRecency {
   }
 
   visibility(activity: SessionProcessActivity): SessionProcessActivity["visibility"] {
-    if (!terminalStates.has(activity.lifecycle.state)) {
+    if (!isSettledProcessLifecycle(activity.lifecycle)) {
       return activity.lifecycle.state === "unknown" ? "unknown" : "active";
     }
     const remainingMs = this.deadlines.remaining(activity.processId);
@@ -88,7 +104,7 @@ export class ProcessActivityRecency {
   }
 
   private normalized(activity: SessionProcessActivity): SessionProcessActivity {
-    const terminal = terminalStates.has(activity.lifecycle.state);
+    const terminal = isSettledProcessLifecycle(activity.lifecycle);
     const terminalAt = terminal ? activity.lifecycle.terminalAt : undefined;
     const terminalMs = terminalAt === undefined ? Number.NaN : Date.parse(terminalAt);
     const plausibleTerminal = Number.isFinite(terminalMs)
@@ -153,7 +169,7 @@ export class ProcessActivityRecency {
   private schedule(): void {
     let nearest: number | undefined;
     for (const [processId, activity] of this.activities) {
-      if (!terminalStates.has(activity.lifecycle.state)) continue;
+      if (!isSettledProcessLifecycle(activity.lifecycle)) continue;
       const deadline = this.deadlines.deadline(processId);
       if (deadline !== undefined && (nearest === undefined || deadline < nearest)) nearest = deadline;
     }

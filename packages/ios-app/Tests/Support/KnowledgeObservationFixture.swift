@@ -1,5 +1,6 @@
 import Foundation
 @testable import TronMobile
+@testable import TronMobileCore
 
 enum KnowledgeObservationFixture {
     static func record() -> KnowledgeRecord {

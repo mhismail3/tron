@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 enum ChatTranscriptProjectionMode: String, Hashable, Sendable {
     case cold

@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+@testable import TronMobileCore
 import UIKit
 import XCTest
 import WebKit

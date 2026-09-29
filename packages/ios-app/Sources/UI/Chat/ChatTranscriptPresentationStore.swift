@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 /// Transcript-coupled session facts frozen with the exact installed commit.
 /// Drafts, command admission, and the independent process projection retain

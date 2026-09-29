@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum SessionProcessButtonPolicy {
     static func isVisible(

@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Bind only user controls through this adapter. Installing projections and
 /// switching scopes use the underlying state directly, so reads never write.

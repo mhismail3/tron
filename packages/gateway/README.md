@@ -2133,9 +2133,10 @@ until their underlying asynchronous operation settles; retiring mobile UI does n
 provider settlement. Registry tokens are the normal drain authority. Exact-owned
 nonterminal extension artifacts are the sole compatibility exception until the pinned
 extension host exposes direct detached-work registration. A logically resumable `paused`
-artifact remains nonterminal presentation/history, but it stops blocking administrative
-drain only after its exact-owned versioned `processTerminal` proof reports `observed` and
-validates the matching runner plus every writer process tree. Missing, pending, unknown,
+artifact keeps its `paused` state and resumable history, but it stops being live work—and
+stops blocking administrative drain—only after its exact-owned versioned `processTerminal`
+proof reports `observed` and validates the matching runner plus every writer process tree.
+Missing, pending, unknown,
 mismatched, or malformed proof remains conservative. Process exit never fabricates
 workflow completion, success, failure, or a terminal receipt.
 The pinned SDK exposes no disposal API for the retained administration resource loader or
@@ -2894,6 +2895,16 @@ Process replacement deltas carry exact removed process IDs, including removal-on
 A native sheet may follow a temporary aggregate only when exactly one admitted successor has
 the same immutable tool-call and root-run correlation; ambiguous replacements fail closed.
 
+A paused subagent row is presented as settled only after the Gateway has observed that
+exact-owned `processTerminal` proof. The proof publishes `state: paused` with its
+observation instant as `lifecycle.terminalAt`, a `recentUntil` five minutes later, and
+`visibility: recent`, so the row is ordered, frozen, and retired exactly like finished work:
+`durationMs` stops sampling the producer's still-counting elapsed time, no abort route is
+offered, no restart drain is held, and the session carries no dashboard subagent activity.
+A paused run without that proof owns live work: it keeps `visibility: active` and no
+terminal timestamp, so iOS presents it as still pausing. A resume is a new run ID and
+appears as its own active row while the settled paused row keeps the facts it published.
+
 `session.processHistory.list` and `.get` page only normalized subagent terminal receipts
 under one bounded branch-derived revision and opaque cursor. Pagination stops before a row that exhausts the current page's byte
 remainder so that row remains reachable at the next cursor; only a row that cannot fit
@@ -2991,8 +3002,8 @@ oversized row advances the cursor with explicit omission metadata. Paging never
 drops an otherwise admissible row merely because an earlier row filled the page.
 
 Artifact discovery is bounded, validates the supported versioned lifecycle
-artifact shape, and prioritizes queued/running/paused then newest observations
-before routing them. One Gateway registry owns discovery and the watcher
+artifact shape, and prioritizes queued/running and unsettled paused runs, then newest
+observations before routing them. One Gateway registry owns discovery and the watcher
 lifecycle; RuntimeSlot remains the authority for exact session/tool ownership.
 Per-slot watchers are therefore permitted only after that exact ownership has
 already been proven, and never perform global scans. Pure artifact state and timestamp

@@ -56,4 +56,15 @@ grep -Fq 'tron-notification.caf' "$generated_project" \
 /usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$ROOT/Sources" \
   || fail "raw native sheet escaped its managed owner"
 
-echo "iOS source policy passed (orientation/resources and managed presentation)"
+# TronMobileCore is the app's Foundation-only lowest module (docs/architecture.md#modules):
+# UI frameworks belong to the app target, so Core must never import them.
+core_ui_imports() {
+  grep -rnE '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*import[[:space:]]+(SwiftUI|UIKit|Observation|UserNotifications)\b' "$1" --include='*.swift'
+}
+core_probe="$(mktemp -d)"
+printf 'import Foundation\n@preconcurrency import UIKit\n' > "$core_probe/Probe.swift"
+core_ui_imports "$core_probe" >/dev/null || { rm -rf "$core_probe"; fail "Core UI-import check no longer detects a UI import"; }
+rm -rf "$core_probe"
+! core_ui_imports "$ROOT/Core" || fail "TronMobileCore imports a UI framework"
+
+echo "iOS source policy passed (orientation/resources, managed presentation and Foundation-only Core)"

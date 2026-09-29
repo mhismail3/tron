@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum PackageInstallDraftPolicy {
     static func afterSuccess(current: String, captured: String) -> String {

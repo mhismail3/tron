@@ -1,6 +1,7 @@
 import Foundation
 import PhotosUI
 import SwiftUI
+import TronMobileCore
 import UniformTypeIdentifiers
 
 struct ChatView: View {

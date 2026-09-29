@@ -116,6 +116,62 @@ describe("session process projection", () => {
       false,
     )).toBeUndefined();
   });
+  it("settles paused rows at the Gateway proof instant and leaves unsettled pauses active", () => {
+    const paused: ExtensionRunActivity = {
+      ...subagent,
+      mode: "async",
+      status: "running",
+      completedAt: undefined,
+      durationMs: 60_000,
+      children: subagent.children.map(child => ({
+        ...child,
+        status: "running" as const,
+        lifecycle: "paused" as const,
+        endedAt: undefined,
+        durationMs: 30_000,
+        startedAt: "2026-01-01T00:00:00.000Z",
+      })),
+      lifecycle: {
+        ...subagent.lifecycle!,
+        state: "paused",
+        terminalAt: undefined,
+        recentUntil: undefined,
+      },
+    };
+    const windingDown = subagentProcessesFromActivity("session", paused)[0]!;
+    expect(windingDown).toMatchObject({
+      lifecycle: { state: "paused" },
+      visibility: "active",
+      durationMs: 30_000,
+    });
+    expect(windingDown.lifecycle.terminalAt).toBeUndefined();
+
+    const settled = subagentProcessesFromActivity("session", paused, {
+      pausedSettledAt: "2026-01-01T00:00:40.000Z",
+    })[0]!;
+    expect(settled.lifecycle).toMatchObject({
+      state: "paused",
+      terminalAt: "2026-01-01T00:00:40.000Z",
+      recentUntil: "2026-01-01T00:05:40.000Z",
+    });
+    expect(settled.visibility).toBe("recent");
+    // Frozen at the proof instant, not the producer's still-running interval.
+    expect(settled.durationMs).toBe(40_000);
+    expect(subagentAbortRoute(
+      settled,
+      { runId: "run-1", producerId: "child-1" },
+      "run-1",
+      "operation-1",
+      true,
+    )).toBeUndefined();
+    expect(subagentAbortRoute(
+      windingDown,
+      { runId: "run-1", producerId: "child-1" },
+      "run-1",
+      undefined,
+      true,
+    )).toEqual({ kind: "controller", runId: "run-1", childId: "child-1" });
+  });
   it("redacts delegated output previews", () => {
     const secret = "API_KEY=top-secret curl -H 'Authorization: Bearer abc123' https://user:pass@example.test";
     expect(redactProcessText(secret)).not.toMatch(/top-secret|abc123|:pass@/u);

@@ -1,5 +1,6 @@
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @Suite("Chat viewport mode")
 struct ChatViewportModeTests {

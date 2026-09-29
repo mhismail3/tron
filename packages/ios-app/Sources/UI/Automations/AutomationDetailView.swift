@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum AutomationMutationReadinessPolicy {
     static func admits(

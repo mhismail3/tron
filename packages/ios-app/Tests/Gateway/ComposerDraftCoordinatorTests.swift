@@ -3,6 +3,7 @@ import ImageIO
 import Observation
 import Synchronization
 import Testing
+@testable import TronMobileCore
 @testable import TronMobile
 
 @MainActor

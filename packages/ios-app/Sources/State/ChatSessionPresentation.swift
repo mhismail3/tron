@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import PhotosUI
 import SwiftUI
+import TronMobileCore
 
 enum ChatOpeningSurfaceAction: Equatable {
     case none

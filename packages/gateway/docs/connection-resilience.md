@@ -131,7 +131,7 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   | `MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS` | 2 | `transport/gateway-service.ts` | Directory/git inspections queue behind each other. |
   | `HEAP_EVICTION_SHARE` | 0.70 of the V8 heap limit | `sessions/runtime-registry.ts` | A cold load first retires idle runtimes largest first until the projected share — the sampled heap less the estimates it just gave back — is under it; the registry's own accounting ends the pass, because `heapUsed` does not fall until V8 collects. |
   | `HEAP_REFUSAL_SHARE` | 0.85 of the V8 heap limit | `sessions/runtime-registry.ts` | A cold load is refused with `busy` and `HEAP_REFUSAL_RETRY_AFTER_MS`; a protected runtime is never retired to make room. |
-  | `GatewayDisposableReadPolicy.busyRetryLimit` / `.maximumRetryAfterDelay` | one retry / 10 s | `ios-app/Sources/Gateway/GatewayProtocol.swift` | The phone waits a shed read's hint (bounded) and retries it once, recording `rpc.retry-after`; a mutation is never retried. |
+  | `GatewayDisposableReadPolicy.busyRetryLimit` / `.maximumRetryAfterDelay` | one retry / 10 s | `ios-app/Core/Gateway/GatewayProtocol.swift` | The phone waits a shed read's hint (bounded) and retries it once, recording `rpc.retry-after`; a mutation is never retried. |
 
   The heap shares are read from the process's own `process.memoryUsage()` and
   `getHeapStatistics().heap_size_limit`, so the launcher's

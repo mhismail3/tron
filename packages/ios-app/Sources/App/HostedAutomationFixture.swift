@@ -1,6 +1,7 @@
 #if HOSTED_TEST
 import Foundation
 import SwiftUI
+import TronMobileCore
 
 enum AutomationPresentationFixture {
     static let updatedAt = "2026-09-20T10:30:00Z"

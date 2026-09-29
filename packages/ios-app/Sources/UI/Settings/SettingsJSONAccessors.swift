@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 extension Dictionary where Key == String, Value == JSONValue {
     func string(_ key: String, fallback: String) -> String { self[key]?.stringValue ?? fallback }

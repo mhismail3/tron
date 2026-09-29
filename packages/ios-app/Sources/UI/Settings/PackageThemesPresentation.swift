@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct PackageThemeItem: Identifiable, Equatable, Sendable {
     let path: String

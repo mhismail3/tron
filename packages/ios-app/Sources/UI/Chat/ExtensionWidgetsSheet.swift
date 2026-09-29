@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// General, read-only presentation surface for retained extension content.
 ///

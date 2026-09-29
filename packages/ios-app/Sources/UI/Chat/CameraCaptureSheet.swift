@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import TronMobileCore
 @preconcurrency import AVFoundation
 
 private final class CameraPhotoDelegateProxy: NSObject, AVCapturePhotoCaptureDelegate {

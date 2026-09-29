@@ -1,6 +1,7 @@
 import SwiftUI
 import XCTest
 @testable import TronMobile
+@testable import TronMobileCore
 
 /// The production connection label mounted over the real reconnect path while
 /// the Gateway answers this restoration's `session.open` slowly (C-2).

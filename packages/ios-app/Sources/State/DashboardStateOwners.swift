@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import TronMobileCore
 
 /// Requires the mounted chat generation to retire before a different route mounts.
 struct SessionRouteReplacementOwner: Equatable {

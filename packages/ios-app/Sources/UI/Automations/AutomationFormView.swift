@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 enum AutomationWorkspacePathPolicy {
     static func initialPath(selectedPath: String) -> String? {

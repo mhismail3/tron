@@ -2,6 +2,7 @@ import SwiftUI
 import Testing
 import UIKit
 @testable import TronMobile
+@testable import TronMobileCore
 
 /// Rail-card layout stability.
 ///

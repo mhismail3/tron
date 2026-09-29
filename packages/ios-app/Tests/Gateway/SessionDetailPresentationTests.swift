@@ -3,6 +3,7 @@ import Observation
 import Synchronization
 import SwiftUI
 import Testing
+@testable import TronMobileCore
 import UIKit
 @testable import TronMobile
 

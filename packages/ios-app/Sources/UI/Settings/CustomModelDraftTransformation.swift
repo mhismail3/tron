@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct CustomModelProviderDraft: Identifiable, Hashable, Sendable {
     let id: UUID

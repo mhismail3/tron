@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 private enum WorkspaceInspectorTab: String, CaseIterable, Identifiable {
     case files = "Files"

@@ -75,7 +75,7 @@ Acceptance: retained provider evidence can recover a date without credentials; a
 
 ### E3 — Dynamic dashboard and search
 
-Owning seams: Gateway Knowledge mutation notification path, `packages/ios-app/Sources/State/AppModel.swift`, `packages/ios-app/Sources/State/KnowledgeRPCClient.swift`, `packages/ios-app/Sources/Models/KnowledgeModels.swift`, and `packages/ios-app/Sources/UI/Automations/KnowledgeDashboardView.swift`.
+Owning seams: Gateway Knowledge mutation notification path, `packages/ios-app/Sources/State/AppModel.swift`, `packages/ios-app/Sources/State/KnowledgeRPCClient.swift`, `packages/ios-app/Core/Models/KnowledgeModels.swift`, and `packages/ios-app/Sources/UI/Automations/KnowledgeDashboardView.swift`.
 
 Trace successful external publication through the existing Knowledge invalidation mechanism. Reuse that mechanism rather than introducing a new journal, mirror, broad polling timer, or duplicate event system. Publish invalidation only after commit; failed or replayed operations must not masquerade as new revisions.
 

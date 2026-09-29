@@ -1,5 +1,6 @@
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 /// Facts shown on the model picker's rail cards.
 ///

@@ -1,5 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
+import TronMobileCore
 
 /// Test-only mounted UIKit evidence, queried at a display boundary. Unlike the
 /// semantic callback cache, this cannot report a frame after native unmount.

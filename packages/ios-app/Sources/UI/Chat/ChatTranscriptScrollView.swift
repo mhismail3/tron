@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 @MainActor
 protocol ChatTranscriptHostedRecording: AnyObject {

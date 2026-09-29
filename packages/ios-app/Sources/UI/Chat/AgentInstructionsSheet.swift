@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// The Gateway's attributed projection of the prompt the model receives
 /// (`session.context` → `instructions`). The Gateway owns splitting and

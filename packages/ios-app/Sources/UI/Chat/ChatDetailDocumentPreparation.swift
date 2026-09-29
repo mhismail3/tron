@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 /// A sheet owns one immutable document and at most one parser. Replacement waits
 /// for the cancelled parser to drain instead of accumulating detached work.

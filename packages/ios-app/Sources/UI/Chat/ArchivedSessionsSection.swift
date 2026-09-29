@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// The dashboard's archived container. Visibility, the zero-count collapse, the
 /// profile-switch pass, and the page reads live here rather than in a caller's

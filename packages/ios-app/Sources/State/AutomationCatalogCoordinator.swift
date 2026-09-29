@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 struct AutomationGatewayEndpoint: Identifiable, Sendable {
     let profile: AutomationDashboardProfile

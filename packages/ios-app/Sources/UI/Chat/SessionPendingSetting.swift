@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Deferred Thinking edits keep the same session/model/runtime and supported
 /// choices. Progress revisions and acknowledgement of our pending value do not

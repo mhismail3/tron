@@ -1,0 +1,551 @@
+import Foundation
+import TronMobileCore
+
+package enum SessionProcessKind: String, Codable, CaseIterable, Sendable { case command, subagent }
+
+package enum SessionProcessExecutionMode: String, Codable, CaseIterable, Sendable {
+    case foreground, background, synchronous, asynchronous, unknown
+    package var displayName: String {
+        switch self {
+        case .foreground: "Foreground"
+        case .background: "Background"
+        case .synchronous: "Synchronous"
+        case .asynchronous: "Asynchronous"
+        case .unknown: ""
+        }
+    }
+}
+
+package enum SessionProcessSource: String, Codable, CaseIterable, Sendable {
+    case mainAssistant, delegatedAgent, admittedExtension
+}
+
+package enum SessionProcessLifecycleState: String, Codable, CaseIterable, Sendable {
+    case queued, running, paused, completed, failed, stopped, rejected, interrupted, unknown
+
+    package var isActive: Bool { switch self { case .queued, .running, .paused: true; default: false } }
+    package var isTerminal: Bool { switch self { case .completed, .failed, .stopped, .rejected, .interrupted: true; default: false } }
+    var isProblem: Bool { switch self { case .failed, .rejected, .interrupted: true; default: false } }
+    package var displayName: String { rawValue == "unknown" ? "Unknown" : rawValue.capitalized }
+}
+
+package enum SessionProcessAttention: String, Codable, CaseIterable, Sendable {
+    case none, activeLongRunning, needsAttention
+}
+
+package enum SessionProcessVisibility: String, Codable, CaseIterable, Sendable {
+    case active, recent, historical, unknown
+}
+
+package struct SessionProcessLifecycle: Codable, Hashable, Sendable {
+    let version: Int
+    package let state: SessionProcessLifecycleState
+    let attention: SessionProcessAttention
+    package let sequence: Int
+    let observedAt: String
+    let producerUpdatedAt: String?
+    package let terminalAt: String?
+    package let recentUntil: String?
+
+    package init(
+        version: Int = 1,
+        state: SessionProcessLifecycleState,
+        attention: SessionProcessAttention = .none,
+        sequence: Int,
+        observedAt: String,
+        producerUpdatedAt: String? = nil,
+        terminalAt: String? = nil,
+        recentUntil: String? = nil
+    ) {
+        self.version = version
+        self.state = state
+        self.attention = attention
+        self.sequence = sequence
+        self.observedAt = observedAt
+        self.producerUpdatedAt = producerUpdatedAt
+        self.terminalAt = terminalAt
+        self.recentUntil = recentUntil
+    }
+
+    /// Gateway-authored settlement. A paused run carries the instant the
+    /// Gateway observed its exact process exit as `terminalAt`, which makes it
+    /// resumable history that ages out like finished work instead of live work.
+    package var isSettled: Bool {
+        state.isTerminal || (state == .paused && terminalAt != nil)
+    }
+
+    /// Work the Gateway still observes: queued/running, or a paused run whose
+    /// process exit it has not proven yet.
+    package var isActiveWork: Bool { !isSettled && state.isActive }
+}
+
+/// Exact additive Gateway DTO. Optional fields remain optional so old history
+/// and rows from different existing producers decode without fabrication.
+package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
+    let version: Int
+    package let processId: String
+    package let kind: SessionProcessKind
+    package let executionMode: SessionProcessExecutionMode
+    let source: SessionProcessSource
+    let parentProcessId: String?
+    package let lifecycle: SessionProcessLifecycle
+    package let visibility: SessionProcessVisibility
+    package let startedAt: String?
+    package let title: String
+    let command: String?
+    package let currentTool: String?
+    package let currentPathBasename: String?
+    package let model: String?
+    package let thinking: String?
+    package let outputTail: String?
+    package let outputTruncated: Bool
+    package let durationMs: Int?
+    // Receipt-local presentation time, never encoded or part of value identity.
+    // Keeping it with the sample prevents sheet/row remounts restarting the clock.
+    package private(set) var durationSampleAnchor = ToolDurationSampleAnchor(uptime: ProcessInfo.processInfo.systemUptime)
+    package let toolCount: Int?
+    package let turnCount: Int?
+    package let childCount: Int?
+    package let toolCallId: String?
+    package let runId: String?
+    package let childSessionRef: String?
+
+    package var id: String { processId }
+
+    package init(
+        version: Int = 1,
+        processId: String,
+        kind: SessionProcessKind,
+        executionMode: SessionProcessExecutionMode,
+        source: SessionProcessSource,
+        parentProcessId: String? = nil,
+        lifecycle: SessionProcessLifecycle,
+        visibility: SessionProcessVisibility,
+        startedAt: String? = nil,
+        title: String,
+        command: String? = nil,
+        currentTool: String? = nil,
+        currentPathBasename: String? = nil,
+        model: String? = nil,
+        thinking: String? = nil,
+        outputTail: String? = nil,
+        outputTruncated: Bool = false,
+        durationMs: Int? = nil,
+        toolCount: Int? = nil,
+        turnCount: Int? = nil,
+        childCount: Int? = nil,
+        toolCallId: String? = nil,
+        runId: String? = nil,
+        childSessionRef: String? = nil,
+        durationSampleAnchor: ToolDurationSampleAnchor = ToolDurationSampleAnchor(uptime: ProcessInfo.processInfo.systemUptime)
+    ) {
+        self.version = version
+        self.processId = processId
+        self.kind = kind
+        self.executionMode = executionMode
+        self.source = source
+        self.parentProcessId = parentProcessId
+        self.lifecycle = lifecycle
+        self.visibility = visibility
+        self.startedAt = startedAt
+        self.title = title
+        self.command = command
+        self.currentTool = currentTool
+        self.currentPathBasename = currentPathBasename
+        self.model = model
+        self.thinking = thinking
+        self.outputTail = outputTail
+        self.outputTruncated = outputTruncated
+        self.durationMs = durationMs
+        self.durationSampleAnchor = durationSampleAnchor
+        self.toolCount = toolCount
+        self.turnCount = turnCount
+        self.childCount = childCount
+        self.toolCallId = toolCallId
+        self.runId = runId
+        self.childSessionRef = childSessionRef
+    }
+
+    /// Progress/output changes may repeat the same duration sample. Such frames
+    /// must not move its receipt anchor forward and make the counter restart.
+    func retainingDurationSample(from previous: Self?) -> Self {
+        guard let previous,
+              processId == previous.processId, runId == previous.runId, startedAt == previous.startedAt,
+              lifecycle.state == .running, previous.lifecycle.state == .running,
+              durationMs != nil, durationMs == previous.durationMs else { return self }
+        var result = self
+        result.durationSampleAnchor = previous.durationSampleAnchor
+        return result
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, processId, kind, executionMode, source, parentProcessId, lifecycle, visibility,
+             startedAt, title, command, currentTool, currentPathBasename, model, thinking, outputTail, outputTruncated,
+             durationMs, toolCount, turnCount, childCount, toolCallId, runId, childSessionRef
+    }
+}
+
+package struct SessionProcessOmissions: Codable, Hashable, Sendable {
+    package let count: Int
+    package let bytes: Int
+    package let reason: String
+}
+
+package enum SessionProcessOverviewVisibility: String, Codable, CaseIterable, Sendable {
+    case hidden, active, recent
+}
+
+package struct SessionProcessOverview: Codable, Hashable, Sendable {
+    let version: Int
+    package let revision: Int
+    let asOf: String
+    package let activeCount: Int
+    package let recentCount: Int
+    let problemCount: Int
+    package let visibility: SessionProcessOverviewVisibility
+    let nearestExpiry: String?
+    let omissions: SessionProcessOmissions?
+
+    init(
+        version: Int = 1,
+        revision: Int,
+        asOf: String,
+        activeCount: Int,
+        recentCount: Int,
+        problemCount: Int,
+        visibility: SessionProcessOverviewVisibility,
+        nearestExpiry: String? = nil,
+        omissions: SessionProcessOmissions? = nil
+    ) {
+        self.version = version
+        self.revision = revision
+        self.asOf = asOf
+        self.activeCount = activeCount
+        self.recentCount = recentCount
+        self.problemCount = problemCount
+        self.visibility = visibility
+        self.nearestExpiry = nearestExpiry
+        self.omissions = omissions
+    }
+}
+
+package struct SessionProcessDelta: Codable, Hashable, Sendable {
+    package let activity: SessionProcessActivity?
+    package let removedProcessIds: [String]?
+    package let processRevision: Int
+    let processAsOf: String
+    package let overview: SessionProcessOverview
+}
+
+/// Lease invalidations are deliberately outside the mounted parent session
+/// sequence. A close notification has no revision and is still admitted.
+package struct ProcessTranscriptChanged: Codable, Hashable, Sendable {
+    package let leaseId: String
+    let processId: String?
+    package let revision: String?
+    let total: Int?
+    let leafEntryId: String?
+    package let closed: Bool?
+    let reason: String?
+
+    package init(
+        leaseId: String, processId: String?, revision: String?, total: Int?,
+        leafEntryId: String?, closed: Bool?, reason: String?
+    ) {
+        self.leaseId = leaseId
+        self.processId = processId
+        self.revision = revision
+        self.total = total
+        self.leafEntryId = leafEntryId
+        self.closed = closed
+        self.reason = reason
+    }
+}
+
+package enum SessionProcessAdmissionPolicy {
+    package static let historyCapability = "process-history.v1"
+    package static let transcriptCapability = "process-transcript.v2"
+    package static let transcriptAbortCapability = "process-transcript-abort.v1"
+    static let maximumActivities = 32
+    static let maximumRemovedProcessIDs = 32
+    static let maximumOverviewCount = 2_080
+    static let maximumStringBytes = 2_048
+    static let maximumOutputBytes = 32 * 1_024
+    package static let maximumEncodedBytes = 256 * 1_024
+
+    package static func admits(_ process: SessionProcessActivity) -> Bool {
+        guard process.version == 1,
+              boundedNonempty(process.processId, 512),
+              process.parentProcessId.map({ boundedNonempty($0, 512) }) ?? true,
+              boundedNonempty(process.title, maximumStringBytes),
+              process.command.map({ bounded($0, maximumStringBytes, newlines: true) }) ?? true,
+              process.startedAt.map(validTimestamp) ?? true,
+              process.currentTool.map({ bounded($0, maximumStringBytes) }) ?? true,
+              process.currentPathBasename.map(validBasename) ?? true,
+              process.model.map({ boundedNonempty($0, maximumStringBytes) }) ?? true,
+              process.thinking.map({ boundedNonempty($0, 128) }) ?? true,
+              process.outputTail.map({ bounded($0, maximumOutputBytes, newlines: true) }) ?? true,
+              process.toolCallId.map({ boundedNonempty($0, maximumStringBytes) }) ?? true,
+              process.runId.map({ boundedNonempty($0, 512) }) ?? true,
+              process.childSessionRef.map({ boundedNonempty($0, 512) && !$0.contains("/") && !$0.contains("\\") }) ?? true,
+              [process.durationMs, process.toolCount, process.turnCount, process.childCount]
+                .allSatisfy({ $0.map { $0 >= 0 } ?? true }),
+              admits(process.lifecycle, visibility: process.visibility) else { return false }
+        switch process.kind {
+        case .subagent:
+            guard process.executionMode == .synchronous || process.executionMode == .asynchronous,
+                  process.command == nil else { return false }
+        case .command:
+            // Decode and validate legacy Gateway rows so an older authoritative
+            // snapshot can still open, but never admit them to presentation.
+            guard process.executionMode == .foreground,
+                  process.source == .mainAssistant,
+                  process.command != nil else { return false }
+        }
+        if let startedAt = process.startedAt,
+           let started = GatewayTimestamp.parse(startedAt),
+           let observed = GatewayTimestamp.parse(process.lifecycle.observedAt), observed < started { return false }
+        guard let encoded = try? JSONEncoder.gateway.encode(process), encoded.count <= maximumEncodedBytes else { return false }
+        return true
+    }
+
+    package static func admitted(_ processes: [SessionProcessActivity]) -> [SessionProcessActivity] {
+        var seen = Set<String>()
+        return Array(processes
+            .filter { $0.kind == .subagent && admits($0) && seen.insert($0.processId).inserted }
+            .sorted(by: SessionProcessProjection.precedes)
+            .prefix(maximumActivities))
+    }
+
+    package static func admits(_ overview: SessionProcessOverview) -> Bool {
+        guard overview.version == 1,
+              overview.revision >= 0,
+              validTimestamp(overview.asOf),
+              overview.nearestExpiry.map(validTimestamp) ?? true,
+              boundedCount(overview.activeCount),
+              boundedCount(overview.recentCount),
+              boundedCount(overview.problemCount),
+              overview.problemCount <= overview.activeCount + overview.recentCount,
+              (overview.recentCount > 0) == (overview.nearestExpiry != nil),
+              admits(overview.omissions) else { return false }
+        switch overview.visibility {
+        case .hidden:
+            return overview.activeCount == 0 && overview.recentCount == 0 && overview.nearestExpiry == nil
+        case .active:
+            return overview.activeCount > 0
+        case .recent:
+            return overview.activeCount == 0 && overview.recentCount > 0 && overview.nearestExpiry != nil
+        }
+    }
+
+    package static func admits(_ delta: SessionProcessDelta) -> Bool {
+        let removals = delta.removedProcessIds ?? []
+        guard delta.processRevision >= 0,
+              validTimestamp(delta.processAsOf),
+              delta.overview.revision == delta.processRevision,
+              delta.overview.asOf == delta.processAsOf,
+              admits(delta.overview),
+              removals.count <= maximumRemovedProcessIDs,
+              Set(removals).count == removals.count,
+              removals.allSatisfy({ boundedNonempty($0, 512) }),
+              delta.activity != nil || !removals.isEmpty else { return false }
+        guard let activity = delta.activity else { return true }
+        guard admits(activity) else { return false }
+        switch activity.visibility {
+        case .active:
+            return delta.overview.visibility == .active && delta.overview.activeCount > 0
+        case .recent:
+            return delta.overview.visibility != .hidden && delta.overview.recentCount > 0
+        case .historical, .unknown:
+            return false
+        }
+    }
+
+    package static func admitsMountedSubset(
+        _ activities: [SessionProcessActivity],
+        overview: SessionProcessOverview
+    ) -> Bool {
+        guard activities.allSatisfy({ $0.visibility == .active || $0.visibility == .recent }) else { return false }
+        let active = activities.filter { $0.visibility == .active }.count
+        let recentRows = activities.filter { $0.visibility == .recent }
+        guard active <= overview.activeCount, recentRows.count <= overview.recentCount else { return false }
+        switch overview.visibility {
+        case .hidden:
+            guard activities.isEmpty else { return false }
+        case .active:
+            guard active > 0 else { return false }
+        case .recent:
+            guard active == 0, !recentRows.isEmpty else { return false }
+        }
+        if let mountedNearest = recentRows.compactMap({ $0.lifecycle.recentUntil }).min(),
+           let overviewNearest = overview.nearestExpiry,
+           overviewNearest > mountedNearest { return false }
+        return true
+    }
+
+    package static func admitsSnapshotFacts(_ snapshot: SessionSnapshot) -> Bool {
+        guard let overview = snapshot.processOverview else {
+            return snapshot.processActivities == nil // Legacy Gateway omits the projection entirely.
+        }
+        let activities = snapshot.processActivities ?? []
+        guard admits(overview), activities.count <= maximumActivities,
+              activities.allSatisfy(admits) else { return false }
+        if (overview.activeCount > 0 || overview.recentCount > 0), snapshot.processActivities == nil { return false }
+        guard admitsMountedSubset(activities, overview: overview) else { return false }
+        let active = activities.filter { $0.visibility == .active }.count
+        let recentRows = activities.filter { $0.visibility == .recent }
+        let recent = recentRows.count
+        if overview.omissions == nil {
+            guard active == overview.activeCount, recent == overview.recentCount else { return false }
+            let nearest = recentRows.compactMap { $0.lifecycle.recentUntil }.min()
+            guard nearest == overview.nearestExpiry else { return false }
+        } else {
+            guard active <= overview.activeCount, recent <= overview.recentCount else { return false }
+            if let mountedNearest = recentRows.compactMap({ $0.lifecycle.recentUntil }).min(),
+               let overviewNearest = overview.nearestExpiry,
+               overviewNearest > mountedNearest { return false }
+        }
+        return true
+    }
+
+    package static func admits(_ change: ProcessTranscriptChanged) -> Bool {
+        guard boundedNonempty(change.leaseId, 256),
+              change.processId.map({ boundedNonempty($0, 512) }) ?? true,
+              change.revision.map({ boundedNonempty($0, 256) }) ?? true,
+              change.total.map({ $0 >= 0 }) ?? true,
+              change.leafEntryId.map({ boundedNonempty($0, 512) }) ?? true,
+              change.reason.map({ bounded($0, maximumStringBytes) }) ?? true else { return false }
+        return change.revision != nil || change.closed == true
+    }
+
+    private static func admits(_ lifecycle: SessionProcessLifecycle, visibility: SessionProcessVisibility) -> Bool {
+        guard lifecycle.version == 1, lifecycle.sequence >= 0,
+              validTimestamp(lifecycle.observedAt),
+              lifecycle.producerUpdatedAt.map(validTimestamp) ?? true,
+              lifecycle.terminalAt.map(validTimestamp) ?? true,
+              lifecycle.recentUntil.map(validTimestamp) ?? true else { return false }
+        switch visibility {
+        case .active:
+            return lifecycle.isActiveWork && lifecycle.terminalAt == nil && lifecycle.recentUntil == nil
+        case .recent, .historical:
+            // Recent/historical presentation is settled work: a terminal row, or
+            // a paused row whose exact process exit the Gateway observed.
+            guard lifecycle.isSettled,
+                  let terminal = lifecycle.terminalAt.flatMap(GatewayTimestamp.parse),
+                  let expiry = lifecycle.recentUntil.flatMap(GatewayTimestamp.parse) else { return false }
+            return abs(expiry.timeIntervalSince(terminal) - recentInterval) < 0.001
+        case .unknown:
+            return lifecycle.state == .unknown && lifecycle.terminalAt == nil && lifecycle.recentUntil == nil
+        }
+    }
+
+    private static let recentInterval: TimeInterval = 5 * 60
+
+    private static func admits(_ omissions: SessionProcessOmissions?) -> Bool {
+        guard let omissions else { return true }
+        return omissions.count >= 0 && omissions.count <= 2_048
+            && omissions.bytes >= 0 && omissions.bytes <= maximumEncodedBytes
+            && ["count", "bytes", "countAndBytes"].contains(omissions.reason)
+    }
+
+    private static func boundedCount(_ value: Int) -> Bool {
+        value >= 0 && value <= maximumOverviewCount
+    }
+
+    private static func validTimestamp(_ value: String) -> Bool {
+        bounded(value, 128) && GatewayTimestamp.parse(value) != nil
+    }
+
+    private static func validBasename(_ value: String) -> Bool {
+        boundedNonempty(value, maximumStringBytes) && !value.contains("/") && !value.contains("\\")
+    }
+
+    private static func boundedNonempty(_ value: String, _ bytes: Int) -> Bool {
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && bounded(value, bytes)
+    }
+
+    private static func bounded(_ value: String, _ bytes: Int, newlines: Bool = false) -> Bool {
+        value.utf8.count <= bytes && !value.unicodeScalars.contains { scalar in
+            if scalar.value == 0x0a || scalar.value == 0x0d { return !newlines }
+            return scalar.value < 0x20 || (0x7f...0x9f).contains(scalar.value)
+        }
+    }
+}
+
+package enum SessionProcessProjection {
+    package struct Sections: Equatable, Sendable {
+        package let active: [SessionProcessActivity]
+        package let recent: [SessionProcessActivity]
+    }
+
+    package static func sections(_ activities: [SessionProcessActivity]) -> Sections {
+        let admitted = SessionProcessAdmissionPolicy.admitted(activities)
+        return Sections(
+            active: admitted.filter { $0.visibility == .active },
+            recent: admitted.filter { $0.visibility == .recent }
+        )
+    }
+
+    /// Keep an already-presented single-run sheet attached when Gateway replaces
+    /// a temporary aggregate with its exact child row. Multiple matching
+    /// children are intentionally ambiguous and fail closed.
+    package static func mountedActivity(
+        selected: SessionProcessActivity,
+        activities: [SessionProcessActivity]
+    ) -> SessionProcessActivity? {
+        let admitted = SessionProcessAdmissionPolicy.admitted(activities)
+        if let exact = admitted.first(where: { $0.processId == selected.processId }) { return exact }
+        guard selected.kind == .subagent,
+              let toolCallID = selected.toolCallId,
+              let runID = selected.runId else { return nil }
+        let successors = admitted.filter {
+            $0.kind == .subagent
+                && $0.toolCallId == toolCallID
+                && $0.runId == runID
+                && $0.processId != selected.processId
+        }
+        return successors.count == 1 ? successors[0] : nil
+    }
+
+    package static func precedes(_ lhs: SessionProcessActivity, _ rhs: SessionProcessActivity) -> Bool {
+        let lhsBucket = lhs.visibility == .active ? 0 : 1
+        let rhsBucket = rhs.visibility == .active ? 0 : 1
+        if lhsBucket != rhsBucket { return lhsBucket < rhsBucket }
+        let lhsProblem = lhs.lifecycle.attention == .needsAttention || lhs.lifecycle.state.isProblem
+        let rhsProblem = rhs.lifecycle.attention == .needsAttention || rhs.lifecycle.state.isProblem
+        if lhsProblem != rhsProblem { return lhsProblem }
+        // Active observation timestamps advance with progress heartbeats and
+        // are not ordering authority. Hold rows at their run-start boundary;
+        // terminal history may continue using its fixed completion boundary.
+        let lhsTime = lhs.visibility == .active
+            ? (lhs.startedAt ?? "")
+            : (lhs.lifecycle.terminalAt ?? lhs.lifecycle.observedAt)
+        let rhsTime = rhs.visibility == .active
+            ? (rhs.startedAt ?? "")
+            : (rhs.lifecycle.terminalAt ?? rhs.lifecycle.observedAt)
+        if lhsTime != rhsTime { return lhsTime > rhsTime }
+        return lhs.processId < rhs.processId
+    }
+}
+
+/// Local rendering deadline only. Gateway snapshots/deltas remain authoritative;
+/// this may hide stale recent chrome but can never extend or promote it.
+struct SessionProcessVisualDeadline: Sendable {
+    let visibility: SessionProcessOverviewVisibility
+    let deadline: ContinuousClock.Instant?
+
+    init(overview: SessionProcessOverview, now: ContinuousClock.Instant = .now, wallNow: Date = .now) {
+        visibility = overview.visibility
+        if overview.visibility == .recent,
+           let expiry = overview.nearestExpiry.flatMap(GatewayTimestamp.parse) {
+            let remaining = max(0, Int(expiry.timeIntervalSince(wallNow) * 1_000))
+            deadline = remaining > 0 ? now.advanced(by: .milliseconds(remaining)) : now
+        } else {
+            deadline = nil
+        }
+    }
+
+    func expired(at now: ContinuousClock.Instant = .now) -> Bool {
+        visibility == .recent && deadline.map { now >= $0 } ?? false
+    }
+}

@@ -10,13 +10,16 @@ struct PrivacyManifestTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         try validate(root.appending(path: "Sources/PrivacyInfo.xcprivacy"))
+        try validate(root.appending(path: "Core/PrivacyInfo.xcprivacy"))
         try validate(root.appending(path: "ShareExtension/PrivacyInfo.xcprivacy"))
     }
 
-    @Test("built app and embedded extension both contain valid manifests")
+    @Test("built app, embedded TronMobileCore framework and extension contain valid manifests")
     func packagedManifests() throws {
         let app = Bundle.main.bundleURL
         try validate(app.appending(path: "PrivacyInfo.xcprivacy"))
+        // TronMobileCore reads UserDefaults itself, so its bundle carries its own manifest.
+        try validate(app.appending(path: "Frameworks/TronMobileCore.framework/PrivacyInfo.xcprivacy"))
         let plugIns = app.appending(path: "PlugIns", directoryHint: .isDirectory)
         let extensions = try FileManager.default.contentsOfDirectory(
             at: plugIns,

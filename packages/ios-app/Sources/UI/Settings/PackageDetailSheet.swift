@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// One kind of resource an installed package provides, in the order the detail
 /// sheet presents them. Skills, subagents, prompts, tools and commands reuse the

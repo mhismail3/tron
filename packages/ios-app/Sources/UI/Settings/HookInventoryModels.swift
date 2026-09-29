@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct HookHandlerSummary: Identifiable, Equatable, Sendable {
     let event: String

@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Value-driven composer presentation. Draft, route, transport, and canonical
 /// ownership remain outside this view and enter only through bindings/intents.

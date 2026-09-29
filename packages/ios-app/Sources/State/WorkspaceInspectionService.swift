@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 typealias WorkspaceInspectionRequest = @Sendable (String, JSONValue) async throws -> JSONValue
 

@@ -2,6 +2,7 @@ import AVFoundation
 import AVKit
 import ImageIO
 import SwiftUI
+import TronMobileCore
 import WebKit
 
 struct DisplayRoute: Identifiable, Hashable, Sendable {

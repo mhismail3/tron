@@ -3782,7 +3782,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const internal = slot as unknown as {
       extensionActivities: Map<string, ExtensionRunActivity>;
       extensionRunOwnership: Map<string, {
-        toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescent?: boolean;
+        toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string;
       }>;
       stopExtensionActivityWatcher: (id: string) => void;
     };
@@ -3852,7 +3852,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       resumeDisposition: "resumable",
     }));
     await slot.discoverExtensionArtifact(asyncDir);
-    expect(internal.extensionRunOwnership.get(runId)?.pausedProcessQuiescent).toBe(true);
+    expect(internal.extensionRunOwnership.get(runId)?.pausedProcessQuiescentAt)
+      .toBe(new Date(started + 1_500).toISOString());
 
     await drain;
     expect(slot.isDrainBusy).toBe(false);
@@ -3903,7 +3904,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     const internal = slot as unknown as {
       extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescent?: boolean }>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string }>;
       canonicalExtensionRunFacts: () => Map<string, unknown>;
     };
     const started = Date.now() - 5_000;

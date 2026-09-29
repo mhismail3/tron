@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Observation copy uses the source date, not a later correction's save time.
 /// Canonical IDs and qualifications remain intact, but belong in technical details.

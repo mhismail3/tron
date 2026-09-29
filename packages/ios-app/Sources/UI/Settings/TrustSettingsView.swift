@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct ProjectTrustSummary: Equatable, Sendable {
     let cwd: String

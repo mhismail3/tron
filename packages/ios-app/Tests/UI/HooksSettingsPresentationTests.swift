@@ -1,4 +1,5 @@
 import Testing
+@testable import TronMobileCore
 @testable import TronMobile
 
 /// Failure modes this suite targets, from the R-0 audit of the resources

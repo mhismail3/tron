@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 /// Owns only the presentation lifecycle of one bounded provider-usage read.
 /// Runtime authority and caching remain in the Gateway; this owner rejects late

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 struct SessionHistoryCursor: Codable, Hashable, Sendable {
     let ordinal: Int

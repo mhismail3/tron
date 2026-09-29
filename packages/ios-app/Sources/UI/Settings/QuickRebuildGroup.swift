@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// What one quick rebuild row can do right now. Availability mirrors the owning
 /// detail sheets: the Gateway source rebuild needs the update helper and a

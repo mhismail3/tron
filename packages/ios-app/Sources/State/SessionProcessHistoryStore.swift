@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 struct SessionProcessHistoryPage: Codable, Hashable, Sendable {
     let activities: [SessionProcessActivity]

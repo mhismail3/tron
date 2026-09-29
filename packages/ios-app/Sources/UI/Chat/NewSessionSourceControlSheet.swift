@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 struct NewSessionQuickSelection: Identifiable, Hashable, Sendable {
     let path: String

@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 enum ToolDetailKind: String, Sendable {
     case read, write, edit, bash, grep, find, list, generic

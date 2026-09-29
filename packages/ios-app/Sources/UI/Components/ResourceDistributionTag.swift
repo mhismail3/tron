@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// The one distribution tag for a resource row. The Gateway derives
 /// `distribution` from Pi's sourceInfo; Pi built-ins carry none, so those rows

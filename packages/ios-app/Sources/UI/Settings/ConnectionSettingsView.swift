@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 import UniformTypeIdentifiers
 
 private extension DashboardServerConnectionState {

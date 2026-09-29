@@ -1,5 +1,6 @@
 import Foundation
 import MetricKit
+import TronMobileCore
 
 /// The local MetricKit adapter retains only bounded, typed summaries. Raw
 /// payloads, symbols, paths, and call-stack text never enter the mailbox.

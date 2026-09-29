@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 enum SessionSearchCoveragePresentation {
     static func state(for response: SessionSearchResponse) -> String {

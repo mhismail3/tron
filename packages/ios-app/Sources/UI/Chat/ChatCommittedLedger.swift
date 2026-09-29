@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Frozen canonical rows inside one complete installed transcript. The revision
 /// is local structural lineage: an unchanged canonical identity/membership spine

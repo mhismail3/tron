@@ -2,6 +2,7 @@ import Foundation
 import Synchronization
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 /// Failure modes this suite exists to catch, written before the code:
 /// 1. the reconnect-stall watchdog ticks while the app is backgrounded;

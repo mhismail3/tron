@@ -1,5 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
+import TronMobileCore
 
 /// Hosted journey for the dashboard's archived container. It renders the real
 /// row swipe actions and the real `ArchivedSessionsContainerSection`, so the

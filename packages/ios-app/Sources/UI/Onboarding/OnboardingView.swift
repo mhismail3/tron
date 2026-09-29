@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Paged first-run sheet. The session shell remains mounted underneath, matching
 /// Tron's established onboarding presentation while gateway state changes.

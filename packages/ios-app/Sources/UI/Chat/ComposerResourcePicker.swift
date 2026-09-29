@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import TronMobileCore
 
 struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
     enum Kind: Hashable, Sendable { case skill, command, prompt }

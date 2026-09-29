@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Testing
+@testable import TronMobileCore
 @testable import TronMobile
 
 /// Failure modes these tests target (a dashboard row re-renders only at the

@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 /// Typed Gateway boundary for the knowledge namespace. Responses are admitted
 /// before reaching views; no corpus or object bytes are cached on iOS.

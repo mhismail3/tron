@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 typealias PendingExtensionInteractionPresenter = @MainActor @Sendable (ExtensionInteraction) -> Void
 

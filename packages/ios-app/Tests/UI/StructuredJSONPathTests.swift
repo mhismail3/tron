@@ -1,4 +1,5 @@
 import Testing
+@testable import TronMobileCore
 @testable import TronMobile
 
 @Suite("Structured JSON live path resolution")
