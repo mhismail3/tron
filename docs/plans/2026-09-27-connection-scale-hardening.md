@@ -9819,3 +9819,41 @@ recovery gaps; all three were fixed on the same branch.
   wait it was in plus the attempt that follows, and the modelled p95 ≤ 5 s is
   the path-change case C-3 targets. The gateway README now says so; the quiet
   host run still owns the real numbers.
+
+### F-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/f-1`)
+
+- Result: the two deterministic iOS regressions on the integration branch are
+  gone; both were tests pinning the pre-`C-6` write log, so no product change was
+  needed and neither suite's guarantee was weakened.
+- Root causes: (1) `ProviderAuthCoordinatorTests.completionDispatchIsOwned`
+  indexed the write log by absolute frame, but the profile clear abandons the
+  retired `provider.list`/`model.list` pair and `C-6` now appends one `cancel`
+  control frame per abandoned read, so frames 3–4 were the cancels rather than
+  the fresh pair (decoding a cancel frame has no `method`).
+  (2) `SessionSheetPresentationTests.testSessionHistoryPagingStartsNewNativeBatchAtTopAndRetainsFailures`
+  pinned the reactivation read to frame 8 and the total to 10; the read the covered
+  surface abandons is likewise cancelled, so the reactivation read is frame 9 and
+  the total is 11. Its `InvalidTransition { phase: idle targetPhase:
+  failed(deinit) }` was the sheet's SwiftUI gesture teardown of that failed
+  fixture response, not the cause: the fixture's own `Expected
+  session.history.list` error preceded it.
+- Changes: `packages/ios-app/Tests/Gateway/ProviderAuthCoordinatorTests.swift`
+  (wait for the retired pair's two cancel frames before the fresh pair, then the
+  pair at 5–6, the Recent-rail warm at 7 and a bound of 8 frames),
+  `packages/ios-app/Tests/UI/SessionSheetPresentationTests.swift` (a
+  `waitForCancellation(ofRequestAt:socket:)` helper that waits for the exact
+  cancel frame naming the abandoned read, then frame indices 9 and 10 with a
+  bound of 11 frames).
+- Evidence: `scripts/tron-ios-test build` and
+  `scripts/tron-ios-test run --only-testing TronMobileTests/ProviderAuthCoordinatorTests
+  --only-testing TronMobileTests/SessionSheetPresentationTests
+  --only-testing TronMobileTests/AppModelReconnectTests
+  --only-testing TronMobileTests/GatewayClientTransportTests
+  --only-testing TronMobileTests/SessionPresentationStoreTests` on lane F1 pass
+  213/213 with 0 failures (retained at
+  `~/Library/Developer/Tron/ios/test-runs/20260929T000253Z-run.4nTQ3g`). Before
+  the fix the same command failed both cases on revision `93cc80968`; the
+  instrumented write logs that named the condition are not part of the change.
+- For the next agent: no other case in those suites indexes the write log past a
+  cancel frame; a new surface-abandonment case does, so a frame index is only
+  trustworthy after the control frame it waits for exists.

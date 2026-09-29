@@ -151,11 +151,15 @@ final class SessionSheetPresentationTests: XCTestCase {
                     activity.value = .covered
                     for _ in 0..<4 { try await DisplayFrameScheduler.displayLink.nextFrame() }
                     try await gateway.respond(at: 7, method: "session.history.list", result: page(1...93))
+                    // The covered surface abandons the read it admitted, so `C-6`
+                    // appends a cancel control frame naming it; the reactivation's
+                    // read follows that frame.
+                    try await self.waitForCancellation(ofRequestAt: 7, socket: gateway.socket)
                     for _ in 0..<4 { try await DisplayFrameScheduler.displayLink.nextFrame() }
                     XCTAssertEqual(probe.store?.page?.entryRange, 94...193)
                     XCTAssertEqual(middleScroll.contentOffset.y, middleOffset, accuracy: 1)
                     activity.value = .active
-                    try await gateway.respond(at: 8, method: "session.history.list", result: page(1...93))
+                    try await gateway.respond(at: 9, method: "session.history.list", result: page(1...93))
                     let last = try await self.historyFirstRow("93", controller: controller)
                     let lastScroll = try XCTUnwrap(self.historyScroll(containing: last))
                     XCTAssertEqual(lastScroll.contentOffset.y + lastScroll.adjustedContentInset.top, 0, accuracy: 1)
@@ -167,12 +171,12 @@ final class SessionSheetPresentationTests: XCTestCase {
                     XCTAssertEqual(lastScroll.contentOffset.y, lastScroll.contentSize.height - lastScroll.bounds.height + lastScroll.adjustedContentInset.bottom, accuracy: 1)
                     self.capture(controller, name: "history-paging-last-bottom-\(scheme)")
                     probe.newer?()
-                    try await gateway.respond(at: 9, method: "session.history.list", result: page(94...193))
+                    try await gateway.respond(at: 10, method: "session.history.list", result: page(94...193))
                     let back = try await self.historyFirstRow("193", controller: controller)
                     let backScroll = try XCTUnwrap(self.historyScroll(containing: back))
                     XCTAssertEqual(backScroll.contentOffset.y + backScroll.adjustedContentInset.top, 0, accuracy: 1)
                     let requests = await gateway.socket.sentFrames().count
-                    XCTAssertEqual(requests, 10)
+                    XCTAssertEqual(requests, 11)
                 }
                 await gateway.client.close()
             }
@@ -362,6 +366,25 @@ final class SessionSheetPresentationTests: XCTestCase {
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
         while !predicate(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(predicate(), "Mounted routing did not settle before its deadline")
+    }
+
+    /// Waits until the write log carries the `C-6` cancel control frame for the
+    /// request at `index`. A surface that abandons a disposable read leaves that
+    /// frame in the log, so callers that index reads by position wait for it
+    /// instead of assuming where it lands.
+    private func waitForCancellation(ofRequestAt index: Int, socket: ScriptedGatewaySocket) async throws {
+        let frames = await socket.sentFrames()
+        let cancelled = try XCTUnwrap(JSONDecoder.gateway.decode(JSONValue.self, from: frames[index]).objectValue?["id"]?.stringValue)
+        try await withTestWatchdog {
+            while true {
+                let cancels = await socket.sentFrames().contains { frame in
+                    let object = try? JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue
+                    return object?["type"] == .string("cancel") && object?["id"] == .string(cancelled)
+                }
+                if cancels { return }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
     }
 
     func testMountedSingleBrowserRunUsesTheSameCustomActivation() async throws {
