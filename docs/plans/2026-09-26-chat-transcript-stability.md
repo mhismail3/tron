@@ -1572,8 +1572,9 @@ pass only through eager-only repairs, stop and report.
     passed in the combined run above, so it is the load-related picker RPC-ordering
     flake, not a regression.
   - The new and changed tests, focused: 8 pass in 8.9 s
-    (`20260929T080731Z-run.IgrxxH`; the detached-restructure test re-run after its
-    anchor assertion was added, `20260929T082904Z-run.KUkGew`), including `CT25-KEYBOARD-METRICS …
+    (`20260929T080731Z-run.IgrxxH`; the detached-restructure test re-run from the
+    committed revision after its anchor assertion was added,
+    `20260929T083030Z-run.V5BFXp`, `dirty: false`), including `CT25-KEYBOARD-METRICS …
     settledClearance=12.7 composerTopSpan=[393.7,791.0]` from the correct-inset
     journey beside the wrong-edge control,
     `CT25-DETACH-METRICS anchor=detach-anchor-turn-43 startY=-35.7
