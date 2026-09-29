@@ -724,8 +724,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // mirrored, so the composer/keyboard inset lands at the content origin
         // and the navigation inset at the far end as native content insets that
         // ride the keyboard's own transaction.
-        .chatTranscriptOrientation(orientation)
         .chatTranscriptInsets(orientation, safeAreaInsets: insetReader.safeAreaInsets)
+        .chatTranscriptOrientation(orientation)
         // The sheet a row asked for is presented here, outside the lazy stack, so
         // streaming a row out of realization cannot dismiss it. The resolver is
         // the same installed projection the rows are rendered from, so the

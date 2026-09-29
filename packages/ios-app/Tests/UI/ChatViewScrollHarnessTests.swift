@@ -4630,6 +4630,7 @@ struct KeyboardBoundarySample {
     let contentOffsetY: CGFloat
     let adjustedInset: UIEdgeInsets
     let contentInset: UIEdgeInsets
+    let scrollSafeAreaInsets: UIEdgeInsets
 
     func insetDiagnosticLine(boundary: String) -> String {
         "CT23-INSET-DIAG boundary=\(boundary) marginTop=\(ct2Number(sourceMargins.top))"
@@ -4639,6 +4640,8 @@ struct KeyboardBoundarySample {
             + " adjustedBottom=\(ct2Number(adjustedInset.bottom))"
             + " contentTop=\(ct2Number(contentInset.top))"
             + " contentBottom=\(ct2Number(contentInset.bottom))"
+            + " safeAreaTop=\(ct2Number(scrollSafeAreaInsets.top))"
+            + " safeAreaBottom=\(ct2Number(scrollSafeAreaInsets.bottom))"
             + " expectedPinnedOffset=\(ct2Number(-adjustedInset.top))"
             + " offsetMinusPinned=\(ct2Number(contentOffsetY + adjustedInset.top))"
     }
@@ -6135,7 +6138,8 @@ final class ChatViewScrollHarness {
             sourceMargins: sourceMargins,
             contentOffsetY: scrollView.contentOffset.y,
             adjustedInset: scrollView.adjustedContentInset,
-            contentInset: scrollView.contentInset
+            contentInset: scrollView.contentInset,
+            scrollSafeAreaInsets: scrollView.safeAreaInsets
         )
     }
 
