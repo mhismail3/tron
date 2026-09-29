@@ -1212,3 +1212,52 @@ pass only through eager-only repairs, stop and report.
   `ChatToolRunViews.swift`, `ChatViewScrollHarnessTests.swift`,
   `ChatRowStabilityTests.swift`, `ChatCommittedLedgerTests.swift`,
   `SessionSheetPresentationTests.swift`.
+
+### CT-27 stage B4 (F8) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: the prompt replacement host renders from its `row` input and keeps only
+  the outgoing queued card as state.
+  - `displayed`, `naturalHeight`, `presentedHeight`,
+    `awaitingReplacementHeightRevision` and the height-choreography
+    `onGeometryChange`/`naturalHeightChanged` loop are deleted; the host renders
+    `content(row, …)` directly and `onChange(of: row)` receives both values, so
+    the retarget no longer needs a mirror.
+  - `ReplacementHeightLayout` (a `Layout` + `Animatable`) holds the canonical row
+    and the outgoing card, measures both in the pass that places them, and returns
+    the interpolated height driven by the same `promptReplacementProgress` as the
+    cross-fade. `ChatPromptReplacementHeightPolicy` still decides whether a
+    replacement may interpolate (Reduce Motion, a covered surface or a change over
+    2,000 pt installs the incoming height at once) with the heights the layout
+    measured. The outgoing layer is clipped to the row's current height by its own
+    placement, as before.
+- Evidence (lane ct27, all products rebuilt from this worktree):
+  - Parity gate 7/7 in 44.8 s (`…T030011Z-run.ovXKL6`); `queued-card-to-sent-row`
+    worst 0.03307 against the 0.065 transition bound (CT-14's queued-card
+    cross-fade and shrink evidence).
+  - Harness `queuedPromptCanonicalReplacementShrinks`: heights
+    `[80, 80, 80, 80, 75, 67, 59, 53, 50, 48, 46, 45, 45, 44, … 44]` — the fade
+    still holds the queued card's height before a monotonic contract with ≥3
+    intermediate heights and no jump, and `maxTail=0.0` (the tail is held).
+  - `ChatRowStabilityTests` 7/7 (8.5 s), including
+    `streamingRowEvaluatesOncePerInstall`: A/B on the same nine-install streaming
+    fixture measured 28 host evaluations with the row-direct host and 36 with a
+    mirror restored (+1 per changed row update, which is the mirror's stale
+    render; the harness's own re-render rate is the noise floor).
+  - The full `ChatViewScrollHarnessTests` suite reports only the same pre-existing
+    `displacedRetainedResume` watchdog failure as stage A.
+- Deviations: (a) the notification progress→settled animation moved from the row
+  host's mirrored, marker-carrying state write into `ChatNotificationView`'s own
+  content transition (the same `inPlaceContentReplacementAnimation` curve and the
+  same `showsProgress` condition). A host-level animation cannot survive below the
+  row content's `chatStableTranscriptUpdates`, and the audit's fix does not name
+  this case. The deleted `admitsChatNotificationReplacementAnimation` marker had
+  no other user. No oracle covers this motion — the parity gate has no runtime
+  notification scenario — so it is preserved by construction, not gate-verified.
+    (b) `ChatViewScrollHarnessTests`'s compaction-settlement wait now also requires
+  a non-empty viewport observation, which is the intent its own comment already
+  states for the earlier waits: a row that applies its content in the install
+  frame makes that frame carry a not-yet-settled viewport, so the previous wait
+  could sample the intermediate frame. Verified stable over six consecutive runs.
+- Changes: `ChatTranscriptScrollView.swift`, `ChatTranscriptEventViews.swift`,
+  `ChatContentTransition.swift`, `ChatHostedProbe.swift`,
+  `ChatViewScrollHarnessTests.swift`, `ChatRowStabilityTests.swift`.

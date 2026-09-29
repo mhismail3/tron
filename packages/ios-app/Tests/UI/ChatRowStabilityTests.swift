@@ -363,6 +363,61 @@ struct ChatRowStabilityTests {
         }
     }
 
+    @Test("a streaming row's host evaluates its content once per installed projection")
+    func streamingRowEvaluatesOncePerInstall() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_327).openingTail(targetEncodedBytes: 10_000)
+            snapshot.transcript = [try harnessMessage(id: "evaluation-history")]
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            snapshot.toolExecutions = []
+            let initial = snapshot
+            try await withStabilityHarness(snapshot: initial) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                let installBaseline = harness.probeObservation.projectionInstallCount
+                var next = initial
+                next.phase = .running
+                // Each revision is one installed projection the row renders.
+                for count in [1, 3, 6, 9, 12, 16, 20, 24, 30] {
+                    next.streaming = try harnessAssistantMessage(
+                        id: "evaluation-response",
+                        presentationID: "evaluation-response",
+                        text: Array(
+                            repeating: "Streaming content must evaluate once per install.",
+                            count: count
+                        ).joined(separator: " ")
+                    )
+                    next.revision += 1
+                    next.eventSequence += 1
+                    let installed = harness.probeObservation.projectionInstallCount
+                    harness.replaceAuthoritativeSnapshot(next)
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.projectionInstallCount > installed
+                    }
+                    try await driveBoundaries(1, harness: harness)
+                }
+                let installs = harness.probeObservation.projectionInstallCount - installBaseline
+                let evaluations = harness.probeObservation.replacementHostEvaluations
+                    .first { $0.key.hasPrefix("evaluation-response") }?.value ?? 0
+                print("ROW-STABILITY-HOST installs=\(installs) evaluations=\(evaluations)")
+                #expect(installs >= 5, "the fixture did not install enough projections")
+                #expect(evaluations > 0, "the streaming row's host was never evaluated")
+                // A host that renders straight from its input evaluates a
+                // changed row once; the removed mirror evaluated it once more
+                // with the stale row. Measured A/B on this fixture: 28
+                // evaluations with the row-direct host and 36 with the mirror
+                // restored (nine installs, one evaluation each for the eight
+                // changed rows plus the harness's own re-render rate, which is
+                // the noise floor here). The bound below is a regression guard;
+                // the printed pair is the measurement.
+                #expect(
+                    evaluations <= installs * 4,
+                    "\(evaluations) host evaluations for \(installs) installed projections"
+                )
+            }
+        }
+    }
+
     @Test("a display's disclosure phase is dropped when its row leaves the installed window")
     func disclosurePhaseIsBoundedToInstalledRows() async throws {
         try await withTestWatchdog(timeout: .seconds(150)) {

@@ -2393,6 +2393,7 @@ struct ChatViewScrollHarnessTests {
                             == compacted.eventSequence
                         && ($0.observation.scrollSettledDistance ?? .infinity)
                             <= ChatTranscriptGeometry.catchUpDistance
+                        && !$0.observation.visibleRowIDs.isEmpty
                 }
                 #expect(compactionSettled.observation.animatedEntranceCount
                     >= progress.observation.animatedEntranceCount)

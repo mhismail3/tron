@@ -31,6 +31,7 @@ extension View {
 struct ChatNotificationView: View {
     let presentation: ChatNotificationPresentation
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingDetail = false
     @State private var detailID = UUID()
     @State private var titleMeasurement: ChatCompactPillTitleMeasurement?
@@ -67,6 +68,17 @@ struct ChatNotificationView: View {
             )
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
             .contentTransition(.interpolate)
+            // A runtime notification that stops showing progress is the one
+            // notification change that animates. The transcript row renders
+            // straight from its input now, so this view owns the transition: a
+            // row-host animation would be suppressed by the projection's own
+            // transaction below it.
+            .animation(
+                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
+                    reduceMotion: reduceMotion
+                ),
+                value: presentation.showsProgress
+            )
             .accessibilityLabel(accessibilityLabel)
             .accessibilityHint(showsDetailAction
                 ? (presentation.expandsOnTruncation ? "Shows the full error message" : "Shows details")

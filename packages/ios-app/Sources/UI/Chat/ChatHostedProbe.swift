@@ -193,6 +193,10 @@ struct ChatHostedObservation: Sendable {
     let rowIdentityMountCounts: [String: Int]
     /// The compact thinking traces' own measurements per trace identity.
     let thinkingTraceMeasurements: [String: ChatHostedThinkingTraceMeasurement]
+    /// How many times each replacement host evaluated its body. A host that
+    /// mirrors its row input evaluates a changed row twice (stale, then fresh);
+    /// one that renders straight from `row` evaluates it once per update.
+    let replacementHostEvaluations: [String: Int]
     let scrollSettledDistance: CGFloat?
     let scrollCommandCount: Int
     let tailMaterializationCommandCount: Int
@@ -282,6 +286,7 @@ final class ChatHostedProbe {
     private var rowIdentityInstances: [String: [UUID]] = [:]
     private var rowIdentityMountCounts: [String: Int] = [:]
     private var thinkingTraceMeasurements: [String: ChatHostedThinkingTraceMeasurement] = [:]
+    private var replacementHostEvaluations: [String: Int] = [:]
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
     private var tailMaterializationCommandCount = 0
@@ -367,6 +372,7 @@ final class ChatHostedProbe {
             rowIdentityInstanceCounts: rowIdentityInstances.mapValues(\.count),
             rowIdentityMountCounts: rowIdentityMountCounts,
             thinkingTraceMeasurements: thinkingTraceMeasurements,
+            replacementHostEvaluations: replacementHostEvaluations,
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
             tailMaterializationCommandCount: tailMaterializationCommandCount,
@@ -653,6 +659,14 @@ final class ChatHostedProbe {
             }
             rowIdentityMountCounts[id, default: 0] &+= 1
         }
+        revision &+= 1
+    }
+
+    /// A replacement host evaluation, recorded from the host's own body so a
+    /// hosted test can count how many times a row update evaluated its content.
+    func recordReplacementHostEvaluation(id: String) {
+        guard !id.isEmpty else { return }
+        Self.incrementBoundedCount(id: id, counts: &replacementHostEvaluations)
         revision &+= 1
     }
 
