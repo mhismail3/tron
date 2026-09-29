@@ -418,6 +418,129 @@ struct ChatRowStabilityTests {
         }
     }
 
+    @Test("two adjacent inline Markdown displays both reach their prepared document")
+    func twoAdjacentInlineDisplaysBothPrepare() async throws {
+        try await withTestWatchdog(timeout: .seconds(120)) {
+            let snapshot = try rowStabilitySnapshot()
+            let fetches = RowStabilityMediaFetches()
+            try await withMediaHarness(snapshot: snapshot, fetches: fetches) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.rowFrames[RowStabilityFixture.inlineDisplayIDs[0]] != nil
+                }
+                let prepared = try await inlineDisplaysPrepared(harness: harness)
+                let heights = RowStabilityFixture.inlineDisplayIDs.map { rowID in
+                    harness.probeObservation.rowFrames[rowID]?.height ?? 0
+                }
+                let fetchesPerDisplay = RowStabilityFixture.inlineDisplayCallIDs.map {
+                    fetches.count(for: $0)
+                }
+                print("ROW-STABILITY-INLINE prepared=\(prepared.count)"
+                    + "/\(RowStabilityFixture.inlineDisplayCallIDs.count)"
+                    + " heights=\(heights.map(rowStabilityNumber).joined(separator: ","))"
+                    + " fetches=\(fetchesPerDisplay.map(String.init).joined(separator: ","))")
+                try writeInlineDisplayReport(
+                    prepared: prepared,
+                    heights: heights,
+                    fetches: fetchesPerDisplay
+                )
+                // Both requests are outstanding in the same lazy window. A single
+                // replacement flight lets the second cancel the first, and the
+                // cancelled card keeps its placeholder for as long as it is
+                // mounted: exactly one of these two is prepared then.
+                #expect(
+                    prepared.count == RowStabilityFixture.inlineDisplayCallIDs.count,
+                    "an inline display never reached its prepared document: \(prepared)"
+                )
+                #expect(
+                    heights.allSatisfy { $0 > 100 },
+                    "a prepared inline display did not render its own content: \(heights)"
+                )
+                #expect(
+                    fetchesPerDisplay.allSatisfy { $0 == 1 },
+                    "each display must fetch its own artifact exactly once: \(fetchesPerDisplay)"
+                )
+            }
+        }
+    }
+
+    @Test("an inline display keeps its prepared document across a scroll out and back")
+    func inlineDisplayKeepsPreparedDocumentAcrossScroll() async throws {
+        try await withTestWatchdog(timeout: .seconds(150)) {
+            let snapshot = try rowStabilitySnapshot()
+            let fetches = RowStabilityMediaFetches()
+            let callIDs = RowStabilityFixture.inlineDisplayCallIDs
+            let rowIDs = RowStabilityFixture.inlineDisplayIDs
+            try await withMediaHarness(snapshot: snapshot, fetches: fetches) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.rowFrames[rowIDs[0]] != nil
+                }
+                #expect(
+                    try await inlineDisplaysPrepared(harness: harness).count == callIDs.count,
+                    "the fixture's displays never prepared"
+                )
+                var before: [CGFloat?] = []
+                for rowID in rowIDs {
+                    before.append(try await settledHeight(rowID, harness: harness))
+                }
+                let appearances = rowIDs.map {
+                    harness.probeObservation.physicalRowAppearanceCounts[$0] ?? 0
+                }
+
+                // The card's row really leaves the viewport: the reader detaches
+                // with the native transcript and scrolls to the oldest loaded
+                // row, then returns to the pinned tail.
+                try await detachToOldestAndReturn(harness: harness)
+
+                var after: [CGFloat?] = []
+                for rowID in rowIDs {
+                    after.append(try await settledHeight(rowID, harness: harness))
+                }
+                let fetchesPerDisplay = callIDs.map { fetches.count(for: $0) }
+                print("ROW-STABILITY-INLINE-HOLD"
+                    + " before=\(before.map { rowStabilityNumber($0 ?? 0) }.joined(separator: ","))"
+                    + " after=\(after.map { rowStabilityNumber($0 ?? 0) }.joined(separator: ","))"
+                    + " fetches=\(fetchesPerDisplay.map(String.init).joined(separator: ","))"
+                    + " appearances=\(appearances.map(String.init).joined(separator: ","))")
+
+                for (index, rowID) in rowIDs.enumerated() {
+                    #expect(
+                        (harness.probeObservation.physicalRowAppearanceCounts[rowID] ?? 0)
+                            > appearances[index],
+                        "the display's row never left the viewport"
+                    )
+                    let initial = try #require(before[index])
+                    let returned = try #require(after[index])
+                    #expect(
+                        abs(returned - initial) <= 1.5,
+                        "the prepared display changed height across the scroll: \(returned) vs \(initial)"
+                    )
+                    let identity = harness.chatMediaIdentity(
+                        blobID: RowStabilityFixture.artifactID(for: callIDs[index])
+                    )
+                    #expect(
+                        identity.flatMap {
+                            harness.chatMedia.retainedInlineArtifact(
+                                for: $0,
+                                as: PreparedAttachmentFilePreview.self
+                            )
+                        } != nil,
+                        "the prepared document was dropped while its row was off screen"
+                    )
+                }
+                // A card that re-enters the window resolves what its identity
+                // already prepared. Its row is not re-fetched, re-prepared or
+                // re-measured, so one fetch per display is the whole cost of
+                // this journey.
+                #expect(
+                    fetchesPerDisplay.allSatisfy { $0 == 1 },
+                    "a re-entering display fetched its artifact again: \(fetchesPerDisplay)"
+                )
+            }
+        }
+    }
+
     @Test("a display's disclosure phase is dropped when its row leaves the installed window")
     func disclosurePhaseIsBoundedToInstalledRows() async throws {
         try await withTestWatchdog(timeout: .seconds(150)) {
@@ -554,9 +677,11 @@ private struct RowStabilityReport {
                 heightsByPhase["return-2"]?[RowStabilityFixture.collapsedDisplayID]
                     .map { abs($0 - open) <= 0.5 }
             } ?? false
-        // The hosted harness has no media source, so an inline display cannot
-        // reach its prepared state here; the field reports that honestly and
-        // the stability field reports what the row's height did instead.
+        // This harness runs without a connected profile, so an inline display
+        // resolves no media identity and renders the unavailable state; the field
+        // reports that honestly and the stability field reports what the row's
+        // height did instead. `twoAdjacentInlineDisplaysBothPrepare` is the
+        // fixture that serves these artifacts and asserts the prepared state.
         inlineDisplaysPrepared = false
         inlineDisplaysStable = RowStabilityFixture.inlineDisplayIDs.allSatisfy { id in
             guard let open = heightsByPhase["open"]?[id],
@@ -842,6 +967,25 @@ private enum RowStabilityFixture {
         case inlineDisplayCallIDs[1]: "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc32"
         default: "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc33"
         }
+    }
+
+    /// The Markdown every fixture display serves. It is short enough to render
+    /// inside the inline card's reserved viewport, so a prepared card is shorter
+    /// than the placeholder it replaces. The artifact's declared size is this
+    /// payload's exact byte count.
+    static func inlineMarkdown(callID: String) -> String {
+        """
+        # \(callID)
+
+        A bounded inline Markdown artifact for the row-stability fixture.
+
+        - prepared once per artifact identity
+        - retained for the card that mounts again
+        """
+    }
+
+    static func artifactSize(for callID: String) -> Int {
+        Data(inlineMarkdown(callID: callID).utf8).count
     }
 
     static func kind(for id: String) -> String {
@@ -1158,7 +1302,7 @@ private func inlineDisplayRows(
                     "id": RowStabilityFixture.artifactID(for: callID),
                     "name": "\(callID).md",
                     "mimeType": "text/markdown",
-                    "size": 335,
+                    "size": RowStabilityFixture.artifactSize(for: callID),
                     "kind": "markdown",
                 ],
             ],
@@ -1204,6 +1348,159 @@ private func toolRunRows(callID: String) -> [[String: Any]] {
             "isError": false,
         ],
     ]
+}
+
+/// One fetch per exact artifact identity: a fixture proves that a card which
+/// re-enters the window resolved what its identity already prepared, rather than
+/// fetching and preparing it again under the reader.
+private final class RowStabilityMediaFetches: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [String: Int] = [:]
+
+    func record(_ blobID: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        counts[blobID, default: 0] += 1
+    }
+
+    func count(for callID: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts[RowStabilityFixture.artifactID(for: callID)] ?? 0
+    }
+}
+
+/// The hosted media source for this fixture's own artifacts. A card with no
+/// source never leaves its placeholder, which is why stage A recorded F4's
+/// starvation path as unreachable: with a source, two adjacent inline Markdown
+/// displays both want the loader at the same instant.
+private func rowStabilityMediaFetch(
+    countingInto fetches: RowStabilityMediaFetches
+) throws -> ChatMediaFetch {
+    let image = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16)).image { context in
+        UIColor.systemTeal.setFill()
+        context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+    }
+    let imageData = try #require(image.pngData())
+    let displays = Dictionary(uniqueKeysWithValues: (
+        RowStabilityFixture.inlineDisplayCallIDs + [RowStabilityFixture.collapsedDisplayCallID]
+    ).map { callID in
+        (
+            RowStabilityFixture.artifactID(for: callID),
+            RowStabilityFixture.inlineMarkdown(callID: callID)
+        )
+    })
+    return { identity in
+        fetches.record(identity.blobID)
+        if let markdown = displays[identity.blobID] {
+            return ChatMediaPayload(data: Data(markdown.utf8), mimeType: "text/markdown")
+        }
+        if identity.blobID == "stability-attachment-image" {
+            return ChatMediaPayload(data: imageData, mimeType: "image/png")
+        }
+        if identity.blobID == "stability-attachment-file" {
+            return ChatMediaPayload(
+                data: Data("Stability fixture notes.\n".utf8),
+                mimeType: "text/plain"
+            )
+        }
+        throw ChatMediaLoadError.staleIdentity
+    }
+}
+
+/// The F4 fixture's harness: a connected profile, so a display artifact has an
+/// exact media identity, over this file's own artifact source. The plain
+/// stability harness has no selected profile, and a card without an identity
+/// renders the unavailable state instead of its prepared document.
+@MainActor
+private func withMediaHarness(
+    snapshot: SessionSnapshot,
+    fetches: RowStabilityMediaFetches,
+    operation: @escaping @MainActor (ChatViewScrollHarness) async throws -> Void
+) async throws {
+    let harness = try await ChatViewScrollHarness.composerSubmissionHarness(
+        snapshot: snapshot,
+        displayFrameScheduler: .displayLink,
+        mediaFetch: try rowStabilityMediaFetch(countingInto: fetches)
+    )
+    do {
+        try await operation(harness)
+    } catch {
+        await harness.close()
+        throw error
+    }
+    await harness.close()
+}
+
+/// The fixture's inline display call IDs whose prepared document the loader
+/// retains. A bounded frame walk is how this harness waits for asynchronous
+/// preparation; there is no timer and no retry loop here.
+@MainActor
+private func inlineDisplaysPrepared(
+    harness: ChatViewScrollHarness,
+    frameBudget: Int = 240
+) async throws -> [String] {
+    var prepared = retainedInlineDisplayCallIDs(harness: harness)
+    for _ in 0..<frameBudget where prepared.count < RowStabilityFixture.inlineDisplayCallIDs.count {
+        try await harness.driveFrameBoundary()
+        prepared = retainedInlineDisplayCallIDs(harness: harness)
+    }
+    return RowStabilityFixture.inlineDisplayCallIDs.filter { prepared.contains($0) }
+}
+
+@MainActor
+private func retainedInlineDisplayCallIDs(harness: ChatViewScrollHarness) -> Set<String> {
+    Set(RowStabilityFixture.inlineDisplayCallIDs.filter { callID in
+        guard let identity = harness.chatMediaIdentity(
+            blobID: RowStabilityFixture.artifactID(for: callID)
+        ) else { return false }
+        return harness.chatMedia.retainedInlineArtifact(
+            for: identity,
+            as: PreparedAttachmentFilePreview.self
+        ) != nil
+    })
+}
+
+/// Every height one native row published, grouped by the native row view that
+/// published it: a fresh mount is a new instance, so a mount from scratch can be
+/// told apart from a preserved lazy child.
+@MainActor
+private func nativeRowMounts(
+    _ semanticID: String,
+    harness: ChatViewScrollHarness
+) -> [UUID: RowMountHeight] {
+    var mounts: [UUID: RowMountHeight] = [:]
+    for sample in harness.recorder.samples {
+        for row in sample.nativeRows where row.semanticID == semanticID {
+            guard row.frame.height.isFinite, row.frame.height > 1 else { continue }
+            mounts[row.instance, default: RowMountHeight(frameIndex: sample.frameIndex)]
+                .record(height: row.frame.height)
+        }
+    }
+    return mounts
+}
+
+/// The F4 fixture's own artifact at a stable path, so the run's evidence can be
+/// inspected without the test's standard output.
+private func writeInlineDisplayReport(
+    prepared: [String],
+    heights: [CGFloat],
+    fetches: [Int]
+) throws {
+    let payload: [String: Any] = [
+        "schema": "tron.chat-inline-display-report.v1",
+        "prepared": prepared,
+        "expected": RowStabilityFixture.inlineDisplayCallIDs,
+        "heights": heights.map { Double($0) },
+        "fetches": fetches,
+    ]
+    let url = RowStabilityReport.directory.appending(path: "inline-displays.json")
+    try FileManager.default.createDirectory(
+        at: RowStabilityReport.directory,
+        withIntermediateDirectories: true
+    )
+    let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+    try data.write(to: url)
 }
 
 // MARK: - Driving the real hosted chat
@@ -1279,6 +1576,16 @@ private func settledRowHeight(
         try await harness.driveFrameBoundary()
     }
     throw HarnessError.missingTranscript
+}
+
+/// A row's settled height, or nil when the row never published one inside the
+/// budget: the caller reports it rather than failing the journey.
+@MainActor
+private func settledHeight(
+    _ rowID: String,
+    harness: ChatViewScrollHarness
+) async throws -> CGFloat? {
+    try? await settledRowHeight(rowID, harness: harness)
 }
 
 /// Detach with the real native scroll, drive to the oldest loaded row and come

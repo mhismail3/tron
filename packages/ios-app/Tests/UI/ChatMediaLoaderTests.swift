@@ -610,7 +610,10 @@ struct ChatMediaLoaderTests {
             thumbnailCount: 0,
             decodedThumbnailBytes: 0,
             thumbnailFlights: 0,
-            hasFullPreviewFlight: false
+            hasFullPreviewFlight: false,
+            retainedInlineArtifactCount: 0,
+            retainedInlineArtifactBytes: 0,
+            inlineArtifactFlights: 0
         ))
 
         let gate = MediaFetchGate(payload: .init(data: fixture.encodedData, mimeType: "image/png"))

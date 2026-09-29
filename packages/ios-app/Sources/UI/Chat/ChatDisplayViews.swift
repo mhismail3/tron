@@ -452,10 +452,19 @@ enum DisplayInlineLayoutPolicy {
         PendingPhotoRemoveLayoutPolicy.previewSide * imageChipScale
     }
 
-    static func openingViewportHeight(for kind: DisplayKind) -> CGFloat {
+    /// The height an inline card reserves before its artifact is prepared,
+    /// decided by the kind it will render rather than by whether the payload has
+    /// arrived. It is the viewport its own content occupies, so preparing cannot
+    /// resize the row: an inline PDF renders in its 320-point viewport, and the
+    /// inline image chip is one exact square. Textual artifacts fill a bounded
+    /// 180-point viewport or their measured height, which the retained prepared
+    /// document makes exact on a remount.
+    static func reservedViewportHeight(for kind: DisplayKind) -> CGFloat {
         switch kind {
-        case .image, .video, .audio, .pdf: 220
+        case .image: imageChipSide
+        case .pdf: maximumViewportHeight
         case .markdown, .text, .code, .html, .document, .webpage, .hls, .browserLive, .nativeLive: 180
+        case .video, .audio: 220
         }
     }
 
@@ -750,7 +759,7 @@ private struct DisplayInlineContainer: View {
                     inlineContent
                 } else {
                     TronLoadingState(label: "Preparing display…", accent: .tronLavender)
-                        .frame(height: DisplayInlineLayoutPolicy.openingViewportHeight(for: display.kind))
+                        .frame(height: DisplayInlineLayoutPolicy.reservedViewportHeight(for: display.kind))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .top)
@@ -959,11 +968,7 @@ private struct DisplayTextArtifactView: View {
     let context: DisplayRenderContext
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var prepared: PreparedAttachmentFilePreview?
     @State private var failed = false
-    @State private var leaseID = UUID()
-    @State private var loadGeneration = 0
-    @State private var loadedIdentity: ChatMediaIdentity?
 
     var body: some View {
         Group {
@@ -973,14 +978,27 @@ private struct DisplayTextArtifactView: View {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
                 TronLoadingState(label: "Preparing content…", accent: .tronBlue)
-                    .frame(height: context == .inline ? 180 : 320)
+                    .frame(height: context == .inline
+                        ? DisplayInlineLayoutPolicy.reservedViewportHeight(for: display.kind)
+                        : DisplayInlineLayoutPolicy.maximumViewportHeight)
             }
         }
         .task(id: PresentationActivityTaskID(
             source: mediaIdentity,
             presentationActive: presentationActivity.allowsPresentationPublication
         )) { await load() }
-        .onDisappear { cancelLoad() }
+    }
+
+    /// The loader retains the prepared document for its exact artifact identity,
+    /// so a card that mounted again renders real content in its first frame
+    /// instead of a placeholder that changes the row's height when the payload
+    /// arrives.
+    private var prepared: PreparedAttachmentFilePreview? {
+        guard let identity = mediaIdentity else { return nil }
+        return model.chatMedia.retainedInlineArtifact(
+            for: identity,
+            as: PreparedAttachmentFilePreview.self
+        )
     }
 
     @ViewBuilder
@@ -1022,49 +1040,43 @@ private struct DisplayTextArtifactView: View {
         return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
     }
 
-    private func cancelLoad() {
-        guard let identity = mediaIdentity else { return }
-        model.chatMedia.cancelFilePreview(for: identity, leaseID: leaseID)
-    }
-
     private func load() async {
         // Covered or retired surfaces neither start nor publish this work.
         guard presentationActivity.allowsPresentationPublication else { return }
         guard let artifact = display.artifact, let identity = mediaIdentity else {
-            loadGeneration &+= 1
-            prepared = nil
             failed = true
-            loadedIdentity = nil
             return
         }
-        // A completed preparation for this exact source stays mounted; only a
-        // new source, a failed attempt, or interrupted work reloads.
-        if loadedIdentity == identity, prepared != nil { return }
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        prepared = nil
         failed = false
-        do {
-            let payload = try await model.chatMedia.filePreviewPayload(for: identity, leaseID: leaseID)
-            let value = try await AttachmentFilePreviewPolicy.prepare(
-                data: payload.data,
-                name: artifact.name,
-                mimeType: payload.mimeType
-            )
-            guard generation == loadGeneration,
-                  !Task.isCancelled,
-                  presentationActivity.allowsPresentationPublication else { return }
-            prepared = value
-            loadedIdentity = identity
-        } catch is CancellationError {
-            // Interrupted work publishes nothing, so the next activation retries.
-            return
-        } catch {
-            guard generation == loadGeneration,
-                  !Task.isCancelled,
-                  presentationActivity.allowsPresentationPublication else { return }
-            failed = true
-            loadedIdentity = nil
+        // The retained document is the source of truth for this identity: a
+        // mounted card renders it without starting a second request.
+        if prepared != nil { return }
+        var retried = false
+        while true {
+            do {
+                _ = try await model.chatMedia.inlineArtifact(for: identity) { payload in
+                    try await AttachmentFilePreviewPolicy.prepare(
+                        data: payload.data,
+                        name: artifact.name,
+                        mimeType: artifact.mimeType
+                    )
+                }
+                return
+            } catch {
+                // A retired surface or a superseded request publishes nothing.
+                // A dependency that dropped this identity's work while the card
+                // is still mounted and still current (memory pressure) asks once
+                // more instead of keeping its placeholder forever.
+                let current = !Task.isCancelled
+                    && presentationActivity.allowsPresentationPublication
+                    && mediaIdentity == identity
+                if current, !retried {
+                    retried = true
+                    continue
+                }
+                if current { failed = true }
+                return
+            }
         }
     }
 }
@@ -1090,16 +1102,20 @@ private struct DisplayDocumentSummary: View {
     }
 }
 
+/// Prepared generated HTML, retained by `ChatMediaLoader` for its exact
+/// artifact identity like any other inline display artifact.
+struct PreparedDisplayHTML: Sendable, ChatInlineArtifact {
+    let source: String
+
+    var accountedBytes: Int { source.utf8.count }
+}
+
 private struct DisplayHTMLArtifactView: View {
     let sessionID: String?
     let display: DisplayProjection
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var html: String?
     @State private var failed = false
-    @State private var leaseID = UUID()
-    @State private var loadGeneration = 0
-    @State private var loadedIdentity: ChatMediaIdentity?
 
     var body: some View {
         Group {
@@ -1115,7 +1131,6 @@ private struct DisplayHTMLArtifactView: View {
             source: mediaIdentity,
             presentationActive: presentationActivity.allowsPresentationPublication
         )) { await load() }
-        .onDisappear { cancelLoad() }
     }
 
     private var mediaIdentity: ChatMediaIdentity? {
@@ -1123,9 +1138,11 @@ private struct DisplayHTMLArtifactView: View {
         return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
     }
 
-    private func cancelLoad() {
-        guard let identity = mediaIdentity else { return }
-        model.chatMedia.cancelFilePreview(for: identity, leaseID: leaseID)
+    /// Prepared markup the loader retains for this exact source, so a remount
+    /// renders it instead of re-fetching and re-preparing under the reader.
+    private var html: String? {
+        guard let identity = mediaIdentity else { return nil }
+        return model.chatMedia.retainedInlineArtifact(for: identity, as: PreparedDisplayHTML.self)?.source
     }
 
     private func load() async {
@@ -1133,38 +1150,35 @@ private struct DisplayHTMLArtifactView: View {
         guard presentationActivity.allowsPresentationPublication else { return }
         guard let artifact = display.artifact, artifact.size <= 5 * 1_024 * 1_024,
               let identity = mediaIdentity else {
-            loadGeneration &+= 1
-            html = nil
             failed = true
-            loadedIdentity = nil
             return
         }
-        // Prepared markup for this exact source stays mounted; only a new
-        // source, a failed attempt, or interrupted work reloads it.
-        if loadedIdentity == identity, html != nil { return }
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        html = nil
         failed = false
-        do {
-            let payload = try await model.chatMedia.filePreviewPayload(for: identity, leaseID: leaseID)
-            guard let source = String(data: payload.data, encoding: .utf8) else {
-                throw CocoaError(.fileReadCorruptFile)
+        if html != nil { return }
+        var retried = false
+        while true {
+            do {
+                _ = try await model.chatMedia.inlineArtifact(for: identity) { payload in
+                    guard let source = String(data: payload.data, encoding: .utf8) else {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    return PreparedDisplayHTML(source: source)
+                }
+                return
+            } catch {
+                // A retired surface or a superseded request publishes nothing; a
+                // dependency that dropped this identity's work while the card is
+                // still mounted and current asks once more.
+                let current = !Task.isCancelled
+                    && presentationActivity.allowsPresentationPublication
+                    && mediaIdentity == identity
+                if current, !retried {
+                    retried = true
+                    continue
+                }
+                if current { failed = true }
+                return
             }
-            guard generation == loadGeneration,
-                  !Task.isCancelled,
-                  presentationActivity.allowsPresentationPublication else { return }
-            html = source
-            loadedIdentity = identity
-        } catch is CancellationError {
-            // Interrupted work publishes nothing, so the next activation retries.
-            return
-        } catch {
-            guard generation == loadGeneration,
-                  !Task.isCancelled,
-                  presentationActivity.allowsPresentationPublication else { return }
-            failed = true
-            loadedIdentity = nil
         }
     }
 }

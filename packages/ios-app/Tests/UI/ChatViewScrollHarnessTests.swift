@@ -3484,9 +3484,13 @@ final class ChatViewScrollHarness {
         performanceSignposts: (any PerformanceSignposting)? = nil,
         enablesPresentationCover: Bool = false,
         installsSubscribedSnapshot: Bool = true,
-        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic
+        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
+        mediaFetch: ChatMediaFetch? = nil
     ) throws {
-        let dependencies = try Self.makeDependencies(enablesComposerSubmission: false)
+        let dependencies = try Self.makeDependencies(
+            enablesComposerSubmission: false,
+            mediaFetch: mediaFetch
+        )
         try self.init(
             snapshot: snapshot,
             displayFrameScheduler: displayFrameScheduler,
@@ -3504,9 +3508,13 @@ final class ChatViewScrollHarness {
         performanceSignposts: (any PerformanceSignposting)? = nil,
         enablesPresentationCover: Bool = false,
         usesRealOpening: Bool = false,
-        unansweredRPCMethods: Set<String> = []
+        unansweredRPCMethods: Set<String> = [],
+        mediaFetch: ChatMediaFetch? = nil
     ) async throws -> ChatViewScrollHarness {
-        let dependencies = try makeDependencies(enablesComposerSubmission: true)
+        let dependencies = try makeDependencies(
+            enablesComposerSubmission: true,
+            mediaFetch: mediaFetch
+        )
         guard let socket = dependencies.socket, let profile = dependencies.profile else {
             throw HarnessError.invalidAuthorityBoundary
         }
@@ -3537,7 +3545,8 @@ final class ChatViewScrollHarness {
     }
 
     private static func makeDependencies(
-        enablesComposerSubmission: Bool
+        enablesComposerSubmission: Bool,
+        mediaFetch: ChatMediaFetch? = nil
     ) throws -> Dependencies {
         let suiteName = "ChatViewScrollHarnessTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -3580,7 +3589,8 @@ final class ChatViewScrollHarness {
             cache: SnapshotCache(root: cacheRoot),
             composerUpload: { _, _, data in try await uploads.upload(data) },
             composerSend: composerSend,
-            composerDraftStore: ComposerDraftStore(root: cacheRoot.appending(path: "drafts"))
+            composerDraftStore: ComposerDraftStore(root: cacheRoot.appending(path: "drafts")),
+            chatMediaFetch: mediaFetch
         )
         return Dependencies(
             suiteName: suiteName,
@@ -3749,6 +3759,15 @@ final class ChatViewScrollHarness {
         hostingController.beginAppearanceTransition(true, animated: true)
         hostingController.endAppearanceTransition()
         try? await DisplayFrameScheduler.displayLink.nextFrame()
+    }
+
+    /// The mounted chat's media owner, so a hosted test can read what it
+    /// retained for an exact artifact identity.
+    var chatMedia: ChatMediaLoader { model.chatMedia }
+
+    /// The exact media identity the mounted chat resolves for one artifact.
+    func chatMediaIdentity(blobID: String) -> ChatMediaIdentity? {
+        model.chatMediaIdentity(blobID: blobID, sessionID: snapshot.sessionId)
     }
 
     func composerWidth() throws -> CGFloat {

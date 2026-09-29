@@ -123,7 +123,12 @@ streamed response limits, off-main ImageIO downsampling, deterministic LRU evict
 late-publication rejection, and app-lifetime memory-pressure cancellation. Full previews are never
 inserted into the thumbnail LRU, receive priority at the shared slot, are decoded through the bounded
 ImageIO path, and only one full-preview flight is owned at a time. Consequently only one admitted
-encoded response/decode working set exists at once.
+encoded response/decode working set exists at once. Inline display cards are a separate owner: they
+load automatically as the lazy window mounts them, so `ChatMediaLoader` keeps one flight per exact
+artifact identity (at most four, sharing the same single preparation slot) instead of one replacement
+flight, and retains at most eight prepared documents or 4 MiB accounted bytes (a value above 1 MiB is
+handed to its caller and not retained). The retained bound is what a card that mounts again resolves
+from, and it is the only media store that is not keyed to a user gesture.
 
 ### Phase 6 simulator workload checkpoint
 
