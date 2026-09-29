@@ -1295,12 +1295,14 @@ struct ChatViewScrollHarnessTests {
                 let name: String
                 let topHidden: Bool
                 let bottomHidden: Bool
+                /// Seconds to hold this state for a host-side screenshot.
+                let hold: Double
             }
             let variants = [
-                Variant(name: "base", topHidden: false, bottomHidden: false),
-                Variant(name: "no-edge-effect", topHidden: true, bottomHidden: true),
-                Variant(name: "no-top-edge", topHidden: true, bottomHidden: false),
-                Variant(name: "no-bottom-edge", topHidden: false, bottomHidden: true),
+                Variant(name: "base", topHidden: false, bottomHidden: false, hold: 20),
+                Variant(name: "no-top-edge", topHidden: true, bottomHidden: false, hold: 20),
+                Variant(name: "no-edge-effect", topHidden: true, bottomHidden: true, hold: 0),
+                Variant(name: "no-bottom-edge", topHidden: false, bottomHidden: true, hold: 0),
             ]
             for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
                 let label = orientation.presentsNewestRowFirst ? "origin" : "end"
@@ -1336,6 +1338,11 @@ struct ChatViewScrollHarnessTests {
                         let key = "\(label)-\(variant.name)"
                         diagnosis.regions[key] = capture.region
                         diagnosis.navBands[key] = capture.navigationBand
+                        if variant.hold > 0 {
+                            print("CT23-HOLD begin=\(key) seconds=\(variant.hold)")
+                            try await Task.sleep(for: .seconds(variant.hold))
+                            print("CT23-HOLD end=\(key)")
+                        }
                     }
                     try harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
                     try await harness.driveFrameBoundary()
