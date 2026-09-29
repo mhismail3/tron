@@ -6118,7 +6118,7 @@ final class ChatViewScrollHarness {
                 newestRowClearance: bottom.clearance
             ),
             distanceFromNewest: probeObservation.geometry.distanceFromBottom,
-            tailState: traceRecords.last { $0.record.message.contains("tail=") }?.record.message
+            tailState: traceRecords.first { $0.record.message.contains("tail=") }?.record.message
         )
     }
 
