@@ -945,21 +945,25 @@ transition diff of 0.0528, at the send entrance's frame 43. The phases are class
 `ChatVisualParitySpec.transitionPhases`, so which frames are compared tightly is
 the scenario's own declaration and every phase not named there is tight by
 default. Sampling is normalized so the compared states reproduce wherever they
-can: the transcript's native offset is snapped to a whole point before a frame
-is rendered, a rendered frame may be re-aligned by up to 2 points vertically, a
+can: only the estimated-end orientation's native offset is snapped to a whole
+point before rendering, a rendered frame may be re-aligned by up to 2 points vertically, a
 rendered frame may be matched to a recorded frame one boundary away, and each
 scenario settles on the rendered pixels (not the recorder's layout sample
 stream) before its fixed frame sequence begins. CT-25
 measured removing the offset snap: the gate stayed green in three runs, but the
 opened-long-history reference's stable frames moved to 0.019 of their 0.025
-bound, so the snap still carries that reference's determinism and its removal
-belongs with CT-23's exact origin. The suite runs in about 60 s.
+bound, so today's path retains it. The orientation owner excludes the exact-origin
+path: rounding its applied negative inset by even a third of a point moves it
+off the native pin and makes subsequent margin changes preserve that displaced
+offset. Capture must observe the keyboard, not scroll it. The keyboard parity
+scenario also checks the settled row against the composer before comparing
+pixels. The suite runs in about 60 s.
 
 The alignment search's step is per frame (CT-23 stage 2). A frame in a stable
 phase is searched at one display pixel — a third of a point on this lane's
-device — because the harness snaps a pinned transcript's offset and both sides of
-the comparison are pixel-snapped, so two pinned transcripts can only sit a whole
-number of display pixels apart. Transition frames keep the half-point step their
+device — matching the display-pixel placement of pinned row frames. Today's
+reference uses whole-point offset normalization; the candidate's exact origin
+is never moved for a capture. Transition frames keep the half-point step their
 own bound was measured with. The finer step is not enough on its own, and the
 gate states it: today's container pins to the `LazyVStack`'s own estimated
 content height, so it settles at a 12.667 pt tail clearance where its contract is
@@ -968,10 +972,12 @@ therefore carries a 0.667 pt (two display pixel) offset, and the 2-point bands
 are sensitive to the capture's ink phase: the finer search finds that offset
 (the reported shift is 0.333-0.667 pt) but the opened-long-history scenario's
 stable frames still read 0.0277-0.0285 against the 0.025 bound, and
-`ordinary-send-keyboard-up`'s stable frames read 0.025-0.050 across runs. That is
-a property of the committed reference, not of the candidate: today's path stays
-10/10 in the same runs, and a sub-point pinned difference of the same size on
-today's path would read the same 0.028. Closing it needs either a re-record
+`ordinary-send-keyboard-up`'s pinned frame can sit on either side of the bound
+(0.02498 with the pre-margin viewport, 0.02505 with margins, identical row
+positions; their image-to-image RMS is 0.00165). Scenario-wide `maxDiff` may
+belong to a permitted transition and must not be reported as the failed stable
+frame's magnitude; `report.json` names each frame's own magnitude and bound.
+Today's path stays 10/10 in the same runs. Closing it needs either a re-record
 (excluded by the CT-12 rule above) or a comparison that is insensitive to the
 capture's ink phase, and CT-12/CT-25's owner owns that decision.
 
@@ -2467,3 +2473,11 @@ origin-anchored path. No Release or ordinary device build reads this switch.
 CT13 and profile scenario metrics name the orientation. Compare matched
 `streaming-reply` and `tool-loop` reports from both orientations with
 `scripts/tron-profile compare`; simulator measurements are not device proof.
+
+
+`ChatRowStabilityTests.rowStabilityJourney` traverses overlapping viewports
+before visiting the oldest loaded history; a direct jump can skip an entire
+lazy fixture. Phase-height comparisons read the probe's settled records and
+wait for the entrance owner's settlement, not a guessed number of display
+frames. Thinking-row mount/measurement and the unchanged 0.5 pt phase bound
+remain gates in both orientations.

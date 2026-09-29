@@ -450,10 +450,6 @@ final class ChatVisualParityRunner {
             columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
             includingPNG: true
         )
-        if frames.last?.phase != phase {
-            let native = try? harness.nativeTranscriptScrollViewForTesting()
-            print("CT23-PARITY-STATE scenario=\(id) frame=\(frames.count) phase=\(phase) \(harness.pinnedDescription()) offset=\(String(describing: native?.contentOffset)) inset=\(String(describing: native?.adjustedContentInset)) rows=\(TranscriptWindowOracle.rows(in: harness.visibleRootView).filter(\.isOnScreen).map { "\($0.semanticID):\($0.windowFrame)" })")
-        }
         frames.append(ChatVisualParityFrame(
             index: frames.count,
             phase: phase,
@@ -572,7 +568,7 @@ private func runScenario(
     let runner = ChatVisualParityRunner(
         id: id,
         harness: harness,
-        recordsArtifacts: true
+        recordsArtifacts: !ChatVisualParityStore.holdsReference(for: id)
     )
     do {
         _ = try await harness.recorder.waitUntil { $0.observation.isReady }
