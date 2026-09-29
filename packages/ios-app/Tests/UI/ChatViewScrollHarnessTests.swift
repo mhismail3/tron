@@ -6195,12 +6195,19 @@ final class ChatViewScrollHarness {
     /// window coordinates.
     @discardableResult
     func driveKeyboardInset(_ transition: KeyboardInsetTransition) async throws -> [KeyboardBoundarySample] {
+        // TEMP CT-23: identify the native owner of detached keyboard movement.
+        let native = try nativeTranscriptScrollView()
+        let observation = native.observe(\.contentOffset, options: [.old, .new]) { view, change in
+            print("CT23-OFFSET old=\(String(describing: change.oldValue)) new=\(view.contentOffset) inset=\(view.contentInset) adjusted=\(view.adjustedContentInset) safe=\(view.safeAreaInsets) size=\(view.contentSize) bounds=\(view.bounds) stack=\(Thread.callStackSymbols.joined(separator: " | "))")
+        }
+        defer { observation.invalidate() }
         beginKeyboardInset(transition)
         var samples: [KeyboardBoundarySample] = []
         for step in 1...max(1, transition.boundaries) {
             applyKeyboardInset(transition, step: step)
             try await driveFrameBoundary()
             samples.append(try keyboardBoundarySample())
+            print("CT23-BOUNDARY step=\(step) detached=\(probeObservation.isDetached) commands=\(probeObservation.scrollCommandCount) offset=\(native.contentOffset) inset=\(native.contentInset) adjusted=\(native.adjustedContentInset) safe=\(native.safeAreaInsets) size=\(native.contentSize) bounds=\(native.bounds) frame=\(native.convert(native.bounds, to: nil)) geometry=\(probeObservation.geometry) reader=\(String(describing: readerAnchor()))")
         }
         return samples
     }
