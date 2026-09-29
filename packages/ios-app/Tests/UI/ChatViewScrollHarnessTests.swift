@@ -1276,6 +1276,55 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // TEMPORARY (CT-23 stage 2 diagnosis): one line per display boundary of the
+    // CT-24 field shapes' tall insertion, with the on-screen rows' window frames
+    // and heights, so an "inserted row is a sliver while the viewport is bare"
+    // transient would be visible frame by frame. Removed with the stage-2
+    // handoff.
+    @Test("CT-23 diagnosis: the CT-24 tall insertion boundary by boundary", .enabled(if: UIValidationTier.isActive))
+    func ct23TallInsertionBoundaries() async throws {
+        try await withTestWatchdog(timeout: .seconds(180)) {
+            for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+                let label = orientation.presentsNewestRowFirst ? "origin" : "end"
+                let shape = try ct24TallNewestHistory(
+                    rowCount: 250, tallCount: 6, appendedTallCount: 0, seed: 1_269
+                )
+                try await withHarness(snapshot: shape.opened, orientation: orientation) { harness in
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && $0.nativeRows.contains {
+                            $0.semanticID == "ct24-turn-\(250 - 1)" && $0.isOnScreen
+                        }
+                    }
+                    var published = try harnessAcknowledgedSnapshot(
+                        shape.opened, promptIndex: 0, text: "Keep this resumed conversation stable."
+                    )
+                    var publishedReplies = 0
+                    for boundary in 0..<60 {
+                        if boundary.isMultiple(of: 12), publishedReplies < ct24FieldReplyParagraphCounts.count {
+                            published.transcript.append(try harnessRichAssistantMessage(
+                                id: "ct24-reply-\(publishedReplies)",
+                                presentationID: "ct24-reply-turn-\(publishedReplies)",
+                                thinkingLines: [],
+                                text: harnessFieldReplyText(
+                                    index: publishedReplies,
+                                    paragraphs: ct24FieldReplyParagraphCounts[publishedReplies]
+                                )
+                            ))
+                            published.transcriptTotal = published.transcript.count
+                            harness.replaceAuthoritativeSnapshot(published)
+                            publishedReplies += 1
+                        }
+                        try await harness.driveFrameBoundary()
+                        let sample = try harness.ct23BoundaryRowFrames()
+                        print("CT23-BOUNDARY orientation=\(label) index=\(boundary)"
+                            + " fraction=\(String(format: "%.3f", Double(sample.fraction)))"
+                            + " rows=\(sample.rows)")
+                    }
+                }
+            }
+        }
+    }
+
     // TEMPORARY (CT-23 stage 2 diagnosis): render the same transcript on both
     // orientations in one run, so the parity wash's mechanism is measurable and
     // the candidate can be bisected against the crisp today's-path capture in
@@ -5463,6 +5512,18 @@ final class ChatViewScrollHarness {
             return "\(row.semanticID)@top\(String(format: "%.2f", Double(top)))/h\(String(format: "%.2f", Double(height)))/f\(String(format: "%.3f", Double(fraction)))"
         }
         return "count=\(rows.count) " + values.joined(separator: " ")
+    }
+
+    /// Every on-screen row's semantic ID and rendered height at this boundary,
+    /// plus the visible transcript fraction: CT-23's tall-insertion transient
+    /// would appear here as a bare viewport beside a ~1 pt row.
+    func ct23BoundaryRowFrames() throws -> (fraction: CGFloat, rows: String) {
+        let bottom = transcriptBottom()
+        let rows = TranscriptWindowOracle.rows(in: hostingController.view).filter(\.isOnScreen)
+        let values = rows
+            .sorted { $0.windowFrame.minY > $1.windowFrame.minY }
+            .map { "\($0.semanticID)@\(String(format: "%.1f", Double($0.windowFrame.minY)))/h\(String(format: "%.1f", Double($0.windowFrame.height)))" }
+        return (bottom.visibleRowFraction, values.joined(separator: ","))
     }
 
     /// One variant of the automatic scroll edge effect's state.
