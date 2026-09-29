@@ -209,19 +209,304 @@ function joinBytes(chunks: Uint8Array[], length: number): Uint8Array {
   return result;
 }
 
-function extractReadable(bytes: Uint8Array, mediaType: string | undefined, maxChars: number): { text: string; truncated: boolean; quality?: "partial" } | undefined {
+/* --- Readable-text extraction -------------------------------------------------
+ * The source owner, not a per-site rule, decides which text a saved page
+ * contributes to summaries and search. Structural signals only: never a
+ * hostname or class-name allowlist, which drifts and silently eats articles.
+ */
+
+/** Below this much retained text a page that had far more raw text is reported
+ * as needing evidence instead of being certified as a complete capture. */
+const READABLE_MIN_SUBSTANTIVE_CHARS = 200;
+/** A content region must carry this much paragraph text to replace the document. */
+const READABLE_MIN_REGION_CHARS = 120;
+/** A candidate region must carry this share of the page's own paragraph text.
+ * One article inside a wrapper is that page's content; a listing of comparable
+ * cards is not, so no single card may stand in for the page. */
+const READABLE_REGION_SHARE = 0.5;
+/** Paragraph-like elements. Loose text in a <div> is how menus, banners and
+ * repository headers are written, so it must not decide the main region. */
+const HTML_PARAGRAPH_TAGS = new Set(["p", "li", "pre", "blockquote", "dd", "figcaption", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"]);
+const READABLE_APP_SHELL_REASON = "Linked HTML appears to be a bounded app shell; substantive article coverage was not established.";
+const READABLE_LOW_YIELD_REASON = "Page chrome was removed and too little substantive text remained; substantive article coverage was not established.";
+const READABLE_TITLE_ONLY_REASON = "Only the document title was available; no article text was extracted.";
+
+/** Elements that never contribute readable article text. `header`/`footer` are
+ * absent on purpose: inside an article they carry its title and byline, and the
+ * document-level fallback drops them separately. */
+const HTML_DROP_TAGS = new Set(["head", "script", "style", "noscript", "template", "svg", "canvas", "iframe", "object", "embed", "nav", "aside", "form", "button", "select", "textarea", "option", "optgroup", "menu", "dialog", "input", "link", "meta", "base", "source", "track", "area", "col", "param", "wbr"]);
+const HTML_FALLBACK_DROP_TAGS = new Set(["header", "footer"]);
+const HTML_CHROME_ROLES = new Set(["navigation", "banner", "contentinfo", "search", "complementary", "menu", "menubar", "toolbar", "tablist", "dialog", "alertdialog"]);
+const HTML_VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+/** Elements whose content is text, not markup, until their own close tag. */
+const HTML_RAW_TEXT_TAGS = new Set(["script", "style", "textarea", "title"]);
+/** Tags whose text is a peer block, so a link-dense one can be dropped alone. */
+const HTML_BLOCK_TAGS = new Set(["p", "div", "li", "section", "article", "main", "header", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote", "table", "tr", "td", "th", "ul", "ol", "dl", "dd", "dt", "figure", "figcaption", "details", "summary", "body"]);
+const HTML_TOKEN_LIMIT = 4_000_000;
+
+type HtmlToken = {
+  kind: "text" | "open" | "close";
+  name: string;
+  text: string;
+  selfClosing: boolean;
+  chrome: boolean;
+  role?: string;
+};
+
+function unquotedAttributeValue(attributes: string, name: string): string | undefined {
+  const pattern = new RegExp(`(?:^|\\s)${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i");
+  const match = pattern.exec(attributes);
+  return match ? (match[2] ?? match[3] ?? match[4] ?? "") : undefined;
+}
+
+/** One linear, quote-aware scan. A `<` that does not begin a well-formed tag
+ * stays literal text, so `a < b` and malformed markup keep their content. */
+function tokenizeHtml(html: string): HtmlToken[] {
+  const tokens: HtmlToken[] = [];
+  const length = Math.min(html.length, HTML_TOKEN_LIMIT);
+  let index = 0; let textStart = 0;
+  const pushText = (end: number) => { if (end > textStart) tokens.push({ kind: "text", name: "", text: html.slice(textStart, end), selfClosing: false, chrome: false }); };
+  while (index < length) {
+    const lt = html.indexOf("<", index);
+    if (lt < 0) break;
+    if (html.startsWith("<!--", lt)) { const close = html.indexOf("-->", lt + 4); pushText(lt); index = textStart = close < 0 ? length : close + 3; continue; }
+    if (html.startsWith("<!", lt) || html.startsWith("<?", lt)) { const close = html.indexOf(">", lt); pushText(lt); index = textStart = close < 0 ? length : close + 1; continue; }
+    let cursor = lt + 1;
+    const closing = html[cursor] === "/";
+    if (closing) cursor += 1;
+    const name = /^[a-zA-Z][a-zA-Z0-9:-]*/.exec(html.slice(cursor, cursor + 64))?.[0];
+    if (!name) { index = lt + 1; continue; }
+    cursor += name.length;
+    let quote: string | undefined; let end = -1;
+    for (let scan = cursor; scan < length; scan += 1) {
+      const character = html[scan]!;
+      if (quote) { if (character === quote) quote = undefined; continue; }
+      if (character === "\"" || character === "'") { quote = character; continue; }
+      if (character === ">") { end = scan + 1; break; }
+      if (character === "<") break;
+    }
+    if (end < 0) { index = lt + 1; continue; }
+    pushText(lt);
+    const attributes = html.slice(cursor, end - 1);
+    const lowered = name.toLowerCase();
+    const role = unquotedAttributeValue(attributes, "role")?.trim().toLowerCase();
+    const hidden = /(?:^|\s)hidden(?:\s|=|$)/i.test(attributes) || unquotedAttributeValue(attributes, "aria-hidden")?.trim().toLowerCase() === "true";
+    // Void elements never open a scope: an unclosed <meta> would otherwise
+    // swallow every later text node as if it were still inside that element.
+    const voidElement = HTML_VOID_TAGS.has(lowered);
+    tokens.push({ kind: closing ? "close" : "open", name: lowered, text: "", selfClosing: !closing && (voidElement || attributes.trimEnd().endsWith("/")), chrome: !closing && !voidElement && (hidden || (role !== undefined && HTML_CHROME_ROLES.has(role))), ...(role && !voidElement ? { role } : {}) });
+    index = textStart = end;
+    // Raw-text elements hold markup-like characters that must never be scanned
+    // as tags: a script's `i < n` or an inline `<div>` would otherwise open
+    // unbalanced elements and drop the rest of the page.
+    if (!closing && HTML_RAW_TEXT_TAGS.has(lowered)) {
+      const closeAt = html.toLowerCase().indexOf(`</${lowered}`, end);
+      const contentEnd = closeAt < 0 ? length : closeAt;
+      if (contentEnd > end) tokens.push({ kind: "text", name: "", text: html.slice(end, contentEnd), selfClosing: false, chrome: false });
+      const closeEnd = closeAt < 0 ? length : html.indexOf(">", closeAt) + 1 || length;
+      tokens.push({ kind: "close", name: lowered, text: "", selfClosing: false, chrome: false });
+      index = textStart = closeEnd;
+    }
+  }
+  pushText(length);
+  return tokens;
+}
+
+/** Index of the close token matching `openIndex`, or the last index in range. */
+function matchClose(tokens: HtmlToken[], openIndex: number, limit: number): number {
+  const name = tokens[openIndex]!.name;
+  let depth = 0;
+  for (let index = openIndex; index < limit; index += 1) {
+    const token = tokens[index]!;
+    if (token.kind === "open" && token.name === name && !token.selfClosing) depth += 1;
+    else if (token.kind === "close" && token.name === name) { depth -= 1; if (depth === 0) return index; }
+  }
+  return limit - 1;
+}
+
+type ReadableBlock = { text: string; linkChars: number; linkCount: number; chars: number };
+
+function decodeHtmlEntities(value: string): string {
+  return value.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;/g, "'").replace(/&quot;/gi, '"');
+}
+
+/** A menu, breadcrumb or file list: many links and almost nothing else. */
+function isLinkDense(block: ReadableBlock): boolean {
+  if (block.chars === 0) return false;
+  if (block.linkCount >= 3 && block.linkChars >= 0.5 * block.chars) return true;
+  return block.chars < 80 && block.linkCount >= 1 && block.linkChars >= 0.8 * block.chars;
+}
+
+/** Extract one element range, dropping chrome by structure and by attribute. */
+function extractRange(tokens: HtmlToken[], from: number, to: number, options: { dropHeaderFooter: boolean }): ReadableBlock {
+  const parts: string[] = [];
+  const dropped: number[] = [];
+  const links: number[] = [];
+  let depth = 0; let linkChars = 0; let linkCount = 0; let index = from;
+  while (index < to) {
+    const token = tokens[index]!;
+    if (token.kind === "text") {
+      if (dropped.length === 0 && /\S/.test(token.text)) {
+        parts.push(token.text);
+        if (links.length > 0) linkChars += decodeHtmlEntities(token.text).replace(/\s+/g, " ").trim().length;
+      }
+      index += 1; continue;
+    }
+    if (token.kind === "open") {
+      // A void element opens no scope, so it must not shift the depth that
+      // later close tokens unwind chrome and link spans by.
+      if (!token.selfClosing) {
+        depth += 1;
+        if (HTML_DROP_TAGS.has(token.name) || token.chrome || (options.dropHeaderFooter && HTML_FALLBACK_DROP_TAGS.has(token.name))) dropped.push(depth);
+        else if (token.name === "a") { links.push(depth); linkCount += 1; }
+      }
+      index += 1; continue;
+    }
+    const nextDepth = Math.max(0, depth - 1);
+    while (dropped.length > 0 && dropped[dropped.length - 1]! > nextDepth) dropped.pop();
+    while (links.length > 0 && links[links.length - 1]! > nextDepth) links.pop();
+    depth = nextDepth; index += 1;
+  }
+  const text = decodeHtmlEntities(parts.join(" ")).replace(/[\t\r\n ]+/g, " ").trim();
+  // Link text is counted on the decoded text, so a link-only block is measured
+  // by what a reader sees rather than by its markup length.
+  return { text, linkChars: Math.min(linkChars, text.length), linkCount, chars: text.length };
+}
+
+/** Extract the children of one range, dropping chrome subtrees and link-dense
+ * sibling blocks. When every child is link-dense the text is kept: a page whose
+ * only content is a link is still content. */
+function extractChildren(tokens: HtmlToken[], from: number, to: number, options: { dropHeaderFooter: boolean }): ReadableBlock {
+  const blocks: ReadableBlock[] = [];
+  let index = from;
+  while (index < to) {
+    const token = tokens[index]!;
+    if (token.kind === "text") { const text = decodeHtmlEntities(token.text).replace(/\s+/g, " ").trim(); blocks.push({ text, linkChars: 0, linkCount: 0, chars: text.length }); index += 1; continue; }
+    if (token.kind === "open") {
+      const close = matchClose(tokens, index, to);
+      const child = extractRange(tokens, index, close + 1, options);
+      blocks.push(child);
+      index = close + 1;
+      continue;
+    }
+    index += 1;
+  }
+  const kept = blocks.filter(block => block.text.length > 0 && !isLinkDense(block));
+  const retained = kept.length > 0 ? kept : blocks.filter(block => block.text.length > 0);
+  const text = retained.map(block => block.text).join(" ").replace(/\s+/g, " ").trim();
+  return { text, linkChars: retained.reduce((total, block) => total + block.linkChars, 0), linkCount: retained.reduce((total, block) => total + block.linkCount, 0), chars: text.length };
+}
+
+type ReadableCandidate = { from: number; close: number; depth: number; score: number };
+
+/** Paragraph-text score per element, computed in one pass. An element's score is
+ * the readable text of its own paragraph descendants, ignoring chrome subtrees
+ * and link text, so a navigation block or a loose repository header cannot make
+ * a wrapper look like the article. */
+function scoreReadableCandidates(tokens: HtmlToken[]): ReadableCandidate[] {
+  const open: Array<{ from: number; depth: number; score: number }> = [];
+  const candidates: ReadableCandidate[] = [];
+  const paragraph: number[] = []; const links: number[] = []; const dropped: number[] = [];
+  let depth = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token.kind === "text") {
+      if (dropped.length === 0 && paragraph.length > 0 && links.length === 0 && /\S/.test(token.text)) {
+        const chars = token.text.replace(/\s+/g, " ").trim().length;
+        for (const frame of open) frame.score += chars;
+      }
+      continue;
+    }
+    if (token.kind === "open") {
+      if (token.selfClosing) continue;
+      depth += 1;
+      open.push({ from: index, depth, score: 0 });
+      if (HTML_PARAGRAPH_TAGS.has(token.name)) paragraph.push(depth);
+      if (token.name === "a") links.push(depth);
+      // Site-level header/footer are chrome for scoring, exactly as they are for
+      // the document fallback.
+      if (HTML_DROP_TAGS.has(token.name) || token.chrome || HTML_FALLBACK_DROP_TAGS.has(token.name)) dropped.push(depth);
+      continue;
+    }
+    const next = Math.max(0, depth - 1);
+    while (open.length > 0 && open[open.length - 1]!.depth > next) { const frame = open.pop()!; candidates.push({ ...frame, close: index }); }
+    while (paragraph.length > 0 && paragraph[paragraph.length - 1]! > next) paragraph.pop();
+    while (links.length > 0 && links[links.length - 1]! > next) links.pop();
+    while (dropped.length > 0 && dropped[dropped.length - 1]! > next) dropped.pop();
+    depth = next;
+  }
+  while (open.length > 0) { const frame = open.pop()!; candidates.push({ ...frame, close: tokens.length - 1 }); }
+  return candidates;
+}
+
+/** Every text byte in a token range, chrome included: told apart from the
+ * retained text, it says whether a region was mostly chrome. */
+function textLengthInRange(tokens: HtmlToken[], from: number, to: number): number {
+  let total = 0;
+  for (let index = from; index < to; index += 1) { const token = tokens[index]!; if (token.kind === "text") total += token.text.trim().length; }
+  return total;
+}
+
+/** Strips every tag, keeping chrome text: the baseline a low-yield page is
+ * measured against, and the only text an app shell can offer. */
+function textWithChrome(html: string): string {
+  return decodeHtmlEntities(html
+    .replace(/<!--([\s\S]*?)-->/g, " ")
+    .replace(/<(script|style|noscript|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]*>/g, " "))
+    .replace(/[\t\r\n ]+/g, " ").trim();
+}
+
+function looksLikeAppShell(html: string, text: string): boolean {
+  if (text.length >= 1_000) return false;
+  if (/<(?:div|main|body)[^>]+(?:id|class)\s*=\s*["']?[^\s"'>]*(?:app|root|next|svelte|react)\b/i.test(html)) return true;
+  return /\b(?:enable javascript|javascript required|loading\.\.\.|please wait)\b/i.test(html);
+}
+
+function scriptDominated(html: string): boolean {
+  let scripted = 0;
+  for (const match of html.matchAll(/<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi)) scripted += match[0].length;
+  return html.length > 0 && scripted / html.length >= 0.5;
+}
+
+/** Public X bodies and non-HTML media types pass through; an HTML page is
+ * reduced to its main content before it becomes evidence. Returns undefined
+ * when the response carries no usable text at all. */
+export function extractReadableText(bytes: Uint8Array, mediaType: string | undefined, maxChars: number): { text: string; truncated: boolean; quality?: "partial"; reason?: string } | undefined {
   const normalized = (mediaType ?? "").split(";", 1)[0]!.trim().toLowerCase();
   if (!(normalized.startsWith("text/") || ["application/xhtml+xml", "application/json", "application/xml", "application/ld+json"].includes(normalized))) return undefined;
-  let text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-  const originalHtml = text;
-  if (normalized === "text/html" || normalized === "application/xhtml+xml") {
-    text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<[^>]*>/g, " ");
-    text = text.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;/g, "'").replace(/&quot;/gi, '"');
+  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  if (normalized !== "text/html" && normalized !== "application/xhtml+xml") {
+    const plain = decoded.replace(/[\t\r ]+/g, " ").replace(/\n\s*\n+/g, "\n\n").trim();
+    return plain ? { text: plain.slice(0, maxChars), truncated: plain.length > maxChars } : undefined;
   }
-  const normalizedText = text.replace(/[\t\r ]+/g, " ").replace(/\n\s*\n+/g, "\n\n").trim();
-  if (!normalizedText) return undefined;
-  const appShell = (normalized === "text/html" || normalized === "application/xhtml+xml") && normalizedText.length < 1_000 && (/<(?:div|main|body)[^>]+(?:id|class)\s*=\s*["']?[^\s"'>]*(?:app|root|next|svelte|react)\b/i.test(originalHtml) || /\b(?:enable javascript|javascript required|loading\.\.\.|please wait)\b/i.test(originalHtml));
-  return { text: normalizedText.slice(0, maxChars), truncated: normalizedText.length > maxChars, ...(appShell ? { quality: "partial" as const } : {}) };
+  const tokens = tokenizeHtml(decoded);
+  const raw = textWithChrome(decoded);
+  const candidates = scoreReadableCandidates(tokens);
+  const rootDepth = candidates.reduce((smallest, candidate) => Math.min(smallest, candidate.depth), Number.POSITIVE_INFINITY);
+  const documentScore = candidates.reduce((largest, candidate) => candidate.depth === rootDepth ? Math.max(largest, candidate.score) : largest, 0);
+  const threshold = Math.max(READABLE_MIN_REGION_CHARS, READABLE_REGION_SHARE * documentScore);
+  // The deepest qualifying candidate is the most specific one: an <article>
+  // inside the page's <main>, not the wrapper around it.
+  const region = candidates.filter(candidate => candidate.score >= threshold).sort((left, right) => right.depth - left.depth)[0];
+  const chosen = region ? extractChildren(tokens, region.from + 1, region.close, { dropHeaderFooter: false }).text : extractChildren(tokens, 0, tokens.length, { dropHeaderFooter: true }).text;
+  const truncated = chosen.length > maxChars;
+  if (!chosen) {
+    const title = titleFrom(bytes.slice(0, 100_000), "text/html");
+    if (looksLikeAppShell(decoded, raw)) return { text: title ?? "", truncated: false, quality: "partial", reason: READABLE_APP_SHELL_REASON };
+    return title ? { text: title, truncated: false, quality: "partial", reason: READABLE_TITLE_ONLY_REASON } : undefined;
+  }
+  const text = chosen.slice(0, maxChars);
+  if (looksLikeAppShell(decoded, raw)) return { text, truncated, quality: "partial", reason: READABLE_APP_SHELL_REASON };
+  // Thin text after removing chrome means the page did not give us an article.
+  // A short article that a chosen region correctly isolated is still evidence:
+  // only a region whose own text was mostly chrome is distrusted.
+  const baseline = region ? textLengthInRange(tokens, region.from, region.close + 1) : raw.length;
+  const chromeHeavy = region === undefined || text.length * 3 <= baseline;
+  const lowYield = text.length < READABLE_MIN_SUBSTANTIVE_CHARS && baseline >= 1_000 && chromeHeavy;
+  if (lowYield) return { text, truncated, quality: "partial", reason: READABLE_LOW_YIELD_REASON };
+  if (region === undefined && text.length < READABLE_MIN_SUBSTANTIVE_CHARS && scriptDominated(decoded)) return { text, truncated, quality: "partial", reason: READABLE_LOW_YIELD_REASON };
+  return { text, truncated };
 }
 
 function titleFrom(bytes: Uint8Array, mediaType: string | undefined): string | undefined {
@@ -694,7 +979,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const mediaType = fetched.mediaType;
   const preview = await optionalPreview(store, bytes, mediaType, fetched.finalUrl, { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal, ...(options.signal ? { callerSignal: options.signal } : {}) }, publicPost?.article?.coverURL);
   const publicReadable = publicPost?.readableText ?? publicPost?.text;
-  const readable = publicPost ? (publicReadable ? { text: publicReadable.slice(0, limits.maxReadableChars), truncated: publicReadable.length > limits.maxReadableChars } : undefined) : bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
+  const readable = publicPost ? (publicReadable ? { text: publicReadable.slice(0, limits.maxReadableChars), truncated: publicReadable.length > limits.maxReadableChars } : undefined) : bytes && bytes.byteLength ? extractReadableText(bytes, mediaType, limits.maxReadableChars) : undefined;
   const disposition: SourceContent["captureDisposition"] = publicPost && (fetched.truncated || readable?.truncated) ? "partial" : fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || readable.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
   // A redirect can reveal an existing canonical target that was not discoverable
   // from the requested alias. Re-scan after fetch so the owner receives the
@@ -735,7 +1020,9 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   }
   const kind = input.origin ?? "manual";
   const providerCaptureReason = publicPost ? `${publicPost.endpoint ? `Public provider: ${redactSourceUrl(publicPost.endpoint)}. ` : ""}${publicPost.limitations.join(" ")} Attempts: ${publicPost.attempts.map(attempt => `${attempt.provider}:${attempt.outcome}${attempt.status !== undefined ? ` status=${attempt.status}` : ""}${attempt.retryAt ? ` (retry after ${attempt.retryAt})` : ""}`).join(", ")}` : undefined;
-  const captureReason = readable?.quality === "partial" ? appendCaptureReason(providerCaptureReason, "Linked HTML appears to be a bounded app shell; substantive article coverage was not established.") : providerCaptureReason;
+  // The extractor owns why text is thin (chrome, app shell, or only a title);
+  // the capture owner only carries that reason into the record.
+  const captureReason = readable?.quality === "partial" ? appendCaptureReason(providerCaptureReason, readable.reason ?? "Readable text was incomplete; substantive article coverage was not established.") : providerCaptureReason;
   const content: SourceContent = {
     title: input.title?.trim() || publicPost?.title || titleFrom(bytes ?? new Uint8Array(), mediaType) || sourceUrl.hostname,
     uri: fetched.finalUrl,
