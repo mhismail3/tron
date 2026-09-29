@@ -144,7 +144,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             // and CFNetwork's maximumMessageSize bounds only compressed wire
             // bytes, so GatewayFramePolicy checks the inflated frame. A frame at
             // the ceiling must decode through the production socket.
-            let socket = GatewaySocketFactory.urlSession.makeConnection(probeRequest)
+            let socket = GatewaySocketFactory.urlSession.makeConnection(probeRequest, nil)
             let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(6)])
             try await socket.send(hello)
             _ = try await socket.receive()

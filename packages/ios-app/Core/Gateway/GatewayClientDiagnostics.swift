@@ -14,6 +14,10 @@ package enum GatewayConnectionDiagnosticStage: String, Sendable {
     case helloReceive = "hello-receive"
     case liveness
     case transport
+    /// One lane of a raced attempt lost (E-3c). The winner's own hello record
+    /// names the transport that carried the connection; this record names why
+    /// the other lane did not.
+    case transportRace = "transport-race"
 }
 
 package enum GatewayConnectionDiagnosticOutcome: String, Sendable {
@@ -39,6 +43,16 @@ enum GatewayConnectionDiagnosticReason: String, Sendable {
     case identityMismatch
     case invalidProfile
     case decodeLimit = "decode_limit"
+    /// The LAN lane did not answer (E-3c). The next attempt races both lanes
+    /// again; a Mac that is off the home network simply loses this lane.
+    case lanUnreachable = "lan_unreachable"
+    /// The LAN lane served a certificate the profile's pin does not admit
+    /// (E-3c): the lane is refused before any credential is written.
+    case lanPinMismatch = "lan_pin_mismatch"
+    /// iOS denied this install the Local Network permission (E-3c): the lane is
+    /// not dialed again until the permission changes, and the phone stays on
+    /// Tailscale.
+    case lanDenied = "lan_denied"
 }
 
 package struct GatewayConnectionDiagnostic: Sendable {

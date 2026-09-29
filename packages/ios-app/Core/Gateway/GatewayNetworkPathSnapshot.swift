@@ -23,11 +23,12 @@ package final class GatewayNetworkPathSnapshot: @unchecked Sendable {
 
 /// Handshake facts for one connection attempt's record.
 package struct GatewayHandshakeDiagnostic: Sendable, Equatable {
-    package init(transportOpened: Bool, transportOpenMilliseconds: Int?, waitedForConnectivity: Bool, networkInterfaces: String?) {
+    package init(transportOpened: Bool, transportOpenMilliseconds: Int?, waitedForConnectivity: Bool, networkInterfaces: String?, transport: String? = nil) {
         self.transportOpened = transportOpened
         self.transportOpenMilliseconds = transportOpenMilliseconds
         self.waitedForConnectivity = waitedForConnectivity
         self.networkInterfaces = networkInterfaces
+        self.transport = transport
     }
 
     /// Whether the WebSocket opened: the socket reported opening, or the hello
@@ -36,4 +37,7 @@ package struct GatewayHandshakeDiagnostic: Sendable, Equatable {
     let transportOpenMilliseconds: Int?
     let waitedForConnectivity: Bool
     package let networkInterfaces: String?
+    /// Which lane this attempt's socket dialed: `lan` or `tailscale` (E-3c).
+    /// nil when no lane was raced (a saved endpoint with no advertisement).
+    package let transport: String?
 }

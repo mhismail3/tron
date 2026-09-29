@@ -34,11 +34,12 @@ package struct GatewaySocketMetadata: Sendable, Equatable {
     let closeCode: Int?
     let httpStatusCode: Int?
 
-    package init(closeCode: Int?, httpStatusCode: Int?, transportOpenMilliseconds: Int? = nil, waitedForConnectivity: Bool = false) {
+    package init(closeCode: Int?, httpStatusCode: Int?, transportOpenMilliseconds: Int? = nil, waitedForConnectivity: Bool = false, certificatePinRejected: Bool = false) {
         self.closeCode = closeCode
         self.httpStatusCode = httpStatusCode
         self.transportOpenMilliseconds = transportOpenMilliseconds
         self.waitedForConnectivity = waitedForConnectivity
+        self.certificatePinRejected = certificatePinRejected
     }
     /// Milliseconds from task start until the WebSocket opened; nil when it
     /// never opened. Distinguishes a path that never reached the Mac from a
@@ -46,6 +47,11 @@ package struct GatewaySocketMetadata: Sendable, Equatable {
     var transportOpenMilliseconds: Int? = nil
     /// URLSession reported waiting for connectivity during this task.
     var waitedForConnectivity = false
+    /// The pinned lane refused the served certificate, so this socket never
+    /// carried the bearer credential (E-3c). A stale pin and a substituted
+    /// certificate are the same fact to the phone: do not use this lane for
+    /// this attempt.
+    var certificatePinRejected = false
 }
 
 package protocol GatewaySocketConnection: Sendable {
@@ -62,14 +68,22 @@ extension GatewaySocketConnection {
 
 
 package struct GatewaySocketFactory: Sendable {
-    let makeConnection: @Sendable (URLRequest) -> any GatewaySocketConnection
+    /// `pin` is the public key a pinned TLS lane's certificate must hash to
+    /// (E-3c). It is nil for the saved endpoint, which keeps whatever trust the
+    /// path already has.
+    let makeConnection: @Sendable (URLRequest, String?) -> any GatewaySocketConnection
 
-    package init(makeConnection: @escaping @Sendable (URLRequest) -> any GatewaySocketConnection) {
+    package init(makeConnection: @escaping @Sendable (URLRequest, String?) -> any GatewaySocketConnection) {
         self.makeConnection = makeConnection
     }
 
-    static let urlSession = GatewaySocketFactory { request in
-        URLSessionGatewaySocketConnection(request: request)
+    /// The single-endpoint form: a fixture or an unpinned dial.
+    package init(makeConnection: @escaping @Sendable (URLRequest) -> any GatewaySocketConnection) {
+        self.init { request, _ in makeConnection(request) }
+    }
+
+    static let urlSession = GatewaySocketFactory { request, pin in
+        URLSessionGatewaySocketConnection(request: request, pinnedPublicKey: pin)
     }
 }
 
@@ -82,6 +96,39 @@ private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDeleg
     private let startedAt = ContinuousClock.now
     private var openedAt: ContinuousClock.Instant?
     private var waitedForConnectivity = false
+    private var certificatePinRejected = false
+    /// The pinned lane's certificate key, or nil when this connection keeps the
+    /// platform's own TLS evaluation.
+    private let pinnedPublicKey: String?
+
+    init(pinnedPublicKey: String?) {
+        self.pinnedPublicKey = pinnedPublicKey
+    }
+
+    /// Server-trust evaluation for a pinned lane (E-3c). The socket is the
+    /// credential's carrier, so the pin decides the handshake: the advertised
+    /// certificate is the only one this lane accepts, and a mismatch cancels the
+    /// challenge — which URLSession resolves during TLS, before the request that
+    /// carries the bearer token is written. Anything unpinned is left to the
+    /// platform.
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard let pinnedPublicKey,
+              challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        guard GatewayLanPin.admitsServerTrust(trust, pin: pinnedPublicKey) else {
+            lock.lock(); certificatePinRejected = true; lock.unlock()
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        completionHandler(.useCredential, URLCredential(trust: trust))
+    }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol protocol: String?) {
@@ -110,7 +157,8 @@ private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDeleg
             closeCode: closeCode,
             httpStatusCode: httpStatusCode,
             transportOpenMilliseconds: openedAt.map { Self.milliseconds(startedAt.duration(to: $0)) },
-            waitedForConnectivity: waitedForConnectivity
+            waitedForConnectivity: waitedForConnectivity,
+            certificatePinRejected: certificatePinRejected
         )
     }
 
@@ -127,11 +175,11 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
     private var closed = false
     private var activePing: GatewayPingCompletion?
 
-    init(request: URLRequest) {
+    init(request: URLRequest, pinnedPublicKey: String? = nil) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = GatewayConnectionPolicy.requestInactivityTimeout
-        let delegate = GatewayWebSocketDelegate()
+        let delegate = GatewayWebSocketDelegate(pinnedPublicKey: pinnedPublicKey)
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         self.delegate = delegate
         self.session = session
@@ -178,7 +226,8 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
             closeCode: observed.closeCode ?? (task.closeCode == .invalid ? nil : task.closeCode.rawValue),
             httpStatusCode: observed.httpStatusCode ?? (task.response as? HTTPURLResponse)?.statusCode,
             transportOpenMilliseconds: observed.transportOpenMilliseconds,
-            waitedForConnectivity: observed.waitedForConnectivity
+            waitedForConnectivity: observed.waitedForConnectivity,
+            certificatePinRejected: observed.certificatePinRejected
         )
     }
 
