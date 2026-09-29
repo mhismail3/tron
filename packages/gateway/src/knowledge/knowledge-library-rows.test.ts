@@ -62,7 +62,7 @@ describe("Knowledge library rows", () => {
     // The row keeps identity and presentation, never the saved text or bytes.
     expect(row).toMatchObject({ title: "Saved source 0", uri: "https://example.test/0", captureDisposition: "partial", admission: "retained", scope: "research" });
     expect(JSON.stringify(row)).not.toContain("X Article body sentence");
-    expect(Object.keys(row).sort()).toEqual(["admission", "captureDisposition", "createdAt", "id", "mediaType", "originalUri", "revisionId", "scope", "title", "updatedAt", "uri"]);
+    expect(Object.keys(row).sort()).toEqual(["admission", "ageBasis", "ageDays", "captureDisposition", "createdAt", "freshness", "hasTake", "id", "mediaType", "originalUri", "revisionId", "scope", "tagsStale", "title", "updatedAt", "uri"]);
   });
 
   it("publishes the original link, provider save time and no misfiled publication time", async () => {

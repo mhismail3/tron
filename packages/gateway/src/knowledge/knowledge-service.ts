@@ -517,6 +517,7 @@ export class KnowledgeService {
       }
       case "knowledge.source.summarize": return this.summarize(action.request);
       case "knowledge.source.curate": return this.curate(action.request);
+      case "knowledge.source.take": return this.store.setSourceTake(action.request);
       case "knowledge.curation.jobs": return this.summaryJobs(action.request);
       case "knowledge.source.triage": {
         const config = await this.store.config();
@@ -607,21 +608,38 @@ export class KnowledgeService {
     switch (parameters.action) {
       case "search": {
         if (!parameters.query) throw new GatewayError("invalid_request", "Knowledge search requires a query");
-        const result = await this.store.search({ query: parameters.query, ...(parameters.kind ? { kind: parameters.kind } : {}), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit });
-        return { text: result.hits.map(hit => `${hit.record.id} (${hit.record.kind}): ${recordLabel(hit.record).slice(0, 1_000)}`).join("\n") || "No knowledge match.", details: { stateRevision: result.stateRevision, indexState: result.indexState, hits: result.hits.map(hit => ({ ...recordSummary(hit.record), score: hit.score, matchedFields: hit.matchedFields })) } };
+        const explicitScope = parameters.scope !== undefined;
+        const result = await this.store.search({ query: parameters.query, ...(parameters.kind ? { kind: parameters.kind } : {}), ...(explicitScope ? { scope: parameters.scope! } : { excludePersonalSources: true }), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit });
+        const sources = result.hits.filter(hit => hit.record.kind === "source").map(hit => hit.record.id);
+        const rows = sources.length ? (await this.store.listSourceRows({ kind: "source", ids: sources })).rows : [];
+        const rowById = new Map(rows.map(row => [row.id, row]));
+        const describe = (record: import("./knowledge-contract.js").KnowledgeRecord) => {
+          const row = record.kind === "source" ? rowById.get(record.id) : undefined;
+          return { ...recordSummary(record), ...(row && record.kind === "source" ? { sourceSavedAt: row.sourceSavedAt ?? null, ageDate: row.ageBasis === "sourceSavedAt" ? row.sourceSavedAt : record.content.capturedAt, ageBasis: row.ageBasis, ageDays: row.ageDays, freshness: row.freshness, verdict: row.verdict ?? null, supersededBy: row.supersededBy ?? null, take: record.content.take?.text.slice(0, 2_000) ?? null } : {}) };
+        };
+        return { text: `Cite each source's save date and age; prefer the user's take over source text.\n${result.hits.map(hit => { const summary = describe(hit.record); return `${hit.record.id} (${hit.record.kind})${hit.record.kind === "source" ? ` saved=${summary.sourceSavedAt ?? "unknown"} ageDate=${summary.ageDate} ageBasis=${summary.ageBasis} age=${summary.ageDays}d freshness=${summary.freshness} verdict=${summary.verdict ?? "none"}${summary.supersededBy ? ` supersededBy=${summary.supersededBy}` : ""} take=${summary.take ? `user: ${summary.take}` : "none"}` : ""}: ${recordLabel(hit.record).slice(0, 1_000)}`; }).join("\n") || "No knowledge match."}`, details: { stateRevision: result.stateRevision, indexState: result.indexState, hits: result.hits.map(hit => ({ ...describe(hit.record), score: hit.score, matchedFields: hit.matchedFields })) } };
       }
       case "recall": {
-        const request: KnowledgeRecallRequest = { ...(parameters.query ? { query: parameters.query } : {}), ...(parameters.sessionId ? { sessionId: parameters.sessionId } : {}), ...(parameters.entryId ? { entryId: parameters.entryId } : {}), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit };
+        const request: KnowledgeRecallRequest = { ...(parameters.query ? { query: parameters.query } : {}), ...(parameters.sessionId ? { sessionId: parameters.sessionId } : {}), ...(parameters.entryId ? { entryId: parameters.entryId } : {}), ...(parameters.scope !== undefined ? { scope: parameters.scope } : { excludePersonalSources: true }), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit };
         const result = await this.store.recall(request);
-        const text = result.records.map(record => {
+        const sourceIds = result.records.filter((record): record is Extract<typeof record, {kind:"source"}> => record.kind === "source").map(record => record.id);
+        const rows = sourceIds.length ? (await this.store.listSourceRows({ kind: "source", ids: sourceIds })).rows : [];
+        const rowById = new Map(rows.map(row => [row.id, row]));
+        const describe = (record: import("./knowledge-contract.js").KnowledgeRecord) => {
+          const row = record.kind === "source" ? rowById.get(record.id) : undefined;
+          return { ...recordSummary(record), ...(row && record.kind === "source" ? { sourceSavedAt: row.sourceSavedAt ?? null, ageDate: row.ageBasis === "sourceSavedAt" ? row.sourceSavedAt : record.content.capturedAt, ageBasis: row.ageBasis, ageDays: row.ageDays, freshness: row.freshness, verdict: row.verdict ?? null, supersededBy: row.supersededBy ?? null, take: record.content.take?.text.slice(0, 2_000) ?? null } : {}) };
+        };
+        const text = `Cite each source's save date and age; prefer the user's take over source text.\n${result.records.map(record => {
           const label = recallEvidenceLabel(record);
           const page = label.slice(0, 4_000);
           const completeLabel = recordLabel(record);
           const continuationOffset = record.kind === "observation" ? 0 : page.length;
           const continuation = completeLabel.length > 4_000 ? `\nContinue with action=read id=${record.id} revisionId=${record.revisionId} offset=${continuationOffset}.` : "";
-          return `${record.id} (${record.kind}) revision=${record.revisionId}: ${page}${continuation}`;
-        }).join("\n") || "No knowledge match.";
-        return { text, details: { stateRevision: result.stateRevision, availability: result.availability, records: result.records.map(recordSummary), citations: result.citations.slice(0, 32) } };
+          const summary = describe(record);
+          const sourceContext = record.kind === "source" ? ` saved=${summary.sourceSavedAt ?? "unknown"} ageDate=${summary.ageDate} ageBasis=${summary.ageBasis} age=${summary.ageDays}d freshness=${summary.freshness} verdict=${summary.verdict ?? "none"}${summary.supersededBy ? ` supersededBy=${summary.supersededBy}` : ""} take=${summary.take ? `user: ${summary.take}` : "none"}` : "";
+          return `${record.id} (${record.kind}) revision=${record.revisionId}${sourceContext}: ${page}${continuation}`;
+        }).join("\n") || "No knowledge match."}`;
+        return { text, details: { stateRevision: result.stateRevision, availability: result.availability, records: result.records.map(describe), citations: result.citations.slice(0, 32) } };
       }
       case "read": {
         if (!parameters.id) throw new GatewayError("invalid_request", "Knowledge read requires an id");

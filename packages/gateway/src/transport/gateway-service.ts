@@ -470,6 +470,7 @@ export class GatewayService {
       case "knowledge.source.triage":
       case "knowledge.source.summarize":
       case "knowledge.source.curate":
+      case "knowledge.source.take":
       case "knowledge.source.admission":
       case "knowledge.note.create":
       case "knowledge.note.update":

@@ -6,7 +6,7 @@ import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge-curation.js";
-import { KnowledgeStore, type KnowledgeTagVocabulary } from "./knowledge-store.js";
+import { KnowledgeStore } from "./knowledge-store.js";
 import type { KnowledgeCurationResponse } from "./knowledge-contract.js";
 
 const roots: string[] = [];
@@ -26,9 +26,19 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
  *  9. summary generation holds the caller open, or loses its outcome when the
  *     caller goes away;
  * 10. the agent tool cannot see the outcome of the work it started;
- * 11. curation mutates captured evidence instead of interpretation. */
+ * 11. curation mutates captured evidence instead of interpretation.
+ * 12. a stale Your take save discards the draft instead of returning the latest take;
+ *     take writes are not user-confirmed, receipted, or fast.
+ * 13. changing Your take leaves an otherwise current tag selection looking fresh.
+ * 14. default agent retrieval exposes personal sources or explicit personal
+ *     requests accidentally hide Chronicle observations and notes.
+ * 15. relevance ordering overwhelms freshness, or a superseded result loses its replacement.
+ * 16. missing save dates silently use capture time without identifying the age basis.
+ * 17. row freshness requires body reads, making Library projection scale with source text.
+ * 18. the K1 constructor vocabulary seam can disagree with Knowledge config about active tag IDs.
+ */
 
-const vocabulary: KnowledgeTagVocabulary = { revision: 7, isActiveTag: id => ["agent-harness", "memory", "evaluation"].includes(id) };
+
 const summarizer: KnowledgeGenerationModel = {
   async reflect() { return "handoff"; },
   async synthesize() { return "synthesis"; },
@@ -37,9 +47,17 @@ const summarizer: KnowledgeGenerationModel = {
 };
 const other = (arguments_: string) => `knowledge-curation-${arguments_}`;
 
-async function fixture(storeArguments: { vocabulary?: KnowledgeTagVocabulary } = {}) {
+async function installVocabulary(store: KnowledgeStore) {
+  let config = await store.config();
+  for (const [id, label] of [["agent-harness", "Agent harness"], ["memory", "Memory"], ["evaluation", "Evaluation"]]) {
+    config = await store.configureTags({ commandId: other(`install-${id}`), expectedConfigRevision: config.revision, edit: { kind: "add", tag: { id, label, definition: `${label} resources.`, category: "work", decayClass: "ages", state: "active" } } });
+  }
+  return config;
+}
+async function fixture(options: { emptyVocabulary?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-curation-")); roots.push(root);
-  const store = new KnowledgeStore(new TronWorkspace(root), undefined, undefined, storeArguments.vocabulary ?? vocabulary);
+  const store = new KnowledgeStore(new TronWorkspace(root));
+  if (!options.emptyVocabulary) await installVocabulary(store);
   const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => summarizer);
   return { root, store, service };
 }
@@ -76,9 +94,9 @@ describe("Knowledge curation", () => {
     expect(response.applied).toBe(2);
     for (const [index, outcome] of response.outcomes.entries()) {
       expect(outcome.revisionId).not.toBe(records[index]!.revisionId);
-      expect(outcome.stored).toEqual({ tagIds: ["agent-harness", "memory"], vocabularyRevision: 7 });
+      expect(outcome.stored).toEqual({ tagIds: ["agent-harness", "memory"], vocabularyRevision: 3 });
       const committed = await store.read(outcome.recordId!, outcome.revisionId!);
-      expect(committed?.content).toMatchObject({ tags: { tagIds: ["agent-harness", "memory"], vocabularyRevision: 7, inputsDigest: expect.stringMatching(/^[a-f0-9]{64}$/), producer: { actor: "agent", model: "fixture/model" } } });
+      expect(committed?.content).toMatchObject({ tags: { tagIds: ["agent-harness", "memory"], vocabularyRevision: 3, inputsDigest: expect.stringMatching(/^[a-f0-9]{64}$/), producer: { actor: "agent", model: "fixture/model" } } });
     }
     // Interpretation only: the captured evidence is untouched.
     const read = await store.read(records[0]!.id);
@@ -165,7 +183,7 @@ describe("Knowledge curation", () => {
     expect(unknown.outcomes[0]).toMatchObject({ status: "failed", code: "unknown-tag" });
     expect((await store.read(record.id))?.content.tags).toBeUndefined();
 
-    const empty = await fixture({ vocabulary: { revision: 0, isActiveTag: () => false } });
+    const empty = await fixture({ emptyVocabulary: true });
     const emptyRecord = await capture(empty.store, 10);
     const refused = await curate(empty.service, "tags", other("batch-empty-vocabulary"), [{ id: emptyRecord.id, revisionId: emptyRecord.revisionId, tagIds: ["memory"] }]);
     expect(refused.outcomes[0]).toMatchObject({ status: "failed", code: "unknown-tag" });
@@ -214,7 +232,8 @@ describe("Knowledge curation", () => {
 
   it("stops the batch when the paid gate refuses and reports the rest as skipped", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-curation-gate-")); roots.push(root);
-    const store = new KnowledgeStore(new TronWorkspace(root), undefined, undefined, vocabulary);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    await installVocabulary(store);
     const budget = { remaining: 2 };
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => summarizer, undefined,
       operation => operation !== "tags" ? { ok: true } as const : budget.remaining > 0 ? (budget.remaining -= 1, { ok: true } as const) : ({ ok: false, code: "budget-exhausted" as const, reason: "Monthly tagging budget is spent" }));
@@ -265,7 +284,8 @@ describe("Knowledge curation", () => {
 
   it("marks a failed generation as failed and leaves an existing summary in place", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-curation-job-failure-")); roots.push(root);
-    const store = new KnowledgeStore(new TronWorkspace(root), undefined, undefined, vocabulary);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    await installVocabulary(store);
     const failing: KnowledgeGenerationModel = { ...summarizer, async summarizeSource() { throw new Error("model unavailable"); } };
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => failing);
     const record = await capture(store, 17);
@@ -294,8 +314,9 @@ describe("Knowledge curation", () => {
     const budget = { remaining: 10_000 };
     // A restarted process is a new owner instance over the same durable
     // workspace: receipts, revisions and the catalog all come back from disk.
-    const open = () => { const store = new KnowledgeStore(workspace, undefined, undefined, vocabulary); return { store, service: new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => summarizer, undefined, operation => operation !== "tags" ? { ok: true } as const : budget.remaining > 0 ? (budget.remaining -= 1, { ok: true } as const) : ({ ok: false, code: "budget-exhausted" as const, reason: "Monthly tagging budget is spent" }), new KnowledgeCurationJobs(64, 30_000)) }; };
+    const open = () => { const store = new KnowledgeStore(workspace); return { store, service: new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => summarizer, undefined, operation => operation !== "tags" ? { ok: true } as const : budget.remaining > 0 ? (budget.remaining -= 1, { ok: true } as const) : ({ ok: false, code: "budget-exhausted" as const, reason: "Monthly tagging budget is spent" }), new KnowledgeCurationJobs(64, 30_000)) }; };
     const first = open();
+    await installVocabulary(first.store);
     const records = await Promise.all(Array.from({ length: 25 }, (_, index) => capture(first.store, 100 + index)));
     const batch = other("acceptance-batch");
     const expected = records.map(record => ({ id: record.id, revisionId: record.revisionId, tagIds: ["agent-harness"] }));

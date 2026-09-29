@@ -87,7 +87,7 @@ describe("Knowledge canonical catalog", () => {
     expect((await reopened.search({ query: "corrected" })).hits).toEqual([]);
   });
 
-  it("rebuilds catalog heads once for the row projection and stays idempotent", async () => {
+  it("upgrades version-3 heads with freshness fields and stays idempotent", async () => {
     const f = await fixture();
     const image = new Uint8Array(Array.from({ length: 512 }, (_, index) => index % 251));
     const object = await f.store.putObject(image, "image/png");
@@ -96,24 +96,25 @@ describe("Knowledge canonical catalog", () => {
       content: { title: "Projected source", uri: "https://example.test/projected", text: "Saved source text", mediaType: "text/html",
         captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z", preview: object,
         admission: { status: "retained", reason: "fixture", decidedAt: "2026-01-01T00:00:00Z" } } } });
-    // Simulate the pre-row-projection catalog: heads without the projection
-    // fields and the manifest that admitted them.
+    // Simulate the version-3 projection: rows predate freshness and take flags.
     const path = await catalogPath(f.root);
     const database = new DatabaseSync(path);
     try {
       const key = JSON.stringify(captured.record.id);
       const head = JSON.parse(String(database.prepare("SELECT value FROM entries WHERE collection = 'records' AND key = ?").get(key)!.value)) as Record<string, unknown>;
-      for (const field of ["createdAt", "updatedAt", "admission", "sessionId", "branchId", "sourceRow"]) delete head[field];
+      const row = head.sourceRow as Record<string, unknown>;
+      for (const field of ["ageBasis", "ageDays", "freshness", "freshnessRank", "verdict", "supersededBy", "hasTake", "tagsStale"]) delete row[field];
+      delete head.freshnessRank;
       database.prepare("UPDATE entries SET value = ? WHERE collection = 'records' AND key = ?").run(JSON.stringify(head), key);
     } finally { database.close(); }
     const manifest = JSON.parse(await readFile(join(f.root, "state.json"), "utf8"));
-    await writeFile(join(f.root, "state.json"), JSON.stringify({ ...manifest, storageVersion: 2 }), { mode: 0o600 });
+    await writeFile(join(f.root, "state.json"), JSON.stringify({ ...manifest, storageVersion: 3 }), { mode: 0o600 });
     // Ordinary reads never migrate, and never present an unprojected head.
     expect((await f.store.status()).available).toBe(false);
     await expect(f.store.listSourceRows({ kind: "source", projection: "sourceRow" })).rejects.toThrow(/row-projection upgrade/);
     await f.store.upgradeStorage();
     expect((await f.store.listSourceRows({ kind: "source", projection: "sourceRow" })).rows).toEqual([
-      expect.objectContaining({ id: captured.record.id, title: "Projected source", admission: "retained", preview: object }),
+      expect.objectContaining({ id: captured.record.id, title: "Projected source", admission: "retained", preview: object, ageBasis: "capturedAt", freshness: "unknown", hasTake: false }),
     ]);
     // The rebuild is derived data: revisions and evidence survive it untouched.
     expect(await f.store.read(captured.record.id, captured.record.revisionId)).toEqual(captured.record);

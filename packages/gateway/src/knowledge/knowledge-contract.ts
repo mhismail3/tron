@@ -178,6 +178,14 @@ export interface SourceTagSelection {
 /** How useful an entry still is. A judgement, never capture evidence. */
 export type SourceVerdict = "evergreen" | "dated" | "superseded" | "archive";
 
+export interface SourceTake {
+  /** One user-owned, confirmed note. Each replacement is a new record revision. */
+  text: string;
+  confirmed: true;
+  producer: { actor: "user" };
+  updatedAt: string;
+}
+
 export interface SourceVerdictState {
   verdict: SourceVerdict;
   /** Required for `superseded`: the entry that replaces this one. */
@@ -221,6 +229,8 @@ export interface SourceContent {
   assessment?: SourceAssessment;
   /** Explicitly generated content summary, separate from the intake assessment. */
   summary?: SourceSummary;
+  /** One editable user-owned note; revisions preserve its history. */
+  take?: SourceTake;
   /** Vocabulary tag selection; see `SourceTagSelection`. */
   tags?: SourceTagSelection;
   /** Usefulness verdict; see `SourceVerdictState`. */
@@ -374,7 +384,7 @@ export interface KnowledgeTagRetagRequest {
   cursor?: string;
   limit?: number;
 }
-export interface KnowledgeTagRetagItem { id: string; revisionId: string; reason: "untagged" | "vocabulary-changed" | "retired-tag"; }
+export interface KnowledgeTagRetagItem { id: string; revisionId: string; reason: "untagged" | "vocabulary-changed" | "retired-tag" | "stale-inputs"; }
 export interface KnowledgeTagRetagResponse { items: KnowledgeTagRetagItem[]; nextCursor?: string; vocabularyRevision: number; }
 export interface KnowledgeTagReconcileResponse { applied: number; unchanged: number; outcomes: Array<{ id: string; status: "applied" | "unchanged" | "conflict" | "failed"; revisionId?: string; reason?: string }>; nextCursor?: string; configRevision: number; }
 export const KNOWLEDGE_TAG_MAX_COUNT = 256;
@@ -491,6 +501,9 @@ export interface KnowledgeListRequest {
 
 /** One library row. Source text and raw bytes are never part of a page: they
  * stay behind an exact `knowledge.read`/`knowledge.object.read`. */
+export type SourceFreshness = "fresh" | "aging" | "stale" | "unknown";
+export type SourceAgeBasis = "sourceSavedAt" | "capturedAt";
+
 export interface KnowledgeSourceRow {
   id: string;
   revisionId: string;
@@ -507,6 +520,13 @@ export interface KnowledgeSourceRow {
   captureDisposition: KnowledgeCaptureDisposition;
   admission?: SourceAdmission;
   sourceSavedAt?: string;
+  ageBasis: SourceAgeBasis;
+  ageDays: number;
+  freshness: SourceFreshness;
+  verdict?: SourceVerdict;
+  supersededBy?: string;
+  hasTake: boolean;
+  tagsStale: boolean;
   /** Never present for connector providers whose legacy save time was once
    * misfiled as publication time. */
   sourcePublishedAt?: string;
@@ -543,6 +563,8 @@ export interface KnowledgeSearchRequest {
   query: string;
   kind?: KnowledgeRecordKind;
   scope?: KnowledgeScope;
+  /** Agent retrieval may hide personal sources without hiding personal notes or observations. */
+  excludePersonalSources?: boolean;
   includeArchived?: boolean;
   includePending?: boolean;
   /** Optional server-side partition for source search projections. */
@@ -572,9 +594,19 @@ export interface KnowledgeRecallRequest {
   sessionId?: string;
   entryId?: string;
   scope?: KnowledgeScope;
+  /** Agent retrieval may hide personal sources without hiding personal notes or observations. */
+  excludePersonalSources?: boolean;
   includeArchived?: boolean;
   includePending?: boolean;
   limit?: number;
+}
+
+export interface KnowledgeSourceTakeRequest {
+  commandId: string;
+  recordId: string;
+  expectedRevision: string;
+  /** Empty explicitly clears Your take. */
+  text: string;
 }
 
 export interface KnowledgeRecallResponse {
@@ -986,6 +1018,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.source.summarize"; request: KnowledgeSourceSummaryRequest }
   | { operation: "knowledge.source.admission"; request: KnowledgeSourceAdmissionRequest }
   | { operation: "knowledge.source.curate"; request: KnowledgeCurationRequest }
+  | { operation: "knowledge.source.take"; request: KnowledgeSourceTakeRequest }
   | { operation: "knowledge.curation.jobs"; request: KnowledgeCurationJobRequest }
   | { operation: "knowledge.correction"; request: KnowledgeCorrectionRequest }
   | { operation: "knowledge.forget"; request: KnowledgeForgetRequest }
@@ -1107,6 +1140,12 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
     assertTimestamp(content.capturedAt, "capturedAt");
     if (content.sourcePublishedAt !== undefined) assertTimestamp(content.sourcePublishedAt, "sourcePublishedAt");
     if (content.sourceSavedAt !== undefined) assertTimestamp(content.sourceSavedAt, "sourceSavedAt");
+    if (content.take !== undefined) {
+      const take = content.take as Record<string, unknown>;
+      if (!take || typeof take !== "object" || Array.isArray(take) || Object.keys(take).some(key => !["text", "confirmed", "producer", "updatedAt"].includes(key)) || take.confirmed !== true || !take.producer || (take.producer as Record<string, unknown>).actor !== "user" || Object.keys(take.producer as Record<string, unknown>).length !== 1) throw new Error("Your take must be a confirmed user-authored note");
+      boundedString(take.text, "Your take", 4_000); if (!take.text) throw new Error("Your take cannot be empty; omit it to clear explicitly");
+      assertTimestamp(take.updatedAt, "Your take updatedAt");
+    }
     if (content.mediaType !== undefined) boundedString(content.mediaType, "source media type", 160);
     if (content.identity !== undefined) {
       const identity = content.identity as Record<string, unknown>;

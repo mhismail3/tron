@@ -15,7 +15,7 @@ import {
   type KnowledgePreviewBatchResponse, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
-  type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse,
+  type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse, type KnowledgeSourceTakeRequest, type SourceFreshness,
   type SourceAdmission, type SourceContent,
   type KnowledgeCurationItem, type KnowledgeCurationOperation, type KnowledgeCurationStored,
   type KnowledgeRelation, type SourceCurationProducer, type SourceVerdictState, assertKnowledgeTagId,
@@ -37,7 +37,7 @@ const RECORD_MAX_BYTES = 2 * 1_048_576;
 const OBJECT_MAX_BYTES = 8_000_000;
 const RECEIPT_LIMIT = 256;
 const OBJECT_HASH = /^[a-f0-9]{64}$/;
-export const CATALOG_STORAGE_VERSION = 3 as const;
+export const CATALOG_STORAGE_VERSION = 4 as const;
 export const KNOWLEDGE_PREVIEW_BATCH_ITEMS = 16;
 export const KNOWLEDGE_PREVIEW_BATCH_BYTES = 4_000_000;
 export const KNOWLEDGE_PREVIEW_MAX_BYTES = 512_000;
@@ -66,8 +66,9 @@ type SourceRowFields = {
   captureDisposition: SourceContent["captureDisposition"];
   sourceSavedAt?: string; sourcePublishedAt?: string;
   preview?: KnowledgeObjectRef; summary?: string;
-  tagIds?: string[]; tagVocabularyRevision?: number;
-  tags?: NonNullable<KnowledgeSourceRow["tags"]>;
+  tagIds?: string[]; tagVocabularyRevision?: number; tags?: NonNullable<KnowledgeSourceRow["tags"]>;
+  ageBasis: "sourceSavedAt" | "capturedAt"; ageSince: string; decayClass: "ages" | "does-not-age" | "unknown";
+  verdict?: import("./knowledge-contract.js").SourceVerdict; supersededBy?: string; hasTake: boolean; tagsStale: boolean;
 };
 type RecordHead = LegacyRecordHead & {
   kind: KnowledgeRecord["kind"]; scope: KnowledgeRecord["scope"];
@@ -200,23 +201,13 @@ function catalogState(control: CatalogControl, catalog?: KnowledgeCatalog): Know
 export function sourceEvidenceDigest(title: string, text: string): string {
   return createHash("sha256").update(JSON.stringify({ title, text })).digest("hex");
 }
-/** The active tag vocabulary. Knowledge configuration owns it (its IDs,
- * definitions, decay classes, and guidelines); the store only asks whether an
- * ID is active and which edition a selection was made against. Until a
- * vocabulary is installed, no tag ID is active and every tag write is refused
- * with `unknown-tag`, rather than silently inventing a taxonomy. */
-export interface KnowledgeTagVocabulary {
-  revision: number;
-  isActiveTag(id: string): boolean;
-}
-export const EMPTY_TAG_VOCABULARY: KnowledgeTagVocabulary = { revision: 0, isActiveTag: () => false };
 /** Digest of the record's own taggable inputs: its saved title and readable
  * text plus its current verdict. The vocabulary edition is recorded separately
  * on the selection, so editing the vocabulary flags re-tagging without making
  * stored selections unreadable. A later owner that adds an input (the user's
  * take) extends this and re-tags; a stored digest then no longer matches. */
 export function curationInputsDigest(content: SourceContent): string {
-  return createHash("sha256").update(JSON.stringify({ title: content.title, text: content.text ?? "", verdict: content.verdict?.verdict ?? null })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ title: content.title, text: content.text ?? "", verdict: content.verdict?.verdict ?? null, take: content.take?.text ?? null })).digest("hex");
 }
 /** The fields one curation operation wrote, read back from its committed
  * revision. Bounded by the item bounds, so a batch outcome stays small. */
@@ -247,10 +238,18 @@ function originalSourceUri(content: SourceContent): string | undefined {
     : undefined;
   return httpUrl(requested) ?? httpUrl(content.uri);
 }
-/** The single owner of a Library row's presentation fields. A client renders
- * these directly instead of re-deriving them from a full record. */
-function sourceRowFields(record: KnowledgeRecord & { kind: "source" }, vocabulary: KnowledgeTagVocabularyConfig = { revision: 0, tags: [], guidelines: "" }): SourceRowFields {
+/** The single owner of a Library row's presentation fields. Age-dependent
+ * values are projected from stable age anchors when read, not persisted in the
+ * head. The canonical Knowledge config supplies both tag labels and decay. */
+function sourceRowFields(record: KnowledgeRecord & { kind: "source" }, config: KnowledgeConfig): SourceRowFields {
   const content = record.content;
+  const ageBasis = content.sourceSavedAt ? "sourceSavedAt" : "capturedAt";
+  const ageSince = content.sourceSavedAt ?? content.capturedAt;
+  // Retired and merged selections remain visible until re-tagging, but cannot
+  // claim a current freshness policy. Only active vocabulary entries govern it.
+  const selectedTags = content.tags?.tagIds.map(id => config.tagVocabulary.tags.find(candidate => candidate.id === id));
+  const decayClass = !selectedTags?.length || selectedTags.some(tag => !tag || tag.state !== "active")
+    ? "unknown" : selectedTags.some(tag => tag!.decayClass === "ages") ? "ages" : "does-not-age";
   const summary = content.summary?.text.trim();
   const current = content.summary && summary && content.summary.evidenceDigest === sourceEvidenceDigest(content.title, content.text ?? "") ? summary : undefined;
   const originalUri = originalSourceUri(content);
@@ -261,13 +260,14 @@ function sourceRowFields(record: KnowledgeRecord & { kind: "source" }, vocabular
     ...(content.mediaType ? { mediaType: content.mediaType } : {}),
     captureDisposition: content.captureDisposition,
     ...(content.sourceSavedAt ? { sourceSavedAt: content.sourceSavedAt } : {}),
-    // Earlier Raindrop intake misfiled its bookmark-save time as publication
-    // time; never repeat that claim from a stored field.
     ...(content.sourcePublishedAt && content.identity?.provider.toLowerCase() !== "raindrop" ? { sourcePublishedAt: content.sourcePublishedAt } : {}),
     ...(content.preview ? { preview: content.preview } : {}),
+    ageBasis, ageSince, decayClass,
+    ...(content.verdict ? { verdict: content.verdict.verdict, ...(content.verdict.supersededBy ? { supersededBy: content.verdict.supersededBy } : {}) } : {}),
+    hasTake: Boolean(content.take?.text), tagsStale: Boolean(content.tags && content.tags.inputsDigest !== curationInputsDigest(content)),
     ...(current ? { summary: current.slice(0, ROW_SUMMARY_CHARS) } : {}),
     ...(content.tags ? { tagIds: [...content.tags.tagIds], tagVocabularyRevision: content.tags.vocabularyRevision } : {}),
-    ...(content.tags ? { tags: content.tags.tagIds.flatMap(id => { const tag = vocabulary.tags.find(candidate => candidate.id === id); return tag ? [{ id: tag.id, label: tag.label, category: tag.category, decayClass: tag.decayClass, state: tag.state }] : []; }) } : {}),
+    ...(content.tags ? { tags: content.tags.tagIds.flatMap(id => { const tag = config.tagVocabulary.tags.find(candidate => candidate.id === id); return tag ? [{ id: tag.id, label: tag.label, category: tag.category, decayClass: tag.decayClass, state: tag.state }] : []; }) } : {}),
   };
 }
 function headScopeFields(record: KnowledgeRecord): { sessionId?: string; branchId?: string } {
@@ -275,7 +275,7 @@ function headScopeFields(record: KnowledgeRecord): { sessionId?: string; branchI
   const branchId = record.kind === "observation" ? record.content.range.branchId : record.provenance.branchId;
   return { ...(sessionId ? { sessionId } : {}), ...(branchId ? { branchId } : {}) };
 }
-function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: string[] = [], config: KnowledgeConfig = DEFAULT_KNOWLEDGE_CONFIG): RecordHead {
+function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: string[] = [], config: KnowledgeConfig): RecordHead {
   const date = record.kind === "observation" ? record.content.items[0]?.observedAt ?? record.createdAt : record.updatedAt;
   const evidence = [...record.provenance.evidence,
     ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : []),
@@ -288,7 +288,7 @@ function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: 
     ...(recordSourceIdentityKeys(record).length > 0 ? { sourceIdentities: recordSourceIdentityKeys(record) } : {}),
     ...(record.kind === "source" && record.content.admission ? { admission: record.content.admission.status } : {}),
     ...headScopeFields(record),
-    ...(record.kind === "source" ? { sourceRow: sourceRowFields(record, config.tagVocabulary) } : {}),
+    ...(record.kind === "source" ? { sourceRow: sourceRowFields(record, config) } : {}),
   };
 }
 /** Cursor identity for one page of Library rows. Every input that changes which
@@ -296,12 +296,12 @@ function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: 
 function sourceRowScope(request: Pick<KnowledgeListRequest, "scope" | "includeArchived" | "includePending" | "sourceAdmission">): string {
   return JSON.stringify(["sourceRow", request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
 }
-type SearchPosition = { score: number; sortAt: number; id: string };
+type SearchPosition = { score: number; freshnessRank: number; sortAt: number; id: string; freshnessNowMs: number };
 function searchScope(request: KnowledgeSearchRequest): string {
-  return JSON.stringify(["records", request.query, request.kind ?? null, request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
+  return JSON.stringify(["records", request.query, request.kind ?? null, request.scope ?? null, request.excludePersonalSources === true, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
 }
 function sourceRowSearchScope(request: KnowledgeSearchRequest): string {
-  return JSON.stringify(["sourceRow", request.query, request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
+  return JSON.stringify(["sourceRow", request.query, request.scope ?? null, request.excludePersonalSources === true, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
 }
 /** Admission lives in the head, so the library partition is one SQL predicate
  * for both the paged and the identity-refresh paths. */
@@ -315,23 +315,42 @@ function admissionFilter(request: Pick<KnowledgeListRequest, "includeArchived" |
 function searchScoreSQL(terms: string[]): string {
   return `(SELECT coalesce(sum(${terms.map(() => "(instr(json_extract(field.value, '$[1]'), ?) > 0)").join(" + ")}), 0) FROM json_each(entries.value, '$.searchFields') AS field)`;
 }
+function searchFreshnessRankSQL(nowMs = Date.now()): string {
+  const now = new Date(nowMs).toISOString();
+  const ageDays = `CAST(julianday('${now}') - julianday(json_extract(value, '$.sourceRow.ageSince')) + 0.00000002 AS INTEGER)`;
+  return `(CASE WHEN json_extract(value, '$.sourceRow.verdict') = 'evergreen' THEN 3
+    WHEN json_extract(value, '$.sourceRow.verdict') IN ('superseded', 'archive') THEN 0
+    WHEN json_extract(value, '$.sourceRow.verdict') = 'dated' THEN CASE WHEN ${ageDays} >= 180 THEN 0 ELSE 2 END
+    WHEN json_extract(value, '$.sourceRow.decayClass') = 'does-not-age' THEN 3
+    WHEN json_extract(value, '$.sourceRow.decayClass') = 'ages' THEN CASE WHEN ${ageDays} >= 180 THEN 0 WHEN ${ageDays} >= 120 THEN 2 ELSE 3 END
+    WHEN json_extract(value, '$.sourceRow.decayClass') = 'unknown' THEN 1 ELSE 0 END)`;
+}
+function headFreshnessRank(head: RecordHead, nowMs: number): number {
+  return head.sourceRow ? projectFreshness(head.sourceRow, nowMs).freshnessRank : 0;
+}
 /** Ordering-preserving keyset for a scored search page. The score is carried
  * exactly as the statement's own ordering key computed it. */
-function readSearchCursor(cursor: string, scope: string, stateRevision: number): { score: number; sortAt: number; id: string } {
+function readSearchCursor(cursor: string, scope: string, stateRevision: number): SearchPosition {
   let value: Record<string, unknown>;
   try {
     if (cursor.length > 2_000) throw new Error();
     value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Record<string, unknown>;
-    if (value.v !== 1 || value.scope !== scope || !Number.isFinite(value.score) || !Number.isFinite(value.sortAt) || typeof value.id !== "string") throw new Error();
+    if (value.v !== 2 || value.scope !== scope || !Number.isFinite(value.score) || !Number.isFinite(value.freshnessRank) || !Number.isFinite(value.sortAt) || !Number.isSafeInteger(value.freshnessNowMs) || typeof value.id !== "string") throw new Error();
     safeId(value.id, "cursor record");
   } catch { throw invalid("Knowledge cursor is invalid for this query; reload the first page"); }
   // Results are ordered by the exact corpus revision that produced them; a
   // stale page would silently skip or repeat rows.
   if (value.stateRevision !== stateRevision) throw conflict("Search results changed; reload the first page");
-  return { score: value.score as number, sortAt: value.sortAt as number, id: value.id };
+  return { score: value.score as number, freshnessRank: value.freshnessRank as number, sortAt: value.sortAt as number, id: value.id, freshnessNowMs: value.freshnessNowMs as number };
 }
-function searchCursor(scope: string, stateRevision: number, position: { score: number; sortAt: number; id: string }): string {
-  return Buffer.from(JSON.stringify({ v: 1, scope, stateRevision, ...position })).toString("base64url");
+function searchCursor(scope: string, stateRevision: number, position: SearchPosition): string {
+  return Buffer.from(JSON.stringify({ v: 2, scope, stateRevision, ...position })).toString("base64url");
+}
+function afterSearchPosition(score: number, freshnessRank: number, sortAt: number, id: string, cursor: SearchPosition): boolean {
+  if (score !== cursor.score) return score < cursor.score;
+  if (freshnessRank !== cursor.freshnessRank) return freshnessRank < cursor.freshnessRank;
+  if (sortAt !== cursor.sortAt) return sortAt < cursor.sortAt;
+  return id > cursor.id;
 }
 /** Score a stored head exactly as the SQL ordering expression scores it: one
  * point per (search field, term) pair the term appears in. */
@@ -340,9 +359,25 @@ function headScore(head: RecordHead, terms: string[]): number {
   for (const [, value] of head.searchFields) score += terms.reduce((sum, term) => sum + (value.includes(term) ? 1 : 0), 0);
   return score;
 }
+function projectFreshness(source: SourceRowFields, nowMs = Date.now()): { freshness: SourceFreshness; freshnessRank: number; ageDays: number } {
+  const parsed = Date.parse(source.ageSince);
+  const ageDays = Number.isFinite(parsed) ? Math.max(0, Math.floor((nowMs - parsed) / 86_400_000)) : 0;
+  const age: SourceFreshness = ageDays >= 180 ? "stale" : ageDays >= 120 ? "aging" : "fresh";
+  let freshness: SourceFreshness;
+  if (source.verdict === "evergreen") freshness = "fresh";
+  else if (source.verdict === "superseded" || source.verdict === "archive") freshness = "stale";
+  else if (source.verdict === "dated") freshness = age === "fresh" ? "aging" : age;
+  else if (source.decayClass === "unknown") freshness = "unknown";
+  else if (source.decayClass === "does-not-age") freshness = "fresh";
+  else freshness = age;
+  return { freshness, ageDays, freshnessRank: freshness === "fresh" ? 3 : freshness === "aging" ? 2 : freshness === "unknown" ? 1 : 0 };
+}
 function sourceRow(id: string, head: RecordHead & { sourceRow: SourceRowFields }): KnowledgeSourceRow {
   const { tagIds: _tagIds, tagVocabularyRevision: _tagVocabularyRevision, ...fields } = head.sourceRow;
-  return { id, revisionId: head.latestRevisionId, scope: head.scope, createdAt: head.createdAt, updatedAt: head.updatedAt, ...fields, ...(head.admission ? { admission: head.admission } : {}) };
+  const { freshnessRank: _rank, ageDays, freshness } = projectFreshness(head.sourceRow);
+  delete (fields as Partial<SourceRowFields>).ageSince;
+  delete (fields as Partial<SourceRowFields>).decayClass;
+  return { id, revisionId: head.latestRevisionId, scope: head.scope, createdAt: head.createdAt, updatedAt: head.updatedAt, ...fields, ageDays, freshness, ...(head.admission ? { admission: head.admission } : {}) };
 }
 function cleanupKey(item: PendingRecordCleanup): string { return JSON.stringify([item.recordId, item.revisionId]); }
 function sourceIdentityKey(identity: { provider: string; accountId: string; itemId: string }): string {
@@ -542,7 +577,7 @@ export class KnowledgeStore {
   private readonly connectorContext = new AsyncLocalStorage<string | undefined>();
   /** Command-scoped summary generations that are already in flight. */
   private readonly summaryInFlight = new Map<string, Promise<KnowledgeMutationResult>>();
-  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: (change: KnowledgeChange) => void, private readonly connectorEnvelope?: KnowledgeConnectorEnvelopeResolver, private readonly tagVocabulary: KnowledgeTagVocabulary = EMPTY_TAG_VOCABULARY) {
+  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: (change: KnowledgeChange) => void, private readonly connectorEnvelope?: KnowledgeConnectorEnvelopeResolver) {
     this.mutex = KnowledgeStore.workspaceLocks.get(workspace) ?? new AsyncMutex(); KnowledgeStore.workspaceLocks.set(workspace, this.mutex);
   }
 
@@ -700,7 +735,7 @@ export class KnowledgeStore {
       const manifest = read.value as { storageVersion?: unknown; schemaVersion?: unknown; catalogID?: unknown };
       if (manifest.storageVersion === CATALOG_STORAGE_VERSION) { const loaded = await this.load(paths, false); loaded.state.catalog?.close(); return; }
       if (manifest.storageVersion === undefined) { await this.createCatalog(paths, validateState(read.value)); return; }
-      if (manifest.storageVersion !== 2) throw new KnowledgeStoreError(typeof manifest.storageVersion === "number" && manifest.storageVersion > CATALOG_STORAGE_VERSION ? "newer" : "invalid", "Unsupported Knowledge catalog manifest");
+      if (manifest.storageVersion !== 2 && manifest.storageVersion !== 3) throw new KnowledgeStoreError(typeof manifest.storageVersion === "number" && manifest.storageVersion > CATALOG_STORAGE_VERSION ? "newer" : "invalid", "Unsupported Knowledge catalog manifest");
       if (manifest.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof manifest.catalogID !== "string" || !/^[0-9a-f-]{36}$/.test(manifest.catalogID)) throw new KnowledgeStoreError("invalid", "Unsupported Knowledge catalog manifest");
       await this.rebuildCatalogHeads(paths, manifest.catalogID);
     });
@@ -713,6 +748,7 @@ export class KnowledgeStore {
   private async rebuildCatalogHeads(paths: StorePaths, catalogID: string): Promise<void> {
     const { catalog } = await this.openCatalog(paths, catalogID, false);
     try {
+      const config = catalog.control<CatalogControl>().config;
       catalog.begin();
       const records = catalog.table<RecordHead>("records");
       // Read the previous shape raw: it predates the projection this rebuild
@@ -721,7 +757,7 @@ export class KnowledgeStore {
         if (!row.value || typeof row.value !== "object") throw new KnowledgeStoreError("invalid", "Invalid Knowledge record head");
         const legacy = row.value as LegacyRecordHead & { objectHashes?: string[] };
         const latest = await this.readRecord(paths, row.key, legacy.latestRevisionId);
-        records.set(row.key, headFor(latest, legacy.revisionIds, legacy.objectHashes ?? []));
+        records.set(row.key, headFor(latest, legacy.revisionIds, legacy.objectHashes ?? [], config));
       }
       catalog.commit();
     } finally { catalog.close(); }
@@ -942,12 +978,13 @@ export class KnowledgeStore {
       if (request.vocabularyRevision !== state.config.tagVocabulary.revision) throw conflict(`Knowledge vocabulary revision changed; current revision is ${state.config.tagVocabulary.revision}`);
       const limit = request.limit ?? 25;
       const retiredIds = state.config.tagVocabulary.tags.filter(tag => tag.state !== "active").map(tag => tag.id);
-      const where = "json_extract(entries.value, '$.kind') = 'source' AND key > ? AND (json_extract(entries.value, '$.sourceRow.tagIds') IS NULL OR json_extract(entries.value, '$.sourceRow.tagVocabularyRevision') != ? OR EXISTS (SELECT 1 FROM json_each(json_extract(entries.value, '$.sourceRow.tagIds')) AS selected WHERE selected.value IN (SELECT value FROM json_each(?))))";
+      const where = "json_extract(entries.value, '$.kind') = 'source' AND key > ? AND (json_extract(entries.value, '$.sourceRow.tagIds') IS NULL OR json_extract(entries.value, '$.sourceRow.tagVocabularyRevision') != ? OR json_extract(entries.value, '$.sourceRow.tagsStale') = 1 OR EXISTS (SELECT 1 FROM json_each(json_extract(entries.value, '$.sourceRow.tagIds')) AS selected WHERE selected.value IN (SELECT value FROM json_each(?))))";
       const rows = state.catalog?.rows<RecordHead>("records", where, [JSON.stringify(cursor ?? ""), request.vocabularyRevision, JSON.stringify(retiredIds)], "key", limit + 1) ?? [];
       const items = rows.slice(0, limit).map(({ key, value: head }) => {
         const ids = head.sourceRow?.tagIds ?? [];
         const hasRetired = ids.some(id => state.config.tagVocabulary.tags.find(tag => tag.id === id)?.state !== "active");
-        return { id: key, revisionId: head.latestRevisionId, reason: ids.length === 0 ? "untagged" as const : hasRetired ? "retired-tag" as const : "vocabulary-changed" as const };
+        const tagsStale = Boolean(head.sourceRow?.tagsStale);
+        return { id: key, revisionId: head.latestRevisionId, reason: ids.length === 0 ? "untagged" as const : tagsStale && !hasRetired ? "stale-inputs" as const : hasRetired ? "retired-tag" as const : "vocabulary-changed" as const };
       });
       const last = items.at(-1)?.id;
       const nextCursor = rows.length > limit && last ? this.tagCursor(last, request.vocabularyRevision) : undefined;
@@ -1016,6 +1053,8 @@ export class KnowledgeStore {
       head.searchFields = head.searchFields.filter(([field]) => field !== "tags");
       if (labels) head.searchFields.push(["tags", labels]);
       if (row.tagIds?.length) row.tags = row.tagIds.flatMap(id => { const tag = activeById.get(id); return tag ? [{ id: tag.id, label: tag.label, category: tag.category, decayClass: tag.decayClass, state: tag.state }] : []; });
+      const selectedTags = row.tagIds?.map(id => state.config.tagVocabulary.tags.find(tag => tag.id === id));
+      row.decayClass = !selectedTags?.length || selectedTags.some(tag => !tag || tag.state !== "active") ? "unknown" : selectedTags.some(tag => tag!.decayClass === "ages") ? "ages" : "does-not-age";
       state.records.set(key, head);
     }
   }
@@ -1152,45 +1191,54 @@ export class KnowledgeStore {
    * that continues it. A scored page binds the query, filters, projection and
    * the exact state revision, because it cannot be resumed across a corpus
    * change without skipping or repeating rows. */
-  private searchPage(request: KnowledgeSearchRequest, terms: string[], filter: { clauses: string[]; parameters: SQLInputValue[] }, scope: string, stateRevision: number): { clauses: string[]; parameters: SQLInputValue[]; order: string } {
+  private searchPage(request: KnowledgeSearchRequest, terms: string[], filter: { clauses: string[]; parameters: SQLInputValue[] }, scope: string, stateRevision: number): { clauses: string[]; parameters: SQLInputValue[]; order: string; freshnessNowMs: number; cursor?: SearchPosition } {
+    const cursor = request.cursor === undefined ? undefined : readSearchCursor(request.cursor, scope, stateRevision);
+    const freshnessNowMs = cursor?.freshnessNowMs ?? Date.now();
     const score = searchScoreSQL(terms);
+    const freshness = searchFreshnessRankSQL(freshnessNowMs);
     const clauses = [...filter.clauses, `${score} > 0`];
     const where = [...filter.parameters, ...terms];
-    if (request.cursor !== undefined) {
-      const cursor = readSearchCursor(request.cursor, scope, stateRevision);
-      clauses.push(`(${score} < ? OR (${score} = ? AND (json_extract(value, '$.sortAt') < ? OR (json_extract(value, '$.sortAt') = ? AND key > json_quote(?)))))`);
-      where.push(...terms, cursor.score, cursor.score, cursor.sortAt, cursor.sortAt, cursor.id);
+    if (cursor) {
+      clauses.push(`(${score} < ? OR (${score} = ? AND (${freshness} < ? OR (${freshness} = ? AND (json_extract(value, '$.sortAt') < ? OR (json_extract(value, '$.sortAt') = ? AND key > ?))))))`);
+      where.push(...terms, ...terms, cursor.score, cursor.score, cursor.freshnessRank, cursor.freshnessRank, cursor.sortAt, cursor.sortAt, JSON.stringify(cursor.id));
     }
     // The statement binds ORDER BY placeholders after every WHERE placeholder.
-    return { clauses, parameters: [...where, ...terms], order: `${score} DESC, json_extract(value, '$.sortAt') DESC, key` };
+    return { clauses, parameters: [...where, ...terms], order: `${score} DESC, ${freshness} DESC, json_extract(value, '$.sortAt') DESC, key`, freshnessNowMs, ...(cursor ? { cursor } : {}) };
   }
 
   /** One page of scored, visible heads, resolved synchronously. The score is the
    * statement's own ordering key, so the cursor continues that exact order. */
-  private scoredHeadPage(state: KnowledgeState, page: { clauses: string[]; parameters: SQLInputValue[]; order: string }, terms: string[], scope: string, limit: number, stateRevision: number): { page: Array<{ id: string; head: RecordHead; score: number }>; nextCursor?: string } {
+  private scoredHeadPage(state: KnowledgeState, page: { clauses: string[]; parameters: SQLInputValue[]; order: string; freshnessNowMs: number; cursor?: SearchPosition }, terms: string[], scope: string, limit: number, stateRevision: number): { page: Array<{ id: string; head: RecordHead; score: number }>; nextCursor?: string } {
     const scored: Array<{ id: string; head: RecordHead; score: number }> = [];
     let nextCursor: string | undefined; let last: SearchPosition | undefined;
     for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", page.clauses.join(" AND "), page.parameters, page.order) ?? []) {
       if (!this.headVisible(state, id, head)) continue;
-      if (scored.length >= limit) { nextCursor = searchCursor(scope, stateRevision, last!); break; }
       const score = headScore(head, terms);
-      scored.push({ id, head, score }); last = { score, sortAt: head.sortAt, id };
+      const freshnessRank = headFreshnessRank(head, page.freshnessNowMs);
+      // SQLite's Julian-day arithmetic has sub-millisecond rounding. Recheck
+      // the keyset in JS against the same clock snapshot so a boundary rounding
+      // cannot repeat or skip a row on a scored page.
+      if (page.cursor && !afterSearchPosition(score, freshnessRank, head.sortAt, id, page.cursor)) continue;
+      if (scored.length >= limit) { nextCursor = searchCursor(scope, stateRevision, last!); break; }
+      scored.push({ id, head, score }); last = { score, freshnessRank, sortAt: head.sortAt, id, freshnessNowMs: page.freshnessNowMs };
     }
     return { page: scored, ...(nextCursor ? { nextCursor } : {}) };
   }
 
-  private scoredPageCursor(candidates: { page: Array<{ id: string; head: RecordHead; score: number }>; nextCursor?: string }, admitted: number, scope: string, stateRevision: number): string | undefined {
+  private scoredPageCursor(candidates: { page: Array<{ id: string; head: RecordHead; score: number }>; nextCursor?: string }, admitted: number, scope: string, stateRevision: number, freshnessNowMs: number): string | undefined {
     if (admitted >= candidates.page.length) return candidates.nextCursor;
     const last = admitted > 0 ? candidates.page[admitted - 1] : undefined;
-    return last ? searchCursor(scope, stateRevision, { score: last.score, sortAt: last.head.sortAt, id: last.id }) : undefined;
+    return last ? searchCursor(scope, stateRevision, { score: last.score, freshnessRank: headFreshnessRank(last.head, freshnessNowMs), sortAt: last.head.sortAt, id: last.id, freshnessNowMs }) : undefined;
   }
 
   /** The page's kind/scope/admission partition. Admission lives in the head, so
    * this is the same predicate the body checks apply, evaluated before a body is
    * read; the body remains the authority for the rows it admits. */
-  private pageFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission">): { clauses: string[]; parameters: SQLInputValue[] } {
+  private pageFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission"> & { excludePersonalSources?: boolean }): { clauses: string[]; parameters: SQLInputValue[] } {
     const base = this.catalogFilter(request); const admission = admissionFilter(request);
-    return { clauses: [...base.clauses, ...admission.clauses], parameters: [...base.parameters, ...admission.parameters] };
+    const privacy = request.excludePersonalSources ? ["NOT (json_extract(value, '$.kind') = 'source' AND json_extract(value, '$.scope') = 'personal')"] : [];
+    const archive = request.includeArchived ? [] : ["NOT (json_extract(value, '$.kind') = 'source' AND coalesce(json_extract(value, '$.sourceRow.verdict'), '') = 'archive')"];
+    return { clauses: [...base.clauses, ...admission.clauses, ...privacy, ...archive], parameters: [...base.parameters, ...admission.parameters] };
   }
   private headVisible(state: KnowledgeState, id: string, head: RecordHead, includeSuppressed = false): boolean {
     const suppression = state.suppressions.get(id);
@@ -1295,7 +1343,7 @@ export class KnowledgeStore {
         if (!budget.admit(hit)) break;
         hits.push(hit);
       }
-      const nextCursor = this.scoredPageCursor(candidates, hits.length, scope, state.stateRevision);
+      const nextCursor = this.scoredPageCursor(candidates, hits.length, scope, state.stateRevision, page.freshnessNowMs);
       return { hits, stateRevision: state.stateRevision, indexState: "canonical", ...(nextCursor ? { nextCursor } : {}) };
     });
   }
@@ -1317,7 +1365,7 @@ export class KnowledgeStore {
         if (head.kind !== "source" || !head.sourceRow) continue;
         rows.push(sourceRow(id, head as RecordHead & { sourceRow: SourceRowFields }));
       }
-      const nextCursor = this.scoredPageCursor(candidates, rows.length, scope, state.stateRevision);
+      const nextCursor = this.scoredPageCursor(candidates, rows.length, scope, state.stateRevision, page.freshnessNowMs);
       return { rows, stateRevision: state.stateRevision, ...(nextCursor ? { nextCursor } : {}) };
     });
   }
@@ -1331,9 +1379,17 @@ export class KnowledgeStore {
         filter.clauses.push(`EXISTS (SELECT 1 FROM json_each(entries.value, '$.searchFields') AS field WHERE ${terms.map(() => "instr(json_extract(field.value, '$[1]'), ?) > 0").join(" AND ")})`);
         filter.parameters.push(...terms);
       }
-      const heads = this.visibleHeadPage(state, filter, "recall", limit);
+      const score = terms.length ? searchScoreSQL(terms) : "CASE WHEN 1 = 1 THEN 0 ELSE 1 END";
+      const freshness = searchFreshnessRankSQL();
+      const orderedHeads: Array<{ id: string; head: RecordHead }> = [];
+      const parameters = [...filter.parameters, ...terms];
+      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), parameters, `${score} DESC, ${freshness} DESC, json_extract(value, '$.sortAt') DESC, key`) ?? []) {
+        if (!this.headVisible(state, id, head)) continue;
+        if (orderedHeads.length >= limit) break;
+        orderedHeads.push({ id, head });
+      }
       const records: KnowledgeRecord[] = []; const budget = new KnowledgePageBudget();
-      for (const { id, head } of heads.page) {
+      for (const { id, head } of orderedHeads) {
         const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
         if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) continue;
@@ -1398,6 +1454,28 @@ export class KnowledgeStore {
       if (current.kind !== "source") throw conflict("Source revision is unavailable");
       const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, admission } }, request.expectedRevision);
+    });
+  }
+  /** The user-owned take has its own fast, typed write path: no model work,
+   * no agent-supplied producer, and the stale response includes the current
+   * note so a client can preserve and reconcile its local draft. */
+  async setSourceTake(request: KnowledgeSourceTakeRequest): Promise<KnowledgeMutationResult> {
+    if (typeof request.text !== "string" || request.text.length > 4_000) throw invalid("Your take must be at most 4000 characters");
+    return this.mutate("knowledge.source.take", request.commandId, request, async (state, paths) => {
+      const head = state.records.get(request.recordId);
+      const current = head ? await this.readRecord(paths, request.recordId, head.latestRevisionId) : null;
+      if (!current || current.kind !== "source" || this.recordExcluded(state, current)) throw conflict("Source is unavailable for Your take");
+      if (current.revisionId !== request.expectedRevision) throw new GatewayError("conflict", "Source revision changed; keep the draft and reconcile with the current take", false, {
+        currentRevision: current.revisionId, currentTake: current.content.take?.text ?? "",
+      });
+      const text = request.text.trim();
+      const take = text ? { text, confirmed: true as const, producer: { actor: "user" as const }, updatedAt: now() } : undefined;
+      if (current.content.take?.text === take?.text) return { record: current, stateRevision: state.stateRevision };
+      const { take: _previousTake, ...content } = current.content;
+      return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope,
+        provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}),
+        content: { ...content, ...(take ? { take } : {}) },
+      }, current.revisionId);
     });
   }
   /** One agent- or user-authored interpretation on a source. Each item is its
@@ -1467,12 +1545,10 @@ export class KnowledgeStore {
         const ids = item.tagIds.map(value => id(value, "tag id"));
         if (new Set(ids).size !== ids.length) throw new KnowledgeCurationRefusal("invalid-input", "A tag selection repeats a tag ID");
         const configured = state.config.tagVocabulary;
-        const configuredRevision = state.config.tagVocabulary.revision;
-        const injected = this.tagVocabulary.revision > 0;
-        const vocabularyRevision = injected ? this.tagVocabulary.revision : configuredRevision;
+        const vocabularyRevision = configured.revision;
         if (!Number.isSafeInteger(vocabularyRevision) || vocabularyRevision < 0) throw new KnowledgeCurationRefusal("unavailable", "The Knowledge tag vocabulary is unavailable");
         for (const value of ids) {
-          const active = injected ? this.tagVocabulary.isActiveTag(value) : configured.tags.some(tag => tag.id === value && tag.state === "active");
+          const active = configured.tags.some(tag => tag.id === value && tag.state === "active");
           if (!active) throw new KnowledgeCurationRefusal("unknown-tag", vocabularyRevision === 0 ? `Unknown tag ${value}: no tag vocabulary is installed` : `Unknown tag ${value}: it is not in vocabulary revision ${vocabularyRevision}`);
         }
         return { scope: current.scope, relations: current.relations, content: { ...content, tags: { tagIds: ids, vocabularyRevision, inputsDigest: curationInputsDigest(content), assignedAt: decided, producer } } };
@@ -1525,6 +1601,7 @@ export class KnowledgeStore {
     }
   }
   async captureSource(request: SourceRecordWriteRequest): Promise<KnowledgeMutationResult> {
+    if (request.record.content.take !== undefined) throw invalid("Your take is user-owned and can only be written with knowledge.source.take");
     const { signal, ...receiptRequest } = request;
     const { canonicalUri } = request;
     return this.mutate("knowledge.source.record-write", request.commandId, receiptRequest, async (state, paths) => {

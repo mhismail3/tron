@@ -150,7 +150,7 @@ screenshots of each state. Device validation by the user after K9.
 | K3 | Done | Tag vocabulary and tagging guidelines owned by Knowledge config | K1 | luna-worker, 2026-09-29 |
 | K4 | Ready | Jev tagger with monthly budget and re-tag triggers | K1, K3 | — |
 | K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
-| K6 | Ready | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1 | — |
+| K6 | Done | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1, K3 | luna-worker, 2026-09-29 |
 | K7 | Ready | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | — |
 | K8 | Ready | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | — |
 | K9 | Ready | Maintainer runtime update and live capability check | K1–K8 | — |
@@ -310,19 +310,20 @@ session only after the user confirms the schedule.
   restore) stays separate from curation placement, because intake carries rubric
   and profile versions that a placement decision must not inherit. The
   assessment model seam is unchanged; K5 selects the enrichment model.
-- Deviations: the store's `KnowledgeTagVocabulary` seam is a constructor seam
-  rather than a config field, because K3 owns the config shape; an empty
-  vocabulary refuses every tag write with `unknown-tag`. The curation gate is a
-  service constructor seam (K4 installs the Jev budget). `SourceSummary.tags` was
+- Deviations: K3 later made the controlled tag vocabulary part of canonical
+  `KnowledgeConfig`; K3+K6 integration removed the interim constructor seam, so
+  tag writes now validate against the same configuration that owns labels and
+  decay classes. An empty vocabulary refuses every tag write with `unknown-tag`.
+  The curation gate is a service constructor seam (K4 installs the Jev budget).
+  `SourceSummary.tags` was
   deleted rather than kept beside the vocabulary: the live corpus held zero
   stored summaries (checked read-only against the running Gateway, 438 sources),
   so the replacement needed no migration. An old iOS build cannot decode a
   record summarized after this change until K7 lands — no such record can exist
   until the Gateway is rebuilt at K9.
-- For the next agent: K3 fills `KnowledgeTagVocabulary` from config and must
-  record its revision; K4 tags through the `tags` curation operation and installs
-  the gate; K5 wires the enrichment model; K6 extends `curationInputsDigest` with
-  the user's take and must then re-tag; K7 adopts `tags`/`verdict` on iOS and
+- For the next agent: K4 tags through the `tags` curation operation, re-tags
+  after take changes, and installs the paid gate; K5 wires the enrichment model; K7
+  adopts `take`, `tags`, `verdict`, freshness/age basis and `hasTake` on iOS and
   drives `summarize` + `curationJob` instead of awaiting a summary call.
 
 ### K2 · Done · 2026-09-29 · deepseek-worker · `knowledge/k2-clean-evidence`
@@ -415,10 +416,77 @@ and its first batch is returned as a committed vocabulary edit plus a typed
 resume conflict rather than misreported as a failed taxonomy mutation.
 - For the next agent: K4 reads `config.tagVocabulary` (including `guidelines`),
 uses the tag definitions/categories/decay classes, and asks
-`knowledge.tags.retag-needed` for a vocabulary edition before tagging. K6 should
-use `knowledgeTagDecayClass(config, tagId)` and keep freshness policy outside
-K3. K7 can render `KnowledgeSourceRow.tags` without opening source bodies.
+`knowledge.tags.retag-needed` before tagging. K7 can render `KnowledgeSourceRow.tags` without opening source bodies.
+
+
+### K6 · Done · 2026-09-29 · luna-worker · `knowledge/k6-take-freshness`
+
+- Result: Added `knowledge.source.take`, a receipted expected-revision write
+  that stores one confirmed user-authored take per source. It returns a typed
+  stale conflict containing the current revision and take; empty text explicitly
+  clears the note. Only the user-facing RPC writes takes; agents can read but the
+  agent knowledge tool cannot write them. `curationInputsDigest` includes take
+  text, and the catalog row marks old selections `tagsStale`. Catalog heads now
+  own save/capture age basis and decay class; rows recompute freshness from the
+  current clock without body reads. Agent search/recall hide personal Sources by
+  default but retain observation/note visibility; explicit personal scope opts
+  in. Archived verdicts are hidden by default. Search and recall order by
+  relevance, then freshness, then recency; returned Sources carry date/age,
+  freshness, verdict/replacement and bounded user take. Storage v4 rebuilds v3
+  heads explicitly at Gateway startup.
+- Evidence: `npx vitest run src/knowledge/ --no-file-parallelism` — 23 files,
+  322 passed. `npx vitest run src/transport/ --no-file-parallelism` — 43 files,
+  404 passed. `npx vitest run --config vitest.scale.config.ts` — 3 files, 3
+  passed. The 12,600-head / 440-source K6 scale test measured 5 ms row list,
+  216 ms row search, 109 ms full list, 173 ms full search, and 162 ms recall
+  (focused run; host-dependent). The scale case verifies all four retrieval
+  surfaces meet generous regression budgets and keep row projections body-free.
+- Changes: `c0933d1ff` (typed user take), `9e6ee5323` (freshness-aware retrieval
+  and v4 head rebuild), `1e09bce4d` (failure-mode inventory).
+- Tasks added: none.
+- Kept on purpose: User takes are not writable through the agent tool; an agent
+  may only read them and the user writes through the RPC. Capture cannot forge a
+  take. Notes and observations are not hidden with personal-scope Sources.
+  Missing tag decay metadata yields `unknown`; the source row explicitly names
+  `capturedAt` when original save time is absent. K6 does not add iOS behavior;
+  K7 owns Entry Detail and row decoding.
+- Deviations: Initial K6 code used a constructor-injected vocabulary accessor.
+  K3+K6 integration removed that duplicate authority: active IDs, labels and
+  decay classes now all come from `KnowledgeConfig.tagVocabulary`. Age continues
+  advancing without writes/timers: the catalog stores only the age anchor,
+  configured decay class and verdict; row freshness and age are calculated at
+  read time, while SQL retrieval rank uses the same read-time basis. Merged and
+  retired selections are `unknown` until re-tagged or reconciled to an active
+  merge target. Storage version
+  advanced from v3 to v4 so old row heads are rebuilt from immutable revisions;
+  migration remains an explicit user-started Gateway action. No live workspace or
+  Gateway was read or mutated.
+- For the next agent: K4 re-tags when `tagsStale` follows a take change, and
+  also pages K3's `knowledge.tags.retag-needed` query, which recognizes stale
+  input digests including changed Your takes. K7 updates native
+  source rows and Entry Detail for take editing, freshness/verdict and pending
+  re-tag state. K9 performs the user-initiated runtime update only after K7.
+
+### K3+K6 integration · Done · 2026-09-29 · `knowledge/k1-k6`
+
+- Unified ownership: `KnowledgeConfig.tagVocabulary` is the sole source of
+  active tag IDs, labels and decay classes; deleted K1's duplicate constructor
+  vocabulary seam. `headFor` and source-head re-projection use the same config.
+- Freshness heads retain stable inputs only (save/capture age anchor, active
+  decay class, verdict). Rows calculate age/freshness at read time; retrieval SQL
+  computes ranking against one clock snapshot per scored page. Fixed Julian-day
+  precision at exact day boundaries and kept cursor continuation on its original
+  rank snapshot. Merged/retired selections remain unknown until reconciled or
+  re-tagged; take-invalidated input digests enter the bounded K3 re-tag query.
+- Evidence: `npm run build`; `npx vitest run src/knowledge/ src/transport/
+  --no-file-parallelism` — 67 files / 742 tests passed; `npx vitest run
+  --config vitest.scale.config.ts src/knowledge/ --no-file-parallelism
+  --reporter verbose` — 4 files / 4 tests passed. On 12,600 heads / 440 sources,
+  K6 measured 1.7 ms row list, 8.2 ms row search, 4.2 ms full list, 12.8 ms
+  full search, 175.7 ms recall; K3 tag row/search/re-tag was 5.0 / 12.4 / 4.8 ms
+  with zero body reads (host-dependent).
+- Regression tests cover no-write crossing of 180 days and reordering, decay edit
+  re-projection, merged/retired semantics, and take-driven re-tag discovery.
 
 Drafted from the 2026-09-28 interview and approved by the user the same day,
-with the reliability and interaction bars added at the user's request. K1 and
-K2 claimed for parallel DeepSeek workers on isolated branches.
+with the reliability and interaction bars added at the user's request. K1, K2, K3 and K6 are complete; K3/K6 were integrated on `knowledge/k1-k6`.

@@ -39,7 +39,7 @@ describe("Knowledge tag catalog scale", () => {
           latestRevisionId: revisionId, revisionIds: [revisionId], kind: isSource ? "source" : "observation", scope: isSource ? "research" : "personal",
           createdAt: timestamp, updatedAt: timestamp, sortAt: Date.parse(timestamp),
           searchFields: isSource ? [["title", `saved item ${index}`], ["tags", "knowledge systems"]] : [["observation", `statement ${index}`]],
-          recordRefs: [], objectHashes: [], ...(isSource ? { sourceRow: { title: `Saved item ${index}`, captureDisposition: "complete", tagIds: ["knowledge"], tagVocabularyRevision: installed.revision - 1, tags: [{ id: "knowledge", label: "Knowledge Systems", category: "work", decayClass: "stable", state: "active" }] } } : {}),
+          recordRefs: [], objectHashes: [], ...(isSource ? { sourceRow: { title: `Saved item ${index}`, captureDisposition: "complete", ageBasis: "sourceSavedAt", ageSince: timestamp, decayClass: "does-not-age", hasTake: false, tagsStale: false, tagIds: ["knowledge"], tagVocabularyRevision: installed.tagVocabulary.revision - 1, tags: [{ id: "knowledge", label: "Knowledge Systems", category: "work", decayClass: "stable", state: "active" }] } } : {}),
         });
         catalog.setRevisions(id, [revisionId]);
       }
