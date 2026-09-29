@@ -2006,6 +2006,75 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // F4: the opening reveal's direction. Flipping the transcript inverts any
+    // offset applied outside a row's counter-flip, so the reveal's rise would
+    // become a drop while every earlier check still passed (the reveal oracle is
+    // deliberately insensitive to direction, and the parity gate cannot resolve a
+    // sub-60 ms phase). Two measurements, because they carry different halves of
+    // the motion: the committed position of the newest row's edge (layout-true,
+    // and the amplitude — measured as the reveal's 8 pt step), and the
+    // luminance-weighted vertical centre of the entering region (the pixels the
+    // reader sees, sign-carrying). The send's 20 pt rise is not measurable here:
+    // the row's entrance translate is never committed between display boundaries
+    // in the rendered tree and the row marker does not carry it, which is why
+    // CT-12 and CT-14 already leave entrance motion to the device checklist.
+    @Test("the opening reveal moves the transcript upward")
+    func hostedOpeningRevealRisesUpward() async throws {
+        try await withTestWatchdog(timeout: .seconds(25)) { @MainActor in
+            let gate = OpeningFrameGate()
+            defer { gate.release() }
+            let snapshot = try SessionScenarioBuilder(seed: 1_276)
+                .openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, displayFrameScheduler: gate.scheduler,
+                                  enablesPresentationCover: true, usesRealOpening: true) { harness in
+                gate.condition = { harness.probe.openingPhase?() == .presenting }
+                try await gate.waitUntilHeld()
+                let bounds = harness.visibleRootView.bounds
+                let composerTop = harness.transcriptBottom().composerTop ?? bounds.height
+                // A band of transcript text above the composer: the entering
+                // region the reveal moves, without the composer's own material.
+                let region = CGRect(x: 30, y: composerTop - 300, width: 330, height: 180)
+                let covered = harness.verticalProfile(in: region, rowStep: 2)
+                var edges: [CGFloat] = []
+                var centres: [CGFloat] = []
+                gate.release()
+                for _ in 0..<12 {
+                    try await DisplayFrameScheduler.displayLink.nextFrame()
+                    let profile = harness.verticalProfile(in: region, rowStep: 2)
+                    if let edge = harness.transcriptBottom().newestRowBottomEdge {
+                        edges.append(edge)
+                    }
+                    if let centre = ChatViewScrollHarness.inkCentre(of: profile, above: covered) {
+                        centres.append(centre)
+                    }
+                }
+                #expect(harness.probe.openingPhase?() == .ready)
+
+                // The committed amplitude: the reveal steps the transcript up by
+                // its 8 pt rise once the physical lift settles.
+                let firstEdge = try #require(edges.first)
+                let settledEdge = try #require(edges.last)
+                #expect(
+                    abs((firstEdge - settledEdge) - 8) <= 3,
+                    "the reveal stepped the newest row's edge from \(firstEdge) to \(settledEdge)"
+                )
+                #expect(
+                    zip(edges, edges.dropFirst()).allSatisfy { $1 <= $0 + 0.5 },
+                    "the newest row's edge never moved down: \(edges)"
+                )
+
+                // The rendered centre of the entering region, recorded per frame.
+                // It is not the gate: measured here, content realization moves it
+                // 74 pt upward over the same frames (657.1 → 583.4) with ±10 pt
+                // wiggles, so an 8 pt direction would be invisible inside it. The
+                // committed edge above carries the direction and the amplitude;
+                // `centres.count` only proves the entering ink was measurable.
+                #expect(centres.count >= 3, "the reveal's entering ink was sampled \(centres.count) times")
+                print("CT25-MOTION-OPENING edges=\(edges.map { String(format: "%.1f", Double($0)) }) centres=\(centres.map { String(format: "%.1f", Double($0)) })")
+            }
+        }
+    }
+
     @Test("hosted opening render stays opaque before one monotonic transcript reveal")
     func hostedOpeningRevealIsMonotonic() async throws {
         try await withTestWatchdog(timeout: .seconds(25)) { @MainActor in
@@ -4853,6 +4922,167 @@ final class ChatViewScrollHarness {
             animated: false
         )
         scrollView.layoutIfNeeded()
+    }
+
+    // MARK: - Motion direction
+
+    /// One rendered region reduced to its rows' mean luminance, with the region's
+    /// own top edge: the input the motion-direction probe reduces to a
+    /// luminance-weighted vertical centre.
+    struct RenderedVerticalProfile: Sendable, Equatable {
+        /// The region's top edge in the hosting view's own coordinates.
+        let regionTop: CGFloat
+        /// Points per profile row.
+        let rowStep: Int
+        /// Mean luminance of each row band of the region, top row first.
+        let rowMeans: [Double]
+    }
+
+    /// The mean luminance of every `rowStep`-point row of `region`, rendered from
+    /// the current hierarchy. The region is small — the band an entrance moves
+    /// through — so this costs a fraction of the parity gate's capture and can be
+    /// sampled between display boundaries.
+    func verticalProfile(in region: CGRect, rowStep: Int = 2) -> RenderedVerticalProfile {
+        let view = hostingController.view!
+        let clipped = region.intersection(view.bounds)
+        guard !clipped.isNull, clipped.height >= CGFloat(rowStep) else {
+            return RenderedVerticalProfile(regionTop: region.minY, rowStep: rowStep, rowMeans: [])
+        }
+        let image = renderedImage(in: clipped, scale: 1, afterScreenUpdates: true)
+        guard let cgImage = image.cgImage,
+              let data = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else {
+            return RenderedVerticalProfile(regionTop: region.minY, rowStep: rowStep, rowMeans: [])
+        }
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        let height = cgImage.height
+        let width = cgImage.width
+        var rowMeans: [Double] = []
+        rowMeans.reserveCapacity(height / rowStep + 1)
+        var y = 0
+        while y < height {
+            let upper = min(height, y + rowStep)
+            var sum = 0.0
+            for row in y..<upper {
+                let line = row * cgImage.bytesPerRow
+                for x in 0..<width {
+                    let offset = line + x * bytesPerPixel
+                    sum += (Double(bytes[offset]) + Double(bytes[offset + 1])
+                        + Double(bytes[offset + 2])) / 3
+                }
+            }
+            rowMeans.append(sum / Double((upper - y) * width))
+            y = upper
+        }
+        return RenderedVerticalProfile(
+            regionTop: clipped.minY, rowStep: rowStep, rowMeans: rowMeans
+        )
+    }
+
+    /// Drive `boundaries` display boundaries, capturing the region's vertical
+    /// profile at each one, so a caller can reduce any later frame against any
+    /// earlier one after the entrance has finished.
+    func sampleVerticalProfiles(
+        in region: CGRect,
+        boundaries: Int,
+        rowStep: Int = 2
+    ) async throws -> [RenderedVerticalProfile] {
+        var profiles: [RenderedVerticalProfile] = []
+        for _ in 0..<boundaries {
+            try await driveFrameBoundary()
+            profiles.append(verticalProfile(in: region, rowStep: rowStep))
+        }
+        return profiles
+    }
+
+    /// The luminance-weighted vertical centre, in the hosting view's own
+    /// coordinates, of the ink `profile` carries above `reference`: `sum(y · w) /
+    /// sum(w)` over the rows where the frame is brighter than the reference.
+    ///
+    /// A vertical move shifts this by the move; a fade that scales the entering
+    /// ink uniformly does not move it at all, which is why direction is readable
+    /// from it even while the entrance is mid-fade. `nil` when nothing in the
+    /// region is brighter than the reference, which is how a covered frame or a
+    /// region the entrance has not reached reports.
+    static func inkCentre(
+        of profile: RenderedVerticalProfile,
+        above reference: RenderedVerticalProfile
+    ) -> CGFloat? {
+        guard profile.rowMeans.count == reference.rowMeans.count,
+              let first = profile.rowMeans.first else { return nil }
+        var weight = 0.0
+        var moment = 0.0
+        for (index, mean) in profile.rowMeans.enumerated() {
+            // A band's own height, so a partly clipped last row cannot dominate.
+            let delta = mean - reference.rowMeans[index] - 0.5
+            guard delta > 0 else { continue }
+            let y = profile.regionTop + CGFloat(index * profile.rowStep) + CGFloat(profile.rowStep) / 2
+            weight += delta
+            moment += delta * Double(y)
+        }
+        guard weight > 0, moment > 0, first.isFinite else { return nil }
+        return CGFloat(moment / weight)
+    }
+
+    /// The vertical displacement, in points, that best aligns `profile`'s ink with
+    /// `reference`: the shift `s` whose reference moved *down* by `s` matches the
+    /// profile most closely, at `step`-point candidate shifts. Each candidate's
+    /// best uniform gain is divided out, so the fade an entrance applies while it
+    /// moves does not bias the estimate; a positive result means the profile's ink
+    /// sits lower on screen than the reference's. `nil` when either profile
+    /// carries too little ink to align.
+    static func inkShift(
+        of profile: RenderedVerticalProfile,
+        to reference: RenderedVerticalProfile,
+        range: ClosedRange<CGFloat> = -32...32,
+        step: CGFloat = 1
+    ) -> CGFloat? {
+        guard profile.rowMeans.count == reference.rowMeans.count,
+              profile.rowMeans.count > 4,
+              profile.rowStep == reference.rowStep else { return nil }
+        let ink = profile.rowMeans.reduce(0) { $0 + abs($1 - (profile.rowMeans.min() ?? 0)) }
+        let referenceInk = reference.rowMeans.reduce(0) { $0 + abs($1 - (reference.rowMeans.min() ?? 0)) }
+        guard ink > 1, referenceInk > 1 else { return nil }
+        var best: (shift: CGFloat, residual: Double)?
+        var candidate = range.lowerBound
+        while candidate <= range.upperBound {
+            let rows = Double(candidate / CGFloat(profile.rowStep))
+            var dot = 0.0
+            var norm = 0.0
+            for index in profile.rowMeans.indices {
+                let source = Double(index) - rows
+                guard source >= 0, source <= Double(reference.rowMeans.count - 1) else { continue }
+                let lower = Int(source.rounded(.down))
+                let fraction = source - Double(lower)
+                let upper = min(lower + 1, reference.rowMeans.count - 1)
+                let value = reference.rowMeans[lower] * (1 - fraction)
+                    + reference.rowMeans[upper] * fraction
+                dot += profile.rowMeans[index] * value
+                norm += value * value
+            }
+            guard norm > 0 else { candidate += step; continue }
+            let gain = max(0, min(2, dot / norm))
+            var residual = 0.0
+            var count = 0
+            for index in profile.rowMeans.indices {
+                let source = Double(index) - rows
+                guard source >= 0, source <= Double(reference.rowMeans.count - 1) else { continue }
+                let lower = Int(source.rounded(.down))
+                let fraction = source - Double(lower)
+                let upper = min(lower + 1, reference.rowMeans.count - 1)
+                let value = reference.rowMeans[lower] * (1 - fraction)
+                    + reference.rowMeans[upper] * fraction
+                residual += abs(profile.rowMeans[index] - gain * value)
+                count += 1
+            }
+            guard count > 0 else { candidate += step; continue }
+            let normalized = residual / Double(count)
+            if best == nil || normalized < best!.residual {
+                best = (candidate, normalized)
+            }
+            candidate += step
+        }
+        return best?.shift
     }
 
     func isNativeTranscriptInteractionEnabled() throws -> Bool {
