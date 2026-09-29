@@ -3479,7 +3479,8 @@ final class ChatViewScrollHarness {
         displayFrameScheduler: DisplayFrameScheduler,
         performanceSignposts: (any PerformanceSignposting)? = nil,
         enablesPresentationCover: Bool = false,
-        installsSubscribedSnapshot: Bool = true
+        installsSubscribedSnapshot: Bool = true,
+        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic
     ) throws {
         let dependencies = try Self.makeDependencies(enablesComposerSubmission: false)
         try self.init(
@@ -3488,7 +3489,8 @@ final class ChatViewScrollHarness {
             performanceSignposts: performanceSignposts,
             dependencies: dependencies,
             installsSubscribedSnapshot: installsSubscribedSnapshot,
-            enablesPresentationCover: enablesPresentationCover
+            enablesPresentationCover: enablesPresentationCover,
+            scrollCallbackMode: scrollCallbackMode
         )
     }
 
@@ -3595,7 +3597,8 @@ final class ChatViewScrollHarness {
         dependencies: Dependencies,
         installsSubscribedSnapshot: Bool,
         enablesPresentationCover: Bool = false,
-        usesRealOpening: Bool = false
+        usesRealOpening: Bool = false,
+        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic
     ) throws {
         self.snapshot = snapshot
         transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
@@ -3627,7 +3630,7 @@ final class ChatViewScrollHarness {
             throw HarnessError.invalidAuthorityBoundary
         }
 
-        let probe = ChatHostedProbe()
+        let probe = ChatHostedProbe(scrollCallbackMode: scrollCallbackMode)
         if !usesRealOpening {
             probe.fixtureOpenPresentation = { [model] in
                 guard let target = model.presentationTarget(for: snapshot.sessionId),

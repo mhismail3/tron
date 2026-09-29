@@ -1,3 +1,16 @@
+/// Whether a mounted row's height changes after it mounts are row-stability
+/// evidence. A row that is streaming, running its entrance, or being replaced
+/// changes its own height as part of its presentation, so it is excluded
+/// rather than counted; the tail marker is not a row at all.
+///
+/// It lives outside the hosted probe's `HOSTED_TEST` block because the hosted
+/// recorder protocol that carries it is compiled in every build.
+enum ChatHostedRowStability: Sendable {
+    case settled
+    case excluded
+    case notARow
+}
+
 #if HOSTED_TEST
 import SwiftUI
 import TronMobileCore
@@ -30,6 +43,49 @@ struct ChatHostedNativeRowProbe: UIViewRepresentable {
     }
 }
 
+/// One row's height history under one installed projection. `firstHeight` is
+/// the height of the row's first settled frame after it mounted and every later
+/// change under the same generation and physical mount is a post-mount resize,
+/// which is what a remount regression (measuring or animating state re-derived
+/// after admission) looks like from outside the row. An excluded frame
+/// (streaming, entrance, replacement), a new generation or a new mount closes
+/// the record, so the next settled frame starts a fresh baseline.
+struct ChatHostedRowStabilityRecord: Sendable, Equatable {
+    let semanticID: String
+    let generation: Int?
+    let mount: Int
+    var firstHeight: CGFloat
+    var latestHeight: CGFloat
+    var resizeCount: Int
+    var maximumResize: CGFloat
+}
+
+/// A row frame that arrived before its projection generation was installed.
+/// The stability class travels with the frame so the deferred admission keeps
+/// the same accounting the live path would have used.
+private struct ChatHostedPendingRowFrame {
+    let frame: CGRect
+    let stability: ChatHostedRowStability
+}
+
+/// Reports the SwiftUI identity of the row content it is attached to. The
+/// `@State` here is the identity under test: if an entrance admission or a
+/// canonical handoff switched the subtree's structure, SwiftUI discards this
+/// state and records a second instance for the same row.
+struct ChatHostedRowIdentityProbe: View {
+    let id: String
+    let recorder: (any ChatTranscriptHostedRecording)?
+    @State private var instance = UUID()
+
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .allowsHitTesting(false)
+            .onAppear { recorder?.recordRowIdentity(id: id, instance: instance, isMount: true) }
+            .onDisappear { recorder?.recordRowIdentity(id: id, instance: instance, isMount: false) }
+    }
+}
+
 struct ChatHostedScrollState: Sendable {
     let isDetached: Bool
     let hasUnread: Bool
@@ -58,6 +114,15 @@ struct ChatHostedObservation: Sendable {
     let geometry: ChatTranscriptGeometry
     let visibleRowIDs: [String]
     let rowFrames: [String: CGRect]
+    /// Post-mount height evidence per settled row, and the rows whose frames
+    /// were excluded because their own presentation owns their height.
+    let rowStabilityRecords: [String: ChatHostedRowStabilityRecord]
+    let excludedRowStabilityIDs: [String]
+    /// Distinct row-content identities and mount counts per row. An entrance
+    /// admission or a canonical handoff that switched a row's view structure
+    /// shows up here as a second instance for the same row.
+    let rowIdentityInstanceCounts: [String: Int]
+    let rowIdentityMountCounts: [String: Int]
     let scrollSettledDistance: CGFloat?
     let scrollCommandCount: Int
     let tailMaterializationCommandCount: Int
@@ -93,6 +158,27 @@ struct ChatHostedObservation: Sendable {
 
     var composerHeight: CGFloat { geometryTrace.last?.composerHeight ?? 0 }
 
+    var postMountResizeCount: Int {
+        rowStabilityRecords.values.reduce(0) { $0 + $1.resizeCount }
+    }
+
+    var maximumPostMountResize: CGFloat {
+        rowStabilityRecords.values.map(\.maximumResize).max() ?? 0
+    }
+
+    var resizedSemanticIDs: [String] {
+        rowStabilityRecords.values
+            .filter { $0.resizeCount > 0 }
+            .map(\.semanticID)
+            .sorted()
+    }
+
+    /// Rows whose content identity changed more than once, which is a remount
+    /// of a row that never left the installed projection.
+    var remountedSemanticIDs: [String] {
+        rowIdentityInstanceCounts.filter { $0.value > 1 }.keys.sorted()
+    }
+
     var hasMonotonicOffsetY: Bool {
         guard geometryTrace.count > 2 else { return true }
         let deltas = zip(geometryTrace, geometryTrace.dropFirst()).map {
@@ -117,7 +203,14 @@ final class ChatHostedProbe {
     private var rowFrames: [String: CGRect] = [:]
     private var rowFrameOrder: [String] = []
     private var rowFrameGeneration: Int?
-    private var pendingRowFramesByGeneration: [Int: [String: CGRect]] = [:]
+    private var pendingRowFramesByGeneration: [Int: [String: ChatHostedPendingRowFrame]] = [:]
+    private var rowStabilityRecords: [String: ChatHostedRowStabilityRecord] = [:]
+    private var excludedRowStabilityIDs: Set<String> = []
+    /// Physical mounts per row. A remount starts a new height baseline, because
+    /// the row's first frame after it measures from scratch.
+    private var rowMountCounters: [String: Int] = [:]
+    private var rowIdentityInstances: [String: [UUID]] = [:]
+    private var rowIdentityMountCounts: [String: Int] = [:]
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
     private var tailMaterializationCommandCount = 0
@@ -198,6 +291,10 @@ final class ChatHostedProbe {
             geometry: geometry,
             visibleRowIDs: visibleRowIDs,
             rowFrames: rowFrames,
+            rowStabilityRecords: rowStabilityRecords,
+            excludedRowStabilityIDs: excludedRowStabilityIDs.sorted(),
+            rowIdentityInstanceCounts: rowIdentityInstances.mapValues(\.count),
+            rowIdentityMountCounts: rowIdentityMountCounts,
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
             tailMaterializationCommandCount: tailMaterializationCommandCount,
@@ -271,25 +368,35 @@ final class ChatHostedProbe {
         }
     }
 
-    func updateRowFrame(id: String, frame: CGRect, generation: Int? = nil) {
+    func updateRowFrame(
+        id: String,
+        frame: CGRect,
+        generation: Int? = nil,
+        stability: ChatHostedRowStability = .notARow
+    ) {
         if let generation {
             if let current = rowFrameGeneration {
                 if generation < current { return }
                 if generation > current {
-                    bufferFutureRowFrame(id: id, frame: frame, generation: generation)
+                    bufferFutureRowFrame(id: id, frame: frame, generation: generation, stability: stability)
                     return
                 }
             } else {
-                bufferFutureRowFrame(id: id, frame: frame, generation: generation)
+                bufferFutureRowFrame(id: id, frame: frame, generation: generation, stability: stability)
                 return
             }
         }
-        admitCurrentRowFrame(id: id, frame: frame)
+        admitCurrentRowFrame(id: id, frame: frame, stability: stability)
     }
 
-    private func bufferFutureRowFrame(id: String, frame: CGRect, generation: Int) {
+    private func bufferFutureRowFrame(
+        id: String,
+        frame: CGRect,
+        generation: Int,
+        stability: ChatHostedRowStability
+    ) {
         var frames = pendingRowFramesByGeneration[generation, default: [:]]
-        frames[id] = frame
+        frames[id] = ChatHostedPendingRowFrame(frame: frame, stability: stability)
         if frames.count > 256 {
             for key in frames.keys.sorted().prefix(frames.count - 256) { frames[key] = nil }
         }
@@ -304,9 +411,12 @@ final class ChatHostedProbe {
     private func admitCurrentRowFrame(
         id: String,
         frame: CGRect,
-        recordsCallback: Bool = true
+        generation: Int? = nil,
+        recordsCallback: Bool = true,
+        stability: ChatHostedRowStability = .notARow
     ) {
         if recordsCallback { semanticFrameCallbackCount &+= 1 }
+        recordRowStability(id: id, frame: frame, generation: generation ?? rowFrameGeneration, stability: stability)
         rowFrames[id] = frame
         rowFrameOrder.removeAll { $0 == id }
         rowFrameOrder.append(id)
@@ -319,6 +429,55 @@ final class ChatHostedProbe {
         refreshControlledState()
         recordGeometryTrace()
         revision &+= 1
+    }
+
+    /// The row-stability baseline is per mount: a settled frame starts it (or
+    /// continues it while the installed generation and the physical mount are
+    /// unchanged), an excluded frame closes it, and a frame whose height moved
+    /// closes over one resize. Records are keyed by the semantic geometry
+    /// identity, which is the physical row identity for every counted row kind
+    /// (aliased prompt rows are excluded from counting).
+    private func recordRowStability(
+        id: String,
+        frame: CGRect,
+        generation: Int?,
+        stability: ChatHostedRowStability
+    ) {
+        guard stability != .notARow, !id.isEmpty,
+              frame.height.isFinite, frame.height >= 0 else { return }
+        guard stability == .settled else {
+            rowStabilityRecords[id] = nil
+            if excludedRowStabilityIDs.count >= 256, !excludedRowStabilityIDs.contains(id) {
+                excludedRowStabilityIDs.remove(excludedRowStabilityIDs.sorted().first ?? id)
+            }
+            excludedRowStabilityIDs.insert(id)
+            return
+        }
+        let mount = rowMountCounters[id] ?? 0
+        guard var record = rowStabilityRecords[id],
+              record.generation == generation,
+              record.mount == mount else {
+            if rowStabilityRecords[id] == nil, rowStabilityRecords.count >= 256 {
+                rowStabilityRecords.removeValue(forKey: rowStabilityRecords.keys.sorted().first ?? id)
+            }
+            rowStabilityRecords[id] = ChatHostedRowStabilityRecord(
+                semanticID: id,
+                generation: generation,
+                mount: mount,
+                firstHeight: frame.height,
+                latestHeight: frame.height,
+                resizeCount: 0,
+                maximumResize: 0
+            )
+            return
+        }
+        let change = frame.height - record.latestHeight
+        record.latestHeight = frame.height
+        if abs(change) > 0.5 {
+            record.resizeCount &+= 1
+            record.maximumResize = max(record.maximumResize, abs(change))
+        }
+        rowStabilityRecords[id] = record
     }
 
     func recordScrollSettle(distanceFromBottom: CGFloat) {
@@ -384,6 +543,13 @@ final class ChatHostedProbe {
 
     func recordPhysicalRowAppearance(id: String) {
         Self.incrementBoundedCount(id: id, counts: &physicalRowAppearanceCounts)
+        if !id.isEmpty {
+            if rowMountCounters[id] == nil, rowMountCounters.count >= 256,
+               let retired = rowMountCounters.keys.sorted().first {
+                rowMountCounters[retired] = nil
+            }
+            rowMountCounters[id, default: 0] &+= 1
+        }
         revision &+= 1
     }
 
@@ -399,6 +565,23 @@ final class ChatHostedProbe {
             counts[retired] = nil
         }
         counts[id, default: 0] &+= 1
+    }
+
+    func recordRowIdentity(id: String, instance: UUID, isMount: Bool) {
+        guard !id.isEmpty else { return }
+        var instances = rowIdentityInstances[id, default: []]
+        if !instances.contains(instance) {
+            if instances.count < 8 { instances.append(instance) }
+        }
+        rowIdentityInstances[id] = instances
+        if isMount {
+            if rowIdentityMountCounts[id] == nil, rowIdentityMountCounts.count >= 256,
+               let retired = rowIdentityMountCounts.keys.sorted().first {
+                rowIdentityMountCounts[retired] = nil
+            }
+            rowIdentityMountCounts[id, default: 0] &+= 1
+        }
+        revision &+= 1
     }
 
     func recordCommittedHistoryRowEvaluation() {
@@ -433,8 +616,13 @@ final class ChatHostedProbe {
             rowFrameOrder = retainedOrder
             rowFrameGeneration = sourceOrdinal
             if let pending = pendingRowFramesByGeneration.removeValue(forKey: sourceOrdinal) {
-                for (id, frame) in pending {
-                    admitCurrentRowFrame(id: id, frame: frame, recordsCallback: false)
+                for (id, pending) in pending {
+                    admitCurrentRowFrame(
+                        id: id,
+                        frame: pending.frame,
+                        recordsCallback: false,
+                        stability: pending.stability
+                    )
                 }
             }
             pendingRowFramesByGeneration = pendingRowFramesByGeneration

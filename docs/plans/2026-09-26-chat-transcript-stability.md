@@ -866,3 +866,54 @@ pass only through eager-only repairs, stop and report.
   CT-23 against CT-25's gates.
 - CT-24 completes inside CT-25: its fixtures (`fc703f16e` on the CT-23 branch)
   move to `main` with CT-25, and CT-24 closes with its repro runs there.
+
+### CT-27 stage A1 (F13) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: the row-stability foundation's measurement fixture and the probe it
+  reads. `ChatHostedProbe` now keeps a per-mount record per row — the first
+  settled frame height under one installed projection and installed mount, and
+  every later height change (>0.5 pt) as a post-mount resize — excluding rows
+  whose own presentation owns their height (streaming, entrance, lifecycle
+  replacement). It also records each row content's view identity through
+  `ChatHostedRowIdentityProbe` (a `HOSTED_TEST`-only background inside
+  `renderRow`), so a structural switch of a row's subtree is visible as a second
+  instance for the same row.
+- New fixture `packages/ios-app/Tests/UI/ChatRowStabilityTests.swift`
+  (`ChatRowStabilityTests.rowStabilityJourney`): 24 ordinary history rows plus
+  one row of every kind the audit names (a prompt with an image and a file
+  attachment, wrapped thinking, two adjacent inline Markdown displays, a
+  sheet-surface display card that renders collapsed, a tool run, a truncated
+  error notice, a code-and-table response), one discrete insertion while pinned
+  so an entrance runs, then a real native scroll to detach, to the oldest loaded
+  row and back twice. It writes `packages/ios-app/build/row-stability/report.json`
+  and prints one `ROW-STABILITY` line. It is a measurement: it asserts only that
+  the journey ran (every fixture row was measured, every one left the lazy range
+  and mounted again, the oldest phase reached offset 0 with the newest rows off
+  screen).
+- Measured on today's `main` (lane ct27, run `20260928T235449Z-run.F0UpSn` and
+  two later runs, 1.5-1.9 s):
+  `postMountResizes=0 maxPostMountResize=0.0 resizedRows=0 remounts=8-9/9
+  collapsedStaysCollapsed=true inlineDisplaysPrepared=false
+  inlineDisplaysStable=true entranceIdentityStable=false excludedRows=1`.
+  So today's failures this fixture records are the entrance one: the inserted
+  row's content identity changes at admission (F1 confirmed by probe, not by
+  source reading), and an inline display cannot reach its prepared state because
+  the hosted harness has no media source (F4's starvation path is not reachable
+  here). No post-mount resize was measured for any row kind: the measuring loops
+  the audit lists (F2 thinking, F3 disclosure, F5 growth host) re-derive their
+  heights inside one display frame, and the row's own geometry callback delivers
+  only the settled value.
+- Deviations: (a) CT-25's real-scroll detach driver is not on this branch, so
+  the journey moves the real native scroll view (real geometry, real lazy
+  realization) and admits the reader's interaction phase through the
+  coordinator's own phase path, with the probe in `.native` scroll-callback mode;
+  (b) the audit's "collapsed display card" is a display whose requested surface
+  is `sheet`, which renders the collapsed pill — collapsing an inline card needs
+  a tap the harness cannot inject; (c) the audit's journey has no insertion, but
+  the entrance-identity field is vacuous without one, so the journey inserts one
+  row while pinned.
+- Changes: `ChatHostedProbe.swift` (per-mount record, identity probe, observation
+  fields), `ChatTranscriptScrollView.swift` (row stability at the row-frame seam,
+  identity probe in `renderRow`), `ChatViewScrollHarnessTests.swift` (one new
+  `scrollCallbackMode` parameter on the harness, `.synthetic` by default),
+  `ChatRowStabilityTests.swift` (new).

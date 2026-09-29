@@ -10,7 +10,13 @@ protocol ChatTranscriptHostedRecording: AnyObject {
     func recordPhysicalRowDisappearance(id: String)
     func recordCommittedHistoryRowEvaluation()
     func recordEntranceResolution(animated: Bool, sourceOrdinal: Int)
-    func updateRowFrame(id: String, frame: CGRect, generation: Int?)
+    func recordRowIdentity(id: String, instance: UUID, isMount: Bool)
+    func updateRowFrame(
+        id: String,
+        frame: CGRect,
+        generation: Int?,
+        stability: ChatHostedRowStability
+    )
     func recordMaximumSemanticExcursion(_ value: CGFloat)
 }
 
@@ -324,6 +330,13 @@ private extension ChatTranscriptRenderItem {
         case .toolRun, .notification: false
         }
     }
+
+    /// A live assistant row owns its height while it grows. Its frames are not
+    /// row-stability evidence until streaming ends.
+    var isStreamingMessage: Bool {
+        guard case .message(let message) = self else { return false }
+        return message.streaming
+    }
 }
 
 /// A unified ForEach preserves this host while runtime/local content becomes
@@ -622,7 +635,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                                 semanticID: "earlier-messages",
                                 installedTag: installed.tag,
                                 entranceState: .none,
-                                terminalPhysicalID: terminalMaterializationID
+                                terminalPhysicalID: terminalMaterializationID,
+                                rowStability: .notARow
                             ) {
                                 earlierRow(installed)
                                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
@@ -968,7 +982,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             installedTag: installed.tag,
             entranceState: .none,
             terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
-            publishesGeometry: !isReplacementOverlay
+            publishesGeometry: !isReplacementOverlay,
+            rowStability: .excluded
         ) {
             if pending.promptBehavior.isQueuedKind {
                 ChatQueuedMessageEntranceRow(
@@ -1007,7 +1022,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             entranceState: .none,
             terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
             lifecycleSettlementID: isReplacementOverlay ? nil : renderedID,
-            publishesGeometry: !isReplacementOverlay
+            publishesGeometry: !isReplacementOverlay,
+            rowStability: .excluded
         ) {
             ChatOutgoingSubmissionRow(
                 presentation: outgoing,
@@ -1040,7 +1056,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             installedTag: installed.tag,
             entranceState: .none,
             terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
-            publishesGeometry: !isReplacementOverlay
+            publishesGeometry: !isReplacementOverlay,
+            rowStability: .excluded
         ) {
             ChatQueuedMessageEntranceRow(
                 animatesEntrance: !isReplacementOverlay && admitsGeometryCallbacks
@@ -1091,13 +1108,24 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 || !admitsGeometryCallbacks
             ? .none
             : transcriptPresentation.entranceState(for: semanticID)
+        // A settled row's own presentation does not change its height. Streaming
+        // growth, an entrance animation and the queued-card handoff do, so those
+        // frames are excluded from the post-mount resize count rather than
+        // reported as instability.
+        let rowStability: ChatHostedRowStability = isReplacementOverlay
+                || canonicalSubmissionIDs.contains(semanticID)
+                || state != .none
+                || item.isStreamingMessage
+            ? .excluded
+            : .settled
         return stableRow(
             semanticID: semanticID,
             installedTag: installed.tag,
             entranceState: state,
             entranceKind: kind,
             terminalPhysicalID: isReplacementOverlay ? nil : (physicalID == terminalMaterializationID ? physicalID : nil),
-            publishesGeometry: !isReplacementOverlay
+            publishesGeometry: !isReplacementOverlay,
+            rowStability: rowStability
         ) {
             if isReplacementOverlay || canonicalSubmissionIDs.contains(semanticID) {
                 renderRow(item, installed: installed, isCommitted: isCommitted)
@@ -1144,6 +1172,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .equatable()
         .environment(\.displayTranscriptReady, isReady && permitsAsynchronousContent)
         .chatStableTranscriptUpdates(projectionIdentity: installed.tag)
+        #if HOSTED_TEST
+        // The row content's own identity, so a hosted test can see whether an
+        // admission or a handoff switched it instead of reading row state.
+        .background {
+            ChatHostedRowIdentityProbe(id: item.id, recorder: hostedRecorder)
+        }
+        #endif
     }
 
     /// The presentation ledger supplies the newest transcript entrance in O(1),
@@ -1196,6 +1231,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         terminalPhysicalID: String? = nil,
         lifecycleSettlementID: String? = nil,
         publishesGeometry: Bool = true,
+        rowStability: ChatHostedRowStability = .settled,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
@@ -1279,7 +1315,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     onEntranceSettled(lifecycleSettlementID)
                 }
                 hostedRecorder?.updateRowFrame(
-                    id: semanticID, frame: sample.frame, generation: installedTag?.timelineGeneration
+                    id: semanticID, frame: sample.frame,
+                    generation: installedTag?.timelineGeneration,
+                    stability: rowStability
                 )
                 hostedRecorder?.recordMaximumSemanticExcursion(
                     scrollCoordinator.maximumPrependSemanticExcursion
@@ -1310,7 +1348,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 )
                 hostedRecorder?.updateRowFrame(
                     id: "transcript-bottom", frame: sample.frame,
-                    generation: transcriptPresentation.installed?.tag.timelineGeneration
+                    generation: transcriptPresentation.installed?.tag.timelineGeneration,
+                    stability: .notARow
                 )
             }
             // Keep one full-size measurable marker. While the row owns the
