@@ -89,8 +89,44 @@ enum KnowledgeCatalogRequestPolicy {
 }
 
 enum KnowledgeCatalogPaginationPolicy {
-    static func admits(cursor: String?, search: String, loadingMore: Bool) -> Bool {
-        cursor != nil && !loadingMore && search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    /// Any returned cursor admits a continuation. Library rows paginate search
+    /// the same way as the catalogue; a full-record search returns no cursor,
+    /// so it stays one bounded page.
+    static func admits(cursor: String?, loadingMore: Bool) -> Bool {
+        cursor != nil && !loadingMore
+    }
+}
+
+/// How one changed-row patch lands on the presented page. A patch may only
+/// rewrite rows this page already shows; a row it has never seen needs the
+/// Gateway's own order, and a changed row that is no longer returned has left
+/// the filter.
+enum KnowledgeLibraryPatchPolicy {
+    enum Outcome: Equatable {
+        case patched([KnowledgeSourceRow])
+        case requiresFirstPage
+    }
+
+    static func outcome(rows: [KnowledgeSourceRow], changedIDs: [String], refreshed: [KnowledgeSourceRow]) -> Outcome {
+        guard !refreshed.contains(where: { row in !rows.contains { $0.id == row.id } }) else { return .requiresFirstPage }
+        var byID: [String: KnowledgeSourceRow] = [:]
+        for row in refreshed { byID[row.id] = row }
+        let dropped = Set(changedIDs).subtracting(byID.keys)
+        return .patched(rows.compactMap { row -> KnowledgeSourceRow? in
+            guard !dropped.contains(row.id) else { return nil }
+            return byID[row.id] ?? row
+        })
+    }
+}
+
+/// Library rows load the next page before the end of the list is reached, so
+/// scrolling never waits on a button.
+enum KnowledgeLibraryPrefetchPolicy {
+    static let distance = 5
+
+    static func admits(rows: [KnowledgeSourceRow], cursor: String?, loadingMore: Bool, appearing id: String) -> Bool {
+        guard cursor != nil, !loadingMore else { return false }
+        return rows.suffix(distance).contains { $0.id == id }
     }
 }
 
@@ -136,10 +172,35 @@ enum KnowledgeCatalogRequestFence {
     }
 }
 
+extension KnowledgeCatalogRequestKey {
+    /// Stable identity of one catalogue filter, used as the first-page cache key.
+    var cacheFilterID: String {
+        [section.rawValue, kind?.rawValue ?? "all", sourceVisibility.rawValue, scope?.rawValue ?? "all", search].joined(separator: "|")
+    }
+}
+
 /// Dashboard rhythm. Catalogue rows pack closer than the section rhythm so a
 /// long retained list stays scannable; section boundaries add their own inset.
 enum KnowledgeDashboardLayout {
     static let recordSpacing: CGFloat = 8
+}
+
+/// The presented catalogue page. Library Sources presents Gateway rows, which
+/// carry what a row and its header need and nothing more; Chronicle, Syntheses,
+/// and observations present full records.
+enum KnowledgeCataloguePage {
+    case rows([KnowledgeSourceRow], nextCursor: String?, stateRevision: Int)
+    case records([KnowledgeRecord], nextCursor: String?, stateRevision: Int)
+
+    var nextCursor: String? {
+        switch self { case .rows(_, let cursor, _): cursor; case .records(_, let cursor, _): cursor }
+    }
+    var stateRevision: Int {
+        switch self { case .rows(_, _, let revision): revision; case .records(_, _, let revision): revision }
+    }
+    var isEmpty: Bool {
+        switch self { case .rows(let rows, _, _): rows.isEmpty; case .records(let records, _, _): records.isEmpty }
+    }
 }
 
 /// Bounded Gateway projection for observations, links, and notes. iOS never
@@ -151,22 +212,25 @@ struct KnowledgeDashboardView: View {
     let onOpenSettings: @MainActor () -> Void
     let onOpenDraft: @MainActor (KnowledgeRecord) -> Void
     let onOpenSession: @MainActor (String, String) -> Void
-    @State private var records: [KnowledgeRecord] = []
+    @State private var page: KnowledgeCataloguePage?
     @State private var area: KnowledgeDashboardArea = .chronicle
     @State private var librarySelection: KnowledgeDashboardSection = .sources
     @State private var sourceVisibility: KnowledgeSourceVisibility = .saved
     @State private var chronicleScope: KnowledgeScope?
     @State private var libraryScope: KnowledgeScope?
-    @State private var selected: KnowledgeRecord?
+    @State private var selectedSubject: KnowledgeDetailSubject?
     @State private var selectedIdentity: KnowledgePresentationIdentity?
     @State private var pendingDetailAction: DetailAction?
     private enum DetailAction { case draft(KnowledgeRecord), session(String, String) }
     @State private var search = ""
+    /// The query the presented page was asked for. Typing debounces into it so a
+    /// word costs one request rather than one per keystroke.
+    @State private var effectiveSearch = ""
+    @State private var searchDebouncer = KnowledgeSearchDebouncer()
     @State private var loading = false
     @State private var error: String?
     @State private var nextCursor: String?
     @State private var loadingMore = false
-    @State private var status: KnowledgeStatus?
     @State private var coverageStore = KnowledgeCoveragePresentationStore()
     @State private var coverageSheet = false
     @State private var chronicleInfoSheet = false
@@ -192,8 +256,15 @@ struct KnowledgeDashboardView: View {
     }
 
     private func requestKey() -> KnowledgeCatalogRequestKey {
-        KnowledgeCatalogRequestKey(section: section, kind: requestKind, scope: scope, search: search, sourceVisibility: activeSourceVisibility)
+        KnowledgeCatalogRequestKey(section: section, kind: requestKind, scope: scope, search: effectiveSearch, sourceVisibility: activeSourceVisibility)
     }
+
+    /// Library Sources need the Gateway's row projection; without it this view
+    /// presents the update placeholder instead of a second, slower read path.
+    private var supportsLibraryRows: Bool {
+        model.gatewayInfo?.capabilities.contains(KnowledgeLibraryCapability.libraryRows) == true
+    }
+    private var presentsLibraryRows: Bool { section == .sources && supportsLibraryRows }
 
     var body: some View {
         DashboardChrome(
@@ -227,19 +298,25 @@ struct KnowledgeDashboardView: View {
         .font(TronTypography.body)
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsVisualTheme(accent: .tronKnowledge)
-        .tronManagedSheet(item: $selected, identity: { "knowledge.detail.\($0.id)" }, onDismiss: finishDetailDismissal) { record in
-            KnowledgeDetailSheet(record: record, origin: selectedIdentity ?? model.knowledgePresentationIdentity,
-                                 onChanged: reload,
+        .tronManagedSheet(item: $selectedSubject, identity: { "knowledge.detail.\($0.id)" }, onDismiss: finishDetailDismissal) { subject in
+            KnowledgeDetailSheet(subject: subject, origin: selectedIdentity ?? model.knowledgePresentationIdentity,
+                                 onChanged: { await reload() },
                                  onOpenDraft: { stageDetailAction(.draft($0)) },
                                  onOpenSession: { stageDetailAction(.session($0, $1)) })
                 .environment(model)
         }
-        .onChange(of: area) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
-        .onChange(of: librarySelection) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
-        .onChange(of: sourceVisibility) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
-        .onChange(of: chronicleScope) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
-        .onChange(of: libraryScope) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
-        .onChange(of: search) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
+        .onChange(of: area) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: librarySelection) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: sourceVisibility) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: chronicleScope) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: libraryScope) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: search) { _, value in
+            // Retire any in-flight read for the previous query at once; the
+            // debounced query starts the next one.
+            loadGeneration &+= 1
+            loadingMore = false
+            scheduleSearch(value)
+        }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
             // Retire both the visible page and any manually spawned page task;
             // the next task must carry the new Gateway identity from its start.
@@ -247,8 +324,16 @@ struct KnowledgeDashboardView: View {
             loadingMore = false
             coverageStore.reset()
             coverageSheet = false
-            records.removeAll(); selected = nil; selectedIdentity = nil; pendingDetailAction = nil
-            nextCursor = nil; status = nil; error = nil
+            page = nil; selectedSubject = nil; selectedIdentity = nil; pendingDetailAction = nil
+            error = nil
+            model.knowledgePreviews.removeAll()
+        }
+        // A committed Knowledge mutation refreshes only what changed. The
+        // covered page keeps its rows and scroll position unless the Gateway
+        // says this page is behind.
+        .onChange(of: model.knowledgeInvalidationRevision) { _, _ in applyKnowledgeChange() }
+        .onChange(of: model.connectionState) { _, state in
+            if state == .connected { model.knowledgePreviews.retryUnavailable() }
         }
         .tronManagedSheet(isPresented: $coverageSheet, identity: "knowledge.coverage", onDismiss: finishDetailDismissal) {
             coverageDetailSheet
@@ -268,7 +353,7 @@ struct KnowledgeDashboardView: View {
         .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
             KnowledgeNoteCreateView { noteSheet = false; await reload() }.environment(model)
         }
-        .task(id: "\(section.rawValue)/\(activeSourceVisibility.rawValue)/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)/\(model.knowledgeInvalidationRevision)") {
+        .task(id: "\(section.rawValue)/\(activeSourceVisibility.rawValue)/\(scope?.rawValue ?? "all")/\(effectiveSearch)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)") {
             guard activity.allowsPresentationPublication else { return }
             await reload()
         }
@@ -281,7 +366,7 @@ struct KnowledgeDashboardView: View {
                 coverageStore.suspend()
             }
         }
-        .onDisappear { coverageStore.suspend() }
+        .onDisappear { coverageStore.suspend(); searchDebouncer.cancel() }
     }
 
     private var dashboardMenuActions: DashboardMenuActions {
@@ -322,8 +407,19 @@ struct KnowledgeDashboardView: View {
     }
 
     private func dismissSearch() {
+        searchDebouncer.cancel()
         search = ""
+        effectiveSearch = ""
         showingSearch = false
+    }
+
+    /// One request per settled query instead of one per keystroke; a short query
+    /// is presented as no query rather than as an empty result page.
+    private func scheduleSearch(_ value: String) {
+        searchDebouncer.schedule(value) { next in
+            guard next != effectiveSearch else { return }
+            effectiveSearch = next
+        }
     }
 
     private var libraryPicker: some View {
@@ -342,22 +438,27 @@ struct KnowledgeDashboardView: View {
 
     @ViewBuilder
     private func dashboardContent(minimumHeight: CGFloat) -> some View {
-        if loading && records.isEmpty {
+        if section == .sources, !supportsLibraryRows {
+            TronPlaceholderState(title: "Update the Gateway to browse the library",
+                                 detail: "This Gateway does not serve the library's compact rows yet. Update it on your Mac, then reopen this tab.",
+                                 icon: "arrow.down.circle", accent: .tronKnowledge)
+                .frame(maxWidth: .infinity, minHeight: minimumHeight)
+        } else if loading && page == nil {
             TronLoadingState(label: "Loading Knowledge…", accent: .tronKnowledge)
                 .frame(maxWidth: .infinity, minHeight: minimumHeight)
-        } else if records.isEmpty, let error {
+        } else if page == nil, let error {
             TronPlaceholderState(title: "Knowledge unavailable", detail: error,
                                  icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
                                  actionTitle: "Retry", action: { Task { await reload() } })
                 .frame(minHeight: minimumHeight)
-        } else if records.isEmpty {
-            let filtered = scope != nil || !search.isEmpty || section != .chronicle || sourceVisibility != .saved
+        } else if page?.isEmpty != false {
+            let filtered = scope != nil || !effectiveSearch.isEmpty || section != .chronicle || sourceVisibility != .saved
             VStack(alignment: .leading, spacing: TronSpacing.md) {
                 TronPlaceholderState(title: filtered ? "No matching Knowledge" : "No Knowledge yet",
                                      detail: filtered ? "Adjust your search or filters to see more records." : "Observations, links, and notes retained by this Gateway will appear here.",
                                      icon: filtered ? "line.3.horizontal.decrease.circle" : "book.closed", accent: .tronKnowledge)
                     .frame(minHeight: minimumHeight)
-                if KnowledgeCatalogPagePolicy.offersContinuation(nextCursor: nextCursor, loadingMore: loadingMore) {
+                if KnowledgeCatalogPagePolicy.offersContinuation(nextCursor: page?.nextCursor, loadingMore: loadingMore) {
                     loadMoreButton
                 }
             }
@@ -369,27 +470,42 @@ struct KnowledgeDashboardView: View {
             if let error {
                 TronSettingsNotice(message: "Refresh unavailable: \(error)", accent: .tronAmber)
             }
-            let previewIdentity = model.knowledgePresentationIdentity
-            ForEach(records) { record in
-                Button {
-                    selected = record
-                    selectedIdentity = previewIdentity
-                } label: { KnowledgeRecordRow(record: record, previewLoader: { reference, record in
-                        await readPreview(reference, record: record, identity: previewIdentity)
-                    }, presentationIdentity: previewIdentity) }
-                    .buttonStyle(.plain)
-            }
-            if KnowledgeCatalogPagePolicy.offersContinuation(nextCursor: nextCursor, loadingMore: loadingMore) {
-                loadMoreButton
-            }
+            presentedRows
         }
     }
 
-    @MainActor private func readPreview(_ reference: KnowledgeObjectRef, record: KnowledgeRecord, identity: KnowledgePresentationIdentity) async -> KnowledgeObjectRead? {
-        guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return nil }
-        let response = try? await model.knowledge.readObject(reference, recordID: record.id, revisionID: record.revisionId)
-        guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return nil }
-        return response
+    @ViewBuilder
+    private var presentedRows: some View {
+        let previewIdentity = model.knowledgePresentationIdentity
+        switch page {
+        case .rows(let rows, _, _):
+            ForEach(rows) { row in
+                Button {
+                    selectedSubject = .row(row)
+                    selectedIdentity = previewIdentity
+                } label: {
+                    KnowledgeSourceRowView(row: row, previews: model.knowledgePreviews)
+                }
+                .buttonStyle(.plain)
+                .onAppear { prefetchIfNeeded(row) }
+            }
+            if KnowledgeCatalogPagePolicy.offersContinuation(nextCursor: page?.nextCursor, loadingMore: loadingMore) {
+                loadMoreButton
+            }
+        case .records(let records, _, _):
+            ForEach(records) { record in
+                Button {
+                    selectedSubject = .record(record)
+                    selectedIdentity = previewIdentity
+                } label: { KnowledgeRecordRow(record: record) }
+                    .buttonStyle(.plain)
+            }
+            if KnowledgeCatalogPagePolicy.offersContinuation(nextCursor: page?.nextCursor, loadingMore: loadingMore) {
+                loadMoreButton
+            }
+        case nil:
+            EmptyView()
+        }
     }
 
     private var loadMoreButton: some View {
@@ -440,44 +556,62 @@ struct KnowledgeDashboardView: View {
         .environment(model)
     }
 
-    private func invalidateCatalogueRequests(clearRecords: Bool = false) {
+    private func invalidateCatalogueRequests() {
         loadGeneration &+= 1
         loadingMore = false
-        nextCursor = nil
-        if clearRecords {
-            records.removeAll()
-            status = nil
-            error = nil
-        }
     }
 
-    private func reload() async {
+    /// How a completed read is published. `mergeFirstPage` keeps the deeper
+    /// rows a reader already reached and never shows a loading state, so a
+    /// Gateway change refreshes content without clearing the screen.
+    private enum KnowledgeCatalogueRefresh { case replace, mergeFirstPage }
+
+    private func reload(_ refresh: KnowledgeCatalogueRefresh = .replace) async {
         loadGeneration += 1; let generation = loadGeneration; let identity = model.knowledgePresentationIdentity
         let requestedSection = section
         let requestedKind = requestKind
         let requestedScope = scope
-        let requestedSearch = search
+        let requestedQuery = effectiveSearch
         let requestedVisibility = activeSourceVisibility
-        let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind, scope: requestedScope, search: requestedSearch, sourceVisibility: requestedVisibility)
+        let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind, scope: requestedScope, search: requestedQuery, sourceVisibility: requestedVisibility)
         guard activity.allowsPresentationPublication, identity.profileID != nil, identity.lifecycleGeneration != nil else { return }
-        loading = true; error = nil
+        if requestedSection == .sources, !supportsLibraryRows { page = nil; error = nil; loading = false; return }
+        if refresh == .replace { loading = true; error = nil }
         defer { if generation == loadGeneration { loading = false } }
+        // A cached first page appears immediately; the Gateway's page replaces it
+        // as soon as it arrives, so no spinner is shown over known content.
+        if refresh == .replace, page == nil, requestedQuery.isEmpty, let profileID = identity.profileID,
+           let cached = await model.knowledgeLibraryCache.page(profileID: profileID, filterID: requestedKey.cacheFilterID) {
+            guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+            page = .rows(cached.rows, nextCursor: cached.nextCursor, stateRevision: cached.stateRevision)
+        }
         do {
-            async let loadedStatus = model.knowledge.status()
-            var response: KnowledgeListResponse
-            if requestedSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                response = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), limit: 50)
+            var acceptedRows: KnowledgeSourceRowPage?
+            var acceptedRecords: KnowledgeListResponse?
+            if requestedSection == .sources {
+                let response = requestedQuery.isEmpty
+                    ? try await model.knowledge.sourceRows(scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), limit: 50)
+                    : try await model.knowledge.searchSourceRows(query: requestedQuery, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), limit: 50)
+                acceptedRows = response
+            } else if requestedQuery.isEmpty {
+                acceptedRecords = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), limit: 50)
             } else {
-                let found = try await model.knowledge.search(query: requestedSearch, kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), limit: 50)
-                response = KnowledgeListResponse(records: found.hits.map { $0.record }, nextCursor: nil, stateRevision: found.stateRevision)
+                let found = try await model.knowledge.search(query: requestedQuery, kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), limit: 50)
+                acceptedRecords = KnowledgeListResponse(records: found.hits.map { $0.record }, nextCursor: nil, stateRevision: found.stateRevision)
             }
-            response = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(response.records, in: requestedSection, sourceVisibility: requestedVisibility), nextCursor: response.nextCursor, stateRevision: response.stateRevision)
-            let currentStatus = try await loadedStatus
             guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
-            records = response.records; nextCursor = response.nextCursor; status = currentStatus
-            guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
-                  activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+            if let acceptedRows {
+                publish(rows: acceptedRows.rows, nextCursor: acceptedRows.nextCursor, stateRevision: acceptedRows.stateRevision, refresh: refresh)
+                if requestedQuery.isEmpty, refresh == .replace, case .rows(let rows, let cursor, let revision) = page,
+                   let profileID = identity.profileID {
+                    await model.knowledgeLibraryCache.save(profileID: profileID, filterID: requestedKey.cacheFilterID,
+                                                           page: KnowledgeLibraryCachedPage(rows: rows, nextCursor: cursor, stateRevision: revision))
+                }
+            } else if let acceptedRecords {
+                let visible = KnowledgeCatalogPagePolicy.visibleRecords(acceptedRecords.records, in: requestedSection, sourceVisibility: requestedVisibility)
+                publish(records: visible, nextCursor: acceptedRecords.nextCursor, stateRevision: acceptedRecords.stateRevision, refresh: refresh)
+            }
         } catch is CancellationError { return } catch {
             // Gateway cancellation can be wrapped as a possibly-sent failure
             // after the sheet retires. Task cancellation and the generation
@@ -489,50 +623,130 @@ struct KnowledgeDashboardView: View {
             self.error = error.localizedDescription
         }
     }
+
+    private func publish(rows: [KnowledgeSourceRow], nextCursor: String?, stateRevision: Int, refresh: KnowledgeCatalogueRefresh) {
+        guard refresh == .mergeFirstPage, case .rows(let current, let cursor, let revision) = page else {
+            page = .rows(rows, nextCursor: nextCursor, stateRevision: stateRevision); return
+        }
+        // The fresh first page is authoritative for order and content; rows the
+        // reader already paged to keep their place after it.
+        let freshIDs = Set(rows.map(\.id))
+        let tail = current.filter { !freshIDs.contains($0.id) }
+        page = .rows(rows + tail, nextCursor: cursor ?? nextCursor, stateRevision: max(revision, stateRevision))
+    }
+
+    private func publish(records: [KnowledgeRecord], nextCursor: String?, stateRevision: Int, refresh: KnowledgeCatalogueRefresh) {
+        guard refresh == .mergeFirstPage, case .records(let current, let cursor, let revision) = page else {
+            page = .records(records, nextCursor: nextCursor, stateRevision: stateRevision); return
+        }
+        let freshIDs = Set(records.map(\.id))
+        let tail = current.filter { !freshIDs.contains($0.id) }
+        page = .records(records + tail, nextCursor: cursor ?? nextCursor, stateRevision: max(revision, stateRevision))
+    }
+
+    /// A committed mutation refreshes the presented page. Rows the Gateway named
+    /// are patched in place; anything else refreshes the first page and merges
+    /// without clearing the screen or the reader's position.
+    private func applyKnowledgeChange() {
+        guard let current = page else { return }
+        guard let change = model.latestKnowledgeChange else {
+            Task { await reload(.mergeFirstPage) }; return
+        }
+        guard KnowledgeChangeGating.requiresRefresh(eventRevision: change.stateRevision, pageRevision: current.stateRevision) else { return }
+        guard case .rows = current, presentsLibraryRows, effectiveSearch.isEmpty, let ids = change.recordIds else {
+            Task { await reload(.mergeFirstPage) }; return
+        }
+        Task { await patchRows(ids: ids) }
+    }
+
+    private func patchRows(ids: [String]) async {
+        guard case .rows(let rows, let cursor, let revision) = page, presentsLibraryRows, effectiveSearch.isEmpty else { return }
+        let identity = model.knowledgePresentationIdentity
+        let requestedKey = requestKey()
+        guard activity.allowsPresentationPublication else { return }
+        do {
+            let refreshed = try await model.knowledge.sourceRows(ids: ids, scope: scope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: section, visibility: activeSourceVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: section, visibility: activeSourceVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: section, visibility: activeSourceVisibility))
+            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
+                  KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()) else { return }
+            guard case .patched(let patched) = KnowledgeLibraryPatchPolicy.outcome(rows: rows, changedIDs: ids, refreshed: refreshed.rows) else {
+                // A row this page has never seen belongs in canonical order, so
+                // the first page is refetched rather than guessed at.
+                await reload(.mergeFirstPage); return
+            }
+            // The Gateway answered at the revision it named, so this page has
+            // now seen that revision.
+            page = .rows(patched, nextCursor: cursor, stateRevision: max(revision, refreshed.stateRevision))
+        } catch {
+            // A failed patch is repaired by the next change or an explicit
+            // refresh; it must not become an error banner over a usable page.
+        }
+    }
+
+    private func prefetchIfNeeded(_ row: KnowledgeSourceRow) {
+        guard case .rows(let rows, let cursor, _) = page else { return }
+        guard KnowledgeLibraryPrefetchPolicy.admits(rows: rows, cursor: cursor, loadingMore: loadingMore, appearing: row.id) else { return }
+        loadMore()
+    }
+
     private func loadMore() {
-        guard KnowledgeCatalogPaginationPolicy.admits(cursor: nextCursor, search: search, loadingMore: loadingMore), let cursor = nextCursor else { return }
+        guard let current = page, KnowledgeCatalogPaginationPolicy.admits(cursor: current.nextCursor, loadingMore: loadingMore), let cursor = current.nextCursor else { return }
         loadingMore = true
         let generation = loadGeneration
-        let query = search
-        let requestedKind = requestKind
+        let requestedQuery = effectiveSearch
+        let requestedKind = requestKind ?? section.kind
         let requestedScope = scope
         let requestedSection = section
         let requestedVisibility = activeSourceVisibility
-        let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind ?? requestedSection.kind, scope: requestedScope, search: query, sourceVisibility: requestedVisibility)
+        let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind, scope: requestedScope, search: requestedQuery, sourceVisibility: requestedVisibility)
         let identity = model.knowledgePresentationIdentity
         Task { @MainActor in
             defer { if generation == loadGeneration { loadingMore = false } }
             guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             do {
-                let page = try await model.knowledge.list(kind: requestedKind ?? requestedSection.kind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), cursor: cursor, limit: 50)
-                let visiblePage = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(page.records, in: requestedSection, sourceVisibility: requestedVisibility), nextCursor: page.nextCursor, stateRevision: page.stateRevision)
+                if requestedSection == .sources {
+                    let nextPage = requestedQuery.isEmpty
+                        ? try await model.knowledge.sourceRows(scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), cursor: cursor, limit: 50)
+                        : try await model.knowledge.searchSourceRows(query: requestedQuery, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), cursor: cursor, limit: 50)
+                    guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
+                          activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
+                          nextPage.nextCursor != cursor, case .rows(let rows, _, let revision) = self.page else { return }
+                    let known = Set(rows.map(\.id))
+                    self.page = .rows(rows + nextPage.rows.filter { !known.contains($0.id) }, nextCursor: nextPage.nextCursor, stateRevision: max(revision, nextPage.stateRevision))
+                    return
+                }
+                let nextPage = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), cursor: cursor, limit: 50)
+                let visiblePage = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(nextPage.records, in: requestedSection, sourceVisibility: requestedVisibility), nextCursor: nextPage.nextCursor, stateRevision: nextPage.stateRevision)
                 guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                       activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
-                      visiblePage.nextCursor != cursor else { return }
+                      visiblePage.nextCursor != cursor, case .records(let records, _, let revision) = self.page else { return }
                 // A Gateway page may contain only another visibility class (or
                 // records already admitted by a retried page). Advance the
                 // canonical cursor even when this projection adds no rows;
                 // rejecting that page made Archived appear empty with an inert
                 // continuation button.
-                let newRecords = visiblePage.records.filter { candidate in !records.contains(candidate) }
-                records.append(contentsOf: newRecords); nextCursor = visiblePage.nextCursor
+                let known = Set(records.map(\.id))
+                self.page = .records(records + visiblePage.records.filter { !known.contains($0.id) }, nextCursor: visiblePage.nextCursor, stateRevision: max(revision, visiblePage.stateRevision))
             } catch is CancellationError { return }
             catch {
                 guard !Task.isCancelled, generation == loadGeneration,
                       KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                       activity.allowsPresentationPublication,
                       model.knowledgePresentationIdentity == identity else { return }
+                // A cursor from an older state revision is stale, not fatal:
+                // restart the first page instead of stranding the reader.
+                if let failure = error as? GatewayFailure, failure.code == "conflict" { await reload(); return }
                 self.error = error.localizedDescription
             }
         }
     }
+
     private func stageDetailAction(_ action: DetailAction) {
         guard model.knowledgePresentationIdentity == selectedIdentity, pendingDetailAction == nil else { return }
         // The existing session/new-session owner must not present through an
         // observation sheet that is still dismissing.
         pendingDetailAction = action
-        selected = nil
+        selectedSubject = nil
     }
 
     /// The coverage sheet belongs to the dashboard rather than to one record.
@@ -784,23 +998,16 @@ private struct KnowledgeCoverageSheetHost: View {
 /// The catalogue row for one retained record. Dense by design: several of these
 /// should fit on a phone screen, so the row keeps one type step below the
 /// detail sheet and only the statement's leading lines.
+/// The catalogue row for an observation or a note. Library Sources present
+/// `KnowledgeSourceRowView` from the Gateway's rows instead, so a record row is
+/// never asked to render a source.
 struct KnowledgeRecordRow: View {
-    typealias PreviewLoader = @Sendable (KnowledgeObjectRef, KnowledgeRecord) async -> KnowledgeObjectRead?
     let record: KnowledgeRecord
-    let previewLoader: PreviewLoader?
-    let presentationIdentity: KnowledgePresentationIdentity?
-
-    init(record: KnowledgeRecord, previewLoader: PreviewLoader? = nil, presentationIdentity: KnowledgePresentationIdentity? = nil) {
-        self.record = record; self.previewLoader = previewLoader; self.presentationIdentity = presentationIdentity
-    }
 
     var body: some View {
         Group {
             if let observation = KnowledgeObservationPresentation(record: record) {
                 KnowledgeObservationStatement(presentation: observation, preview: true)
-                    .accessibilityElement(children: .combine)
-            } else if case .source(let source) = record.content {
-                KnowledgeSourceRow(record: record, source: source, previewLoader: previewLoader, presentationIdentity: presentationIdentity)
                     .accessibilityElement(children: .combine)
             } else {
                 otherRecord
@@ -847,45 +1054,30 @@ struct KnowledgeRecordRow: View {
     }
 }
 
-enum KnowledgePreviewDecoder {
-    nonisolated static func downsample(_ data: Data) async -> UIImage? {
-        await Task.detached(priority: .utility) {
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 256,
-                    kCGImageSourceCreateThumbnailWithTransform: true
-                  ] as CFDictionary) else { return nil }
-            return UIImage(cgImage: cgImage)
-        }.value
-    }
-}
-
 struct KnowledgeSourceThumbnail: View {
-    let source: KnowledgeSourceContent
+    let letters: String
     let size: CGFloat
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.18, style: .continuous)
                 .fill(Color.tronKnowledge.opacity(0.16))
-            Text(KnowledgeSourcePresentationPolicy.thumbnailLetters(source))
+            Text(letters)
                 .font(TronTypography.sans(size: size * 0.25, weight: .bold))
                 .foregroundStyle(Color.tronKnowledge)
         }
         .frame(width: size, height: size)
-        .accessibilityLabel("Preview for \(source.title)")
+        .accessibilityHidden(true)
     }
 }
 
-struct KnowledgeSourceRow: View {
-    let record: KnowledgeRecord
-    let source: KnowledgeSourceContent
-    let previewLoader: KnowledgeRecordRow.PreviewLoader?
-    let presentationIdentity: KnowledgePresentationIdentity?
-    @State private var previewImage: UIImage?
-    @State private var previewTicket = UUID()
-
+/// One Library Sources row, presented from the Gateway's row projection. It
+/// keeps the compact catalogue shape — two title lines and one domain/type line
+/// beside a preview centered on that block — and asks the preview store for its
+/// image, so a row that scrolls away and back never refetches.
+struct KnowledgeSourceRowView: View {
+    let row: KnowledgeSourceRow
+    let previews: KnowledgePreviewStore
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     /// Two title lines plus one subtext line; the preview matches that block so
     /// every row has the same compact height and centers its text beside it.
@@ -893,22 +1085,21 @@ struct KnowledgeSourceRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: TronSpacing.lg) {
-            if let previewImage {
-                Image(uiImage: previewImage)
+            if let image = previews.image(for: row.preview?.hash) {
+                Image(uiImage: image)
                     .resizable().scaledToFill()
                     .frame(width: Self.previewSize, height: Self.previewSize)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .accessibilityLabel("Preview for \(source.title)")
+                    .accessibilityLabel("Preview for \(row.title)")
             } else {
-                KnowledgeSourceThumbnail(source: source, size: Self.previewSize)
-                    .accessibilityHidden(true)
+                KnowledgeSourceThumbnail(letters: KnowledgeSourceRowPresentationPolicy.thumbnailLetters(row), size: Self.previewSize)
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(source.title)
+                Text(row.title)
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
-                Text(KnowledgeSourcePresentationPolicy.rowSubtitle(source))
+                Text(KnowledgeSourceRowPresentationPolicy.subtitle(row))
                     .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
@@ -916,18 +1107,169 @@ struct KnowledgeSourceRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens source details")
-        .task(id: "\(presentationIdentity?.profileID ?? "none"):\(presentationIdentity?.lifecycleGeneration ?? 0):\(presentationIdentity?.connectionID ?? 0):\(record.id):\(record.revisionId):\(source.preview?.hash ?? "none")") {
-            previewImage = nil
-            previewTicket = UUID()
-            let ticket = previewTicket
-            guard let reference = source.preview, let previewLoader else { return }
-            guard let response = await previewLoader(reference, record), !Task.isCancelled, ticket == previewTicket,
-                  response.offset == 0, response.nextOffset == nil,
-                  let data = Data(base64Encoded: response.base64), data.count == response.bytes,
-                  response.totalBytes == response.bytes, data.count <= 512_000,
-                  let image = await KnowledgePreviewDecoder.downsample(data), !Task.isCancelled, ticket == previewTicket else { return }
-            previewImage = image
+        .accessibilityHint("Opens entry details")
+        .task(id: "\(row.id):\(row.revisionId):\(row.preview?.hash ?? "none")") {
+            guard let request = row.previewRequest else { return }
+            _ = await previews.load(request, includeArchived: row.admission == .archived)
+        }
+    }
+}
+
+/// One entry's header: the title, a pill naming the original link, and a square
+/// preview that spans exactly the title-plus-pill block. The Library row and the
+/// loaded detail share it, so an entry opened from a row does not change shape
+/// when its full record arrives.
+struct KnowledgeEntryHeader: View {
+    let title: String
+    let linkLabel: String?
+    let linkURL: URL?
+    let preview: UIImage?
+    let thumbnailLetters: String
+    let onOpenLink: (URL) -> Void
+    @State private var textHeight: CGFloat = 44
+
+    var body: some View {
+        // The preview's top meets the title's first line and its bottom meets the
+        // visible pill capsule.
+        let side = min(max(textHeight, 44), 120)
+        HStack(alignment: .top, spacing: TronSpacing.lg) {
+            Group {
+                if let preview {
+                    Image(uiImage: preview).resizable().scaledToFill()
+                        .frame(width: side, height: side)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                } else {
+                    KnowledgeSourceThumbnail(letters: thumbnailLetters, size: side)
+                }
+            }
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                // The pill names the destination, so the domain is not repeated
+                // as a separate caption. The original link is the source of truth.
+                if let linkURL {
+                    Button { onOpenLink(linkURL) } label: {
+                        TronInlineActionLabel(linkLabel ?? linkURL.host ?? "Open original", icon: "arrow.up.right", accent: .tronKnowledge)
+                    }
+                    .buttonStyle(.plain)
+                    .controlSize(.small)
+                    // Lay out the visible capsule, not its taller transparent
+                    // hit target; the 44-point target still overhangs into padding.
+                    .padding(.vertical, -(TronSettingsLayoutPolicy.compactPillTargetHeight - TronSettingsLayoutPolicy.compactPillHeight) / 2)
+                    .accessibilityLabel("Open original")
+                    .accessibilityHint("Opens the page in the in-app browser")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
+        }
+        .padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
+        .tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.06)
+    }
+}
+
+/// An entry opened from its Library row. The row's header is presented at once
+/// and the full record replaces it when it arrives, so the tap is never a blank
+/// sheet; every behavior after that is the record-based detail's.
+struct KnowledgeEntryLoadView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var activity
+    let row: KnowledgeSourceRow
+    let origin: KnowledgePresentationIdentity
+    let onChanged: () async -> Void
+    let onOpenDraft: (KnowledgeRecord) -> Void
+    let onOpenSession: (String, String) -> Void
+    @State private var record: KnowledgeRecord?
+    @State private var error: String?
+    @State private var requestGeneration = 0
+    @State private var externalPageURL: URL?
+
+    var body: some View {
+        Group {
+            if let record {
+                KnowledgeDetailView(record: record, origin: origin, onChanged: onChanged,
+                                    onOpenDraft: onOpenDraft, onOpenSession: onOpenSession)
+            } else {
+                loadingBody
+            }
+        }
+        .task(id: "entry-\(row.id):\(row.revisionId):\(origin.profileID ?? "none"):\(origin.lifecycleGeneration ?? -1):\(origin.connectionID ?? -1):\(requestGeneration)") {
+            await load()
+        }
+    }
+
+    @ViewBuilder private var loadingBody: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: TronSpacing.section) {
+                KnowledgeEntryHeader(
+                    title: row.title,
+                    linkLabel: KnowledgeSourceRowPresentationPolicy.domain(row),
+                    linkURL: KnowledgeSourceRowPresentationPolicy.originalURL(row),
+                    preview: model.knowledgePreviews.image(for: row.preview?.hash),
+                    thumbnailLetters: KnowledgeSourceRowPresentationPolicy.thumbnailLetters(row),
+                    onOpenLink: { externalPageURL = $0 }
+                )
+                if let summary = row.summary {
+                    // The row already carries the current summary, so the entry
+                    // never flashes a generate action it is about to replace.
+                    TronSettingsGroup("Summary", accent: .tronKnowledge) {
+                        Text(summary)
+                            .font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
+                            .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
+                    }
+                }
+                if let error {
+                    TronPlaceholderState(title: "Entry unavailable", detail: error,
+                                         icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
+                                         actionTitle: "Retry", action: { requestGeneration &+= 1 })
+                } else {
+                    TronLoadingState(label: "Loading entry…", accent: .tronKnowledge)
+                }
+            }
+            .padding(.horizontal, TronSpacing.xlarge)
+            .padding(.vertical, TronSpacing.large)
+        }
+        .tronScrollEdgeChrome()
+        .tronSettingsLayout()
+        .tronNavigationTitle("Entry Detail", accent: .tronKnowledge)
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .tronManagedSheet(isPresented: Binding(get: { externalPageURL != nil }, set: { if !$0 { externalPageURL = nil } }), identity: "knowledge.external.\(row.id)") {
+            if let externalPageURL {
+                TronSafariView(url: externalPageURL)
+                    .ignoresSafeArea(.container, edges: .all)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
+            }
+        }
+    }
+
+    private func load() async {
+        guard activity.allowsPresentationPublication else { return }
+        let generation = requestGeneration
+        let requestedIdentity = model.knowledgePresentationIdentity
+        do {
+            // The row names the exact revision it presented, and its admission
+            // carries the authority an archived or pending record needs.
+            let value = try await model.knowledge.read(id: row.id, revisionID: row.revisionId,
+                                                       includeArchived: row.admission == .archived,
+                                                       includePending: row.admission == .pending)
+            guard !Task.isCancelled, generation == requestGeneration, activity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == requestedIdentity else { return }
+            guard let value else { error = "This entry is no longer available."; return }
+            record = value
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled, generation == requestGeneration, activity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == requestedIdentity else { return }
+            self.error = error.localizedDescription
         }
     }
 }
@@ -963,11 +1305,15 @@ struct KnowledgeDetailView: View {
     @State private var reflectionRequestGeneration = 0
     @State private var linkedReader = KnowledgeLinkedRecordReaderStore()
     @State private var citationTitles: [String: String] = [:]
-    @State private var detailPreviewImage: UIImage?
-    @State private var detailPreviewTicket = UUID()
     @State private var externalPageURL: URL?
-    @State private var headerTextHeight: CGFloat = 64
     private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin && activity.allowsPresentationPublication }
+    /// The preview is content-addressed and shared with the catalogue row the
+    /// entry was opened from, so an already-seen image is presented without a
+    /// read.
+    private var detailPreviewImage: UIImage? {
+        guard case .source(let source) = currentRecord.content else { return nil }
+        return model.knowledgePreviews.image(for: source.preview?.hash)
+    }
     private var observationPresentation: KnowledgeObservationPresentation? { KnowledgeObservationPresentation(record: currentRecord) }
 
     var body: some View {
@@ -1042,20 +1388,10 @@ struct KnowledgeDetailView: View {
         }
         .tronScrollEdgeChrome()
         .task(id: "detail-preview-\(origin.profileID ?? "none"):\(origin.lifecycleGeneration ?? 0):\(origin.connectionID ?? 0):\(currentRecord.id):\(currentRecord.revisionId):\(currentRecord.content.sourcePreviewHash ?? "none")") {
-            detailPreviewImage = nil; detailPreviewTicket = UUID(); let ticket = detailPreviewTicket
-            let requestIdentity = model.knowledgePresentationIdentity
-            let requestActivity = activity
-            guard case .source(let source) = currentRecord.content, let reference = source.preview,
-                  requestIdentity == origin, requestActivity.allowsPresentationPublication else { return }
-            guard let response = try? await model.knowledge.readObject(reference, recordID: currentRecord.id, revisionID: currentRecord.revisionId),
-                  !Task.isCancelled, ticket == detailPreviewTicket, model.knowledgePresentationIdentity == requestIdentity,
-                  requestActivity.allowsPresentationPublication,
-                  response.offset == 0, response.nextOffset == nil, let data = Data(base64Encoded: response.base64),
-                  data.count == response.bytes, response.totalBytes == response.bytes, data.count <= 512_000,
-                  let image = await KnowledgePreviewDecoder.downsample(data), !Task.isCancelled,
-                  ticket == detailPreviewTicket, model.knowledgePresentationIdentity == requestIdentity,
-                  requestActivity.allowsPresentationPublication else { return }
-            detailPreviewImage = image
+            guard case .source(let source) = currentRecord.content, let preview = source.preview,
+                  model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
+            _ = await model.knowledgePreviews.load(KnowledgePreviewRequest(recordID: currentRecord.id, revisionID: currentRecord.revisionId, reference: preview),
+                                                   includeArchived: source.admission?.status == .archived)
         }
         .tronNavigationTitle(observationPresentation == nil ? "Entry Detail" : "Observation", accent: .tronKnowledge)
         .toolbar {
@@ -1167,43 +1503,15 @@ struct KnowledgeDetailView: View {
             .padding(14)
         }
     }
-    private func sourceDetailHeader(_ source: KnowledgeSourceContent) -> some View {
-        // The preview spans exactly the title-plus-pill block: its top meets the
-        // title's first line and its bottom meets the visible pill capsule.
-        let side = min(max(headerTextHeight, 44), 120)
-        return HStack(alignment: .top, spacing: TronSpacing.lg) {
-            Group {
-                if let detailPreviewImage { Image(uiImage: detailPreviewImage).resizable().scaledToFill().frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)) }
-                else { KnowledgeSourceThumbnail(source: source, size: side) }
-            }
-            .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: TronSpacing.md) {
-                Text(source.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                // The pill names the destination, so the domain is not repeated
-                // as a separate caption. The original link is the source of truth.
-                if let url = KnowledgeSourcePresentationPolicy.originalURL(source) {
-                    Button { externalPageURL = url } label: {
-                        TronInlineActionLabel(KnowledgeSourcePresentationPolicy.domain(source.uri) ?? url.host ?? "Open original", icon: "arrow.up.right", accent: .tronKnowledge)
-                    }
-                    .buttonStyle(.plain)
-                    .controlSize(.small)
-                    // Lay out the visible capsule, not its taller transparent
-                    // hit target; the 44-point target still overhangs into padding.
-                    .padding(.vertical, -(TronSettingsLayoutPolicy.compactPillTargetHeight - TronSettingsLayoutPolicy.compactPillHeight) / 2)
-                    .accessibilityLabel("Open original")
-                    .accessibilityHint("Opens the page in the in-app browser")
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerTextHeight = $0 }
-        }
-        .padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
-        .tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.06)
+    @ViewBuilder private func sourceDetailHeader(_ source: KnowledgeSourceContent) -> some View {
+        KnowledgeEntryHeader(
+            title: source.title,
+            linkLabel: KnowledgeSourcePresentationPolicy.domain(source.uri),
+            linkURL: KnowledgeSourcePresentationPolicy.originalURL(source),
+            preview: detailPreviewImage,
+            thumbnailLetters: KnowledgeSourcePresentationPolicy.thumbnailLetters(source),
+            onOpenLink: { externalPageURL = $0 }
+        )
     }
 
     @ViewBuilder private func sourceSummary(_ source: KnowledgeSourceContent) -> some View {
@@ -1397,27 +1705,21 @@ struct KnowledgeDetailView: View {
         // exact Gateway/session/entry citation even when the row is off-page.
         return model.sessions.first(where: { $0.id == sessionID })?.title ?? "Originating session"
     }
+    /// One bounded rows request resolves every related-entry title this detail
+    /// shows; a title is a convenience, so a failure leaves the fallback label.
     private func loadCitationTitles() async {
-        let refs = currentRecord.provenance.evidence + {
-            if case .observation(let observation) = currentRecord.content { return observation.items.flatMap { $0.evidence ?? [] } }
-            if case .note(let note) = currentRecord.content { return note.contraryEvidence ?? [] }
-            return []
-        }() + currentRecord.relations.map { KnowledgeEvidenceRef(recordId: $0.recordId, revisionId: nil, sessionEntry: nil, objectHash: nil, locator: nil) }
-        for ref in refs.prefix(24) {
-            guard !Task.isCancelled, model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
-            guard let id = ref.recordId, id != currentRecord.id else { continue }
-            let key = ref.revisionId.map { "\(id)|\($0)" } ?? id
-            guard citationTitles[key] == nil else { continue }
-            let record = try? await model.knowledge.read(id: id, revisionID: ref.revisionId)
-            guard !Task.isCancelled, model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
-            guard let record else { continue }
-            let title: String
-            switch record.content {
-            case .source(let source): title = source.title
-            case .observation(let observation): title = observation.items.first?.text ?? "Observation"
-            case .note(let note): title = note.title
-            }
-            citationTitles[key] = title.isEmpty ? "Related source" : title
+        let related = relatedRecordIDs.filter { id in
+            citationTitles[id] == nil && !citationTitles.keys.contains { $0.hasPrefix("\(id)|") }
+        }
+        guard !related.isEmpty else { return }
+        let requestedIdentity = origin
+        do {
+            let page = try await model.knowledge.sourceRows(ids: Array(related.prefix(KnowledgeChangeGating.maximumRecordIDs)), includeArchived: true, includePending: true)
+            guard !Task.isCancelled, model.knowledgePresentationIdentity == requestedIdentity,
+                  activity.allowsPresentationPublication else { return }
+            for row in page.rows { citationTitles[row.id] = row.title.isEmpty ? "Related entry" : row.title }
+        } catch {
+            return
         }
     }
 

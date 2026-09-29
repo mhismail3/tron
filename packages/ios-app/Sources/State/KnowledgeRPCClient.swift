@@ -63,6 +63,48 @@ final class KnowledgeRPCClient {
         let value: KnowledgeListResponse = try await request("knowledge.list", KnowledgeListRequest(kind: kind, scope: scope, includeSuppressed: false, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, sourceAdmission: sourceAdmission, cursor: cursor, limit: min(100, max(1, limit))))
         guard value.records.count <= 100 else { throw invalidResponse() }; return value
     }
+    /// One page of Library rows. Rows carry no saved text or objects, so a
+    /// catalogue page is a fraction of the full-record response.
+    func sourceRows(scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, sourceAdmission: KnowledgeSourceAdmission? = nil, cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeSourceRowPage {
+        let value: KnowledgeSourceRowPage = try await request("knowledge.list", KnowledgeSourceRowListRequest(kind: .source, scope: scope, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, sourceAdmission: sourceAdmission, cursor: cursor, ids: nil, limit: min(100, max(1, limit))))
+        guard value.rows.count <= 100, value.stateRevision >= 0, value.nextCursor == nil || value.nextCursor != cursor else { throw invalidResponse() }
+        return value
+    }
+    /// Exact rows for known ids, used to patch changed rows and to resolve
+    /// related-entry titles without reading their records.
+    func sourceRows(ids: [String], scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, sourceAdmission: KnowledgeSourceAdmission? = nil) async throws -> KnowledgeSourceRowPage {
+        guard !ids.isEmpty, ids.count <= KnowledgeChangeGating.maximumRecordIDs, Set(ids).count == ids.count else { throw invalidResponse() }
+        let value: KnowledgeSourceRowPage = try await request("knowledge.list", KnowledgeSourceRowListRequest(kind: .source, scope: scope, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, sourceAdmission: sourceAdmission, cursor: nil, ids: ids, limit: ids.count))
+        guard value.rows.count <= ids.count, value.nextCursor == nil, value.stateRevision >= 0 else { throw invalidResponse() }
+        return value
+    }
+    func searchSourceRows(query: String, scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, sourceAdmission: KnowledgeSourceAdmission? = nil, cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeSourceRowPage {
+        let value: KnowledgeSourceRowPage = try await request("knowledge.search", KnowledgeSourceRowSearchRequest(query: String(query.prefix(500)), kind: .source, scope: scope, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, sourceAdmission: sourceAdmission, cursor: cursor, limit: min(100, max(1, limit))))
+        guard value.rows.count <= 100, value.stateRevision >= 0, value.nextCursor == nil || value.nextCursor != cursor else { throw invalidResponse() }
+        return value
+    }
+    /// One bounded batch of preview images. Each item's bytes are verified
+    /// against the exact request that asked for them; a refusal is reported per
+    /// item instead of failing the batch.
+    func readPreviews(_ requests: [KnowledgePreviewRequest], includeArchived: Bool = false) async throws -> KnowledgePreviewBatchResult {
+        guard !requests.isEmpty, requests.count <= KnowledgePreviewLimits.maximumBatchItems else { throw invalidResponse() }
+        guard requests.reduce(0, { $0 + $1.reference.bytes }) <= KnowledgePreviewLimits.maximumBatchBytes else { throw invalidResponse() }
+        let value: KnowledgePreviewBatchResponse = try await request("knowledge.previews.read", KnowledgePreviewBatchRequest(requests: requests, includeArchived: includeArchived ? true : nil))
+        guard value.items.count <= requests.count else { throw invalidResponse() }
+        var expected: [String: KnowledgePreviewRequest] = [:]
+        for request in requests { expected["\(request.recordID)|\(request.hash)"] = request }
+        var images: [String: Data] = [:]; var unavailable: Set<String> = []
+        for item in value.items {
+            guard let request = expected.removeValue(forKey: "\(item.recordId)|\(item.hash)") else { throw invalidResponse() }
+            guard let base64 = item.base64 else {
+                guard let reason = item.unavailable, ["forbidden", "missing", "too-large"].contains(reason) else { throw invalidResponse() }
+                unavailable.insert(request.hash); continue
+            }
+            guard item.unavailable == nil, let data = Data(base64Encoded: base64), data.count == request.reference.bytes else { throw invalidResponse() }
+            images[request.hash] = data
+        }
+        return KnowledgePreviewBatchResult(images: images, unavailableHashes: unavailable)
+    }
     func search(query: String, kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, sourceAdmission: KnowledgeSourceAdmission? = nil, limit: Int = 50) async throws -> KnowledgeSearchResponse {
         let value: KnowledgeSearchResponse = try await request("knowledge.search", KnowledgeSearchRequest(query: String(query.prefix(500)), kind: kind, scope: scope, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, sourceAdmission: sourceAdmission, limit: min(100, max(1, limit))))
         guard value.hits.count <= 100, value.indexState == "canonical" else { throw invalidResponse() }; return value
@@ -71,9 +113,9 @@ final class KnowledgeRPCClient {
         let value: KnowledgeRecallResponse = try await request("knowledge.recall", KnowledgeRecallRequest(query: query, sessionId: sessionID, entryId: entryID, scope: scope, limit: min(100, max(1, limit))))
         guard value.records.count <= 100 else { throw invalidResponse() }; return value
     }
-    func read(id: String, revisionID: String? = nil) async throws -> KnowledgeRecord? {
-        struct Params: Encodable { let id: String; let revisionId: String?; let includeSuppressed: Bool }
-        let value: JSONValue = try await request("knowledge.read", Params(id: id, revisionId: revisionID, includeSuppressed: false))
+    func read(id: String, revisionID: String? = nil, includeArchived: Bool = false, includePending: Bool = false) async throws -> KnowledgeRecord? {
+        struct Params: Encodable { let id: String; let revisionId: String?; let includeSuppressed: Bool; let includeArchived: Bool?; let includePending: Bool? }
+        let value: JSONValue = try await request("knowledge.read", Params(id: id, revisionId: revisionID, includeSuppressed: false, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil))
         if value == .null { return nil }
         let record = try value.decode(KnowledgeRecord.self)
         guard record.id == id, revisionID == nil || record.revisionId == revisionID else { throw invalidResponse() }

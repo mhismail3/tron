@@ -302,8 +302,20 @@ struct KnowledgeCoverageDetailSheet: View {
     }
 }
 
+/// What a Knowledge detail presents. A Library row already carries the entry's
+/// header, so it opens immediately and the full record replaces it when it
+/// arrives; every other entry opens from its record.
+package enum KnowledgeDetailSubject: Identifiable, Hashable, Sendable {
+    case record(KnowledgeRecord)
+    case row(KnowledgeSourceRow)
+
+    package var id: String {
+        switch self { case .record(let record): record.id; case .row(let row): row.id }
+    }
+}
+
 struct KnowledgeDetailSheet: View {
-    let record: KnowledgeRecord
+    let subject: KnowledgeDetailSubject
     let origin: KnowledgePresentationIdentity
     let onChanged: () async -> Void
     let onOpenDraft: (KnowledgeRecord) -> Void
@@ -313,17 +325,25 @@ struct KnowledgeDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            KnowledgeDetailView(record: record, origin: origin, onChanged: onChanged,
-                                onOpenDraft: onOpenDraft, onOpenSession: onOpenSession)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { dismiss() } label: {
-                            Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronKnowledge)
-                        }
-                        .accessibilityLabel("Done")
-                    }
+            Group {
+                switch subject {
+                case .record(let record):
+                    KnowledgeDetailView(record: record, origin: origin, onChanged: onChanged,
+                                        onOpenDraft: onOpenDraft, onOpenSession: onOpenSession)
+                case .row(let row):
+                    KnowledgeEntryLoadView(row: row, origin: origin, onChanged: onChanged,
+                                           onOpenDraft: onOpenDraft, onOpenSession: onOpenSession)
                 }
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronKnowledge)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)

@@ -106,3 +106,27 @@ final class KnowledgeLinkedRecordReaderStore {
         }
     }
 }
+
+/// Coalesces keystrokes into one settled query. A cancelled schedule never
+/// publishes its value, so a superseded query cannot replace a newer one.
+@MainActor
+final class KnowledgeSearchDebouncer {
+    private var task: Task<Void, Never>?
+    private let delay: Duration
+
+    init(delay: Duration = KnowledgeSearchPolicy.debounce) { self.delay = delay }
+
+    func schedule(_ value: String, apply: @escaping @MainActor (String) -> Void) {
+        task?.cancel()
+        task = Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            apply(KnowledgeSearchPolicy.effectiveQuery(value))
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+    }
+}

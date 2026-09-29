@@ -1514,7 +1514,17 @@ subscription. Knowledge status projects settled and remaining coverage dispositi
 records. Reflected observations publish the generated unconfirmed note as an explicit editable handoff, while
 source corrections retain the captured text/object and append a user-authored correction with new provenance.
 Knowledge detail and linked-record presentations fence activity, Gateway identity, and latest
-request generation before and after every await.
+request generation before and after every await. The Library Sources catalogue is a
+Gateway row projection rather than a page of full records, and every read it makes —
+first page, continuation, changed-row patch, related title, batched preview — carries the same
+activity, identity, request-key and generation fences as the record paths. Its first page is a
+bounded, profile-scoped, disposable projection presented before the Gateway answers and replaced
+by it; preview images are addressed by the Gateway's object hash, so deduplication, staleness and
+verification are properties of the name rather than of a cache-invalidation protocol.
+`knowledge.changed` is one typed, coalesced event per window carrying the committed state revision
+and the changed record ids; a dashboard page whose own revision is not older ignores it, and a
+patch that would need a row this page has never seen defers to a merged first-page refresh instead
+of inventing canonical order locally.
 
 In-app notification projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
 `InAppNoticeCenter` is the single AppModel-owned, monotonic-clock-driven center. It presents one readable
