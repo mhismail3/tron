@@ -307,10 +307,10 @@ private struct ChatTranscriptViewportModifier: ViewModifier {
             content
                 .ignoresSafeArea(.container, edges: .vertical)
                 .ignoresSafeArea(.keyboard, edges: .vertical)
-                // Temporary profile control: preserve the inset distance while
-                // removing the contentMargins mechanism (not a keyboard fix).
-                .safeAreaPadding(.top, margins.top)
-                .safeAreaPadding(.bottom, margins.bottom)
+                .contentMargins(.top, margins.top, for: .scrollContent)
+                .contentMargins(.bottom, margins.bottom, for: .scrollContent)
+                .contentMargins(.top, margins.top, for: .scrollIndicators)
+                .contentMargins(.bottom, margins.bottom, for: .scrollIndicators)
                 .chatTranscriptOrientation(orientation)
                 .ignoresSafeArea(.all, edges: .vertical)
         } else {
