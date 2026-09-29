@@ -20,6 +20,7 @@ import UIKit
 ///
 /// The journey is a measurement, not a gate: it asserts only that the scenario
 /// ran. The counts it prints and writes are the evidence a fix is judged by.
+@MainActor
 @Suite("Chat row stability", .serialized, .enabled(if: UIValidationTier.isActive))
 struct ChatRowStabilityTests {
     @Test("every row kind survives detach, oldest-row and return without a post-mount resize")
@@ -156,6 +157,56 @@ struct ChatRowStabilityTests {
                 #expect(
                     observation.rowFrames[RowStabilityFixture.entranceRowID]?.height ?? 0 > 0,
                     "the inserted row never published a frame"
+                )
+            }
+        }
+    }
+
+    @Test("the canonical prompt handoff keeps one row content identity")
+    func canonicalPromptHandoffKeepsRowContentIdentity() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            let promptText = "A prompt whose canonical row must keep its identity."
+            var initial = try SessionScenarioBuilder(seed: 1_327).openingTail(targetEncodedBytes: 10_000)
+            initial.acceptsQueuedPrompts = false
+            let snapshot = initial
+            try await withComposerSubmissionHarness(snapshot: snapshot) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                try await driveBoundaries(3, harness: harness)
+                try harness.setComposerDraftText(promptText)
+                harness.submitPrompt()
+                _ = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains {
+                        $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
+                    }
+                }
+                var acknowledged = snapshot
+                acknowledged.transcript.append(try decodeTranscriptFixture(
+                    TranscriptItem.self,
+                    from: try JSONSerialization.data(withJSONObject: [
+                        "id": "canonical-prompt",
+                        "parentId": NSNull(),
+                        "presentationId": harnessHostedPromptOperationID,
+                        "timestamp": "2026-01-01T00:01:00Z",
+                        "kind": "message",
+                        "role": "user",
+                        "content": [[
+                            "id": "canonical-text",
+                            "ordinal": 0,
+                            "type": "text",
+                            "text": promptText,
+                        ]],
+                    ])
+                ))
+                acknowledged.transcriptTotal = acknowledged.transcript.count
+                harness.replaceAuthoritativeSnapshot(acknowledged)
+                _ = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains { $0.semanticID == "canonical-prompt" && $0.isVisible }
+                }
+                for _ in 0..<40 { try await harness.driveFrameBoundary() }
+                let observation = harness.probeObservation
+                #expect(
+                    observation.rowIdentityInstanceCounts["canonical-prompt"] == 1,
+                    "the canonical handoff switched the prompt row's content identity"
                 )
             }
         }
@@ -752,6 +803,26 @@ private func withStabilityHarness(
         snapshot: snapshot,
         displayFrameScheduler: .displayLink,
         scrollCallbackMode: .native
+    )
+    do {
+        try await operation(harness)
+    } catch {
+        await harness.close()
+        throw error
+    }
+    await harness.close()
+}
+
+/// The composer-submission harness for the canonical handoff: a real outgoing
+/// submission the authoritative snapshot then acknowledges.
+@MainActor
+private func withComposerSubmissionHarness(
+    snapshot: SessionSnapshot,
+    operation: @escaping @MainActor (ChatViewScrollHarness) async throws -> Void
+) async throws {
+    let harness = try await ChatViewScrollHarness.composerSubmissionHarness(
+        snapshot: snapshot,
+        displayFrameScheduler: .displayLink
     )
     do {
         try await operation(harness)

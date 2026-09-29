@@ -1127,7 +1127,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             publishesGeometry: !isReplacementOverlay,
             rowStability: rowStability
         ) {
-            if isReplacementOverlay || canonicalSubmissionIDs.contains(semanticID) {
+            // One structure for every transcript row. A canonical submission's
+            // entrance state is already forced to `.none` above, and a `.none`
+            // entrance row is layout-neutral, so membership in
+            // `canonicalSubmissionIDs` no longer selects between two structures:
+            // that selection remounted the prompt subtree, including its native
+            // context-menu interaction, when the handoff added the ID.
+            if isReplacementOverlay {
                 renderRow(item, installed: installed, isCommitted: isCommitted)
                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             } else {

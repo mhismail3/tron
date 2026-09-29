@@ -970,3 +970,27 @@ pass only through eager-only repairs, stop and report.
   audit's `semanticFrameCallbackCount` proof therefore does not discriminate here
   (275 before, 275 after on this journey).
 - Changes: `ChatEntranceRows.swift`.
+
+### CT-27 stage A4 (F9) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: `transcriptRow` no longer selects between two structures by
+  `canonicalSubmissionIDs.contains(semanticID)`. The state above already forces
+  a canonical submission's entrance state to `.none`, and a `.none` entrance row
+  is layout-neutral, so the membership test only decided whether the prompt
+  subtree was wrapped in `ChatTranscriptEntranceRow` — adding the handoff ID
+  therefore remounted the subtree, including its native context-menu
+  interaction, for no layout reason. `isReplacementOverlay` remains the only
+  branch.
+- Evidence (lane ct27): parity gate 7/7 (45.7 s), including
+  `queued-card-to-sent-row` (worst 0.04878 against 0.065) which is the canonical
+  handoff's own scenario; `ChatRowStabilityTests` 3/3 (3.3 s) including
+  `canonicalPromptHandoffKeepsRowContentIdentity`.
+- Deviation, stated because the evidence is weaker than the finding: the hosted
+  fixture could not reproduce the switch. In every flow reachable from the
+  harness the handoff ID is remembered during the same projection intake that
+  first installs the canonical row (`ChatView.intakeLatestTranscriptProjectionIfNeeded`
+  calls `rememberCanonicalSubmissionHandoffs` before `transcriptPresentation.submit`),
+  so the row's content identity is one instance before and after this change.
+  The test stays as a regression guard on that invariant; F9's own proof rests on
+  the source argument above and the handoff's parity scenario.
+- Changes: `ChatTranscriptScrollView.swift`, `ChatRowStabilityTests.swift`.
