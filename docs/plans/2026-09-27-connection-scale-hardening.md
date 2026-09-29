@@ -641,6 +641,8 @@ rows are in priority order.
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-4 | Done | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28; the killer is XCTest's per-test execution-time allowance (XCTestCore reports `Restarting after unexpected exit, crash, or test timeout`) SIGKILLing the app (`Test crashed with signal kill`), and the test it lands on is the process's CPU-heaviest because `IOSClientDiagnosticBuffer.redactedMessage` matched URLs super-quadratically (3 ms at 512 characters, 654 ms at 4,096; the export test 8.646-10.297 s -> 0.072 s); see the T-4 handoff |
+| T-5 | Ready | `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` hit its 5 s watchdog once in the full iOS run on `419a67a53` ("blocked on a wait that ignores cancellation"); passes alone 3/3. Check whether it waits on a write-log index a C-6 cancel frame can shift (as F-1 found) and make it robust | F-1 | |
+| F-2 | Ready | O-6b `bandwidth` page leg fails on integration with `session.sync` conflict "Session synchronization is no longer owned by this token" (run `20260928T235606Z-multi-session-471100`); `--cases none` passes. Decide driver artifact (concurrent page mounts on one connection) vs Gateway regression (C-6/G-12 barrier handling) and fix at the owner | O-6b | |
 | C-7 | Done | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/c-7`; the connection epoch now owns its event reader) |
 
 ### Phase 2 — Release and one evaluation day
@@ -9857,3 +9859,33 @@ recovery gaps; all three were fixed on the same branch.
 - For the next agent: no other case in those suites indexes the write log past a
   cancel frame; a new surface-abandonment case does, so a frame index is only
   trustworthy after the control frame it waits for exists.
+
+### Interim release · 2026-09-28 · orchestrator
+
+- Result: at the user's request, an interim install of the merged Phase 1
+  work before the plan's single release. Candidate `hardening/integration`
+  `419a67a53` (protocol 6): O-1..O-5, O-7, C-1..C-7, G-1a..G-1d, G-2..G-5,
+  G-7..G-13 (G-13 measurement only), E-2*, E-3a/E-3b (LAN listener off by
+  default; phone half E-3c not built), T-1..T-4, F-1. Not included: E-3c,
+  E-3d, G-3a.
+- Evidence: Gateway full vitest 2,172/2,173 with `--maxWorkers=4` (the one
+  failure is "keeps a large streamed write visible…", which also fails
+  intermittently on `main`); iOS full unit run 1,913/1,914 (T-5 flake, passes
+  alone 3/3); iOS↔Gateway E2E including C-1's 90 s blackhole passed
+  (`tron-ios-gateway-e2e-501/results/20260928T235314Z-run.bZKigP`); short
+  multi-session smoke (300 files, 60 s, `--cases none`,
+  `20260929T000118Z-multi-session-26dbfd`): `session.list` p50 24 ms / max
+  1.5 s (provisional `main` p99 46.5 s), cold open max 1.6 s (large 0.5 s),
+  catalog walks 0, no-subscriber CPU 9.7% of a core (provisional `main` 57%),
+  heap peak 12.8% of the limit; event-loop max ~1 s remains (G-3a).
+- Builds: Mac Release `~/Workspace/tron-interim-build/Tron.app` (bundled
+  Gateway manifest `sourceRevision 419a67a53`, protocol 6); iOS `Tron Device` +
+  `LocalDevice` prebuilt in `packages/ios-app/build/DerivedData` of the
+  integration worktree, installed with `scripts/tron-ios-device install`
+  after `scripts/tron mac verify`.
+- Rollback: Mac app 0.1.0 (7), Gateway payload
+  `0.1.0-beta.7-source-1790559163986`, source `d47425afc`; reinstall the
+  previous Mac and iOS builds together (protocol 5).
+- Deviation: the interim install comes from `hardening/integration`, not
+  `main`; R-1 still merges once to `main` for the final release.
+- Tasks added: T-5, F-2.
