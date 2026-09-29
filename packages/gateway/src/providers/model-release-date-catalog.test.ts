@@ -41,7 +41,9 @@ describe("ModelReleaseDateCatalog", () => {
   it("shares in-flight requests, skips fresh data unless forced, and restores persistence", async () => {
     const catalog = await fixture();
     let resolve!: (value: Response) => void;
-    const fetcher = vi.fn(() => new Promise<Response>(r => { resolve = r; }));
+    const fetcher = vi.fn(() => fetcher.mock.calls.length === 1
+      ? new Promise<Response>(r => { resolve = r; })
+      : Promise.resolve(response(catalogData, { etag: '"release-2"' })));
     vi.stubGlobal("fetch", fetcher);
     const one = catalog.refresh({ force: true });
     const two = catalog.refresh({ force: true });
