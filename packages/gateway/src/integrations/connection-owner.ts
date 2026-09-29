@@ -27,6 +27,7 @@ import {
   assertCredentialReference,
   connectionRequestHash,
   normalizeProviderDisplayName,
+  validateRaindropCollectionMappings,
   validateConnectionInstance,
   validateConnectionPolicy,
   validateConnectionState,
@@ -124,12 +125,14 @@ function validateCommand(command: ConnectionCommand): void {
     if (command.scope !== undefined && (typeof command.scope !== "string" || command.scope.length < 1 || command.scope.length > 512)) throw invalid("Connection scope is invalid");
     assertCredentialReference(command.credentialRef); validateConnectionPolicy(command.policy);
     if (command.configuration !== undefined) validateMcpConnectionConfiguration(command.configuration);
+    if (command.raindropCollections !== undefined) validateRaindropCollectionMappings(command.raindropCollections);
     return;
   }
   if (command.kind === "setup.cancel") { assertConnectionId(command.operationId, "setup operation id"); assertConnectionId(command.instanceId); return; }
   assertConnectionId(command.instanceId);
   if (command.kind === "policy.update") {
     validateConnectionPolicy(command.policy);
+    if (command.raindropCollections !== undefined) validateRaindropCollectionMappings(command.raindropCollections);
     if (!Number.isSafeInteger(command.expectedSetupRevision) || command.expectedSetupRevision < 1) throw invalid("Policy updates require the observed setup revision");
   }
 }
@@ -325,7 +328,8 @@ export class ConnectionOwner {
       if (definition.implementation === "mcp" && operation.method === "endpoint" && command.configuration?.transport !== "http") throw invalid("Endpoint setup requires HTTP MCP configuration");
       if (definition.implementation === "mcp" && operation.method === "local-command" && command.configuration?.transport !== "stdio") throw invalid("Local command setup requires stdio MCP configuration");
       if (definition.implementation !== "mcp" && command.configuration !== undefined) throw invalid("Only MCP connections accept transport configuration");
-      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.configuration ? { configuration: copy(command.configuration) } : {}), policy: copy(command.policy), health: command.policy.enabled ? "setup-required" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1, credentialAvailability: "unknown", providerIdentity: "unknown" };
+      if (command.raindropCollections !== undefined && definition.id !== "knowledge.raindrop") throw invalid("Only Raindrop connections accept collection mappings");
+      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.configuration ? { configuration: copy(command.configuration) } : {}), ...(command.raindropCollections ? { raindropCollections: copy(command.raindropCollections) } : {}), policy: copy(command.policy), health: command.policy.enabled ? "setup-required" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1, credentialAvailability: "unknown", providerIdentity: "unknown" };
       state.instances[instance.id] = instance; operation.status = "completed"; operation.updatedAt = timestamp;
       return resultForInstance(instance);
     }
@@ -341,6 +345,10 @@ export class ConnectionOwner {
       // Compare under the same mutex as publication, after receipt replay. A
       // stale sheet cannot restore permissions changed by another owner client.
       if (instance.setupRevision !== command.expectedSetupRevision) throw conflict("Connection changed; reopen its settings before saving");
+      if (command.raindropCollections !== undefined) {
+        if (instance.definitionId !== "knowledge.raindrop") throw invalid("Only Raindrop connections accept collection mappings");
+        instance.raindropCollections = copy(command.raindropCollections);
+      }
       instance.policy = copy(command.policy); instance.health = command.policy.enabled ? "setup-required" : "disabled"; instance.credentialAvailability = "unknown"; instance.providerIdentity = "unknown"; delete instance.providerDisplayName; instance.updatedAt = timestamp; instance.setupRevision += 1; delete instance.lastError;
       return resultForInstance(instance);
     }

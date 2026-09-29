@@ -51,6 +51,12 @@ export interface McpConnectionConfiguration {
   env?: Record<string, string>;
 }
 
+export interface RaindropCollectionMapping {
+  collectionId: string;
+  scope: "research" | "personal";
+  destination?: string;
+}
+
 export interface ConnectionInstance {
   id: string;
   definitionId: string;
@@ -59,6 +65,8 @@ export interface ConnectionInstance {
   scope?: string;
   credentialRef: string;
   configuration?: McpConnectionConfiguration;
+  /** Raindrop intake routing is connection-owned setup/policy, never connector progress state. */
+  raindropCollections?: RaindropCollectionMapping[];
   policy: ConnectionPolicy;
   health: ConnectionHealth;
   createdAt: string;
@@ -115,9 +123,9 @@ export interface ProviderAdmissionObservation {
 
 export type ConnectionCommand =
   | { kind: "setup.begin"; commandId: string; instanceId: string; definitionId: string; method: ConnectionSetupMethod }
-  | { kind: "setup.complete"; commandId: string; operationId: string; instanceId: string; providerAccountId: string; scope?: string; credentialRef: string; policy: ConnectionPolicy; configuration?: McpConnectionConfiguration }
+  | { kind: "setup.complete"; commandId: string; operationId: string; instanceId: string; providerAccountId: string; scope?: string; credentialRef: string; policy: ConnectionPolicy; configuration?: McpConnectionConfiguration; raindropCollections?: RaindropCollectionMapping[] }
   | { kind: "setup.cancel"; commandId: string; operationId: string; instanceId: string }
-  | { kind: "policy.update"; commandId: string; instanceId: string; expectedSetupRevision: number; policy: ConnectionPolicy }
+  | { kind: "policy.update"; commandId: string; instanceId: string; expectedSetupRevision: number; policy: ConnectionPolicy; raindropCollections?: RaindropCollectionMapping[] }
   | { kind: "disconnect"; commandId: string; instanceId: string };
 
 export type ConnectionAction =
@@ -212,6 +220,10 @@ export function validateConnectionInstance(value: unknown): asserts value is Con
   assertCredentialReference(item.credentialRef); validateConnectionPolicy(item.policy);
   if (item.credentialAvailability !== undefined && !["available", "unavailable", "unknown"].includes(item.credentialAvailability as string) || item.providerIdentity !== undefined && !["admitted", "mismatch", "unknown"].includes(item.providerIdentity as string)) throw new Error("Connection admission observation is invalid");
   if (item.providerDisplayName !== undefined && normalizeProviderDisplayName(item.providerDisplayName) !== item.providerDisplayName) throw new Error("Provider display name is invalid");
+  if (item.raindropCollections !== undefined) {
+    if (item.definitionId !== "knowledge.raindrop") throw new Error("Only Raindrop connections may map collections");
+    validateRaindropCollectionMappings(item.raindropCollections);
+  }
   if (item.configuration !== undefined) {
     if (item.implementation !== "mcp") throw new Error("Only MCP instances may contain transport configuration");
     validateMcpConnectionConfiguration(item.configuration);
@@ -220,6 +232,19 @@ export function validateConnectionInstance(value: unknown): asserts value is Con
   for (const key of ["createdAt", "updatedAt"] as const) bounded(item[key], `Connection ${key}`, 64);
   if (!Number.isSafeInteger(item.setupRevision) || (item.setupRevision as number) < 0) throw new Error("Connection setup revision is invalid");
   if (item.lastError !== undefined) bounded(item.lastError, "Connection error", 4_096);
+}
+
+export function validateRaindropCollectionMappings(value: unknown): asserts value is RaindropCollectionMapping[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 64) throw new Error("Raindrop collection mappings must contain 1..64 entries");
+  const ids = new Set<string>();
+  for (const mapping of value) {
+    if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) throw new Error("Raindrop collection mapping is invalid");
+    const item = mapping as Record<string, unknown>;
+    if (typeof item.collectionId !== "string" || !/^-?\d{1,18}$/.test(item.collectionId) || ids.has(item.collectionId)) throw new Error("Raindrop collection IDs must be unique numeric IDs");
+    if (item.scope !== "research" && item.scope !== "personal") throw new Error("Raindrop collection scope must be research or personal");
+    if (item.destination !== undefined && (typeof item.destination !== "string" || !/^-?\d{1,18}$/.test(item.destination))) throw new Error("Raindrop destination must be a numeric collection ID");
+    ids.add(item.collectionId);
+  }
 }
 
 export function validateMcpConnectionConfiguration(value: unknown): asserts value is McpConnectionConfiguration {
