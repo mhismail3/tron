@@ -719,9 +719,13 @@ For failure-boundary interpretation, evidence collection, and regression
 expectations, see [connection resilience and diagnosis](docs/connection-resilience.md).
 
 A second, TLS-only listener serves the Mac's private LAN address, so a phone
-at home does not depend on Tailscale's path (E-3a). It is on by default (E-3d);
-`--lan-endpoint off` or `TRON_GATEWAY_LAN_ENDPOINT=off` is the kill switch for a
-Mac or a network where the lane misbehaves. It binds only an
+at home does not depend on Tailscale's path (E-3a). It is on by default (E-3d)
+for a Gateway that is not bound to loopback; a loopback bind (`127.0.0.0/8`,
+`::1`, `localhost`) keeps one loopback listener like the developer default and
+needs `--lan-endpoint on` to serve the lane. `--lan-endpoint off` or
+`TRON_GATEWAY_LAN_ENDPOINT=off` is the kill switch for a Mac or a network where
+the lane misbehaves, and `on` overrides a loopback default the same way. It
+binds only an
 RFC 1918 or IPv6 ULA address the Mac actually has — never a wildcard, never
 link-local, never Tailscale's own ranges — on the main listener's port, rebinds
 when the preferred address changes, and disables itself when the Mac has none.
@@ -739,6 +743,19 @@ accepted connection's `http.upgrade` record names the leg it arrived on
 (`transport=lan`, `tailscale` or `primary`), and each bind, rebind or disable
 writes one `lan.listener` record with its state, address family and port but not
 the address ([observability](docs/observability.md)).
+
+The Mac-supervised Gateway can take neither spelling in its own arguments: its
+LaunchAgent program arguments and environment are the ownership contract the
+wrapper checks before registration and against the running process
+(`ExistingInstallDetector`, `StableGatewayProvenance` in the Mac app). Its kill
+switch is the launchd session's environment, which the launcher inherits and
+passes on unchanged (`packages/mac-app/scripts/tron-gateway-launcher.c`):
+`launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off`, then a Gateway restart the
+user performs; `launchctl unsetenv TRON_GATEWAY_LAN_ENDPOINT` hands the default
+back. The variable applies from the next Gateway start, and one
+`lan.listener state=disabled reason=setting_off` record is the evidence that it
+took effect. That route has not been proved end to end on an installed release
+yet.
 
 A paired device learns the lane on the two channels it already owns (E-3b): the
 `POST /v1/pair` response and every `hello` answer carry `lanEndpoints` —

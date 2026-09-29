@@ -57,7 +57,7 @@ describe("gateway configuration", () => {
     expect(() => resolveBindHost("tailscale", {})).toThrow(/Tailscale is not connected/);
   });
 
-  it("resolves only private, non-Tailscale LAN addresses and keeps the endpoint on by default", async () => {
+  it("resolves only private, non-Tailscale LAN addresses and scopes the endpoint default by host", async () => {
     const interfaces = {
       en0: [
         { address: "192.168.4.24", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" },
@@ -96,12 +96,23 @@ describe("gateway configuration", () => {
 
     const home = await mkdtemp(join(tmpdir(), "tron-lan-endpoint-setting-"));
     const environment = { TRON_DATA_DIR: home };
-    const configured = await loadConfig([], environment);
-    // On by default since E-3d; either spelling of the kill switch still wins.
-    expect(configured.lanEndpoint).toEqual({ enabled: true, stateDirectory: join(home, "gateway", "lan-endpoint") });
+    // Loopback is the developer default: the lane has no home network to serve,
+    // so an unset setting leaves this Gateway with one loopback listener.
+    expect((await loadConfig([], environment)).lanEndpoint).toEqual({ enabled: false, stateDirectory: join(home, "gateway", "lan-endpoint") });
+    for (const host of ["127.0.0.1", "127.9.9.9", "localhost", "::1", "::ffff:127.0.0.1"]) {
+      expect((await loadConfig(["--host", host], environment)).lanEndpoint.enabled).toBe(false);
+    }
+    // Any host that is reachable from the home network gets the lane by default.
+    for (const host of ["192.168.4.24", "10.0.0.5", "fd00::24"]) {
+      expect((await loadConfig(["--host", host], environment)).lanEndpoint.enabled).toBe(true);
+    }
+    expect((await loadConfig([], { ...environment, TRON_GATEWAY_HOST: "192.168.4.24" })).lanEndpoint.enabled).toBe(true);
+    // Either spelling of the kill switch still wins, in both directions.
+    expect((await loadConfig(["--lan-endpoint", "off", "--host", "192.168.4.24"], environment)).lanEndpoint.enabled).toBe(false);
     expect((await loadConfig(["--lan-endpoint", "on"], environment)).lanEndpoint.enabled).toBe(true);
     expect((await loadConfig(["--lan-endpoint", "off"], environment)).lanEndpoint.enabled).toBe(false);
     expect((await loadConfig([], { ...environment, TRON_GATEWAY_LAN_ENDPOINT: "off" })).lanEndpoint.enabled).toBe(false);
+    expect((await loadConfig([], { ...environment, TRON_GATEWAY_LAN_ENDPOINT: "on" })).lanEndpoint.enabled).toBe(true);
     for (const raw of ["true", "yes", "", "ON"]) {
       await expect(loadConfig(["--lan-endpoint", raw], environment)).rejects.toMatchObject({ code: "invalid_request" });
     }
