@@ -158,8 +158,10 @@ struct ChatTranscriptScaleMeasurementTests {
                 + " openEntries=\(signposts.entries(of: .firstReadyFrame))"
                 + " openFrameGapMaxMs=\(scalePoint(opening.maximum))"
                 + " openFrameGapsOver33=\(opening.over33)"
+                + " tailClearance=\(harness.transcriptBottom().clearance.map { String(scalePoint($0)) } ?? "none")"
+                + " pinned=\(harness.isPinnedToBottom())"
                 + " mountedMarkers=\(harness.recorder.samples.last?.nativeRows.count ?? -1)"
-                + " visibleRows=\(harness.recorder.samples.last?.nativeRows.filter(\.isVisible).count ?? -1)"
+                + " visibleRows=\(harness.recorder.samples.last?.nativeRows.count { $0.isOnScreen } ?? -1)"
                 + " contentHeight=\(scalePoint(harness.probeObservation.geometry.contentHeight))"
                 + " containerHeight=\(scalePoint(harness.probeObservation.geometry.containerHeight))"
                 + " memoryBeforeInstallMB=\(scaleMegabytes(memoryBeforeInstall))"
@@ -181,6 +183,8 @@ struct ChatTranscriptScaleMeasurementTests {
         _ = try await measureBlankPhase(harness: harness, shape: shape)
 
         let memoryEnd = scaleResidentMemoryBytes()
+        let tailClearance = harness.newestRowClearance().map { String(scalePoint($0)) } ?? "none"
+        let pinned = harness.isPinnedToBottom()
         print(
             "CT13-CLOSE shape=\(shape)"
                 + " scrollOver16_7=\(scroll.over16_7) scrollOver33=\(scroll.over33)"
@@ -188,7 +192,7 @@ struct ChatTranscriptScaleMeasurementTests {
                 + " sendOver16_7=\(send.over16_7) sendOver33=\(send.over33)"
                 + " memoryEndMB=\(scaleMegabytes(memoryEnd))"
                 + " commands=\(scaleCommandCounts(harness))"
-                + " tailError=\(scalePoint(try harness.nativeTranscriptSignedTailError()))"
+                + " tailClearance=\(tailClearance) pinned=\(pinned)"
         )
         return true
     }
@@ -202,8 +206,9 @@ struct ChatTranscriptScaleMeasurementTests {
     }
 
     /// One display frame per 600 pt step: up through the history and back to the
-    /// tail. Each step writes the native content offset and lays out
-    /// synchronously, which is the per-frame main-thread work this measures.
+    /// tail. Each step places the real reader that many visual points from the
+    /// newest end and lays out synchronously, which is the per-frame main-thread
+    /// work this measures.
     private func measureScrollPhase(
         harness: ChatViewScrollHarness,
         frames: ScaleFrameIntervalRecorder,
@@ -217,7 +222,7 @@ struct ChatTranscriptScaleMeasurementTests {
         distances += distances.reversed()
         for distance in distances {
             let startedAt = ContinuousClock.now
-            try harness.displaceNativeTranscriptFromTail(by: distance)
+            try harness.scrollReader(byVisualPoints: distance)
             stepDurations.append(
                 scaleMilliseconds(startedAt.duration(to: .now))
             )
@@ -272,7 +277,7 @@ struct ChatTranscriptScaleMeasurementTests {
         shape: String
     ) async throws -> PhaseOutcome {
         // Return to the pinned tail the way a reader does before typing.
-        try harness.displaceNativeTranscriptFromTail(by: 0)
+        try harness.scrollReader(byVisualPoints: 0)
         for _ in 0..<10 { try await harness.driveFrameBoundary() }
         frames.beginPhase()
         var stepDurations: [Double] = []
@@ -312,27 +317,47 @@ struct ChatTranscriptScaleMeasurementTests {
         var blankAfterSettle = 0
         var samples = 0
         var visibleMinimum = Int.max
+        var uncoveredBand = 0
+        var minimumVisibleFraction: CGFloat = 1
         var phaseBlanks: [String] = []
+        var phaseUncoveredBand: [String] = []
         for (segment, height) in [CGFloat(620), 844, 620].enumerated() {
             harness.resize(height: height)
             var segmentBlank = 0
+            var segmentUncoveredBand = 0
             for frame in 0..<segmentLength {
                 try await harness.driveFrameBoundary()
                 let sample = try harness.ct2BoundarySample(tallSemanticID: "")
                 samples += 1
                 visibleMinimum = min(visibleMinimum, sample.visibleRowCount)
+                minimumVisibleFraction = min(minimumVisibleFraction, sample.coverage.visibleRowFraction)
+                if sample.coverage.uncoveredBand {
+                    uncoveredBand += 1
+                    segmentUncoveredBand += 1
+                }
                 guard sample.visibleRowCount == 0 else { continue }
                 blank += 1
                 segmentBlank += 1
                 if frame >= settlingBoundaries { blankAfterSettle += 1 }
             }
             phaseBlanks.append("p\(segment):\(segmentBlank)")
+            phaseUncoveredBand.append("p\(segment):\(segmentUncoveredBand)")
         }
+        let bottom = harness.transcriptBottom()
+        let bottomRow = TranscriptWindowOracle.rows(in: harness.visibleRootView)
+            .filter(\.isOnScreen)
+            .max { $0.windowFrame.maxY < $1.windowFrame.maxY }
         print(
             "CT13-BLANK shape=\(shape) samples=\(samples) blankBoundaries=\(blank)/\(samples)"
                 + " blankAfterSettle=\(blankAfterSettle)"
                 + " blankPhases=\(phaseBlanks.joined(separator: ","))"
                 + " visibleRowsMinimum=\(visibleMinimum)"
+                + " minVisibleRowFraction=\(scalePoint(minimumVisibleFraction))"
+                + " uncoveredBandBoundaries=\(uncoveredBand)/\(samples)"
+                + " uncoveredBandPhases=\(phaseUncoveredBand.joined(separator: ","))"
+                + " bottomRow=\(bottomRow?.semanticID ?? "none")"
+                + " clearance=\(bottom.clearance.map { String(scalePoint($0)) } ?? "none")"
+                + " bandCovered=\(bottom.isBandCovered)"
         )
         return blank
     }
@@ -362,6 +387,8 @@ struct ChatTranscriptScaleMeasurementTests {
                 + " stepP95Ms=\(scalePoint(scalePercentile(sortedSteps, 0.95)))"
                 + " stepMaxMs=\(scalePoint(sortedSteps.last ?? 0))"
                 + " visibleRows=\(sample.visibleRowCount)"
+                + " clearance=\(harness.transcriptBottom().clearance.map { String(scalePoint($0)) } ?? "none")"
+                + " pinned=\(harness.isPinnedToBottom())"
                 + " contentHeight=\(scalePoint(sample.contentHeight))"
                 + " offsetY=\(scalePoint(sample.offsetY))"
                 + " residentMB=\(scaleMegabytes(scaleResidentMemoryBytes()))"
