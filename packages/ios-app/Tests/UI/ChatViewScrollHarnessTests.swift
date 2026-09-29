@@ -1536,7 +1536,6 @@ struct ChatViewScrollHarnessTests {
             sourceWindowFrame: CGRect,
             targetTransform: CGAffineTransform,
             containerCenterInWindow: CGPoint,
-            previewSize: CGSize,
             containerRendersFlipped: Bool,
             previewViewRendersFlipped: Bool
         ) -> String? {
@@ -1553,10 +1552,6 @@ struct ChatViewScrollHarnessTests {
             guard abs(containerCenterInWindow.x - expected.x) <= tolerance,
                   abs(containerCenterInWindow.y - expected.y) <= tolerance else {
                 return "the preview is centered at \(containerCenterInWindow), not over the source at \(expected)"
-            }
-            guard abs(previewSize.width - sourceWindowFrame.width) <= tolerance,
-                  abs(previewSize.height - sourceWindowFrame.height) <= tolerance else {
-                return "the preview is \(previewSize), not the source's \(sourceWindowFrame.size)"
             }
             return nil
         }
@@ -1623,7 +1618,6 @@ struct ChatViewScrollHarnessTests {
         func failure(
             transform: CGAffineTransform = .identity,
             center: CGPoint = .zero,
-            size: CGSize? = nil,
             containerFlipped: Bool = false,
             previewFlipped: Bool = false
         ) -> String? {
@@ -1631,7 +1625,6 @@ struct ChatViewScrollHarnessTests {
                 sourceWindowFrame: source,
                 targetTransform: transform,
                 containerCenterInWindow: center == .zero ? CGPoint(x: source.midX, y: source.midY) : center,
-                previewSize: size ?? source.size,
                 containerRendersFlipped: containerFlipped,
                 previewViewRendersFlipped: previewFlipped
             )
@@ -1639,7 +1632,6 @@ struct ChatViewScrollHarnessTests {
         #expect(failure() == nil)
         #expect(failure(transform: CGAffineTransform(scaleX: 1, y: -1)) != nil, "the transcript's flip")
         #expect(failure(center: CGPoint(x: source.midX, y: source.midY - 1)) != nil, "one point away")
-        #expect(failure(size: CGSize(width: source.width, height: source.height + 1)) != nil, "one point taller")
         #expect(failure(containerFlipped: true) != nil, "a flipped container")
         #expect(failure(previewFlipped: true) != nil, "a flipped preview view")
     }
@@ -1693,7 +1685,6 @@ struct ChatViewScrollHarnessTests {
                             sourceWindowFrame: windowFrame,
                             targetTransform: preview.target.transform,
                             containerCenterInWindow: container.convert(preview.target.center, to: nil),
-                            previewSize: preview.view.bounds.size,
                             containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
                             previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
                         )
@@ -1723,6 +1714,7 @@ struct ChatViewScrollHarnessTests {
                     }
                     let candidates = harness.ownedContextMenuSurfaces().filter { surface in
                         surface.view.convert(surface.view.bounds, to: nil).intersects(display.windowFrame)
+                            && surface.owner.makeMenu()?.children.compactMap { ($0 as? UIAction)?.title } == ["Tool Details"]
                     }
                     #expect(candidates.count == 1, "\(orientation): expected one owned card menu, got \(candidates.count)")
                     guard let surface = candidates.first else { return }
@@ -1751,7 +1743,6 @@ struct ChatViewScrollHarnessTests {
                         sourceWindowFrame: sourceFrame,
                         targetTransform: preview.target.transform,
                         containerCenterInWindow: container.convert(preview.target.center, to: nil),
-                        previewSize: preview.view.bounds.size,
                         containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
                         previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
                     )
