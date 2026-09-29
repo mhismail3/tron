@@ -240,8 +240,6 @@ const HTML_CHROME_ROLES = new Set(["navigation", "banner", "contentinfo", "searc
 const HTML_VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
 /** Elements whose content is text, not markup, until their own close tag. */
 const HTML_RAW_TEXT_TAGS = new Set(["script", "style", "textarea", "title"]);
-/** Tags whose text is a peer block, so a link-dense one can be dropped alone. */
-const HTML_BLOCK_TAGS = new Set(["p", "div", "li", "section", "article", "main", "header", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote", "table", "tr", "td", "th", "ul", "ol", "dl", "dd", "dt", "figure", "figcaption", "details", "summary", "body"]);
 const HTML_TOKEN_LIMIT = 4_000_000;
 
 type HtmlToken = {

@@ -25,15 +25,12 @@ import { recoverProviderSaveTime } from "./source-capture.js";
  */
 const homes: string[] = [];
 afterEach(async () => { await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true }))); });
-async function fixture(): Promise<KnowledgeStore> {
+async function fixture(): Promise<{ store: KnowledgeStore; home: string }> {
   const home = await mkdtemp(join(tmpdir(), "tron-save-time-")); homes.push(home);
-  return new KnowledgeStore(new TronWorkspace(home));
+  return { home, store: new KnowledgeStore(new TronWorkspace(home)) };
 }
-/** The content-addressed object directory for a store created by `fixture`. */
-const objectsDir = (store: KnowledgeStore) => {
-  const home = (store as unknown as { workspace: TronWorkspace }).workspace;
-  return join((home as unknown as { home: string }).home, "workspace", "state", "knowledge", "objects");
-};
+/** The content-addressed object directory under a fixture's workspace. */
+const objectsDir = (home: string) => join(home, "workspace", "state", "knowledge", "objects");
 const ITEM_ID = "846675565";
 const CREATED = "2024-09-03T06:22:40.426Z";
 const raindropItem = (overrides: Record<string, unknown> = {}) => ({ _id: Number(ITEM_ID), title: "Saved item", link: "https://example.com/post", created: CREATED, lastUpdate: "2026-04-13T18:00:34.580Z", collection: { $id: 111 }, ...overrides });
@@ -67,7 +64,7 @@ const read = (store: KnowledgeStore, id: string) => store.read(id, undefined, fa
 
 describe("provider save-time recovery", () => {
   it("recovers Raindrop's created time from retained provider evidence and leaves publication time alone (S13, S11)", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const source = await capture(store, { publishedAt: CREATED });
     const result = await recover(store, source.id);
     expect(result.status).toBe("recovered");
@@ -86,7 +83,7 @@ describe("provider save-time recovery", () => {
   });
 
   it("keeps an existing save time untouched (S3, S10)", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const source = await capture(store, { savedAt: "2025-05-05T00:00:00.000Z" });
     const first = await recover(store, source.id, source.revisionId, "save-time-replay");
     expect(first.status).toBe("present");
@@ -97,7 +94,7 @@ describe("provider save-time recovery", () => {
   });
 
   it("applies a replay of a completed recovery as one revision (S10)", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const source = await capture(store);
     const first = await recover(store, source.id, source.revisionId, "save-time-single-revision");
     expect(first.status).toBe("recovered");
@@ -111,7 +108,7 @@ describe("provider save-time recovery", () => {
   });
 
   it("refuses providers and records without a retained payload (S1, S2, S4)", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const manual = await capture(store, { provider: "manual", representation: false });
     expect((await recover(store, manual.id)).status).toBe("unsupported");
     const x = await capture(store, { provider: "x", payload: { id: "1234", text: "post", created_at: "2026-01-01T00:00:00.000Z" } });
@@ -123,14 +120,14 @@ describe("provider save-time recovery", () => {
   });
 
   it("refuses evidence belonging to another item (S5)", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const source = await capture(store, { payload: raindropItem({ _id: 999999999 }) });
     expect((await recover(store, source.id)).status).toBe("absent");
     expect((await read(store, source.id))?.content.sourceSavedAt).toBeUndefined();
   });
 
   it("never substitutes lastUpdate or capture time, and rejects nonsense instants (S6, S7)", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const noCreated = await capture(store, { payload: raindropItem({ created: undefined }) });
     expect((await recover(store, noCreated.id)).status).toBe("absent");
     expect((await read(store, noCreated.id))?.content.sourceSavedAt).toBeUndefined();
@@ -143,7 +140,7 @@ describe("provider save-time recovery", () => {
   });
 
   it("resolves the current item identity when several representations are retained", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const source = await capture(store);
     const foreign = await store.putObject(new TextEncoder().encode(JSON.stringify(raindropItem({ _id: 111111111 }))), "application/json");
     const current = await read(store, source.id);
@@ -154,12 +151,12 @@ describe("provider save-time recovery", () => {
   });
 
   it("treats an unreadable or oversized retained object as absent (S8)", async () => {
-    const store = await fixture();
+    const { store, home } = await fixture();
     const unreadable = await capture(store, { payload: raindropItem() });
     const hash = unreadable.content.representations![0]!.object.hash;
     // A retained hash whose bytes are gone must not produce a save time. The
     // object store is content addressed, so removing it is exactly that state.
-    await rm(join(unreadable.content.origins ? "" : "", objectsDir(store), hash));
+    await rm(join(objectsDir(home), hash));
     expect((await recover(store, unreadable.id)).status).toBe("absent");
     const oversized = await capture(store, { payload: { ...raindropItem(), padding: "x".repeat(300_000) } });
     const outcome = await recover(store, oversized.id);
@@ -168,7 +165,7 @@ describe("provider save-time recovery", () => {
   });
 
   it("fences a stale expected revision and an excluded source (S9, S12)", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const source = await capture(store);
     const staleRevision = source.revisionId;
     const touched = await store.captureSource({ commandId: `save-time-touch-${randomUUID()}`, expectedRevision: staleRevision, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, content: { ...source.content, text: "body after a later capture" } } });
@@ -182,7 +179,7 @@ describe("provider save-time recovery", () => {
   });
 
   it("uses caller-supplied bytes only for a pending source, bound to the listed hash (S4)", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const payload = new TextEncoder().encode(JSON.stringify(raindropItem()));
     const object = await store.putObject(payload, "application/json");
     const pending = await store.captureSource({ commandId: `save-time-pending-${randomUUID()}`, record: {
@@ -210,7 +207,7 @@ describe("provider save-time recovery", () => {
   });
 
   it("reports an unknown source as absent without a write", async () => {
-    const store = await fixture();
+    const { store } = await fixture();
     const result = await recover(store, "00000000-0000-4000-8000-000000000000");
     expect(result.status).toBe("absent");
   });
