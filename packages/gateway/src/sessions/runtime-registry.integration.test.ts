@@ -101,11 +101,15 @@ function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
  * a pass that never ends. */
 async function discoverExtensionArtifactsUntil(registry: RuntimeRegistry, settled: () => boolean = () => true): Promise<void> {
   const state = registry as unknown as { artifactDiscoveryInFlight: boolean };
-  const deadline = Date.now() + 5_000;
+  // The budget counts only this helper's own passes: time spent waiting out an
+  // interval pass does not spend it.
+  let ownPassMs = 0;
   do {
     while (state.artifactDiscoveryInFlight) await new Promise((resolve) => setTimeout(resolve, 10));
+    const startedAt = Date.now();
     await (registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
-  } while (!settled() && Date.now() < deadline);
+    ownPassMs += Date.now() - startedAt + 10;
+  } while (!settled() && ownPassMs < 5_000);
   if (!settled()) throw new Error("extension artifact discovery did not settle");
 }
 
