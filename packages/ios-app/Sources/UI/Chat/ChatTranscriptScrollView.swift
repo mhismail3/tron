@@ -991,7 +991,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                                 terminalRowOwnsTailAffordance,
                             installed: installed
                         )
-                        // Temporary profile control: omit only each row's counter-flip.
+                        .chatTranscriptOrientation(orientation)
                         .chatTranscriptVoiceOverOrder(
                             orientation,
                             spinePosition: spinePosition
@@ -1006,6 +1006,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         // Older history appends at the far end, where an estimate
                         // only sizes the scroll range: a page load moves nothing
                         // on screen.
+                        .chatTranscriptOrientation(orientation)
                         .chatTranscriptVoiceOverOrder(
                             orientation,
                             spinePosition: physicalRows.count
