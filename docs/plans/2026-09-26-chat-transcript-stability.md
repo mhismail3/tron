@@ -3262,3 +3262,19 @@ Lane cleanup completed with `scripts/tron-ios-test lane-remove ct23b`;
 `status --all` confirms no ct23b lane and no booted simulator. No other lane
 was removed or released by hand. Retained run/profile roots and live-worktree
 build products are separate from the deleted lane's simulator/state.
+
+
+### CT-23 device evaluation build · 2026-09-30 · worker lane ct23b
+
+User-approved evaluation only; CT-23 remains blocked for production cutover.
+Implementation and validation are owned in `/private/tmp/tron-ct23b`; no Gateway
+lifecycle, device installation, or upstream Git action is authorized.
+
+- Step 1: guard the viewport-mode release probe with `HOSTED_TEST`, matching its
+  declaration and the adjacent release path. Non-hosted LocalDevice and Release
+  compilation are the regression gates, to run after the evaluation switch lands.
+- Step 2: owner-coordinate prepend excursion and terminal-ID position corrections
+  are next; existing page-barrier and full origin harness are the regressions.
+- Step 3: temporary LocalDevice-only launch preference and diagnostics toggle;
+  hosted environment selection and Release's current path must remain intact.
+- Evidence and user-owned install/checklist handoff follow below after clean commits.

@@ -2848,7 +2848,9 @@ struct ChatView: View {
 
     @MainActor
     private func applyViewportMode(_ mode: ChatViewportMode) {
+        #if HOSTED_TEST
         hostedProbe?.recordTargetRelease()
+        #endif
         guard mode == .anchored || scrollCoordinator.canInstallPersistentBottomPosition else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
