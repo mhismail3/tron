@@ -172,30 +172,32 @@ struct ChatCompactPillSurface<Content: View>: View {
             style: .continuous
         )
         let surfaceAccent = accentOverride ?? tone.surfaceColor
-        switch material {
-        case .glass:
-            content
-                .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .contentShape(shape)
-                .glassEffect(
-                    .regular.tint(surfaceAccent.opacity(0.18)).interactive(interactive),
-                    in: shape
-                )
-        case .flat:
-            content
-                .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .contentShape(shape)
-                .background(surfaceAccent.opacity(0.10), in: shape)
-                .overlay(shape.stroke(surfaceAccent.opacity(0.30), lineWidth: 0.5))
-        }
+        let isGlass = material == .glass
+        // One structure at every material: a value change from flat to glass
+        // must not remount the pill (a remount showed the flat frame before the
+        // measured glass one). The unused half of each pair is inert — a clear
+        // background and stroke, or an identity glass effect.
+        content
+            .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .contentShape(shape)
+            .background(surfaceAccent.opacity(isGlass ? 0 : 0.10), in: shape)
+            .overlay(shape.stroke(surfaceAccent.opacity(isGlass ? 0 : 0.30), lineWidth: 0.5))
+            .glassEffect(
+                isGlass
+                    ? .regular.tint(surfaceAccent.opacity(0.18)).interactive(interactive)
+                    : .identity,
+                in: shape
+            )
     }
 }
 
 private struct ChatCompactPillInteractionModifier: ViewModifier {
     let accessibilityLabel: String
     let accessibilityValue: String?
+    /// Whether the pill is a control. A pill that owns no action keeps its own
+    /// accessibility element and label without the button trait.
+    let addsButtonTrait: Bool
     let action: () -> Void
 
     func body(content: Content) -> some View {
@@ -206,7 +208,7 @@ private struct ChatCompactPillInteractionModifier: ViewModifier {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityLabel)
             .accessibilityValue(accessibilityValue ?? "")
-            .accessibilityAddTraits(.isButton)
+            .accessibilityAddTraits(addsButtonTrait ? .isButton : [])
             .accessibilityAction { action() }
     }
 }
@@ -215,11 +217,13 @@ extension View {
     func chatCompactPillInteraction(
         accessibilityLabel: String,
         accessibilityValue: String? = nil,
+        addsButtonTrait: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         modifier(ChatCompactPillInteractionModifier(
             accessibilityLabel: accessibilityLabel,
             accessibilityValue: accessibilityValue,
+            addsButtonTrait: addsButtonTrait,
             action: action
         ))
     }

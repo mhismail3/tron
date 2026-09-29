@@ -34,6 +34,9 @@ struct ChatNotificationView: View {
     @State private var showingDetail = false
     @State private var detailID = UUID()
     @State private var titleMeasurement: ChatCompactPillTitleMeasurement?
+    #if HOSTED_TEST
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+    #endif
 
     private var showsDetailAction: Bool {
         presentation.hasDetailSheet
@@ -45,40 +48,51 @@ struct ChatNotificationView: View {
     }
 
     var body: some View {
-        Group {
-            if showsDetailAction {
-                pill
-                    .chatCompactPillInteraction(
-                        accessibilityLabel: accessibilityLabel,
-                        action: {
-                            detailID = UUID()
-                            model.lifecycleRecordDiagnostic(event: "detail.tap", message: "detailID=\(detailID) sourceBytes=\(presentation.body?.utf8.count ?? 0)")
-                            showingDetail = true
-                        }
-                    )
-                    // Preserve the 44-point semantic row target without making
-                    // its empty corners compete with the glass surface gesture.
-                    .frame(minWidth: 44, minHeight: 44)
-                    .accessibilityHint(presentation.expandsOnTruncation ? "Shows the full error message" : "Shows details")
-            } else {
-                pill
+        // One structure at every value. A truncated notice's material is decided
+        // by a measurement that arrives after the first layout pass; switching
+        // between an interactive glass pill and a plain one remounted the pill
+        // and showed one flat frame before the measured glass one. Hit testing,
+        // the button trait and the 44-point target are chosen by the value
+        // instead.
+        pill
+            .chatCompactPillInteraction(
+                accessibilityLabel: accessibilityLabel,
+                addsButtonTrait: showsDetailAction,
+                action: showDetail
+            )
+            .allowsHitTesting(showsDetailAction)
+            .frame(
+                minWidth: showsDetailAction ? 44 : 0,
+                minHeight: showsDetailAction ? 44 : 0
+            )
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+            .contentTransition(.interpolate)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityHint(showsDetailAction
+                ? (presentation.expandsOnTruncation ? "Shows the full error message" : "Shows details")
+                : "")
+            .onPreferenceChange(ChatCompactPillTitleMeasurementKey.self) { measurements in
+                let rendered = measurements.first(where: { $0.renderedWidth > 0 })?.renderedWidth
+                let intrinsic = measurements.first(where: { $0.intrinsicWidth > 0 })?.intrinsicWidth
+                guard let rendered, let intrinsic else { return }
+                let next = ChatCompactPillTitleMeasurement(renderedWidth: rendered, intrinsicWidth: intrinsic)
+                guard titleMeasurement != next else { return }
+                titleMeasurement = next
             }
-        }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
-        .contentTransition(.interpolate)
-        .accessibilityLabel(accessibilityLabel)
-        .onPreferenceChange(ChatCompactPillTitleMeasurementKey.self) { measurements in
-            let rendered = measurements.first(where: { $0.renderedWidth > 0 })?.renderedWidth
-            let intrinsic = measurements.first(where: { $0.intrinsicWidth > 0 })?.intrinsicWidth
-            guard let rendered, let intrinsic else { return }
-            let next = ChatCompactPillTitleMeasurement(renderedWidth: rendered, intrinsicWidth: intrinsic)
-            guard titleMeasurement != next else { return }
-            titleMeasurement = next
-        }
-        .tronManagedSheet(
-            isPresented: $showingDetail,
-            identity: "chat.transcript-event-detail"
-        ) { detailSheet }
+            .tronManagedSheet(
+                isPresented: $showingDetail,
+                identity: "chat.transcript-event-detail"
+            ) { detailSheet }
+    }
+
+    private func showDetail() {
+        guard showsDetailAction else { return }
+        detailID = UUID()
+        model.lifecycleRecordDiagnostic(
+            event: "detail.tap",
+            message: "detailID=\(detailID) sourceBytes=\(presentation.body?.utf8.count ?? 0)"
+        )
+        showingDetail = true
     }
 
     private var pill: some View {
@@ -97,6 +111,13 @@ struct ChatNotificationView: View {
                 detailStyle: presentation.hasDetailSheet ? .summary : .status
             )
         }
+        #if HOSTED_TEST
+        // The pill's own identity, so a hosted test can see whether the
+        // truncation measurement switched its structure.
+        .background {
+            ChatHostedRowIdentityProbe(id: presentation.id, recorder: hostedRecorder?.recorder)
+        }
+        #endif
     }
 
     private var accessibilityLabel: String {

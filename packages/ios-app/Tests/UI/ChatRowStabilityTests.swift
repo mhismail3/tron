@@ -211,6 +211,43 @@ struct ChatRowStabilityTests {
             }
         }
     }
+
+    @Test("a truncated error notice keeps one pill structure across its measurement")
+    func truncatedNoticeKeepsOnePillStructure() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_327).openingTail(targetEncodedBytes: 10_000)
+            snapshot.transcript.append(try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: try JSONSerialization.data(withJSONObject: assistantMessage(
+                    id: "stability-notice-reply",
+                    content: [[
+                        "id": "stability-notice-reply:text",
+                        "ordinal": 0,
+                        "type": "text",
+                        "text": "A reply that failed after it started.",
+                    ]],
+                    errorMessage: RowStabilityFixture.truncatedError
+                ))
+            ))
+            snapshot.transcriptTotal = (snapshot.transcriptTotal ?? snapshot.transcript.count - 1) + 1
+            let initial = snapshot
+            try await withStabilityHarness(snapshot: initial) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.nativeRows.contains { $0.semanticID == "stability-notice-reply" }
+                }
+                try await driveBoundaries(12, harness: harness)
+                let observation = harness.probeObservation
+                // The notice's title is truncated, so the pill is interactive
+                // and glass; the measurement that decides it arrives after the
+                // first layout pass and must not switch the pill's structure.
+                #expect(
+                    observation.rowIdentityInstanceCounts["embedded-notice"] == 1,
+                    "the truncation measurement remounted the notice pill"
+                )
+            }
+        }
+    }
 }
 
 // MARK: - The journey's phases and report

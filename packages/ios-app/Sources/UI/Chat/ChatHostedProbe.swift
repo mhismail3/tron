@@ -86,6 +86,25 @@ struct ChatHostedRowIdentityProbe: View {
     }
 }
 
+/// The hosted recorder a rendered row can reach, so a `HOSTED_TEST`-only
+/// identity probe can live inside the row content that owns the structure under
+/// test (the notification pill, for instance) without every product view taking
+/// a recorder parameter.
+struct ChatHostedRecorderBox: @unchecked Sendable {
+    let recorder: (any ChatTranscriptHostedRecording)?
+}
+
+private struct ChatHostedRecorderKey: EnvironmentKey {
+    static let defaultValue: ChatHostedRecorderBox? = nil
+}
+
+extension EnvironmentValues {
+    var chatHostedRecorder: ChatHostedRecorderBox? {
+        get { self[ChatHostedRecorderKey.self] }
+        set { self[ChatHostedRecorderKey.self] = newValue }
+    }
+}
+
 struct ChatHostedScrollState: Sendable {
     let isDetached: Bool
     let hasUnread: Bool

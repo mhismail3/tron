@@ -994,3 +994,40 @@ pass only through eager-only repairs, stop and report.
   The test stays as a regression guard on that invariant; F9's own proof rests on
   the source argument above and the handoff's parity scenario.
 - Changes: `ChatTranscriptScrollView.swift`, `ChatRowStabilityTests.swift`.
+
+### CT-27 stage A5 (F10) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: the notification pill is one structure at every value.
+  `ChatNotificationView.body` no longer switches `Group { if showsDetailAction }`
+  between an interactive pill and a plain one: hit testing, the 44-point target
+  and the button trait are chosen by the value on the same view, and the detail
+  action is guarded inside the tap handler. `ChatCompactPillSurface` no longer
+  switches on its material: it applies one structure with the flat background and
+  stroke driven to zero opacity when glass and `Glass.identity` when flat, so a
+  flat-to-glass change is a value change and cannot remount the pill.
+  `ChatCompactPillInteractionModifier` gained `addsButtonTrait` (default true) so
+  a pill that owns no action keeps its own accessibility element without the
+  button trait. A `HOSTED_TEST`-only environment box carries the hosted recorder
+  to `ChatNotificationView.pill`, where `ChatHostedRowIdentityProbe` records the
+  pill's own identity.
+- Evidence (lane ct27):
+  - `ChatRowStabilityTests` 4/4 (3.6 s), including
+    `truncatedNoticeKeepsOnePillStructure`: the truncated error notice's pill
+    records one identity across its truncation measurement.
+  - Negative control: with `ChatNotificationView.body` restored to the
+    `Group { if showsDetailAction }` form (and the rest of the change kept), the
+    same test fails with `rowIdentityInstanceCounts["embedded-notice"] == 2` —
+    the oracle catches the remount the finding describes.
+  - Parity gate 7/7 (47.8 s) with the pill, surface and probe changes.
+- Deviations: the first committed frame of a *truncated* notice is still the flat
+  material, because truncation is only known from the measurement the first
+  layout pass produces; what this change removes is the remount and the second
+  structure. Making the first frame final would require deciding a
+  `expandsOnTruncation` notice's material from data instead of its measured
+  title, which would turn a non-truncated provider-error notice from a flat,
+  non-interactive pill into a glass, tappable one — a visible product change this
+  task does not ask for. The audit's "snapshot the first two frames" oracle
+  therefore is not used; the identity probe replaces it.
+- Changes: `ChatCompactPill.swift`, `ChatTranscriptEventViews.swift`,
+  `ChatTranscriptScrollView.swift`, `ChatHostedProbe.swift`,
+  `ChatRowStabilityTests.swift`.

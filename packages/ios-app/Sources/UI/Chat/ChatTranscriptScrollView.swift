@@ -1179,6 +1179,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .environment(\.displayTranscriptReady, isReady && permitsAsynchronousContent)
         .chatStableTranscriptUpdates(projectionIdentity: installed.tag)
         #if HOSTED_TEST
+        .environment(\.chatHostedRecorder, ChatHostedRecorderBox(recorder: hostedRecorder))
         // The row content's own identity, so a hosted test can see whether an
         // admission or a handoff switched it instead of reading row state.
         .background {
