@@ -15,7 +15,11 @@ const COMMAND_RECEIPT_MAX_BYTES = 1_048_576 + 4 * 1_024;
 const COMMAND_RECEIPT_MAX_ENTRIES = 32_768;
 const COMMAND_RECEIPT_MAX_AGGREGATE_BYTES = 64 * 1_048_576;
 const COMMAND_RECEIPT_MAX_AGE_MS = 24 * 60 * 60_000;
-const COMMAND_RECEIPT_PRUNE_INTERVAL_MS = 60_000;
+// The cadence `gateway-main.ts` registers this store's prune with the
+// background-work scheduler on. Admission no longer prunes on its own: a
+// request path never walks the receipt directory. The capacity boundary below
+// still forces one exact pass before it rejects a command.
+export const COMMAND_RECEIPT_PRUNE_INTERVAL_MS = 60_000;
 // Editor changes are superseded by their revisioned successors. Retain their
 // idempotency response long enough to cover reconnect/retry, but not for the
 // full command window: sustained typing otherwise exhausts shared capacity.
@@ -81,6 +85,14 @@ export class CommandReceiptStore {
     mutex: AsyncMutex;
     users: number;
     preserveReceiptUntilDrain: boolean;
+    /** True from the start of a receipt write until that write's accounting has
+     * run, so a concurrent rebuild knows the disk state of this receipt is not
+     * yet authoritative. */
+    unaccountedWrite: boolean;
+    /** Bytes this lane's receipt contributes to `inventory`; `undefined` until
+     * the pending write's accounting has run. A rebuild credits this value
+     * instead of the file while `unaccountedWrite` holds. */
+    creditedBytes: number | undefined;
   }>();
   private readonly inventoryMutex = new AsyncMutex();
   private readonly maximumEntries: number;
@@ -88,7 +100,6 @@ export class CommandReceiptStore {
   private readonly maximumAgeMs: number;
   private reservedCompletionBytes = 0;
   private inventory: CommandReceiptUsage | undefined;
-  private nextPruneAt = 0;
 
   constructor(
     tronHome: string,
@@ -158,6 +169,24 @@ export class CommandReceiptStore {
     let entries = 0;
     for (const name of names) {
       if (!isCanonicalReceiptName(name)) continue;
+      // A receipt write runs outside the mutex, so the disk may already carry
+      // its result while its accounting step has not run yet. Credit what that
+      // step will account for instead of the file, so its change lands on a
+      // total that has not counted the receipt yet: the pending size once the
+      // lane has recorded one, and nothing at all before that (the pending
+      // receipt, if already renamed, is not evidence the accounting has seen).
+      // Reading the file here would count it twice, and discarding these totals
+      // instead would make every writing command force the next admission to
+      // rescan this directory. The first 43 characters are the command key both
+      // receipt name patterns are built from (`isOwnedTemporaryReceiptName`).
+      const lane = this.lanes.get(name.slice(0, 43));
+      if (lane?.unaccountedWrite) {
+        if (lane.creditedBytes !== undefined) {
+          entries += 1;
+          bytes += lane.creditedBytes;
+        }
+        continue;
+      }
       try {
         const metadata = await lstat(join(this.directory, name));
         if (!metadata.isFile()) continue;
@@ -188,10 +217,11 @@ export class CommandReceiptStore {
     this.inventory.bytes -= bytes;
   }
 
-  private async pruneUnlocked(maxAgeMs: number, force = false): Promise<void> {
+  /** Receipt files in one directory, read to prove which are expired. Only the
+   * scheduler's job and the capacity boundary call this, so every call is one
+   * exact pass; there is no cheaper earlier exit. */
+  private async pruneUnlocked(maxAgeMs: number): Promise<void> {
     const now = Date.now();
-    if (!force && now < this.nextPruneAt) return;
-    this.nextPruneAt = now + COMMAND_RECEIPT_PRUNE_INTERVAL_MS;
     let names: string[];
     try { names = await readdir(this.directory); }
     catch (error) {
@@ -202,6 +232,15 @@ export class CommandReceiptStore {
     for (const name of names) {
       const path = join(this.directory, name);
       if (isOwnedTemporaryReceiptName(name)) {
+        // A lane is registered before its command writes and removed only after
+        // every user of that command finishes, so it is present for both the
+        // pending and the completed write. A temporary whose lane still exists
+        // is a publication in flight: removing it would fail that write with
+        // ENOENT after its operation already ran. Only crash leftovers, whose
+        // lane is gone, are scavenged. The first 43 characters are the command
+        // key both receipt name patterns are built from
+        // (`isOwnedTemporaryReceiptName`).
+        if (this.lanes.has(name.slice(0, 43))) continue;
         await rm(path, { force: true });
         changed = true;
         continue;
@@ -228,7 +267,9 @@ export class CommandReceiptStore {
       }
     }
     // A prune may remove arbitrary pre-existing evidence. Rebuild once on the
-    // next admission instead of carrying a potentially stale cached total.
+    // next admission instead of carrying a potentially stale cached total. It
+    // is the only step that invalidates the cache, so a rebuild can only be
+    // caused by a prune that removed something, never by a write in flight.
     if (changed) this.inventory = undefined;
   }
 
@@ -247,6 +288,8 @@ export class CommandReceiptStore {
       mutex: new AsyncMutex(),
       users: 0,
       preserveReceiptUntilDrain: false,
+      unaccountedWrite: false,
+      creditedBytes: undefined,
     };
     lane.users += 1;
     this.lanes.set(key, lane);
@@ -263,9 +306,13 @@ export class CommandReceiptStore {
         };
         const pendingBytes = persistedReceiptBytes(pending);
         let reserved = false;
-        const recorded = await this.inventoryMutex.run(async () => {
+        // Admission is accounting only. `inventoryMutex` guards the entry/byte
+        // inventory and the inflight byte reservations; the durable write is a
+        // per-command lane's own slow step and runs outside it. Holding the
+        // process-wide mutex across the fsync serialized every other command's
+        // receipt write behind one command's disk write.
+        const admission = await this.inventoryMutex.run(async () => {
           await mkdir(this.directory, { recursive: true, mode: 0o700 });
-          await this.pruneUnlocked(this.maximumAgeMs, this.maximumAgeMs === 0);
           const existing = await this.readReceipt(path);
           if (existing) {
             if (existing.identityHash !== identityHash || existing.method !== method || existing.commandId !== commandId) {
@@ -280,7 +327,7 @@ export class CommandReceiptStore {
             // A capacity boundary is also an admission boundary: force one
             // exact cleanup pass before rejecting, so a just-expired
             // high-frequency receipt cannot unnecessarily block the command.
-            await this.pruneUnlocked(this.maximumAgeMs, true);
+            await this.pruneUnlocked(this.maximumAgeMs);
             usage = await this.inventoryUsage();
             if (usage.entries >= this.maximumEntries
               || usage.bytes + this.reservedCompletionBytes + COMMAND_RECEIPT_MAX_BYTES > this.maximumAggregateBytes) {
@@ -291,20 +338,40 @@ export class CommandReceiptStore {
               throw new GatewayError("busy", "Command receipt capacity is full; completed receipts expire, but unresolved outcomes retain replay protection and require operator reconciliation", true);
             }
           }
+          // The reservation covers this receipt's bytes until they are in the
+          // inventory, so a concurrent admission still counts them. It is
+          // released only with the completed receipt, which may be larger.
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
           reserved = true;
-          try {
-            await this.writeReceipt(path, pending);
-            this.recordNewReceipt(pendingBytes);
-            lane.preserveReceiptUntilDrain = true;
-          } catch (error) {
-            this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
-            reserved = false;
-            throw error;
-          }
           return { exists: false } as const;
         });
-        if (recorded.exists) return recorded.result;
+        if (admission.exists) return admission.result;
+        // This write's accounting is the only step that adds its bytes to the
+        // totals, so the lane reports it as unaccounted before the publication
+        // can be seen by a concurrent admission's rebuild. A failed write
+        // clears that again: whatever reached the disk is then the truth.
+        lane.unaccountedWrite = true;
+        try {
+          await this.writeReceipt(path, pending);
+        } catch (error) {
+          await this.inventoryMutex.run(async () => {
+            lane.unaccountedWrite = false;
+            if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
+            reserved = false;
+          });
+          throw error;
+        }
+        // A duplicate lane keeps its completed receipt until every duplicate
+        // drains, so a concurrent prune cannot delete the fence the next
+        // duplicate is about to read. Pending receipts are never pruned by age,
+        // so the fence only has to exist once this command has a receipt to
+        // preserve.
+        lane.preserveReceiptUntilDrain = true;
+        await this.inventoryMutex.run(async () => {
+          lane.creditedBytes = pendingBytes;
+          lane.unaccountedWrite = false;
+          this.recordNewReceipt(pendingBytes);
+        });
 
         let result: JsonValue;
         try {
@@ -321,6 +388,12 @@ export class CommandReceiptStore {
               if (!uncertain) {
                 await rm(path, { force: true });
                 this.removeReceipt(pendingBytes);
+                // The receipt is gone from the disk and from the totals, so the
+                // lane must stop reporting a credit for it. Leaving the removed
+                // size behind would let a rebuild credit the next write on this
+                // lane from that stale value and then count that write's own
+                // accounting again.
+                lane.creditedBytes = undefined;
               }
             } finally {
               if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
@@ -338,20 +411,29 @@ export class CommandReceiptStore {
           });
           throw outcomeUnknown("Successful command receipt exceeds its bounded capacity; refresh authoritative state instead of replaying");
         }
+        lane.unaccountedWrite = true;
         try {
-          await this.inventoryMutex.run(async () => {
-            await this.writeReceipt(path, completed);
-            this.replaceReceiptBytes(pendingBytes, completedBytes);
-            if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
-            reserved = false;
-          });
+          await this.writeReceipt(path, completed);
         } catch (error) {
           await this.inventoryMutex.run(async () => {
+            lane.unaccountedWrite = false;
             if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
             reserved = false;
           });
           throw error;
         }
+        await this.inventoryMutex.run(async () => {
+          // The exact persisted size replaces the pending estimate in the same
+          // step that releases the reservation that covered it. A rebuild that
+          // landed during the write credited this lane's pending size rather
+          // than the file (see `inventoryUsage`), so that difference is exactly
+          // what is left to apply here.
+          lane.creditedBytes = completedBytes;
+          lane.unaccountedWrite = false;
+          this.replaceReceiptBytes(pendingBytes, completedBytes);
+          if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
+          reserved = false;
+        });
         return result;
       });
     } finally {
@@ -362,7 +444,7 @@ export class CommandReceiptStore {
 
   async prune(maxAgeMs = this.maximumAgeMs): Promise<void> {
     await this.inventoryMutex.run(async () => {
-      await this.pruneUnlocked(maxAgeMs, true);
+      await this.pruneUnlocked(maxAgeMs);
     });
   }
 }

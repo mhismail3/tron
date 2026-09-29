@@ -141,6 +141,18 @@ export class AutomationScheduler {
           ? await this.executor.recover(record, run)
           : { state: "outcomeUnknown", reason: "gateway-restarted-without-terminal-evidence" };
       } catch (error) {
+        if (error instanceof GatewayError && error.retryable && error.diagnosticReason === "catalog_not_ready") {
+          // The catalog owner has not published a cut yet, so this run's outcome
+          // cannot be decided: committing one would clear the run marker without
+          // evidence and lose the session's record. Leave the record untouched
+          // for a later pass or the next restart.
+          this.onDiagnostic(
+            `Automation recovery deferred until the session catalog is ready: ${error.message}`,
+            record.id,
+            run.runId,
+          );
+          continue;
+        }
         result = {
           state: "outcomeUnknown",
           reason: "recovery-failed",

@@ -1,0 +1,5 @@
+{
+  "reason": "The LAN endpoint's pin (E-3b): the Gateway advertises this value with its endpoints, and the phone compares the certificate the LAN leg serves against it. Both implementations must derive it identically - standard base64 of SHA-256 over the certificate's public key as the raw uncompressed X9.63 point (0x04 || X || Y) - or a paired phone can never admit the LAN leg. The Gateway test (lan-endpoint.integration.test.ts) and the phone test (GatewayProtocolContractTests.swift) both assert their own implementation against this certificate.",
+  "certificatePem": "-----BEGIN CERTIFICATE-----\nMIIBLjCB1AIJAL1E3d0F4aUHMAoGCCqGSM49BAMCMB8xHTAbBgNVBAMMFHRyb24t\nbGFuLXBpbi1maXh0dXJlMB4XDTI2MDkyODIxMjIwOVoXDTM2MDkyNTIxMjIwOVow\nHzEdMBsGA1UEAwwUdHJvbi1sYW4tcGluLWZpeHR1cmUwWTATBgcqhkjOPQIBBggq\nhkjOPQMBBwNCAASlN2eKpf6mVIWGqSGCykYh9MQ3Z3MZg4WK8q76NFerFzwuKiwt\nHPXCNApdtjhcQOsjgk5L/sGQBM4DvmIBUZkaMAoGCCqGSM49BAMCA0kAMEYCIQCq\nhZYOu8eiKzMPzMGoRdqjqIt8cNVGk+gqmcotZieYlQIhAM/rc60RcJBmZmVhqSkS\nRfd0S5FB5/HSB5mX/Fq8iWLR\n-----END CERTIFICATE-----\n",
+  "pin": "JEmgCK6cjn6zQe6FLvuOu2GErCFbEldD4cViMU8odVc="
+}

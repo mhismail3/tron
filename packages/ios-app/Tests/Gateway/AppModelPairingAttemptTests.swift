@@ -200,6 +200,47 @@ struct AppModelPairingAttemptTests {
         }
     }
 
+    @Test("a path hint cannot park over the pairing that owns the connect")
+    func pathHintDuringPairingDoesNotPark() async throws {
+        try await withFixture(ids: [uuid(1)]) { fixture in
+            // A selected gateway is what makes this window reachable: the hint
+            // can only park a paired app, and pairing a replacement is when the
+            // pairing owns the connect.
+            let existing = GatewayProfile(
+                id: "existing-profile",
+                label: "Existing Mac",
+                host: "existing.gateway.test",
+                port: 9_847,
+                machineId: "existing-profile",
+                deviceId: "existing-device"
+            )
+            fixture.defaults.set(
+                try JSONEncoder.gateway.encode([existing]), forKey: "gatewayProfiles.v1"
+            )
+            fixture.defaults.set(existing.id, forKey: "selectedGateway.v1")
+            try fixture.store.reload()
+
+            let pairing = fixture.startPairing(self.firstInvitation)
+            try await fixture.http.waitForRequests(1)
+            #expect(fixture.model.connectionState == .connecting)
+            // The route goes away while the pairing is enrolling. Parking would
+            // publish `.reconnecting` over the pairing's `.connecting`, and the
+            // pairing's own connect returns silently on that state mismatch.
+            fixture.model.lifecycleNotePathHint(satisfied: false)
+            for _ in 0..<20 { await Task.yield() }
+            #expect(fixture.model.connectionState == .connecting)
+
+            try await fixture.http.succeed(
+                request: 0, machineID: "accepted-machine", token: "accepted-token"
+            )
+            try await fixture.socket.waitUntilSent(count: 1)
+            #expect(fixture.socketFactory.requests.count == 1)
+            await fixture.socket.enqueue(helloFrame())
+            try await valueOfOwnedTask(pairing)
+            #expect(fixture.commit.saved.map(\.token) == ["accepted-token"])
+        }
+    }
+
     @Test("the event listener does not retain AppModel or GatewayClient after owner release")
     func eventListenerOwnerRelease() {
         weak var weakModel: AppModel?
@@ -302,7 +343,7 @@ struct AppModelPairingAttemptTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
     }
 }
 

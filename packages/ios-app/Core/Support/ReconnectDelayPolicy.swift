@@ -11,12 +11,14 @@ package struct ReconnectDelayPolicy: Sendable {
     )
 
     package let initialSeconds: Double
-    let multiplier: Double
-    let maximumSeconds: Double
+    /// Read by the dashboard pool, which builds its own deterministic curves
+    /// from the selected profile's progression.
+    package let multiplier: Double
+    package let maximumSeconds: Double
     let jitterFraction: Double
     private let nextUnitInterval: @Sendable () -> Double
 
-    init(
+    package init(
         initialSeconds: Double = 2,
         multiplier: Double = 1.7,
         maximumSeconds: Double = 15,
@@ -62,7 +64,7 @@ package struct ReconnectDelayPolicy: Sendable {
 @MainActor
 package final class GatewayReconnectSchedule {
     private let clock: MonotonicClock
-    private let delayPolicy: ReconnectDelayPolicy
+    private var delayPolicy: ReconnectDelayPolicy
     private var nominalDelay: Double
     private var pending: Task<Void, Never>?
     private var continuation: CheckedContinuation<Bool, Never>?
@@ -96,6 +98,25 @@ package final class GatewayReconnectSchedule {
         guard continuation != nil else { return }
         pending?.cancel()
         resume(true)
+    }
+
+    /// A path change re-routes the next attempt (C-3): cancel the pending wait
+    /// so the loop attempts at once, and restart the curve so the new path's
+    /// first retry is the base interval rather than the interval the old path's
+    /// failures had grown to. Repeated failures on an unchanged path keep the
+    /// capped, jittered curve `accelerate()` leaves alone.
+    package func restartForPathChange() {
+        accelerate()
+        nominalDelay = delayPolicy.initialSeconds
+    }
+
+    /// Replaces the curve this schedule follows from its next wait on, keeping
+    /// the nominal delay already reached. An owner whose curve depends on how
+    /// far a run of failures has gone (the dashboard pool escalates after a
+    /// few) uses this so the switch neither restarts at the base interval nor
+    /// shortens the wait it is in the middle of growing.
+    package func adopt(delayPolicy: ReconnectDelayPolicy) {
+        self.delayPolicy = delayPolicy
     }
 
     package func reset() {

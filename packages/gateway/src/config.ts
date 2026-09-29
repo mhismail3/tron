@@ -29,6 +29,11 @@ export interface GatewayConfig {
   readonly maxLiveRuntimes: number;
   readonly maxOutboundBytes: number;
   readonly maxSynchronizationBytes: number;
+  /** The second, TLS-only listener for the private LAN (E-3a). */
+  readonly lanEndpoint: {
+    readonly enabled: boolean;
+    readonly stateDirectory: string;
+  };
   /** Maintainer-owned product endpoint. It is never accepted from mobile or tool input. */
   readonly pushServiceOrigin?: string;
 }
@@ -70,6 +75,15 @@ function parsePort(raw: string | undefined): number {
     throw new GatewayError("invalid_request", "Gateway port must be between 1 and 65535");
   }
   return port;
+}
+
+/** The LAN endpoint's kill switch. Off until E-3d sets the release default, so
+ * a Gateway without the setting behaves exactly as it did before E-3a. */
+function parseLanEndpointEnabled(raw: string | undefined): boolean {
+  if (raw === undefined) return false;
+  if (raw === "on") return true;
+  if (raw === "off") return false;
+  throw new GatewayError("invalid_request", "TRON_GATEWAY_LAN_ENDPOINT must be on or off");
 }
 
 function ipv6Bytes(address: string): number[] | null {
@@ -134,6 +148,66 @@ export function resolveBindHost(raw: string | undefined, interfaces = networkInt
   throw new GatewayError("conflict", "Tailscale is not connected; Tron cannot expose the mobile gateway", true);
 }
 
+
+/** One address the LAN listener may bind: RFC 1918 and IPv6 ULA only, so an
+ * endpoint is never a wildcard, a link-local address or Tailscale's own
+ * interface. */
+export interface LanAddress {
+  readonly address: string;
+  readonly family: "IPv4" | "IPv6";
+}
+
+// Tailscale's IPv6 range (fd7a:115c:a1e0::/48) is inside the ULA range, so the
+// Tailscale test has to come first: binding it as a LAN address would advertise
+// the virtual interface as the home network path.
+export function isPrivateLanAddress(address: string): boolean {
+  if (typeof address !== "string") return false;
+  const family = isIP(address);
+  if (family === 4) {
+    const octets = address.split(".").map(Number);
+    if (octets.length !== 4 || !octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)) return false;
+    return octets[0] === 10
+      || (octets[0] === 172 && octets[1]! >= 16 && octets[1]! <= 31)
+      || (octets[0] === 192 && octets[1] === 168);
+  }
+  if (family === 6) {
+    if (isTailscaleAddress(address)) return false;
+    const bytes = ipv6Bytes(address);
+    return bytes !== null && (bytes[0]! & 0xfe) === 0xfc;
+  }
+  return false;
+}
+
+function ipv4Order(address: string): number {
+  return address.split(".").reduce((value, octet) => value * 256 + Number(octet), 0);
+}
+
+function interfaceFamily(family: string | number): LanAddress["family"] {
+  return family === "IPv4" || family === 4 ? "IPv4" : "IPv6";
+}
+
+/** The private LAN addresses the endpoint may bind, most preferred first. The
+ * order is deterministic so a Mac with two private interfaces (Wi-Fi and a
+ * wired or virtual one) always exposes the same one: IPv4 before IPv6, then
+ * the lowest IPv4 address, then the interface name. */
+export function resolveLanAddresses(interfaces = networkInterfaces()): LanAddress[] {
+  const candidates = Object.entries(interfaces).flatMap(([name, addresses]) => (addresses ?? [])
+    .filter((candidate) => !candidate.internal && isPrivateLanAddress(candidate.address))
+    .map((candidate) => ({
+      address: candidate.address,
+      family: interfaceFamily(candidate.family),
+      name,
+    })));
+  candidates.sort((left, right) => {
+    if (left.family !== right.family) return left.family === "IPv4" ? -1 : 1;
+    if (left.family === "IPv4" && ipv4Order(left.address) !== ipv4Order(right.address)) {
+      return ipv4Order(left.address) - ipv4Order(right.address);
+    }
+    if (left.address !== right.address) return left.address < right.address ? -1 : 1;
+    return left.name === right.name ? 0 : left.name < right.name ? -1 : 1;
+  });
+  return candidates.map(({ address, family }) => ({ address, family }));
+}
 
 function isStoredGatewayConfig(value: unknown): value is StoredGatewayConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -355,6 +429,12 @@ export async function loadConfig(
     maxLiveRuntimes: parseRuntimeCapacity(environment.TRON_GATEWAY_MAX_LIVE_RUNTIMES),
     maxOutboundBytes: 8 * 1_048_576,
     maxSynchronizationBytes: 2 * 1_048_576,
+    lanEndpoint: {
+      enabled: parseLanEndpointEnabled(valueAfter(args, "--lan-endpoint") ?? environment.TRON_GATEWAY_LAN_ENDPOINT),
+      // The Gateway's private state directory. The key and certificate are 0600
+      // inside it and are never regenerated under an existing pin (E-3b).
+      stateDirectory: join(tronHome, "gateway", "lan-endpoint"),
+    },
     ...(pushServiceOrigin ? { pushServiceOrigin } : {}),
   };
 }

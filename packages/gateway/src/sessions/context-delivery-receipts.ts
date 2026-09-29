@@ -91,6 +91,15 @@ function isCustomMessageEntry(entry: SessionEntry | undefined): boolean {
 export function contextDeliveryMetadataByEntry(
   entries: readonly SessionEntry[],
 ): ReadonlyMap<string, ContextDeliveryMetadata> {
+  // Most branches hold no delivery receipt, and a snapshot projection runs this
+  // over the whole branch on every build: with nothing to join, do not index
+  // every entry twice for a map that stays empty (G-2). The `some` pass is one
+  // cheap scan that stops at the first receipt.
+  if (!entries.some((entry) => entry.type === "custom"
+    && (entry.customType === CONTEXT_DELIVERY_RECEIPT_TYPE
+      || entry.customType === HISTORICAL_CONTEXT_DELIVERY_RECEIPT_TYPE))) {
+    return new Map();
+  }
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const position = new Map(entries.map((entry, index) => [entry.id, index]));
   const admitted = new Map<string, ContextDeliveryMetadata>();

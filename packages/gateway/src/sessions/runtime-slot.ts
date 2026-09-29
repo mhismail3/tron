@@ -60,6 +60,8 @@ import type {
   ResourceInvocation,
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { stage } from "../transport/request-span.js";
+import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
 import {
@@ -290,8 +292,25 @@ function extensionArtifactReadFailureReason(error: unknown): ExtensionArtifactRe
 }
 
 const EXTENSION_ARTIFACT_MISSING_GRACE_MS = 30_000;
+/** A producer replaces status.json by an atomic rename, so a read can open the
+ * old inode and stat the new one. The discovery lane owns no watcher for that
+ * directory, so it re-reads a bounded number of times before reporting the
+ * replacement; the producer's next replace is a whole status-update cadence
+ * away, so an immediate retry lands in a settled window. */
+const EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES = 3;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 const MAX_EXTENSION_EVENT_LINES = 256;
+
+/** How one offer of a `status.json` to a slot ended, for the caller that decides
+ * whether this exact artifact may be recorded as dealt with. `accepted` means
+ * the slot projected a lifecycle from those bytes; `rejected` means no later
+ * offer of the same bytes can decide differently (the artifact's own shape,
+ * run identity, declared directory or timestamps rejected it, or a terminal
+ * latch the identity cannot lift outranks it); `transient` means the slot could
+ * not decide from its current state — a losing read, an unavailable terminal
+ * receipt claim, an I/O error, or an ownership/attribution comparison that a
+ * later pass may resolve — so the same artifact must be offered again. */
+export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "transient";
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
 
@@ -394,6 +413,10 @@ export interface RuntimeSlotDependencies {
   processActivityRecency: ProcessActivityRecency;
   workRegistry: GatewayWorkRegistry;
   isSessionPresented: (sessionId: string) => boolean;
+  /** Subscribers the registry currently holds for a session; the slot's only
+   * view of an audience at build time. */
+  sessionAudience: (sessionId: string) => number;
+  resources?: ResourceRecorder;
   machineId?: string;
   notifications?: NotificationService;
   extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
@@ -497,6 +520,10 @@ export class RuntimeSlot {
   private eventSequence = 0;
   private phase: SessionPhase;
   private disposed = false;
+  /** Set by the registry when it publishes this slot as a live runtime. Only a
+   * published slot is an eviction when it is disposed; a start that was retired
+   * before publication never was one. */
+  private published = false;
   private readonly stateChangeWaiters = new Set<() => void>();
   private retainedLeaseCount = 0;
   private readonly automationTerminalObservers = new Map<string, (terminal: AutomationOperationTerminal) => Promise<void> | void>();
@@ -665,6 +692,18 @@ export class RuntimeSlot {
     updatedAt: string;
     messageCount: number;
     firstMessage: string;
+  } | undefined;
+  /** Summary facts are folded from the entries appended since the last fold, so
+   * publishing a change never re-walks a long transcript (G-11: a live session
+   * with tens of thousands of entries otherwise spends its publish window on
+   * history). An entry set that is not a pure append (branch switch, file
+   * re-open, external rewrite) is walked whole instead. */
+  private summaryContentFold: {
+    messageCount: number;
+    firstMessage: string;
+    updatedAt: string | undefined;
+    entryCount: number;
+    lastEntryId: string | undefined;
   } | undefined;
   /** Snapshot-derived SDK scans are exact but need not repeat while the
    * RuntimeSlot revision is unchanged. A canonical event/rebind/branch change
@@ -2553,35 +2592,57 @@ export class RuntimeSlot {
     return boundedSummaryText([...title].slice(0, 80).join(""), 256);
   }
 
-  private summary(): SessionSummaryUpdate {
-    if (this.summaryContentDirty || !this.cachedSummaryContent) {
-      const entries = this.sessionManager.getEntries();
-      let firstMessage = "";
-      let messageCount = 0;
-      let updatedAt: string | undefined;
-      for (const entry of entries) {
-        if (entry.type === "message") {
-          // Pi 0.87 persists system-message transcript deltas for provider context;
-          // they are canonical but not visible conversation rows.
-          if (entry.message.role !== "system") messageCount += 1;
-          if (!firstMessage && entry.message.role === "user") {
-            firstMessage = boundedSummaryText(userFacingPromptPreview(typeof entry.message.content === "string"
-              ? entry.message.content
-              : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("")));
-          }
-        }
-        const activityAt = catalogActivityTimestamp(entry);
-        if (activityAt !== undefined && (updatedAt === undefined || activityAt > Date.parse(updatedAt))) {
-          updatedAt = new Date(activityAt).toISOString();
+  /** Fold the summary facts over the entries appended since the previous fold.
+   * `getEntries()` returns the file's entries in append order, so the previous
+   * boundary id proves the earlier entries are still the same ones; anything
+   * else (shorter array, different entry at the boundary) is not an append. */
+  private foldSummaryContent(): { messageCount: number; firstMessage: string; updatedAt: string | undefined } {
+    const entries = this.sessionManager.getEntries();
+    const folded = this.summaryContentFold
+      && this.summaryContentFold.entryCount <= entries.length
+      && (this.summaryContentFold.entryCount === 0
+        || entries[this.summaryContentFold.entryCount - 1]?.id === this.summaryContentFold.lastEntryId)
+      ? this.summaryContentFold
+      : (this.summaryContentFold = {
+        messageCount: 0,
+        firstMessage: "",
+        updatedAt: undefined,
+        entryCount: 0,
+        lastEntryId: undefined,
+      });
+    for (let index = folded.entryCount; index < entries.length; index += 1) {
+      const entry = entries[index]!;
+      if (entry.type === "message") {
+        // Pi 0.87 persists system-message transcript deltas for provider context;
+        // they are canonical but not visible conversation rows.
+        if (entry.message.role !== "system") folded.messageCount += 1;
+        if (!folded.firstMessage && entry.message.role === "user") {
+          folded.firstMessage = boundedSummaryText(userFacingPromptPreview(typeof entry.message.content === "string"
+            ? entry.message.content
+            : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("")));
         }
       }
+      const activityAt = catalogActivityTimestamp(entry);
+      if (activityAt !== undefined
+        && (folded.updatedAt === undefined || activityAt > Date.parse(folded.updatedAt))) {
+        folded.updatedAt = new Date(activityAt).toISOString();
+      }
+    }
+    folded.entryCount = entries.length;
+    folded.lastEntryId = entries[entries.length - 1]?.id;
+    return folded;
+  }
+
+  private summary(): SessionSummaryUpdate {
+    if (this.summaryContentDirty || !this.cachedSummaryContent) {
+      const folded = this.foldSummaryContent();
       const rawName = this.sessionManager.getSessionName();
       const name = rawName ? boundedSummaryText(rawName) : undefined;
       this.cachedSummaryContent = {
         ...(name ? { name } : {}),
-        updatedAt: updatedAt ?? this.sessionManager.getHeader()?.timestamp ?? new Date().toISOString(),
-        messageCount,
-        firstMessage,
+        updatedAt: folded.updatedAt ?? this.sessionManager.getHeader()?.timestamp ?? new Date().toISOString(),
+        messageCount: folded.messageCount,
+        firstMessage: folded.firstMessage,
       };
       this.summaryContentDirty = false;
     }
@@ -3057,6 +3118,12 @@ export class RuntimeSlot {
 
   /** Join live settlement and reconcile bounded canonical evidence before open. */
   async reconcileAttention(): Promise<void> {
+    // Marker evidence and any pending settlement are disk work on the open path;
+    // the request span names them instead of leaving them unaccounted.
+    return stage("attention.reconcile", () => this.reconcileAttentionBody());
+  }
+
+  private async reconcileAttentionBody(): Promise<void> {
     if (this.attentionBarrier) {
       try {
         await this.attentionBarrier;
@@ -4253,6 +4320,34 @@ export class RuntimeSlot {
     }
   }
 
+  /** Run identities and exact directories ambient discovery can attribute to
+   * this slot. Every route this slot can accept requires one of them: a
+   * canonical JSONL fact, a live ownership binding or a projected activity row
+   * names the run, and the artifact's declared directory must agree with the
+   * directory it was found in. A directory none of them names can only be
+   * rejected, so the registry skips it instead of reopening its `status.json` on
+   * every pass (G-8d). Run identities never contain a path separator, so one set
+   * can hold both keys. */
+  extensionAmbientArtifactAttribution(): ReadonlySet<string> {
+    const attributed = new Set<string>();
+    const addDirectory = (asyncDir: string): void => {
+      attributed.add(resolve(asyncDir));
+      try { attributed.add(realpathSync(asyncDir)); } catch { /* a directory that is gone stays attributable lexically */ }
+    };
+    for (const [runId, binding] of this.extensionRunOwnership) {
+      attributed.add(runId);
+      if (binding.asyncDir) addDirectory(binding.asyncDir);
+    }
+    for (const [runId, fact] of this.canonicalExtensionRunFacts()) {
+      attributed.add(runId);
+      if (fact.asyncDir) addDirectory(fact.asyncDir);
+    }
+    for (const activity of this.extensionActivities.values()) {
+      if (activity.runId) attributed.add(activity.runId);
+    }
+    return attributed;
+  }
+
   /** Exact directories already bound by a live tool result outrank ambient
    * discovery, especially while administrative drain needs terminal evidence. */
   ownedExtensionArtifactDirectories(): string[] {
@@ -4332,8 +4427,11 @@ export class RuntimeSlot {
   }
 
   /** Called only by the Gateway-scoped bounded artifact discovery owner or by
-   * a watcher attached after this slot proved canonical ownership. */
-  discoverExtensionArtifact(asyncDir: string): Promise<void> {
+   * a watcher attached after this slot proved canonical ownership. The outcome
+   * tells a caller whether it may record this exact artifact as dealt with: an
+   * offer the slot could not decide (`transient`) must leave no record, or a
+   * run known only from a saved session log is never offered again (G-8a). */
+  discoverExtensionArtifact(asyncDir: string): Promise<ExtensionArtifactDiscoveryOutcome> {
     return this.refreshSubagentActivityFromArtifact(asyncDir);
   }
 
@@ -4359,7 +4457,7 @@ export class RuntimeSlot {
   private async refreshSubagentActivityFromArtifact(
     asyncDir: string,
     canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
-  ): Promise<void> {
+  ): Promise<ExtensionArtifactDiscoveryOutcome> {
     let diagnosticOwner: string | undefined;
     let missingToolCallId: string | undefined;
     let claimedReceipt: { activityId: string; owner: GatewayWorkHandle } | undefined;
@@ -4373,14 +4471,14 @@ export class RuntimeSlot {
       missingToolCallId = bound?.[1].toolCallId;
       if (!realAsyncDir) {
         if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
-        return;
+        return "transient";
       }
       diagnosticOwner = this.extensionArtifactOwnerForDirectory(realAsyncDir);
-      const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
+      const rawValue = await this.readExtensionStatusArtifactWithReplacementRetry(realAsyncDir);
       if (rawValue === undefined) {
         if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
         if (diagnosticOwner) this.warnExtensionArtifact("artifact-replacement-in-progress", diagnosticOwner);
-        return;
+        return "transient";
       }
       if (bound) this.extensionArtifactMissingSince.delete(bound[1].toolCallId);
       // Registry discovery is bounded but grants no ownership. Historical
@@ -4389,41 +4487,45 @@ export class RuntimeSlot {
       const admission = inspectExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
       if (!admission.accepted) {
         if (diagnosticOwner) this.warnExtensionArtifact(admission.reason, diagnosticOwner);
-        return;
+        return "rejected";
       }
       const raw = admission.artifact;
       const runId = raw.runId as string;
-      if (!runId) return;
+      if (!runId) return "rejected";
       // The file's declared directory is advisory. If present, it must agree
-      // with the directory that was actually discovered/read.
+      // with the directory that was actually discovered/read; a declared path
+      // this slot cannot resolve is retried rather than recorded.
       if (typeof raw.asyncDir === "string") {
         const declaredAsyncDir = this.canonicalExtensionArtifactDirectory(raw.asyncDir);
-        if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) {
+        if (!declaredAsyncDir) return "transient";
+        if (declaredAsyncDir !== realAsyncDir) {
           if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return;
+          return "rejected";
         }
       }
       const ownership = this.extensionRunOwnership.get(runId);
       const canonical = (canonicalFacts ?? this.canonicalExtensionRunFacts()).get(runId);
       const historicalArtifact = raw.lifecycleArtifactVersion !== EXTENSION_LIFECYCLE_ARTIFACT_VERSION;
-      if (historicalArtifact && !ownership?.asyncDir && !canonical?.asyncDir) return;
+      if (historicalArtifact && !ownership?.asyncDir && !canonical?.asyncDir) return "transient";
       // A duplicated runId in canonical JSONL has no safe artifact owner.
       if (canonical?.ambiguous) {
         if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return;
+        return "transient";
       }
+      // An ownership or canonical comparison is decided against state this slot
+      // re-reads every pass, so the same bytes may be admissible later.
       if (ownership?.asyncDir) {
         const ownershipAsyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
         if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) {
           if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return;
+          return "transient";
         }
       }
       if (canonical?.asyncDir) {
         const canonicalAsyncDir = this.canonicalExtensionArtifactDirectory(canonical.asyncDir);
         if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) {
           if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return;
+          return "transient";
         }
       }
       if (canonical?.toolCallId && ownership && ownership.toolCallId !== canonical.toolCallId) {
@@ -4431,7 +4533,7 @@ export class RuntimeSlot {
         // but a real ownership binding must never switch to another call.
         if (!ownership.toolCallId.startsWith("subagent:") || ownership.toolCallId === canonical.toolCallId) {
           if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return;
+          return "transient";
         }
       }
       const matchingEntries = [...this.extensionActivities.entries()].filter(([, activity]) => activity.runId === runId);
@@ -4439,7 +4541,7 @@ export class RuntimeSlot {
       // malformed or legacy payload has produced duplicate run identities.
       if (!ownership && !canonical?.toolCallId && matchingEntries.length > 1) {
         if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return;
+        return "transient";
       }
       const boundToolCallId = canonical?.toolCallId ?? ownership?.toolCallId;
       let existingEntry: readonly [string, ExtensionRunActivity | undefined] | undefined = boundToolCallId
@@ -4457,12 +4559,12 @@ export class RuntimeSlot {
       // Artifact files are enrichment only. A current tool execution or a
       // canonical terminal tool result must establish ownership first; cwd,
       // sessionId, and a lone running tool are not attribution evidence.
-      if (!existingEntry?.[1] && !canonical?.toolCallId) return;
+      if (!existingEntry?.[1] && !canonical?.toolCallId) return "transient";
       if (!existingEntry?.[1] && canonical?.toolCallId) {
         existingEntry = [canonical.toolCallId, this.extensionActivities.get(canonical.toolCallId)];
       }
       const toolCallId = existingEntry?.[0];
-      if (!toolCallId) return;
+      if (!toolCallId) return "transient";
       const previous = existingEntry?.[1];
       const normalized = normalizeExtensionArtifact(raw, {
         now: new Date().toISOString(),
@@ -4474,7 +4576,7 @@ export class RuntimeSlot {
       });
       if (!normalized) {
         if (diagnosticOwner) this.warnExtensionArtifact("invalid-timestamp", diagnosticOwner);
-        return;
+        return "rejected";
       }
       const { status: state, startedAt, updatedAt, completedAt, durationMs } = normalized;
       const facts = canonicalFacts ?? this.canonicalExtensionRunFacts();
@@ -4501,7 +4603,8 @@ export class RuntimeSlot {
       const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
       // A terminal lifecycle event is authoritative; a late running artifact
       // enriches neither status nor ownership and must not resurrect the pill.
-      if (ownership?.terminal && state === "running") return;
+      // The latch cannot lift for this identity, so the bytes are rejected.
+      if (ownership?.terminal && state === "running") return "rejected";
       const artifactValue = ownership?.terminal
         ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous?.status === "failed" ? "failed" : "completed" })
         : superseded
@@ -4538,11 +4641,13 @@ export class RuntimeSlot {
       // Ambient discovery is another producer of lifecycle candidates. Apply
       // the same Gateway terminal latch and sequence admission as live tool
       // events before replacing an existing row.
-      if (admitExtensionRunActivity(previous, activity) === previous) return;
+      if (admitExtensionRunActivity(previous, activity) === previous) return "rejected";
       const terminalReceiptOwner = activity.status === "running"
         ? undefined
         : this.claimExtensionReceiptOwnership(activityKey);
-      if (activity.status !== "running" && !terminalReceiptOwner) return;
+      // A full Gateway work registry is temporary: the terminal receipt can be
+      // claimed by a later pass, so this artifact is not delivered yet.
+      if (activity.status !== "running" && !terminalReceiptOwner) return "transient";
       if (terminalReceiptOwner) claimedReceipt = { activityId: activityKey, owner: terminalReceiptOwner };
       // Ownership facts are written before this frame's projection publishes:
       // settled paused presentation, dashboard activity, and drain accounting
@@ -4557,7 +4662,7 @@ export class RuntimeSlot {
         this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
         claimedReceipt = undefined;
         if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return;
+        return "transient";
       }
       if (existingEntry) this.extensionActivities.delete(existingEntry[0]);
       const syntheticToolCallId = matchingEntries.find(([id]) => id.startsWith("subagent:") && id !== toolCallId)?.[0];
@@ -4576,13 +4681,33 @@ export class RuntimeSlot {
       }
       this.trimExtensionActivities();
       this.publishExtensionActivity(activity);
+      return "accepted";
     } catch (error) {
       if (claimedReceipt) this.releaseExtensionReceiptOwnership(claimedReceipt.activityId, claimedReceipt.owner);
       if (error instanceof OversizedExtensionArtifactError && missingToolCallId) {
         this.observeMissingExtensionArtifact(missingToolCallId);
       }
       if (diagnosticOwner) this.warnExtensionArtifact(extensionArtifactReadFailureReason(error), diagnosticOwner);
+      // An artifact that is too large or belongs to another session keeps that
+      // verdict for these bytes; every other failure is retried by the caller.
+      return error instanceof OversizedExtensionArtifactError || error instanceof ForeignExtensionArtifactSessionError
+        ? "rejected"
+        : "transient";
     }
+  }
+
+  /** The discovery lane's read of one owned artifact. A racing replacement is
+   * retried here rather than warned (G-8a); the watcher lane keeps its own
+   * per-directory retry budget, and the 60 s per-(owner, reason) dedup in
+   * `warnExtensionArtifact` still collapses a genuine replacement. */
+  private async readExtensionStatusArtifactWithReplacementRetry(
+    asyncDir: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    let value = await this.readExtensionStatusArtifact(asyncDir);
+    for (let attempt = 0; value === undefined && attempt < EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES; attempt += 1) {
+      value = await this.readExtensionStatusArtifact(asyncDir);
+    }
+    return value;
   }
 
   private stopExtensionActivityWatcher(toolCallId: string): void {
@@ -4759,14 +4884,19 @@ export class RuntimeSlot {
       const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
       if (rawValue === undefined) {
         const tracked = this.extensionActivityWatchers.get(toolCallId);
-        if (tracked && tracked.asyncDir === realAsyncDir && tracked.readRetries < 3 && !tracked.timer) {
-          tracked.readRetries += 1;
-          tracked.timer = setTimeout(() => {
-            tracked.timer = undefined;
-            void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
-          }, tracked.readRetries * 100);
-          tracked.timer.unref();
-          return;
+        if (tracked && tracked.asyncDir === realAsyncDir) {
+          // A pending debounce or retry already owns this re-read, so a read that
+          // lost a replacement race waits for it instead of warning: the timer
+          // fires a few milliseconds later, inside the same replacement.
+          if (tracked.timer === undefined && tracked.readRetries < 3) {
+            tracked.readRetries += 1;
+            tracked.timer = setTimeout(() => {
+              tracked.timer = undefined;
+              void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
+            }, tracked.readRetries * 100);
+            tracked.timer.unref();
+          }
+          if (tracked.timer !== undefined) return;
         }
         this.observeMissingExtensionArtifact(toolCallId);
         this.warnExtensionArtifact("artifact-replacement-in-progress", `${previous.runId ?? "run"}\0${toolCallId}`);
@@ -5753,6 +5883,12 @@ export class RuntimeSlot {
   }
 
   snapshot(sequence = this.eventSequence): SessionSnapshot {
+    return stage("snapshot.build", () => this.buildSnapshot(sequence));
+  }
+
+  /** The snapshot body. `snapshot` attributes it to the request that asked for
+   * it; a state change with no request measures it where it publishes. */
+  private buildSnapshot(sequence: number): SessionSnapshot {
     this.assertNoTrustReload();
     const session = this.runtime.session;
     this.ensureAgentProjection();
@@ -6183,7 +6319,24 @@ export class RuntimeSlot {
     // snapshot publishes.
     this.flushPendingProgress();
     this.eventSequence += 1;
-    this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
+    // No audience, no projection: a snapshot is a canonical branch walk plus a
+    // transcript page, so building one for a session nobody receives it for is
+    // work for nobody. The subscriber record is the slot's whole audience fact,
+    // and the transport is its only writer: it subscribes a client before
+    // installing that client's synchronization barrier, so a pending barrier is
+    // always a subscriber here, and a client that subscribes later receives a
+    // fresh snapshot through the ordinary open and synchronization path. The
+    // transport counts the recipients of every snapshot frame it is handed, so
+    // a projection a ready socket cannot receive is still recorded and warns
+    // (`UNAUDIENCED_SNAPSHOT_WARNING`) rather than passing as an ordinary build.
+    //
+    // `buildSnapshot` also settles this slot's agent projection. That settlement
+    // belongs to every publication, not only to the ones with an audience, so it
+    // runs here rather than inside the build.
+    this.ensureAgentProjection();
+    if (this.dependencies.sessionAudience(this.id) > 0) {
+      this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
+    }
     this.publishSummary();
   }
 
@@ -8203,6 +8356,13 @@ export class RuntimeSlot {
     return this.disposed;
   }
 
+  /** The registry publishes one newly live runtime. Until then the slot is a
+   * start that may still be retired, so it is not yet a runtime the sample can
+   * report a load or an eviction for. */
+  markPublished(): void {
+    this.published = true;
+  }
+
   async shutdown(): Promise<void> {
     if (this.disposed) return;
     if (this.shutdownPromise) return this.shutdownPromise;
@@ -8342,6 +8502,11 @@ export class RuntimeSlot {
     this.lifecycle.retire();
     this.ui.retire();
     this.disposed = true;
+    // One live runtime is gone. This is the only place a slot stops existing, so
+    // the resource sample counts the eviction where it happens and can see a
+    // load and an eviction inside one window. A slot the registry never
+    // published was never live, so its retirement is not an eviction.
+    if (this.published) this.dependencies.resources?.recordRuntimeEvicted();
     this.publishStateChange();
   }
 

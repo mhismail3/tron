@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
+import { GatewayError } from "./errors.js";
 import { DeviceStore } from "./security/device-store.js";
 import { TrustService } from "./admin/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
@@ -20,15 +21,19 @@ import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/resta
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
-import { CommandReceiptStore } from "./transport/command-receipts.js";
+import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
+import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-diagnostics.js";
+import { requestsCompetingForLoop } from "./transport/request-span.js";
+import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
+import { STARTUP_LISTEN_BUDGET_MS, startupBudget, type StartupStepTiming } from "./lifecycle/startup-budget.js";
 import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
@@ -98,8 +103,6 @@ process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
 
-/** Session stages under this bound are debug detail; slower ones warn. */
-const SLOW_SESSION_STAGE_MS = 1_000;
 const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"), {
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
@@ -123,9 +126,12 @@ const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"),
  * `durationMs` is launchd and the launcher.
  */
 let startupCheckpointAt = 0;
+const startupSteps: StartupStepTiming[] = [];
 function startupCheckpoint(step: string, at = performance.now()): void {
-  logger.log("info", `Gateway startup step ${step} took ${Math.round(at - startupCheckpointAt)} ms`, {
-    event: "gateway.startup-step", source: "lifecycle", step, durationMs: at - startupCheckpointAt,
+  const durationMs = at - startupCheckpointAt;
+  startupSteps.push({ step, durationMs });
+  logger.log("info", `Gateway startup step ${step} took ${Math.round(durationMs)} ms`, {
+    event: "gateway.startup-step", source: "lifecycle", step, durationMs,
   });
   startupCheckpointAt = at;
 }
@@ -189,12 +195,18 @@ const jevClient = new JevDecisionClient(knowledgeCredentials);
 const mcp = new McpAdapter({ connections, credentials: knowledgeCredentials, workRegistry });
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
+// One sampler for the process: the transport records its own traffic and logs
+// the record, the registry reports catalog walks and answers its inventory.
+const resourceSampler: ResourceSampler = new ResourceSampler({
+  readRuntimes: (): Promise<readonly ResourceRuntimeEntry[]> => sessions.resourceInventory(),
+});
 // Late-bound: the scheduler is constructed after the registry, and archiving
 // must not hide a session whose automation run is already dispatched.
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
 const sessions = new RuntimeRegistry({
   agentDir: config.agentDir,
   tronHome: config.tronHome,
+  resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
@@ -219,6 +231,35 @@ const sessions = new RuntimeRegistry({
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
+  // Load and eviction are transitions at info: the byte budget's decisions have
+  // to be attributable to one session from the log alone, and the reason has to
+  // separate a budget eviction from an idle or requested one.
+  runtimeLifecycleRecord: (record) => logger.log("info",
+    `Session runtime ${record.event === "runtime.loaded" ? "loaded" : "evicted"} (${record.reason})`, {
+      event: record.event,
+      source: "sessions",
+      sessionId: record.sessionId,
+      reason: record.reason,
+      counts: {
+        transcriptBytes: record.transcriptBytes,
+        estimatedHeapBytes: record.estimatedHeapBytes,
+        // The budget is pressure rather than a gate, so a load it could not fit
+        // is served and flagged here instead.
+        ...(record.overBudget === true ? { overBudget: 1 } : {}),
+      },
+    }),
+  capacityShedRecord: (record) => logger.log("warning",
+    `Shed a cold load (${record.admission}) under heap pressure (${Math.round(record.heapUsedBytes / 1_048_576)} MiB of ${Math.round(record.heapLimitBytes / 1_048_576)} MiB)`, {
+      event: "gateway.shed",
+      source: "sessions",
+      reason: record.reason,
+      admission: record.admission,
+      counts: {
+        heapUsedBytes: record.heapUsedBytes,
+        heapLimitBytes: record.heapLimitBytes,
+        retryAfterMs: record.retryAfterMs,
+      },
+    }),
   compactionDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "failure" ? "error" : "info",
     `Session compaction ${diagnostic.outcome}`,
@@ -239,17 +280,41 @@ const sessions = new RuntimeRegistry({
     `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,
     { event: "extension.artifact-rejected", source: "sessions" },
   ),
-  stageTiming: (stage, durationMs, outcome, metadata) => {
-    const context = [
-      metadata?.workID ? `workID=${metadata.workID}` : undefined,
-      metadata?.scope ? `scope=${metadata.scope}` : undefined,
-    ].filter(Boolean).join(" ");
-    logger.log(
-      durationMs >= SLOW_SESSION_STAGE_MS || outcome === "failure" ? "warning" : "debug",
-      `Session stage ${stage} completed in ${durationMs}ms (${outcome})${context ? ` ${context}` : ""}`,
-      { event: "session.stage", source: "sessions" },
-    );
-  },
+  artifactDiscoveryTruncated: ({ entries, statusReads, work, dropped }) => logger.log(
+    "warning",
+    `Extension artifact discovery stopped early after ${entries} root entries, ${statusReads} artifact reads, ${work} routed reads and ${dropped} candidates its routing budget cut`,
+    { event: "extension.discovery-truncated", source: "sessions", counts: { entries, statusReads, work, dropped } },
+  ),
+  // Both of these are handled background failures outside any request span, so
+  // they keep their own warning record.
+  catalogIndexFailure: (stage, durationMs) => logger.log(
+    "warning",
+    `Catalog metadata index ${stage} failed; the affected rows are rebuilt from canonical files`,
+    { event: "catalog-index.failure", source: "sessions", step: stage, durationMs },
+  ),
+  catalogReconciled: ({ outcome, files, added, removed, modified, unproven, durationMs }) => logger.log(
+    outcome === "reconciled" ? "info" : "warning",
+    `Session catalog ${outcome}: ${added} added, ${removed} removed, ${modified} modified, ${unproven} unproven over ${files} files in ${durationMs}ms`,
+    { event: "catalog.reconciled", source: "sessions", outcome, durationMs, counts: { files, added, removed, modified, unproven } },
+  ),
+  // One row the watcher changed for one file, outside any request span. Debug:
+  // the detail belongs in a diagnostic export's buffer, not in the persisted
+  // volume budget, and a Gateway-owned change is not reported here.
+  catalogChanged: ({ sessionId, outcome, durationMs }) => logger.log(
+    "debug",
+    `Catalog row ${outcome} for ${sessionId} in ${durationMs}ms`,
+    { event: "catalog.changed", source: "sessions", sessionId, outcome, durationMs },
+  ),
+  catalogWatcherReset: ({ reason }) => logger.log(
+    "warning",
+    `Catalog folder watcher reset (${reason}); the index is re-derived from canonical files once a watcher is attached`,
+    { event: "catalog.watcher-reset", source: "sessions", reason },
+  ),
+  runtimeDisposeTimeout: (graceMs) => logger.log(
+    "warning",
+    `Extension runtime shutdown overran its ${graceMs}ms disposal grace and was forced`,
+    { event: "runtime.dispose-timeout", source: "sessions", durationMs: graceMs },
+  ),
 });
 const developmentHelperOverride = process.env.NODE_ENV === "development" ? process.env.TRON_SEARCH_EMBEDDING_HELPER : undefined;
 const bundledSearchHelper = process.env.TRON_GATEWAY_SEARCH_EMBEDDING_HELPER;
@@ -368,8 +433,9 @@ automationToolOperations = new GatewayScheduleToolOperations(automations, receip
 
 let stopping = false;
 let sessionSearchWarmTask: Promise<void> | undefined;
-let storageMaintenanceTimer: NodeJS.Timeout | undefined;
 let uploadStoragePressure: "normal" | "low" | "exhausted" = "normal";
+/** How often bounded artifact maintenance runs as a background slice. */
+const STORAGE_MAINTENANCE_INTERVAL_MS = 10 * 60_000;
 function recordShutdownStep(step: string, durationMs: number): void {
   logger.log("info", `Gateway shutdown step ${step} took ${Math.round(durationMs)} ms`, {
     event: "gateway.shutdown-step", source: "lifecycle", step, durationMs,
@@ -392,8 +458,9 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     automations.beginDrain();
     workRegistry.beginDrain();
     sessionSearch?.cancelWarmup();
-    if (storageMaintenanceTimer) clearInterval(storageMaintenanceTimer);
-    storageMaintenanceTimer = undefined;
+    // Before the owners it drives are disposed: the scheduler arms no further
+    // slice, and a slice already in flight settles on its own.
+    backgroundWork.stop();
     await shutdownStep("transport-close", () => transport.close(), recordShutdownStep);
     await shutdownStep("cancellation", async () => { await Promise.allSettled([
       automations.requestShutdownCancellation(),
@@ -557,6 +624,7 @@ transport = new GatewayServer({
   maximumSubscriptionsPerConnection: config.maxSubscriptionsPerConnection,
   maximumOutboundBytes: config.maxOutboundBytes,
   maximumSynchronizationBytes: config.maxSynchronizationBytes,
+  lanEndpoint: config.lanEndpoint,
   devices,
   uploads,
   sessions,
@@ -564,6 +632,7 @@ transport = new GatewayServer({
   auth,
   service,
   logger,
+  resourceSampler,
   authorizeBrowserLiveView: (sessionId, viewId, generation) => sessions.authorizeBrowserLiveView(sessionId, viewId, generation),
 });
 
@@ -606,15 +675,24 @@ await transport.listen(async () => {
     if (!stopping) {
       await sessionSearch.warm();
       const durationMs = performance.now() - warmStartedAt;
-      logger.log("info", `Session search warm-up took ${Math.round(durationMs)} ms`, {
-        event: "session-search.warm", source: "search", durationMs,
+      const { reusedSessions, parsedSessions } = sessionSearch.indexPassStats();
+      logger.log("info", `Session search warm-up took ${Math.round(durationMs)} ms (${reusedSessions} reused, ${parsedSessions} reparsed)`, {
+        event: "session-search.warm", source: "search", durationMs, counts: { reusedSessions, parsedSessions },
       });
     }
   })().catch((error) => {
     if (!stopping) logger.log("warning", "Session search warm-up failed; lexical search will recover on demand", { event: "session-search.warm-failed", source: "search", error });
   });
   transport.setStartupPhase("automation-recovery");
-  await automations.initialize();
+  await automations.initialize().catch((error) => {
+    // The owner may not have published a cut yet (a large catalog with no
+    // durable document). Automation targets are re-checked on the next start;
+    // failing startup here would turn a slow first read into a crash-loop.
+    if (!(error instanceof GatewayError) || !error.retryable || error.diagnosticReason !== "catalog_not_ready") throw error;
+    logger.log("warning", "Automation recovery deferred: the session catalog is not ready", {
+      event: "automation.recovery-deferred", source: "automations", reason: error.diagnosticReason,
+    });
+  });
   startupCheckpoint("automation-recovery");
   transport.setStartupPhase("storage-warming");
   await sessions.initializeBlobStorage();
@@ -622,6 +700,22 @@ await transport.listen(async () => {
   await sessions.recoverKnowledgeObservation();
   startupCheckpoint("knowledge-observation-recovery");
 });
+// G-13's startup budget: this process's own start, process start to serving.
+// The restart case reads this record (its durationMs, counts.budgetMs and
+// slowest step) from the fixture's Gateway log, so the start is attributable
+// from either side; it judges the criterion on its own close → listening span,
+// which also covers this process's predecessor's shutdown.
+{
+  const budget = startupBudget(performance.now(), startupSteps);
+  logger.log(
+    budget.withinBudget ? "info" : "warning",
+    `Gateway startup budget ${budget.withinBudget ? "met" : "missed"}: listening after ${Math.round(budget.listeningMs)} ms of ${STARTUP_LISTEN_BUDGET_MS} ms (slowest step ${budget.slowestStep} at ${budget.slowestStepMs} ms)`,
+    {
+      event: "gateway.startup-budget", source: "lifecycle", durationMs: budget.listeningMs, step: budget.slowestStep,
+      counts: { budgetMs: STARTUP_LISTEN_BUDGET_MS, stepMs: budget.slowestStepMs, overBudgetMs: budget.overBudgetMs },
+    },
+  );
+}
 // Serving already; these records account for post-listen recovery work.
 await sessions.recoverCanonicalAttention();
 startupCheckpoint("attention-recovery");
@@ -650,8 +744,47 @@ const maintainStorage = async (): Promise<void> => {
   }
 };
 await maintainStorage();
-storageMaintenanceTimer = setInterval(() => void maintainStorage(), 10 * 60_000);
-storageMaintenanceTimer.unref();
+// The one background-work scheduler. The jobs that used to own a timer of their
+// own (catalog reconciliation registers itself, receipt pruning and storage
+// maintenance below) now take turns one slice at a time, each yielding to the
+// loop, and wait while a request is in flight or the loop is behind.
+backgroundWork.register({
+  name: "command-receipts.prune",
+  intervalMs: COMMAND_RECEIPT_PRUNE_INTERVAL_MS,
+  slice: () => receipts.prune(),
+});
+backgroundWork.register({
+  name: "storage.maintain",
+  intervalMs: STORAGE_MAINTENANCE_INTERVAL_MS,
+  slice: () => maintainStorage(),
+});
+// A signal that ignored the signal handlers above would start the scheduler
+// after `shutdown()` stopped it, and its jobs would run against owners being
+// disposed.
+if (!stopping) backgroundWork.start({
+  requestsInFlight: requestsCompetingForLoop,
+  // One record per slice, and one per starved spell: the scheduler's own cost
+  // and its pauses have to be visible without a per-tick record. The job is the
+  // step, so a slice or a backlog can be read out of the log without parsing
+  // the message.
+  onSlice: ({ job, outcome, durationMs, waitedMs, error }) => logger.log(
+    outcome === "failed" ? "warning" : "debug",
+    `Background slice ${job} ${outcome} in ${Math.round(durationMs)}ms after waiting ${Math.round(waitedMs)}ms`,
+    {
+      event: "background.slice", source: "background", step: job, outcome, durationMs,
+      counts: { waitedMs: Math.round(waitedMs) },
+      ...(error === undefined ? {} : { error }),
+    },
+  ),
+  onBacklog: ({ job, waitedMs, reason, jobs, due }) => logger.log(
+    "warning",
+    `Background job ${job} has been due for ${Math.round(waitedMs)}ms; the scheduler is paused (${reason})`,
+    {
+      event: "background.backlog", source: "background", step: job, reason,
+      counts: { waitedMs: Math.round(waitedMs), jobs, due },
+    },
+  ),
+});
 } catch (error) {
   await releaseRuntimeLock();
   throw error;

@@ -45,15 +45,20 @@ package struct PerformanceInterval: Sendable {
     package let operation: PerformanceOperation
     package let state: OSSignpostIntervalState?
     let measuredStart: ContinuousClock.Instant?
+    /// Identifies an interval a logging wrapper is tracking, so that wrapper
+    /// can close it at scene background before its owner ends it.
+    let trackedID: Int?
 
     package init(
         operation: PerformanceOperation,
         state: OSSignpostIntervalState? = nil,
-        measuredStart: ContinuousClock.Instant? = nil
+        measuredStart: ContinuousClock.Instant? = nil,
+        trackedID: Int? = nil
     ) {
         self.operation = operation
         self.state = state
         self.measuredStart = measuredStart
+        self.trackedID = trackedID
     }
 }
 
@@ -64,6 +69,17 @@ package protocol PerformanceSignposting: Sendable {
         result: PerformanceResult,
         metrics: PerformanceMetrics
     )
+    /// Ends every interval still open at scene background with outcome
+    /// `backgrounded`. Signs the record, not the OS interval: the operation's
+    /// own `end` still closes its signpost when its work unwinds.
+    ///
+    /// The requirement is `package` because the app target's scene owner calls
+    /// it; a protocol requirement takes its protocol's access level.
+    func endOpenIntervalsAtBackground()
+}
+
+extension PerformanceSignposting {
+    package func endOpenIntervalsAtBackground() {}
 }
 
 package struct SystemPerformanceSignposts: PerformanceSignposting {

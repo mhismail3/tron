@@ -244,7 +244,10 @@ than blocking admission; mismatch, credential/policy changes, setup revision
 changes, and disconnect clear the label. `providerAccountId` remains the
 canonical technical identity and is never replaced by display metadata. Ordinary
 Raindrop reads reuse their existing `/user` verification to publish this observation;
-listing connections does not make a provider request. Authentication failures during
+listing connections does not make a provider request. An observation that repeats
+the instance's current projection is not a state transition: the owner writes
+nothing, so that read performs no durable I/O and does not move `stateRevision`
+or `updatedAt`. Authentication failures during
 reads or sweeps, including a credential disappearing between attempts, clear the
 observation under the captured setup revision rather than leaving a stale ready label.
 `allowWrites`, `paidAccessApproved`, and `recurringApproved` remain

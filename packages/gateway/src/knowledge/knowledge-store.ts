@@ -6,7 +6,7 @@ import { join, dirname } from "node:path";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { durableAtomicWriteJson, durableRemove } from "../util/durable-json.js";
+import { durableAtomicWriteJson, durableRemove, syncDurably } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
   DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, OBSERVATION_ATTENTION_DISPOSITIONS, OBSERVATION_COVERAGE_DISPOSITIONS, knowledgeScopeEligible, normalizeKnowledgeSourceUrl,
@@ -470,9 +470,9 @@ async function durableAtomicWriteBytes(path: string, bytes: Uint8Array, mode = 0
   let exists = false;
   try {
     const handle = await open(temporary, "wx", mode); exists = true;
-    try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
+    try { await handle.writeFile(bytes); await syncDurably(handle); } finally { await handle.close(); }
     await rename(temporary, path); exists = false;
-    const directoryHandle = await open(directory, "r"); try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+    const directoryHandle = await open(directory, "r"); try { await syncDurably(directoryHandle); } finally { await directoryHandle.close(); }
   } catch (error) { if (exists) await import("node:fs/promises").then(fs => fs.rm(temporary, { force: true })).catch(() => {}); throw error; }
 }
 
@@ -730,7 +730,7 @@ export class KnowledgeStore {
       if (!prepared) await durableRemove(path).catch(() => {});
     }
     const durable = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try { await durable.sync(); } finally { await durable.close(); }
+    try { await syncDurably(durable); } finally { await durable.close(); }
     // A failure here may leave an ignored catalog, never half-migrate a corpus.
     // Do not delete it after an uncertain manifest rename/fsync outcome.
     await durableAtomicWriteJson(paths.state, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, storageVersion: CATALOG_STORAGE_VERSION, catalogID }, 0o600);

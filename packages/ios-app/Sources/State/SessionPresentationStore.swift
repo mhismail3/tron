@@ -283,6 +283,12 @@ final class SessionPresentationStore {
     private let synchronization = SessionSynchronizationCoordinator()
     private var deferredEffectsByTarget: [SessionPresentationIdentity: [ReducerEffect]] = [:]
     private var terminalSynchronizationFailures: [SessionPresentationIdentity: GatewayFailure] = [:]
+    /// The Gateway's own code for the failure that ended the last opening
+    /// synchronization of a session. `open` rewords that failure as
+    /// `sync_failed`, so `session.open.failure` reads this to report what the
+    /// Gateway actually answered (O-4 Do 7). Recording only: the thrown failure
+    /// keeps the presentation owner's wording.
+    private var openingFailureGatewayCodes: [String: String] = [:]
     private struct AutomaticSynchronization {
         let lease: SessionSynchronizationCoordinator.Lease
         let target: SessionPresentationIdentity
@@ -297,6 +303,20 @@ final class SessionPresentationStore {
     private var pendingSynchronizationLeases: [String: SessionSynchronizationCoordinator.Lease] = [:]
     @ObservationIgnored private var eventProcessingTask: Task<Void, Never>?
     private var eventProcessingGeneration = 0
+    // Replacement and foreground restoration of the mounted chat (C-2) owns the
+    // treatment that chat shows, never the connection label: the socket that
+    // admitted it is live, so the retained transcript reconciles behind a
+    // Connected badge and the chat itself reports the wait.
+    @ObservationIgnored private var mountedRestorationTreatmentTask: Task<Void, Never>?
+    private var mountedRestorationOwner = 0
+    // The mounted chat a restoration belongs to. Its treatment is scoped to
+    // that chat and retired against it, so a restoration the user has left or
+    // replaced can never post onto whatever screen is current.
+    private var mountedRestorationTarget: SessionPresentationIdentity?
+    private var mountedRestorationShowsCatchUpTreatment = false
+    // A restoration that finishes inside the grace shows no treatment at all: a
+    // prompt reconnect must not flash a catch-up notice over the chat.
+    private static let mountedRestorationTreatmentGrace: Duration = .seconds(2)
 
     private(set) var context: JSONValue?
     private(set) var sessionTree: [SessionTreeNode] = []
@@ -404,6 +424,13 @@ final class SessionPresentationStore {
     func presentationGeneration(for sessionID: String) -> Int? {
         guard target?.sessionID == sessionID else { return nil }
         return target?.generation
+    }
+
+    /// The Gateway's own code for the failure that ended this session's last
+    /// opening synchronization, or nil when the phone never reached the Gateway
+    /// or the failure did not come from an opening synchronization.
+    func openingFailureGatewayCode(sessionID: String) -> String? {
+        openingFailureGatewayCodes[sessionID]
     }
 
     func presentationTarget(for sessionID: String) -> SessionPresentationIdentity? {
@@ -569,6 +596,9 @@ final class SessionPresentationStore {
         )
         pendingTarget = requested
         terminalSynchronizationFailures[requested] = nil
+        // A new opening owns the answer: an earlier opening's Gateway code must
+        // not be read as this one's.
+        openingFailureGatewayCodes[sessionID] = nil
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
@@ -1541,10 +1571,59 @@ final class SessionPresentationStore {
         guard let target = mountedTarget else { return true }
         if let recovery = automaticSynchronization, recovery.failed,
            recovery.target == target, recovery.connectionGeneration == connectionGeneration { return false }
-        return await synchronize(
+        let owner = beginMountedRestoration(target: target)
+        let restored = await synchronize(
             target.sessionID,
             presentationGeneration: target.generation
         )
+        // Success and failure let the synchronization owner publish its own
+        // outcome in the restoration's own scope; only a restoration that
+        // ended without one leaves the treatment for this owner to retire.
+        finishMountedRestoration(owner: owner, restored: restored)
+        return restored
+    }
+
+    /// One mounted restoration owns the treatment it publishes; a newer
+    /// restoration supersedes an older one's cleanup instead of clearing the
+    /// treatment the chat is showing.
+    private func beginMountedRestoration(target: SessionPresentationIdentity) -> Int {
+        mountedRestorationOwner &+= 1
+        let owner = mountedRestorationOwner
+        mountedRestorationTarget = target
+        mountedRestorationTreatmentTask?.cancel()
+        let clock = self.clock
+        mountedRestorationTreatmentTask = Task { @MainActor [weak self] in
+            do { try await clock.sleep(Self.mountedRestorationTreatmentGrace) } catch { return }
+            // The chat this restoration belongs to must still be the mounted
+            // one: a restoration the user left, or replaced with a pending
+            // open, reports nothing onto the screen that took over.
+            guard let self, self.mountedRestorationOwner == owner,
+                  self.mountedTarget == target, self.pendingTarget == nil else { return }
+            self.mountedRestorationShowsCatchUpTreatment = true
+            self.delegate?.sessionPresentationStorePostNotice(
+                Self.sessionCatchUpNotice,
+                replacing: .sessionCatchUp,
+                role: .info,
+                scope: self.noticeScope(for: target)
+            )
+        }
+        return owner
+    }
+
+    private func finishMountedRestoration(owner: Int, restored: Bool) {
+        guard mountedRestorationOwner == owner else { return }
+        let target = mountedRestorationTarget
+        mountedRestorationTarget = nil
+        mountedRestorationTreatmentTask?.cancel()
+        mountedRestorationTreatmentTask = nil
+        guard mountedRestorationShowsCatchUpTreatment else { return }
+        mountedRestorationShowsCatchUpTreatment = false
+        guard !restored else { return }
+        // A latched failure for this same chat has already replaced the
+        // treatment with its own warning; only a restoration that ended
+        // without one is this treatment's to retire.
+        if let recovery = automaticSynchronization, recovery.failed, recovery.target == target { return }
+        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope(for: target))
     }
 
     func loadContext(sessionID: String) async {
@@ -2014,6 +2093,13 @@ final class SessionPresentationStore {
         var result = PerformanceResult.failure
         var metrics = PerformanceMetrics.none
         defer { performanceSignposts.end(interval, result: result, metrics: metrics) }
+        // This presentation attempt owns the answer: a code kept from the
+        // attempt that asked for a retry must not be read as the one that ended
+        // the open. A reconnect attempt is not an opening and never reports a
+        // `gatewayCode`, so it neither stores nor clears one.
+        if case .presentation = lease.intent {
+            openingFailureGatewayCodes[sessionID] = nil
+        }
         let attemptConnectionGeneration = connectionGeneration
         var provisionalToken: String?
         do {
@@ -2295,6 +2381,16 @@ final class SessionPresentationStore {
                 sessionID: sessionID
             ) else {
                 return .failed(showCatchUpNotice: false)
+            }
+            // `open` rewords this failure, so keep the code the Gateway itself
+            // answered for the opening synchronization's own record. A locally
+            // minted failure (`disconnected`, `timeout`, `closed`, …) has no
+            // Gateway answer to report, so it is not stored and the record
+            // reads `gatewayCode=none`.
+            if case .presentation = lease.intent,
+               let failure = error as? GatewayFailure,
+               failure.answeredByGateway == true {
+                openingFailureGatewayCodes[sessionID] = failure.code
             }
             if let failure = error as? GatewayFailure,
                failure.code == "busy",

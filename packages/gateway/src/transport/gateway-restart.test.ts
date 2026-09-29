@@ -54,6 +54,9 @@ function service(options: {
     devices: { hasDevice: async () => true },
     notifications: {
       upsertGrant: options.upsertGrant ?? (async () => ({})),
+      // Stub for the receipt-free identical-registration pre-check: this fake
+      // stores nothing, so no registration is ever already current.
+      registrationIsCurrent: async () => false,
       removeDevice: async () => true,
     },
     requestRestart: options.requestRestart ?? (() => {}),

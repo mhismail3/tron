@@ -528,6 +528,8 @@ package actor GatewayClient {
         var lastWriteProgressAt: ContinuousClock.Instant?
         var overflowResyncSignaled = false
         var info: GatewayInfo?
+        /// From hello; stamped on this epoch's connection records.
+        var gatewayConnectionID: String?
     }
 
     package nonisolated let events: GatewayEventStream
@@ -653,6 +655,7 @@ package actor GatewayClient {
         profileID: String? = nil,
         profileLabel: String? = nil,
         attemptID: String? = nil,
+        gatewayConnectionID: String? = nil,
         frameBytes: Int? = nil,
         decodeLimitKind: JSONValueDecodingLimitKind? = nil,
         decodeActual: Int? = nil,
@@ -673,6 +676,8 @@ package actor GatewayClient {
             clientID: diagnosticOwnerID,
             attemptID: attemptID ?? (connectionID == connection?.id ? connection?.attemptID : nil),
             connectionID: connectionID,
+            gatewayConnectionID: gatewayConnectionID
+                ?? (connectionID == connection?.id ? connection?.gatewayConnectionID : nil),
             timestamp: GatewayTimestamp.preciseString(from: .now),
             profileID: profileID ?? self.profile?.id,
             profileLabel: profileLabel ?? self.profile?.label,
@@ -832,11 +837,15 @@ package actor GatewayClient {
         guard let socketURL = profile.socketURL else { throw Self.invalidProfileEndpoint() }
         self.profile = profile
         self.token = token
-        let handshakeTimeout = GatewayConnectionPolicy.handshakeDeadline
+        // Two bounds, not one shared deadline: the socket open gives up at
+        // `transportOpenDeadline` so a down path is named in 5 s, and only a
+        // socket that opened may spend the hello budget (D-4, C-3).
+        let transportOpenTimeout = GatewayConnectionPolicy.transportOpenDeadline
+        let helloTimeout = GatewayConnectionPolicy.helloDeadline
         let attemptStartedAt = clock.now()
         let handshakeStage = GatewayHandshakeStage()
-        // One deadline covers hello send and receive. The URL loading inactivity
-        // timeout stays above the application-owned liveness decision.
+        // The URL loading inactivity timeout stays above the
+        // application-owned liveness decision.
         var request = URLRequest(url: socketURL, timeoutInterval: GatewayConnectionPolicy.requestInactivityTimeout)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = socketFactory.makeConnection(request)
@@ -851,13 +860,31 @@ package actor GatewayClient {
                 "protocolVersion": .number(Double(TronGatewayProtocolContract.protocolVersion)),
                 "clientId": .string(uuidSource.next().uuidString),
                 "clientRole": .string("mobile"),
+                // O-1 correlation key: the Gateway stamps it on this
+                // connection's records (packages/gateway/README.md, hello).
+                "diagnostics": .object([
+                    "clientId": .string(diagnosticOwnerID),
+                    "attemptId": .string(attemptID ?? "initial"),
+                    "epoch": .string(String(epochID)),
+                ]),
             ])
             let helloData = try JSONEncoder.gateway.encode(hello)
-            let data = try await Self.withTimeout(clock: clock, duration: handshakeTimeout, onTimeout: { await socket.close() }) {
+            _ = try await Self.withTimeout(
+                clock: clock,
+                duration: transportOpenTimeout,
+                onTimeout: { await socket.close() },
+                timeoutFailure: Self.transportOpenTimeoutFailure
+            ) {
                 handshakeStage.set(.helloSend)
+                // The hello write completes only once the socket opened, so its
+                // deadline is the transport-open one.
                 try await socket.send(helloData)
                 await self.markWriteProgress(epochID: epochID)
                 try await self.requireEpoch(epochID)
+            }
+            // One hello deadline covers send and receive once the socket is
+            // open; the transport-open bound above is what a connect gets.
+            let data = try await Self.withTimeout(clock: clock, duration: helloTimeout, onTimeout: { await socket.close() }) {
                 handshakeStage.set(.helloReceive)
                 return try await socket.receive()
             }
@@ -881,6 +908,7 @@ package actor GatewayClient {
             }
             guard var epoch = connection, epoch.id == epochID else { throw CancellationError() }
             epoch.info = decoded.info
+            epoch.gatewayConnectionID = decoded.connectionId
             epoch.lastInboundAt = clock.now()
             connection = epoch
             if activateEvents { try activateEventDelivery(connectionID: epochID) }
@@ -900,7 +928,9 @@ package actor GatewayClient {
                     reachedHelloReceive: true
                 )
             )
-            return GatewayConnectionIdentity(id: epochID, info: decoded.info)
+            return GatewayConnectionIdentity(
+                id: epochID, info: decoded.info, gatewayConnectionID: decoded.connectionId
+            )
         } catch {
             let metadata = await socket.metadata()
             let upgradeFailure = Self.upgradeFailure(error, metadata: metadata)
@@ -1117,7 +1147,69 @@ package actor GatewayClient {
         case admission(GatewayConnectionAdmission)
     }
 
+    /// Send one request, and retry a shed disposable read after the hint its
+    /// `busy` answer carried (`G-12`). Each attempt is a complete request of its
+    /// own — its own identity, timeout and pending entry — so the retry cannot
+    /// inherit a stale one, and a caller that leaves cancels the attempt in
+    /// flight. A mutation, a prompt and any failure without a Gateway hint are
+    /// never retried here.
     private func requestValue<P: Encodable>(
+        _ method: String,
+        _ params: P,
+        timeout: Duration,
+        epochExpectation: EpochExpectation,
+        correlation: String? = nil
+    ) async throws -> JSONValue {
+        var retries = 0
+        while true {
+            let id = uuidSource.next().uuidString
+            do {
+                return try await requestOnce(
+                    id: id,
+                    method,
+                    params,
+                    timeout: timeout,
+                    epochExpectation: epochExpectation,
+                    correlation: correlation
+                )
+            } catch let failure as GatewayFailure {
+                guard retries < GatewayDisposableReadPolicy.busyRetryLimit,
+                      let delay = GatewayDisposableReadPolicy.retryAfterDelay(for: failure, method: method)
+                else { throw failure }
+                retries += 1
+                recordRetryAfter(method: method, requestID: id, delay: delay)
+                try await clock.sleep(delay)
+            }
+        }
+    }
+
+    /// Record that the Gateway shed this read and the phone is waiting its hint
+    /// out (`G-12`): the phone's half of one `gateway.shed`.
+    private func recordRetryAfter(method: String, requestID: String, delay: Duration) {
+        guard let appLog else { return }
+        let components = delay.components
+        let milliseconds = Int(
+            components.seconds * 1_000
+                + components.attoseconds / 1_000_000_000_000_000
+        )
+        let profileID = profile?.id
+        let connectionID = connection?.id
+        Task {
+            await appLog.recordRPC(
+                event: "rpc.retry-after",
+                method: method,
+                requestID: requestID,
+                outcome: "retrying",
+                code: "busy",
+                durationMilliseconds: milliseconds,
+                profileID: profileID,
+                connectionID: connectionID
+            )
+        }
+    }
+
+    private func requestOnce<P: Encodable>(
+        id: String,
         _ method: String,
         _ params: P,
         timeout: Duration,
@@ -1139,7 +1231,6 @@ package actor GatewayClient {
         }
         let epochID = epoch.id
         let socket = epoch.socket
-        let id = uuidSource.next().uuidString
         if let correlation { latestRequestIDByCorrelation[correlation] = id }
         let frame = GatewayRequest(id: id, method: method, params: try JSONValue.encode(params))
         let data = try JSONEncoder.gateway.encode(frame)
@@ -1636,14 +1727,14 @@ package actor GatewayClient {
                     details: nil
                 )
                 do {
+                    // No onTimeout close here: the handshake close is what
+                    // releases an unanswered socket. A cancelled ping is
+                    // settled at once by `GatewayPingCompletion.cancel`, so
+                    // this deadline can wait for the cancelled probe instead of
+                    // closing a socket the verdict may keep.
                     try await GatewayClient.withTimeout(
                         clock: clock,
                         duration: GatewayConnectionPolicy.clientPongDeadline,
-                        onTimeout: { [weak self] in
-                            // Record and revoke at the epoch owner before close
-                            // wakes the receiver with a less-specific error.
-                            await self?.livenessFailed(timeout, epochID: epochID, startedAt: startedAt)
-                        },
                         timeoutFailure: timeout
                     ) {
                         try await socket.ping()
@@ -1651,8 +1742,11 @@ package actor GatewayClient {
                     await self?.notePong(epochID: epochID)
                 } catch {
                     guard !Task.isCancelled else { return }
-                    await self?.livenessFailed(error, epochID: epochID, startedAt: startedAt)
-                    return
+                    // A probe whose pong was queued behind inbound data does
+                    // not end this wait unless its deadline passed in total
+                    // silence; otherwise the next grid tick re-arms it.
+                    let ended = await self?.livenessFailed(error, epochID: epochID, probeSentAt: startedAt) ?? true
+                    if ended { return }
                 }
             }
         }
@@ -1665,17 +1759,43 @@ package actor GatewayClient {
         connection = epoch
     }
 
-    private func livenessFailed(_ error: Error, epochID: Int, startedAt: ContinuousClock.Instant) async {
-        guard ownsEpoch(epochID) else { return }
+    /// Settle one failed liveness probe and report whether the wait is over.
+    /// A pong can be queued behind the Gateway's own outbound data, so a probe
+    /// whose deadline passed is evidence of a dead link only when no inbound
+    /// frame of any kind arrived after that probe was sent: messages, pongs and
+    /// any other data all prove the link. The check and the retirement it
+    /// guards are one actor call, so a frame delivered while the deadline
+    /// settles cannot be split from the verdict. Only a `pong_timeout` is
+    /// excused this way; a genuine send failure still retires the epoch.
+    /// Returns true once the epoch was retired or is no longer current.
+    private func livenessFailed(_ error: Error, epochID: Int, probeSentAt: ContinuousClock.Instant) async -> Bool {
+        let failure = Self.transportFailure(error)
+        if failure.code == "pong_timeout", let epoch = connection, epoch.id == epochID,
+           let lastInboundAt = epoch.lastInboundAt, lastInboundAt > probeSentAt {
+            // The epoch stays and the next grid tick re-arms the wait, so this
+            // probe leaves a debug record: a run that shows zero `pong_timeout`
+            // retirements alone cannot tell an excused probe from a cap that
+            // never delayed a pong (C-4's O-6b check).
+            recordDiagnostic(
+                stage: .liveness,
+                outcome: .excused,
+                startedAt: probeSentAt,
+                reason: .pingTimeout,
+                connectionID: epochID
+            )
+            return false
+        }
+        guard ownsEpoch(epochID) else { return true }
         recordDiagnostic(
             stage: .liveness,
             outcome: .failure,
-            startedAt: startedAt,
-            reason: Self.diagnosticReason(for: Self.transportFailure(error).code),
+            startedAt: probeSentAt,
+            reason: Self.diagnosticReason(for: failure.code),
             error: error,
             connectionID: epochID
         )
-        await disconnectEpoch(epochID: epochID, failure: Self.transportFailure(error))
+        await disconnectEpoch(epochID: epochID, failure: failure)
+        return true
     }
 
     private func disconnectEpoch(epochID: Int, failure: GatewayFailure) async {
@@ -1731,7 +1851,10 @@ package actor GatewayClient {
                 recordRPCDiagnostic(request: waiter, outcome: .success)
                 waiter.continuation.resume(returning: response.result ?? .null)
             } else {
-                let error = response.error ?? GatewayFailure(
+                // The response frame is the Gateway's own answer, so its error is
+                // stamped; the fallback below is the phone's own reading of a
+                // malformed frame and stays unstamped.
+                let error = response.error?.stampedAsGatewayAnswer ?? GatewayFailure(
                     code: "invalid_response",
                     message: "Gateway returned an invalid error.",
                     retryable: false,
@@ -1806,6 +1929,7 @@ package actor GatewayClient {
         let error: Error = request.transmission.mayHaveBeenSent
             ? Self.possiblySentFailure(message: "The Mac did not answer after the request may have been sent.")
             : GatewayFailure(code: "timeout", message: "The request expired before it was sent.", retryable: true, details: nil)
+        cancelDisposableRead(request, socket: epoch.socket)
         fail(id: id, epochID: epochID, error: error)
     }
 
@@ -1815,7 +1939,43 @@ package actor GatewayClient {
         let error: Error = request.transmission.mayHaveBeenSent
             ? Self.possiblySentFailure(message: "The cancelled request may have reached the Mac.")
             : CancellationError()
+        cancelDisposableRead(request, socket: epoch.socket)
         fail(id: id, epochID: epochID, error: error, forcedOutcome: .cancelled)
+    }
+
+    /// Tell the Gateway this call stopped waiting for a disposable read, so it
+    /// stops computing an answer nobody consumes (`C-6`). A request that never
+    /// left this client has nothing to cancel, and an accepted mutation or
+    /// admitted prompt is never cancelled: its owner must settle it durably.
+    /// The frame is fire-and-forget because the caller already failed locally;
+    /// a socket that cannot carry it is the socket's own failure to report.
+    private func cancelDisposableRead(_ request: PendingRequest, socket: any GatewaySocketConnection) {
+        guard GatewayDisposableReadPolicy.admits(request.method),
+              request.transmission.mayHaveBeenSent,
+              let data = try? JSONEncoder.gateway.encode(GatewayCancelFrame(id: request.requestID))
+        else { return }
+        let duration = diagnosticMilliseconds(request.startedAt.duration(to: clock.now()))
+        if let appLog {
+            Task {
+                await appLog.recordRPC(
+                    event: "rpc.cancelled",
+                    method: request.method,
+                    requestID: request.requestID,
+                    outcome: "cancelled",
+                    code: nil,
+                    durationMilliseconds: duration,
+                    profileID: request.profileID,
+                    connectionID: request.connectionID
+                )
+            }
+        }
+        Task { [socket] in
+            // The cancel must not overtake the request it cancels: a frame that
+            // reaches the Gateway first names a request that never arrived, so
+            // the read it meant to stop keeps running.
+            await request.send?.value
+            try? await socket.send(data)
+        }
     }
 
     private func fail(
@@ -1878,7 +2038,8 @@ package actor GatewayClient {
             lastWriteProgressAgeMilliseconds: ageMilliseconds(epoch.lastWriteProgressAt),
             profileID: epoch.profileID,
             profileLabel: epoch.profileLabel,
-            attemptID: epoch.attemptID
+            attemptID: epoch.attemptID,
+            gatewayConnectionID: epoch.gatewayConnectionID
         )
         epoch.receiveTask?.cancel()
         epoch.livenessTask?.cancel()
@@ -1983,6 +2144,17 @@ package actor GatewayClient {
             return nil
         }
     }
+
+    /// The transport-open deadline's own failure. The code stays `timeout`: the
+    /// attempt record's `stage=transport-open` plus `transportOpened=false` is
+    /// what names a path that never opened (the no-path presentation reads
+    /// those), while this message keeps the two bounds tellable apart by eye.
+    private nonisolated static let transportOpenTimeoutFailure = GatewayFailure(
+        code: "timeout",
+        message: "The Mac gateway did not open the connection.",
+        retryable: true,
+        details: nil
+    )
 
     private nonisolated static func transportFailure(_ error: Error) -> GatewayFailure {
         if error is CancellationError {

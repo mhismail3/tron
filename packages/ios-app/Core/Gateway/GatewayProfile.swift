@@ -1,5 +1,60 @@
 import Foundation
 
+/// One LAN endpoint a paired Gateway advertises on its authenticated channels
+/// (E-3b): where this phone may open a second leg. With the profile's pin it is
+/// everything the LAN race needs, and both parts are validated at the boundary
+/// so a stored or advertised endpoint is always one this phone can dial.
+package struct GatewayLanEndpoint: Codable, Hashable, Sendable {
+    package let host: String
+    package let port: Int
+
+    package init?(host: String, port: Int) {
+        guard let canonical = PairingInvitationParser.canonicalHost(host),
+              (1...65_535).contains(port) else { return nil }
+        self.host = canonical
+        self.port = port
+    }
+
+    /// The endpoints an advertisement or a stored profile carries. An absent or
+    /// malformed list is no endpoints at all, and an entry this phone cannot
+    /// dial is dropped: the LAN leg is an optimization over the Tailscale one
+    /// (E-3c), and a bad entry must not cost the phone the channel that carried
+    /// it.
+    package static func sanitized(_ advertised: [GatewayLanEndpoint]?) -> [GatewayLanEndpoint] {
+        (advertised ?? []).compactMap { GatewayLanEndpoint(host: $0.host, port: $0.port) }
+    }
+
+    /// The host as a URL authority. An IPv6 literal is bracketed here: it is
+    /// stored bare (a bracketed host is not a hostname), and `URLComponents`
+    /// refuses a bare literal outright, which would leave a Mac whose only
+    /// private address is a ULA with no LAN leg to dial.
+    package var urlHost: String { host.contains(":") ? "[\(host)]" : host }
+
+    /// The lane serves TLS only (E-3a), so its socket is `wss` under the
+    /// certificate the profile pinned — not the plain `ws` an ordinary saved
+    /// endpoint uses.
+    package var socketURL: URL? {
+        var components = URLComponents()
+        components.scheme = "wss"
+        components.host = urlHost
+        components.port = port
+        components.path = "/v1/socket"
+        return components.url
+    }
+
+    /// The base for this lane's authenticated HTTP routes while it wins the
+    /// race (E-3c).
+    package func httpURL(path: String = "", queryItems: [URLQueryItem] = []) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = urlHost
+        components.port = port
+        components.path = path
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        return components.url
+    }
+}
+
 package struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
     package let id: String
     package var label: String
@@ -9,18 +64,29 @@ package struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
     package var machineGroupID: String
     package var deviceId: String? = nil
     package var isEnabled: Bool = true
+    /// The LAN endpoints this Gateway last advertised, and the pin its
+    /// certificate must match (E-3b). They are learned at pairing and replaced
+    /// by every hello, so the race always dials a lane the Mac currently
+    /// serves; an empty list means the lane is off and the profile keeps only
+    /// its Tailscale endpoint.
+    package var lanEndpoints: [GatewayLanEndpoint] = []
+    package var lanPin: String? = nil
 
     package init(id: String, label: String, host: String, port: Int, machineId: String,
-         machineGroupID: String? = nil, deviceId: String? = nil, isEnabled: Bool = true) {
+         machineGroupID: String? = nil, deviceId: String? = nil, isEnabled: Bool = true,
+         lanEndpoints: [GatewayLanEndpoint] = [], lanPin: String? = nil) {
         self.id = id; self.label = label; self.host = host; self.port = port
         self.machineId = machineId; self.machineGroupID = machineGroupID ?? machineId
         self.deviceId = deviceId; self.isEnabled = isEnabled
+        self.lanEndpoints = lanEndpoints; self.lanPin = lanPin
     }
 
-    private enum CodingKeys: String, CodingKey { case id, label, host, port, machineId, machineGroupID, deviceId, isEnabled }
+    private enum CodingKeys: String, CodingKey { case id, label, host, port, machineId, machineGroupID, deviceId, isEnabled, lanEndpoints, lanPin }
 
     package init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        let advertised: [GatewayLanEndpoint]? = (try? values.decodeIfPresent([GatewayLanEndpoint].self, forKey: .lanEndpoints)) ?? nil
+        let pin: String? = (try? values.decodeIfPresent(String.self, forKey: .lanPin)) ?? nil
         self.init(
             id: try values.decode(String.self, forKey: .id),
             label: try values.decode(String.self, forKey: .label),
@@ -29,8 +95,19 @@ package struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
             machineId: try values.decode(String.self, forKey: .machineId),
             machineGroupID: try values.decodeIfPresent(String.self, forKey: .machineGroupID),
             deviceId: try values.decodeIfPresent(String.self, forKey: .deviceId),
-            isEnabled: try values.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+            isEnabled: try values.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true,
+            lanEndpoints: GatewayLanEndpoint.sanitized(advertised),
+            lanPin: pin.flatMap(GatewayLanPin.admit)
         )
+    }
+
+    /// Replace the advertisement this profile holds with what a pairing
+    /// response or hello just carried (E-3b). Every hello replaces both values,
+    /// including an empty list, because the Mac's latest answer is the only
+    /// truth about the lane it serves now.
+    mutating func adoptLanAdvertising(_ endpoints: [GatewayLanEndpoint], pin: String?) {
+        lanEndpoints = GatewayLanEndpoint.sanitized(endpoints)
+        lanPin = pin.flatMap(GatewayLanPin.admit)
     }
 
     var hasValidEndpoint: Bool {
@@ -145,9 +222,14 @@ struct PairingResponse: Decodable, Sendable {
     let machineGroupID: String?
     let machineName: String
     let gatewayChannel: String
+    /// The LAN lane the Mac serves right now, if any (E-3b). Pairing is the
+    /// first authenticated channel, so it is where a phone learns them for the
+    /// first time; every later hello replaces them.
+    let lanEndpoints: [GatewayLanEndpoint]
+    let lanPin: String?
 
     private enum CodingKeys: String, CodingKey {
-        case deviceId, token, machineId, machineGroupID, machineName, gatewayChannel
+        case deviceId, token, machineId, machineGroupID, machineName, gatewayChannel, lanEndpoints, lanPin
     }
 
     init(from decoder: Decoder) throws {
@@ -158,6 +240,10 @@ struct PairingResponse: Decodable, Sendable {
         machineGroupID = try values.decodeIfPresent(String.self, forKey: .machineGroupID)
         machineName = try values.decode(String.self, forKey: .machineName)
         gatewayChannel = try GatewayChannelPolicy.admit(values.decode(String.self, forKey: .gatewayChannel))
+        let advertised: [GatewayLanEndpoint]? = (try? values.decodeIfPresent([GatewayLanEndpoint].self, forKey: .lanEndpoints)) ?? nil
+        lanEndpoints = GatewayLanEndpoint.sanitized(advertised)
+        let pin: String? = (try? values.decodeIfPresent(String.self, forKey: .lanPin)) ?? nil
+        lanPin = pin.flatMap(GatewayLanPin.admit)
     }
 }
 
@@ -224,7 +310,9 @@ package struct GatewayPairer: Sendable {
             port: invitation.port,
             machineId: paired.machineId,
             machineGroupID: paired.machineGroupID,
-            deviceId: paired.deviceId
+            deviceId: paired.deviceId,
+            lanEndpoints: paired.lanEndpoints,
+            lanPin: paired.lanPin
         )
         return (profile, paired.token)
     }

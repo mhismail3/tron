@@ -11,6 +11,7 @@ import {
   type ConnectionAction,
   type ConnectionCapabilityStatus,
   type ConnectionCommand,
+  type ConnectionHealth,
   type ConnectionInstance,
   type ConnectionInstanceProjection,
   type ConnectionOwnerReceipt,
@@ -192,7 +193,9 @@ export class ConnectionOwner {
   }
 
   /** Adapter-owned admission observations are bounded and revision-fenced. They
-   * are never inferred from setup intent and are not polled during projection. */
+   * are never inferred from setup intent and are not polled during projection.
+   * An observation that repeats the current projection is not a state
+   * transition, so a read that re-observes it saves nothing. */
   async recordProviderObservation(instanceId: string, setupRevision: number, observation: ProviderAdmissionObservation): Promise<void> {
     assertConnectionId(instanceId);
     return this.mutex.run(async () => {
@@ -204,6 +207,15 @@ export class ConnectionOwner {
         && observation.providerIdentity === "admitted"
         ? normalizeProviderDisplayName(observation.providerDisplayName)
         : undefined;
+      const health: ConnectionHealth = observation.credentialAvailability === "available" && observation.providerIdentity === "admitted" ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
+      // All four projected fields already hold these values (an absent
+      // observation field projects as `unknown`, so it is compared that way),
+      // so this is not a state transition: a read that re-observes the same
+      // provider result must not bump `updatedAt`/`stateRevision` or fsync.
+      if ((instance.credentialAvailability ?? "unknown") === observation.credentialAvailability
+        && (instance.providerIdentity ?? "unknown") === observation.providerIdentity
+        && instance.providerDisplayName === admittedDisplayName
+        && instance.health === health) return;
       instance.credentialAvailability = observation.credentialAvailability;
       instance.providerIdentity = observation.providerIdentity;
       if (admittedDisplayName !== undefined) {
@@ -211,7 +223,7 @@ export class ConnectionOwner {
       } else {
         delete instance.providerDisplayName;
       }
-      instance.health = observation.credentialAvailability === "available" && observation.providerIdentity === "admitted" ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
+      instance.health = health;
       instance.updatedAt = now();
       state.stateRevision += 1;
       validateConnectionState(state);

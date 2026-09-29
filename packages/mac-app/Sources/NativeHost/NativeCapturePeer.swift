@@ -23,34 +23,6 @@ struct NativeCaptureProcess: Equatable, Sendable {
     }
 }
 
-/// Small file identity fence, not a payload cache or a second selection store.
-private struct CaptureSelectionStamp: Equatable, Sendable {
-    let exists: Bool
-    let device: Int32
-    let inode: UInt64
-    let modified: Int64
-    let nanos: Int64
-    let bytes: Data
-    static func read(_ url: URL) throws -> Self {
-        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        if fd < 0, errno == ENOENT { return Self(exists: false, device: 0, inode: 0, modified: 0, nanos: 0, bytes: Data()) }
-        guard fd >= 0 else { throw NativeCaptureHostError.unauthorized }
-        defer { _ = Darwin.close(fd) }
-        var before = stat(), after = stat(), named = stat()
-        guard fstat(fd, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
-              before.st_size > 0, before.st_size <= GatewayPayloadStore.maxManifestBytes else { throw NativeCaptureHostError.unauthorized }
-        var bytes = [UInt8](repeating: 0, count: Int(before.st_size))
-        guard Darwin.read(fd, &bytes, bytes.count) == bytes.count,
-              fstat(fd, &after) == 0, lstat(url.path, &named) == 0,
-              before.st_dev == after.st_dev, before.st_ino == after.st_ino, before.st_size == after.st_size,
-              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
-              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
-              named.st_dev == after.st_dev, named.st_ino == after.st_ino else { throw NativeCaptureHostError.unauthorized }
-        return Self(exists: true, device: before.st_dev, inode: before.st_ino,
-                    modified: Int64(before.st_mtimespec.tv_sec), nanos: Int64(before.st_mtimespec.tv_nsec), bytes: Data(bytes))
-    }
-}
-
 public struct NativeCaptureContext: Sendable {
     let automationEndpoint: @Sendable () -> NativeAutomationEndpoint?
     public init(outerBundle: URL, teamRequirement: String,
@@ -82,8 +54,8 @@ final class NativeCapturePeer: @unchecked Sendable {
     let codeRequirement: String
     private let context: NativeCaptureContext
     private let payload: GatewayPayloadValidationResult
-    private let selection: CaptureSelectionStamp
-    private let manifest: CaptureSelectionStamp
+    private let selection: PayloadSelectionStamp
+    private let manifest: PayloadSelectionStamp
     private let auditSession: au_asid_t
 
     init(connection: NSXPCConnection, context: NativeCaptureContext) throws {
@@ -94,15 +66,16 @@ final class NativeCapturePeer: @unchecked Sendable {
         auditSession = connection.auditSessionIdentifier
         self.context = context
         let process = try NativeCaptureProcess.read(connection.processIdentifier)
-        let pointer = try CaptureSelectionStamp.read(context.store.currentManifestURL)
+        let pointer = PayloadSelectionStamp.read(context.store.currentManifestURL)
         let payload = try context.payload()
         self.process = process; self.payload = payload
-        guard pointer == (try CaptureSelectionStamp.read(context.store.currentManifestURL)),
+        guard let pointer, pointer == PayloadSelectionStamp.read(context.store.currentManifestURL),
+              let manifest = PayloadSelectionStamp.read(payload.root.appendingPathComponent("manifest.json")),
               ["node-arm64", "node-x64"].contains(where: { payload.root.appendingPathComponent("runtime/\($0)").path == process.executable }) else {
             throw NativeCaptureHostError.unauthorized
         }
         selection = pointer
-        manifest = try CaptureSelectionStamp.read(payload.root.appendingPathComponent("manifest.json"))
+        self.manifest = manifest
         codeRequirement = try NativeCodeSigning.pin(context.teamRequirement, to: URL(fileURLWithPath: process.executable))
         guard isCurrent() else { throw NativeCaptureHostError.unauthorized }
     }
@@ -111,8 +84,8 @@ final class NativeCapturePeer: @unchecked Sendable {
         var audit = auditinfo_addr_t()
         return (try? NativeCaptureProcess.read(process.pid)) == process
             && getaudit_addr(&audit, Int32(MemoryLayout<auditinfo_addr_t>.size)) == 0 && audit.ai_asid == auditSession
-            && (try? CaptureSelectionStamp.read(context.store.currentManifestURL)) == selection
-            && (try? CaptureSelectionStamp.read(payload.root.appendingPathComponent("manifest.json"))) == manifest
+            && PayloadSelectionStamp.read(context.store.currentManifestURL) == selection
+            && PayloadSelectionStamp.read(payload.root.appendingPathComponent("manifest.json")) == manifest
     }
 
     func validate() async -> Bool {

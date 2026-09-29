@@ -113,7 +113,7 @@ final class ProfileChatRun: ProfileScenarioRun {
             messageCount: snapshot.transcriptTotal ?? snapshot.transcript.count,
             firstMessage: "Profile chat fixture", phase: snapshot.phase, summaryRevision: 1
         )])
-        fixture.handle("session.list") { _ in .object(["sessions": summary, "listRevision": .number(1)]) }
+        fixture.handle("session.list") { _ in .object(["sessions": summary, "listRevision": .number(1), "projectionToken": .string("epoch-1:1")]) }
         fixture.handle("session.open") { _ in
             .object([
                 "session": session,

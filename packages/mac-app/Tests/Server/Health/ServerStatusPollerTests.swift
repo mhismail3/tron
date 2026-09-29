@@ -10,7 +10,10 @@ struct ServerStatusPollerTests {
         tailscaleFromSettings: String? = nil,
         tailscaleStatus: TailscaleStatus = .notInstalled,
         serverPort: Int = 9847,
-        launchAgentLoaded: Bool? = false
+        launchAgentLoaded: Bool? = false,
+        admitStableRuntime: (@Sendable (ServerPingInfo) async -> StableGatewayObserver.Admission?)? = nil,
+        pingServer: (@Sendable (String?) async -> ServerPingResult)? = nil,
+        statusPollPingServer: (@Sendable (String?) async -> ServerPingResult)? = nil
     ) -> EnvironmentSetup {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let launchAgentManager = MockLaunchAgentManager()
@@ -23,6 +26,21 @@ struct ServerStatusPollerTests {
             gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
             gatewayChannelMarker: TronGatewayProfile.stable.channel
         )
+        let defaultAdmission: @Sendable (ServerPingInfo) async -> StableGatewayObserver.Admission? = { info in
+            StableGatewayObserver.Admission(
+                processID: 16027,
+                uptime: "01:07:42",
+                payload: GatewayPayloadValidationResult(
+                    root: tmp,
+                    manifest: GatewayPayloadManifest(
+                        channel: "stable", version: "test", gatewayVersion: info.version,
+                        nodeVersion: "22", sourceRevision: "revision", runtimeEpoch: "epoch",
+                        payloadFingerprint: String(repeating: "a", count: 64)
+                    )
+                ),
+                info: info
+            )
+        }
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp,
@@ -36,21 +54,7 @@ struct ServerStatusPollerTests {
             wrapperLockPath: tmp.appendingPathComponent(".mac-wrapper.com.tron.mac.lock"),
             onboardedSentinelExists: { false },
             readBearerToken: { token },
-            admitStableRuntime: { info in
-                StableGatewayObserver.Admission(
-                    processID: 16027,
-                    uptime: "01:07:42",
-                    payload: GatewayPayloadValidationResult(
-                        root: tmp,
-                        manifest: GatewayPayloadManifest(
-                            channel: "stable", version: "test", gatewayVersion: info.version,
-                            nodeVersion: "22", sourceRevision: "revision", runtimeEpoch: "epoch",
-                            payloadFingerprint: String(repeating: "a", count: 64)
-                        )
-                    ),
-                    info: info
-                )
-            },
+            admitStableRuntime: admitStableRuntime ?? defaultAdmission,
             readTailscaleIPFromSettings: { tailscaleFromSettings },
             cacheTailscaleIP: { _ in },
             probeTailscale: { tailscaleStatus },
@@ -58,10 +62,11 @@ struct ServerStatusPollerTests {
             detectExistingInstall: { .none },
             validateApplicationLocation: { nil },
             validateBundledHelper: { nil },
-            pingServer: { receivedToken in
+            pingServer: pingServer ?? { receivedToken in
                 #expect(receivedToken == token)
                 return pingResult
             },
+            statusPollPingServer: statusPollPingServer,
             launchAgentManager: launchAgentManager,
             touchOnboardedSentinel: { }
         )

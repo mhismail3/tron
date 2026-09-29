@@ -16,6 +16,13 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 10_000): Promise<
   }
 }
 
+/** Wait for the catalog owner's first published cut: a read that lands before
+ * it refuses retryably, and no reader walks the folder (G-1c). */
+async function awaitCatalogCut(registry: RuntimeRegistry): Promise<void> {
+  await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } })
+    .sessionCatalog.whenPublished();
+}
+
 describe.sequential("recent model usage", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
@@ -65,6 +72,7 @@ describe.sequential("recent model usage", () => {
     });
     registries.push(registry);
     await registry.initialize();
+    await awaitCatalogCut(registry);
     return { root, registry, faux, parentId: manager.getSessionId(), childId: child.getSessionId(), changes };
   }
 
@@ -158,6 +166,8 @@ describe.sequential("recent model usage", () => {
     registries.push(registry);
     try {
       await registry.initialize();
+      await awaitCatalogCut(registry);
+    await awaitCatalogCut(registry);
       expect(registry.recentModelUsage()).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
