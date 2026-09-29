@@ -85,6 +85,21 @@ describe("GatewayLogger", () => {
     expect(new GatewayLogger(path).recent(2)[0]!.stage).toBe("catalog.walk");
   });
 
+  it("persists the protocol version a refused hello asked for", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    logger.log("warning", "Socket upgrade rejected at hello", {
+      event: "http.upgrade", reason: "protocol_mismatch", peerProtocolVersion: 5 });
+    logger.log("warning", "Socket upgrade rejected at hello", {
+      event: "http.upgrade", reason: "protocol_mismatch", peerProtocolVersion: 5.5 });
+
+    const [record, fractional] = lines(path) as Array<Record<string, unknown>>;
+    expect(record!.peerProtocolVersion).toBe(5);
+    // Only an integer is a protocol version; the writer keeps nothing else.
+    expect(fractional).not.toHaveProperty("peerProtocolVersion");
+    expect(new GatewayLogger(path).recent(2)[0]!.peerProtocolVersion).toBe(5);
+  });
+
   it.each([["1", false], ["0", true]])("mirrors persisted records to process streams only when TRON_GATEWAY_SUPERVISED is %s", (supervised, mirrors) => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", supervised);
     const path = logPath();

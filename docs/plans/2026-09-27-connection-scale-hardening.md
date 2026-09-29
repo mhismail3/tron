@@ -10036,3 +10036,13 @@ recovery gaps; all three were fixed on the same branch.
   `scripts/tron mac verify`, then installs the iOS app from `main`. Building
   the Mac app from a shell whose PATH puts GNU `find`/`stat` first fails in
   `bundle-gateway.sh`; put `/usr/bin` first.
+- Follow-up after the install (2026-09-29): the build-8 app's startup
+  re-registered the Gateway (`launch-agent.unregister`, `register`, then
+  Running on `0.1.0-beta.8`), `scripts/tron mac verify` passed, and the phone,
+  reinstalled from `main`, opened a paired mobile connection. The live log
+  showed the writer's fixed field list dropped `peerProtocolVersion` (the
+  message kept "peer 5, Gateway accepts 6-6"): the lifecycle test asserted the
+  mocked logger's input, not the persisted record. `GatewayLogger` now
+  persists it, covered by `logger.test.ts` ("persists the protocol version a
+  refused hello asked for", red first with `expected undefined to be 5`); the
+  field reaches the installed app with the next Mac build.

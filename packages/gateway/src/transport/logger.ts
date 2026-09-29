@@ -34,6 +34,9 @@ export interface LogRecord {
   peerClientId?: string;
   peerAttemptId?: string;
   peerEpoch?: string;
+  /** The protocol version a refused hello asked for (`http.upgrade`,
+   * `reason=protocol_mismatch`): names the stale side of a version mismatch. */
+  peerProtocolVersion?: number;
   commandId?: string;
   /** A named lifecycle step, such as a startup checkpoint. */
   step?: string;
@@ -80,6 +83,7 @@ export interface LogMetadata {
   peerClientId?: string;
   peerAttemptId?: string;
   peerEpoch?: string;
+  peerProtocolVersion?: number;
   commandId?: string;
   step?: string;
   requestID?: string;
@@ -255,6 +259,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.peerClientId === "string" ? { peerClientId: boundedDiagnosticID(value.peerClientId) } : {}),
     ...(typeof value.peerAttemptId === "string" ? { peerAttemptId: boundedDiagnosticID(value.peerAttemptId) } : {}),
     ...(typeof value.peerEpoch === "string" ? { peerEpoch: boundedDiagnosticID(value.peerEpoch) } : {}),
+    ...(Number.isSafeInteger(value.peerProtocolVersion) ? { peerProtocolVersion: value.peerProtocolVersion } : {}),
     ...(typeof value.commandId === "string" ? { commandId: boundedDiagnosticID(value.commandId) } : {}),
     ...(typeof value.step === "string" ? { step: boundedDiagnosticID(value.step).slice(0, 64) } : {}),
     ...(typeof value.requestID === "string" ? { requestID: boundedDiagnosticID(value.requestID) } : {}),
