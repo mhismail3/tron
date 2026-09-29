@@ -462,6 +462,7 @@ function recordShutdownStep(step: string, durationMs: number): void {
 async function shutdown(reason: string, exitCode = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
+  service.dispose();
   const stoppingAt = performance.now();
   // The last record of this process: the next process's gateway.started
   // follows after launchd and the launcher.
@@ -668,6 +669,7 @@ const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_00
 enrollmentTimer.unref();
 startupCheckpoint("composition");
 await transport.listen(async () => {
+  service.startModelReleaseDateRefresh();
   startupCheckpoint("listener-bind");
   // This startup follows a user-initiated Gateway update. Keep Knowledge
   // unavailable on upgrade failure without disabling unrelated chat features.

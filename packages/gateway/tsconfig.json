@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "resolveJsonModule": true,
+    "allowJs": true,
     "lib": ["ES2023"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -20,6 +21,6 @@
     "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.mjs"],
   "exclude": ["src/**/*.test.ts"]
 }

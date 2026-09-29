@@ -71,6 +71,10 @@ The authorization code/state remain in the iOS listener's memory and travel eith
 Pi manual-code response or as the query-only `auth.callback` relay; they never enter snapshots, caches,
 logs, or durable events.
 
+`models.catalogChanged` is a global, payload-free invalidation broadcast after the Gateway's live
+release-date catalog changes. The provider-auth coordinator reloads each already materialized
+provider model catalog through `model.list`; it never treats the event as catalog data.
+
 `AppModel.handle(_:)` owns cross-domain routing; `SessionPresentationStore` exclusively
 admits and reduces mounted-session topics:
 

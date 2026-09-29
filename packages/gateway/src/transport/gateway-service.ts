@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
-import { modelReleaseDate } from "../providers/model-release-dates.js";
+import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog.js";
 import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
@@ -291,6 +291,7 @@ export interface GatewayServiceDependencies {
   sessionSearch?: SessionSearchService;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
+  modelReleaseDates?: ModelReleaseDateCatalog;
 }
 
 export class GatewayService {
@@ -307,6 +308,7 @@ export class GatewayService {
   private readonly automationPages = new AutomationPaginationStore();
   private readonly workspaceInspector: WorkspaceInspectionService;
   private readonly providerUsage: ProviderUsageOwner;
+  private readonly modelReleaseDates: ModelReleaseDateCatalog;
   /** The named caps that queue rather than refuse (`G-12`); an admitted
    * mutation or prompt is never behind them. */
   private readonly exportGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_SESSION_EXPORTS);
@@ -330,6 +332,24 @@ export class GatewayService {
       (data, mimeType) => dependencies.sessions.registerWorkspaceBlob(data, mimeType),
     );
     this.providerUsage = dependencies.providerUsage ?? new ProviderUsageOwner();
+    this.modelReleaseDates = dependencies.modelReleaseDates ?? new ModelReleaseDateCatalog({
+      tronHome: dependencies.config?.tronHome ?? process.cwd(),
+      providers: () => dependencies.modelRuntime.getProviders().map(provider => provider.id),
+      log: (level, message, metadata) => dependencies.logger?.log(level, message, { event: "model.release-dates", source: "model-release-dates", ...metadata }),
+      broadcast: () => {
+        this.modelCatalogPages.invalidate();
+        dependencies.broadcast("models.catalogChanged", {});
+      },
+      ...(this.workRegistry ? { workRegistry: this.workRegistry } : {}),
+    });
+  }
+
+  startModelReleaseDateRefresh(): void {
+    this.modelReleaseDates.start();
+  }
+
+  dispose(): void {
+    this.modelReleaseDates.dispose();
   }
 
   releaseClient(clientID: string): void {
@@ -1813,10 +1833,21 @@ export class GatewayService {
                 force: params.force === undefined ? false : boolean(params.force, "force"),
                 signal: controller.signal,
               });
-              const result = params.sessionId === undefined
-                ? await this.dependencies.globalProviderResources.withStableSnapshot(refresh, controller.signal)
-                : await refresh();
-              return safeJson({ aborted: result.aborted, errors: Object.fromEntries([...result.errors].map(([key, error]) => [key, error.message])) });
+              const releaseDates = this.modelReleaseDates.refresh({
+                force: params.force === undefined ? false : boolean(params.force, "force"),
+                signal: controller.signal,
+              });
+              const modelRefresh = params.sessionId === undefined
+                ? this.dependencies.globalProviderResources.withStableSnapshot(refresh, controller.signal)
+                : refresh();
+              const [result, releaseDateResult] = await Promise.all([modelRefresh, releaseDates]);
+              return safeJson({
+                aborted: result.aborted,
+                errors: Object.fromEntries([...result.errors].map(([key, error]) => [key, error.message])),
+                releaseDates: releaseDateResult.error
+                  ? { updated: releaseDateResult.updated, error: releaseDateResult.error }
+                  : { updated: releaseDateResult.updated },
+              });
             } finally {
               clearTimeout(timer);
             }
@@ -2174,10 +2205,10 @@ export class GatewayService {
   private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown): Promise<JsonValue> {
     const page = await this.modelCatalogPages.page(modelRuntime, cursor, limit, async () => {
       const available = new Set((await modelRuntime.getAvailable()).map((model) => `${model.provider}\0${model.id}`));
-      return modelRuntime.getModels().map((model) => {
+      return Promise.all(modelRuntime.getModels().map(async (model) => {
         // Undated models simply omit the field; the picker's provider sections
         // list them without a release date.
-        const releaseDate = modelReleaseDate(model.provider, model.id);
+        const releaseDate = await this.modelReleaseDates.modelReleaseDate(model.provider, model.id);
         // USD per million tokens. An all-zero SDK price means "unset", not free,
         // so it is omitted and the picker shows no price.
         const priced = model.cost.input > 0 || model.cost.output > 0;
@@ -2194,7 +2225,7 @@ export class GatewayService {
           ...(releaseDate === undefined ? {} : { releaseDate }),
           ...(priced ? { cost: { input: model.cost.input, output: model.cost.output } } : {}),
         };
-      });
+      }));
     });
     return safeJson({ models: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
   }

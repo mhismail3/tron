@@ -837,6 +837,14 @@ final class ProviderAuthCoordinator {
         invalidationGeneration &+= 1
     }
 
+    /// Release-date changes invalidate the model catalog projection, including an open picker.
+    func noteModelCatalogChanged() {
+        invalidationGeneration &+= 1
+        for target in Array(catalogByTarget.keys) {
+            Task { await refreshCatalog(target: target) }
+        }
+    }
+
     /// Revokes disposable transport work while retaining the stable-device-owned
     /// provider operation so a replacement socket can rebind with auth.resume.
     func retireConnection() {

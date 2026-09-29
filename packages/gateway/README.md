@@ -2280,19 +2280,40 @@ the field is omitted; cache rates and tiered pricing are not projected.
 
 `model.list` items carry an optional `releaseDate` (`YYYY-MM-DD`) that backs the
 picker's Latest rail; models with no known date omit the field and appear only
-in provider sections. The pinned Pi catalog drops the vendor's `release_date`,
-so Tron vendors the facts in `packages/gateway/src/providers/model-release-dates.json`
-instead of consulting the network while serving a request. The snapshot is
-maintained manually with `scripts/update-model-release-dates.mjs`, which reads
-the pinned SDK catalog to decide which providers to cover and normalizes a
-month-precision release to the first of that month. It requires an installed
-`packages/gateway/node_modules`; `--check` verifies the checked-in snapshot is
-current without writing. A Pi catalog update therefore needs a refresh. Platform
-providers that re-export another vendor's models (OpenAI Codex and Azure OpenAI
-over OpenAI, the Vercel AI Gateway over `vercel`, Fireworks over `fireworks-ai`,
-Z.ai's coding plan over `zai-coding-plan`) are resolved through the documented
-alias map in `packages/gateway/src/providers/model-release-date-aliases.json`,
-which the generator reads so a snapshot can never fall behind an alias.
+in provider sections. A Gateway-owned release-date catalog overlays a persisted
+fresh `models.dev` snapshot on the vendored baseline in
+`packages/gateway/src/providers/model-release-dates.json`; fetched keys win and
+missing fetched keys retain their baseline values. Reads use only the in-memory
+merged catalog and never perform network I/O. The persisted document lives at
+`<tronHome>/gateway/model-release-dates.json`, is atomically replaced, and carries
+`fetchedAt` plus conditional-request validators. Invalid or oversized persisted
+state is warned about and ignored in favor of the baseline.
+
+After the listener starts, the Gateway makes a non-blocking refresh and retries
+on a 12-hour interval; a fresh persisted snapshot suppresses periodic requests.
+`models.refresh` also runs the release-date refresh concurrently with Pi's model
+refresh under the same 60-second cancellation boundary. Its response keeps the
+existing `{aborted, errors}` fields and additively includes
+`releaseDates: {updated}` or `releaseDates: {updated, error}`; release-date
+failure never changes the successful provider refresh result. A non-forced
+request skips release-date fetching while data is younger than 12 hours; the iOS
+Model Catalog Refresh action sends `force: true`, so it bypasses freshness. The Gateway
+uses conditional ETag/Last-Modified requests, caps response and persisted data at
+32 MiB, shares concurrent fetches, and aborts on shutdown. `PI_OFFLINE=1` disables
+these network requests. A release-date failure is reported additively as
+`releaseDates.error`, never fails the existing refresh result or discards usable
+dates. When fetched dates change, `models.catalogChanged` tells connected clients
+to reload `model.list`.
+
+The vendored baseline is maintained manually with
+`scripts/update-model-release-dates.mjs`, which reads the pinned SDK catalog to
+decide provider coverage and uses the same provider/date/alias normalization as
+the runtime service. Month-precision releases normalize to the first day of the
+month. The script requires installed `packages/gateway/node_modules`; `--check`
+verifies the checked-in baseline without writing. Runtime coverage comes from the
+providers exposed by the running `ModelRuntime`, including extension providers,
+plus alias targets. Providers that re-export another vendor's models resolve
+through `packages/gateway/src/providers/model-release-date-aliases.json`.
 
 ### Prompt attachments and request size
 

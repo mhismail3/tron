@@ -31,6 +31,11 @@ export class ModelCatalogPager {
   private readonly byOwner = new Map<object, Map<string, StoredCatalog>>();
   private access = 0;
 
+  invalidate(owner?: object): void {
+    if (owner) this.byOwner.delete(owner);
+    else this.byOwner.clear();
+  }
+
   async page<T>(
     owner: object,
     rawCursor: unknown,

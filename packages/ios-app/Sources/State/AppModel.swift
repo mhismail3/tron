@@ -4706,6 +4706,8 @@ final class AppModel {
             packageConfiguration.notePackagesChanged()
         case "models.customChanged":
             customModelConfiguration.noteCustomModelsChanged()
+        case "models.catalogChanged":
+            providerAuth.noteModelCatalogChanged()
         case "models.recentChanged":
             providerAuth.noteRecentModelsChanged()
         case "notification.inbox.changed":
