@@ -10,6 +10,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { BlobStore } from "../sessions/blob-store.js";
 import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS, HTTP_REQUEST_TIMEOUT_MS, HTTP_HEADERS_TIMEOUT_MS } from "./server.js";
+import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 
 // Failure modes this file exists to catch (real sockets, real HTTP boundary):
 // 1. An upgrade that opens the write buffer and is deleted before hello
@@ -250,22 +251,33 @@ describe("HTTP pending-work ownership", () => {
     expect(record.fields).not.toHaveProperty("peerClientId");
   });
 
-  it("records a hello that arrived but was refused as rejected at the hello phase", async () => {
+  it.each([5, 99])("refuses a hello whose protocol this Gateway cannot speak with a typed close (%i)", async protocolVersion => {
     const f = await fixture();
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
     await bounded(once(peer, "open"), "upgrade open");
-    peer.send(JSON.stringify({ type: "hello", protocolVersion: 99 }));
+    const closed = once(peer, "close");
+    peer.send(JSON.stringify({ type: "hello", protocolVersion }));
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
     // The peer's version is what tells a stale phone build from a stale Gateway.
     expect(record.fields).toMatchObject({
-      outcome: "rejected", phaseReached: "hello", reason: "protocol_mismatch", peerProtocolVersion: 99,
+      outcome: "rejected", phaseReached: "hello", reason: "protocol_mismatch", peerProtocolVersion: protocolVersion,
     });
     // The frame was refused before it could name the peer.
     expect(record.fields).not.toHaveProperty("peerClientId");
     expect(typeof record.fields.helloMs).toBe("number");
+    // The refused peer only has the close itself to classify the ending: a
+    // generic transport failure retries a version mismatch forever, so the
+    // typed code and the version range are what let the phone name the build
+    // that must update (F-3).
+    const [closeCode, closeReason] = await bounded(closed, "protocol mismatch close");
+    expect(closeCode).toBe(PROTOCOL_MISMATCH_CLOSE_CODE);
+    expect(JSON.parse(String(closeReason))).toEqual({
+      code: "protocol_mismatch", gatewayProtocol: PROTOCOL_VERSION, minProtocol: MIN_PROTOCOL_VERSION,
+    });
+    expect(Buffer.byteLength(String(closeReason))).toBeLessThanOrEqual(123);
   });
 
   it("keeps complete-body, header and inactivity bounds distinct", async () => {

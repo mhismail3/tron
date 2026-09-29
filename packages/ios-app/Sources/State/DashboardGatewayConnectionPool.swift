@@ -22,7 +22,8 @@ protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
     func dashboardPoolDidUpdate(
         profileID: String,
         sessions: [SessionSummary],
-        state: DashboardServerConnectionState
+        state: DashboardServerConnectionState,
+        stopReason: String?
     )
     func dashboardPoolNotificationInboxChanged(profileID: String, change: NotificationInboxChanged?)
     func dashboardPoolAutomationChanged(profileID: String)
@@ -136,6 +137,12 @@ final class DashboardGatewayConnectionPool {
         var refreshRetryAttempt: Int
         var refreshFailedAttempts: Int
         var connectionFailureClassifier: GatewayConnectionFailureClassifier
+        /// The message of the non-retryable failure that stopped this profile,
+        /// or nil while it is retrying. The state alone is `.offline` for a
+        /// background profile, and that profile is not the selected one whose
+        /// stop the detail view already reads: without this, half of the F-3
+        /// requirement (which build must update) has nowhere to render.
+        var stopReason: String?
         /// The pool's own count of this entry's attempts that failed in a row.
         /// Only a successful attempt clears it; it decides when the retry curve
         /// escalates, unlike the display classifier, which stops counting an
@@ -224,6 +231,13 @@ final class DashboardGatewayConnectionPool {
 
     func state(for profileID: String) -> DashboardServerConnectionState? {
         entries[profileID]?.state
+    }
+
+    /// The message of the failure that stopped this background profile, or nil
+    /// while it retries or is connected. It is the pool's own record of why
+    /// that profile's entry stopped, which `state` alone cannot carry (F-3).
+    func stopReason(for profileID: String) -> String? {
+        entries[profileID]?.stopReason
     }
 
     func infoSnapshot(for profileID: String) -> GatewayInfo? {
@@ -423,6 +437,7 @@ final class DashboardGatewayConnectionPool {
             refreshRetryAttempt: 0,
             refreshFailedAttempts: 0,
             connectionFailureClassifier: GatewayConnectionFailureClassifier(),
+            stopReason: nil,
             consecutiveFailedAttempts: 0,
             reconnectLoopID: nil,
             attemptInFlightLoopID: nil
@@ -470,6 +485,7 @@ final class DashboardGatewayConnectionPool {
                 self.entries[profile.id]?.reconnectSchedule.reset()
                 self.entries[profile.id]?.connectionFailureClassifier.reset()
                 self.entries[profile.id]?.consecutiveFailedAttempts = 0
+                self.entries[profile.id]?.stopReason = nil
                 self.entries[profile.id]?.connectionID = connectionID
                 self.entries[profile.id]?.gatewayInfo = identity.info
                 self.entries[profile.id]?.state = .connecting
@@ -509,6 +525,7 @@ final class DashboardGatewayConnectionPool {
                 guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.nonRetryableProfiles.insert(profile.id)
                 self.entries[profile.id]?.gatewayInfo = nil
+                self.entries[profile.id]?.stopReason = failure.message
                 self.entries[profile.id]?.state = failure.code == "identity_mismatch" ? .identityMismatch : .offline
                 self.recordAttempt(
                     profileID: profile.id,
@@ -584,7 +601,8 @@ final class DashboardGatewayConnectionPool {
         delegate?.dashboardPoolDidUpdate(
             profileID: profileID,
             sessions: entry.catalog.sessions,
-            state: .offline
+            state: .offline,
+            stopReason: nil
         )
         if close {
             let previous = retirementTasks[profileID]?.task
@@ -864,6 +882,7 @@ final class DashboardGatewayConnectionPool {
                     entry.reconnectSchedule.reset()
                     self.entries[profileID]?.connectionFailureClassifier.reset()
                     self.entries[profileID]?.consecutiveFailedAttempts = 0
+                    self.entries[profileID]?.stopReason = nil
                     self.entries[profileID]?.state = .connecting
                     self.publish(profileID: profileID)
                     let connectionID = identity.id
@@ -905,6 +924,7 @@ final class DashboardGatewayConnectionPool {
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.nonRetryableProfiles.insert(profileID)
                     self.entries[profileID]?.gatewayInfo = nil
+                    self.entries[profileID]?.stopReason = failure.message
                     self.entries[profileID]?.state = failure.code == "identity_mismatch" ? .identityMismatch : .offline
                     self.recordAttempt(
                         profileID: profileID,
@@ -1364,7 +1384,8 @@ final class DashboardGatewayConnectionPool {
         delegate?.dashboardPoolDidUpdate(
             profileID: profileID,
             sessions: entry.catalog.sessions,
-            state: entry.state
+            state: entry.state,
+            stopReason: entry.stopReason
         )
         delegate?.dashboardPoolDidUpdateArchivedCount(
             profileID: profileID,

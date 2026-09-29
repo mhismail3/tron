@@ -6,6 +6,7 @@ import TronMobileCore
 private final class GatewayPathDiagnosticsObserver {
     private let monitor = NWPathMonitor()
     private let delivery = GatewayPathDiagnosticCoalescer()
+    private let lanPermission = GatewayLanPermissionRecord()
     private let record: @MainActor @Sendable (String) -> Void
     private let pathHint: @MainActor @Sendable (Bool, String?) -> Void
 
@@ -14,8 +15,10 @@ private final class GatewayPathDiagnosticsObserver {
         pathHint = { [weak model] satisfied, signature in
             model?.lifecycleNotePathHint(satisfied: satisfied, signature: signature)
         }
-        monitor.pathUpdateHandler = { [delivery, record, pathHint] path in
+        let lanPermission = self.lanPermission
+        monitor.pathUpdateHandler = { [delivery, record, pathHint, lanPermission] path in
             GatewayNetworkPathSnapshot.shared.update(interfaces: Self.interfaces(path))
+            lanPermission.update(systemDenied: Self.localNetworkDenied(path))
             Task { @MainActor in pathHint(path.status == .satisfied, Self.routeSignature(path)) }
             Self.offer(Self.facts(path), delivery: delivery, record: record)
         }
@@ -27,9 +30,18 @@ private final class GatewayPathDiagnosticsObserver {
         if active {
             // The scene activation re-reads the same path: it forwards that
             // reading's signature so it cannot pass as a route change (C-3).
-            pathHint(monitor.currentPath.status == .satisfied, Self.routeSignature(monitor.currentPath))
-            Self.offer(Self.facts(monitor.currentPath), delivery: delivery, record: record)
+            let path = monitor.currentPath
+            lanPermission.update(systemDenied: Self.localNetworkDenied(path))
+            pathHint(path.status == .satisfied, Self.routeSignature(path))
+            Self.offer(Self.facts(path), delivery: delivery, record: record)
         }
+    }
+
+    /// The system's own report that this install may not reach the local
+    /// network (E-3c). The LAN lane reads it; nothing else in the app treats a
+    /// denied permission as an outage.
+    private nonisolated static func localNetworkDenied(_ path: NWPath) -> Bool {
+        path.unsatisfiedReason == .localNetworkDenied
     }
 
     private nonisolated static func offer(

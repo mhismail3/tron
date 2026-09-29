@@ -253,6 +253,11 @@ final class AppModel {
     /// Gateway-owned archived-session counts, one per profile whose count is
     /// known. Absent means unknown, which is never presented as zero.
     private var dashboardArchivedCountsByProfile: [String: Int] = [:]
+    /// The message of the non-retryable failure that stopped one background
+    /// profile, keyed by profile. The pool's entry owns the fact; this holds the
+    /// last one it published so a device detail can show why that profile is
+    /// offline for any profile, not only the selected one (F-3).
+    private var dashboardStopReasonsByProfile: [String: String] = [:]
     /// Advances when a Gateway's archive projection changes: an authoritative
     /// dashboard page for the focused profile, or a background profile's own
     /// authoritative page or retired connection. The archived container is its
@@ -1331,6 +1336,20 @@ final class AppModel {
     func loadHistoricalLaterTranscript(sessionID: String) async -> Bool {
         guard let generation = sessionPresentation.presentationGeneration(for: sessionID) else { return false }
         return await sessionPresentation.loadHistoricalLater(sessionID: sessionID, presentationGeneration: generation)
+    }
+
+    /// Why this profile is stopped, for the device detail's Status group. The
+    /// selected profile's stop is the lifecycle's own `.offline` reason; a
+    /// background profile's stop lives on its pool entry, which the pool
+    /// publishes here (F-3).
+    func dashboardConnectionStopReason(for profileID: String) -> String? {
+        _ = profileRevision
+        guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return nil }
+        if profiles.selected?.id == profile.id {
+            guard case .offline(let reason) = connectionState, !reason.isEmpty else { return nil }
+            return reason
+        }
+        return dashboardStopReasonsByProfile[profileID]
     }
 
     func dashboardServerState(for profileID: String) -> DashboardServerConnectionState {
@@ -4819,6 +4838,9 @@ final class AppModel {
         for profileID in Array(dashboardArchivedCountsByProfile.keys) where !currentProfileIDs.contains(profileID) {
             dashboardArchivedCountsByProfile[profileID] = nil
         }
+        for profileID in Array(dashboardStopReasonsByProfile.keys) where !currentProfileIDs.contains(profileID) {
+            dashboardStopReasonsByProfile[profileID] = nil
+        }
         dashboardPresentationRevision &+= 1
         dashboardConnections.reconcile(
             profiles: profiles.profiles,
@@ -5045,12 +5067,19 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
     func dashboardPoolDidUpdate(
         profileID: String,
         sessions: [SessionSummary],
-        state: DashboardServerConnectionState
+        state: DashboardServerConnectionState,
+        stopReason: String?
     ) {
         // A retired secondary cannot invalidate the focused owner's rows or
         // consent after the same profile has acquired its replacement socket.
         guard profileID != profiles.selected?.id,
               profiles.profiles.contains(where: { $0.id == profileID }) else { return }
+        // A stop message is retained only while its entry is stopped: a
+        // reconnect or a retired entry clears it, so the detail view never shows
+        // a reason for a profile that is retrying again (F-3).
+        let publishedStopReason = stopReason.flatMap { $0.isEmpty ? nil : $0 }
+        let stopReasonChanged = dashboardStopReasonsByProfile[profileID] != publishedStopReason
+        dashboardStopReasonsByProfile[profileID] = publishedStopReason
         let previousState = dashboardStatesByProfile[profileID]
         if state != .connected {
             sessionSearchPolicyLoadedConnections[profileID] = nil
@@ -5070,13 +5099,19 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
             incomingSessionCount: sessions.count,
             state: state
         ) {
-            guard dashboardStatesByProfile[profileID] != state else { return }
+            guard dashboardStatesByProfile[profileID] != state else {
+                if stopReasonChanged { dashboardPresentationRevision &+= 1 }
+                return
+            }
             dashboardStatesByProfile[profileID] = state
             dashboardPresentationRevision &+= 1
             return
         }
         guard dashboardSessionsByProfile[profileID] != sessions
-            || dashboardStatesByProfile[profileID] != state else { return }
+            || dashboardStatesByProfile[profileID] != state else {
+            if stopReasonChanged { dashboardPresentationRevision &+= 1 }
+            return
+        }
         dashboardSessionsByProfile[profileID] = sessions
         dashboardStatesByProfile[profileID] = state
         dashboardPresentationRevision &+= 1

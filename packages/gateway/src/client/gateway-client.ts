@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
-import { PROTOCOL_VERSION } from "../version.js";
+import { PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 import type { JsonValue } from "../protocol/types.js";
 
 export interface GatewayClientEvent {
@@ -95,18 +95,47 @@ export class GatewayProtocolClient {
       socket.on("error", (error) => {
         if (this.isCurrent(socket)) this.closeError = new GatewayClientError("disconnected", error.message, true);
       });
-      socket.on("close", (_code, reason) => {
+      socket.on("close", (code, reason) => {
+        // A typed protocol refusal outranks any transport error ws reported
+        // first: the version pair is permanent, so retrying it never converges.
+        const closeFailure = this.protocolMismatchFailure(code, reason)
+          ?? this.closeError
+          ?? new GatewayClientError("disconnected", reason.toString() || "Gateway disconnected", true);
         if (!this.isCurrent(socket)) {
-          if (!settled) fail(new GatewayClientError("disconnected", reason.toString() || "Gateway disconnected", true));
+          if (!settled) fail(closeFailure);
           return;
         }
-        if (!settled) fail(this.closeError ?? new GatewayClientError("disconnected", reason.toString() || "Gateway disconnected", true));
-        const error = this.closeError ?? new GatewayClientError("disconnected", reason.toString() || "Gateway disconnected", true);
-        this.failPending(error);
+        if (!settled) fail(closeFailure);
+        this.failPending(closeFailure);
         this.socket = undefined;
-        for (const listener of this.disconnectListeners) listener(error);
+        for (const listener of this.disconnectListeners) listener(closeFailure);
       });
     });
+  }
+
+  /** The typed ending of a protocol refusal, or undefined for any other close.
+   * The Gateway answers an unspeakable hello with `PROTOCOL_MISMATCH_CLOSE_CODE`
+   * and a JSON reason carrying its own protocol range; the raw reason is not a
+   * message a user reads, and a mismatch is retryable only if the build pair
+   * changes. */
+  private protocolMismatchFailure(code: number, reason: Buffer): GatewayClientError | undefined {
+    if (code !== PROTOCOL_MISMATCH_CLOSE_CODE) return undefined;
+    let range: { gatewayProtocol?: number; minProtocol?: number } = {};
+    try {
+      range = JSON.parse(reason.toString()) as typeof range;
+    } catch {
+      range = {};
+    }
+    const staleSide = typeof range.gatewayProtocol === "number" && range.gatewayProtocol < PROTOCOL_VERSION
+      ? "Update the Gateway"
+      : typeof range.minProtocol === "number" && range.minProtocol > PROTOCOL_VERSION
+        ? "Update this client"
+        : "Update the Gateway or this client";
+    return new GatewayClientError(
+      "protocol_mismatch",
+      `Gateway protocol mismatch (Gateway accepts ${range.minProtocol ?? "?"}-${range.gatewayProtocol ?? "?"}, this client speaks ${PROTOCOL_VERSION}). ${staleSide}.`,
+      false,
+    );
   }
 
   onEvent(listener: (event: GatewayClientEvent) => void): () => void {

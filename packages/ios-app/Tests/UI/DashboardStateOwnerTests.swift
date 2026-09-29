@@ -1372,6 +1372,79 @@ struct DashboardStateOwnerTests {
         }
     }
 
+    @Test("dashboard protocol mismatch stops retrying the background profile")
+    func dashboardProtocolMismatchStopsUntilRetry() async throws {
+        try await withTestWatchdog { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            // The Mac refuses the hello with the pair its own refusal sends:
+            // application close 4006 carrying the Gateway's protocol range. A
+            // Mac old enough to advertise an older range predates that close, so
+            // it stays retryable until it is updated (F-3, Option B).
+            let socket = ScriptedGatewaySocket(metadata: GatewaySocketMetadata(
+                closeCode: GatewayProtocolMismatchClose.closeCode,
+                httpStatusCode: 101,
+                closeReason: #"{"code":"protocol_mismatch","gatewayProtocol":6,"minProtocol":6}"#
+            ))
+            let factory = ScriptedGatewaySocketFactory(sockets: [socket, ScriptedGatewaySocket()])
+            let pool = DashboardGatewayConnectionPool(clientFactory: {
+                GatewayClient(socketFactory: factory.factory)
+            })
+            let recorder = DashboardPoolRecorder()
+            pool.delegate = recorder
+            await socket.failPendingReceivers(URLError(.networkConnectionLost))
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            try await Self.waitUntil { pool.state(for: profile.id) == .offline }
+            // No retry can fix a permanent build mismatch, and the message that
+            // names the build to update belongs to this profile's own entry:
+            // the badge alone is only `Offline`, and this is not the selected
+            // profile whose stop the detail view reads (F-3).
+            let published = try #require(recorder.updates.last { $0.profileID == profile.id }?.stopReason)
+            #expect(published.contains("Update Tron on"))
+            #expect(pool.stopReason(for: profile.id) == published)
+            pool.notePathHint(profileID: profile.id, satisfied: true)
+            for _ in 0..<20 { await Task.yield() }
+            #expect(factory.requests.count == 1)
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a background profile's stop reason is readable for that profile alone")
+    func backgroundStopReasonReachesTheModel() async throws {
+        let suiteName = "DashboardStopReasonTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let selected = GatewayProfile(
+            id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+            machineId: "selected-runtime", deviceId: "device"
+        )
+        let remote = GatewayProfile(
+            id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+            machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([selected, remote]), forKey: "gatewayProfiles.v1")
+        defaults.set(selected.id, forKey: "selectedGateway.v1")
+        let model = AppModel(
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: suiteName))
+        )
+        // The pool publishes the stop it holds for the profile that failed, and
+        // the device detail reads it back for that profile: the selected
+        // profile reads its own lifecycle reason instead.
+        model.dashboardPoolDidUpdate(
+            profileID: remote.id, sessions: [], state: .offline, stopReason: "Update Tron on the Mac."
+        )
+        #expect(model.dashboardConnectionStopReason(for: remote.id) == "Update Tron on the Mac.")
+        #expect(model.dashboardConnectionStopReason(for: selected.id) == nil)
+        // A profile that is retrying again must not keep the old stop.
+        model.dashboardPoolDidUpdate(profileID: remote.id, sessions: [], state: .reconnecting, stopReason: nil)
+        #expect(model.dashboardConnectionStopReason(for: remote.id) == nil)
+    }
+
     @Test("dashboard retirement barriers are per-profile across an A to B to A handoff")
     func dashboardRetirementIsPerProfile() async throws {
         try await withTestWatchdog { @MainActor in
@@ -2634,6 +2707,7 @@ private final class DashboardPoolRecorder: DashboardGatewayConnectionPoolDelegat
         let profileID: String
         let sessions: [SessionSummary]
         let state: DashboardServerConnectionState
+        let stopReason: String?
     }
 
     private let changes = AsyncStream<Update>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -2672,9 +2746,10 @@ private final class DashboardPoolRecorder: DashboardGatewayConnectionPoolDelegat
     func dashboardPoolDidUpdate(
         profileID: String,
         sessions: [SessionSummary],
-        state: DashboardServerConnectionState
+        state: DashboardServerConnectionState,
+        stopReason: String?
     ) {
-        let update = Update(profileID: profileID, sessions: sessions, state: state)
+        let update = Update(profileID: profileID, sessions: sessions, state: state, stopReason: stopReason)
         updates.append(update)
         changes.continuation.yield(update)
     }
