@@ -1742,7 +1742,7 @@ struct ChatViewScrollHarnessTests {
                     // Failure mode: SwiftUI selects the flipped scroll-content
                     // host as the preview target even though the card renders
                     // upright through its row's counter-flip.
-                    if let displayRow = rows.first(where: { $0.semanticID.contains("display") }) {
+                    if let displayRow = rows.first(where: { $0.semanticID == resolving.first }) {
                         let point = CGPoint(x: displayRow.windowFrame.midX, y: displayRow.windowFrame.minY + 12)
                         let configuration = try #require(delegate.contextMenuInteraction(
                             bridge.interaction,
