@@ -275,6 +275,12 @@ enum ChatVisualParityReference {
         // CT-12's reference, re-recorded per display frame by CT-14 on the
         // unchanged chat before any container change.
         "eed1e15a5de1a4ef0f66e338f89e9be7508e266c",
+        // The CT-25 scenarios (safe-area keyboard inset, short transcript,
+        // oldest row at the visual top), recorded on the same path. Their first
+        // recording named an ancestor of this revision with `dirty: true`, which
+        // no commit can reproduce; the far-end clamp that commit carries also
+        // moved the oldest-row scenario, so all three were recorded again here.
+        "c18b3b08402f533ce3b03d96eb6d1ca2d39e473a",
     ]
 
     /// The source revision this run is running against, as
