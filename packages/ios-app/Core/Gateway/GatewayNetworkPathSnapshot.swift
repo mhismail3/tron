@@ -3,8 +3,9 @@ import Foundation
 /// The interfaces of the device's current network path (for example
 /// "wifi,other" while Tailscale is up), as last reported by the app's one
 /// NWPathMonitor owner (`GatewayPathDiagnosticsObserver`). Connection records
-/// read it to say which interface an attempt could use; it never gates,
-/// retries, or replaces a connection.
+/// read it to say which interface an attempt could use, and the LAN lane's
+/// availability is read from it (the lane is dialed only on Wi-Fi, E-3c); it
+/// does not replace a connection.
 package final class GatewayNetworkPathSnapshot: @unchecked Sendable {
     package static let shared = GatewayNetworkPathSnapshot()
 

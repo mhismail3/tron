@@ -177,7 +177,12 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
 
     init(request: URLRequest, pinnedPublicKey: String? = nil) {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = true
+        // A pinned lane is the local one: iOS blocks a connection to it when
+        // the install's Local Network permission is denied, and a session that
+        // waits for connectivity hides that inside the connect budget instead
+        // of naming it (E-3c). The saved endpoint keeps waiting, because the
+        // path it needs is the one a phone that just lost Wi-Fi is waiting for.
+        configuration.waitsForConnectivity = pinnedPublicKey == nil
         configuration.timeoutIntervalForRequest = GatewayConnectionPolicy.requestInactivityTimeout
         let delegate = GatewayWebSocketDelegate(pinnedPublicKey: pinnedPublicKey)
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)

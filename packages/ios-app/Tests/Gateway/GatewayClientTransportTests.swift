@@ -2199,6 +2199,13 @@ struct GatewayClientLanLaneTests {
         )
     }
 
+    private func savedOnlyProfile() -> GatewayProfile {
+        GatewayProfile(
+            id: "machine", label: "Mac", host: Self.savedHost, port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+    }
+
     private func wifiOnlyPath() -> @Sendable () -> String? { { "wifi,other" } }
 
     @Test("the pinned LAN lane wins the race before the saved endpoint is dialed")
@@ -2358,5 +2365,221 @@ struct GatewayClientLanLaneTests {
         #expect(secondFactory.dialedHosts == [Self.savedHost])
         await client.close()
         await secondClient.close()
+    }
+
+    @Test("the LAN lane's own answer is the one the attempt reports")
+    func lanAnswerOutranksTheSavedLaneTimeout() async throws {
+        let lan = ScriptedGatewaySocket(metadata: GatewaySocketMetadata(closeCode: nil, httpStatusCode: 401))
+        let saved = ScriptedGatewaySocket()
+        await lan.failNextSend(URLError(.badServerResponse))
+        await saved.failNextSend(URLError(.timedOut))
+        let factory = HostRoutedGatewaySocketFactory(queued: [Self.lanHost: [lan], Self.savedHost: [saved]])
+        let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())
+
+        // The revoked device is answered 401 by the LAN lane and times out on
+        // the saved lane. Reporting the timeout would keep the phone retrying a
+        // Mac that has already refused it.
+        var thrown: (any Error)?
+        do {
+            _ = try await client.connectForLifecycle(profile: lanProfile(), token: "token")
+        } catch {
+            thrown = error
+        }
+        let failure = try #require(thrown as? GatewayFailure)
+        #expect(failure.code == "unauthenticated")
+        #expect(!failure.retryable)
+
+        // The attempt's newest record is the lane whose failure it reported,
+        // and a 401 is not a LAN that is unreachable.
+        let reported = try #require(await client.latestHandshakeDiagnostic(after: 0))
+        #expect(reported.handshake?.transport == "lan")
+        #expect(reported.httpStatusCode == 401)
+        #expect(reported.reason == .transport)
+        let lanRecord = try #require(await client.diagnostics().first { $0.handshake?.transport == "lan" })
+        #expect(lanRecord.reason != .lanUnreachable)
+        await client.close()
+    }
+
+    @Test("a network the LAN lane carried keeps the LAN lane's head start")
+    func rememberedLanKeepsTheStagger() async throws {
+        let firstLan = ScriptedGatewaySocket()
+        let firstSaved = ScriptedGatewaySocket()
+        let hangingLan = ScriptedGatewaySocket()
+        let secondSaved = ScriptedGatewaySocket()
+        await firstLan.enqueue(Self.helloFrame)
+        // The first connect never dials the saved lane (the LAN lane wins inside
+        // the stagger), so this is the socket its next attempt reaches.
+        await firstSaved.enqueue(Self.helloFrame)
+        let factory = HostRoutedGatewaySocketFactory(queued: [
+            Self.lanHost: [firstLan, hangingLan],
+            Self.savedHost: [firstSaved, secondSaved],
+        ])
+        let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())
+        _ = try await client.connectForLifecycle(profile: lanProfile(), token: "token")
+        #expect(factory.dialedHosts == [Self.lanHost])
+
+        // The same network, with the LAN lane no longer answering: the saved
+        // endpoint still waits the stagger, so the local socket is not lost to
+        // whichever hello lands first. Skipping the stagger here would make the
+        // home network a coin flip.
+        let started = ContinuousClock.now
+        _ = try await client.connectForLifecycle(profile: lanProfile(), token: "token")
+        let elapsed = started.duration(to: ContinuousClock.now)
+
+        #expect(elapsed >= .milliseconds(200))
+        #expect(factory.dialedHosts.count == 3)
+        await client.close()
+    }
+
+    @Test("a reconnect keeps a head start for the LAN lane this network carried")
+    func reconnectKeepsTheLanHeadStart() async throws {
+        let firstLan = ScriptedGatewaySocket()
+        let firstSaved = ScriptedGatewaySocket()
+        let hangingLan = ScriptedGatewaySocket()
+        let secondSaved = ScriptedGatewaySocket()
+        await firstLan.enqueue(Self.helloFrame)
+        await firstSaved.enqueue(Self.helloFrame)
+        let factory = HostRoutedGatewaySocketFactory(queued: [
+            Self.lanHost: [firstLan, hangingLan],
+            Self.savedHost: [firstSaved, secondSaved],
+        ])
+        let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())
+        _ = try await client.connectForLifecycle(profile: lanProfile(), token: "token")
+
+        // A lane that just died must not spend the attempt's budget, so the
+        // head start is short — but it is not nothing, or the lane that carried
+        // the network loses to the first hello to land.
+        let started = ContinuousClock.now
+        _ = try await client.reconnectForLifecycle(profile: lanProfile(), token: "token")
+        let elapsed = started.duration(to: ContinuousClock.now)
+
+        #expect(elapsed >= .milliseconds(40))
+        #expect(elapsed < .milliseconds(200))
+        await client.close()
+    }
+
+    @Test("an equal finish goes to the LAN lane")
+    func equalFinishGoesToTheLanLane() async throws {
+        let lan = ScriptedGatewaySocket()
+        let saved = ScriptedGatewaySocket()
+        await saved.enqueue(Self.helloFrame)
+        let factory = HostRoutedGatewaySocketFactory(queued: [Self.lanHost: [lan], Self.savedHost: [saved]])
+        let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())
+        // A race with no head start: the saved lane answers at once and the LAN
+        // lane answers inside the tie window, which the local lane must win.
+        let answering = Task { try? await Task.sleep(for: .milliseconds(10)); await lan.enqueue(Self.helloFrame) }
+
+        _ = try await client.reconnectForLifecycle(profile: lanProfile(), token: "token")
+        await answering.value
+
+        let winner = try #require(await client.diagnostics().first { $0.stage == .helloReceive && $0.outcome == .success })
+        #expect(winner.handshake?.transport == "lan")
+        #expect(await saved.closed())
+        await client.close()
+    }
+
+    @Test("a LAN lane that fails promptly does not hold the attempt for the stagger")
+    func failedLanLaneWakesTheStagger() async throws {
+        let lan = ScriptedGatewaySocket()
+        let saved = ScriptedGatewaySocket()
+        await lan.failNextSend(URLError(.cannotConnectToHost))
+        await saved.enqueue(Self.helloFrame)
+        let factory = HostRoutedGatewaySocketFactory(queued: [Self.lanHost: [lan], Self.savedHost: [saved]])
+        let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())
+
+        let started = ContinuousClock.now
+        _ = try await client.connectForLifecycle(profile: lanProfile(), token: "token")
+        let elapsed = started.duration(to: ContinuousClock.now)
+
+        #expect(elapsed < .milliseconds(200))
+        #expect(factory.dialedHosts.count == 2)
+        await client.close()
+    }
+
+    @Test("a system-reported Local Network denial skips the lane and records it")
+    func systemReportedDenialSkipsTheLane() async throws {
+        let suite = "GatewayClientLanLaneTests.denied.\\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let permission = GatewayLanPermissionRecord(defaults: defaults)
+        // What the app's path monitor writes when iOS reports the denial: no
+        // dial ever sees -1009, and the lane must still be left out and named.
+        permission.update(systemDenied: true)
+
+        let saved = ScriptedGatewaySocket()
+        await saved.enqueue(Self.helloFrame)
+        let factory = HostRoutedGatewaySocketFactory(queued: [
+            Self.lanHost: [ScriptedGatewaySocket()],
+            Self.savedHost: [saved],
+        ])
+        let client = GatewayClient(
+            socketFactory: factory.factory,
+            lanPermission: permission,
+            networkPath: wifiOnlyPath()
+        )
+
+        _ = try await client.connectForLifecycle(profile: lanProfile(), token: "token")
+
+        #expect(factory.dialedHosts == [Self.savedHost])
+        let denial = try #require(await client.diagnostics().first { $0.reason == .lanDenied })
+        #expect(denial.stage == .transportRace)
+        #expect(denial.handshake?.transport == "lan")
+        // The permission is state, not a one-way latch: the monitor's next
+        // reading of a path that does not report the denial clears it.
+        permission.update(systemDenied: false)
+        #expect(!permission.isDenied)
+        await client.close()
+    }
+
+    @Test("a saved endpoint with no LAN advertisement records no transport")
+    func unracedAttemptRecordsNoTransport() async throws {
+        let socket = ScriptedGatewaySocket()
+        await socket.enqueue(Self.helloFrame)
+        let factory = ScriptedGatewaySocketFactory(socket: socket)
+        let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())
+
+        _ = try await client.connectForLifecycle(profile: savedOnlyProfile(), token: "token")
+
+        let winner = try #require(await client.diagnostics().first { $0.stage == .helloReceive && $0.outcome == .success })
+        #expect(winner.handshake?.transport == nil)
+        await client.close()
+    }
+
+    @Test("a hello-receive failure names a socket that opened")
+    func helloReceiveFailureNamesAnOpenedSocket() async throws {
+        let socket = ScriptedGatewaySocket()
+        await socket.failPendingReceivers(URLError(.networkConnectionLost))
+        let factory = ScriptedGatewaySocketFactory(socket: socket)
+        let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())
+
+        await #expect(throws: (any Error).self) {
+            _ = try await client.connectForLifecycle(profile: savedOnlyProfile(), token: "token")
+        }
+
+        // The hello write completed before the receive, so the socket opened
+        // even though the transport's own metadata never observed it.
+        let failure = try #require(await client.diagnostics().first {
+            $0.stage == .helloReceive && $0.outcome == .failure
+        })
+        #expect(failure.handshake?.transportOpened == true)
+        await client.close()
+    }
+
+    @Test("a close ends the lanes an attempt is still dialing")
+    func closeEndsTheInFlightLanes() async throws {
+        let lan = ScriptedGatewaySocket(suspendsSend: true)
+        let saved = ScriptedGatewaySocket()
+        let factory = HostRoutedGatewaySocketFactory(queued: [Self.lanHost: [lan], Self.savedHost: [saved]])
+        let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())
+
+        let attempt = Task { try? await client.connectForLifecycle(profile: lanProfile(), token: "token") }
+        try await lan.waitUntilSendInvoked(count: 1)
+        await client.close()
+
+        // No epoch owned these sockets, so only the attempt record could end
+        // the one that was still dialing.
+        try await lan.waitUntilClosed()
+        attempt.cancel()
+        _ = await attempt.value
     }
 }
