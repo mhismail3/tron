@@ -106,7 +106,11 @@ extension XCTestCase {
         let configuration = try ProfileRunConfiguration.selected(scenario, defaultWindow: defaultWindow)
         ProfileResourceSample.captureMainThread()
         let trace = try ProfileTraceHandshake.requested()
-        print("TRON_PROFILE_SCENARIO_START name=\(scenario) iterations=\(configuration.iterations) window_ms=\(configuration.window.profileMilliseconds)")
+        // The transcript's development switch is the one input a profile report
+        // cannot otherwise attribute: the same scenario measured on both sides of
+        // it produces two different containers. The line names it, like the
+        // harness's own metrics lines do.
+        print("TRON_PROFILE_SCENARIO_START name=\(scenario) transcript_orientation=\(ChatTranscriptOrientation.selected) iterations=\(configuration.iterations) window_ms=\(configuration.window.profileMilliseconds)")
         try trace?.awaitRecording()
         let options = XCTMeasureOptions()
         options.iterationCount = configuration.iterations
