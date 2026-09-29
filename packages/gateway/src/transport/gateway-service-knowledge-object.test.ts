@@ -40,6 +40,31 @@ describe("Gateway knowledge object transport", () => {
     expect(createHash("sha256").update(rebuilt).digest("hex")).toBe(hash);
   });
 
+  it("projects a bounded preview batch and keeps one bad item local", async () => {
+    const bytes = Buffer.alloc(1_024);
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = index % 251;
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const gateway = service(() => ({ items: [
+      { recordId: "record-preview", hash, base64: bytes.toString("base64") },
+      { recordId: "record-missing", hash: "d".repeat(64), unavailable: "forbidden" },
+    ] }));
+    const result = await gateway.invoke(client(), "knowledge.previews.read", { items: [
+      { recordId: "record-preview", revisionId: "revision-preview", hash, mediaType: "image/png", bytes: bytes.length },
+      { recordId: "record-missing", revisionId: "revision-preview", hash: "d".repeat(64), mediaType: "image/png", bytes: 1 },
+    ] }) as any;
+    expect(Buffer.from(result.items[0].base64, "base64").equals(bytes)).toBe(true);
+    expect(result.items[1]).toEqual({ recordId: "record-missing", hash: "d".repeat(64), unavailable: "forbidden" });
+  });
+
+  it("rejects a malformed or unbounded preview batch instead of clipping it", async () => {
+    const nonCanonical = service(() => ({ items: [{ recordId: "record-preview", hash: "e".repeat(64), base64: "YQ=" }] }));
+    await expect(nonCanonical.invoke(client(), "knowledge.previews.read", {})).rejects.toMatchObject({ code: "internal" });
+    const noOutcome = service(() => ({ items: [{ recordId: "record-preview", hash: "e".repeat(64) }] }));
+    await expect(noOutcome.invoke(client(), "knowledge.previews.read", {})).rejects.toMatchObject({ code: "internal" });
+    const unbounded = service(() => ({ items: Array.from({ length: 17 }, () => ({ recordId: "record-preview", hash: "e".repeat(64), unavailable: "missing" })) }));
+    await expect(unbounded.invoke(client(), "knowledge.previews.read", {})).rejects.toMatchObject({ code: "internal" });
+  });
+
   it("keeps an authorized missing object as null and rejects inconsistent bounded chunks", async () => {
     const missing = service(() => null);
     await expect(missing.invoke(client(), "knowledge.object.read", {})).resolves.toBeNull();

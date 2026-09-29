@@ -24,7 +24,12 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
       if (typeof value.latestRevisionId !== "string" || !strings(value.revisionIds) || !value.revisionIds.includes(value.latestRevisionId)
         || !["observation", "source", "note"].includes(value.kind as string) || !["personal", "research"].includes(value.scope as string)
         || typeof value.sortAt !== "number" || !Number.isFinite(value.sortAt) || !strings(value.recordRefs) || !strings(value.objectHashes)
+        || typeof value.createdAt !== "string" || typeof value.updatedAt !== "string"
         || (value.sourceIdentities !== undefined && !strings(value.sourceIdentities))
+        || (value.admission !== undefined && !["pending", "retained", "archived"].includes(value.admission as string))
+        || (value.sessionId !== undefined && typeof value.sessionId !== "string")
+        || (value.branchId !== undefined && typeof value.branchId !== "string")
+        || (value.kind === "source" ? !validSourceRow(value.sourceRow) : value.sourceRow !== undefined)
         || !Array.isArray(value.searchFields) || !value.searchFields.every(field => strings(field) && field.length === 2)) throw new Error("Invalid Knowledge record head");
       break;
     case "suppressions":
@@ -45,6 +50,19 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
       break;
   }
   return value as T;
+}
+
+/** A source head's row projection. Every field is bounded, and the text-free
+ * shape is what keeps a Library page small. */
+function validSourceRow(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  const optional = (key: string): boolean => row[key] === undefined || (typeof row[key] === "string" && (row[key] as string).length <= 4_096);
+  return typeof row.title === "string" && row.title.length <= 4_096
+    && ["complete", "partial", "metadata-only", "inaccessible", "failed", "reference-only"].includes(row.captureDisposition as string)
+    && ["uri", "originalUri", "mediaType", "sourceSavedAt", "sourcePublishedAt", "summary"].every(optional)
+    && (row.summary === undefined || (row.summary as string).length <= 280)
+    && (row.preview === undefined || (typeof row.preview === "object" && row.preview !== null && !Array.isArray(row.preview)));
 }
 
 // Escape keys as JSON strings: receipt keys contain NUL separators, and the
@@ -152,6 +170,14 @@ export class KnowledgeCatalog {
     for (const row of this.database.prepare(query).iterate(...parameters)) {
       yield { key: JSON.parse(String(row.key)) as string, value: catalogValue<T>(collection, String(row.value)) };
     }
+  }
+
+  /** Raw rows for the explicit storage upgrade only. A pre-upgrade head does
+   * not satisfy the current head contract, and the caller's rebuild is exactly
+   * what makes it valid; ordinary reads go through the validated accessors. */
+  rawEntries(collection: CatalogCollection): Array<{ key: string; value: unknown }> {
+    return this.database.prepare("SELECT key, value FROM entries WHERE collection = ? ORDER BY key").all(collection)
+      .map(row => ({ key: JSON.parse(String(row.key)) as string, value: JSON.parse(String(row.value)) as unknown }));
   }
 
   count(collection: CatalogCollection, where: string): number {

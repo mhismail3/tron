@@ -298,10 +298,11 @@ export class KnowledgeService {
         const chunk = bytes.slice(offset, Math.min(bytes.byteLength, offset + 512_000));
         return { hash: action.request.hash, mediaType: action.request.mediaType, bytes: chunk.byteLength, totalBytes: bytes.byteLength, offset, ...(offset + chunk.byteLength < bytes.byteLength ? { nextOffset: offset + chunk.byteLength } : {}), base64: Buffer.from(chunk).toString("base64") };
       }
+      case "knowledge.previews.read": return this.store.readPreviewsBatch(action.request);
       case "knowledge.config": return this.store.configure(action.request.commandId, action.request.config);
-      case "knowledge.list": return this.store.list(action.request);
+      case "knowledge.list": return action.request.projection === "sourceRow" ? this.store.listSourceRows(action.request) : this.store.list(action.request);
       case "knowledge.read": return this.store.read(action.request.id, action.request.revisionId, action.request.includeSuppressed, action.request.includeArchived, action.request.includePending);
-      case "knowledge.search": return this.store.search(action.request);
+      case "knowledge.search": return action.request.projection === "sourceRow" ? this.store.searchSourceRows(action.request) : this.store.search(action.request);
       case "knowledge.recall": return this.store.recall(action.request);
       case "knowledge.source.preview.refresh": {
         return this.runOwned("source preview refresh", (signal, retirements) => refreshSourcePreview(this.store, action.request, { signal, retirements }), signal);

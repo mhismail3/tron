@@ -63,7 +63,7 @@ import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, providerUsageSupported, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { KnowledgeStoreError } from "../knowledge/knowledge-store.js";
+import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
@@ -78,6 +78,30 @@ const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;
  * safeJson intentionally clips ordinary strings; applying it here would make
  * base64 and its advertised byte offsets disagree. Keep this boundary typed and
  * bounded so the native/frame limits still govern the enclosing response. */
+/** Preview batches carry base64 like object reads, so they cross the same exact
+ * byte boundary instead of safeJson's string clipping. */
+function projectKnowledgePreviewBatch(value: unknown): JsonValue {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("internal", "Knowledge preview batch response is invalid");
+  const items = (value as { items?: unknown }).items;
+  if (!Array.isArray(items) || items.length > KNOWLEDGE_PREVIEW_BATCH_ITEMS) throw new GatewayError("internal", "Knowledge preview batch response is invalid");
+  let total = 0;
+  return { items: items.map(entry => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new GatewayError("internal", "Knowledge preview batch item is invalid");
+    const item = entry as Record<string, unknown>;
+    if (typeof item.recordId !== "string" || item.recordId.length > 200 || typeof item.hash !== "string" || !/^[a-f0-9]{64}$/.test(item.hash)) throw new GatewayError("internal", "Knowledge preview batch item is invalid");
+    if (item.base64 === undefined) {
+      if (!["forbidden", "missing", "too-large"].includes(item.unavailable as string)) throw new GatewayError("internal", "Knowledge preview batch item is invalid");
+      return { recordId: item.recordId, hash: item.hash, unavailable: item.unavailable as string };
+    }
+    if (typeof item.base64 !== "string") throw new GatewayError("internal", "Knowledge preview batch item is invalid");
+    const bytes = Buffer.from(item.base64, "base64");
+    if (bytes.byteLength > KNOWLEDGE_PREVIEW_MAX_BYTES || total + bytes.byteLength > KNOWLEDGE_PREVIEW_BATCH_BYTES
+      || bytes.toString("base64") !== item.base64) throw new GatewayError("internal", "Knowledge preview batch item exceeds its bound");
+    total += bytes.byteLength;
+    return { recordId: item.recordId, hash: item.hash, base64: item.base64 };
+  }) };
+}
+
 function projectKnowledgeObjectChunk(value: unknown): JsonValue {
   if (value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("internal", "Knowledge object response is invalid");
@@ -188,7 +212,7 @@ const restartDrainMethods = new Set([
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
-  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.search", "knowledge.recall",
+  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall",
   "connections.list",
 ]);
 
@@ -378,7 +402,7 @@ export class GatewayService {
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
-        ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1"] : []),
+        ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
         ...(this.dependencies.sessionSearch ? ["session-search.v1"] : []),
       ],
@@ -398,6 +422,7 @@ export class GatewayService {
       case "knowledge.list":
       case "knowledge.read":
       case "knowledge.object.read":
+      case "knowledge.previews.read":
       case "knowledge.search":
       case "knowledge.recall":
       case "knowledge.connector.status":
@@ -405,7 +430,9 @@ export class GatewayService {
 
         const knowledge = this.requireKnowledge();
         const result = await knowledge.invoke({ operation: method, request: params } as KnowledgeAction);
-        return method === "knowledge.object.read" ? projectKnowledgeObjectChunk(result) : safeJson(result);
+        if (method === "knowledge.object.read") return projectKnowledgeObjectChunk(result);
+        if (method === "knowledge.previews.read") return projectKnowledgePreviewBatch(result);
+        return safeJson(result);
       }
       case "connections.list": {
         if (!this.dependencies.connections) throw new GatewayError("unsupported", "Connection management is unavailable");

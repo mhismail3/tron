@@ -87,6 +87,41 @@ describe("Knowledge canonical catalog", () => {
     expect((await reopened.search({ query: "corrected" })).hits).toEqual([]);
   });
 
+  it("rebuilds catalog heads once for the row projection and stays idempotent", async () => {
+    const f = await fixture();
+    const image = new Uint8Array(Array.from({ length: 512 }, (_, index) => index % 251));
+    const object = await f.store.putObject(image, "image/png");
+    const captured = await f.store.captureSource({ commandId: "row-upgrade-capture", record: { kind: "source", scope: "research",
+      provenance: { actor: "connector", evidence: [] }, relations: [],
+      content: { title: "Projected source", uri: "https://example.test/projected", text: "Saved source text", mediaType: "text/html",
+        captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z", preview: object,
+        admission: { status: "retained", reason: "fixture", decidedAt: "2026-01-01T00:00:00Z" } } } });
+    // Simulate the pre-row-projection catalog: heads without the projection
+    // fields and the manifest that admitted them.
+    const path = await catalogPath(f.root);
+    const database = new DatabaseSync(path);
+    try {
+      const key = JSON.stringify(captured.record.id);
+      const head = JSON.parse(String(database.prepare("SELECT value FROM entries WHERE collection = 'records' AND key = ?").get(key)!.value)) as Record<string, unknown>;
+      for (const field of ["createdAt", "updatedAt", "admission", "sessionId", "branchId", "sourceRow"]) delete head[field];
+      database.prepare("UPDATE entries SET value = ? WHERE collection = 'records' AND key = ?").run(JSON.stringify(head), key);
+    } finally { database.close(); }
+    const manifest = JSON.parse(await readFile(join(f.root, "state.json"), "utf8"));
+    await writeFile(join(f.root, "state.json"), JSON.stringify({ ...manifest, storageVersion: 2 }), { mode: 0o600 });
+    // Ordinary reads never migrate, and never present an unprojected head.
+    expect((await f.store.status()).available).toBe(false);
+    await expect(f.store.listSourceRows({ kind: "source", projection: "sourceRow" })).rejects.toThrow(/row-projection upgrade/);
+    await f.store.upgradeStorage();
+    expect((await f.store.listSourceRows({ kind: "source", projection: "sourceRow" })).rows).toEqual([
+      expect.objectContaining({ id: captured.record.id, title: "Projected source", admission: "retained", preview: object }),
+    ]);
+    // The rebuild is derived data: revisions and evidence survive it untouched.
+    expect(await f.store.read(captured.record.id, captured.record.revisionId)).toEqual(captured.record);
+    const upgraded = await readFile(join(f.root, "state.json"));
+    await f.store.upgradeStorage();
+    expect(await readFile(join(f.root, "state.json"))).toEqual(upgraded);
+  });
+
   it("retains the old manifest on a missing committed revision and retries without an empty reset", async () => {
     const f = await legacyFixture();
     const path = join(f.root, "records", f.old.id, `${f.old.revisionId}.json`);
@@ -224,7 +259,7 @@ describe("Knowledge canonical catalog", () => {
         await Promise.all(batch.map(record => writeRecord(f.root, record)));
         for (const record of batch) {
           records.set(record.id, { latestRevisionId: record.revisionId, revisionIds: [record.revisionId], kind: record.kind, scope: record.scope,
-            sortAt: Date.parse(record.createdAt), searchFields: [["observation", record.content.items[0]!.text.toLowerCase()], ["session", "session-fixture"]], recordRefs: [], objectHashes: [] });
+            createdAt: record.createdAt, updatedAt: record.updatedAt, sortAt: Date.parse(record.createdAt), searchFields: [["observation", record.content.items[0]!.text.toLowerCase()], ["session", "session-fixture"]], recordRefs: [], objectHashes: [] });
           catalog.setRevisions(record.id, [record.revisionId]);
           coverage.set(`cut-${record.id}`, { schemaVersion: 1, id: `cut-${record.id}`, revisionId: record.revisionId, range: record.content.range,
             disposition: "observed", groupRevisionIds: [record.revisionId], recordedAt: record.createdAt });
