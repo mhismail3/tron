@@ -52,14 +52,16 @@ struct ChatNotificationView: View {
         // by a measurement that arrives after the first layout pass; switching
         // between an interactive glass pill and a plain one remounted the pill
         // and showed one flat frame before the measured glass one. Hit testing,
-        // the button trait and the 44-point target are chosen by the value
-        // instead.
-        pill
-            .modifier(ChatNotificationPillInteraction(
+        // the button trait, the 44-point target and the detail action are chosen
+        // by the value instead: an informational notice owns no action, so it
+        // offers none.
+        let detailAction: (() -> Void)? = showsDetailAction ? { showDetail() } : nil
+        return pill
+            .chatCompactPillInteraction(
                 accessibilityLabel: accessibilityLabel,
-                ownsDetailAction: showsDetailAction,
-                showDetail: showDetail
-            ))
+                addsButtonTrait: showsDetailAction,
+                action: detailAction
+            )
             .allowsHitTesting(showsDetailAction)
             .frame(
                 minWidth: showsDetailAction ? 44 : 0,
@@ -139,26 +141,6 @@ struct ChatNotificationView: View {
 
 }
 
-/// A notice's interaction: a detail-bearing or truncated notice is a control and
-/// asks the transcript for its detail sheet, while an informational notice keeps
-/// its own element with no action to perform.
-private struct ChatNotificationPillInteraction: ViewModifier {
-    let accessibilityLabel: String
-    let ownsDetailAction: Bool
-    let showDetail: () -> Void
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if ownsDetailAction {
-            content.chatCompactPillInteraction(
-                accessibilityLabel: accessibilityLabel,
-                action: showDetail
-            )
-        } else {
-            content.chatCompactPillInformation(accessibilityLabel: accessibilityLabel)
-        }
-    }
-}
 
 /// The full text of one transcript event, in the standard sheet chrome. It is
 /// rendered by the transcript's sheet host from the route a pill presented.

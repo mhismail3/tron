@@ -198,36 +198,25 @@ private struct ChatCompactPillInteractionModifier: ViewModifier {
     /// Whether the pill is a control. A pill that owns no action keeps its own
     /// accessibility element and label without the button trait.
     let addsButtonTrait: Bool
-    /// The pill's own action, or nil for an informational pill. A control the
-    /// reader cannot act on must not carry an activation action that does
-    /// nothing.
+    /// The pill's own action, or nil for an informational pill. The interactive
+    /// half is attached at every value: a conditional here switched the pill's
+    /// structure and re-showed its flat frame across the truncation measurement
+    /// (F10, measured as two pill instances for one notice). A pill that owns no
+    /// action instead declares that it does not respond to user interaction, so
+    /// no activation is offered for a control the reader cannot act on.
     let action: (() -> Void)?
 
     func body(content: Content) -> some View {
         content
+            // The interactive glass surface remains the only visual press
+            // owner. A wrapping Button would add a second touch-down phase.
+            .onTapGesture { action?() }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityLabel)
             .accessibilityValue(accessibilityValue ?? "")
             .accessibilityAddTraits(addsButtonTrait ? .isButton : [])
-            .modifier(ChatCompactPillActionModifier(action: action))
-    }
-}
-
-/// The interactive half of a compact pill, attached only when the pill owns an
-/// action. The interactive glass surface remains the only visual press owner: a
-/// wrapping Button would add a second touch-down phase.
-private struct ChatCompactPillActionModifier: ViewModifier {
-    let action: (() -> Void)?
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let action {
-            content
-                .onTapGesture(perform: action)
-                .accessibilityAction { action() }
-        } else {
-            content
-        }
+            .accessibilityAction { action?() }
+            .accessibilityRespondsToUserInteraction(action != nil)
     }
 }
 
@@ -236,27 +225,13 @@ extension View {
         accessibilityLabel: String,
         accessibilityValue: String? = nil,
         addsButtonTrait: Bool = true,
-        action: @escaping () -> Void
+        action: (() -> Void)? = nil
     ) -> some View {
         modifier(ChatCompactPillInteractionModifier(
             accessibilityLabel: accessibilityLabel,
             accessibilityValue: accessibilityValue,
             addsButtonTrait: addsButtonTrait,
             action: action
-        ))
-    }
-
-    /// An informational pill: its own accessibility element and label, no
-    /// button trait and no activation action to perform.
-    func chatCompactPillInformation(
-        accessibilityLabel: String,
-        accessibilityValue: String? = nil
-    ) -> some View {
-        modifier(ChatCompactPillInteractionModifier(
-            accessibilityLabel: accessibilityLabel,
-            accessibilityValue: accessibilityValue,
-            addsButtonTrait: false,
-            action: nil
         ))
     }
 }
