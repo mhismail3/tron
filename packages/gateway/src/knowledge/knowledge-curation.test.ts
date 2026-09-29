@@ -26,7 +26,16 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
  *  9. summary generation holds the caller open, or loses its outcome when the
  *     caller goes away;
  * 10. the agent tool cannot see the outcome of the work it started;
- * 11. curation mutates captured evidence instead of interpretation. */
+ * 11. curation mutates captured evidence instead of interpretation.
+ * 12. a stale Your take save discards the draft instead of returning the latest take;
+ *     take writes are not user-confirmed, receipted, or fast.
+ * 13. changing Your take leaves an otherwise current tag selection looking fresh.
+ * 14. default agent retrieval exposes personal sources or explicit personal
+ *     requests accidentally hide Chronicle observations and notes.
+ * 15. relevance ordering overwhelms freshness, or a superseded result loses its replacement.
+ * 16. missing save dates silently use capture time without identifying the age basis.
+ * 17. row freshness requires body reads, making Library projection scale with source text.
+ */
 
 const vocabulary: KnowledgeTagVocabulary = { revision: 7, isActiveTag: id => ["agent-harness", "memory", "evaluation"].includes(id) };
 const summarizer: KnowledgeGenerationModel = {
