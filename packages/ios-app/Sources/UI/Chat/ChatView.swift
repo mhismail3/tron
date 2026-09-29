@@ -945,19 +945,6 @@ struct ChatView: View {
             if hasEarlierMessages { positions["earlier-messages"] = 0 }
             return positions
         } ?? [:]
-        let physicalTerminalPosition: Int? = installed.flatMap {
-            let rows = ChatPhysicalTranscriptRowPolicy.rows(
-                installed: $0,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
-                orientation: transcriptOrientation
-            )
-            let leadingEarlierRow = ($0.sourceWindow.originalStart ?? 0) > 0 ? 1 : 0
-            return rows.indices.last.map {
-                transcriptOrientation.visualPosition(
-                    ofSpinePosition: $0, count: rows.count
-                ) + leadingEarlierRow
-            } ?? (leadingEarlierRow > 0 ? 0 : nil)
-        }
         let terminalPhysicalID = installed.flatMap {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
@@ -967,6 +954,7 @@ struct ChatView: View {
             if let terminal = rows.newest { return terminal.id }
             return ($0.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil
         }
+        let physicalTerminalPosition = terminalPhysicalID.flatMap { physicalRowPositions[$0] }
         // Keep the native physical target while transferring its geometry
         // owner atomically with prompt/tool payload replacement.
         scrollCoordinator.reconcileMaterializationRows { physicalID in
@@ -2122,17 +2110,12 @@ struct ChatView: View {
                 )
             })
             if hasEarlierMessages { physicalPositions["earlier-messages"] = 0 }
-            let leadingEarlierRow = hasEarlierMessages ? 1 : 0
             scrollCoordinator.projectionInstalled(
                 structure: retained.physicalRowSpineIdentity,
                 terminalPhysicalID: terminalID,
                 projectionTag: retained.tag,
                 physicalRowPositions: physicalPositions,
-                physicalTerminalPosition: rows.indices.last.map {
-                    transcriptOrientation.visualPosition(
-                        ofSpinePosition: $0, count: rows.count
-                    ) + leadingEarlierRow
-                } ?? (leadingEarlierRow > 0 ? 0 : nil)
+                physicalTerminalPosition: terminalID.flatMap { physicalPositions[$0] }
             )
         }
         let interval = performanceSignposts.begin(.firstReadyFrame)

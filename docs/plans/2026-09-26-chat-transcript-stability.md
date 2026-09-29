@@ -3273,8 +3273,12 @@ lifecycle, device installation, or upstream Git action is authorized.
 - Step 1: guard the viewport-mode release probe with `HOSTED_TEST`, matching its
   declaration and the adjacent release path. Non-hosted LocalDevice and Release
   compilation are the regression gates, to run after the evaluation switch lands.
-- Step 2: owner-coordinate prepend excursion and terminal-ID position corrections
-  are next; existing page-barrier and full origin harness are the regressions.
+- Step 2: prepend excursion now consumes the same owner-adapted frame as anchor
+  capture. Both ChatView installation paths look up the terminal ID in their
+  existing visual-position map (including the earlier-messages fallback), not
+  the spine's last index. Existing `hostedPrependBarrier` (≤2 pt excursion),
+  terminal opening, and full origin harness are the regressions; no bounds or
+  expectations changed. This corrects diagnostics, not observed reader movement.
 - Step 3: temporary LocalDevice-only launch preference and diagnostics toggle;
   hosted environment selection and Release's current path must remain intact.
 - Evidence and user-owned install/checklist handoff follow below after clean commits.

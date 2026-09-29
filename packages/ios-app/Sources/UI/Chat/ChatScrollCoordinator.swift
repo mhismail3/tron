@@ -491,7 +491,11 @@ final class ChatScrollCoordinator {
            let oldest = rawSemanticFrames.min(by: { $0.value.revision < $1.value.revision })?.key {
             rawSemanticFrames[oldest] = nil
         }
-        recordPrependExcursionIfOwned(renderedID: renderedID, layoutEpoch: layoutEpoch, frame: frame)
+        if let adaptedFrame = semanticFrame(for: renderedID)?.frame {
+            recordPrependExcursionIfOwned(
+                renderedID: renderedID, layoutEpoch: layoutEpoch, frame: adaptedFrame
+            )
+        }
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
         if openingTailPhase.context?.targetRenderedID == renderedID {
