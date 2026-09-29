@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-28
 - **Status:** Active
-- **Last updated:** 2026-09-29, K1–K3, K6 and K7 done
+- **Last updated:** 2026-09-29, K1–K4, K6 and K8 done; K7 in progress
 - **Goal:** Agents keep every Library entry summarized, tagged, judged for freshness and correctly scoped, guided by the user's own takes, so useful sources surface on their own in future work.
 
 ## Goal and constraints
@@ -148,11 +148,11 @@ screenshots of each state. Device validation by the user after K9.
 | K1 | Done | Typed enrichment and curation operations for agents, RPC and the agent tool | none | deepseek-worker, 2026-09-28 |
 | K2 | Done | Clean evidence for summaries: extraction without site chrome, provider-date recovery | none | deepseek-worker, 2026-09-29 |
 | K3 | Done | Tag vocabulary and tagging guidelines owned by Knowledge config | K1 | luna-worker, 2026-09-29 |
-| K4 | Ready | Jev tagger with monthly budget and re-tag triggers | K1, K3 | — |
+| K4 | Done | Jev tagger with monthly budget and re-tag triggers | K1, K3 | luna-worker, 2026-09-29 |
 | K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
 | K6 | Done | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1, K3 | luna-worker, 2026-09-29 |
-| K7 | Done | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | luna-worker, 2026-09-29 |
-| K8 | Ready | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | — |
+| K7 | In progress | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | luna-worker, 2026-09-29 |
+| K8 | Done | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | luna-worker, 2026-09-29 |
 | K9 | Ready | Maintainer runtime update and live capability check | K1–K8 | — |
 | K10 | Ready | Seed: agent drafts the vocabulary from the 276 entries; user edits it | K9 | — |
 | K11 | Ready | Seed: summarize and tag the existing library within budget | K10 | — |
@@ -215,14 +215,18 @@ The decay-class accessor is exported for K6; freshness remains K6's owner.
 
 ### K4 — Jev tagger
 
-Owning files: `packages/gateway/src/knowledge/jev-assessment.ts`,
-`packages/gateway/src/knowledge/jev-client.ts`.
+Owning files: `packages/gateway/src/knowledge/knowledge-tagger.ts`,
+`packages/gateway/src/knowledge/knowledge-service.ts`,
+`packages/gateway/src/knowledge/knowledge-store.ts`,
+`packages/gateway/src/knowledge/jev-client.ts`, and ConnectionOwner definition/policy.
 
 One `noul` question per candidate tag, batched 16 per call; a category `choice`
 pass first narrows candidates when the vocabulary is large. Inputs: title,
-summary, bounded clean text, the user's take, verdict, tag definitions and
-guidelines. Threshold and ties defined and tested. Monthly budget ($5) persisted
-with reservations and settlement; the tagger stops cleanly when exhausted.
+summary, bounded UTF-8 clean text, the user's take, verdict, tag definitions and
+guidelines. Selection requires confidence greater than 0.65 (ties are omitted).
+Monthly budget ($5 default, ConnectionOwner-configurable) persisted with
+per-dispatch reservation, usage settlement, and crash-safe uncertainty
+reconciliation; the tagger stops cleanly when exhausted or unapproved.
 Re-tag triggers: new entry, summary change, Your take change, vocabulary or
 guideline change (bulk, with a cost estimate first). Install the budget through
 K1's `KnowledgeCurationGate`, which receives the batch operation: refuse only
@@ -488,7 +492,56 @@ uses the tag definitions/categories/decay classes, and asks
 - Regression tests cover no-write crossing of 180 days and reordering, decay edit
   re-projection, merged/retired semantics, and take-driven re-tag discovery.
 
-### K7 · Done · 2026-09-29 · luna-worker · `knowledge/k7-ios`
+### K4 · Done · 2026-09-29 · luna-worker · `knowledge/k4-jev-tagger`
+
+- Result: Added the built-in `knowledge.jev` ConnectionOwner paid capability
+  and exact `connector:jev:personal` credential reference. Typed agent-tool/RPC
+  operations start one-source jobs, run bounded (1..25) re-tag queue pages,
+  estimate worst-case reservations, report the monthly ledger, and reconcile an
+  uncertain attempt at its reserved ceiling. The Jev decision engine uses the
+  configured vocabulary/guidelines and current source evidence; publishes via
+  K1's expected-revision write and K3's vocabulary-revision fence. Summary/take
+  changes start a single-source job when one approved Jev connection exists;
+  vocabulary changes estimate before a queue page. No recurring worker exists.
+- Budget: ConnectionOwner paid approval remains false until explicitly changed;
+  its `paidBudgetCents` is the only monthly cap (500 cents is the default).
+  Each Jev dispatch durably reserves its 64,000-token ceiling, settles actual
+  usage on valid result, and leaves an explicit uncertain fence after ambiguous
+  results or restart. Free verdict/scope/relation edits remain available when
+  paid tagging is unavailable.
+- Evidence: `npm run build`; focused ConnectionOwner/tagger tests passed 2
+  files / 22 tests, and the obsolete 440-source `todo` was removed after its
+  scale test was implemented. The final full command
+  `npx vitest run src/knowledge/ src/transport/ src/integrations/connection-owner.test.ts src/index.test.ts --no-file-parallelism`
+  passed 69/70 files and 764 tests; one unrelated timing-sensitive request-span
+  assertion observed 94 ms against its 100 ms minimum. Re-running that owning
+  file alone passed 2/2 tests. `npx vitest run --config vitest.scale.config.ts
+  src/knowledge/knowledge-tagger.scale.test.ts --reporter=verbose` — 1 test
+  passed. With 440 synthetic source records, 18 batches and 440 fake Jev calls,
+  the queue took 54,066.7 ms (8.1 sources/second) after setup; no paid provider
+  or live Gateway was used. Measurements are host-dependent.
+- Changes: `550ad665f` (paid authority), `0a48df2f8` (persistent reservations),
+  the K4 integration commit (tagger, tests, docs and handoff).
+- Tasks added: none.
+- Deviations: The specific paid Jev approval is a generic ConnectionOwner policy,
+  not Raindrop approval, a standalone Jev budget, or a second K4 setting. A
+  dispatch with uncertain provider outcome is not retried: the user may reconcile
+  the attempt at the full reserved upper bound, after which a deliberate later
+  run is a new budgeted operation. Take and summary changes invalidate the
+  current digest; K5 calls the one-source tag operation after a new source has
+  completed intake.
+- For K5/K7: `knowledge.source.tag`, `knowledge.tags.run`,
+  `knowledge.tags.estimate`, `knowledge.tags.budget`, and
+  `knowledge.tags.budget.reconcile` are the typed RPC operations; the agent
+  knowledge tool exposes `tagSource`, `retagQueue`, `estimateTaggingCost`, and
+  `taggingBudget`. Read `packages/gateway/docs/knowledge.md` for the explicit
+  connection setup/policy actions and ledger behavior.
+
+Drafted from the 2026-09-28 interview and approved by the user the same day,
+with the reliability and interaction bars added at the user's request. K1–K4, K6 and K8 are complete; K3/K6 were integrated on `knowledge/k1-k6`; K7 is in progress.
+
+
+### K7 · In progress · 2026-09-29 · luna-worker · `knowledge/k7-ios`
 
 - Result: Native source records adopt K1/K3/K6 take, controlled-tag selection,
   verdict, vocabulary config, asynchronous summary-job, and enriched row DTOs;
@@ -517,14 +570,62 @@ uses the tag definitions/categories/decay classes, and asks
   ends. Take drafts live only in a bounded-by-active-record process-memory
   registry, never persistent defaults. Mutating controls retain per-control
   progress and do not disable unrelated Entry Detail actions.
-- Deviations: The requested simulator end-to-end cases (dismissal/reconnect
-  during generation, double tap, take conflict/failure/retry and re-tag
-  completion) and retained simulator screenshot set were not produced in this
-  implementation pass. Validation covers contract decoding and Library
-  projection/cache/preview suites, not those interaction traces. A maintainer
-  should require these focused tests and the honestly labeled render screenshots
-  before treating K7's interaction bar as fully demonstrated. No Gateway was
-  rebuilt or contacted.
+- Deviations: The initial K7 commit did not include interaction traces/screenshots; this task is actively closing those acceptance gaps before K7 can be marked Done.
 
-Drafted from the 2026-09-28 interview and approved by the user the same day,
-with the reliability and interaction bars added at the user's request. K1, K2, K3, K6 and K7 are complete; K3/K6 were integrated on `knowledge/k1-k6`.
+
+### K8 · Done · 2026-09-29 · luna-worker · `knowledge/k8-multi-collection`
+
+- Result: Raindrop routing is owned by the existing `ConnectionInstance` via
+  revision-fenced `raindropCollections`, configured at setup or with
+  `connections.policy.update`; a Raindrop mapping replaces the former single
+  connection scope. Up to 64 unique numeric collection IDs map to `research` or
+  `personal` and may name a per-collection remote destination. Intake, dry-run,
+  and connector sweeps require a mapped collection (or the sole mapping), reject
+  unmapped IDs before credentials/provider I/O, and bind discovery receipts,
+  pending items, captured progress, and research pilot cohorts to that collection.
+  Raindrop offset pagination deliberately restarts at page zero; it does not
+  persist a provider page number that can skip shifted bookmarks. Provider item
+  collection identity must match the requested endpoint when supplied.
+- Source behavior: Research continues through complete capture and the existing
+  paid Jev pilot/admission path, now with one receipt-backed pilot per mapped
+  collection. Personal captures the original link, title, best-effort preview
+  and saved Raindrop note; inaccessible/partial page capture still admits the
+  personal source without Jev. Provider/account/item identity stays canonical
+  across a collection move: captured provider collection provenance is refreshed
+  and K1's receipted placement write re-scopes the existing record, rather than
+  creating a second source. A setup revision change stops processing before
+  admission or remote effect. Remote moves require the existing account-level
+  `allowWrites` and the exact selected collection's configured destination,
+  which is rechecked against the current setup revision before effect.
+- Failure modes written before implementation: unmapped IDs; collection identity
+  mismatch/duplicate items; collection-local pending/page-receipt/pilot
+  isolation; scope routing; personal page-fetch failure; provider item movement
+  without duplicate source; a connection setup revision changing while an
+  intake awaits capture; and remote destination/write-policy fencing.
+- Evidence: `npm run build` passed. `npx vitest run
+  src/knowledge/connectors.test.ts src/knowledge/multi-account-connectors.test.ts
+  src/integrations/connection-owner.test.ts --no-file-parallelism` — 3 files / 59
+  tests passed. The full focused knowledge/transport/connection-owner run passed
+  752 of 754 tests (68 files); the two failures were the pre-existing timing
+  assertion in `request-span.integration.test.ts` (observed 82–89 ms against a
+  >100 ms threshold) and one observation-admission wait/temporary-directory
+  cleanup race while a sibling worker was running its Gateway suite. No failure
+  touched K8 files. Scale run `npx vitest run --config vitest.scale.config.ts
+  src/knowledge/ --no-file-parallelism --reporter verbose` passed 4 tests. On
+  12,600 records / 440 sources, K6 measured row projection 1.6 ms, row search
+  8.0 ms, full list 3.8 ms, full search 9.6 ms, recall 15.9 ms; K3 tag list,
+  search, and retag queue were 2.7 ms, 8.2 ms, and 0.8 ms, with zero body reads.
+  Existing Raindrop 51-item shifted-page scale test passed in 2.8 s. No dedicated
+  K8 wall-clock benchmark was added; intake remains capped at 10 items and
+  discovery/pending storage remains bounded at 500 identities per connection.
+- Changes: `749f24416` (`feat(integrations): configure Raindrop collection scopes`)
+  and this K8 implementation plus documentation/handoff commit.
+- Tasks added: none. No Raindrop skill exists under `.agents/skills/`; the
+  global `~/.tron/agent/skills/tron-raindrop/SKILL.md` was outside scope. Its
+  future wording should say that setup/policy owns explicit per-collection
+  research/personal mappings, calls must select one when multiple exist, and
+  personal intake is link-first with no Jev assessment.
+- Deviations: None in behavior. Tests use injected HTTP/capture/assessment
+  fakes; no live Gateway, credentials, or paid provider were accessed. The
+  initial full-suite rerun remains blocked by the two host-load-sensitive tests
+  above; focused changed owners and all scale owners pass.

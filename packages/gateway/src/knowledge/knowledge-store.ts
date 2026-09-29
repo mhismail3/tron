@@ -201,13 +201,12 @@ function catalogState(control: CatalogControl, catalog?: KnowledgeCatalog): Know
 export function sourceEvidenceDigest(title: string, text: string): string {
   return createHash("sha256").update(JSON.stringify({ title, text })).digest("hex");
 }
-/** Digest of the record's own taggable inputs: its saved title and readable
- * text plus its current verdict. The vocabulary edition is recorded separately
- * on the selection, so editing the vocabulary flags re-tagging without making
- * stored selections unreadable. A later owner that adds an input (the user's
- * take) extends this and re-tags; a stored digest then no longer matches. */
+/** Digest of the record's own taggable inputs: its saved title, current
+ * summary, readable text, verdict, and the user's take. The vocabulary edition
+ * is recorded separately on the selection, so taxonomy edits can re-tag without
+ * making stored selections unreadable. */
 export function curationInputsDigest(content: SourceContent): string {
-  return createHash("sha256").update(JSON.stringify({ title: content.title, text: content.text ?? "", verdict: content.verdict?.verdict ?? null, take: content.take?.text ?? null })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ title: content.title, summary: content.summary?.text ?? null, text: content.text ?? "", verdict: content.verdict?.verdict ?? null, take: content.take?.text ?? null })).digest("hex");
 }
 /** The fields one curation operation wrote, read back from its committed
  * revision. Bounded by the item bounds, so a batch outcome stays small. */
@@ -413,7 +412,7 @@ function validateCoverage(value: unknown): asserts value is ObservationCoverage 
   range.entryIds.forEach(entry => safeId(entry as string, "coverage entry id"));
   if (range.projectId !== undefined) assertKnowledgeProjectId(range.projectId as string, "coverage projectId");
 }
-function validateConnectorState(value: unknown, connector: "raindrop" | "x"): asserts value is KnowledgeConnectorState {
+function validateConnectorState(value: unknown, connector: "raindrop" | "x" | "jev"): asserts value is KnowledgeConnectorState {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Invalid connector state");
   const state = value as Record<string, unknown>;
   if (state.connectionId !== undefined && (typeof state.connectionId !== "string" || !/^[A-Za-z0-9._:-]{1,160}$/.test(state.connectionId))) throw new KnowledgeStoreError("invalid", "Invalid connector connection ID");
@@ -431,15 +430,34 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x"): as
     if (!authority || typeof authority !== "object" || typeof authority.id !== "string" || authority.id.length < 1 || authority.id.length > 160 || typeof authority.accountId !== "string" || !/^\d+$/.test(authority.accountId) || typeof authority.sourceCollection !== "string" || !/^-?\d{1,18}$/.test(authority.sourceCollection) || typeof authority.profileVersion !== "string" || authority.profileVersion.length < 1 || authority.profileVersion.length > 256 || !Array.isArray(authority.itemIds) || authority.itemIds.length > 10 || authority.itemIds.some(itemId => typeof itemId !== "string" || itemId.length < 1 || itemId.length > 512) || !Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 10 || !Number.isSafeInteger(budgetCents) || budgetCents < 1 || budgetCents > 100 || !Number.isSafeInteger(usedItems) || usedItems < 0 || usedItems > maxItems || !Number.isSafeInteger(reservedCents) || reservedCents < 0 || reservedCents > budgetCents) throw new KnowledgeStoreError("invalid", `Invalid connector ${label}`);
   };
   if (state.assessmentPilot !== undefined) validateAssessmentAuthority(state.assessmentPilot, "assessment pilot");
+  if (state.assessmentPilots !== undefined) {
+    if (!state.assessmentPilots || typeof state.assessmentPilots !== "object" || Array.isArray(state.assessmentPilots) || Object.keys(state.assessmentPilots).length > 64) throw new KnowledgeStoreError("invalid", "Invalid connector collection pilots");
+    for (const [collectionId, pilot] of Object.entries(state.assessmentPilots as Record<string, unknown>)) {
+      validateAssessmentAuthority(pilot, "collection assessment pilot");
+      if (!/^-?\d{1,18}$/.test(collectionId) || (pilot as Record<string, unknown>).sourceCollection !== collectionId) throw new KnowledgeStoreError("invalid", "Connector collection pilot does not match its collection");
+    }
+  }
   if (state.assessmentApprovals !== undefined) {
     if (!Array.isArray(state.assessmentApprovals) || state.assessmentApprovals.length > 32 || new Set(state.assessmentApprovals.map(item => (item as Record<string, unknown>)?.id)).size !== state.assessmentApprovals.length) throw new KnowledgeStoreError("invalid", "Invalid connector assessment approvals");
     state.assessmentApprovals.forEach(item => validateAssessmentAuthority(item, "assessment approval"));
   }
   for (const id of state.capturedIds) if (typeof id !== "string" || id.length > 512) throw new KnowledgeStoreError("invalid", "Invalid connector captured ID");
+  if (state.capturedCollections !== undefined) {
+    if (!state.capturedCollections || typeof state.capturedCollections !== "object" || Array.isArray(state.capturedCollections) || Object.keys(state.capturedCollections).length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector collection progress");
+    for (const [itemId, collectionId] of Object.entries(state.capturedCollections as Record<string, unknown>)) if (!itemId || itemId.length > 512 || typeof collectionId !== "string" || !/^-?\d{1,18}$/.test(collectionId)) throw new KnowledgeStoreError("invalid", "Invalid connector collection progress");
+  }
   if (state.assessmentAttempts !== undefined) {
     if (!state.assessmentAttempts || typeof state.assessmentAttempts !== "object" || Array.isArray(state.assessmentAttempts) || Object.keys(state.assessmentAttempts).length > 500) throw new KnowledgeStoreError("invalid", "Invalid connector assessment attempts");
     for (const [itemId, attempt] of Object.entries(state.assessmentAttempts as Record<string, unknown>)) {
       if (!itemId || !attempt || typeof attempt !== "object" || ((attempt as Record<string, unknown>).itemId !== undefined && (typeof (attempt as Record<string, unknown>).itemId !== "string" || !(attempt as Record<string, unknown>).itemId)) || ((attempt as Record<string, unknown>).cohortId !== undefined && (typeof (attempt as Record<string, unknown>).cohortId !== "string" || !(attempt as Record<string, unknown>).cohortId)) || !["dispatched", "settled"].includes((attempt as Record<string, unknown>).status as string) || !Number.isSafeInteger((attempt as Record<string, unknown>).chargeCents) || ((attempt as Record<string, unknown>).chargeCents as number) < 1 || ((attempt as Record<string, unknown>).inputTokens !== undefined && (!Number.isSafeInteger((attempt as Record<string, unknown>).inputTokens) || (attempt as Record<string, unknown>).inputTokens as number < 0)) || ((attempt as Record<string, unknown>).outputTokens !== undefined && (!Number.isSafeInteger((attempt as Record<string, unknown>).outputTokens) || (attempt as Record<string, unknown>).outputTokens as number < 0)) || ((attempt as Record<string, unknown>).estimatedCostCents !== undefined && (typeof (attempt as Record<string, unknown>).estimatedCostCents !== "number" || !Number.isFinite((attempt as Record<string, unknown>).estimatedCostCents) || (attempt as Record<string, unknown>).estimatedCostCents as number < 0))) throw new KnowledgeStoreError("invalid", "Invalid connector assessment attempt");
+    }
+  }
+  if (state.taggingBudget !== undefined) {
+    const ledger = state.taggingBudget as Record<string, unknown>;
+    if (!ledger || typeof ledger !== "object" || !/^[0-9]{4}-[0-9]{2}$/.test(ledger.month as string) || !Number.isFinite(ledger.spentCents) || (ledger.spentCents as number) < 0 || !Number.isFinite(ledger.reservedCents) || (ledger.reservedCents as number) < 0 || !ledger.attempts || typeof ledger.attempts !== "object" || Array.isArray(ledger.attempts) || Object.keys(ledger.attempts).length > 4_096) throw new KnowledgeStoreError("invalid", "Invalid Knowledge Jev tagging budget");
+    for (const [id, raw] of Object.entries(ledger.attempts as Record<string, unknown>)) {
+      const attempt = raw as Record<string, unknown>;
+      if (!id || id.length > 200 || !attempt || !/^[0-9]{4}-[0-9]{2}$/.test(attempt.month as string) || !["reserved", "settled", "uncertain"].includes(attempt.status as string) || !Number.isFinite(attempt.reservedCents) || (attempt.reservedCents as number) <= 0 || ((attempt.actualCostCents !== undefined) && (!Number.isFinite(attempt.actualCostCents) || (attempt.actualCostCents as number) < 0)) || ((attempt.inputTokens !== undefined) && (!Number.isSafeInteger(attempt.inputTokens) || (attempt.inputTokens as number) < 0)) || ((attempt.outputTokens !== undefined) && (!Number.isSafeInteger(attempt.outputTokens) || (attempt.outputTokens as number) < 0))) throw new KnowledgeStoreError("invalid", "Invalid Jev tagging reservation");
     }
   }
   for (const key of ["accountId", "scope", "destination", "credentialRef", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
@@ -1067,7 +1085,7 @@ export class KnowledgeStore {
     return this.connectorContext.run(connectionId, task);
   }
 
-  async connectorState(connector: "raindrop" | "x", connectionId?: string): Promise<KnowledgeConnectorState | undefined> {
+  async connectorState(connector: "raindrop" | "x" | "jev", connectionId?: string): Promise<KnowledgeConnectorState | undefined> {
     return this.readState(async state => {
       const contextConnectionId = this.connectorContext.getStore();
       const key = connectionId ?? contextConnectionId;
@@ -1103,7 +1121,7 @@ export class KnowledgeStore {
 
   /** Connector operational state shares the knowledge owner’s serialized state;
    * this update never accepts or persists a credential value. */
-  async updateConnectorState(commandId: string, connector: "raindrop" | "x", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }, connectionId?: string): Promise<KnowledgeConnectorState> {
+  async updateConnectorState(commandId: string, connector: "raindrop" | "x" | "jev", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }, connectionId?: string): Promise<KnowledgeConnectorState> {
     const contextConnectionId = this.connectorContext.getStore();
     const key = connectionId ?? contextConnectionId;
     if (this.connectorEnvelope && !key) throw conflict("Connector state requires an admitted connection instance");
@@ -1114,9 +1132,10 @@ export class KnowledgeStore {
     const receiptOperation = `knowledge.connector.state:${stateKey}`;
     const receiptPayload = { ...(payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : { payload }), connectionId: stateKey };
     return this.mutate(receiptOperation, commandId, receiptPayload, async state => {
-      const current = state.connectors?.[stateKey] ? structuredClone(state.connectors[stateKey]) : undefined;
+      let current = state.connectors?.[stateKey] ? structuredClone(state.connectors[stateKey]) : undefined;
       const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
       if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
+      if (envelope && !current && connector === "jev") current = { connector: "jev", ...(key ? { connectionId: key } : {}), enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved, pending: [], capturedIds: [], health: "setup-required", remaining: 0 };
       if (current && envelope) Object.assign(current, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
       const next = update(current);
       if (key) next.connectionId = key;
@@ -1494,6 +1513,8 @@ export class KnowledgeStore {
         if (state.suppressions.get(input.item.recordId)?.forgotten) throw new KnowledgeCurationRefusal("forgotten", "Knowledge record was forgotten and cannot be curated");
         if (!head) throw new KnowledgeCurationRefusal("unknown-record", `Knowledge record ${input.item.recordId} is not available`);
         if (head.latestRevisionId !== input.item.expectedRevision) throw new KnowledgeCurationRefusal("stale-revision", `Knowledge record revision changed; expected ${input.item.expectedRevision} but ${head.latestRevisionId} is committed`, head.latestRevisionId);
+        if (input.operation === "tags" && input.item.vocabularyRevision !== undefined && input.item.vocabularyRevision !== state.config.tagVocabulary.revision) throw new KnowledgeCurationRefusal("stale-vocabulary", `Tag vocabulary changed while Jev was deciding; re-read edition ${state.config.tagVocabulary.revision}`, head.latestRevisionId);
+        if (input.operation !== "tags" && input.item.vocabularyRevision !== undefined) throw new KnowledgeCurationRefusal("invalid-input", "Only a tag operation may fence its vocabulary revision");
         const current = await this.readRecord(paths, input.item.recordId, head.latestRevisionId);
         if (current.kind !== "source") throw new KnowledgeCurationRefusal("invalid-input", "Knowledge curation applies to source records only");
         if (this.recordExcluded(state, current)) throw new KnowledgeCurationRefusal("excluded", "Knowledge record is excluded from retrieval");

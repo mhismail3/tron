@@ -724,6 +724,7 @@ export type KnowledgeCurationOperation = "summary" | "tags" | "verdict" | "place
  * the caller records the code and continues with the next item. */
 export type KnowledgeCurationCode =
   | "stale-revision"
+  | "stale-vocabulary"
   | "unknown-record"
   | "excluded"
   | "forgotten"
@@ -755,6 +756,8 @@ export interface KnowledgeCurationItem {
   summary?: { text: string; coverage: "full" | "sampled" };
   /** `tags` only. */
   tagIds?: string[];
+  /** Optional tager fence: rejects publication if the taxonomy edition changed while Jev ran. */
+  vocabularyRevision?: number;
   /** `verdict` only. */
   verdict?: { verdict: SourceVerdict; supersededBy?: string; reason?: string };
   /** `placement` only; at least one of scope or admission. */
@@ -816,6 +819,12 @@ export interface KnowledgeCurationJob {
   reason?: string;
 }
 
+export interface KnowledgeTagRequest { commandId: string; sourceId: string; expectedRevision: string; connectionId: string; }
+export interface KnowledgeTagRunRequest { commandId: string; connectionId: string; limit?: number; }
+export interface KnowledgeTagBudgetRequest { connectionId: string; }
+export interface KnowledgeTagBudgetReconcileRequest { connectionId: string; attemptId: string; }
+export interface KnowledgeTagCostEstimateRequest { connectionId: string; limit?: number; }
+
 export interface KnowledgeCurationJobRequest {
   commandId?: string;
   sourceId?: string;
@@ -856,6 +865,8 @@ export interface KnowledgeAssessmentApprovalRequest {
   id: string;
   maxItems: number;
   budgetCents: number;
+  /** Mapped provider collection for the cohort; required when the connection maps several. */
+  sourceCollection?: string;
   /** Explicit pending identities for renewed attempts; omitted selects only new work. */
   itemIds?: string[];
 }
@@ -882,7 +893,7 @@ export interface KnowledgeConnectorConfigurationRequest {
 }
 
 export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; connectionId?: string; }
-export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; dryRun: boolean; limit?: number; }
+export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; dryRun: boolean; limit?: number; sourceCollection?: string; }
 
 /** Read-only Raindrop API access. Every request revalidates the authenticated
  * user against the configured accountId; returned provider objects are raw
@@ -902,8 +913,15 @@ export interface KnowledgeRaindropRequest {
   read: KnowledgeRaindropReadRequest;
 }
 
+export interface KnowledgeTaggingLedger {
+  month: string;
+  spentCents: number;
+  reservedCents: number;
+  attempts: Record<string, { month: string; reservedCents: number; status: "reserved" | "settled" | "uncertain"; actualCostCents?: number; inputTokens?: number; outputTokens?: number }>;
+}
+
 export interface KnowledgeConnectorState {
-  connector: "raindrop" | "x";
+  connector: "raindrop" | "x" | "jev";
   /** Adapter state key. Generic account authority remains ConnectionOwner. */
   connectionId?: string;
   enabled: boolean;
@@ -919,11 +937,17 @@ export interface KnowledgeConnectorState {
   checkpoints?: Record<string, string>;
   pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; savedAt?: string; collectionId?: string; apiPayload?: string; metadataComplete?: boolean }>;
   capturedIds: string[];
+  /** Last mapped collection observed for processed Raindrop item identities. */
+  capturedCollections?: Record<string, string>;
   assessmentPilot?: { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] };
+  /** Initial intake cohorts are isolated by source collection. */
+  assessmentPilots?: Record<string, { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
   /** Append-only later cohorts. The first pilot remains frozen in assessmentPilot. */
   assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
   /** Durable per-cohort/item paid-attempt fence; legacy item-only keys remain valid. */
   assessmentAttempts?: Record<string, { itemId?: string; cohortId?: string; status: "dispatched" | "settled"; chargeCents: number; inputTokens?: number; outputTokens?: number; estimatedCostCents?: number }>;
+  /** Durable tagger dispatch reservations; uncertain attempts are never blindly retried. */
+  taggingBudget?: KnowledgeTaggingLedger;
   health: "unconfigured" | "setup-required" | "ready" | "running" | "partial" | "rate-limited" | "auth-error" | "error";
   /** Adapter observations are bounded; unknown is the pre-admission state. */
   credentialAvailability?: "available" | "unavailable" | "unknown";
@@ -955,6 +979,7 @@ export interface KnowledgeConnectorStatus {
   providerIdentity: "admitted" | "mismatch" | "unknown";
   accountId?: string;
   scope?: string;
+  raindropCollections?: Array<{ collectionId: string; scope: "research" | "personal"; destination?: string }>;
   destination?: string;
   lastRunAt?: string;
   lastError?: string;
@@ -965,6 +990,7 @@ export interface KnowledgeConnectorStatus {
   recurringApproved: boolean;
   paidAccessApproved: boolean;
   assessmentPilot?: { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] };
+  assessmentPilots?: Record<string, { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
   assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; reservedCents: number; usedItems: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
 }
 /** Object bytes are authorized by the exact committed record revision that
@@ -1020,6 +1046,11 @@ export type KnowledgeAction =
   | { operation: "knowledge.source.curate"; request: KnowledgeCurationRequest }
   | { operation: "knowledge.source.take"; request: KnowledgeSourceTakeRequest }
   | { operation: "knowledge.curation.jobs"; request: KnowledgeCurationJobRequest }
+  | { operation: "knowledge.source.tag"; request: KnowledgeTagRequest }
+  | { operation: "knowledge.tags.run"; request: KnowledgeTagRunRequest }
+  | { operation: "knowledge.tags.budget"; request: KnowledgeTagBudgetRequest }
+  | { operation: "knowledge.tags.budget.reconcile"; request: KnowledgeTagBudgetReconcileRequest }
+  | { operation: "knowledge.tags.estimate"; request: KnowledgeTagCostEstimateRequest }
   | { operation: "knowledge.correction"; request: KnowledgeCorrectionRequest }
   | { operation: "knowledge.forget"; request: KnowledgeForgetRequest }
   | { operation: "knowledge.exclusion"; request: KnowledgeExclusionRequest }

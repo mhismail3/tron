@@ -37,6 +37,136 @@ async function fixture(http: (url: string, init: { headers: Record<string, strin
 }
 
 describe("knowledge connectors", () => {
+  async function mappedRaindropFixture(http: (url: string, init: { headers: Record<string, string>; signal: AbortSignal; method?: "GET" | "PUT" | "POST" | "DELETE"; body?: string }) => Promise<ConnectorHTTPResponse>, sourceFetch?: (url: string, excerpt: string | undefined, signal: AbortSignal) => Promise<Response>, assessment?: SourceAssessmentModel, policyOptions: { allowWrites?: boolean; destination7?: string } = {}) {
+    const root = await mkdtemp(join(tmpdir(), "tron-mapped-raindrop-")); roots.push(root);
+    const owner = new ConnectionOwner(root);
+    const setup = await owner.execute({ kind: "setup.begin", commandId: command("mapped-begin"), instanceId: "mapped", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+    await owner.execute({ kind: "setup.complete", commandId: command("mapped-complete"), operationId: setup.operationId, instanceId: "mapped", providerAccountId: "42", credentialRef: "connector:raindrop:test-account", policy: { enabled: true, allowWrites: policyOptions.allowWrites ?? false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false }, raindropCollections: [{ collectionId: "7", scope: "research", ...(policyOptions.destination7 ? { destination: policyOptions.destination7 } : {}) }, { collectionId: "8", scope: "personal" }, { collectionId: "9", scope: "research" }] });
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const extension = new KnowledgeConnectorExtension(store, { connections: owner, credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:test-account", "synthetic-raindrop-token"]])), http, resolveHost: publicResolver, ...(sourceFetch ? { sourceFetch } : {}), ...(assessment ? { assessment } : {}), sleep: async () => {}, now: () => "2026-01-01T00:00:00.000Z" });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("mapped-configure"), connector: "raindrop", connectionId: "mapped", enabled: true } });
+    return { root, owner, store, extension };
+  }
+
+  it("rejects unmapped collections and isolates pending intake by mapped collection", async () => {
+    const requested: string[] = [];
+    let httpCalls = 0;
+    const items = (collectionId: string) => ({ items: [{ _id: collectionId, title: `Item ${collectionId}`, link: `https://example.com/${collectionId}`, note: `Note ${collectionId}`, collection: { $id: Number(collectionId) } }] });
+    const { extension } = await mappedRaindropFixture(async url => { httpCalls += 1; if (url.endsWith("/user")) return response({ user: { _id: 42 } }); const match = /raindrops\/(\d+)/.exec(url); if (match) { requested.push(match[1]!); return response(items(match[1]!)); } throw new Error("unexpected provider request"); });
+    await expect(extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("unmapped-collection"), connectionId: "mapped", sourceCollection: "99", dryRun: true, limit: 1 } })).rejects.toMatchObject({ code: "unsupported" });
+    expect(httpCalls).toBe(0);
+    const first = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("mapped-research-dry"), connectionId: "mapped", sourceCollection: "7", dryRun: true, limit: 1 } }) as any;
+    const second = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("mapped-personal-dry"), connectionId: "mapped", sourceCollection: "8", dryRun: true, limit: 1 } }) as any;
+    expect(first.pending.map((item: any) => item.id)).toEqual(["7"]);
+    expect(second.pending.map((item: any) => item.id)).toEqual(["8"]);
+    expect(requested).toEqual(["7", "8"]);
+  });
+
+  it("does not assign a duplicate item to a second collection when its provider collection contradicts the request", async () => {
+    const { store, extension } = await mappedRaindropFixture(async url => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      const requested = /raindrops\/(\d+)/.exec(url)?.[1];
+      if (requested === "7" || requested === "8") return response({ items: [{ _id: 77, title: "Same provider item", link: "https://example.com/same", collection: { $id: 7 } }] });
+      throw new Error("unexpected provider request");
+    });
+    const first = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("duplicate-first"), connectionId: "mapped", sourceCollection: "7", dryRun: true, limit: 1 } }) as any;
+    const second = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("duplicate-second"), connectionId: "mapped", sourceCollection: "8", dryRun: true, limit: 1 } }) as any;
+    expect(first.pending.map((item: any) => item.id)).toEqual(["77"]);
+    expect(second.pending).toEqual([]);
+    expect((await store.connectorState("raindrop", "mapped"))?.pending.map(item => item.collectionId)).toEqual(["7"]);
+  });
+
+  it("re-scopes one canonical source when its bookmark moves to a mapped personal collection", async () => {
+    let collection = "7";
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Useful research", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const { store, extension } = await mappedRaindropFixture(async url => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      const requested = /raindrops\/(\d+)/.exec(url)?.[1];
+      if (requested === "7" || requested === "8") return response({ items: [{ _id: 77, title: "Moved bookmark", link: "https://example.com/moved", note: "Personal note", collection: { $id: Number(requested) } }] });
+      if (url.endsWith("/raindrop/77")) return response({ item: { _id: 77, collection: { $id: Number(collection) } } });
+      throw new Error("unexpected provider request");
+    }, async () => new Response("A real saved source with enough useful content for capture.", { headers: { "content-type": "text/plain" } }), assessment);
+    const first = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("move-first-research"), connectionId: "mapped", sourceCollection: "7", dryRun: false, limit: 1, pilot: { id: "research-pilot", maxItems: 1, budgetCents: 1 } } }) as any;
+    expect(first.retained).toBe(1);
+    let sources = (await store.list({ kind: "source", includePending: true, includeArchived: true })).records.filter(record => record.kind === "source");
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.scope).toBe("research");
+    collection = "8";
+    const second = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("move-second-personal"), connectionId: "mapped", sourceCollection: "8", dryRun: false, limit: 1 } }) as any;
+    expect(second.retained).toBe(1);
+    sources = (await store.list({ kind: "source", includePending: true, includeArchived: true })).records.filter(record => record.kind === "source");
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({ scope: "personal", content: { identity: { provider: "raindrop", itemId: "77" }, collectionId: "8", admission: { status: "retained" } } });
+  });
+
+  it("keeps an intake admission behind a connection-configuration revision race", async () => {
+    let owner: ConnectionOwner | undefined;
+    let changed = false;
+    const { owner: connectionOwner, store, extension } = await mappedRaindropFixture(async url => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      if (url.includes("/raindrops/8?")) return response({ items: [{ _id: 89, title: "Racing bookmark", link: "https://example.com/racing", collection: { $id: 8 } }] });
+      throw new Error("unexpected provider request");
+    }, async () => {
+      if (!changed) {
+        changed = true;
+        const live = await owner!.resolveInstance("mapped");
+        await owner!.execute({ kind: "policy.update", commandId: command("mapping-race-update"), instanceId: "mapped", expectedSetupRevision: live.setupRevision, policy: live.policy, raindropCollections: [{ collectionId: "7", scope: "research" }, { collectionId: "8", scope: "research" }] });
+      }
+      return new Response("Capture succeeded under the configuration admitted when intake began.", { headers: { "content-type": "text/plain" } });
+    });
+    owner = connectionOwner;
+    const result = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("mapping-race-intake"), connectionId: "mapped", sourceCollection: "8", dryRun: false, limit: 1 } }) as any;
+    const sources = (await store.list({ kind: "source", includePending: true, includeArchived: true })).records.filter(record => record.kind === "source");
+    expect(result).toMatchObject({ retained: 0, pending: 1 });
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({ scope: "personal", content: { admission: { status: "pending" }, collectionId: "8" } });
+  });
+
+  it("keeps assessment pilot cohorts independent for each mapped research collection", async () => {
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const { store, extension } = await mappedRaindropFixture(async url => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      const collection = /raindrops\/(\d+)/.exec(url)?.[1];
+      if (collection === "7" || collection === "9") return response({ items: [{ _id: collection, title: `Research ${collection}`, link: `https://example.com/${collection}`, collection: { $id: Number(collection) } }] });
+      throw new Error("unexpected provider request");
+    }, async () => new Response("A real research item with sufficiently useful readable evidence.", { headers: { "content-type": "text/plain" } }), assessment);
+    for (const [collectionId, pilotId] of [["7", "pilot-7"], ["9", "pilot-9"]]) {
+      const result = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command(`cohort-${collectionId}`), connectionId: "mapped", sourceCollection: collectionId!, dryRun: false, limit: 1, pilot: { id: pilotId!, maxItems: 1, budgetCents: 1 } } }) as any;
+      expect(result.retained).toBe(1);
+    }
+    expect(Object.keys((await store.connectorState("raindrop", "mapped"))?.assessmentPilots ?? {}).sort()).toEqual(["7", "9"]);
+  });
+
+  it("uses only the selected collection's approved remote destination", async () => {
+    let remoteCollection = "7";
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const writes: string[] = [];
+    const { extension } = await mappedRaindropFixture(async (url, init) => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      if (url.includes("/raindrops/7?")) return response({ items: [{ _id: 90, title: "Move-approved source", link: "https://example.com/move-approved", collection: { $id: 7 } }] });
+      if (url.endsWith("/raindrop/90") && init.method === "PUT") { writes.push(JSON.parse(init.body ?? "{}").collection.$id); remoteCollection = "9"; return response({ item: { _id: 90, collection: { $id: 9 } } }); }
+      if (url.endsWith("/raindrop/90")) return response({ item: { _id: 90, collection: { $id: Number(remoteCollection) } } });
+      throw new Error("unexpected provider request");
+    }, async () => new Response("Complete source text supports the collection move.", { headers: { "content-type": "text/plain" } }), assessment, { allowWrites: true, destination7: "9" });
+    const result = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("mapped-destination"), connectionId: "mapped", sourceCollection: "7", dryRun: false, limit: 1, pilot: { id: "destination-pilot", maxItems: 1, budgetCents: 1 } } }) as any;
+    expect(writes).toEqual(["9"]);
+    expect(result).toMatchObject({ moved: 1, retained: 1, pending: 0 });
+  });
+
+  it("admits a personal bookmark from its link and saved note when page capture fails, without Jev", async () => {
+    let assessmentCalls = 0;
+    const { store, extension } = await mappedRaindropFixture(async url => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      if (url.includes("/raindrops/8?")) return response({ items: [{ _id: 88, title: "Personal bookmark", link: "https://example.com/personal", note: "Saved note", created: "2025-01-01T00:00:00.000Z", collection: { $id: 8 } }] });
+      throw new Error("unexpected provider request");
+    }, async () => { throw new Error("page fetch unavailable"); }, { assess: async () => { assessmentCalls += 1; throw new Error("Jev must not run for personal intake"); } });
+    const result = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("personal-failed-capture"), connectionId: "mapped", sourceCollection: "8", dryRun: false, limit: 1 } }) as any;
+    const sources = (await store.list({ kind: "source", includePending: true, includeArchived: true })).records.filter(record => record.kind === "source");
+    expect(result).toMatchObject({ retained: 1, pending: 0 });
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({ scope: "personal", content: { title: "Personal bookmark", collectionId: "8", admission: { status: "retained" }, annotations: [{ text: "Saved note" }] } });
+    expect(assessmentCalls).toBe(0);
+  });
   it("rejects malformed Raindrop read envelopes before credential lookup or HTTP", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-malformed-read-")); roots.push(root);
     let credentialReads = 0; let httpCalls = 0;
@@ -65,7 +195,7 @@ describe("knowledge connectors", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-missing-connection-credential-")); roots.push(root);
     const owner = new ConnectionOwner(root);
     const setup = await owner.execute({ kind: "setup.begin", commandId: command("missing-credential-begin"), instanceId: "personal", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
-    await owner.execute({ kind: "setup.complete", commandId: command("missing-credential-complete"), operationId: setup.operationId, instanceId: "personal", providerAccountId: "42", scope: "0", credentialRef: "connector:raindrop:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+    await owner.execute({ kind: "setup.complete", commandId: command("missing-credential-complete"), operationId: setup.operationId, instanceId: "personal", providerAccountId: "42", credentialRef: "connector:raindrop:personal", raindropCollections: [{ collectionId: "0", scope: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
     let httpCalls = 0;
     const store = new KnowledgeStore(new TronWorkspace(root));
     const extension = new KnowledgeConnectorExtension(store, { connections: owner, credentials: { read: async () => undefined }, http: async () => { httpCalls += 1; return response({ items: [] }); }, sleep: async () => {} });

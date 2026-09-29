@@ -6,6 +6,7 @@ import type {
   KnowledgeCurationCode, KnowledgeCurationJobRequest, KnowledgeCurationJobResponse, KnowledgeCurationOutcome,
   KnowledgeCurationRequest, KnowledgeCurationResponse, KnowledgeSourceSummaryStart, ObservationCoverageDisposition,
   KnowledgeTagEdit, KnowledgeTagEditRequest, KnowledgeTagReconcileRequest, KnowledgeTagRetagRequest,
+  KnowledgeTagRequest, KnowledgeTagRunRequest, KnowledgeTagBudgetRequest, KnowledgeTagCostEstimateRequest,
   SourceAssessment, SourceCurationProducer,
 } from "./knowledge-contract.js";
 import { KNOWLEDGE_CURATION_MAX_ITEMS, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS, KnowledgeCurationRefusal } from "./knowledge-contract.js";
@@ -18,9 +19,12 @@ import { triageSource } from "./source-triage.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
+import { createHash } from "node:crypto";
+import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, KNOWLEDGE_TAG_QUESTIONS_PER_CALL, activeTagDefinitions } from "./knowledge-tagger.js";
+import type { ConnectionOwner } from "../integrations/connection-owner.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -60,7 +64,7 @@ const toolParameters = Type.Object({
   noteBody: Type.Optional(Type.String({ maxLength: 100_000 })),
   confirmed: Type.Optional(Type.Boolean()),
   kind: Type.Optional(Type.Union([Type.Literal("source"), Type.Literal("observation"), Type.Literal("note")])),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
   // Curation. One batch carries one operation; each item names the revision it
   // was read at, and the owner derives every evidence binding itself.
   curation: Type.Optional(Type.Union([Type.Literal("summary"), Type.Literal("tags"), Type.Literal("verdict"), Type.Literal("placement"), Type.Literal("relation")])),
@@ -68,6 +72,9 @@ const toolParameters = Type.Object({
   curationStatus: Type.Optional(Type.Union([Type.Literal("running"), Type.Literal("done"), Type.Literal("failed")])),
   expectedConfigRevision: Type.Optional(Type.Integer({ minimum: 0 })),
   vocabularyRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+  expectedRevision: Type.Optional(Type.String({ minLength: 16, maxLength: 80 })),
+  budgetCents: Type.Optional(Type.Number({ minimum: 0, maximum: 1_000_000 })),
+  attemptId: Type.Optional(Type.String({ minLength: 16, maxLength: 64 })),
   tagCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   tagEdit: Type.Optional(Type.Union([
     Type.Object({ kind: Type.Literal("add"), tag: Type.Object({ id: Type.String({ minLength: 1, maxLength: 48 }), label: Type.String({ minLength: 1, maxLength: 80 }), definition: Type.String({ minLength: 1, maxLength: 512 }), category: Type.String({ minLength: 1, maxLength: 48 }), decayClass: Type.Union([Type.Literal("ages"), Type.Literal("stable")]), state: Type.Literal("active") }, { additionalProperties: false }) }, { additionalProperties: false }),
@@ -220,7 +227,8 @@ export interface KnowledgeExtensionSeam {
  * dispatching after its budget is spoken for. The tagging owner installs the
  * budget here and must refuse only operations that spend it: a spent tagging
  * budget never blocks free edits such as verdicts, placement or relations. */
-export type KnowledgeCurationGate = (operation: KnowledgeCurationRequest["operation"]) => { ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string };
+export type KnowledgeCurationGate = (operation: KnowledgeCurationRequest["operation"]) => { ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string } | Promise<{ ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string }>;
+export interface KnowledgeTaggingRuntime { engine: KnowledgeTaggingEngine; budget: KnowledgeTaggingBudget; connections: Pick<ConnectionOwner, "snapshot">; }
 
 export interface KnowledgeGenerationModel extends SourceAssessmentModel {
   reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal }): Promise<string>;
@@ -282,6 +290,7 @@ export class KnowledgeService {
     private readonly workRegistry?: GatewayWorkRegistry,
     private readonly curationGate?: KnowledgeCurationGate,
     private readonly jobs: KnowledgeCurationJobs = new KnowledgeCurationJobs(),
+    private readonly tagging?: KnowledgeTaggingRuntime,
   ) { this.observer = observer; }
 
   private async runOwned<T>(operation: string, task: (signal: AbortSignal, retirements: Promise<void>[]) => Promise<T>, parentSignal?: AbortSignal): Promise<T> {
@@ -345,7 +354,7 @@ export class KnowledgeService {
     let stateRevision: number | undefined;
     for (const item of request.items) {
       if (stop) { outcomes.push({ recordId: item.recordId, status: "skipped", code: stop.code, reason: stop.reason }); continue; }
-      const gate = this.curationGate?.(request.operation);
+      const gate = await this.curationGate?.(request.operation);
       if (gate && !gate.ok) { stop = { code: gate.code, reason: gate.reason }; outcomes.push({ recordId: item.recordId, status: "skipped", code: gate.code, reason: gate.reason }); continue; }
       const refusal = curationItemRefusal(request.operation, item);
       if (refusal) { outcomes.push({ recordId: item.recordId, status: "failed", code: refusal.code, reason: refusal.reason }); continue; }
@@ -362,6 +371,7 @@ export class KnowledgeService {
           revisionId: record.revisionId,
           stored: curationStored(record, request.operation),
         });
+        if (request.operation === "summary" && record.revisionId !== item.expectedRevision) void this.autoRetag(record.id, record.revisionId);
       } catch (error) {
         outcomes.push(curationFailureOutcome(item, error));
       }
@@ -399,6 +409,115 @@ export class KnowledgeService {
     return { job, record };
   }
 
+  private async taggingConnectionId(): Promise<string | undefined> {
+    const snapshot = await this.tagging?.connections.snapshot();
+    const enabled = snapshot?.instances.filter(instance => instance.definitionId === "knowledge.jev" && instance.policy.enabled && instance.policy.paidAccessApproved && instance.policy.paidBudgetCents > 0) ?? [];
+    return enabled.length === 1 ? enabled[0]!.id : undefined;
+  }
+
+  private async startTag(request: KnowledgeTagRequest): Promise<{ job: import("./knowledge-contract.js").KnowledgeCurationJob }> {
+    if (!this.tagging) throw new GatewayError("unsupported", "Jev Knowledge tagging is not installed");
+    if (!request.commandId || request.commandId.length > 160 || !request.sourceId || !request.expectedRevision || !request.connectionId) throw new GatewayError("invalid_request", "Tagging requires commandId, sourceId, expectedRevision and connectionId");
+    const existing = this.jobs.find(request.commandId);
+    if (existing) {
+      if (existing.sourceId !== request.sourceId || existing.operation !== "tags") throw new KnowledgeCurationRefusal("command-id-reuse", "This command ID already started different curation work");
+      return { job: existing };
+    }
+    const record = await this.store.read(request.sourceId, undefined, false, true, true);
+    if (!record || record.kind !== "source") throw new GatewayError("conflict", "Source is unavailable, excluded, or forgotten");
+    if (record.revisionId !== request.expectedRevision) throw new KnowledgeCurationRefusal("stale-revision", "Source revision changed before tagging began", record.revisionId);
+    const job = this.jobs.start({
+      commandId: request.commandId, operation: "tags", sourceId: request.sourceId,
+      run: signal => this.runOwned("tag", async ownedSignal => this.runTag(request.sourceId, request.expectedRevision, request.connectionId, request.commandId, ownedSignal), signal),
+    });
+    return { job };
+  }
+
+  private async runTag(sourceId: string, expectedRevision: string, connectionId: string, jobId: string, signal: AbortSignal): Promise<{ revisionId: string }> {
+    if (!this.tagging) throw new GatewayError("unsupported", "Jev Knowledge tagging is not installed");
+    const record = await this.store.read(sourceId, undefined, false, true, true);
+    if (!record || record.kind !== "source") throw new GatewayError("conflict", "Source is unavailable, excluded, or forgotten");
+    if (record.revisionId !== expectedRevision) throw new KnowledgeCurationRefusal("stale-revision", "Source changed while tagging; the edit was preserved and the entry remains eligible for re-tagging", record.revisionId);
+    const config = await this.store.config();
+    const tags = activeTagDefinitions(config.tagVocabulary);
+    if (!tags.length) throw new KnowledgeCurationRefusal("unavailable", "The controlled tag vocabulary has no active tags");
+    const existing = record.content.tags;
+    const inputDigest = await import("./knowledge-store.js").then(module => module.curationInputsDigest(record.content));
+    if (existing && existing.vocabularyRevision === config.tagVocabulary.revision && existing.inputsDigest === inputDigest && existing.tagIds.every(id => tags.some(tag => tag.id === id))) return { revisionId: record.revisionId };
+    const decision = await this.tagging.engine.decide(record, config.tagVocabulary, connectionId, jobId, signal);
+    if (signal.aborted) throw new GatewayError("cancelled", "Knowledge tag run was cancelled after Jev returned; reconcile the attempt before retrying");
+    const curationId = `jev-tag-write-${createHash("sha256").update(JSON.stringify([jobId, sourceId, expectedRevision])).digest("hex").slice(0, 48)}`;
+    const committed = await this.store.curateSource({
+      commandId: curationId, operation: "tags", producer: { actor: "agent", model: decision.model },
+      item: { recordId: sourceId, expectedRevision, tagIds: decision.tagIds, vocabularyRevision: decision.vocabularyRevision },
+    });
+    return { revisionId: committed.record.revisionId };
+  }
+
+  async runTagQueue(request: KnowledgeTagRunRequest): Promise<{ job: import("./knowledge-contract.js").KnowledgeCurationJob }> {
+    if (!this.tagging) throw new GatewayError("unsupported", "Jev Knowledge tagging is not installed");
+    const limit = request.limit ?? 25;
+    if (!request.commandId || request.commandId.length > 160 || !request.connectionId || !Number.isSafeInteger(limit) || limit < 1 || limit > 25) throw new GatewayError("invalid_request", "A tag queue run requires commandId, connectionId and limit 1..25");
+    const existing = this.jobs.find(request.commandId);
+    if (existing) {
+      if (existing.sourceId !== "tag-queue" || existing.operation !== "tags") throw new KnowledgeCurationRefusal("command-id-reuse", "This command ID already started different curation work");
+      return { job: existing };
+    }
+    const job = this.jobs.start({ commandId: request.commandId, operation: "tags", sourceId: "tag-queue", run: signal => this.runOwned("tag queue", async ownedSignal => {
+      const config = await this.store.config();
+      const page = await this.store.tagsNeedingRetag({ vocabularyRevision: config.tagVocabulary.revision, limit });
+      let lastRevision = "";
+      for (const item of page.items) {
+        if (ownedSignal.aborted) throw new GatewayError("cancelled", "Knowledge tag queue was cancelled; committed entries remain tagged");
+        const childId = `jev-tag-item-${createHash("sha256").update(JSON.stringify([request.commandId, item.id, item.revisionId])).digest("hex").slice(0, 48)}`;
+        const outcome = await this.runTag(item.id, item.revisionId, request.connectionId, childId, ownedSignal);
+        lastRevision = outcome.revisionId;
+      }
+      return { revisionId: lastRevision || `empty-${config.tagVocabulary.revision}` };
+    }, signal) });
+    return { job };
+  }
+
+  async taggingBudget(request: KnowledgeTagBudgetRequest) {
+    if (!this.tagging) throw new GatewayError("unsupported", "Jev Knowledge tagging is not installed");
+    return this.tagging.budget.status(request.connectionId);
+  }
+
+  async estimateTaggingCost(request: KnowledgeTagCostEstimateRequest) {
+    if (!this.tagging) throw new GatewayError("unsupported", "Jev Knowledge tagging is not installed");
+    const limit = request.limit ?? 25;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) throw new GatewayError("invalid_request", "A tag cost estimate is bounded to 1..25 entries");
+    const config = await this.store.config();
+    const page = await this.store.tagsNeedingRetag({ vocabularyRevision: config.tagVocabulary.revision, limit });
+    const activeTags = activeTagDefinitions(config.tagVocabulary);
+    const count = activeTags.length;
+    const categoryCount = new Set(activeTags.map(tag => tag.category)).size;
+    const categoryCallBound = count > KNOWLEDGE_TAG_QUESTIONS_PER_CALL ? (categoryCount > 254 ? Math.ceil(categoryCount / 128) : 1) : 0;
+    const perEntryCallBound = categoryCallBound + Math.ceil(count / KNOWLEDGE_TAG_QUESTIONS_PER_CALL);
+    const budget = await this.tagging.budget.status(request.connectionId);
+    const calls = page.items.length * perEntryCallBound;
+    const estimateCents = calls * KNOWLEDGE_TAG_CALL_RESERVATION_CENTS;
+    return { vocabularyRevision: config.tagVocabulary.revision, queuedSources: page.items.length, boundedSources: limit, callsAtMost: calls, reservationCentsAtMost: estimateCents, availableCents: budget.availableCents, affordableByCurrentBudget: budget.enabled && budget.paidAccessApproved && estimateCents <= budget.availableCents + 1e-9 };
+  }
+
+  private async autoRetagQueue(vocabularyRevision: number): Promise<void> {
+    if (!this.tagging) return;
+    const connectionId = await this.taggingConnectionId();
+    if (!connectionId) return;
+    const estimate = await this.estimateTaggingCost({ connectionId, limit: 25 }).catch(() => undefined);
+    if (!estimate?.queuedSources || !estimate.affordableByCurrentBudget) return;
+    const commandId = `jev-vocabulary-${createHash("sha256").update(`${connectionId}:${vocabularyRevision}`).digest("hex").slice(0, 40)}`;
+    await this.runTagQueue({ commandId, connectionId, limit: 25 }).catch(() => {});
+  }
+
+  async autoRetag(sourceId: string, revisionId: string): Promise<void> {
+    if (!this.tagging) return;
+    const connectionId = await this.taggingConnectionId();
+    if (!connectionId) return;
+    const commandId = `jev-auto-take-${createHash("sha256").update(`${sourceId}:${revisionId}`).digest("hex").slice(0, 40)}`;
+    await this.startTag({ commandId, sourceId, expectedRevision: revisionId, connectionId }).catch(() => {});
+  }
+
   summaryJobs(request: KnowledgeCurationJobRequest): KnowledgeCurationJobResponse {
     if (request.limit !== undefined && (!Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 64)) throw new GatewayError("invalid_request", "A job page carries 1..64 jobs");
     return this.jobs.observe(request);
@@ -424,6 +543,7 @@ export class KnowledgeService {
         const generated = await model.summarizeSource({ sessionId: source.id, sourceText, sourceRevisionIds: [source.revisionId], signal, maxOutputChars: Math.min(config.observation.maxOutputChars, 8_000) });
         return { ...generated, generatedAt: new Date().toISOString(), sourceRevisionId: source.revisionId, evidenceDigest: sourceEvidenceDigest(source.content.title, text), coverage, producer };
       }, signal);
+      void this.autoRetag(result.record.id, result.record.revisionId);
       return { revisionId: result.record.revisionId };
     } finally {
       work?.settle();
@@ -469,10 +589,15 @@ export class KnowledgeService {
       case "knowledge.previews.read": return this.store.readPreviewsBatch(action.request);
       case "knowledge.config": return this.store.configure(action.request.commandId, action.request.config);
       case "knowledge.tags.configure": {
+        const priorConfig = await this.store.config();
         const config = await this.store.configureTags(action.request);
-        if (action.request.edit.kind !== "merge") return config;
+        if (action.request.edit.kind !== "merge") {
+          if (config.tagVocabulary.revision !== priorConfig.tagVocabulary.revision) void this.autoRetagQueue(config.tagVocabulary.revision);
+          return config;
+        }
         try {
           const reconciliation = await this.store.reconcileTagMerges({ commandId: this.tagMergeCommandId(action.request.commandId), expectedConfigRevision: config.revision, limit: 25 });
+          if (config.tagVocabulary.revision !== priorConfig.tagVocabulary.revision) void this.autoRetagQueue(config.tagVocabulary.revision);
           return { config, reconciliation };
         } catch (error) {
           if (!(error instanceof GatewayError) || error.code !== "conflict") throw error;
@@ -480,6 +605,7 @@ export class KnowledgeService {
           // The vocabulary edit is already receipted. Report its committed
           // result separately from a concurrent config change that fenced the
           // first re-point batch; the caller can resume at the newer revision.
+          if (config.tagVocabulary.revision !== priorConfig.tagVocabulary.revision) void this.autoRetagQueue(config.tagVocabulary.revision);
           return { config, reconciliation: { applied: 0, unchanged: 0, outcomes: [], configRevision: current.revision, conflict: true, reason: error.message } };
         }
       }
@@ -517,7 +643,19 @@ export class KnowledgeService {
       }
       case "knowledge.source.summarize": return this.summarize(action.request);
       case "knowledge.source.curate": return this.curate(action.request);
-      case "knowledge.source.take": return this.store.setSourceTake(action.request);
+      case "knowledge.source.take": {
+        const result = await this.store.setSourceTake(action.request);
+        if (result.record.revisionId !== action.request.expectedRevision) void this.autoRetag(result.record.id, result.record.revisionId);
+        return result;
+      }
+      case "knowledge.source.tag": return this.startTag(action.request);
+      case "knowledge.tags.run": return this.runTagQueue(action.request);
+      case "knowledge.tags.budget": return this.taggingBudget(action.request);
+      case "knowledge.tags.budget.reconcile": {
+        if (!this.tagging) throw new GatewayError("unsupported", "Jev Knowledge tagging is not installed");
+        return this.tagging.budget.reconcileUncertain(action.request.connectionId, action.request.attemptId);
+      }
+      case "knowledge.tags.estimate": return this.estimateTaggingCost(action.request);
       case "knowledge.curation.jobs": return this.summaryJobs(action.request);
       case "knowledge.source.triage": {
         const config = await this.store.config();
@@ -764,6 +902,31 @@ export class KnowledgeService {
         if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId) throw new GatewayError("invalid_request", "Source summary requires commandId, sourceId, and revisionId");
         const result = await this.summarize({ commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId });
         return { text: `Source summary ${result.job.status} for ${result.job.sourceId} (commandId ${result.job.commandId}); query action=curationJob for its outcome.`, details: result };
+      }
+      case "tagSource": {
+        if (!parameters.commandId || !parameters.sourceId || !parameters.expectedRevision || !parameters.connectionId) throw new GatewayError("invalid_request", "tagSource requires commandId, sourceId, expectedRevision and connectionId");
+        const details = await this.startTag({ commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.expectedRevision, connectionId: parameters.connectionId });
+        return { text: `Knowledge tag job ${details.job.status} for ${details.job.sourceId}; query curationJob for its outcome.`, details };
+      }
+      case "retagQueue": {
+        if (!parameters.commandId || !parameters.connectionId) throw new GatewayError("invalid_request", "retagQueue requires commandId and connectionId");
+        const details = await this.runTagQueue({ commandId: parameters.commandId, connectionId: parameters.connectionId, ...(parameters.limit ? { limit: parameters.limit } : {}) });
+        return { text: `Knowledge tag queue job ${details.job.status}; query curationJob for its outcome.`, details };
+      }
+      case "estimateTaggingCost": {
+        if (!parameters.connectionId) throw new GatewayError("invalid_request", "estimateTaggingCost requires connectionId");
+        const details = await this.estimateTaggingCost({ connectionId: parameters.connectionId, ...(parameters.limit ? { limit: parameters.limit } : {}) });
+        return { text: `Knowledge retag estimate: ${details.queuedSources} queued entries, up to ${details.callsAtMost} Jev calls and ${details.reservationCentsAtMost.toFixed(3)} cents reserved; affordable=${details.affordableByCurrentBudget}.`, details };
+      }
+      case "taggingBudget": {
+        if (!parameters.connectionId) throw new GatewayError("invalid_request", "taggingBudget requires connectionId");
+        const details = await this.taggingBudget({ connectionId: parameters.connectionId });
+        return { text: `Jev tag budget ${details.month}: ${details.spentCents.toFixed(3)} cents spent, ${details.reservedCents.toFixed(3)} reserved, ${details.availableCents.toFixed(3)} available of ${details.capCents} cents; ${details.uncertain.length} uncertain attempts.`, details };
+      }
+      case "reconcileTagBudget": {
+        if (!parameters.connectionId || !parameters.attemptId) throw new GatewayError("invalid_request", "reconcileTagBudget requires connectionId and attemptId");
+        const details = await this.invoke({ operation: "knowledge.tags.budget.reconcile", request: { connectionId: parameters.connectionId, attemptId: parameters.attemptId } }, signal);
+        return { text: `Uncertain Jev attempt reconciled at its full reservation ceiling (${(details as { reconciledCostCents: number }).reconciledCostCents.toFixed(3)} cents).`, details };
       }
       case "curationJob": {
         const result = this.summaryJobs({ ...(parameters.commandId ? { commandId: parameters.commandId } : {}), ...(parameters.sourceId ? { sourceId: parameters.sourceId } : {}), ...(parameters.curationStatus ? { status: parameters.curationStatus } : {}) });

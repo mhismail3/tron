@@ -27,6 +27,7 @@ import {
   assertCredentialReference,
   connectionRequestHash,
   normalizeProviderDisplayName,
+  validateRaindropCollectionMappings,
   validateConnectionInstance,
   validateConnectionPolicy,
   validateConnectionState,
@@ -52,6 +53,14 @@ const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] = [
       { id: "move", displayName: "Move bookmarks", effects: ["write"], supported: true },
       { id: "assess", displayName: "Assess sources", effects: ["paid"], supported: true },
     ],
+  },
+  {
+    schemaVersion: 1,
+    id: "knowledge.jev",
+    implementation: "knowledge-connector",
+    displayName: "Jev tagging",
+    setupMethods: ["token"],
+    capabilities: [{ id: "tag", displayName: "Tag Knowledge sources", effects: ["paid"], supported: true }],
   },
   {
     schemaVersion: 1,
@@ -99,7 +108,7 @@ function capabilityAvailability(
   if (!instance.policy.enabled) return { availability: "disabled", detail: "Connection is disabled by policy" };
   const providerPrerequisitesAdmitted = instance.implementation === "mcp"
     ? true
-    : instance.credentialAvailability === "available" && instance.providerIdentity === "admitted";
+    : instance.credentialAvailability === "available" && (instance.providerIdentity === "admitted" || instance.definitionId === "knowledge.jev");
   if (instance.health !== "ready" || !providerPrerequisitesAdmitted) {
     return { availability: "unavailable", detail: instance.lastError ?? prerequisiteDetail(instance) };
   }
@@ -124,18 +133,23 @@ function validateCommand(command: ConnectionCommand): void {
     if (command.scope !== undefined && (typeof command.scope !== "string" || command.scope.length < 1 || command.scope.length > 512)) throw invalid("Connection scope is invalid");
     assertCredentialReference(command.credentialRef); validateConnectionPolicy(command.policy);
     if (command.configuration !== undefined) validateMcpConnectionConfiguration(command.configuration);
+    if (command.raindropCollections !== undefined) {
+      if (command.scope !== undefined) throw invalid("Raindrop collection mappings replace the single connector scope");
+      validateRaindropCollectionMappings(command.raindropCollections);
+    }
     return;
   }
   if (command.kind === "setup.cancel") { assertConnectionId(command.operationId, "setup operation id"); assertConnectionId(command.instanceId); return; }
   assertConnectionId(command.instanceId);
   if (command.kind === "policy.update") {
     validateConnectionPolicy(command.policy);
+    if (command.raindropCollections !== undefined) validateRaindropCollectionMappings(command.raindropCollections);
     if (!Number.isSafeInteger(command.expectedSetupRevision) || command.expectedSetupRevision < 1) throw invalid("Policy updates require the observed setup revision");
   }
 }
 
 function resultForInstance(instance: ConnectionInstance): Record<string, unknown> {
-  return { id: instance.id, definitionId: instance.definitionId, implementation: instance.implementation, providerAccountId: instance.providerAccountId, ...(instance.scope ? { scope: instance.scope } : {}), ...(instance.providerDisplayName ? { providerDisplayName: instance.providerDisplayName } : {}), policy: instance.policy, health: instance.health, createdAt: instance.createdAt, updatedAt: instance.updatedAt, setupRevision: instance.setupRevision, ...(instance.lastError ? { lastError: instance.lastError } : {}) };
+  return { id: instance.id, definitionId: instance.definitionId, implementation: instance.implementation, providerAccountId: instance.providerAccountId, ...(instance.scope ? { scope: instance.scope } : {}), ...(instance.raindropCollections ? { raindropCollections: copy(instance.raindropCollections) } : {}), ...(instance.providerDisplayName ? { providerDisplayName: instance.providerDisplayName } : {}), policy: instance.policy, health: instance.health, createdAt: instance.createdAt, updatedAt: instance.updatedAt, setupRevision: instance.setupRevision, ...(instance.lastError ? { lastError: instance.lastError } : {}) };
 }
 
 export class ConnectionOwner {
@@ -207,7 +221,8 @@ export class ConnectionOwner {
         && observation.providerIdentity === "admitted"
         ? normalizeProviderDisplayName(observation.providerDisplayName)
         : undefined;
-      const health: ConnectionHealth = observation.credentialAvailability === "available" && observation.providerIdentity === "admitted" ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
+      const localCredentialAdmission = instance.definitionId === "knowledge.jev" && observation.credentialAvailability === "available";
+      const health: ConnectionHealth = observation.credentialAvailability === "available" && (observation.providerIdentity === "admitted" || localCredentialAdmission) ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
       // All four projected fields already hold these values (an absent
       // observation field projects as `unknown`, so it is compared that way),
       // so this is not a state transition: a read that re-observes the same
@@ -325,7 +340,8 @@ export class ConnectionOwner {
       if (definition.implementation === "mcp" && operation.method === "endpoint" && command.configuration?.transport !== "http") throw invalid("Endpoint setup requires HTTP MCP configuration");
       if (definition.implementation === "mcp" && operation.method === "local-command" && command.configuration?.transport !== "stdio") throw invalid("Local command setup requires stdio MCP configuration");
       if (definition.implementation !== "mcp" && command.configuration !== undefined) throw invalid("Only MCP connections accept transport configuration");
-      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.configuration ? { configuration: copy(command.configuration) } : {}), policy: copy(command.policy), health: command.policy.enabled ? "setup-required" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1, credentialAvailability: "unknown", providerIdentity: "unknown" };
+      if (command.raindropCollections !== undefined && definition.id !== "knowledge.raindrop") throw invalid("Only Raindrop connections accept collection mappings");
+      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.configuration ? { configuration: copy(command.configuration) } : {}), ...(command.raindropCollections ? { raindropCollections: copy(command.raindropCollections) } : {}), policy: copy(command.policy), health: command.policy.enabled ? "setup-required" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1, credentialAvailability: "unknown", providerIdentity: "unknown" };
       state.instances[instance.id] = instance; operation.status = "completed"; operation.updatedAt = timestamp;
       return resultForInstance(instance);
     }
@@ -341,6 +357,11 @@ export class ConnectionOwner {
       // Compare under the same mutex as publication, after receipt replay. A
       // stale sheet cannot restore permissions changed by another owner client.
       if (instance.setupRevision !== command.expectedSetupRevision) throw conflict("Connection changed; reopen its settings before saving");
+      if (command.raindropCollections !== undefined) {
+        if (instance.definitionId !== "knowledge.raindrop") throw invalid("Only Raindrop connections accept collection mappings");
+        instance.raindropCollections = copy(command.raindropCollections);
+        delete instance.scope;
+      }
       instance.policy = copy(command.policy); instance.health = command.policy.enabled ? "setup-required" : "disabled"; instance.credentialAvailability = "unknown"; instance.providerIdentity = "unknown"; delete instance.providerDisplayName; instance.updatedAt = timestamp; instance.setupRevision += 1; delete instance.lastError;
       return resultForInstance(instance);
     }

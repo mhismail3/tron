@@ -6,6 +6,34 @@ import { drainDurableWriteStats } from "../util/durable-json.js";
 import { ConnectionOwner } from "./connection-owner.js";
 
 describe("ConnectionOwner", () => {
+  it("exposes paid Jev tagging only through the generic connection approval policy", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-jev-tag-connection-"));
+    try {
+    const owner = new ConnectionOwner(home);
+    const setup = await owner.execute({ kind: "setup.begin", commandId: "jev-tag-begin-0001", instanceId: "tagger", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
+    await owner.execute({ kind: "setup.complete", commandId: "jev-tag-complete-0001", operationId: setup.operationId, instanceId: "tagger", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 500, recurringApproved: false } });
+    await owner.recordProviderObservation("tagger", 1, { credentialAvailability: "available", providerIdentity: "unknown" });
+    expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "unavailable", detail: "Paid access approval is required for this capability" }));
+    await owner.execute({ kind: "policy.update", commandId: "jev-tag-approve-0001", instanceId: "tagger", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
+    await owner.recordProviderObservation("tagger", 2, { credentialAvailability: "available", providerIdentity: "unknown" });
+    expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "available" }));
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+  it("validates and revision-fences Raindrop collection-to-scope mappings in connection configuration", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-raindrop-mappings-"));
+    try {
+      const owner = new ConnectionOwner(home);
+      const policy = { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false };
+      const setup = await owner.execute({ kind: "setup.begin", commandId: "mapping-begin-001", instanceId: "raindrop", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+      const mappings = [{ collectionId: "1", scope: "research" as const, destination: "9" }, { collectionId: "2", scope: "personal" as const }];
+      await expect(owner.execute({ kind: "setup.complete", commandId: "mapping-invalid-001", operationId: setup.operationId, instanceId: "raindrop", providerAccountId: "42", credentialRef: "connector:raindrop:test", policy, raindropCollections: [{ collectionId: "1", scope: "research" }, { collectionId: "1", scope: "personal" }] })).rejects.toThrow(/unique numeric IDs/);
+      const added = await owner.execute({ kind: "setup.complete", commandId: "mapping-complete-01", operationId: setup.operationId, instanceId: "raindrop", providerAccountId: "42", credentialRef: "connector:raindrop:test", policy, raindropCollections: mappings }) as { setupRevision: number };
+      const next = [{ collectionId: "1", scope: "personal" as const }, mappings[1]!];
+      await owner.execute({ kind: "policy.update", commandId: "mapping-update-01", instanceId: "raindrop", expectedSetupRevision: added.setupRevision, policy, raindropCollections: next });
+      await expect(owner.execute({ kind: "policy.update", commandId: "mapping-stale-001", instanceId: "raindrop", expectedSetupRevision: added.setupRevision, policy, raindropCollections: mappings })).rejects.toThrow(/Connection changed/);
+      expect((await owner.resolveInstance("raindrop")).raindropCollections).toEqual(next);
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
   it("keeps two same-provider accounts isolated and requires exact setup operations", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-connections-"));
     try {

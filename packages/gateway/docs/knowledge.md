@@ -153,9 +153,9 @@ no selection, a stale vocabulary edition, retired/merged tag IDs, or a stale
 an exact vocabulary revision. K4 owns producing replacement selections.
 
 A selection records the vocabulary revision it was validated against and
-`curationInputsDigest` (SHA-256 of the record's own title, readable text and
-current verdict), so editing the vocabulary flags re-tagging without making
-stored selections unreadable, while a change to the evidence itself does. Tag
+`curationInputsDigest` (SHA-256 of the record's title, current summary, readable
+text, verdict, and Your take), so edits to any tag input enter the bounded query
+without making stored selections unreadable. Tag
 labels, category and decay class are projected onto source rows from catalog
 heads; both Library row search by label and list/search rendering read no source
 bodies. A vocabulary label/category/decay/state edit reprojects the bounded
@@ -167,6 +167,73 @@ later one as `skipped` with the code, which is how the paid tagging owner stops
 dispatching once its budget is spoken for. It refuses only operations that spend
 the budget: a spent tagging budget never blocks free edits such as verdicts,
 placement or relations.
+
+### Jev tag decisions and paid-work ownership
+
+`knowledge.source.tag` (agent tool `tagSource`) accepts one source's exact
+`expectedRevision` and one `knowledge.jev` `connectionId`; it returns an owned
+`tags` job instead of waiting for Jev. `knowledge.tags.run` (agent tool
+`retagQueue`) owns one bounded queue run of 1..25 entries from the canonical
+`knowledge.tags.retag-needed` query. Repeated command IDs observe the existing
+job. `knowledge.curation.jobs` reports its state. Cancellation preserves already
+committed entries; an interrupted entry remains in the K3 query. K5 can call
+`knowledge.source.tag` after source capture/summary as part of its intake flow.
+
+Tag evidence is limited by UTF-8 byte bounds: title 512, current summary 2,000,
+readable text 8,000, take 2,000, verdict 1,000, and guidelines 3,000 bytes. The
+summary, evidence, take, verdict, and guidelines are in shared Jev state, while
+each candidate question carries its vocabulary ID, label, definition, and
+category. The input digest covers title, current summary, readable text,
+verdict, and take. K1 computes the stored digest and provenance; the tag write
+also fences the vocabulary edition used to make the decision, so a taxonomy
+change in-flight cannot publish under a newer edition. A strict noul confidence
+threshold of **greater than 0.65** selects a tag; equal-to-threshold results are
+omitted. At more than 16 active tags Jev first chooses applicable categories
+(one or two category-choice questions for the maximum 256-category vocabulary),
+then answers one noul question per remaining candidate, in groups of at most 16.
+
+The paid capability belongs to `knowledge.jev` in ConnectionOwner, not to a
+Raindrop account. It uses only the existing Keychain reference
+`connector:jev:personal`. A user must create/enable that connection and
+explicitly set `paidAccessApproved: true`; default paid approval remains false.
+Its generic `paidBudgetCents` is the configurable monthly ceiling (500 cents is
+the chosen default). No tagging code creates the connection or approves spend.
+Before each Jev POST, the tagger durably reserves the current connection's
+published 64,000-input-token maximum ($0.2688 cents); after a valid response it
+settles to Jev's actual usage cost. A process restart leaves reserved or
+uncertain dispatches visible in `knowledge.tags.budget` and blocks further paid
+tagging in that month. `knowledge.tags.budget.reconcile` explicitly reconciles
+one unknown result at its full reserved ceiling; it never makes the same Jev
+call again. The UTC month rollover resets only that month's settled/reserved
+counters and retains prior unresolved attempts. `knowledge.tags.estimate`
+(agent tool `estimateTaggingCost`) uses the current retag query and worst-case
+question batches to report maximum reservations without making a paid call.
+`knowledge.tags.budget` (agent tool `taggingBudget`) reports cap, spend,
+reservations, availability, and uncertain attempts. The standalone `jev` tool's
+per-call ceiling remains independent.
+
+K1's curation gate checks paid policy only for tag writes; free verdict, scope,
+relation, and other edits continue when Jev spend is disabled or exhausted.
+Paid reservations occur immediately before the Jev dispatch, not when the
+already-computed tag selection is published. Take and summary revisions
+invalidate the tag input digest; take edits and summary changes start an
+automatic single-source job when one enabled Jev connection exists. Vocabulary
+or guideline edition changes run a cost estimate first, then start one bounded
+queue page only when its worst-case reservation is affordable. Otherwise all
+stale entries stay in the K3 query for an explicit later run. There is no
+recurring queue or scheduler.
+
+To configure paid tagging, the user explicitly calls `connections.setup.begin`
+with `{commandId, instanceId, definitionId:"knowledge.jev", method:"token"}`;
+then `connections.setup.complete` with the returned `operationId`, matching
+`instanceId`, `providerAccountId:"personal"`,
+`credentialRef:"connector:jev:personal"`, and policy
+`{enabled:true, allowWrites:false, paidAccessApproved:false, paidBudgetCents:500, recurringApproved:false}`.
+After adding the Jev value to the existing Mac Keychain service, the user
+explicitly updates that instance through `connections.policy.update` with its
+current `expectedSetupRevision` and the same policy except
+`paidAccessApproved:true`. These are ordinary existing connection-owner setup
+and policy actions; there is no second tagging approval store.
 
 Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
 owned background work, not a request that waits for a model: the call accepts a
@@ -342,8 +409,7 @@ qualified evidence and a pinned `knowledge.read` continuation (`id`,
 `revisionId`, and `offset`) whenever the evidence section is incomplete; the
 complete record is never available only through tool details. Observation
 defaults to disabled and the store never chooses a provider or model silently. Connector DTOs are operation shapes implemented by the installed connector
-extension. Connection setup owns the selected account/scope and opaque `credentialRef`
-(`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it.
+extension. Connection setup owns the selected account, its Raindrop collection-to-scope mapping, and opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it. Raindrop collection routes are edited through the connection's revision-fenced setup/policy command, not duplicated in connector progress state.
 Once `ConnectionOwner` is active, connector actions require an exact
 `connectionId` and Knowledge persists provider progress under that instance
 key, without copying the generic account envelope. Tokens never enter
@@ -687,14 +753,16 @@ provider/account/item rather than scanning source pages.
 ## Bounded Raindrop intake
 
 `knowledge.raindrop.intake` is the explicit manual source-owner operation for a
-bounded pilot. `dryRun` only discovers and persists pending provider identities;
-it does not call Jev or mutate Raindrop. A run requires an explicit pilot ID,
-maximum item count (at most 10), and budget (at most 100 cents), which are
-persisted in connector state so a new command cannot reset usage. The numeric
-source collection must match the connector's configured scope; it cannot bypass
-that authority fence. Discovery retains no more than the approved limit per
-intake call, so shifted provider pages are revisited rather than silently skipped.
-Destination remains the separately configured collection.
+bounded intake. `dryRun` only discovers and persists pending provider identities;
+it does not call Jev or mutate Raindrop. Research admission requires an explicit
+pilot ID, maximum item count (at most 10), and budget (at most 100 cents), which
+are persisted as a receipt-backed cohort for that collection so another
+collection cannot reuse the allowance. The selected numeric collection must be
+present in the connection's explicit mapping; an unmapped collection fails
+before credential lookup/provider I/O. Discovery retains no more than the
+selected limit per collection, so shifted provider pages are revisited rather
+than silently skipped. Remote destinations are configured per source collection
+and still require the connection's independent `allowWrites` approval.
 
 Each item keeps its bounded complete Raindrop JSON as a `provider-api` source
 representation, the fetched linked evidence separately, and the source
@@ -799,5 +867,8 @@ bounded run revisits page zero and uses durable IDs, so moved items shrinking
 earlier pages cannot silently skip later entries. Malformed read envelopes are
 rejected locally before credential lookup or provider HTTP; provider failures
 remain sanitized.
-The operation is manual only; no recurring approval, scheduler, X integration,
-or collection creation is implied.
+For Raindrop, `ConnectionInstance.raindropCollections` is the sole routing configuration: 1..64 unique numeric collection IDs map to `research` or `personal`, with an optional destination per source collection. Setup completion installs the mappings; `connections.policy.update` can replace them only against the exact `setupRevision`. Raindrop no longer needs a single selected collection in the generic connector scope. Intake requires a mapped collection, and when several are configured the caller must select one; an unmapped ID is rejected before discovery. Dry-run and pending results filter to that collection. Provider page receipts include the collection ID; offset discovery restarts at page zero because moving bookmarks shifts Raindrop's pages, while durable pending/captured identities are tracked by their last collection. The returned item's collection, when present, must match the requested collection; if absent, the exact collection endpoint is the provenance.
+
+Research retains the existing complete-capture → Jev assessment → admission path, with its pilot/receipt budget isolated by collection. Personal uses the original link, title, best-effort preview, and saved Raindrop note; failed or partial page fetches do not block `retained` admission and do not call Jev. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
+
+A remote move is authorized only by the existing connection `allowWrites` policy and the selected source collection's optional mapped destination, revalidated against the current setup revision at preflight and effect admission. No destination on a mapping means no move; another collection's destination cannot authorize it. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.
