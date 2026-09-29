@@ -664,7 +664,7 @@ rows are in priority order.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | R-1 | Done | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | orchestrator, 2026-09-29: merged to `main` with four known misses the user accepted in writing (see handoff); F-4..F-7 own them |
-| F-4 | Claimed | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-4), 2026-09-30 |
+| F-4 | Blocked | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-4), 2026-09-30; outbound writes now pause at the socket-buffer boundary, but the quiet-host `bandwidth-stream` acceptance run could not be completed (see handoff) |
 | F-5 | Claimed | Prompt admission p99 ~610 ms against 250 ms in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567, with F-6 and F-7), 2026-09-30 |
 | F-6 | Claimed | Event loop p99 ~38 ms against 20 ms, max up to 1.4 s under load; attribute with a CPU profile | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30 |
 | F-7 | Claimed | Warm `session.open` p99 ~335 ms against 300 ms | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30 |
@@ -10678,6 +10678,35 @@ recovery gaps; all three were fixed on the same branch.
   future protocol bump keeps `PROTOCOL_VERSION`/`MIN_PROTOCOL_VERSION` in
   `config/GatewayProtocol.json` as the single authority. A real-device check of
   the old-Mac scenario is R-2's install, not this row.
+
+#### F-4 · Blocked · 2026-09-30 · orchestrator-dispatched deepseek-worker (branch `hardening/f-4`)
+
+- Result: added a queue write gate at 64 KiB `ws.bufferedAmount`, resumed by the
+  underlying socket's `drain` event; unsent superseded state continues to
+  coalesce while the transport is backpressured. Added a focused regression for
+  pause → coalesce → resume and updated the connection-resilience contract.
+- Failure modes written before implementation: (1) send callbacks can keep
+  feeding `ws` while its writable buffer is pressured; (2) pausing must retain
+  G-4 sequence/rebaseline coverage and enqueue order; (3) fast sockets must not
+  wait and the distinct 2 Mbit page case must retain its link use.
+- Evidence: `npx vitest run src/transport/server-capacity.integration.test.ts`
+  **36/36**, `npx vitest run src/transport/server-heartbeat.integration.test.ts`
+  **10/10**, and `npm run build` pass. The new test failed before the queue gate
+  (it wrote `summary-1` while the modeled transport was blocked) and passes with
+  the gate.
+- Qualification blocked: both before-change profile attempts using
+  `scripts/tron-profile gateway --scenario multi-session --no-build --iterations
+  1 --cases bandwidth-stream,bandwidth` stopped in `prime` because
+  `session.list` returned `busy: The session catalog has not been read yet`;
+  the fixture's `gateway.startup-step attention-recovery` took 11.5 s, beyond
+  the driver's retry window. Host load was 61–87 with parallel iOS builds, so no
+  after-change numbers or claim against the pong deadline/link-use targets are
+  available. The stored R-1 baseline remains `bandwidth-stream` 24,430–24,577 ms,
+  2 deadline misses; `bandwidth` max ping 1,558–1,622 ms, 0 misses and link use
+  0.979–0.993.
+- For the next agent: re-run the prescribed before/after qualification on a
+  quiet host. Do not mark Done unless `bandwidth-stream` has zero deadline
+  misses and ping-to-pong well under 8 s without regressing the `bandwidth` leg.
 
 #### F-3 review round 1 · 2026-09-29
 

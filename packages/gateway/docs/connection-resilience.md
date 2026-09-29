@@ -7,8 +7,11 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 ## Failure boundaries
 
 - **Gateway outbound queue:** at most 8 MiB and 4,096 encoded frames per connection,
-  including the active write. Exactly one frame enters `ws` at a time. Completion
-  releases both its payload reference and byte reservation. A newer session
+  including the active write. Exactly one frame enters `ws` at a time. The next
+  frame waits while `ws.bufferedAmount` exceeds 64 KiB and resumes on the
+  underlying socket's `drain` event, bounding bytes handed toward a slow reader
+  so bulk state cannot indefinitely delay a control pong. Completion releases
+  both its payload reference and byte reservation. A newer session
   summary replaces the unsent summary of that session, and a newer session
   snapshot supersedes the unsent sequenced state of its own runtime generation
   that it fully re-states, up to its own `eventSequence`, so a slow link carries

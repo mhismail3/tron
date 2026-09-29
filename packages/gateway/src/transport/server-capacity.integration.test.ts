@@ -145,6 +145,38 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(overflow).not.toHaveBeenCalled();
   });
 
+  it("coalesces superseded state while transport-buffered bytes pause outbound writes", () => {
+    const writes: string[] = [];
+    const completions: Array<(error?: Error) => void> = [];
+    let transportWritable = true;
+    const queue = new OrderedOutboundQueue(
+      4_096,
+      (encoded, done) => { writes.push(encoded); completions.push(done); },
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      () => transportWritable,
+    );
+
+    expect(queue.enqueue(queuedFrame("active"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("summary-1", "session.summary", "session.summary:s1"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("progress"))).toBe(true);
+    transportWritable = false;
+    completions.shift()!();
+    expect(writes).toEqual(["active"]);
+
+    expect(queue.enqueue(queuedFrame("summary-2", "session.summary", "session.summary:s1"))).toBe(true);
+    expect(queue.snapshot()).toMatchObject({ queuedFrames: 2, oldestTopic: "test.frame" });
+    transportWritable = true;
+    queue.resume();
+    expect(writes).toEqual(["active", "progress"]);
+    completions.shift()!();
+    expect(writes).toEqual(["active", "progress", "summary-2"]);
+    completions.shift()!();
+    expect(queue.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0 });
+  });
+
   // G-4 failure modes, queue level: a superseded frame that is already being
   // written cannot be recalled; a replacement larger than the remaining budget
   // must not evict the state it supersedes on its way to the backstop; and
