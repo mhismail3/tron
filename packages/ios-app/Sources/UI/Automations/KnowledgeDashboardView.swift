@@ -229,7 +229,6 @@ struct KnowledgeDashboardView: View {
     @State private var searchDebouncer = KnowledgeSearchDebouncer()
     @State private var loading = false
     @State private var error: String?
-    @State private var nextCursor: String?
     @State private var loadingMore = false
     @State private var coverageStore = KnowledgeCoveragePresentationStore()
     @State private var coverageSheet = false

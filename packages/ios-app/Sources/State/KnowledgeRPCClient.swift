@@ -100,7 +100,8 @@ final class KnowledgeRPCClient {
                 guard let reason = item.unavailable, ["forbidden", "missing", "too-large"].contains(reason) else { throw invalidResponse() }
                 unavailable.insert(request.hash); continue
             }
-            guard item.unavailable == nil, let data = Data(base64Encoded: base64), data.count == request.reference.bytes else { throw invalidResponse() }
+            guard item.unavailable == nil, let data = Data(base64Encoded: base64), data.count == request.reference.bytes,
+                  KnowledgePreviewDigest.hex(data) == request.hash else { throw invalidResponse() }
             images[request.hash] = data
         }
         return KnowledgePreviewBatchResult(images: images, unavailableHashes: unavailable)

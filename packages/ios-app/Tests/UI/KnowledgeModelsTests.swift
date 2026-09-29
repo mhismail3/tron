@@ -483,8 +483,8 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertFalse(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", loadingMore: true))
     }
 
-    func testLibraryPrefetchLoadsOnlyNearTheEndOfTheLoadedRows() {
-        let rows = (0..<20).map { Self.rowFixture(id: "row-\($0)") }
+    func testLibraryPrefetchLoadsOnlyNearTheEndOfTheLoadedRows() throws {
+        let rows = try (0..<20).map { try KnowledgeRowFixture.row(KnowledgeRowFixture.rowJSON(id: "row-\($0)")) }
         XCTAssertFalse(KnowledgeLibraryPrefetchPolicy.admits(rows: rows, cursor: "page-2", loadingMore: false, appearing: "row-0"))
         XCTAssertTrue(KnowledgeLibraryPrefetchPolicy.admits(rows: rows, cursor: "page-2", loadingMore: false, appearing: "row-16"))
         XCTAssertTrue(KnowledgeLibraryPrefetchPolicy.admits(rows: rows, cursor: "page-2", loadingMore: false, appearing: "row-19"))

@@ -25,6 +25,25 @@ struct KnowledgePreviewStoreTests {
         return try #require(image.pngData())
     }
 
+    /// Distinct image bytes and the content address each one has. The Gateway
+    /// publishes bytes addressed by their own hash, so a fixture must too.
+    private func addressedImages(_ count: Int) throws -> [(hash: String, data: Data)] {
+        let base = try imageData()
+        return (0..<count).map { index in
+            let data = index == 0 ? base : base + Data([UInt8(index)])
+            return (KnowledgePreviewDigest.hex(data), data)
+        }
+    }
+
+    /// Rows mount together, so their preview requests arrive together.
+    private func loadConcurrently(_ hashes: [String], store: KnowledgePreviewStore, bytes: Int) async {
+        var tasks: [Task<Void, Never>] = []
+        for hash in hashes {
+            tasks.append(Task { @MainActor in _ = await store.load(request(hash: hash, record: hash, bytes: bytes)) })
+        }
+        for task in tasks { await task.value }
+    }
+
     private func request(hash: String, record: String = "record", bytes: Int) -> KnowledgePreviewRequest {
         KnowledgePreviewRequest(recordID: record, revisionID: "revision", reference: KnowledgeObjectRef(hash: hash, mediaType: "image/png", bytes: bytes))
     }
@@ -66,8 +85,10 @@ struct KnowledgePreviewStoreTests {
         async let second = store.load(request(hash: hash, record: "b", bytes: data.count))
         let images = await [first, second]
         #expect(images.allSatisfy { $0 != nil })
+        // One object is one batch item however many rows asked for it.
         #expect(await recorder.batches.count == 1)
-        #expect(await recorder.batches.first?.count == 2)
+        #expect(await recorder.batches.first?.count == 1)
+        #expect(await recorder.batches.first?.first?.recordID == "a")
 
         // A cached image is served without another request.
         _ = await store.load(request(hash: hash, record: "a", bytes: data.count))
@@ -79,19 +100,14 @@ struct KnowledgePreviewStoreTests {
     func batchBound() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let data = try imageData()
         let recorder = BatchRecorder()
-        let hashes = (0..<(KnowledgePreviewLimits.maximumBatchItems + 4)).map { String(format: "%064x", $0) }
-        var images: [String: Data] = [:]
-        for hash in hashes { images[hash] = data }
-        await recorder.set(images, unavailable: [])
-        let store = store(recorder, root: root, window: .milliseconds(60))
+        let addressed = try addressedImages(KnowledgePreviewLimits.maximumBatchItems + 4)
+        let hashes = addressed.map(\.hash)
+        await recorder.set(Dictionary(addressed.map { ($0.hash, $0.data) }, uniquingKeysWith: { first, _ in first }), unavailable: [])
+        let data = try imageData()
+        let store = store(recorder, root: root, window: .milliseconds(120))
         // Rows that mount together ask concurrently; that is what coalesces.
-        await withTaskGroup(of: Void.self) { group in
-            for hash in hashes {
-                group.addTask { @MainActor in _ = await store.load(request(hash: hash, record: hash, bytes: data.count)) }
-            }
-        }
+        await loadConcurrently(hashes, store: store, bytes: data.count)
         let sizes = await recorder.batches.map(\.count)
         #expect(sizes.allSatisfy { $0 <= KnowledgePreviewLimits.maximumBatchItems })
         #expect(sizes.reduce(0, +) == hashes.count)
@@ -102,8 +118,9 @@ struct KnowledgePreviewStoreTests {
     func unavailableRetry() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let data = try imageData()
-        let hash = KnowledgePreviewDigest.hex(data)
+        let addressed = try addressedImages(1)[0]
+        let data = addressed.data
+        let hash = addressed.hash
         let recorder = BatchRecorder()
         await recorder.set([:], unavailable: [hash])
         let store = store(recorder, root: root)
@@ -125,8 +142,9 @@ struct KnowledgePreviewStoreTests {
     func transportFailure() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let data = try imageData()
-        let hash = KnowledgePreviewDigest.hex(data)
+        let addressed = try addressedImages(1)[0]
+        let data = addressed.data
+        let hash = addressed.hash
         let attempts = AttemptCounter()
         let store = KnowledgePreviewStore(disk: KnowledgePreviewDiskCache(root: root), coalescingWindow: .milliseconds(10)) { _, _ in
             await attempts.increment()
@@ -141,16 +159,17 @@ struct KnowledgePreviewStoreTests {
     func diskCorruption() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let data = try imageData()
-        let hash = KnowledgePreviewDigest.hex(data)
+        let addressed = try addressedImages(1)[0]
+        let data = addressed.data
+        let hash = addressed.hash
         let disk = KnowledgePreviewDiskCache(root: root)
         await disk.store(hash: hash, data: data)
         #expect(await disk.data(for: hash) == data)
-        // Bytes stored under a name they do not hash to are discarded.
-        let wrong = KnowledgeRowFixture.hash("f")
+        // The store refuses to write bytes that do not match the name they claim.
+        let wrong = (try addressedImages(2)[1]).hash
         await disk.store(hash: wrong, data: data)
         #expect(await disk.data(for: wrong) == nil)
-        // A stored file overwritten with other bytes is discarded too.
+        // A file that was overwritten with other bytes is discarded on read.
         try Data(repeating: 3, count: 40).write(to: root.appending(path: "\(hash).img"))
         #expect(await disk.data(for: hash) == nil)
     }
@@ -159,36 +178,34 @@ struct KnowledgePreviewStoreTests {
     func diskEviction() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let data = try imageData()
-        let disk = KnowledgePreviewDiskCache(root: root, maximumBytes: data.count * 2)
-        let hashes = (0..<6).map { String(format: "%064x", $0) }
-        for hash in hashes { await disk.store(hash: hash, data: data) }
-        #expect(await disk.byteCount() <= data.count * 2 + data.count)
+        let addressed = try addressedImages(6)
+        // Two images fit; the rest must evict the oldest.
+        let disk = KnowledgePreviewDiskCache(root: root, maximumBytes: addressed[0].data.count * 2)
+        for entry in addressed { await disk.store(hash: entry.hash, data: entry.data) }
+        let bound = addressed[0].data.count * 2
+        #expect(await disk.byteCount() <= bound + addressed[0].data.count)
         var remaining = 0
-        for hash in hashes { if await disk.data(for: hash) != nil { remaining += 1 } }
+        for entry in addressed { if await disk.data(for: entry.hash) != nil { remaining += 1 } }
         #expect(remaining > 0)
         #expect(remaining <= 3)
+        // The newest image survives eviction.
+        #expect(await disk.data(for: addressed[addressed.count - 1].hash) != nil)
     }
 
     @Test("the mounted window is bounded")
     func memoryBound() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let data = try imageData()
+        let addressed = try addressedImages(12)
+        let hashes = addressed.map(\.hash)
+        let data = addressed[0].data
         let recorder = BatchRecorder()
-        let hashes = (0..<12).map { String(format: "%064x", $0) }
-        var images: [String: Data] = [:]
-        for hash in hashes { images[hash] = data }
-        await recorder.set(images, unavailable: [])
+        await recorder.set(Dictionary(addressed.map { ($0.hash, $0.data) }, uniquingKeysWith: { first, _ in first }), unavailable: [])
         let store = KnowledgePreviewStore(disk: KnowledgePreviewDiskCache(root: root), coalescingWindow: .milliseconds(10), maximumMemoryImages: 4) { requests, _ in
             await recorder.record(requests)
             return await recorder.outcome(for: requests)
         }
-        await withTaskGroup(of: Void.self) { group in
-            for hash in hashes {
-                group.addTask { @MainActor in _ = await store.load(request(hash: hash, record: hash, bytes: data.count)) }
-            }
-        }
+        await loadConcurrently(hashes, store: store, bytes: data.count)
         #expect(store.images.count == 4)
         // The evicted images stay on disk, so showing them again is not a fetch.
         let before = await recorder.batches.count

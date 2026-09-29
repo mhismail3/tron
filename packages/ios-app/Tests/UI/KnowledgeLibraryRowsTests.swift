@@ -69,26 +69,30 @@ struct KnowledgeLibraryRowsTests {
 
     @Test("a preview batch verifies every item against its own reference")
     func previewBatch() async throws {
+        // The Gateway publishes bytes addressed by their own hash, so the
+        // fixture's bytes must hash to the reference they answer.
         let bytes = Data(repeating: 7, count: 32)
-        let reference = KnowledgeObjectRef(hash: KnowledgeRowFixture.hash("a"), mediaType: "image/jpeg", bytes: bytes.count)
+        let reference = KnowledgeObjectRef(hash: KnowledgePreviewDigest.hex(bytes), mediaType: "image/jpeg", bytes: bytes.count)
         let request = KnowledgePreviewRequest(recordID: "a", revisionID: "revision-1", reference: reference)
+        let missing = KnowledgeObjectRef(hash: KnowledgePreviewDigest.hex(Data([1, 2, 3])), mediaType: "image/jpeg", bytes: 3)
         let client = KnowledgeRPCClient(request: { method, _ in
             #expect(method == "knowledge.previews.read")
             let items: [KnowledgePreviewBatchItem] = [
                 .init(recordId: "a", hash: reference.hash, base64: bytes.base64EncodedString(), unavailable: nil),
-                .init(recordId: "b", hash: KnowledgeRowFixture.hash("b"), base64: nil, unavailable: "missing"),
+                .init(recordId: "b", hash: missing.hash, base64: nil, unavailable: "missing"),
             ]
             return try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(KnowledgePreviewBatchResponse(items: items)))
         })
-        let result = try await client.readPreviews([request, KnowledgePreviewRequest(recordID: "b", revisionID: "revision-1", reference: KnowledgeObjectRef(hash: KnowledgeRowFixture.hash("b"), mediaType: "image/jpeg", bytes: 10))])
+        let result = try await client.readPreviews([request, KnowledgePreviewRequest(recordID: "b", revisionID: "revision-1", reference: missing)])
         #expect(result.images[reference.hash] == bytes)
-        #expect(result.unavailableHashes == [KnowledgeRowFixture.hash("b")])
+        #expect(result.unavailableHashes == [missing.hash])
         await #expect(throws: GatewayFailure.self) { try await client.readPreviews([]) }
     }
 
     @Test("a preview batch refuses bytes that do not match the answer it received")
     func previewBatchRejectsMismatch() async throws {
-        let reference = KnowledgeObjectRef(hash: KnowledgeRowFixture.hash("a"), mediaType: "image/jpeg", bytes: 32)
+        let served = Data(repeating: 7, count: 32)
+        let reference = KnowledgeObjectRef(hash: KnowledgePreviewDigest.hex(served), mediaType: "image/jpeg", bytes: 32)
         let request = KnowledgePreviewRequest(recordID: "a", revisionID: "revision-1", reference: reference)
         func client(_ response: [KnowledgePreviewBatchItem]) -> KnowledgeRPCClient {
             KnowledgeRPCClient(request: { _, _ in
@@ -99,9 +103,13 @@ struct KnowledgeLibraryRowsTests {
         await #expect(throws: GatewayFailure.self) {
             try await client([.init(recordId: "a", hash: reference.hash, base64: Data(repeating: 1, count: 8).base64EncodedString(), unavailable: nil)]).readPreviews([request])
         }
+        // Bytes of the right length that do not hash to the requested reference.
+        await #expect(throws: GatewayFailure.self) {
+            try await client([.init(recordId: "a", hash: reference.hash, base64: Data(repeating: 3, count: 32).base64EncodedString(), unavailable: nil)]).readPreviews([request])
+        }
         // An unknown record that was never asked for.
         await #expect(throws: GatewayFailure.self) {
-            try await client([.init(recordId: "other", hash: reference.hash, base64: Data(repeating: 1, count: 32).base64EncodedString(), unavailable: nil)]).readPreviews([request])
+            try await client([.init(recordId: "other", hash: reference.hash, base64: served.base64EncodedString(), unavailable: nil)]).readPreviews([request])
         }
         // Neither bytes nor a reason.
         await #expect(throws: GatewayFailure.self) {
@@ -141,7 +149,8 @@ struct KnowledgeLibraryRowsTests {
         #expect(KnowledgeSourceRowPresentationPolicy.sourceType(repository) == "Repository")
         let pdf = try KnowledgeRowFixture.row(KnowledgeRowFixture.rowJSON(uri: "https://example.test/a", mediaType: "application/pdf"))
         #expect(KnowledgeSourceRowPresentationPolicy.sourceType(pdf) == "PDF")
-        #expect(KnowledgeSourceRowPresentationPolicy.thumbnailLetters(repository) == "GI")
+        // The first letter of each dotted host label, as the record path does.
+        #expect(KnowledgeSourceRowPresentationPolicy.thumbnailLetters(repository) == "GC")
     }
 
     @Test("a changed-row patch keeps every unchanged row in place")
