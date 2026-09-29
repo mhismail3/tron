@@ -1979,7 +1979,7 @@ final class ChatTranscriptPresentationStore {
     @MainActor
     private func pruneInlineDisclosurePhases(to output: InstalledChatTranscript) {
         guard !inlineDisclosurePhases.isEmpty else { return }
-        let identities = Set(output.completedDisplayPresentations.map(\.presentationIdentity))
+        let identities = Set(output.completedDisplayPresentations.map(\.disclosureIdentity))
         guard inlineDisclosurePhases.keys.contains(where: { !identities.contains($0) }) else { return }
         inlineDisclosurePhases = inlineDisclosurePhases.filter { identities.contains($0.key) }
     }

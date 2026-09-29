@@ -176,7 +176,7 @@ struct DisplayToolView: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
 
     private var display: DisplayProjection? { tool.display }
-    private var disclosureIdentity: String? { display?.presentationIdentity }
+    private var disclosureIdentity: String? { display?.disclosureIdentity }
     private var effectiveSurface: DisplaySurface {
         display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? tool.requestedDisplaySurface ?? .sheet
@@ -742,7 +742,7 @@ private struct DisplayInlineContainer: View {
                         // through its own collapse action; a tap cannot be
                         // injected into a SwiftUI button.
                         .modifier(HostedToolActionProbeModifier(
-                            id: "display-collapse:\(display.presentationIdentity)",
+                            id: "display-collapse:\(display.disclosureIdentity)",
                             action: onCollapse
                         ))
                         #endif
@@ -971,6 +971,9 @@ private struct DisplayTextArtifactView: View {
     @State private var loadedIdentity: ChatMediaIdentity?
     @State private var loadedDocument: PreparedAttachmentFilePreview?
     @State private var failed = false
+    #if HOSTED_TEST
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+    #endif
 
     var body: some View {
         Group {
@@ -1057,7 +1060,7 @@ private struct DisplayTextArtifactView: View {
         failed = false
         do {
             let document = try await model.chatMedia.inlineArtifact(for: identity) { payload in
-                try await AttachmentFilePreviewPolicy.prepare(
+                return try await AttachmentFilePreviewPolicy.prepare(
                     data: payload.data,
                     name: artifact.name,
                     mimeType: artifact.mimeType
@@ -1069,6 +1072,14 @@ private struct DisplayTextArtifactView: View {
                   mediaIdentity == identity else { return }
             loadedIdentity = identity
             loadedDocument = document
+            #if HOSTED_TEST
+            // The card's own render, which nothing else can observe for an
+            // artifact the loader deliberately does not retain.
+            hostedRecorder?.recorder?.recordInlineArtifactPublication(
+                id: artifact.id,
+                bytes: document.accountedBytes
+            )
+            #endif
         } catch is CancellationError {
             // Interrupted work publishes nothing, so the next activation asks
             // again instead of keeping a placeholder forever.
@@ -1118,6 +1129,9 @@ private struct DisplayHTMLArtifactView: View {
     @State private var loadedIdentity: ChatMediaIdentity?
     @State private var loadedHTML: String?
     @State private var failed = false
+    #if HOSTED_TEST
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+    #endif
 
     var body: some View {
         Group {
@@ -1173,6 +1187,14 @@ private struct DisplayHTMLArtifactView: View {
                   mediaIdentity == identity else { return }
             loadedIdentity = identity
             loadedHTML = source.source
+            #if HOSTED_TEST
+            // The card's own render, which nothing else can observe for markup
+            // the loader deliberately does not retain.
+            hostedRecorder?.recorder?.recordInlineArtifactPublication(
+                id: artifact.id,
+                bytes: source.source.utf8.count
+            )
+            #endif
         } catch is CancellationError {
             // Interrupted work publishes nothing, so the next activation asks
             // again instead of keeping a placeholder forever.

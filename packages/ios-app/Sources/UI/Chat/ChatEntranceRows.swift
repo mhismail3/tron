@@ -25,9 +25,17 @@ enum ChatEntranceGrowthPolicy {
     /// this transparent gutter keeps those effects out of its clip boundary.
     static let effectOverflow: CGFloat = 24
     /// A settled row's clip covers this far past its own bounds in every
-    /// direction: past any Liquid Glass press expansion or shadow the row draws,
-    /// and small enough that the clip stays a bounded surface.
-    static let settledOverflow: CGFloat = 128
+    /// direction. The clip node is present at every progress — removing it at
+    /// admission switched the row's view structure — so at progress 1 it must not
+    /// trim any surface a row draws past its animated frame. The largest is an
+    /// inline display card's expansion: its host animates from the collapsed pill
+    /// to the card while the card's expanded layer keeps its natural height, so
+    /// the card overhangs its own frame by up to its bounded viewport plus its
+    /// header. Liquid Glass press expansion, shadows and a prompt's selection
+    /// chrome fit inside that too.
+    static let settledOverflow: CGFloat = DisplayInlineLayoutPolicy.maximumViewportHeight
+        + DisplayInlineLayoutPolicy.controlTouchTarget
+        + effectOverflow
     /// Height interpolation is a layout optimization for compact arrivals, not
     /// a transcript admission requirement. Keeping very tall rows at their
     /// natural height prevents a single large prompt or Markdown response from

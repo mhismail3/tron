@@ -55,11 +55,11 @@ struct ChatNotificationView: View {
         // the button trait and the 44-point target are chosen by the value
         // instead.
         pill
-            .chatCompactPillInteraction(
+            .modifier(ChatNotificationPillInteraction(
                 accessibilityLabel: accessibilityLabel,
-                addsButtonTrait: showsDetailAction,
-                action: showDetail
-            )
+                ownsDetailAction: showsDetailAction,
+                showDetail: showDetail
+            ))
             .allowsHitTesting(showsDetailAction)
             .frame(
                 minWidth: showsDetailAction ? 44 : 0,
@@ -137,6 +137,27 @@ struct ChatNotificationView: View {
         [presentation.title, presentation.detail].compactMap { $0 }.joined(separator: ", ")
     }
 
+}
+
+/// A notice's interaction: a detail-bearing or truncated notice is a control and
+/// asks the transcript for its detail sheet, while an informational notice keeps
+/// its own element with no action to perform.
+private struct ChatNotificationPillInteraction: ViewModifier {
+    let accessibilityLabel: String
+    let ownsDetailAction: Bool
+    let showDetail: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if ownsDetailAction {
+            content.chatCompactPillInteraction(
+                accessibilityLabel: accessibilityLabel,
+                action: showDetail
+            )
+        } else {
+            content.chatCompactPillInformation(accessibilityLabel: accessibilityLabel)
+        }
+    }
 }
 
 /// The full text of one transcript event, in the standard sheet chrome. It is

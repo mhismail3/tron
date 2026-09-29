@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import TronMobileCore
 import UIKit
@@ -289,6 +290,170 @@ struct ChatRowStabilityTests {
                 "the tail offset jumped instead of sliding: \(growingOffset.summary)"
             )
         }
+    }
+
+    @Test("an inline artifact over the retention ceiling renders in the card that loaded it")
+    func oversizedInlineArtifactRendersInItsCard() async throws {
+        try await withTestWatchdog(timeout: .seconds(180)) {
+            let snapshot = try oversizedPDFDisplaySnapshot()
+            let fetches = RowStabilityMediaFetches()
+            try await withMediaHarness(snapshot: snapshot, fetches: fetches) { harness in
+                let callID = RowStabilityFixture.oversizedDisplayCallID
+                let artifactID = RowStabilityFixture.artifactID(for: callID)
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.rowFrames[RowStabilityFixture.oversizedDisplayID] != nil
+                }
+                // The card's own render is the only observable fact: a value this
+                // size is handed to the card rather than retained. A bounded frame
+                // walk waits for it, and the expectation below reports what the
+                // card actually did.
+                var published = 0
+                for _ in 0..<240 {
+                    published = harness.probeObservation.inlineArtifactPublications[artifactID] ?? 0
+                    if published > 0 { break }
+                    try await harness.driveFrameBoundary()
+                }
+                let expected = RowStabilityFixture.oversizedPDF.count
+                // The fixture must be a document the card's own preparation
+                // policy accepts, or the journey would prove nothing.
+                let preparedFixture = try AttachmentFilePreviewPolicy.prepareSynchronously(
+                    data: RowStabilityFixture.oversizedPDF,
+                    name: "\(callID).pdf",
+                    mimeType: "application/pdf"
+                )
+                print("ROW-STABILITY-OVERSIZED-FIXTURE bytes=\(preparedFixture.accountedBytes)")
+                print("ROW-STABILITY-OVERSIZED published=\(published) expected=\(expected)"
+                    + " fetches=\(fetches.count(for: callID))")
+                #expect(
+                    expected > 1_024 * 1_024,
+                    "the fixture must exceed the loader's one-megabyte retention ceiling"
+                )
+                // The card itself renders what it loaded. A card that only read
+                // the retained store would show its placeholder forever here,
+                // because a value this size is deliberately not retained.
+                #expect(
+                    published == expected,
+                    "the card never rendered its own \(expected)-byte artifact (published \(published))"
+                )
+                if let identity = harness.chatMediaIdentity(blobID: artifactID) {
+                    #expect(
+                        harness.chatMedia.retainedInlineArtifact(
+                            for: identity,
+                            as: PreparedAttachmentFilePreview.self
+                        ) == nil,
+                        "a value over the retention ceiling must not occupy the store"
+                    )
+                }
+                #expect(
+                    fetches.count(for: callID) == 1,
+                    "the card fetched its artifact \(fetches.count(for: callID)) times"
+                )
+            }
+        }
+    }
+
+    @Test("an open thinking detail follows the trace the transcript installs next")
+    func thinkingDetailFollowsLiveTraceContent() async throws {
+        try await withTestWatchdog(timeout: .seconds(240)) {
+            let snapshot = try streamingTraceSnapshot(lineCount: 6)
+            try await withStabilityHarness(snapshot: snapshot) { harness in
+                var next = snapshot
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && !$0.observation.thinkingTraceMeasurements.isEmpty
+                }
+                let identity = try #require(
+                    harness.probeObservation.thinkingTraceMeasurements.keys.first
+                )
+                // The reader opens the trace's detail through the row's own
+                // control; the transcript presents it above the rows.
+                #expect(
+                    harness.toolActionProbe.activate("thinking-detail:\(identity)"),
+                    "the trace's detail control was not mounted"
+                )
+                _ = try await harness.recorder.waitUntil { _ in harness.presentsManagedSheet }
+                let opened = harness.probeObservation.thinkingSheetSamples[identity] ?? []
+                // The trace keeps arriving while the sheet is open.
+                for count in [30, 60] {
+                    next.streaming = try harnessRichAssistantMessage(
+                        id: RowStabilityFixture.traceMotionReplyID,
+                        presentationID: RowStabilityFixture.traceMotionReplyID,
+                        thinkingLines: traceMotionLines(count),
+                        text: "The trace above is still arriving."
+                    )
+                    next.revision += 1
+                    next.eventSequence += 1
+                    harness.replaceAuthoritativeSnapshot(next)
+                    try await driveBoundaries(20, harness: harness)
+                }
+                let samples = harness.probeObservation.thinkingSheetSamples[identity] ?? []
+                let longest = samples.map(\.sourceUTF16Length).max() ?? 0
+                let openedLength = opened.map(\.sourceUTF16Length).max() ?? 0
+                let openedOffset = opened.first?.scrollOffset ?? 0
+                let settledOffset = samples.last?.scrollOffset ?? 0
+                print("ROW-STABILITY-THINKING-SHEET opened=\(openedLength)"
+                    + " longest=\(longest) samples=\(samples.count)"
+                    + " offset=\(rowStabilityNumber(openedOffset))"
+                    + "->\(rowStabilityNumber(settledOffset))")
+                #expect(
+                    harness.presentsManagedSheet,
+                    "the detail was dismissed while the trace streamed"
+                )
+                #expect(longest > openedLength, "the open sheet never followed the trace")
+                #expect(
+                    longest >= traceMotionLines(60).joined(separator: "\n").utf16.count,
+                    "the sheet stopped short of the trace the install carries: \(longest)"
+                )
+                // A streaming trace follows its tail: the sheet's own scroll
+                // position moves with the content it follows.
+                #expect(
+                    settledOffset > openedOffset + 1,
+                    "the sheet did not follow the trace's tail: \(openedOffset) -> \(settledOffset)"
+                )
+            }
+        }
+    }
+
+    @Test("a settled row's clip does not trim what the row draws past its frame")
+    func settledEntranceClipKeepsRowOverflow() throws {
+        // A display card keeps its expanded layer at natural height while its own
+        // host animates from the collapsed pill, so a settled row draws past its
+        // frame by far more than a press region or a shadow.
+        let size = CGSize(width: 200, height: 400)
+        let content = ZStack(alignment: .top) {
+            Color.clear.frame(width: 200, height: 44)
+            ChatTranscriptEntranceRow(
+                state: .none,
+                kind: .assistantContent,
+                reduceMotion: true
+            ) {
+                // Reports the collapsed row's height while drawing the expanded
+                // layer below it: exactly the shape a display card presents.
+                VStack(spacing: 0) {
+                    Color.clear.frame(width: 200, height: 44)
+                    Color.red.frame(width: 200, height: 400)
+                }
+                .frame(width: 200, height: 44, alignment: .top)
+            }
+            .frame(width: 200, height: 44, alignment: .top)
+        }
+        .frame(width: size.width, height: size.height, alignment: .top)
+        let image = try renderHostedView(content, size: size)
+        let drawn = try #require(pixel(of: image, at: CGPoint(x: 100, y: 80)))
+        let overflow = try #require(pixel(of: image, at: CGPoint(x: 100, y: 300)))
+        print("ROW-STABILITY-SETTLED-CLIP drawn=\(drawn) overflow=\(overflow)"
+            + " settledOverflow=\(rowStabilityNumber(ChatEntranceGrowthPolicy.settledOverflow))")
+        #expect(
+            isRed(drawn),
+            "the row drew nothing of its own content: \(drawn)"
+        )
+        // 300 pt past the row's own frame is a display card's expansion, not a
+        // press region: the settled clip must let it through.
+        #expect(
+            isRed(overflow),
+            "the settled clip trimmed the row's overflow at 300 pt: \(overflow)"
+        )
     }
 
     @Test("a truncated error notice keeps one pill structure across its measurement")
@@ -867,6 +1032,135 @@ private func traceMotionPayload(_ motion: ChatHostedThinkingTraceMotion) -> [Str
      "paragraphOffsets": motion.paragraphOffsets.map(Double.init)]
 }
 
+/// A transcript whose newest row is a streaming reply carrying one wrapped
+/// thinking run of the given line count.
+private func streamingTraceSnapshot(lineCount: Int) throws -> SessionSnapshot {
+    var snapshot = try stabilitySnapshot(items: rowStabilityHistoryItems())
+    snapshot.phase = .running
+    snapshot.streaming = try harnessRichAssistantMessage(
+        id: RowStabilityFixture.traceMotionReplyID,
+        presentationID: RowStabilityFixture.traceMotionReplyID,
+        thinkingLines: traceMotionLines(lineCount),
+        text: "The trace above is still arriving."
+    )
+    return snapshot
+}
+
+/// One hosted render of a view at an exact size, so a test can assert what a clip
+/// actually let through.
+@MainActor
+private func renderHostedView<Content: View>(_ content: Content, size: CGSize) throws -> UIImage {
+    let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+    let window = UIWindow(windowScene: scene)
+    window.frame = CGRect(origin: .zero, size: size)
+    let controller = UIHostingController(rootView: content)
+    window.rootViewController = controller
+    window.makeKeyAndVisible()
+    controller.view.frame = window.bounds
+    controller.view.setNeedsLayout()
+    controller.view.layoutIfNeeded()
+    defer {
+        window.isHidden = true
+        window.rootViewController = nil
+    }
+    return UIGraphicsImageRenderer(size: size).image { _ in
+        window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+    }
+}
+
+/// Whether a rendered pixel is the fixture's own red rather than the window's
+/// background.
+private func isRed(_ pixel: (red: Int, green: Int, blue: Int, alpha: Int)) -> Bool {
+    pixel.alpha > 200 && pixel.red > 200 && pixel.green < 120 && pixel.blue < 120
+}
+
+/// One rendered pixel in device RGB, given in points of the rendered view, with
+/// the Core Graphics buffer's bottom-up rows resolved to a top-left origin.
+private func pixel(of image: UIImage, at point: CGPoint) -> (red: Int, green: Int, blue: Int, alpha: Int)? {
+    guard let cgImage = image.cgImage else { return nil }
+    let x = Int((point.x * image.scale).rounded())
+    let y = Int((point.y * image.scale).rounded())
+    guard x >= 0, y >= 0, x < cgImage.width, y < cgImage.height else { return nil }
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4)
+    defer { buffer.deallocate() }
+    buffer.initialize(repeating: 0, count: 4)
+    guard let context = CGContext(
+        data: buffer,
+        width: 1,
+        height: 1,
+        bitsPerComponent: 8,
+        bytesPerRow: 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+    context.draw(
+        cgImage,
+        in: CGRect(
+            x: -CGFloat(x),
+            y: -(CGFloat(cgImage.height) - CGFloat(y) - 1),
+            width: CGFloat(cgImage.width),
+            height: CGFloat(cgImage.height)
+        )
+    )
+    return (Int(buffer[0]), Int(buffer[1]), Int(buffer[2]), Int(buffer[3]))
+}
+
+/// The oversized inline display's own rows: one finalized PDF display above the
+/// loader's retention ceiling, in the same shape every other display fixture uses.
+private func oversizedPDFDisplaySnapshot() throws -> SessionSnapshot {
+    let callID = RowStabilityFixture.oversizedDisplayCallID
+    let requestID = "\(callID)-request"
+    let resultID = "\(callID)-result"
+    let rows: [[String: Any]] = [
+        assistantMessage(
+            id: requestID,
+            content: [
+                [
+                    "id": "\(callID)-call-content",
+                    "ordinal": 0,
+                    "type": "toolCall",
+                    "toolCallId": callID,
+                    "name": "display",
+                    "arguments": ["presentation": ["surface": "inline"]],
+                ],
+            ]
+        ),
+        [
+            "id": resultID,
+            "parentId": requestID,
+            "presentationId": resultID,
+            "timestamp": "2026-01-01T00:00:01Z",
+            "kind": "message",
+            "role": "toolResult",
+            "content": [
+                ["id": "\(resultID)-text", "ordinal": 0, "type": "text", "text": "Displayed oversized PDF."],
+            ],
+            "toolCallId": callID,
+            "toolName": "display",
+            "isError": false,
+            "display": [
+                "schema": "tron.display.v1",
+                "displayId": callID,
+                "revision": 1,
+                "title": "Oversized PDF",
+                "altText": "Oversized inline PDF fixture.",
+                "kind": "pdf",
+                "presentation": ["requestedSurface": "inline", "inlineTapAction": "sheet"],
+                "eligibleSurfaces": ["sheet", "inline"],
+                "fallbackText": "Oversized inline PDF fixture.",
+                "artifact": [
+                    "id": RowStabilityFixture.artifactID(for: callID),
+                    "name": "\(callID).pdf",
+                    "mimeType": "application/pdf",
+                    "size": RowStabilityFixture.oversizedPDF.count,
+                    "kind": "pdf",
+                ],
+            ],
+        ],
+    ]
+    return try stabilitySnapshot(items: rowStabilityHistoryItems() + rows)
+}
+
 private struct RowStabilityReport {
     static let schema = "tron.chat-row-stability-report.v1"
     static let packageRoot = URL(fileURLWithPath: #filePath)
@@ -1219,6 +1513,46 @@ private enum RowStabilityFixture {
     /// The row the trace-motion scenario streams: one wrapped thinking run whose
     /// lines are replaced by each install.
     static let traceMotionReplyID = "stability-trace-motion-reply"
+    static let oversizedDisplayCallID = "stability-oversized-display"
+    static let oversizedDisplayID = "tool-run-" + oversizedDisplayCallID
+    /// An inline PDF artifact above the loader's one-megabyte retention ceiling.
+    /// Text artifacts cannot be this large — the preview policy truncates them to
+    /// 320 KB — and HTML is not an inline surface, so a PDF is the only display
+    /// kind that reaches the ceiling while staying presentable inline. A page of
+    /// incompressible pixels is the cheapest way to cross it: repeated text and
+    /// vector content deflate far below the ceiling.
+    static let oversizedPDF: Data = {
+        let side = 1_024
+        var pixels = [UInt8](repeating: 255, count: side * side * 4)
+        var seed: UInt64 = 0x2545_F491_4F6C_DD1D
+        for index in 0..<(side * side) {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            pixels[index * 4] = UInt8((seed >> 33) & 0xFF)
+            pixels[index * 4 + 1] = UInt8((seed >> 41) & 0xFF)
+            pixels[index * 4 + 2] = UInt8((seed >> 49) & 0xFF)
+        }
+        let bytes = Data(pixels)
+        guard let provider = CGDataProvider(data: bytes as CFData),
+              let image = CGImage(
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: side * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+              ) else { return Data() }
+        let bounds = CGRect(x: 0, y: 0, width: 612, height: 792)
+        return UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
+            context.beginPage()
+            context.cgContext.draw(image, in: bounds)
+        }
+    }()
+
     static let errorNoticeID = "stability-error-notice"
     static let codeTableID = "stability-code-table"
     static let oldestHistoryID = "stability-history-0"
@@ -1238,10 +1572,10 @@ private enum RowStabilityFixture {
     ]
 
     /// The collapse control a hosted test activates. A display's disclosure owner
-    /// key is its presentation identity, `displayId:revision`, and the fixture
-    /// projects revision 1.
+    /// key is its own identity without the content revision, so a later revision
+    /// cannot re-expand a card the reader collapsed.
     static func collapseActionID(for callID: String) -> String {
-        "display-collapse:\(callID):1"
+        "display-collapse:\(callID)"
     }
 
     /// Display artifact identity is a UUID in the display contract.
@@ -1249,6 +1583,7 @@ private enum RowStabilityFixture {
         switch callID {
         case inlineDisplayCallIDs[0]: "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc31"
         case inlineDisplayCallIDs[1]: "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc32"
+        case oversizedDisplayCallID: "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc34"
         default: "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc33"
         }
     }
@@ -1271,6 +1606,7 @@ private enum RowStabilityFixture {
     static func artifactSize(for callID: String) -> Int {
         Data(inlineMarkdown(callID: callID).utf8).count
     }
+
 
     static func kind(for id: String) -> String {
         switch id {
@@ -1714,6 +2050,12 @@ private func rowStabilityMediaFetch(
         fetches.record(identity.blobID)
         if let markdown = displays[identity.blobID] {
             return ChatMediaPayload(data: Data(markdown.utf8), mimeType: "text/markdown")
+        }
+        if identity.blobID == RowStabilityFixture.artifactID(for: RowStabilityFixture.oversizedDisplayCallID) {
+            return ChatMediaPayload(
+                data: RowStabilityFixture.oversizedPDF,
+                mimeType: "application/pdf"
+            )
         }
         if identity.blobID == "stability-attachment-image" {
             return ChatMediaPayload(data: imageData, mimeType: "image/png")

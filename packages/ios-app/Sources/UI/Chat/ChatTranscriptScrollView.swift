@@ -14,6 +14,8 @@ protocol ChatTranscriptHostedRecording: AnyObject {
     func recordThinkingTrace(id: String, contentHeight: CGFloat, referenceHeight: CGFloat, overflowing: Bool)
     func recordThinkingTraceViewport(id: String, height: CGFloat)
     func recordThinkingTraceParagraphOffset(id: String, offset: CGFloat)
+    func recordInlineArtifactPublication(id: String, bytes: Int)
+    func recordThinkingSheet(id: String, sourceUTF16Length: Int, scrollOffset: CGFloat)
     func recordReplacementHostEvaluation(id: String)
     func updateRowFrame(
         id: String,
@@ -333,7 +335,7 @@ extension ChatTranscriptScrollView {
     /// skipped.
     func inlineDisclosurePhase(of item: ChatTranscriptRenderItem) -> DisplayInlineDisclosureState {
         guard let display = item.displayPresentation else { return DisplayInlineDisclosureState() }
-        return transcriptPresentation.inlineDisclosurePhase(for: display.presentationIdentity)
+        return transcriptPresentation.inlineDisclosurePhase(for: display.disclosureIdentity)
     }
 }
 
@@ -765,6 +767,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 transcriptPresentation.resolveNotificationDetail(eventID)
             }
         ))
+        #if HOSTED_TEST
+        // The sheet a row opens is presented from this host, so a hosted test
+        // observes the presented detail's own content through the same recorder
+        // the rows use.
+        .environment(\.chatHostedRecorder, ChatHostedRecorderBox(recorder: hostedRecorder))
+        #endif
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .alignment)
         // Positioning is pinned-owned even while the opaque opening surface is

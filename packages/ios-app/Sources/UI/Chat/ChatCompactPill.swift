@@ -198,18 +198,36 @@ private struct ChatCompactPillInteractionModifier: ViewModifier {
     /// Whether the pill is a control. A pill that owns no action keeps its own
     /// accessibility element and label without the button trait.
     let addsButtonTrait: Bool
-    let action: () -> Void
+    /// The pill's own action, or nil for an informational pill. A control the
+    /// reader cannot act on must not carry an activation action that does
+    /// nothing.
+    let action: (() -> Void)?
 
     func body(content: Content) -> some View {
         content
-            // The interactive glass surface remains the only visual press
-            // owner. A wrapping Button would add a second touch-down phase.
-            .onTapGesture(perform: action)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityLabel)
             .accessibilityValue(accessibilityValue ?? "")
             .accessibilityAddTraits(addsButtonTrait ? .isButton : [])
-            .accessibilityAction { action() }
+            .modifier(ChatCompactPillActionModifier(action: action))
+    }
+}
+
+/// The interactive half of a compact pill, attached only when the pill owns an
+/// action. The interactive glass surface remains the only visual press owner: a
+/// wrapping Button would add a second touch-down phase.
+private struct ChatCompactPillActionModifier: ViewModifier {
+    let action: (() -> Void)?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let action {
+            content
+                .onTapGesture(perform: action)
+                .accessibilityAction { action() }
+        } else {
+            content
+        }
     }
 }
 
@@ -225,6 +243,20 @@ extension View {
             accessibilityValue: accessibilityValue,
             addsButtonTrait: addsButtonTrait,
             action: action
+        ))
+    }
+
+    /// An informational pill: its own accessibility element and label, no
+    /// button trait and no activation action to perform.
+    func chatCompactPillInformation(
+        accessibilityLabel: String,
+        accessibilityValue: String? = nil
+    ) -> some View {
+        modifier(ChatCompactPillInteractionModifier(
+            accessibilityLabel: accessibilityLabel,
+            accessibilityValue: accessibilityValue,
+            addsButtonTrait: false,
+            action: nil
         ))
     }
 }

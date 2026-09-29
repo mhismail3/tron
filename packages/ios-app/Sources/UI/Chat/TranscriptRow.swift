@@ -534,6 +534,14 @@ private struct ThinkingBlock: View {
             traceViewport(inline: inline)
                 .contentShape(Rectangle())
                 .onTapGesture { openDetails() }
+                #if HOSTED_TEST
+                // The detail action a hosted test activates; a tap cannot be
+                // injected into a SwiftUI gesture.
+                .modifier(HostedToolActionProbeModifier(
+                    id: "thinking-detail:\(traceIdentity)",
+                    action: openDetails
+                ))
+                #endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
@@ -859,6 +867,9 @@ struct ThinkingTraceDetailSheet: View {
     let identity: String
     let streaming: Bool
     @Environment(\.dismiss) private var dismiss
+    #if HOSTED_TEST
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+    #endif
 
     private let title = "Thinking"
     /// Scroll target for tail following; a completed trace never scrolls here.
@@ -889,6 +900,17 @@ struct ThinkingTraceDetailSheet: View {
                 }
                 .defaultScrollAnchor(.top)
                 .tronScrollEdgeChrome()
+                #if HOSTED_TEST
+                // What this sheet is actually showing: its source length and its
+                // own scroll position, recorded per scroll-geometry change.
+                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, offset in
+                    hostedRecorder?.recorder?.recordThinkingSheet(
+                        id: identity,
+                        sourceUTF16Length: inline.source.utf16.count,
+                        scrollOffset: offset
+                    )
+                }
+                #endif
                 .onAppear {
                     // A completed trace starts at its beginning. Scrolling to it
                     // here would drop the content padding out of view and start

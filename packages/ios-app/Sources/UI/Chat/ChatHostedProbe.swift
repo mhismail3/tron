@@ -124,6 +124,14 @@ struct ChatHostedThinkingTraceMotion: Equatable, Sendable {
     var paragraphOffsets: [CGFloat] = []
 }
 
+/// One open thinking-trace detail sheet's own content: how many source characters
+/// it is showing and where its scroll view sits. A sheet that follows the
+/// transcript's installs grows with the trace and moves to its tail.
+struct ChatHostedThinkingSheetSample: Equatable, Sendable {
+    let sourceUTF16Length: Int
+    let scrollOffset: CGFloat
+}
+
 /// A trace's measurements, so a hosted test can see that a mounted wrapped trace
 /// measured itself and reads as overflowing: without them the rewrite would
 /// silently lose the tap target and the tail fade.
@@ -206,6 +214,14 @@ struct ChatHostedObservation: Sendable {
     /// viewport height and the paragraph offset, in the order the layout passes
     /// produced them.
     let thinkingTraceMotion: [String: ChatHostedThinkingTraceMotion]
+    /// The prepared value each inline display card published for itself, keyed by
+    /// its artifact identity. A value above the loader's retention ceiling is
+    /// never retained, so the card that loaded it is the only place its render is
+    /// observable at all.
+    let inlineArtifactPublications: [String: Int]
+    /// One open thinking-trace detail sheet's own content per trace identity, in
+    /// the order its scroll geometry changed.
+    let thinkingSheetSamples: [String: [ChatHostedThinkingSheetSample]]
     /// How many times each replacement host evaluated its body. A host that
     /// mirrors its row input evaluates a changed row twice (stale, then fresh);
     /// one that renders straight from `row` evaluates it once per update.
@@ -300,6 +316,8 @@ final class ChatHostedProbe {
     private var rowIdentityMountCounts: [String: Int] = [:]
     private var thinkingTraceMeasurements: [String: ChatHostedThinkingTraceMeasurement] = [:]
     private var thinkingTraceMotion: [String: ChatHostedThinkingTraceMotion] = [:]
+    private var inlineArtifactPublications: [String: Int] = [:]
+    private var thinkingSheetSamples: [String: [ChatHostedThinkingSheetSample]] = [:]
     private var replacementHostEvaluations: [String: Int] = [:]
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
@@ -387,6 +405,8 @@ final class ChatHostedProbe {
             rowIdentityMountCounts: rowIdentityMountCounts,
             thinkingTraceMeasurements: thinkingTraceMeasurements,
             thinkingTraceMotion: thinkingTraceMotion,
+            inlineArtifactPublications: inlineArtifactPublications,
+            thinkingSheetSamples: thinkingSheetSamples,
             replacementHostEvaluations: replacementHostEvaluations,
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
@@ -717,6 +737,30 @@ final class ChatHostedProbe {
         guard motion.paragraphOffsets.last != offset else { return }
         motion.paragraphOffsets.append(offset)
         thinkingTraceMotion[id] = motion
+        revision &+= 1
+    }
+
+    /// One inline display card's own prepared value. An artifact above the
+    /// loader's retention ceiling is handed to the card instead of being retained,
+    /// so this is the only record that the card renders what it loaded.
+    func recordInlineArtifactPublication(id: String, bytes: Int) {
+        guard !id.isEmpty, bytes > 0 else { return }
+        guard inlineArtifactPublications[id] != bytes else { return }
+        inlineArtifactPublications[id] = bytes
+        revision &+= 1
+    }
+
+    /// One open thinking-trace sheet's content and scroll position.
+    func recordThinkingSheet(id: String, sourceUTF16Length: Int, scrollOffset: CGFloat) {
+        guard !id.isEmpty, scrollOffset.isFinite else { return }
+        var samples = thinkingSheetSamples[id] ?? []
+        let sample = ChatHostedThinkingSheetSample(
+            sourceUTF16Length: sourceUTF16Length,
+            scrollOffset: scrollOffset
+        )
+        guard samples.last != sample else { return }
+        samples.append(sample)
+        thinkingSheetSamples[id] = samples
         revision &+= 1
     }
 
