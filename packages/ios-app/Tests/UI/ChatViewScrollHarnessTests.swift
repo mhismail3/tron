@@ -1276,60 +1276,52 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    // TEMPORARY (CT-23 stage 2 diagnosis): the automatic scroll edge effect's
-    // band. `ct23DiagnosisEffectBand` reports the effect-carrying layer's window
-    // frame, so the whole-viewport wash can be told from the 170.8 pt band the
-    // unflipped transcript has, under each candidate state.
-    @Test("CT-23 diagnosis: the edge effect's band under the flip", .enabled(if: UIValidationTier.isActive))
-    func ct23EdgeEffectBand() async throws {
-        try await withTestWatchdog(timeout: .seconds(240)) {
+    // TEMPORARY (CT-23 stage 2 diagnosis): what the automatic top edge effect's
+    // band is computed from, on both orientations: a long history, a short one
+    // (content shorter than the viewport), and the long one with the keyboard's
+    // own inset driven up.
+    @Test("CT-23 diagnosis: what the edge effect's band follows", .enabled(if: UIValidationTier.isActive))
+    func ct23EdgeEffectBandSource() async throws {
+        try await withTestWatchdog(timeout: .seconds(300)) {
             for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
                 let label = orientation.presentsNewestRowFirst ? "origin" : "end"
-                var snapshot = try SessionScenarioBuilder(seed: 1_282).openingTail(targetEncodedBytes: 10_000)
-                snapshot.acceptsQueuedPrompts = false
-                snapshot.transcript = try (0..<40).map { index in
-                    try harnessRichAssistantMessage(
-                        id: "band-history-\(index)",
-                        presentationID: "band-turn-\(index)",
-                        thinkingLines: [],
-                        text: index.isMultiple(of: 4)
-                            ? harnessTallEstimateRowText(index)
-                            : "Band history row \(index) stays one line."
-                    )
-                }
-                snapshot.transcriptStart = 0
-                snapshot.transcriptTotal = snapshot.transcript.count
-                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
-                    _ = try await harness.recorder.waitUntil { $0.observation.isReady }
-                    for _ in 0..<40 { try await harness.driveFrameBoundary() }
-                    try harness.snapNativeTranscriptOffsetToWholePoint()
-                    func report(_ name: String) async {
+                for shape in ["long", "short"] {
+                    var snapshot = try SessionScenarioBuilder(seed: 1_283).openingTail(targetEncodedBytes: 10_000)
+                    snapshot.acceptsQueuedPrompts = false
+                    let rowCount = shape == "long" ? 40 : 4
+                    snapshot.transcript = try (0..<rowCount).map { index in
+                        try harnessRichAssistantMessage(
+                            id: "band-source-\(index)",
+                            presentationID: "band-source-turn-\(index)",
+                            thinkingLines: [],
+                            text: shape == "long" && index.isMultiple(of: 4)
+                                ? harnessTallEstimateRowText(index)
+                                : "Band source row \(index) stays one line."
+                        )
+                    }
+                    snapshot.transcriptStart = 0
+                    snapshot.transcriptTotal = snapshot.transcript.count
+                    try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
+                        _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                        for _ in 0..<40 { try await harness.driveFrameBoundary() }
+                        try harness.snapNativeTranscriptOffsetToWholePoint()
+                        try harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
+                        try await harness.driveFrameBoundary()
+                        let state = await MainActor.run { harness.ct23DiagnosisScrollViewState() }
                         let band = await MainActor.run { harness.ct23DiagnosisEffectBand() }
-                        print("CT23-BAND orientation=\(label) state=\(name) band=\(band)")
-                    }
-                    await report("product")
-                    try harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
-                    try await harness.driveFrameBoundary()
-                    await report("effects-on")
-                    let scrollView = try harness.nativeTranscriptScrollViewForTesting()
-                    for style in ["hard", "automatic", "soft"] {
-                        switch style {
-                        case "hard": scrollView.topEdgeEffect.style = .hard
-                        case "automatic": scrollView.topEdgeEffect.style = .automatic
-                        default: scrollView.topEdgeEffect.style = .soft
+                        print("CT23-BAND-SOURCE orientation=\(label) shape=\(shape) \(state)")
+                        print("CT23-BAND-SOURCE orientation=\(label) shape=\(shape) band=\(band)")
+                        if shape == "long" {
+                            harness.beginKeyboardInset(.show(boundaries: 8))
+                            for step in 1...8 {
+                                harness.applyKeyboardInset(.show(boundaries: 8), step: step)
+                                try await harness.driveFrameBoundary()
+                            }
+                            let keyboardState = await MainActor.run { harness.ct23DiagnosisScrollViewState() }
+                            let keyboardBand = await MainActor.run { harness.ct23DiagnosisEffectBand() }
+                            print("CT23-BAND-SOURCE orientation=\(label) shape=long-keyboard \(keyboardState)")
+                            print("CT23-BAND-SOURCE orientation=\(label) shape=long-keyboard band=\(keyboardBand)")
                         }
-                        try await harness.driveFrameBoundary()
-                        await report("top-style-\(style)")
-                    }
-                    scrollView.topEdgeEffect.style = .soft
-                    try harness.ct23DiagnosisSetEdgeEffectsHidden(top: true, bottom: false)
-                    try await harness.driveFrameBoundary()
-                    for (name, shift) in [("scrolled-60", CGFloat(60)), ("scrolled-400", CGFloat(400))] {
-                        try harness.ct23DiagnosisShiftOffset(by: shift)
-                        try await harness.driveFrameBoundary()
-                        await report(name)
-                        try harness.ct23DiagnosisShiftOffset(by: -shift)
-                        try await harness.driveFrameBoundary()
                     }
                 }
             }
