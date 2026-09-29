@@ -212,6 +212,29 @@ package struct KnowledgeConfig: Codable, Hashable, Sendable {
 package struct KnowledgeStatus: Codable, Hashable, Sendable {
     let available: Bool; let state: String; package let stateRevision: Int?; package let recordCount: Int; package let coverageCount: Int; package let coverage: KnowledgeCoverageSummary; package let suppressedCount: Int; package let pendingCleanupCount: Int; package let config: KnowledgeConfig; let observationConfigured: Bool; let detail: String?
 }
+
+/// A committed Knowledge mutation broadcast. The revision is what a presented
+/// catalogue page compares against before refreshing, and the ids let it patch
+/// the affected rows instead of replacing the page.
+package struct KnowledgeChanged: Decodable, Hashable, Sendable {
+    package let stateRevision: Int
+    package let recordIds: [String]?
+
+    private enum CodingKeys: String, CodingKey { case stateRevision, recordIds }
+
+    package init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        stateRevision = try values.decode(Int.self, forKey: .stateRevision)
+        let ids = try values.decodeIfPresent([String].self, forKey: .recordIds)
+        guard stateRevision >= 0,
+              ids.map({ $0.count <= KnowledgeChangeGating.maximumRecordIDs && $0.allSatisfy { !$0.isEmpty } }) ?? true else {
+            throw DecodingError.dataCorruptedError(forKey: .stateRevision, in: values, debugDescription: "Invalid knowledge change revision")
+        }
+        // An empty id list cannot name rows; the mutation revision alone is the
+        // signal, so the consumer refreshes its first page instead.
+        recordIds = ids.flatMap { $0.isEmpty ? nil : $0 }
+    }
+}
 package struct KnowledgeListResponse: Codable, Hashable, Sendable {
     package let records: [KnowledgeRecord]; package let nextCursor: String?; package let stateRevision: Int
 
@@ -331,23 +354,33 @@ package enum KnowledgeSourcePresentationPolicy {
         return SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    package static func sourceType(_ source: KnowledgeSourceContent) -> String? {
-        guard let host = domain(source.uri) else { return nil }
+    /// The shared row/type rule, usable from either a full source or the
+    /// Library's row projection.
+    package static func sourceType(uri: String?, mediaType: String?) -> String? {
+        guard let host = domain(uri) else { return nil }
         if host.contains("github") { return "Repository" }
         if host.contains("x.com") || host.contains("twitter") { return "Post" }
-        if source.mediaType?.contains("pdf") == true { return "PDF" }
+        if mediaType?.contains("pdf") == true { return "PDF" }
         return "Web page"
     }
 
+    package static func sourceType(_ source: KnowledgeSourceContent) -> String? {
+        sourceType(uri: source.uri, mediaType: source.mediaType)
+    }
+
     /// One compact library-row line: where the entry lives and what it is.
-    package static func rowSubtitle(_ source: KnowledgeSourceContent) -> String {
-        [domain(source.uri), sourceType(source)].compactMap { $0 }.joined(separator: " · ")
+    package static func subtitle(uri: String?, mediaType: String?) -> String {
+        [domain(uri), sourceType(uri: uri, mediaType: mediaType)].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    package static func thumbnailLetters(uri: String?, title: String) -> String {
+        let host = domain(uri) ?? title
+        let letters = host.split(whereSeparator: { !$0.isLetter }).prefix(2).compactMap { $0.first.map(String.init) }.joined()
+        return letters.isEmpty ? String(title.prefix(1)).uppercased() : letters.uppercased()
     }
 
     package static func thumbnailLetters(_ source: KnowledgeSourceContent) -> String {
-        let host = domain(source.uri) ?? source.title
-        let letters = host.split(whereSeparator: { !$0.isLetter }).prefix(2).compactMap { $0.first.map(String.init) }.joined()
-        return letters.isEmpty ? String(source.title.prefix(1)).uppercased() : letters.uppercased()
+        thumbnailLetters(uri: source.uri, title: source.title)
     }
 
     static func coverageTitle(_ disposition: KnowledgeCaptureDisposition) -> String {

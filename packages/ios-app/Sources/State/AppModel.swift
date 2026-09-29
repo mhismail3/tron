@@ -242,6 +242,10 @@ final class AppModel {
     let automationCatalog: AutomationCatalogCoordinator
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.
     let knowledge: KnowledgeRPCClient
+    /// The Library's bounded first-page projection and its preview images. Both
+    /// are disposable and neither is a second authority for the corpus.
+    let knowledgeLibraryCache: KnowledgeLibraryPageCache
+    let knowledgePreviews: KnowledgePreviewStore
     /// Read-side projections and owner-routed connection-instance mutations.
     let integrations: IntegrationsRPCClient
     private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
@@ -298,6 +302,10 @@ final class AppModel {
     /// Gateway-broadcast knowledge mutations invalidate dashboard reads without
     /// introducing a dashboard-owned polling loop.
     private(set) var knowledgeInvalidationRevision = 0
+    /// The typed change carried by the latest broadcast, when the Gateway sent
+    /// one. Absent means the client cannot reason about the revision and must
+    /// refresh rather than patch rows.
+    private(set) var latestKnowledgeChange: KnowledgeChanged?
     var workspace: WorkspaceListing?
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
@@ -644,6 +652,12 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
+        let knowledgeLibraryCache = KnowledgeLibraryPageCache()
+        let knowledgePreviews = KnowledgePreviewStore(
+            loadBatch: { requests, includeArchived in
+                try await knowledge.readPreviews(requests, includeArchived: includeArchived)
+            }
+        )
         let integrations = IntegrationsRPCClient(
             request: { method, params in
                 try await client.requestValue(method, params)
@@ -683,6 +697,8 @@ final class AppModel {
         self.dashboardConnections = dashboardConnections
         self.automationCatalog = automationCatalog
         self.knowledge = knowledge
+        self.knowledgeLibraryCache = knowledgeLibraryCache
+        self.knowledgePreviews = knowledgePreviews
         self.integrations = integrations
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
@@ -1859,6 +1875,13 @@ final class AppModel {
         setGatewayEnabled(false, profile: profile)
     }
 
+    /// Disposable per-Gateway projections retire with the Gateway itself.
+    private func forgetProfileCaches(_ profileID: String) async {
+        await composerDrafts.removeProfile(profileID).value
+        await cache.remove(profileID: profileID)
+        await knowledgeLibraryCache.remove(profileID: profileID)
+    }
+
     func forgetGateway(_ profile: GatewayProfile) async {
         if profiles.selected?.id == profile.id {
             await forgetCurrentGateway()
@@ -1866,8 +1889,7 @@ final class AppModel {
         }
         do {
             try profiles.remove(profile)
-            await composerDrafts.removeProfile(profile.id).value
-            await cache.remove(profileID: profile.id)
+            await forgetProfileCaches(profile.id)
             profileRevision &+= 1
             reconcileDashboardConnections()
         } catch {
@@ -1879,8 +1901,7 @@ final class AppModel {
         let forgottenProfileID = profiles.selected?.id
         if await lifecycle.forgetCurrentGateway() {
             if let forgottenProfileID {
-                await composerDrafts.removeProfile(forgottenProfileID).value
-                await cache.remove(profileID: forgottenProfileID)
+                await forgetProfileCaches(forgottenProfileID)
             }
             profileRevision &+= 1
             reconcileDashboardConnections()
@@ -2958,8 +2979,7 @@ final class AppModel {
             pairedDevices.removeAll { $0.id == id }
             if let profile = profiles.selected, profile.deviceId == id,
                await lifecycle.forget(profile: profile) {
-                await composerDrafts.removeProfile(profile.id).value
-                await cache.remove(profileID: profile.id)
+                await forgetProfileCaches(profile.id)
                 profileRevision &+= 1
                 reconcileDashboardConnections()
                 setupComplete = false
@@ -4565,6 +4585,7 @@ final class AppModel {
             automationCatalog.invalidate()
         case "knowledge.changed":
             knowledgeInvalidationRevision &+= 1
+            latestKnowledgeChange = { if case .knowledgeChanged(let change) = event.preparation { return change }; return nil }()
         case "packages.progress", "packages.completed":
             let completed = event.topic == "packages.completed"
             let succeeded = event.payload.objectValue?["success"]?.boolValue == true

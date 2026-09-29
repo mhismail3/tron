@@ -9,6 +9,43 @@ mutually exclusive and never mutate canonical admission.
 ## Knowledge Sources presentation
 
 The Sources library is a user-facing reading surface, not a storage inspector.
+It reads the Gateway's bounded row projection (`projection: "sourceRow"`), which
+carries only what a row and its detail header need: identity, title, links, a
+preview reference, admission, dates, and the current generated summary. A page of
+rows no longer transfers each entry's saved text or retained objects. The view
+requires the `knowledge-library-rows.v1` capability and presents an explicit
+update-the-Gateway placeholder without it rather than falling back to the slower
+full-record read.
+
+Opening the tab is not gated on the network. The accepted first page of each
+profile and filter is kept in a bounded local cache (at most eight filters per
+Gateway, one page each, with a size cap) and presented immediately while the
+Gateway's page replaces it in the background; the loading state appears only when
+nothing is cached. A cached page is never presented for a different Gateway
+profile, and it retires with the profile.
+
+Row images are content-addressed by the object hash the Gateway published, so an
+image is fetched at most once per Gateway, is never stale, and is verified against
+its own name before display. Rows that mount together coalesce into bounded
+batches of at most sixteen, the decoded window is bounded in memory, and the
+recent library is bounded on disk. An image the Gateway refuses is remembered
+instead of retried on every scroll, and the retained demand is retried once when
+the connection returns.
+
+Search waits for a settled query (300 ms, at least two characters) so a typed word
+costs one request rather than one per keystroke, cancels the superseded read, and
+paginates through the same cursor contract as the catalogue. Library rows load the
+next page before the reader reaches the end, so there is no Load more button in
+Sources.
+
+A committed Knowledge mutation refreshes only what changed. The event carries the
+Gateway's state revision and the changed record ids: a page that already has that
+revision stays exactly as it is (no scroll movement), named rows are patched in
+place, and anything else — a new row this page has never seen, an older Gateway
+that sends no revision, a changed row while a search filter is active — merges a
+fresh first page beneath the rows the reader already reached. Chronicle and
+Syntheses keep full records, and their status read is only performed by the
+Chronicle surfaces that display it.
 Rows are one fixed compact height: a title of at most two lines and one
 domain/type line in the standard settings-row subtext size, beside a bounded
 square preview centered on that text block. The preview is the Gateway-captured
@@ -16,7 +53,11 @@ safe JPEG, PNG, or WebP page preview or X Article cover image; sources without
 one use a deterministic domain/title fallback. Summaries, intake assessments,
 and routine capture/admission state are not shown in rows.
 
-The **Entry Detail** sheet leads with one compact header container: the title
+The **Entry Detail** sheet opens from the row the reader touched: the header, the
+link, and the current summary the row already carries are presented at once, and
+the full record (`knowledge.read` at the row's exact revision, with the admission
+authority the row reported) replaces them as soon as it arrives. It leads with one
+compact header container: the title
 with a pill naming the original link's domain directly beneath it, and a square
 preview that spans exactly from the title's top to the pill's bottom. The pill opens the
 page in the in-app browser (`TronSafariView`, the same full-bleed
@@ -29,8 +70,9 @@ secondary details sheet: the **Summary** group (a generated summary with its
 grounded tags, or a **Generate AI summary** button row), a **Details** table in
 the standard metadata-table layout (type, publication/save/capture dates,
 capture state, origin, media type, revision), saved notes, related entries that
-open at their current revision, links declared in the entry (in-app browser),
-and capture coverage when the capture is incomplete.
+open at their current revision — their titles resolved by one bounded rows
+request rather than one read per title — links declared in the entry (in-app
+browser), and capture coverage when the capture is incomplete.
 For redirected connector captures, the original-link pill uses the requested URL
 recorded for that exact saved-item identity in origin provenance; the resolved
 page URI remains capture metadata. Unrelated referral origins are never used as
