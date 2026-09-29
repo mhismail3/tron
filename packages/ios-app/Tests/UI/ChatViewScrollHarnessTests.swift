@@ -1739,6 +1739,25 @@ struct ChatViewScrollHarnessTests {
                             resolving.append(row.semanticID)
                         }
                     }
+                    // Failure mode: SwiftUI selects the flipped scroll-content
+                    // host as the preview target even though the card renders
+                    // upright through its row's counter-flip.
+                    if let displayRow = rows.first(where: { $0.semanticID.contains("display") }) {
+                        let point = CGPoint(x: displayRow.windowFrame.midX, y: displayRow.windowFrame.minY + 12)
+                        let configuration = try #require(delegate.contextMenuInteraction(
+                            bridge.interaction,
+                            configurationForMenuAtLocation: bridge.view.convert(point, from: nil)
+                        ))
+                        let preview = try #require(delegate.contextMenuInteraction?(
+                            bridge.interaction,
+                            configuration: configuration,
+                            highlightPreviewForItemWithIdentifier: configuration.identifier ?? ("preview-gate" as NSString)
+                        ))
+                        let container = try #require(preview.target.container as? UIView)
+                        print("CT23-MENU orientation=\(orientation) source=\(type(of: preview.view)) bounds=\(preview.view.bounds) frame=\(preview.view.convert(preview.view.bounds, to: nil)) target=\(type(of: container)) center=\(preview.target.center) transform=\(preview.target.transform) sourceFlipped=\(TranscriptWindowOracle.isFlipped(preview.view)) containerFlipped=\(TranscriptWindowOracle.isFlipped(container))")
+                        #expect(!TranscriptWindowOracle.isFlipped(container),
+                            "\(orientation): SwiftUI's card preview inherits the scroll container's flip")
+                    }
                     // The display card is the only row with a SwiftUI
                     // `.contextMenu`; a bridge that resolved everywhere would
                     // prove nothing about the card.
