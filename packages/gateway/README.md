@@ -2365,6 +2365,15 @@ ownership rather than interpreting unavailable membership as an empty catalog.
    a stale “already synchronizing” conflict. Concurrent opens for the same connection and
    session are rejected before they can replace the owner; establishment and synchronization
    commit are request-and-token exact. Distinct sessions and connections remain independent.
+   A connection whose `hello` declared `clientRole: "mobile"` instead holds **one mobile
+   presentation**: a newer `session.open` retires every other session's synchronization and
+   subscription on that connection, synchronized or not, so several answers are never mounted
+   on one mobile connection at once and only the newest one can synchronize — an earlier
+   answer's `syncToken` is refused with `conflict` (the phone replaces its mounted chat and
+   cancels the page it stopped waiting for, it does not keep two). A technical client on its
+   own connection keeps independent subscriptions.
+   `sync-protocol.integration.test.ts` covers the retiring mobile open and both sides of that
+   boundary.
 5. Reconnect/open returns complete current runtime state plus a bounded canonical
    transcript tail, not durable missed-event replay; older transcript pages remain
    available through branch-stable anchors.
@@ -2693,9 +2702,14 @@ cannot hold the catalog, and it takes the same per-host profile lock.
     sending socket when it is spent — until the receiving socket drains — so a
     queued pong waits behind the data in flight on the Gateway's side of the
     link. The workload keeps `bandwidthInFlight` (default 6) full bounded
-    transcript pages in flight at once, each on its own session (the Gateway
-    admits one `session.open` per session per connection), and reports the peak
-    it held (`.max_in_flight`) and the load that peak asked the Gateway to send,
+    transcript pages in flight at once, each on its own session, as a phone
+    switching chats faster than the capped link can deliver them: a mobile
+    connection holds one presentation, so the newest `session.open` retires the
+    page before it and only that mount synchronizes — every earlier page is
+    abandoned with the `cancel` frame the phone sends for a read it stopped
+    waiting for, and its bytes are still the load this connection carried. The
+    leg reports the peak it held (`.max_in_flight`) and the load that peak asked
+    the Gateway to send,
     in the decoder's bytes (`.offered_in_flight_bytes` — the unit the Gateway's
     own 8 MiB outbound queue is bounded in) and in wire bytes
     (`.offered_in_flight_wire_bytes`). A leg is rejected unless it filled at

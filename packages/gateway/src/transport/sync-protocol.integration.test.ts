@@ -1017,3 +1017,137 @@ describe("disposable read cancellation", () => {
     socket.close();
   });
 });
+
+describe("mobile presentation slot", () => {
+  it("retires a mobile connection's earlier answered page, so its abandoned synchronization is refused", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-sync-slot-"));
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const address = probe.address();
+    if (!address || typeof address === "string") throw new Error("probe did not bind");
+    const port = address.port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    // Each page's open is released one at a time, so the test decides exactly
+    // when a newer page retires the answered one before its synchronization -
+    // the interleaving the qualification driver's several pages in flight hit.
+    const openStarts: string[] = [];
+    const openGates = new Map<string, () => void>();
+    const service = {
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
+      terminalBelongsToSession: () => false,
+      releaseClient: vi.fn(),
+      releaseSessionProcessTranscripts: vi.fn(),
+      invoke: async (context: any, method: string, params: any) => {
+        const sessionId = params.sessionId as string;
+        if (method === "session.sync") {
+          context.completeSynchronization(sessionId, params.syncToken);
+          return { synchronized: true };
+        }
+        if (method === "session.presentation.set") {
+          return context.setPresentationVisibility(sessionId, params.subscriptionToken, params.revision, params.visible);
+        }
+        if (method === "session.close") {
+          return { closed: context.unsubscribe(sessionId, params.subscriptionToken) };
+        }
+        if (method !== "session.open") throw new Error(`unexpected method ${method}`);
+        // Ownership is installed before the page is built, as the real open
+        // does, so the newer page's arrival retires this answer's barrier.
+        const syncToken = context.beginSynchronization(sessionId);
+        openStarts.push(sessionId);
+        await new Promise<void>((resolve) => openGates.set(sessionId, resolve));
+        const session = { sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 1, revision: 1 };
+        context.establishSynchronization(sessionId, session);
+        return { session, syncToken, subscriptionToken: syncToken };
+      },
+    };
+    const sessions = {
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+      unsubscribeClient: vi.fn(),
+    };
+    const gateway = new GatewayServer({
+      host: "127.0.0.1",
+      port,
+      maxFrameBytes: 1_024,
+      devices,
+      uploads: {} as any,
+      sessions: sessions as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: service as any,
+      logger: { log: vi.fn() } as any,
+    });
+    await gateway.listen();
+    cleanups.push(async () => { await gateway.close(); });
+
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const frames: any[] = [];
+    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6, clientRole: "mobile" }));
+    while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+
+    const tick = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 1)); };
+    const waitFor = async (predicate: () => boolean, what: string): Promise<void> => {
+      const deadline = Date.now() + 5_000;
+      while (!predicate()) {
+        if (Date.now() >= deadline) throw new Error(`timed out waiting for ${what}`);
+        await tick();
+      }
+    };
+    const answered = (id: string): any => frames.find((frame) => frame.id === id);
+    const page = (prefix: string, sessionId: string): void => {
+      socket.send(JSON.stringify({ type: "request", id: `${prefix}-open`, method: "session.open", params: { sessionId } }));
+    };
+    const sync = (prefix: string, sessionId: string, syncToken: string): void => {
+      socket.send(JSON.stringify({ type: "request", id: `${prefix}-sync`, method: "session.sync", params: { sessionId, syncToken } }));
+    };
+    const openPage = async (prefix: string, sessionId: string, count: number): Promise<any> => {
+      openGates.delete(sessionId);
+      page(prefix, sessionId);
+      await waitFor(() => openStarts.filter((started) => started === sessionId).length === count
+        && openGates.has(sessionId), `the ${prefix} open`);
+      return openGates.get(sessionId)!;
+    };
+
+    // The first page is answered and its client has not synchronized yet.
+    const releaseFirst = await openPage("first", "page-a", 1);
+    releaseFirst();
+    await waitFor(() => answered("first-open") !== undefined, "the first page's answer");
+    const firstPage = answered("first-open");
+    expect(firstPage.ok).toBe(true);
+
+    // A newer page on the same mobile connection retires that answered open:
+    // this connection holds one presentation, and the phone that replaced its
+    // mounted chat never synchronizes the page it abandoned.
+    const releaseSecond = await openPage("second", "page-b", 1);
+    sync("abandoned", "page-a", firstPage.result.syncToken);
+    await waitFor(() => answered("abandoned-sync") !== undefined, "the abandoned page's synchronization answer");
+    expect(answered("abandoned-sync").error).toMatchObject({
+      code: "conflict",
+      message: "Session synchronization is no longer owned by this token",
+    });
+
+    // The phone's own path for a page it stopped waiting for: a cancel for the
+    // answered open (`C-6`). It changes nothing about the newer owner.
+    socket.send(JSON.stringify({ type: "cancel", id: "first-open" }));
+    releaseSecond();
+    await waitFor(() => answered("second-open") !== undefined, "the newer page's answer");
+    sync("current", "page-b", answered("second-open").result.syncToken);
+    await waitFor(() => answered("current-sync") !== undefined, "the newer page's synchronization answer");
+    expect(answered("current-sync").result).toEqual({ synchronized: true });
+
+    // The abandoned page left no ownership behind: re-opening that session on
+    // the same connection synchronizes normally.
+    const releaseAgain = await openPage("again", "page-a", 2);
+    releaseAgain();
+    await waitFor(() => answered("again-open") !== undefined, "the reopened page's answer");
+    sync("again", "page-a", answered("again-open").result.syncToken);
+    await waitFor(() => answered("again-sync") !== undefined, "the reopened page's synchronization answer");
+    expect(answered("again-sync").result).toEqual({ synchronized: true });
+    socket.close();
+  });
+});

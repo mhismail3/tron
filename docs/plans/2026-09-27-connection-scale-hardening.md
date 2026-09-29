@@ -6,6 +6,7 @@
 - **Last updated:** 2026-09-28, G-8a/G-8d/T-1 Done: an unchanged extension artifact costs one `stat` and no read, the ambient pass stays bound and reports a stop, and both read lanes retry a replace before warning (see the handoff)
 - **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
+- **Last updated:** 2026-09-29, F-2 Done: the O-6b page leg's refusal was the driver mounting six presentations on one mobile connection (one presentation slot, by contract); the lane now abandons a superseded page with the phone's own `cancel`, the repro is green with zero `session.sync` refusals, and the driver's page leg no longer fails on a mount the connection retired by design (see the handoff)
 - **Last updated:** 2026-09-29, G-3a Done: streaming progress follows the snapshot rule — a `session.progress` frame is projected and serialized only for a session with a subscriber (the O-6a CPU profile's throttled-flush subtree 551.7 → 193.5 ms, the subscriber's wire frames unchanged at 177 → 178; see the handoff)
 
 - **Last updated:** 2026-09-28, G-13 review response 1: the row is Blocked, not
@@ -644,7 +645,7 @@ rows are in priority order.
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-4 | Done | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28; the killer is XCTest's per-test execution-time allowance (XCTestCore reports `Restarting after unexpected exit, crash, or test timeout`) SIGKILLing the app (`Test crashed with signal kill`), and the test it lands on is the process's CPU-heaviest because `IOSClientDiagnosticBuffer.redactedMessage` matched URLs super-quadratically (3 ms at 512 characters, 654 ms at 4,096; the export test 8.646-10.297 s -> 0.072 s); see the T-4 handoff |
 | T-5 | Done | `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` hit its 5 s watchdog once in the full iOS run on `419a67a53` ("blocked on a wait that ignores cancellation"); passes alone 3/3. Check whether it waits on a write-log index a C-6 cancel frame can shift (as F-1 found) and make it robust. **Blocked on validation only:** the scenario no longer indexes the write log by position (it finds each read by method and scope), but the owned iOS lane was leased by another worker for this whole session, so the suite was never compiled or run; see the handoff | F-1 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
-| F-2 | Blocked | O-6b `bandwidth` page leg fails on integration with `session.sync` conflict "Session synchronization is no longer owned by this token" (run `20260928T235606Z-multi-session-471100`); `--cases none` passes. Decide driver artifact (concurrent page mounts on one connection) vs Gateway regression (C-6/G-12 barrier handling) and fix at the owner. **Decided: Gateway regression** (reproduced `--cases blackhole,bandwidth` 2/2; `--cases bandwidth` alone passes; the refusal is the first `session.sync` on the fresh connection the mobile opens after the Gateway's heartbeat close of its blackholed socket, 243 conflicts on that one connection). Root cause not landed in the budget; see the handoff | O-6b | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| F-2 | Done | O-6b `bandwidth` page leg fails on integration with `session.sync` conflict "Session synchronization is no longer owned by this token" (run `20260928T235606Z-multi-session-471100`); `--cases none` passes. Decide driver artifact (concurrent page mounts on one connection) vs Gateway regression (C-6/G-12 barrier handling) and fix at the owner. **Fixed in the driver** (F-2 second pass): the earlier "Gateway regression" reading came from matching the refusal to the wrong frame — the first `session.open`+`session.sync` on the fresh connection succeeds (104-byte answer, then a successful `session.presentation.set`), and the refusals are the six concurrent page lanes racing the Gateway's documented one-presentation-per-mobile-connection rule. The same conflict storm (264) is present in the `--cases bandwidth` run cited as passing, so the reconnect is not the trigger; the lane now abandons a superseded page with the phone's own `cancel` frame instead of synchronizing it. Repro `--cases blackhole,bandwidth` is green (run `20260929T073639Z-multi-session-e06f2e`: `link_use` 0.993, `max_in_flight` 6, zero `session.sync` conflicts); see the handoff | O-6b | orchestrator-dispatched deepseek-worker, 2026-09-29 (second pass on branch `hardening/f-2`) |
 | F-3 | Claimed | A protocol mismatch reads as a generic transport failure on the phone: the Gateway closes 1008 without a machine-readable reason, so the phone retries forever and shows no "update this Mac" state (2026-09-29, a protocol-5 MacBook Pro profile left the Knowledge dashboard loading). Send a typed close reason for protocol mismatch; the phone stops retrying that profile and shows which side needs updating | E-3b | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | T-6 | Ready | Load flakes in `runtime-registry.integration.test.ts`: "keeps a large streamed write visible through snapshot recovery and canonical handoff" (fails intermittently on `main` too) and "does not reopen an unchanged ambient artifact for a live slot" (G-8a, failed once in a combined run, passes alone 3/3). Make both deterministic | G-8a | |
 | C-7 | Done | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/c-7`; the connection epoch now owns its event reader) |
@@ -10169,9 +10170,67 @@ recovery gaps; all three were fixed on the same branch.
   positional assumption in the same file is `settingsResponsesRemainKeyed`,
   which still indexes frames 1-4 and 3-5 absolutely and has the same shape.
 
-### F-2 · Blocked · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/t-5`)
+### F-2 · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/f-2`, second pass)
 
-- Decided: **Gateway regression**, not a driver artifact. Concurrent page mounts
+- Root cause (driver, not Gateway): the O-6b page leg mounts `bandwidthInFlight`
+  (default 6) pages **concurrently on the one mobile connection**, and a mobile
+  connection holds exactly one presentation. `server.ts`'s `beginSynchronization`
+  calls `revokePresentationOwners` for a `presentationOnly` (clientRole `mobile`)
+  connection, which retires every other session's synchronization and
+  subscription — synchronized or not. When the pages arrive faster than the cap
+  delivers them, each page's `session.sync` reaches the Gateway after the next
+  lane's open already retired its barrier, so `completeSynchronization` refuses it
+  with "Session synchronization is no longer owned by this token". Every lane then
+  retries, stays in lockstep, and a lane exhausts `retry("mount")`'s 40 attempts,
+  which fails the driver (exit 1).
+- The earlier "Gateway regression" reading was a mis-read of the artifact: in
+  `20260929T072833Z-multi-session-357ca1` the first `session.open` on the fresh
+  connection is answered with a 603,526-byte page, its `session.sync` answer is
+  **104 bytes** (a success - `{synchronized:true}` is 104, the refusal is 188),
+  and the `session.presentation.set` right after it succeeds, which is only
+  possible once that barrier committed. The 271 refusals are the six page lanes.
+  The reconnect is not the trigger: the run cited as passing
+  (`20260929T061808Z-multi-session-9ebc17`, `--cases bandwidth`) carries **264
+  identical `session.sync` conflicts** and only survived because its lanes drifted
+  out of lockstep inside the retry budget.
+- Fix (driver): `RecordingClient.openPresentation` numbers each `session.open`
+  sent on a socket and reports whether a newer attempt superseded it;
+  `MountedChat.open` then abandons a superseded page with the `{type:"cancel"}`
+  frame the phone sends for a read it stopped waiting for (`C-6`,
+  `GatewayDisposableReadPolicy` admits `session.open`) instead of synchronizing
+  it. The page's bytes are still the load the connection carried, so the leg's
+  measurements are unchanged in kind and its lane no longer fails on a mount the
+  connection retired by design. `scripts/tron-profile-gateway-driver.mjs`.
+- Contract pinned: `sync-protocol.integration.test.ts` gains "mobile presentation
+  slot" — an answered mobile page whose successor retires it, the refusal of its
+  `syncToken`, the phone's `cancel`, the newer page's commit, and the re-opened
+  page synchronizing normally. The rule is now stated in `packages/gateway/README.md`
+  (transport invariant 4) and the bandwidth leg's paragraph describes the new shape.
+- Evidence (this branch): repro `scripts/tron-profile gateway --scenario
+  multi-session --no-build --iterations 1 --catalog-files 300 --catalog-mib 256
+  --mixed-seconds 60 --cases blackhole,bandwidth` is **green** in 5.0 min —
+  `20260929T073639Z-multi-session-e06f2e`: `impairment.bandwidth.link_use` 0.993,
+  `delivered_bytes_per_second` 248,270 B/s, `max_in_flight` 6, 327 operations,
+  `max_ping_to_pong_ms` 1,840, 0 pong misses, 0 unexpected closes, and **zero
+  `session.sync` refusals** in the fixture Gateway log (the failure run carried
+  271). Before the fix the same command failed 1/1 on this branch
+  (`20260929T072833Z-multi-session-357ca1`, 271 conflicts, driver exit 1).
+  `npx vitest run src/transport/sync-protocol.integration.test.ts` 6/6, and the
+  driver's own stub suites (`MultiDriverImpairment`, `MultiDriverWindows`,
+  `ImpairmentCases`, `RelayBackpressure`) 25/25.
+- Left for other rows (not F-2): the `bandwidth-stream` leg has the same
+  one-presentation premise — it mounts up to `bandwidthStreamSessions` (7) chats
+  sequentially on the one mobile connection, so each mount retires the previous
+  subscription and its reported `streams` count is opens issued, not live
+  subscriptions (one running session's ~300 kB/s of decoded state is what the leg
+  actually measured). It passes today because sequential mounts synchronize before
+  the next open, and because one stream alone out-produces the 0.08 Mbit/s cap.
+  Proposed follow-up row: measure that leg as one live stream (or hold its streams
+  on a technical connection), with its README paragraph and validator floor.
+
+#### F-2 first pass (branch `hardening/t-5`) — superseded by the entry above
+
+- Decided (then): **Gateway regression**, not a driver artifact. Concurrent page mounts
   on one connection are not the trigger: `scripts/tron-profile gateway
   --scenario multi-session --no-build --iterations 1 --catalog-files 300
   --catalog-mib 256 --mixed-seconds 60 --cases bandwidth` passes

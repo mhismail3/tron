@@ -465,6 +465,11 @@ class RecordingClient {
     this.retired = false;
     // Stable across reconnects, as the phone's client identity is.
     this.clientId = randomUUID();
+    // A mobile connection has one presentation slot: the newest `session.open`
+    // sent on this socket retires the one before it, so an attempt a newer one
+    // superseded cannot synchronize. Reset with the socket, like the Gateway's
+    // own per-connection slot (`openPresentation`).
+    this.presentationOpenSerial = 0;
   }
 
   async connect() {
@@ -473,6 +478,9 @@ class RecordingClient {
     // (a deliberate abandon included) must not keep muting its closes.
     this.closing = false;
     this.awaitingPong = null;
+    // The Gateway's presentation slot belongs to the connection, so a rebuilt
+    // socket starts with none.
+    this.presentationOpenSerial = 0;
     this.pingsOutstanding.length = 0;
     // Two bounds, not one shared deadline (contract `clientTransportOpenDeadline`
     // then `clientHelloDeadline`): a socket that never opens gives up first, and
@@ -645,10 +653,10 @@ class RecordingClient {
     for (const listener of this.listeners) listener(frame, topic);
   }
 
-  request(method, params = {}, deadlineMs = REQUEST_TIMEOUT_MS) {
+  request(method, params = {}, deadlineMs = REQUEST_TIMEOUT_MS, requestID = randomUUID()) {
     // A lease renewal can fire while reconnect() has no open socket.
     if (this.socket?.readyState !== 1) return Promise.reject(new Error(`${this.name} ${method}: socket not open`));
-    const id = randomUUID();
+    const id = requestID;
     const promise = new Promise((resolveRequest, rejectRequest) => {
       this.pending.set(id, { method, resolve: resolveRequest, reject: rejectRequest });
     });
@@ -661,6 +669,26 @@ class RecordingClient {
     }
     this.send({ type: "request", id, method, params });
     return withDeadline(promise, deadlineMs, `${this.name} ${method}`);
+  }
+
+  /** One `session.open` as a presentation attempt, reporting whether a newer
+   * attempt on this socket retired it before it synchronized.
+   *
+   * A mobile connection holds one presentation: the Gateway retires the
+   * previous open when a newer one begins, synchronized or not, so the earlier
+   * answer's `syncToken` can no longer commit. That is the phone's own model -
+   * replacing its mounted chat cancels the read it stopped waiting for (`C-6`)
+   * - so a superseded attempt abandons its page here, and the page's bytes stay
+   * this connection's carried load instead of failing the lane that delivered
+   * them. Without it, several pages in flight on one mobile connection (the
+   * bandwidth leg) answer every open and then refuse every synchronization. */
+  async openPresentation(sessionId, deadlineMs = REQUEST_TIMEOUT_MS) {
+    const serial = (this.presentationOpenSerial += 1);
+    const id = randomUUID();
+    const opened = await this.request("session.open", { sessionId }, deadlineMs, id);
+    if (this.presentationOpenSerial === serial) return { opened, superseded: false };
+    this.send({ type: "cancel", id });
+    return { opened, superseded: true };
   }
 
   /** Close and reopen the socket like a phone reconnect; the open window,
@@ -785,7 +813,8 @@ class MountedChat {
   }
 
   async open(deadlineMs = REQUEST_TIMEOUT_MS) {
-    const opened = await this.client.request("session.open", { sessionId: this.sessionId }, deadlineMs);
+    const attempt = await this.client.openPresentation(this.sessionId, deadlineMs);
+    const opened = attempt.opened;
     if (opened?.session?.sessionId !== this.sessionId) fail(`session.open returned ${opened?.session?.sessionId}`);
     this.token = opened.subscriptionToken;
     this.openSnapshot = opened.session;
@@ -812,6 +841,15 @@ class MountedChat {
       this.cursor = { generation: payload.runtimeGeneration, sequence: payload.eventSequence };
     };
     this.client.listeners.add(this.listener);
+    if (attempt.superseded) {
+      // A newer page on this connection retired this mount before its
+      // synchronization: the page arrived - it is the load this lane offered -
+      // but the connection's one presentation belongs to the newer attempt, and
+      // a phone that replaced its mounted chat this fast never synchronizes the
+      // page it abandoned.
+      this.client.listeners.delete(this.listener);
+      return opened;
+    }
     const synced = await this.client.request("session.sync", { sessionId: this.sessionId, syncToken: opened.syncToken }, deadlineMs);
     if (synced?.synchronized !== true) fail("session.sync did not synchronize");
     await this.setVisible(true, deadlineMs);
