@@ -9446,12 +9446,62 @@ wait).
 - For E-3d: **do not enable the LAN endpoint by default on this evidence.** The
   two E2E cases E-3d's own text requires have not run; the focused tests prove
   the race's decisions, not a live 90 s Tailscale blackhole or a blocked LAN leg.
-- For the next agent: the seams are `GatewayClient.dialRoutes(for:)` (lane
+- For the next agent: the seams are `GatewayClient.dialPlan(for:)` (lane
   eligibility: Wi-Fi, a pin, an endpoint, not denied), `raceLanes`/`attemptLeg`
-  (per-lane dial and retirement), `currentRoute` (set on install, cleared with
-  the epoch - the base the HTTP item should read) and
+  (per-lane dial and retirement) and
   `GatewaySocketFactory.makeConnection(_:pin:)`/`BoundedURLSessionDataLoader.load`
-  for the HTTP pin.
+  for the HTTP pin. The winner's route is not kept client-side: the HTTP item
+  adds its own winning-endpoint base.
+
+### E-3c · Blocked · review fixes · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3c`)
+
+- Result: the four major findings of the review and the cheap minors are fixed;
+  the task stays Blocked (item 3 and both E2E cases still open).
+  (1) The attempt reports a lane's *answer*, not the last lane to end: a Mac
+  refusal (401/403/503), a pin refusal or a protocol/identity mismatch from any
+  lane outranks a transport failure, so a revoked device the LAN lane refuses
+  with 401 reaches `unauthorized` instead of retrying the saved lane's timeout;
+  the LAN record maps an upgrade failure through the shared classifier instead
+  of `lan_unreachable`.
+  (2) The stagger is skipped only when the *saved* lane is the one this network
+  carried; a remembered LAN win keeps the LAN first with a 250 ms head start
+  (50 ms on a reconnect), an equal finish in a no-head-start race goes to the LAN
+  lane, and a race that never learned why the LAN lane lost cannot overwrite a
+  remembered LAN win.
+  (3) The denied Local Network permission is detected from state production has:
+  the app's path monitor writes `NWPath.unsatisfiedReason == .localNetworkDenied`
+  into `GatewayLanPermissionRecord` (a later reading clears it), and the pinned
+  lane dials with `waitsForConnectivity = false` so a blocked lane fails inside
+  the connect budget; both paths record `lan_denied` once per launch.
+  (4) The `gateway.connection` row names `transport-race`, `transport=lan|tailscale`
+  and the three LAN reasons, and the path-snapshot comment no longer claims it
+  never gates a connection.
+  Minors: the reported failure's record is the newest one (so
+  `latestHandshakeDiagnostic` and `gateway.attempt` read the reported lane), the
+  staggered lane wakes as soon as the lane ahead fails, a single-route attempt
+  records no `transport` and a `hello-receive` failure infers an opened socket,
+  the unused `currentRoute`/HTTP-route-base scaffolding is deleted, and an attempt
+  owns its lane sockets so `close()` and `retireForBackground()` end a handshake
+  in flight. Rejected: none.
+- Evidence: `scripts/tron-ios-test build` clean; `--only-testing
+  TronMobileTests/GatewayClientLanLaneTests` (15 cases, including the LAN-401
+  race, the remembered-LAN head start, the equal-finish tie, the monitor-reported
+  denial and the close that ends an in-flight lane) with `GatewayClientTransportTests`,
+  `GatewayProtocolContractTests`, `AppModelReconnectTests`,
+  `GatewayDiagnosticsServiceTests`, `DashboardStateOwnerTests` and
+  `GatewayPairingTransportTests` 236/236 (`20260929T082003Z-run.2DdkCd`). The pin test
+  now fails the pinned dial the way production does (`URLError.cancelled`, the
+  socket's own cancelled trust challenge) instead of an injected
+  `.serverCertificateUntrusted`. `scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- What is left: item 3 (HTTP routes on the winning endpoint) and the two E2E
+  cases, unchanged from the entry above. The denial is now reachable in
+  production (the path monitor's `unsatisfiedReason` and a pinned dial that fails
+  as not connected) but was not observed on a device in this session; the
+  E2E/device run is still what proves it. `AppModelPerformanceSignpostTests`'
+  "presentation open and authoritative resync close distinct intervals" is a
+  pre-existing flake under load: it failed 1/3 in a six-suite run on this branch
+  both with and without these fixes, and passes alone.
 
 ### E-3b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
 

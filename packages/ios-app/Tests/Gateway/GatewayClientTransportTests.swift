@@ -2304,7 +2304,9 @@ struct GatewayClientLanLaneTests {
             closeCode: nil, httpStatusCode: nil, certificatePinRejected: true
         ))
         let saved = ScriptedGatewaySocket()
-        await lan.failNextSend(URLError(.serverCertificateUntrusted))
+        // What the socket's own cancelled server-trust challenge fails with:
+        // `cancelAuthenticationChallenge` ends the request as cancelled.
+        await lan.failNextSend(URLError(.cancelled))
         await saved.enqueue(Self.helloFrame)
         let factory = HostRoutedGatewaySocketFactory(queued: [Self.lanHost: [lan], Self.savedHost: [saved]])
         let client = GatewayClient(socketFactory: factory.factory, networkPath: wifiOnlyPath())

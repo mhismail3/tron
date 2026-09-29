@@ -661,9 +661,12 @@ package actor GatewayClient {
             for waiter in waiters { waiter.resume() }
         }
 
-        var lanOpened: Bool {
+        /// Whether that lane already completed its hello. A lane waiting out the
+        /// stagger behind it reads this, so it never dials a race the lane ahead
+        /// of it has already won.
+        func hasOpened(_ lane: GatewayDialLane) -> Bool {
             lock.lock(); defer { lock.unlock() }
-            return openedLanes.contains(GatewayDialLane.lan.rawValue)
+            return openedLanes.contains(lane.rawValue)
         }
 
         /// Wait until that lane ends. Cancellation resumes the waiter so the
@@ -1210,8 +1213,11 @@ package actor GatewayClient {
                 let tieGrace = delay == nil && index > 0 && route.lane != .lan ? Self.lanTieGrace : nil
                 group.addTask { [self] in
                     if let delay {
-                        await Self.waitForStagger(delay, lead: routes[index - 1].lane, resolution: resolution, clock: clock)
-                        if Task.isCancelled { return .abandoned }
+                        let lead = routes[index - 1].lane
+                        await Self.waitForStagger(delay, lead: lead, resolution: resolution, clock: clock)
+                        // The stagger ends early on a lane that already
+                        // answered: this one needs no dial and no hello.
+                        if Task.isCancelled || resolution.hasOpened(lead) { return .abandoned }
                     }
                     return await attemptLeg(
                         route,
@@ -1374,9 +1380,9 @@ package actor GatewayClient {
                 // A lane with no head start has a tie to resolve: a saved lane
                 // that opened while the LAN lane is still dialing holds for a
                 // moment, and an equal finish belongs to the local lane.
-                if let tieGrace, !resolution.lanOpened {
+                if let tieGrace, !resolution.hasOpened(.lan) {
                     try? await clock.sleep(tieGrace)
-                    if resolution.lanOpened {
+                    if resolution.hasOpened(.lan) {
                         await socket.close()
                         resolution.markLaneSettled(route.lane, opened: false)
                         return .abandoned
