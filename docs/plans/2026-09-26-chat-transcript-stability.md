@@ -1261,3 +1261,54 @@ pass only through eager-only repairs, stop and report.
 - Changes: `ChatTranscriptScrollView.swift`, `ChatTranscriptEventViews.swift`,
   `ChatContentTransition.swift`, `ChatHostedProbe.swift`,
   `ChatViewScrollHarnessTests.swift`, `ChatRowStabilityTests.swift`.
+
+### CT-27 stage B summary · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: the three measure→state→frame loops the audit's F2, F3 and F8 name are
+  gone, each with its own evidence, in four commits on `ct-27-rows`:
+  `9999c265c` (per-mount and per-phase height variants in the row-stability
+  journey, recording today's failures), `8ff12834a` F2 (`ThinkingTailLayout`),
+  `bff461f27` F3 (store-owned disclosure phase + `DisclosureLayout`),
+  `c6b48deaa` F8 (the replacement host renders from its row +
+  `ReplacementHeightLayout`).
+- Evidence (lane ct27, all products rebuilt from this worktree; run directories
+  under `~/Library/Developer/Tron/ios/test-runs/`):
+  - `ChatRowStabilityTests` 7/7 in 8.5 s (`…T022607Z-run.BQW5ix` for F3's
+    six-test state): the journey, the F2 trace gate, the two disclosure tests,
+    and the streaming host-evaluation count.
+  - Parity gate 7/7 after every finding, worst frames 44.6–49.7 s
+    (`…T022001Z-run.J22i94` for F3, `…T030011Z-run.ovXKL6` for F8); CT-14 motion
+    evidence unchanged within the gate's bounds.
+  - Full unit run: 1,772 tests in 148 suites with exactly one failure, the
+    pre-existing `displacedRetainedResume` watchdog timeout, which fails
+    identically on stage A's code (verified by stashing this work).
+- Deviations and audit corrections:
+  - **SwiftUI preserves a row's `@State` across this harness's lazy window
+    changes.** Every fixture row keeps one native row identity (one mount, one
+    entry in the journey's per-mount history) and one content identity across the
+    journey's detach and oldest-row scroll, while
+    `physicalRowAppearanceCounts` records 2–4 `onAppear` events. Therefore F3's
+    premise (a collapsed card comes back expanded because the row's state is
+    lost) is not reproducible here, and the journey's `remounts=8/9` field
+    measures `onAppear` re-fires rather than lazy remounts. Stage A's claim that
+    "every fixture row left the lazy range and mounted again" is not established
+    by that counter; what the journey proves is that views leave and re-enter the
+    viewport. A fixture that forces a real remount (or the device checklist) is
+    the next step for the state-durability findings.
+  - F8's notification case: the progress→settled animation moved from the row
+    host's marker-carrying state write to `ChatNotificationView`'s own content
+    transition. No oracle covers that motion.
+  - The audit's "body-evaluation count per token" proof has a high noise floor in
+    this harness (≈2 extra host evaluations per install from other re-renders);
+    the A/B difference it measures is exactly +1 per changed row, so it is kept
+    as reported evidence with a loose bound.
+- Not in this stage: F4 (inline display loads per identity, reserved heights and
+  retry), F11 (row-owned sheet routes), F12, and the flip-specific probes F6/F7;
+  the two inline markdown displays' 20 pt post-mount change is their card content
+  arriving when the transcript becomes ready (F4's path), reported by the journey
+  rather than asserted away.
+- For the next agent: the journey's per-mount record, its per-phase record, the
+  collapsed-card sequence and the host-evaluation count are the stage's
+  regression guards; the disclosure phase's durability should be re-checked on
+  the CT-7 device checklist, where SwiftUI discards row state more aggressively
+  than this harness shows.
