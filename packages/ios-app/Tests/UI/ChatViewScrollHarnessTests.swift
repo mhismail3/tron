@@ -1329,6 +1329,7 @@ struct ChatViewScrollHarnessTests {
                             top: variant.topHidden, bottom: variant.bottomHidden
                         )
                         try await harness.driveFrameBoundary()
+                        harness.ct23DiagnosisAttachWholeWindow(named: "\(label)-\(variant.name)")
                         let capture = Self.ct23DiagnosisCapture(
                             harness, label: label, name: variant.name
                         )
