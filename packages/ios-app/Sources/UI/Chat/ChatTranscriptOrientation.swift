@@ -70,7 +70,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// inside the wash). Today's transcript pins at the far end of its content, so
     /// its own top edge effect is the normal band it has always been. The chat's
     /// top blur is drawn by the transcript itself and is the same on both paths.
-    var suppressesPinnedEndScrollEdgeEffect: Bool { self == .newestAtOrigin }
+    var suppressesPinnedEndScrollEdgeEffect: Bool { false }
 
     /// Whether the pinned newest end depends on the lazy stack's estimate.
     /// Materialization and repair mechanisms are retained only on this path
