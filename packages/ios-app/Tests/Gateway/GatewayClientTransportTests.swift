@@ -2145,6 +2145,7 @@ private final class HostRoutedGatewaySocketFactory: @unchecked Sendable {
     private var queued: [String: [ScriptedGatewaySocket]]
     private var hosts: [String] = []
     private var pins: [String?] = []
+    private var authorizations: [String?] = []
 
     init(queued: [String: [ScriptedGatewaySocket]]) {
         self.queued = queued
@@ -2156,6 +2157,7 @@ private final class HostRoutedGatewaySocketFactory: @unchecked Sendable {
             lock.lock()
             hosts.append(host)
             pins.append(pin)
+            authorizations.append(request.value(forHTTPHeaderField: "Authorization"))
             let socket = queued[host]?.first
             if queued[host]?.isEmpty == false { queued[host]?.removeFirst() }
             lock.unlock()
@@ -2172,6 +2174,11 @@ private final class HostRoutedGatewaySocketFactory: @unchecked Sendable {
     var dialedPins: [String?] {
         lock.lock(); defer { lock.unlock() }
         return pins
+    }
+
+    var dialedAuthorizations: [String?] {
+        lock.lock(); defer { lock.unlock() }
+        return authorizations
     }
 }
 
@@ -2209,6 +2216,9 @@ struct GatewayClientLanLaneTests {
         #expect(factory.dialedHosts == [Self.lanHost])
         // The pin travels with the LAN lane's dial and not with the saved one.
         #expect(factory.dialedPins == [Self.pin])
+        // The credential rides the request the pinned handshake admits: the
+        // socket's own trust evaluation is what runs before any request byte.
+        #expect(factory.dialedAuthorizations == ["Bearer token"])
         #expect(await lan.sendInvocationCount() == 1)
         await client.close()
     }
@@ -2302,6 +2312,8 @@ struct GatewayClientLanLaneTests {
         // The refused lane wrote no credential: its only send is the refused
         // one, and the socket that carried the connection is the saved endpoint.
         #expect(await lan.sentFrames().isEmpty)
+        #expect(factory.dialedAuthorizations.last == "Bearer token")
+        #expect(factory.dialedHosts.last == Self.savedHost)
         await client.close()
     }
 
