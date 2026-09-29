@@ -629,7 +629,7 @@ rows are in priority order.
 | G-5a | Done | The Mac app admits the argv G-5's launcher execs: Stable admission, registration repair, Debug admission and `mac verify` require the launcher's exact command; a refused admission names its check; the menu keeps Pause when admission refuses; `protocol_mismatch` records the peer's version | G-5 | direct session on `main`, 2026-09-29 (see handoff) |
 | E-3a | Done | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3b | Done | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| E-3c | Claimed | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| E-3c | Blocked | LAN endpoint, phone side: pin validation, staggered race, seamless fallback (race, pin and denial record land; HTTP routes and the two-leg E2E cases do not - see the handoff) | E-3b, C-3 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
 | G-13 | Blocked | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`/`.close_to_listening_ms`, read from the new process's own record; the case reports G-13's criterion with its numbers. Blocked, not Done: the criterion is a "Done when" and no run has met it — the measured misses are host-bound plus two named causes (the old process's 2 s `work-settle` grace and the storm upgrades serialized by `DeviceStore`'s credential mutex), which need rows of their own or a quiet-host R-1 run; see the handoff |
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -9387,6 +9387,70 @@ wait).
   `hardening/integration` merged (132 + 241 tests) and `tsc --noEmit` clean.
 - Deviations: no code change aims at the two causes above, so the criterion is
   still not demonstrated; the quiet-host run remains the orchestrator's.
+
+### E-3c · Blocked · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3c`)
+
+- Result: the phone-side race, the pinned trust and the fallback are built and
+  covered by focused tests; the task is **not Done**. `GatewayClient` now dials
+  the profile's advertised LAN lane first (with its pin) and the saved Tailscale
+  lane after `LAN_RACE_STAGGER` (250 ms, `GatewayClient.lanRaceStagger`) unless
+  the LAN lane's hello already completed; the first authenticated hello wins,
+  every losing lane is closed before it can carry work (including one that
+  opened while the winner was taken), a reconnect races both lanes at once
+  (liveness loss never waits the stagger), a lane that carried this network path
+  skips the stagger next time, and a LAN dial the system reports as "not
+  connected" while Tailscale reached the Mac marks the install's Local Network
+  permission denied (`GatewayLanPermissionRecord`, `gateway.lan-permission-denied`)
+  and stops dialing the lane. `GatewayLanPin.admitsServerTrust` is the pinned
+  lane's whole TLS evaluation (the challenge is cancelled on a pin mismatch,
+  during the handshake and before URLSession writes the credential-bearing
+  request); an unpinned lane keeps the platform's own evaluation. Losing lanes
+  are recorded, and the winning hello records `transport=lan|tailscale`
+  (`GatewayHandshakeDiagnostic.transport`, `packages/ios-app/docs/events.md`).
+- Evidence: `scripts/tron-ios-test build` clean; `scripts/tron-ios-test run
+  --only-testing TronMobileTests/GatewayClientLanLaneTests --only-testing
+  TronMobileTests/GatewayClientTransportTests --only-testing
+  TronMobileTests/GatewayProtocolContractTests` 89/89 including the six new LAN-lane
+  cases (the LAN lane wins before the staggered lane dials and only the LAN dial
+  carries the pin; a LAN lane that never answers is retired and the saved endpoint
+  wins after >= 250 ms; a reconnect dials both lanes in < 200 ms; a lane this
+  network already carries skips the stagger; a pin-refused lane is named
+  `lan_pin_mismatch` and its socket sent nothing; a recorded denial is not dialed
+  again), and the shared-fixture case now also asserts
+  `admitsServerTrust` admits the fixture certificate for its pin and refuses
+  another. `scripts/tron-ios-test run --only-testing
+  TronMobileTests/GatewayClientLanLaneTests ... AppModelReconnectTests
+  GatewayDiagnosticsServiceTests` 155/155; `DashboardStateOwnerTests`,
+  `AppModelLifecycleTests`, `GatewayLogExportTests`, `AppModelEventTests`,
+  `AppModelPairingAttemptTests` 122/122.
+- Deviations: (1) Do item 3 ("HTTP routes use the winning endpoint for that
+  epoch") is **not implemented**: live-view, media/blob and upload routes still
+  address `profile.httpURL`, so a LAN-won epoch reads HTTP over Tailscale. The
+  `BoundedHTTPDataTransport`/upload/file transports have no pin plumbing yet, so
+  routing them over the LAN lane would fail TLS closed; that work plus its pin
+  plumbing is the remaining half of the item. (2) The two-leg E2E cases are
+  **not written**: `scripts/ios-gateway-e2e-test` still runs its single loopback
+  proxy leg, so the "Tailscale leg blackholed 90 s -> no visible disconnect" and
+  "LAN leg blocked -> Tailscale wins within the stagger plus one handshake" cases
+  have no harness yet. The lane's advertisement is the Gateway's own bind, so a
+  controllable second leg needs either a TLS+WS fixture proxy that injects the
+  advertisement (and computes a pin over its own certificate) or a Gateway
+  fixture seam for the advertised address; both are harness work this budget did
+  not reach. (3) `AppModelReconnectTests`' maintenance-restart-watchdog case
+  advanced the manual clock on an ambiguous signal (two 90 s sleeps, the restart
+  watchdog and no ordering guarantee that the reconnect loop had parked first);
+  the faster lane-close path exposed it and it is now fenced on the loop's own
+  `reconnect.delay` record before the advance. No production behavior changed for
+  that test.
+- For E-3d: **do not enable the LAN endpoint by default on this evidence.** The
+  two E2E cases E-3d's own text requires have not run; the focused tests prove
+  the race's decisions, not a live 90 s Tailscale blackhole or a blocked LAN leg.
+- For the next agent: the seams are `GatewayClient.dialRoutes(for:)` (lane
+  eligibility: Wi-Fi, a pin, an endpoint, not denied), `raceLanes`/`attemptLeg`
+  (per-lane dial and retirement), `currentRoute` (set on install, cleared with
+  the epoch - the base the HTTP item should read) and
+  `GatewaySocketFactory.makeConnection(_:pin:)`/`BoundedURLSessionDataLoader.load`
+  for the HTTP pin.
 
 ### E-3b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
 
