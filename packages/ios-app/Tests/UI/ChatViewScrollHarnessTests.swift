@@ -1374,9 +1374,9 @@ struct ChatViewScrollHarnessTests {
                 let hold: Double
             }
             let variants = [
-                Variant(name: "product", topHidden: nil, bottomHidden: nil, hold: 20),
-                Variant(name: "forced-on", topHidden: false, bottomHidden: false, hold: 20),
-                Variant(name: "no-top-edge", topHidden: true, bottomHidden: false, hold: 20),
+                Variant(name: "product", topHidden: nil, bottomHidden: nil, hold: 0),
+                Variant(name: "forced-on", topHidden: false, bottomHidden: false, hold: 0),
+                Variant(name: "no-top-edge", topHidden: true, bottomHidden: false, hold: 0),
                 Variant(name: "no-edge-effect", topHidden: true, bottomHidden: true, hold: 0),
                 Variant(name: "no-bottom-edge", topHidden: false, bottomHidden: true, hold: 0),
             ]
@@ -1443,8 +1443,8 @@ struct ChatViewScrollHarnessTests {
             let measurements = await MainActor.run {
                 (regions: diagnosis.regions, navBands: diagnosis.navBands)
             }
-            let reference = measurements.regions["end-base"]
-            let referenceNav = measurements.navBands["end-base"] ?? []
+            let reference = measurements.regions["end-product"]
+            let referenceNav = measurements.navBands["end-product"] ?? []
             func navDistance(_ candidate: [Double], _ recorded: [Double]) -> Double {
                 guard candidate.count == recorded.count, !candidate.isEmpty else { return .infinity }
                 let squared = zip(candidate, recorded).reduce(0.0) { partial, pair in
@@ -1459,7 +1459,7 @@ struct ChatViewScrollHarnessTests {
                     region, reference!, alignmentPoints: ChatVisualParitySpec.alignmentPoints
                 )
                 let navBand = navDistance(measurements.navBands[key] ?? [], referenceNav)
-                print("CT23-DIAG compare=\(key)-vs-end-base"
+                print("CT23-DIAG compare=\(key)-vs-end-product"
                     + " magnitude=\(String(format: "%.5f", value.magnitude))"
                     + " shift=\(String(format: "%.1f", value.shift))"
                     + " navBand=\(String(format: "%.5f", navBand))")
