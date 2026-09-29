@@ -1379,7 +1379,13 @@ pass only through eager-only repairs, stop and report.
     upward) fails both of them.
   - The gate that must not move: `ChatViewScrollHarnessTests` and
     `ChatVisualParityTests` together pass 62 tests in 2 suites in 160.0 s
-    (`20260929T034229Z-run.i6Twmu`), parity gate verdict pass (see stage B5).
+    (`20260929T034229Z-run.i6Twmu`) and again in 154.5 s
+    (`20260929T035259Z-run.t76yRr`), parity gate verdict pass (see stage B5).
+    One heavy invocation between them failed `pickerRejectsRetiredCatalog` with
+    2 issues (176.4 s, `20260929T034722Z-run.LvqoyA`); the same suite passed
+    alone 61/61 in 96.5 s (`20260929T035052Z-run.fSGqcc`) and the fixture has no
+    relationship to this stage's changes, so it is the load-related picker
+    RPC-ordering flake stage A already recorded, not a regression.
 - Changes: this commit (`packages/ios-app/Tests/UI/ChatViewScrollHarnessTests.swift`,
   this plan).
 - Deviations:

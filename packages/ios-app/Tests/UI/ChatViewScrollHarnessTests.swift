@@ -4979,22 +4979,6 @@ final class ChatViewScrollHarness {
         )
     }
 
-    /// Drive `boundaries` display boundaries, capturing the region's vertical
-    /// profile at each one, so a caller can reduce any later frame against any
-    /// earlier one after the entrance has finished.
-    func sampleVerticalProfiles(
-        in region: CGRect,
-        boundaries: Int,
-        rowStep: Int = 2
-    ) async throws -> [RenderedVerticalProfile] {
-        var profiles: [RenderedVerticalProfile] = []
-        for _ in 0..<boundaries {
-            try await driveFrameBoundary()
-            profiles.append(verticalProfile(in: region, rowStep: rowStep))
-        }
-        return profiles
-    }
-
     /// The luminance-weighted vertical centre, in the hosting view's own
     /// coordinates, of the ink `profile` carries above `reference`: `sum(y · w) /
     /// sum(w)` over the rows where the frame is brighter than the reference.
@@ -5022,67 +5006,6 @@ final class ChatViewScrollHarness {
         }
         guard weight > 0, moment > 0, first.isFinite else { return nil }
         return CGFloat(moment / weight)
-    }
-
-    /// The vertical displacement, in points, that best aligns `profile`'s ink with
-    /// `reference`: the shift `s` whose reference moved *down* by `s` matches the
-    /// profile most closely, at `step`-point candidate shifts. Each candidate's
-    /// best uniform gain is divided out, so the fade an entrance applies while it
-    /// moves does not bias the estimate; a positive result means the profile's ink
-    /// sits lower on screen than the reference's. `nil` when either profile
-    /// carries too little ink to align.
-    static func inkShift(
-        of profile: RenderedVerticalProfile,
-        to reference: RenderedVerticalProfile,
-        range: ClosedRange<CGFloat> = -32...32,
-        step: CGFloat = 1
-    ) -> CGFloat? {
-        guard profile.rowMeans.count == reference.rowMeans.count,
-              profile.rowMeans.count > 4,
-              profile.rowStep == reference.rowStep else { return nil }
-        let ink = profile.rowMeans.reduce(0) { $0 + abs($1 - (profile.rowMeans.min() ?? 0)) }
-        let referenceInk = reference.rowMeans.reduce(0) { $0 + abs($1 - (reference.rowMeans.min() ?? 0)) }
-        guard ink > 1, referenceInk > 1 else { return nil }
-        var best: (shift: CGFloat, residual: Double)?
-        var candidate = range.lowerBound
-        while candidate <= range.upperBound {
-            let rows = Double(candidate / CGFloat(profile.rowStep))
-            var dot = 0.0
-            var norm = 0.0
-            for index in profile.rowMeans.indices {
-                let source = Double(index) - rows
-                guard source >= 0, source <= Double(reference.rowMeans.count - 1) else { continue }
-                let lower = Int(source.rounded(.down))
-                let fraction = source - Double(lower)
-                let upper = min(lower + 1, reference.rowMeans.count - 1)
-                let value = reference.rowMeans[lower] * (1 - fraction)
-                    + reference.rowMeans[upper] * fraction
-                dot += profile.rowMeans[index] * value
-                norm += value * value
-            }
-            guard norm > 0 else { candidate += step; continue }
-            let gain = max(0, min(2, dot / norm))
-            var residual = 0.0
-            var count = 0
-            for index in profile.rowMeans.indices {
-                let source = Double(index) - rows
-                guard source >= 0, source <= Double(reference.rowMeans.count - 1) else { continue }
-                let lower = Int(source.rounded(.down))
-                let fraction = source - Double(lower)
-                let upper = min(lower + 1, reference.rowMeans.count - 1)
-                let value = reference.rowMeans[lower] * (1 - fraction)
-                    + reference.rowMeans[upper] * fraction
-                residual += abs(profile.rowMeans[index] - gain * value)
-                count += 1
-            }
-            guard count > 0 else { candidate += step; continue }
-            let normalized = residual / Double(count)
-            if best == nil || normalized < best!.residual {
-                best = (candidate, normalized)
-            }
-            candidate += step
-        }
-        return best?.shift
     }
 
     func isNativeTranscriptInteractionEnabled() throws -> Bool {
