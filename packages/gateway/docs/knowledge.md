@@ -251,7 +251,19 @@ Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
 owned background work, not a request that waits for a model: the call accepts a
 job and returns its state plus the source's current revision, the model runs
 outside the store lock, and the commit revalidates the exact source revision,
-configuration revision and privacy state before publishing. The job survives a
+configuration revision and privacy state before publishing. It uses only
+`KnowledgeConfig.enrichment.model`, a separate `provider/model` setting from
+`observation.model`; unset enrichment is the typed job refusal
+`model-not-configured`, with an actionable `knowledge.config` instruction, and
+never falls back to observation. The enrichment setting round-trips through the
+whole-config `knowledge.config` RPC (the iOS settings sheet preserves it) and
+can be changed by the agent tool action `setEnrichmentModel`. For example, after
+the user-initiated K9 Gateway update, read `knowledge.status.config.revision`,
+then call the agent `knowledge` tool with
+`{action:"setEnrichmentModel", commandId:"knowledge-enrichment-2026-09-29",
+expectedConfigRevision:<current revision>,
+enrichmentModel:"opencode-go/deepseek-v4.1-flash"}`. This plan value is not
+written into the live config by source changes or tests. The job survives a
 dismissed sheet, a backgrounded app and a reconnect, and
 `knowledge.curation.jobs` (agent tool `curationJob`) reports `running`, `done`
 or `failed` with a typed code for one command ID or for one entry. A duplicate
@@ -536,6 +548,15 @@ oversized, and non-image results do not delete an existing preview. A repeated
 command or source that already has a preview performs no provider fetch; callers
 must reconcile uncertain outcomes before retrying.
 
+`knowledge.source.reextract` (agent tool `reextractSource`) is a bounded,
+receipted one-source recovery operation for the saved readable-text projection.
+It reads only the retained raw object authorized by the exact source revision,
+performs no network request, recomputes `extractReadableText`, and commits only
+against that expected revision. Replay returns the receipt; stale revisions
+conflict. Poor or empty extraction returns `needs-evidence` with a reason and
+keeps the source partial; it does not invent readable text. K11 can call it per
+item and report each revision/outcome before requesting summaries.
+
 `recoverProviderSaveTime` is the owner-mediated save-time reconciliation: one
 source, one command ID, optional expected revision. It reads the provider payload
 already retained at that exact revision, with no network request and no
@@ -775,6 +796,21 @@ before credential lookup/provider I/O. Discovery retains no more than the
 selected limit per collection, so shifted provider pages are revisited rather
 than silently skipped. Remote destinations are configured per source collection
 and still require the connection's independent `allowWrites` approval.
+
+After each Raindrop item's capture, K2 save-time recovery, and existing inline
+assessment/admission/move processing settles, eligible complete research sources
+and personal sources with readable text enqueue one Gateway-owned summary job
+without waiting for the model. Missing personal text is not fabricated or
+summarized, and incomplete research remains pending for re-capture. A successful
+summary job queues its K4 tag job; both are observable through
+`knowledge.curation.jobs` / `knowledge.curation.job`. Intake command IDs are
+derived from the exact source revision; an existing summary with the same
+source-evidence digest and current tag input digest is reused on rerun. Summary
+or tag failure is recorded on that job without rewriting a committed admission;
+an item left pending by its existing assessment remains pending. Other cohort
+items continue. The order differs from the initial K5 draft: K8's existing Jev
+admission does not consume summary/tags, and its receipt/budget/move authority
+remains independent of queued enrichment.
 
 Each item keeps its bounded complete Raindrop JSON as a `provider-api` source
 representation, the fetched linked evidence separately, and the source

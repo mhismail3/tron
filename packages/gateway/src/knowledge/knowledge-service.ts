@@ -4,7 +4,7 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type {
   KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeRaindropReadRequest,
   KnowledgeCurationCode, KnowledgeCurationJobRequest, KnowledgeCurationJobResponse, KnowledgeCurationOutcome,
-  KnowledgeCurationRequest, KnowledgeCurationResponse, KnowledgeSourceSummaryStart, ObservationCoverageDisposition,
+  KnowledgeCurationRequest, KnowledgeCurationResponse, KnowledgeRecord, KnowledgeSourceSummaryStart, ObservationCoverageDisposition,
   KnowledgeTagEdit, KnowledgeTagEditRequest, KnowledgeTagReconcileRequest, KnowledgeTagRetagRequest,
   KnowledgeTagRequest, KnowledgeTagRunRequest, KnowledgeTagBudgetRequest, KnowledgeTagCostEstimateRequest,
   SourceAssessment, SourceCurationProducer,
@@ -14,7 +14,7 @@ import { curationCommandId, curationFailureOutcome, curationItemRefusal, curatio
 import { curationStored, sourceEvidenceDigest, type KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
-import { captureSource, readPublicXPost, refreshSourcePreview, type SourceAssessmentModel } from "./source-capture.js";
+import { captureSource, extractReadableText, readPublicXPost, refreshSourcePreview, type SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
@@ -24,7 +24,7 @@ import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESE
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setEnrichmentModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -71,6 +71,8 @@ const toolParameters = Type.Object({
   producerModel: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   curationStatus: Type.Optional(Type.Union([Type.Literal("running"), Type.Literal("done"), Type.Literal("failed")])),
   expectedConfigRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+  enrichmentModel: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  clearEnrichmentModel: Type.Optional(Type.Boolean()),
   vocabularyRevision: Type.Optional(Type.Integer({ minimum: 0 })),
   expectedRevision: Type.Optional(Type.String({ minLength: 16, maxLength: 80 })),
   budgetCents: Type.Optional(Type.Number({ minimum: 0, maximum: 1_000_000 })),
@@ -512,12 +514,36 @@ export class KnowledgeService {
     await this.runTagQueue({ commandId, connectionId, limit: 25 }).catch(() => {});
   }
 
+  queueIntakeSummary(source: KnowledgeRecord & { kind: "source" }): void {
+    const text = source.content.text;
+    if (!text) return;
+    const digest = sourceEvidenceDigest(source.content.title, text);
+    if (source.content.summary?.evidenceDigest === digest) {
+      void this.autoRetag(source.id, source.revisionId);
+      return;
+    }
+    const commandId = `intake-summary-${createHash("sha256").update(`${source.id}:${source.revisionId}`).digest("hex").slice(0, 40)}`;
+    void this.summarize({ commandId, sourceId: source.id, expectedRevision: source.revisionId }).catch(() => {});
+  }
+
   async autoRetag(sourceId: string, revisionId: string): Promise<void> {
     if (!this.tagging) return;
+    const commandId = `jev-auto-intake-${createHash("sha256").update(`${sourceId}:${revisionId}`).digest("hex").slice(0, 40)}`;
+    const existing = this.jobs.find(commandId);
+    if (existing) return;
     const connectionId = await this.taggingConnectionId();
-    if (!connectionId) return;
-    const commandId = `jev-auto-take-${createHash("sha256").update(`${sourceId}:${revisionId}`).digest("hex").slice(0, 40)}`;
-    await this.startTag({ commandId, sourceId, expectedRevision: revisionId, connectionId }).catch(() => {});
+    if (!connectionId) {
+      this.jobs.start({ commandId, operation: "tags", sourceId, run: async () => {
+        throw new KnowledgeCurationRefusal("unavailable", "Tagging skipped: enable and approve the single Knowledge Jev connection with remaining monthly budget; the source summary is unchanged.");
+      } });
+      return;
+    }
+    await this.startTag({ commandId, sourceId, expectedRevision: revisionId, connectionId }).catch(error => {
+      if (this.jobs.find(commandId)) return;
+      this.jobs.start({ commandId, operation: "tags", sourceId, run: async () => {
+        throw new KnowledgeCurationRefusal("unavailable", `Tagging skipped: ${error instanceof Error ? error.message : "Jev is unavailable"}; the source summary is unchanged.`);
+      } });
+    });
   }
 
   summaryJobs(request: KnowledgeCurationJobRequest): KnowledgeCurationJobResponse {
@@ -532,9 +558,10 @@ export class KnowledgeService {
     const work = this.workRegistry?.begin({ kind: "knowledge-curation", hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => cancel(new Error("Knowledge summary was cancelled by the Gateway")) });
     try {
       const config = await this.store.config();
+      if (!config.enrichment?.model) throw new KnowledgeCurationRefusal("model-not-configured", "Source summary requires Knowledge enrichment.model; set it in knowledge.config (it never falls back to observation.model)");
       const model = this.modelForConfig?.(config);
-      if (!model) throw new GatewayError("unsupported", "Source summary requires an explicitly configured model");
-      const producer: SourceCurationProducer = { actor: "agent", ...(config.observation.model ? { model: config.observation.model } : {}) };
+      if (!model) throw new KnowledgeCurationRefusal("unavailable", `Configured Knowledge enrichment model '${config.enrichment.model}' is unavailable in the model runtime`);
+      const producer: SourceCurationProducer = { actor: "agent", model: config.enrichment.model };
       const result = await this.store.generateSourceSummary(request.commandId, request.sourceId, request.expectedRevision, config.revision, async source => {
         const text = source.content.text!;
         // A source marked partial remains partial even when its saved excerpt fits the request.
@@ -550,6 +577,24 @@ export class KnowledgeService {
     } finally {
       work?.settle();
     }
+  }
+
+  private async reextract(request: { commandId: string; sourceId: string; expectedRevision: string }): Promise<{ status: "reextracted" | "needs-evidence"; source: unknown; reason?: string }> {
+    const source = await this.store.read(request.sourceId, request.expectedRevision, false, true, true);
+    if (!source || source.kind !== "source") throw new GatewayError("conflict", "Source revision is unavailable, excluded, or forgotten");
+    if (!source.content.object) return { status: "needs-evidence", source: { id: source.id, revisionId: source.revisionId }, reason: "No retained raw object exists; capture fresh evidence before summarizing." };
+    const bytes = await this.store.readObject(source.content.object, { recordId: source.id, revisionId: source.revisionId, includeArchived: true });
+    if (!bytes) return { status: "needs-evidence", source: { id: source.id, revisionId: source.revisionId }, reason: "Retained raw evidence is unavailable; re-capture the source before summarizing." };
+    const extracted = extractReadableText(bytes, source.content.object.mediaType, 48_000);
+    const text = extracted?.text.trim() || undefined;
+    const needsEvidence = !text || extracted?.quality === "partial";
+    const captureDisposition = needsEvidence || source.content.captureDisposition !== "complete" ? "partial" as const : "complete" as const;
+    const reason = needsEvidence ? `needs-evidence: ${extracted?.reason ?? "retained object contains no substantive readable text"}` : source.content.captureReason;
+    const { captureReason: _oldReason, text: _oldText, ...contentWithoutPriorExtraction } = source.content;
+    const updated = await this.store.captureSource({ commandId: request.commandId, expectedRevision: request.expectedRevision,
+      record: { ...source, content: { ...contentWithoutPriorExtraction, ...(text ? { text } : {}), captureDisposition, ...(reason ? { captureReason: reason } : {}) } } });
+    if (updated.record.kind !== "source") throw new Error("Re-extraction returned a non-source record");
+    return { status: needsEvidence ? "needs-evidence" : "reextracted", source: updated.record, ...(reason ? { reason } : {}) };
   }
 
   private async synthesizeRevisions(commandId: string, sessionId: string, sourceRevisionIds: string[], signal?: AbortSignal): Promise<unknown> {
@@ -644,6 +689,7 @@ export class KnowledgeService {
         return this.store.setSourceAdmission(action.request);
       }
       case "knowledge.source.summarize": return this.summarize(action.request);
+      case "knowledge.source.reextract": return this.reextract(action.request);
       case "knowledge.source.curate": return this.curate(action.request);
       case "knowledge.source.take": {
         const result = await this.store.setSourceTake(action.request);
@@ -885,6 +931,11 @@ export class KnowledgeService {
         const response = await this.curate(curationToolRequest(parameters));
         return { text: curationToolText(response), details: response };
       }
+      case "setEnrichmentModel": {
+        if (!parameters.commandId || parameters.expectedConfigRevision === undefined || (!parameters.clearEnrichmentModel && !parameters.enrichmentModel) || (parameters.clearEnrichmentModel && parameters.enrichmentModel)) throw new GatewayError("invalid_request", "setEnrichmentModel requires commandId, expectedConfigRevision, and enrichmentModel or clearEnrichmentModel=true");
+        const config = await this.store.setEnrichmentModel(parameters.commandId, parameters.expectedConfigRevision, parameters.clearEnrichmentModel ? undefined : parameters.enrichmentModel!);
+        return { text: `Summary model ${config.enrichment?.model ?? "cleared"} saved at Knowledge config revision ${config.revision}; Gateway summaries never use observation.model as fallback.`, details: config };
+      }
       case "configureTags": {
         if (!parameters.commandId || parameters.expectedConfigRevision === undefined || !parameters.tagEdit) throw new GatewayError("invalid_request", "Tag configuration requires commandId, expectedConfigRevision and tagEdit");
         const details = await this.invoke({ operation: "knowledge.tags.configure", request: { commandId: parameters.commandId, expectedConfigRevision: parameters.expectedConfigRevision, edit: parameters.tagEdit as KnowledgeTagEdit } }, signal);
@@ -904,6 +955,11 @@ export class KnowledgeService {
         if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId) throw new GatewayError("invalid_request", "Source summary requires commandId, sourceId, and revisionId");
         const result = await this.summarize({ commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId });
         return { text: `Source summary ${result.job.status} for ${result.job.sourceId} (commandId ${result.job.commandId}); query action=curationJob for its outcome.`, details: result };
+      }
+      case "reextractSource": {
+        if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId) throw new GatewayError("invalid_request", "Source re-extraction requires commandId, sourceId, and revisionId");
+        const result = await this.reextract({ commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId });
+        return { text: `Source re-extraction ${result.status} for ${parameters.sourceId}: ${result.reason ?? "readable evidence updated"}`, details: result };
       }
       case "tagSource": {
         if (!parameters.commandId || !parameters.sourceId || !parameters.expectedRevision) throw new GatewayError("invalid_request", "tagSource requires commandId, sourceId and expectedRevision");

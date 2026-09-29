@@ -126,3 +126,9 @@ regressions share a URL, quote, newline, and Unicode digest vector.
 Entry Detail's background work and autosave are validated out of process by
 `TronKnowledgeDetailUITests` against the hosted scripted Gateway; see
 [iOS development](development.md).
+
+Knowledge Configuration stores the source-summary provider/model in
+`KnowledgeConfig.enrichment.model`, separate from the observer model. Its
+Summary model picker can clear the value; the iOS config codec round-trips it
+because `knowledge.config` replaces the whole KnowledgeConfig. Summary jobs
+refuse when it is unset and never fall back to the observation model.

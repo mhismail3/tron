@@ -15,7 +15,7 @@ function service(chunk: (params: Record<string, unknown>) => unknown): GatewaySe
 }
 
 describe("Gateway knowledge object transport", () => {
-  it("routes typed tag configuration mutations and re-tag queries through Knowledge", async () => {
+  it("routes typed re-extraction and tag configuration mutations through Knowledge", async () => {
     const calls: Array<{ operation: string; request: Record<string, unknown> }> = [];
     const gateway = service(params => ({ accepted: true, ...params }));
     const invoke = (gateway as unknown as { dependencies: { knowledge: { invoke: (action: { operation: string; request: Record<string, unknown> }) => Promise<unknown> } } }).dependencies.knowledge.invoke;
@@ -23,10 +23,12 @@ describe("Gateway knowledge object transport", () => {
     const configured = await gateway.invoke(client(), "knowledge.tags.configure", { commandId: "tag-configure-0001", expectedConfigRevision: 4, edit: { kind: "retire", id: "legacy" } });
     const reconciled = await gateway.invoke(client(), "knowledge.tags.reconcile", { commandId: "tag-reconcile-0001", expectedConfigRevision: 5, limit: 25 });
     const retag = await gateway.invoke(client(), "knowledge.tags.retag-needed", { vocabularyRevision: 5, limit: 25 });
+    const reextract = await gateway.invoke(client(), "knowledge.source.reextract", { commandId: "reextract-0001", sourceId: "source-1", expectedRevision: "revision-000000000001" });
     expect(configured).toMatchObject({ accepted: true, expectedConfigRevision: 4 });
     expect(reconciled).toMatchObject({ accepted: true, expectedConfigRevision: 5, limit: 25 });
     expect(retag).toMatchObject({ accepted: true, vocabularyRevision: 5, limit: 25 });
-    expect(calls.map(call => call.operation)).toEqual(["knowledge.tags.configure", "knowledge.tags.reconcile", "knowledge.tags.retag-needed"]);
+    expect(reextract).toMatchObject({ accepted: true, commandId: "reextract-0001", sourceId: "source-1" });
+    expect(calls.map(call => call.operation)).toEqual(["knowledge.tags.configure", "knowledge.tags.reconcile", "knowledge.tags.retag-needed", "knowledge.source.reextract"]);
   });
 
   it.each([306_865, 1_100_003])("preserves exact bytes and continuations for a %i-byte object", async size => {

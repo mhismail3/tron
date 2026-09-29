@@ -55,6 +55,7 @@ import { SessionSearchAllowanceLedger } from "./sessions/session-search-allowanc
 import { SessionSearchService } from "./sessions/session-search-service.js";
 import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
 import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
+import type { KnowledgeRecord } from "./knowledge/knowledge-contract.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { McpAdapter } from "./integrations/mcp-adapter.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
@@ -343,8 +344,10 @@ const knowledgeStore = new KnowledgeStore(
   change => knowledgeChanges.record(change),
   async (connectionId) => connections.resolveInstance(connectionId).catch(() => undefined),
 );
+let queueKnowledgeSummary: (source: KnowledgeRecord & { kind: "source" }) => void = () => {};
 const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   credentials: knowledgeCredentials,
+  queueSummary: source => queueKnowledgeSummary(source),
   assessment: new JevSourceAssessmentModel(knowledgeCredentials),
   ...(xPricing ? { xPricing } : {}),
   connections,
@@ -370,7 +373,7 @@ const knowledge = new KnowledgeService(
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),
   },
   (knowledgeConfig) => {
-    const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
+    const model = modelForConfig(modelRuntime, knowledgeConfig.enrichment?.model);
     return model ? new ModelRuntimeKnowledgeModel(modelRuntime, model) : undefined;
   },
   workRegistry,
@@ -384,6 +387,7 @@ const knowledge = new KnowledgeService(
   new KnowledgeCurationJobs(64, 120_000, job => transport?.broadcast("knowledge.curation.job", { ...job })),
   knowledgeTagging,
 );
+queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
 sessions.setKnowledgeService(knowledge);
 const terminal = new TerminalService(
   config.terminalReplayBytes,

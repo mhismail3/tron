@@ -1080,6 +1080,17 @@ export class KnowledgeStore {
     try { validateKnowledgeConfig(config); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge config"); }
     return this.mutate("knowledge.config", commandId, config, async state => { if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale"); if (JSON.stringify(config.tagVocabulary) !== JSON.stringify(state.config.tagVocabulary)) throw invalid("Tag taxonomy changes require the typed knowledge.tags.configure operation"); const next = structuredClone(config); next.tagVocabulary = structuredClone(state.config.tagVocabulary); next.revision += 1; state.config = next; return next; });
   }
+  async setEnrichmentModel(commandId: string, expectedConfigRevision: number, model?: string): Promise<KnowledgeConfig> {
+    if (!Number.isSafeInteger(expectedConfigRevision) || expectedConfigRevision < 0 || (model !== undefined && (typeof model !== "string" || model.length === 0 || model.length > 200))) throw invalid("Knowledge enrichment model requires an exact config revision and a bounded provider/model string");
+    return this.mutate("knowledge.config", commandId, { expectedConfigRevision, enrichmentModel: model ?? null }, async state => {
+      if (state.config.revision !== expectedConfigRevision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
+      const { enrichment: _previous, ...withoutEnrichment } = state.config;
+      const next = { ...withoutEnrichment, ...(model ? { enrichment: { model } } : {}), revision: state.config.revision + 1 };
+      validateKnowledgeConfig(next);
+      state.config = next;
+      return next;
+    });
+  }
 
   async withConnectorContext<T>(connectionId: string | undefined, task: () => Promise<T>): Promise<T> {
     return this.connectorContext.run(connectionId, task);

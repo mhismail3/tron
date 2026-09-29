@@ -221,8 +221,12 @@ package enum KnowledgeObservationConfigurationPolicy {
     }
 }
 
+package struct KnowledgeEnrichment: Codable, Hashable, Sendable {
+    package var model: String?
+    package init(model: String?) { self.model = model }
+}
 package struct KnowledgeConfig: Codable, Hashable, Sendable {
-    let schemaVersion: Int; var revision: Int; package var eligibility: KnowledgeEligibility; package var observation: KnowledgeObservationLimits; var maximumSearchResults: Int; package var currentInterests: [String]; package var tagVocabulary: KnowledgeTagVocabulary
+    let schemaVersion: Int; var revision: Int; package var eligibility: KnowledgeEligibility; package var observation: KnowledgeObservationLimits; package var enrichment: KnowledgeEnrichment? = nil; var maximumSearchResults: Int; package var currentInterests: [String]; package var tagVocabulary: KnowledgeTagVocabulary
 }
 package struct KnowledgeStatus: Codable, Hashable, Sendable {
     let available: Bool; let state: String; package let stateRevision: Int?; package let recordCount: Int; package let coverageCount: Int; package let coverage: KnowledgeCoverageSummary; package let suppressedCount: Int; package let pendingCleanupCount: Int; package let config: KnowledgeConfig; let observationConfigured: Bool; let detail: String?

@@ -471,6 +471,7 @@ export class GatewayService {
       case "knowledge.source.preview.refresh":
       case "knowledge.source.triage":
       case "knowledge.source.summarize":
+      case "knowledge.source.reextract":
       case "knowledge.source.tag":
       case "knowledge.tags.run":
       case "knowledge.tags.budget.reconcile":

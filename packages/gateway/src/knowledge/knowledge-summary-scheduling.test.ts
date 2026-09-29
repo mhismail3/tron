@@ -33,6 +33,8 @@ describe("Knowledge source summary scheduling", () => {
   async function fixture(gate: Promise<void>, counter: { generations: number }) {
     const root = await mkdtemp(join(tmpdir(), "tron-summary-scheduling-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
+    const config = await store.config();
+    await store.configure("summary-scheduling-enrichment-model", { ...config, enrichment: { model: "fixture/enrichment" } });
     const source = await store.captureSource({ commandId: "summary-scheduling-capture", record: { kind: "source", scope: "research",
       provenance: { actor: "user", evidence: [] }, relations: [],
       content: { title: "Thread", text: "A post and its saved replies", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" } } });

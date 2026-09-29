@@ -157,6 +157,18 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(requests, 0)
     }
 
+    /// Failure mode: the settings UI decodes and re-sends the whole config; if
+    /// enrichment is omitted from this model, saving any observation setting
+    /// silently clears the user's summary model.
+    func testKnowledgeConfigRoundTripPreservesEnrichmentModel() throws {
+        let input = #"{"schemaVersion":1,"revision":7,"eligibility":{"sessionIds":[],"projectIds":[],"excludedSessionIds":[],"excludedProjectIds":[]},"observation":{"enabled":false,"maxInputChars":48000,"maxOutputChars":8000,"timeoutMs":30000,"maxAttempts":1},"enrichment":{"model":"opencode-go/deepseek-v4.1-flash"},"maximumSearchResults":50,"currentInterests":[],"tagVocabulary":{"revision":0,"tags":[],"guidelines":""}}"#.data(using: .utf8)!
+        let config = try JSONDecoder().decode(KnowledgeConfig.self, from: input)
+        XCTAssertEqual(config.enrichment?.model, "opencode-go/deepseek-v4.1-flash")
+        let encoded = try JSONEncoder().encode(config)
+        let roundTrip = try JSONDecoder().decode(KnowledgeConfig.self, from: encoded)
+        XCTAssertEqual(roundTrip.enrichment?.model, "opencode-go/deepseek-v4.1-flash")
+    }
+
     func testObservationRoundTripPreservesCanonicalInputIdentity() throws {
         let range = KnowledgeObservationRange(
             sessionId: "session-1", branchId: "branch-1", fromEntryId: "entry-1", toEntryId: "entry-2",

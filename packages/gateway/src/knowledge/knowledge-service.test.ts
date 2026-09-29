@@ -67,10 +67,41 @@ describe("KnowledgeService integration", () => {
     }
   });
 
+  it("sets and replays the enrichment model through the revision-fenced Knowledge config owner", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-enrichment-model-set-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
+    const input = { action: "setEnrichmentModel", commandId: "agent-enrichment-model-set", expectedConfigRevision: 0, enrichmentModel: "opencode-go/deepseek-v4.1-flash" } as const;
+    const first = await service.tool(input);
+    expect(first.details).toMatchObject({ revision: 1, enrichment: { model: "opencode-go/deepseek-v4.1-flash" } });
+    expect(await service.tool(input)).toEqual(first);
+    await expect(service.tool({ ...input, commandId: "agent-enrichment-stale", enrichmentModel: "other/model" })).rejects.toThrow("stale");
+    const clear = await service.tool({ action: "setEnrichmentModel", commandId: "agent-enrichment-clear", expectedConfigRevision: 1, clearEnrichmentModel: true });
+    expect(clear.details).toMatchObject({ revision: 2 });
+    expect((await store.config()).enrichment).toBeUndefined();
+  });
+
+  it("refuses summary generation without enrichment.model even when observation.model exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-source-summary-no-enrichment-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const initial = await store.config();
+    await store.configure("summary-observation-only", { ...initial, observation: { ...initial.observation, model: "fixture/observation" } });
+    const source = await store.captureSource({ commandId: "summary-unset-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Evidence", text: "Clean saved text", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
+    let calls = 0;
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => { calls += 1; return model(); });
+    const accepted = await service.invoke({ operation: "knowledge.source.summarize", request: { commandId: "summary-needs-enrichment", sourceId: source.record.id, expectedRevision: source.record.revisionId } }) as { job: { status: string } };
+    expect(accepted.job.status).toBe("running");
+    expect(await waitForJob(service, "summary-needs-enrichment")).toMatchObject({ status: "failed", code: "model-not-configured", reason: expect.stringContaining("knowledge.config") });
+    expect(calls).toBe(0);
+    expect((await store.read(source.record.id))?.content.summary).toBeUndefined();
+  });
+
   it("generates an explicit source-content summary against the exact saved revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-source-summary-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const source = await store.captureSource({ commandId: "source-summary-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Thread", text: "A post and its saved replies", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" } } });
+    const initial = await store.config();
+    await store.configure("source-summary-config", { ...initial, enrichment: { model: "fixture/enrichment" } });
     let input = "";
     let generations = 0;
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async summarizeSource(request) { generations += 1; input = request.sourceText; return { text: "A post with some saved replies." }; } }));
@@ -86,8 +117,36 @@ describe("KnowledgeService integration", () => {
     expect(generations).toBe(1);
     const updated = await store.read(source.record.id);
     expect(updated?.content.assessment).toBeUndefined();
-    expect(updated?.content.summary).toMatchObject({ text: "A post with some saved replies.", sourceRevisionId: source.record.revisionId, coverage: "sampled", producer: { actor: "agent" } });
+    expect(updated?.content.summary).toMatchObject({ text: "A post with some saved replies.", sourceRevisionId: source.record.revisionId, coverage: "sampled", producer: { actor: "agent", model: "fixture/enrichment" } });
     expect(updated?.content.summary?.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("re-extracts only an exact retained object revision, idempotently, and flags poor pages", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-source-reextract-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const article = `<html><body><nav>${"chrome menu link ".repeat(100)}</nav><article><h1>Readable evidence</h1><p>${"Substantive paragraph text about the saved subject. ".repeat(8)}</p></article></body></html>`;
+    const object = await store.putObject(Buffer.from(article), "text/html");
+    const source = await store.captureSource({ commandId: "reextract-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Saved page", object, text: "old navigation text", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
+    const initial = await store.config();
+    await store.configure("reextract-enrichment-config", { ...initial, enrichment: { model: "fixture/enrichment" } });
+    let summaryInput = "";
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async summarizeSource(input) { summaryInput = input.sourceText; return { text: "Summary from clean saved text" }; } }));
+    const action = { operation: "knowledge.source.reextract" as const, request: { commandId: "reextract-clean", sourceId: source.record.id, expectedRevision: source.record.revisionId } };
+    const result = await service.invoke(action) as { status: string; source: { revisionId: string; content: { text?: string } } };
+    expect(result.status).toBe("reextracted");
+    expect(result.source.content.text).toContain("Substantive paragraph");
+    expect(result.source.content.text).not.toContain("chrome menu link");
+    expect((await service.invoke(action) as typeof result).source.revisionId).toBe(result.source.revisionId);
+    await service.invoke({ operation: "knowledge.source.summarize", request: { commandId: "summary-from-reextract", sourceId: source.record.id, expectedRevision: result.source.revisionId } });
+    expect(await waitForJob(service, "summary-from-reextract")).toMatchObject({ status: "done" });
+    expect(summaryInput).toContain("Substantive paragraph");
+    expect(summaryInput).not.toContain("chrome menu link");
+    const poorObject = await store.putObject(Buffer.from("<html><head><title>Only title</title></head><body><nav>Home Pricing Account</nav></body></html>"), "text/html");
+    const poor = await store.captureSource({ commandId: "reextract-poor-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "App shell", object: poorObject, text: "stale old body", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" } } });
+    const needsEvidence = await service.invoke({ operation: "knowledge.source.reextract", request: { commandId: "reextract-poor", sourceId: poor.record.id, expectedRevision: poor.record.revisionId } }) as { status: string; reason?: string; source: { content: { text?: string; captureDisposition: string } } };
+    expect(needsEvidence).toMatchObject({ status: "needs-evidence", reason: expect.stringContaining("needs-evidence"), source: { content: { captureDisposition: "partial" } } });
+    expect(needsEvidence.source.content.text).toBe("Only title");
+    await expect(service.invoke({ operation: "knowledge.source.reextract", request: { commandId: "reextract-stale", sourceId: poor.record.id, expectedRevision: "stale-revision-000000000000" } })).rejects.toThrow();
   });
 
   it("routes source triage through the persisted source and model seam", async () => {

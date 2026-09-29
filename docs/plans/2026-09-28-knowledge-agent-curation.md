@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-28
 - **Status:** Active
-- **Last updated:** 2026-09-29, K1–K4 and K6–K8 done
+- **Last updated:** 2026-09-29, K1–K8 done
 - **Goal:** Agents keep every Library entry summarized, tagged, judged for freshness and correctly scoped, guided by the user's own takes, so useful sources surface on their own in future work.
 
 ## Goal and constraints
@@ -149,7 +149,7 @@ screenshots of each state. Device validation by the user after K9.
 | K2 | Done | Clean evidence for summaries: extraction without site chrome, provider-date recovery | none | deepseek-worker, 2026-09-29 |
 | K3 | Done | Tag vocabulary and tagging guidelines owned by Knowledge config | K1 | luna-worker, 2026-09-29 |
 | K4 | Done | Jev tagger with monthly budget and re-tag triggers | K1, K3 | luna-worker, 2026-09-29 |
-| K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
+| K5 | Done | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | luna-worker, 2026-09-29 |
 | K6 | Done | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1, K3 | luna-worker, 2026-09-29 |
 | K7 | Done | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | luna-worker + supervisor, 2026-09-29 |
 | K8 | Done | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | luna-worker, 2026-09-29 |
@@ -236,9 +236,16 @@ publication of an already-computed selection.
 ### K5 — Summaries at intake
 
 A Knowledge enrichment model setting, set to `opencode-go/deepseek-v4.1-flash`,
-separate from the observation model. Intake order: capture → clean evidence →
-summary → Jev tags → admission. Failures leave the entry pending with a reason,
-never a fabricated summary.
+separate from the observation model. Intake captures and performs K2 recovery,
+then completes K8's existing Jev assessment/admission/approved move path. Once
+that per-item path settles, readable complete research sources and readable
+personal sources enqueue an owned summary job; a successful summary queues K4
+tagging. This deliberate order avoids racing the existing paid admission write:
+the Jev assessment does not depend on summary/tags, and the post-capture model
+jobs do not block intake. Summary/tag errors remain on their observable job,
+preserve an existing summary/tags and do not rewrite a committed admission.
+Personal light captures with no readable text receive no summary. Exact-revision
+re-extraction of retained raw objects is available for K11's seed cleanup.
 
 ### K6 — Your take, verdicts, freshness, retrieval
 
@@ -423,6 +430,64 @@ uses the tag definitions/categories/decay classes, and asks
 `knowledge.tags.retag-needed` before tagging. K7 can render `KnowledgeSourceRow.tags` without opening source bodies.
 
 
+### K5 · Done · 2026-09-29 · luna-worker · `knowledge/k5-intake-enrichment`
+
+- Result: `KnowledgeConfig.enrichment.model` is the separate optional summary
+  provider/model setting; summary jobs resolve it through the existing pinned
+  `modelForConfig(modelRuntime, config.enrichment.model)` path and return typed
+  `model-not-configured` with the exact config action when unset. There is no
+  fallback to `observation.model`. Agent `setEnrichmentModel` uses the same
+  revision-fenced config owner; iOS round-trips the new field and its Knowledge
+  Configuration view supplies a Summary model picker and Clear action.
+- Re-extraction: agent/RPC `reextractSource` / `knowledge.source.reextract`
+  authorizes and reads only the exact revision's retained object, recomputes K2
+  `extractReadableText` without a network call, and publishes with an expected
+  revision receipt. Replay returns the same revision; stale revisions conflict;
+  thin/title-only extraction returns `needs-evidence` with an honest partial
+  reason. Summaries consume the stored readable projection, never raw HTML.
+- Intake: after each item's existing K8 capture, save-time recovery, paid
+  assessment/admission and any authorized move settles (or the item is left
+  pending), Raindrop intake and connector sweeps queue one background summary for
+  sources with readable evidence. Summary completion queues a K4 job, including
+  an observable failed job reason when Jev approval/budget is unavailable.
+  Command IDs and evidence digests suppress rerun charges. Model/tag latency is
+  never awaited by intake; job failures preserve committed admission and
+  existing summary/tags. This corrects the initial plan's sequence assumption:
+  K8 admission is independent of generated summaries/tags and is kept ahead of
+  the queued derivatives to avoid losing its exact-revision fence.
+- Failure modes documented before implementation: enrichment model unset
+  despite an observation model; clean text versus retained page chrome; stale or
+  missing exact raw evidence; title-only/app-shell extraction; model failure
+  isolating one item; unapproved Jev preserving a completed summary; no readable
+  personal capture; rerun receipt/evidence digest avoiding repeat generation or
+  tag dispatch; and provider latency not blocking the intake reply.
+- Evidence: `npm run build` passed; focused changed Gateway tests passed 4 files /
+  78 tests (`knowledge-intake-enrichment.test.ts`, `knowledge-service.test.ts`,
+  `connectors.test.ts`, `gateway-service-knowledge-object.test.ts`). The ten-item
+  end-to-end intake fixture uses fake model, Jev assessment/tag engine, Keychain
+  and HTTP; verifies observable summary then tag order per source, intake return
+  while all ten model requests remain held, and rerun with no additional model
+  or tag calls. It writes and asserts
+  `$(node -p 'require("node:os").tmpdir()')/tron-k5-test-results/knowledge-intake-outcome.json`.
+  `scripts/tron-ios-test build` and
+  `scripts/tron-ios-test run --only-testing TronMobileTests/KnowledgeModelsTests`
+  passed (34 cases, including config decode/re-encode). Scale config passed 5/5.
+  Final required Gateway command `npx vitest run src/knowledge/ src/transport/
+  src/integrations/ --no-file-parallelism` passed 787/788 tests across 71 files;
+  the one unrelated cold-open timing assertion requires >100 ms but this run
+  observed 84 ms. An earlier run of the same full command passed 788/788. Scale
+  config passed 5/5. The retained intake artifact contains 10 sources and 20
+  ordered summary/tag events.
+- Changes: K5 implementation commit on `knowledge/k5-intake-enrichment` (see branch history).
+- User setup after K9 rebuild: call `knowledge.status` to read the current
+  `config.revision`, then agent tool
+  `{action:"setEnrichmentModel",commandId:"knowledge-enrichment-2026-09-29",
+  expectedConfigRevision:<current revision>,
+  enrichmentModel:"opencode-go/deepseek-v4.1-flash"}`. Alternatively update
+  the same field through `knowledge.config` using the complete current config
+  and its revision fence. No live Knowledge store was changed by this work.
+- Tasks added: none. No Gateway rebuild/restart or paid provider call was made.
+
 ### K6 · Done · 2026-09-29 · luna-worker · `knowledge/k6-take-freshness`
 
 - Result: Added `knowledge.source.take`, a receipted expected-revision write
@@ -538,7 +603,7 @@ uses the tag definitions/categories/decay classes, and asks
   connection setup/policy actions and ledger behavior.
 
 Drafted from the 2026-09-28 interview and approved by the user the same day,
-with the reliability and interaction bars added at the user's request. K1–K4, K6 and K8 are complete; K3/K6 were integrated on `knowledge/k1-k6`; K7 is in progress.
+with the reliability and interaction bars added at the user's request. K1–K8 are complete; K3/K6 were integrated on `knowledge/k1-k6`.
 
 
 ### K7 · Done · 2026-09-29 · luna-worker, completed by supervisor · `knowledge/k7-ios`
