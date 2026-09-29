@@ -485,13 +485,24 @@ private struct ThinkingBlock: View {
     let animatesInsertion: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
+    #if HOSTED_TEST
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+    #endif
 
-    /// The paragraph's measured height and the reference line count's measured
-    /// height. Both are geometry→state and never drive layout: the tail layout
-    /// measures its own subviews, and these two only decide the overflow flag
-    /// (the mask, the tap and the accessibility trait).
+    /// The paragraph's measured height and the four reference lines' measured
+    /// height. Each has one purpose, and neither can move a mounted row: the
+    /// reference height decides the overflow flag (the tail mask, the tap target
+    /// and the accessibility trait), and the content height is the trace
+    /// layout's animatable input, which is how the viewport and the tail offset
+    /// interpolate together while the trace streams. The layout measures its own
+    /// subviews in the pass that places them, so its first frame is exact.
     @State private var contentHeight: CGFloat = 0
     @State private var referenceHeight: CGFloat = 0
+    /// Whether a measurement has landed for this trace. A mount's first
+    /// measurement is the height the layout already placed the trace at, so the
+    /// update that publishes it is not growth and must not animate; every later
+    /// change is the trace's own growth.
+    @State private var hasMeasuredTrace = false
 
     init(
         segments: [ChatThinkingSegment],
@@ -575,6 +586,18 @@ private struct ThinkingBlock: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measured in
                     installMeasurement(&contentHeight, measured)
                 }
+                #if HOSTED_TEST
+                // Where the layout placed the paragraph in the viewport it owns.
+                // Its top edge is the tail offset the trace slides by.
+                .onGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.frame(in: .named(Self.traceMotionSpace)).minY
+                } action: { offset in
+                    hostedRecorder?.recorder?.recordThinkingTraceParagraphOffset(
+                        id: traceIdentity,
+                        offset: offset
+                    )
+                }
+                #endif
             referenceLines
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measured in
                     installMeasurement(&referenceHeight, measured)
@@ -582,14 +605,25 @@ private struct ThinkingBlock: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .animation(
-            reduceMotion ? nil : .smooth(
-                duration: ChatScrollCoordinator.liveGrowthAnimationDuration
-            ),
-            value: sourceLength
+            reduceMotion || !hasMeasuredTrace
+                ? nil
+                : .smooth(duration: ChatScrollCoordinator.liveGrowthAnimationDuration),
+            value: animatedTraceMotion
         )
         .clipped()
         .mask(tailMask)
+        .onChange(of: contentHeight, initial: true) { _, measured in
+            guard measured > 0, !hasMeasuredTrace else { return }
+            hasMeasuredTrace = true
+        }
         #if HOSTED_TEST
+        .coordinateSpace(name: Self.traceMotionSpace)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            hostedRecorder?.recorder?.recordThinkingTraceViewport(
+                id: traceIdentity,
+                height: height
+            )
+        }
         .background {
             ChatHostedThinkingTraceProbe(
                 id: traceIdentity,
@@ -602,10 +636,30 @@ private struct ThinkingBlock: View {
         .accessibilityHidden(true)
     }
 
-    /// The only value whose change animates the viewport: the trace arriving.
-    /// A mount, a width change or a measurement landing cannot grow the row.
-    private var sourceLength: Int {
-        segments.reduce(0) { $0 + $1.text.utf16.count }
+    #if HOSTED_TEST
+    private static let traceMotionSpace = "chat-thinking-trace-motion"
+    #endif
+
+    /// The one value whose change animates this trace: the viewport it presents
+    /// and the tail offset it slides by, both derived from the content height the
+    /// layout interpolates. It is the same pair the frame-and-offset animation
+    /// this replaces keyed on, and it matters that it is derived from the
+    /// measurement rather than from the trace's source: the source grows in the
+    /// install that suppresses row animations, while the measurement lands in the
+    /// layout pass that must interpolate.
+    private var animatedTraceMotion: CGSize {
+        guard contentHeight > 0, referenceHeight > 0 else { return .zero }
+        let viewport = ChatThinkingTraceLayoutPolicy.viewportHeight(
+            contentHeight: contentHeight,
+            maximumHeight: referenceHeight
+        )
+        return CGSize(
+            width: viewport,
+            height: ChatThinkingTraceLayoutPolicy.tailOffset(
+                contentHeight: contentHeight,
+                viewportHeight: viewport
+            )
+        )
     }
 
     private func installMeasurement(_ storage: inout CGFloat, _ measured: CGFloat) {
@@ -681,12 +735,18 @@ private struct ThinkingBlock: View {
 /// lines, scrolled to its tail. Both subviews are measured in the pass that
 /// places them, so a mounted row is at its final height in its first frame —
 /// the estimate this replaces left the first mount of a trace 50 pt short and
-/// only a later remount reached the measured viewport. `contentHeight` is the
-/// one animated input, and only the trace's own source growth changes it.
+/// only a later remount reached the measured viewport.
+///
+/// The viewport height and the paragraph's tail offset are both derived from one
+/// content height, exactly as the frame and offset this replaces were: while the
+/// trace streams, the layout's animatable `contentHeight` interpolates and the
+/// row grows continuously, and a trace past four lines slides its tail instead
+/// of jumping a line per token. A zero `contentHeight` is the first pass of a
+/// mount: the layout then uses the paragraph height it just measured, so no
+/// estimate is ever committed.
 private struct ThinkingTailLayout: Layout, Animatable {
-    /// Zero until the paragraph's first geometry pass. The layout measures the
-    /// paragraph itself in that pass, so the mount is exact rather than
-    /// estimated.
+    /// The trace's content height to interpolate, or zero on the first pass of a
+    /// mount, where the layout's own synchronous measurement is exact.
     var contentHeight: CGFloat
 
     var animatableData: CGFloat {
@@ -728,12 +788,15 @@ private struct ThinkingTailLayout: Layout, Animatable {
         let measured = measure(width: bounds.width, subviews: subviews, cache: &cache)
         let viewport = viewportHeight(measured)
         // The paragraph keeps its natural height and is offset so its tail —
-        // the newest text — is what the viewport shows.
+        // the newest text — is what the viewport shows. The offset comes from the
+        // same content height as the viewport, so both move in one interpolation:
+        // an offset derived from the paragraph's own, already-measured height
+        // would jump a line per token while the viewport animated.
         subviews[0].place(
             at: CGPoint(
                 x: bounds.minX,
                 y: bounds.minY - ChatThinkingTraceLayoutPolicy.tailOffset(
-                    contentHeight: measured.paragraph,
+                    contentHeight: contentHeight(measured),
                     viewportHeight: viewport
                 )
             ),
@@ -750,9 +813,17 @@ private struct ThinkingTailLayout: Layout, Animatable {
 
     private func viewportHeight(_ measured: (paragraph: CGFloat, reference: CGFloat)) -> CGFloat {
         ChatThinkingTraceLayoutPolicy.viewportHeight(
-            contentHeight: contentHeight > 0 ? contentHeight : measured.paragraph,
+            contentHeight: contentHeight(measured),
             maximumHeight: measured.reference
         )
+    }
+
+    /// The one height the viewport and the tail offset are derived from: the
+    /// interpolated content height, or — on the first pass of a mount, before any
+    /// measurement has been published — the exact height of the paragraph the
+    /// same pass measured.
+    private func contentHeight(_ measured: (paragraph: CGFloat, reference: CGFloat)) -> CGFloat {
+        contentHeight > 0 ? contentHeight : measured.paragraph
     }
 
     private func measure(

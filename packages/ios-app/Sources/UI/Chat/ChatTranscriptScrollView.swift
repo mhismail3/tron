@@ -12,6 +12,8 @@ protocol ChatTranscriptHostedRecording: AnyObject {
     func recordEntranceResolution(animated: Bool, sourceOrdinal: Int)
     func recordRowIdentity(id: String, instance: UUID, isMount: Bool)
     func recordThinkingTrace(id: String, contentHeight: CGFloat, referenceHeight: CGFloat, overflowing: Bool)
+    func recordThinkingTraceViewport(id: String, height: CGFloat)
+    func recordThinkingTraceParagraphOffset(id: String, offset: CGFloat)
     func recordReplacementHostEvaluation(id: String)
     func updateRowFrame(
         id: String,

@@ -248,6 +248,49 @@ struct ChatRowStabilityTests {
         }
     }
 
+    @Test("a streaming thinking trace grows and slides its tail in animation frames")
+    func thinkingTraceGrowthMotionMatchesTheFrameAndOffsetAnimation() async throws {
+        try await withTestWatchdog(timeout: .seconds(240)) {
+            // Under four lines: the trace grows inside its reference height, so
+            // its viewport grows and its tail stays flush to the viewport bottom.
+            let underFour = try await traceMotion(lines: [1, 2, 3])
+            // Past four lines: the viewport is pinned to the reference lines and
+            // the tail slides as the paragraph keeps growing.
+            let overFour = try await traceMotion(lines: [5, 6, 8, 10])
+
+            let growingViewport = TraceMotionSequence(underFour.viewportHeights)
+            let growingOffset = TraceMotionSequence(overFour.paragraphOffsets)
+            print("ROW-STABILITY-TRACE-MOTION"
+                + " underFourViewport=\(growingViewport.summary)"
+                + " underFourOffset=\(TraceMotionSequence(underFour.paragraphOffsets).summary)"
+                + " overFourViewport=\(TraceMotionSequence(overFour.viewportHeights).summary)"
+                + " overFourOffset=\(growingOffset.summary)")
+            try writeTraceMotionReport(underFour: underFour, overFour: overFour)
+
+            // A trace that grows inside its reference height: the viewport
+            // interpolates (main's animated frame height) and the tail never
+            // leaves the bottom edge.
+            #expect(
+                growingViewport.isAnimatedGrowth,
+                "the viewport did not grow in animation frames: \(growingViewport.summary)"
+            )
+            #expect(
+                TraceMotionSequence(underFour.paragraphOffsets).isFlush,
+                "a trace shorter than four lines moved its paragraph: \(underFour.paragraphOffsets)"
+            )
+            // A trace past four lines: the viewport is pinned and the tail
+            // interpolates (main's animated tail offset).
+            #expect(
+                TraceMotionSequence(overFour.viewportHeights).isConstant,
+                "the four-line viewport moved while the tail grew: \(overFour.viewportHeights)"
+            )
+            #expect(
+                growingOffset.isAnimatedGrowth,
+                "the tail offset jumped instead of sliding: \(growingOffset.summary)"
+            )
+        }
+    }
+
     @Test("a truncated error notice keeps one pill structure across its measurement")
     func truncatedNoticeKeepsOnePillStructure() async throws {
         try await withTestWatchdog(timeout: .seconds(60)) {
@@ -679,6 +722,151 @@ struct ChatRowStabilityTests {
 
 /// One measured phase: every fixture row's frame height at that phase, plus the
 /// probe's own counters.
+/// The frame-to-frame motion of one rendered value: the trace's viewport height
+/// or the offset its paragraph was placed at. It is the evidence that a growing
+/// trace moves as the one animation the pre-rewrite frame and offset moved in,
+/// rather than jumping a line per token.
+private struct TraceMotionSequence {
+    let first: CGFloat
+    let last: CGFloat
+    let intermediates: Int
+    let maximumStep: CGFloat
+    let isMonotonic: Bool
+
+    init(_ samples: [CGFloat]) {
+        first = samples.first ?? 0
+        last = samples.last ?? 0
+        let steps = zip(samples, samples.dropFirst()).map { abs($1 - $0) }
+        maximumStep = steps.max() ?? 0
+        // A value may grow in either direction (the tail offset is signed); it
+        // must never reverse inside one growth.
+        isMonotonic = !Self.reversesDirection(samples)
+        let low = min(first, last)
+        let high = max(first, last)
+        intermediates = samples.filter { $0 > low + 0.5 && $0 < high - 0.5 }.count
+    }
+
+    /// Whether a sequence that steps in one direction ever steps back.
+    private static func reversesDirection(_ samples: [CGFloat]) -> Bool {
+        var direction: CGFloat = 0
+        for (previous, next) in zip(samples, samples.dropFirst()) {
+            let step = next - previous
+            guard abs(step) > 0.5 else { continue }
+            if direction == 0 {
+                direction = step > 0 ? 1 : -1
+            } else if (step > 0 ? 1 : -1) != direction {
+                return true
+            }
+        }
+        return false
+    }
+
+    var change: CGFloat { abs(last - first) }
+
+    /// The value grew by more than half a line, monotonically, through at least
+    /// three intermediate values, with no single display frame carrying most of
+    /// the change: the shape one 0.16 s interpolation produces.
+    var isAnimatedGrowth: Bool {
+        change > 8 && isMonotonic && intermediates >= 3 && maximumStep <= change * 0.5
+    }
+
+    var isConstant: Bool { change <= 1 }
+
+    var isFlush: Bool { maximumStep <= 0.5 }
+
+    var summary: String {
+        "start:\(rowStabilityNumber(first))"
+            + ":end:\(rowStabilityNumber(last))"
+            + ":steps:\(intermediates)"
+            + ":maxStep:\(rowStabilityNumber(maximumStep))"
+            + ":monotonic:\(isMonotonic)"
+    }
+}
+
+/// One streaming trace's motion: the newest row streams a wrapped thinking run
+/// through the given line counts (the first is what it mounts with), and the
+/// trace's own rendered geometry is recorded at every display boundary between
+/// the installs.
+@MainActor
+private func traceMotion(lines lineCounts: [Int]) async throws -> ChatHostedThinkingTraceMotion {
+    var snapshot = try stabilitySnapshot(items: rowStabilityHistoryItems())
+    snapshot.phase = .running
+    snapshot.streaming = try harnessRichAssistantMessage(
+        id: RowStabilityFixture.traceMotionReplyID,
+        presentationID: RowStabilityFixture.traceMotionReplyID,
+        thinkingLines: traceMotionLines(lineCounts.first ?? 1),
+        text: "The trace above is still arriving."
+    )
+    var motion = ChatHostedThinkingTraceMotion()
+    try await withStabilityHarness(snapshot: snapshot) { harness in
+        _ = try await harness.recorder.waitUntil {
+            $0.observation.isReady
+                && !$0.observation.thinkingTraceMeasurements.isEmpty
+        }
+        for count in lineCounts.dropFirst() {
+            snapshot.streaming = try harnessRichAssistantMessage(
+                id: RowStabilityFixture.traceMotionReplyID,
+                presentationID: RowStabilityFixture.traceMotionReplyID,
+                thinkingLines: traceMotionLines(count),
+                text: "The trace above is still arriving."
+            )
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            harness.replaceAuthoritativeSnapshot(snapshot)
+            // A 0.16 s interpolation at the display link's rate, with every
+            // boundary sampled: the motion is the trace's own, not the harness's.
+            for _ in 0..<20 {
+                try await harness.driveFrameBoundary()
+                guard let current = harness.probeObservation.thinkingTraceMotion.values.first else { continue }
+                motion.viewportHeights = traceMotionMerged(motion.viewportHeights, current.viewportHeights)
+                motion.paragraphOffsets = traceMotionMerged(motion.paragraphOffsets, current.paragraphOffsets)
+            }
+        }
+    }
+    return motion
+}
+
+/// The samples of one trace across the harness's per-boundary observations, which
+/// repeat the sequence they have recorded so far.
+private func traceMotionMerged(_ previous: [CGFloat], _ next: [CGFloat]) -> [CGFloat] {
+    guard let last = previous.last, let first = next.first, last == first else {
+        return next.isEmpty ? previous : next
+    }
+    return previous + next.dropFirst()
+}
+
+/// The trace's own thinking lines. Each one stays on one line of the compact
+/// trace's width, so a line count is a measured line count.
+private func traceMotionLines(_ count: Int) -> [String] {
+    (1...count).map { "Reasoning line \($0) of the trace." }
+}
+
+/// A trace's motion at a stable path, so the run's evidence can be inspected and
+/// regenerated without the test's standard output.
+private func writeTraceMotionReport(
+    underFour: ChatHostedThinkingTraceMotion,
+    overFour: ChatHostedThinkingTraceMotion
+) throws {
+    let payload: [String: Any] = [
+        "schema": "tron.chat-trace-motion-report.v1",
+        "underFourLines": traceMotionPayload(underFour),
+        "overFourLines": traceMotionPayload(overFour),
+    ]
+    let url = RowStabilityReport.directory.appending(path: "trace-motion.json")
+    try FileManager.default.createDirectory(
+        at: RowStabilityReport.directory,
+        withIntermediateDirectories: true
+    )
+    let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+    try data.write(to: url)
+    print("ROW-STABILITY-TRACE-MOTION report=\(url.path)")
+}
+
+private func traceMotionPayload(_ motion: ChatHostedThinkingTraceMotion) -> [String: Any] {
+    ["viewportHeights": motion.viewportHeights.map(Double.init),
+     "paragraphOffsets": motion.paragraphOffsets.map(Double.init)]
+}
+
 private struct RowStabilityReport {
     static let schema = "tron.chat-row-stability-report.v1"
     static let packageRoot = URL(fileURLWithPath: #filePath)
@@ -1028,6 +1216,9 @@ private enum RowStabilityFixture {
     static let groupedRunDetailActionID = "row:" + groupedRunCallIDs[0]
     /// The streaming reply the tool-detail journey grows under the reader.
     static let streamingReplyID = "stability-tool-detail-reply"
+    /// The row the trace-motion scenario streams: one wrapped thinking run whose
+    /// lines are replaced by each install.
+    static let traceMotionReplyID = "stability-trace-motion-reply"
     static let errorNoticeID = "stability-error-notice"
     static let codeTableID = "stability-code-table"
     static let oldestHistoryID = "stability-history-0"

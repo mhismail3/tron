@@ -115,6 +115,15 @@ struct ChatHostedThinkingTraceMeasurement: Equatable, Sendable {
     let overflowing: Bool
 }
 
+/// One compact thinking trace's rendered motion per layout pass: the viewport the
+/// layout gave it and the offset it placed the paragraph at. A streaming trace's
+/// viewport and tail offset must interpolate together from one content height, so
+/// both sequences step in animation frames instead of jumping a line per token.
+struct ChatHostedThinkingTraceMotion: Equatable, Sendable {
+    var viewportHeights: [CGFloat] = []
+    var paragraphOffsets: [CGFloat] = []
+}
+
 /// A trace's measurements, so a hosted test can see that a mounted wrapped trace
 /// measured itself and reads as overflowing: without them the rewrite would
 /// silently lose the tap target and the tail fade.
@@ -193,6 +202,10 @@ struct ChatHostedObservation: Sendable {
     let rowIdentityMountCounts: [String: Int]
     /// The compact thinking traces' own measurements per trace identity.
     let thinkingTraceMeasurements: [String: ChatHostedThinkingTraceMeasurement]
+    /// The compact thinking traces' rendered motion per trace identity: the
+    /// viewport height and the paragraph offset, in the order the layout passes
+    /// produced them.
+    let thinkingTraceMotion: [String: ChatHostedThinkingTraceMotion]
     /// How many times each replacement host evaluated its body. A host that
     /// mirrors its row input evaluates a changed row twice (stale, then fresh);
     /// one that renders straight from `row` evaluates it once per update.
@@ -286,6 +299,7 @@ final class ChatHostedProbe {
     private var rowIdentityInstances: [String: [UUID]] = [:]
     private var rowIdentityMountCounts: [String: Int] = [:]
     private var thinkingTraceMeasurements: [String: ChatHostedThinkingTraceMeasurement] = [:]
+    private var thinkingTraceMotion: [String: ChatHostedThinkingTraceMotion] = [:]
     private var replacementHostEvaluations: [String: Int] = [:]
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
@@ -372,6 +386,7 @@ final class ChatHostedProbe {
             rowIdentityInstanceCounts: rowIdentityInstances.mapValues(\.count),
             rowIdentityMountCounts: rowIdentityMountCounts,
             thinkingTraceMeasurements: thinkingTraceMeasurements,
+            thinkingTraceMotion: thinkingTraceMotion,
             replacementHostEvaluations: replacementHostEvaluations,
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
@@ -682,6 +697,26 @@ final class ChatHostedProbe {
         )
         guard thinkingTraceMeasurements[id] != measurement else { return }
         thinkingTraceMeasurements[id] = measurement
+        revision &+= 1
+    }
+
+    /// One layout pass of a compact thinking trace. Consecutive equal values are
+    /// dropped, so each sequence is the trace's own frame-to-frame motion.
+    func recordThinkingTraceViewport(id: String, height: CGFloat) {
+        guard !id.isEmpty, height.isFinite else { return }
+        var motion = thinkingTraceMotion[id] ?? ChatHostedThinkingTraceMotion()
+        guard motion.viewportHeights.last != height else { return }
+        motion.viewportHeights.append(height)
+        thinkingTraceMotion[id] = motion
+        revision &+= 1
+    }
+
+    func recordThinkingTraceParagraphOffset(id: String, offset: CGFloat) {
+        guard !id.isEmpty, offset.isFinite else { return }
+        var motion = thinkingTraceMotion[id] ?? ChatHostedThinkingTraceMotion()
+        guard motion.paragraphOffsets.last != offset else { return }
+        motion.paragraphOffsets.append(offset)
+        thinkingTraceMotion[id] = motion
         revision &+= 1
     }
 
