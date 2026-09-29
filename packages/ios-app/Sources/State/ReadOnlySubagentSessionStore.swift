@@ -193,6 +193,31 @@ final class ReadOnlySubagentSessionStore {
 
     var canLoadEarlier: Bool { status == .open && recoveryTask == nil && transcriptStart > 0 }
 
+    /// The trace an open thinking detail follows, resolved from the projection
+    /// this child transcript's own rows render from. Its rows are never
+    /// streaming: a child session is rendered as recorded.
+    func resolveThinkingTrace(_ identity: String) -> ChatThinkingTraceContent? {
+        guard let resolved = ChatTranscriptDetailResolution.thinkingTrace(
+            in: presentation.timeline.items,
+            identity: identity
+        ) else { return nil }
+        return ChatThinkingTraceContent(
+            segments: resolved.segments,
+            preparedText: preparedText.slice(for: resolved.item),
+            // A child transcript renders a recorded session: its own rows never
+            // pass a streaming flag.
+            streaming: false
+        )
+    }
+
+    /// The presentation an open event detail follows, from the same projection.
+    func resolveNotificationDetail(_ eventID: String) -> ChatNotificationPresentation? {
+        ChatTranscriptDetailResolution.notificationDetail(
+            in: presentation.timeline.items,
+            eventID: eventID
+        )
+    }
+
     func open(
         parentSessionID: String,
         processID: String,

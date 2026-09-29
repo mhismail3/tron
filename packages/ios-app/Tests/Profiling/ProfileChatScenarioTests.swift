@@ -233,27 +233,34 @@ final class ProfileChatRun: ProfileScenarioRun {
         expectedSequence = frames.last(where: { $0.offset < window - Self.drainTail && $0.eventSequence != nil })?.eventSequence
     }
 
-    /// A pinned chat follows its tail. The transcript viewport must end at the
-    /// content bottom when the window ends: a chat that stopped following a
-    /// growing tail (the ChatScrollCoordinator's `chat.lease.repair-exhausted`
-    /// mode) leaves the new rows below the viewport, where SwiftUI does not
-    /// render them, and the window measures a fraction of the workload.
-    static let pinnedTailTolerance: CGFloat = 24
+    /// A pinned chat follows its tail. The newest row must sit at the visual
+    /// bottom when the window ends: a chat that stopped following a growing tail
+    /// (the ChatScrollCoordinator's `chat.lease.repair-exhausted` mode) leaves
+    /// the new rows below the viewport, where SwiftUI does not render them, and
+    /// the window measures a fraction of the workload.
+    ///
+    /// The check is in window coordinates, through the same
+    /// `TranscriptWindowOracle` the hosted journeys use: a scroll-space offset
+    /// against the estimated content size points at the oldest history once
+    /// CT-23 flips the transcript, and would then read a blank chat as followed.
+    static let pinnedTailTolerance = TranscriptWindowOracle.profilingTolerance
 
     func renderCheck() -> ProfileRenderCheck {
         let exhausted = repairsExhausted() - repairsExhaustedBefore
         guard let view = host?.view,
-              let transcript = profileViews(UIScrollView.self, in: view).max(by: { $0.contentSize.height < $1.contentSize.height }) else {
+              TranscriptWindowOracle.transcriptScrollView(in: view) != nil else {
             return ProfileRenderCheck(counters: ["followed": 0], divergence: "no transcript scroll view is mounted")
         }
-        let distance = transcript.contentSize.height + transcript.adjustedContentInset.bottom
-            - transcript.bounds.height - transcript.contentOffset.y
-        let followed = abs(distance) <= Self.pinnedTailTolerance
-        let detail = "tail_distance=\(Int(distance.rounded())) content_height=\(Int(transcript.contentSize.height)) "
+        let bottom = TranscriptWindowOracle.bottom(in: view)
+        let distance = bottom.pinnedError
+        let followed = TranscriptWindowOracle.isPinned(in: view, tolerance: Self.pinnedTailTolerance)
+        let detail = "tail_clearance=\(bottom.clearance.map { String(Int($0.rounded())) } ?? "none") "
+            + "band_covered=\(bottom.isBandCovered) "
+            + "visible_fraction=\(String(format: "%.2f", Double(bottom.visibleRowFraction))) "
             + "repair_exhausted=\(exhausted)"
         return ProfileRenderCheck(
             counters: ["followed": followed ? 1 : 0],
-            divergence: followed ? nil : "the pinned transcript ended \(Int(distance.rounded())) pt from its tail (\(detail))",
+            divergence: followed ? nil : "the pinned transcript's newest row is \(distance.map { "\(Int($0.rounded()))" } ?? "not measurable") pt from its pinned bottom (\(detail))",
             detail: detail
         )
     }

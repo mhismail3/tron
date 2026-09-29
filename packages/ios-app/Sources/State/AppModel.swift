@@ -492,6 +492,7 @@ final class AppModel {
         composerSend: ComposerSendOperation? = nil,
         composerAttachmentFileAccess: ComposerAttachmentFileAccess = .live,
         composerDraftStore: ComposerDraftStore = ComposerDraftStore(),
+        chatMediaFetch: ChatMediaFetch? = nil,
         extensionInteractionDrafts: ExtensionInteractionDraftStore = ExtensionInteractionDraftStore(),
         exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore(),
         diagnosticStore: IOSClientDiagnosticStore? = nil,
@@ -672,7 +673,7 @@ final class AppModel {
             uuidSource: uuidSource
         )
         let chatMedia = ChatMediaLoader(
-            fetch: { identity in
+            fetch: chatMediaFetch ?? { identity in
                 let value = try await client.blob(
                     id: identity.blobID,
                     sessionID: identity.sessionID,

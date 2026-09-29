@@ -561,6 +561,10 @@ struct ReadOnlySubagentSessionSheet: View {
     @State private var detent: PresentationDetent = .medium
     @State private var stopRequested = false
     @State private var invalidationSinkID: UUID?
+    /// This transcript's own row-sheet owner: a child transcript's thinking
+    /// detail and event detail must survive the lazy row that asked for them,
+    /// exactly as the parent chat's do.
+    @State private var sheetRoutes = ChatTranscriptSheetRouteOwner()
 
     private let tailID = "read-only-subagent-tail"
 
@@ -757,6 +761,7 @@ struct ReadOnlySubagentSessionSheet: View {
                             preparedText: store.preparedText.slice(for: item),
                             toolPayloads: store.presentation.toolPayloads
                         )
+                        .environment(\.chatTranscriptSheetRoutes, sheetRoutes)
                         // Transcript/tool semantics are not navigation chrome.
                         .environment(\.tronSettingsVisualTheme, nil)
                         .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
@@ -781,6 +786,15 @@ struct ReadOnlySubagentSessionSheet: View {
             .padding(.top, 12)
             .scrollTargetLayout()
         }
+        // A child transcript's tool runs render as ordinary cards, so this host
+        // never resolves a tool-run route; it presents the thinking and event
+        // detail routes their rows ask for, resolved from this transcript's own
+        // projection.
+        .modifier(ChatTranscriptSheetHost(
+            routes: sheetRoutes,
+            resolveThinkingTrace: { store.resolveThinkingTrace($0) },
+            resolveNotificationDetail: { store.resolveNotificationDetail($0) }
+        ))
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
         // Native tail anchoring must track lazy Markdown measurement and sheet

@@ -218,21 +218,23 @@ struct ToolRunView: View {
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.pendingExtensionInteractionPresenter) private var presentPendingInteraction
     @Environment(\.displayPresentationHandler) private var presentDisplay
-    @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
-    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
+    @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     let run: ChatToolRunPresentation
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
     let recordChip: (ToolChipInstrumentationSample) -> Void
-    @State private var resolvedState: ToolRunResolvedState?
-    @State private var detailDetent: PresentationDetent = .medium
-    @State private var displayHandoff = ToolDisplayHandoff()
-    @Environment(\.scenePhase) private var scenePhase
+    /// Supplied by the transcript's row installation; a host that renders a run
+    /// outside a transcript shows the default expanded card.
+    var inlineDisclosurePhase: DisplayInlineDisclosureState = DisplayInlineDisclosureState()
 
     var body: some View {
         Group {
             if run.tools.count == 1, let tool = run.tools.first, tool.toolName == "display" {
-                DisplayToolView(tool: tool, onOpenTechnicalDetails: openDetails)
+                DisplayToolView(
+                    tool: tool,
+                    disclosure: inlineDisclosurePhase,
+                    onOpenTechnicalDetails: openDetails
+                )
             } else {
                 ToolActivityChip(
                     run: run,
@@ -242,33 +244,6 @@ struct ToolRunView: View {
                 )
             }
         }
-            .tronManagedSheet(
-                isPresented: Binding(
-                    get: { resolvedState != nil },
-                    set: { if !$0 { resolvedState = nil } }
-                ),
-                identity: "chat.tool-run.\(run.id)",
-                onDismiss: completeDisplayHandoff
-            ) {
-                if let resolvedState {
-                    LiveToolRunDetails(
-                        initial: resolvedState,
-                        detent: $detailDetent,
-                        onDisplay: stageDisplayHandoff,
-                        onDismiss: { self.resolvedState = nil }
-                    )
-                }
-            }
-            .onChange(of: installationTag) { previousTag, currentTag in
-                if previousTag.presentationGeneration != currentTag.presentationGeneration
-                    || previousTag.runtimeGeneration != currentTag.runtimeGeneration
-                    || previousTag.sessionID != currentTag.sessionID { displayHandoff.cancel() }
-                refreshResolvedDetails(for: currentTag)
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase != .active { displayHandoff.cancel() }
-            }
-            .onChange(of: model.selectedGatewayProfileID()) { _, _ in displayHandoff.cancel() }
     }
 
     private func activateRun() {
@@ -278,37 +253,15 @@ struct ToolRunView: View {
         } else { openDetails() }
     }
 
-    private func stageDisplayHandoff(toolID: String, command: DisplayPresentationCommand) {
-        guard let state = resolvedState else { return }
-        displayHandoff.stage(command, toolID: toolID, runtime: state.installationTag.runtimeGeneration,
-                             installation: state.installationTag.presentationGeneration, profile: model.selectedGatewayProfileID())
-        resolvedState = nil
-    }
-
-    private func completeDisplayHandoff() {
-        guard let currentInstallation = model.presentationGeneration(for: installationTag.sessionID) else {
-            displayHandoff.cancel()
-            return
-        }
-        let activity = surfaceToken.flatMap { activityCoordinator?.activity(for: $0) }
-        let active = activity?.allowsPresentationPublication == true
-            && scenePhase == .active && UIApplication.shared.applicationState == .active
-        // The detail source establishes authority; the visible projection also
-        // includes admitted history pages, not just the 512-item gateway tail.
-        let source = model.sessionToolDetailSource(for: installationTag.sessionID)
-            .flatMap { _ in model.transcriptSnapshot(for: installationTag.sessionID) }
-        if let command = displayHandoff.consume(
-            source: source,
-            installation: currentInstallation, profile: model.selectedGatewayProfileID(), active: active
-        ) { presentDisplay?(command) }
-    }
-
     private var detailToolIDs: [String] {
         ChatToolInvocationOrdering.reverseChronological(run.tools).map(\.id)
     }
 
+    /// The detail sheet belongs to the transcript, not to this row: streaming
+    /// pushes the row out of lazy realization, and the sheet — with its deferred
+    /// display handoff — must outlive it. The row resolves the run it just asked
+    /// for and hands the route to the transcript's host.
     private func openDetails() {
-        displayHandoff.cancel()
         if let sessionID,
            let presentPendingInteraction,
            let interaction = PendingExtensionInteractionToolPresentation.interaction(
@@ -319,22 +272,17 @@ struct ToolRunView: View {
             presentPendingInteraction(interaction)
             return
         }
-        guard let details = resolveDetails(detailToolIDs, installationTag), !details.isEmpty else { return }
-        detailDetent = .medium
-        resolvedState = ToolRunResolvedState(
-            installationTag: installationTag,
-            run: run,
-            tools: details
-        )
-    }
-
-    private func refreshResolvedDetails(for tag: ChatTranscriptProjectionTag) {
-        guard resolvedState != nil,
-              let details = resolveDetails(detailToolIDs, tag), !details.isEmpty else {
-            resolvedState = nil
-            return
-        }
-        resolvedState = ToolRunResolvedState(installationTag: tag, run: run, tools: details)
+        guard let sheetRoutes,
+              let details = resolveDetails(detailToolIDs, installationTag), !details.isEmpty else { return }
+        sheetRoutes.present(.toolRun(ChatToolRunSheetRoute(
+            runID: run.id,
+            toolIDs: detailToolIDs,
+            state: ToolRunResolvedState(
+                installationTag: installationTag,
+                run: run,
+                tools: details
+            )
+        )))
     }
 }
 

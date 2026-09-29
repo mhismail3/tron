@@ -2952,6 +2952,12 @@ A paused run without that proof owns live work: it keeps `visibility: active` an
 terminal timestamp, so iOS presents it as still pausing. A resume is a new run ID and
 appears as its own active row while the settled paused row keeps the facts it published.
 
+A run the Gateway watched finish takes its own observation instant as `terminalAt`. A run
+it first reads already terminal, after a restart or slot reload, takes the producer's
+recorded end instead (falling back to the observation when that end is missing, malformed
+or in the future). Otherwise every old run in a reopened session would return as recent,
+with a duration counted from its start to now.
+
 `session.processHistory.list` and `.get` page only normalized subagent terminal receipts
 under one bounded branch-derived revision and opaque cursor. Pagination stops before a row that exhausts the current page's byte
 remainder so that row remains reachable at the next cursor; only a row that cannot fit

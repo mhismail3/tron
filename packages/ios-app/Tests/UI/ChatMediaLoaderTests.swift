@@ -210,6 +210,65 @@ struct ChatMediaLoaderTests {
         #expect(loader.metrics().thumbnailFlights == 0)
     }
 
+    @Test("an inline artifact request waits for a slot instead of failing")
+    func inlineArtifactWaitsForCapacity() async throws {
+        // One more card mounts than there are inline artifact slots, with every
+        // fetch held at the first one. A card that cannot start yet must wait
+        // for a slot: a burst of mounting cards never fails a load permanently.
+        let gate = MediaFetchGate(payload: .init(data: Data("# prepared".utf8), mimeType: "text/markdown"))
+        let loader = ChatMediaLoader(
+            fetch: { identity in try await gate.fetch(identity) },
+            admits: { _ in true }
+        )
+        let requests = (0 ... ChatMediaPolicy.maximumInlineArtifactFlights).map { index in
+            Task {
+                try await loader.inlineArtifact(for: mediaIdentity(blobID: "inline-\(index)")) { payload in
+                    PreparedDisplayHTML(source: String(decoding: payload.data, as: UTF8.self))
+                }
+            }
+        }
+        await loader.hostedWaitForInlineArtifactFlightCount(ChatMediaPolicy.maximumInlineArtifactFlights)
+        #expect(loader.metrics().inlineArtifactFlights == ChatMediaPolicy.maximumInlineArtifactFlights)
+
+        await gate.release()
+        for request in requests {
+            let prepared = try await request.value
+            #expect(prepared.source == "# prepared")
+        }
+        #expect(loader.metrics().inlineArtifactFlights == 0)
+    }
+
+    @Test("a failed inline flight whose waiter was cancelled releases its slot")
+    func failedInlineFlightReleasesSlot() async throws {
+        // Every flight fails while its own waiter is cancelled: a flight that has
+        // already ended must retire, or it holds one of the four slots forever
+        // and later cards cannot start.
+        let gate = MediaFailingFetchGate()
+        let loader = ChatMediaLoader(
+            fetch: { identity in try await gate.fetch(identity) },
+            admits: { _ in true }
+        )
+        let requests = (0..<ChatMediaPolicy.maximumInlineArtifactFlights).map { index in
+            Task {
+                try await loader.inlineArtifact(for: mediaIdentity(blobID: "failing-\(index)")) { _ in
+                    PreparedDisplayHTML(source: "never")
+                }
+            }
+        }
+        await loader.hostedWaitForInlineArtifactFlightCount(ChatMediaPolicy.maximumInlineArtifactFlights)
+        for request in requests { request.cancel() }
+        await gate.failEveryFetch()
+        for request in requests { _ = try? await request.value }
+        #expect(loader.metrics().inlineArtifactFlights == 0)
+
+        await gate.admitNextFetch()
+        let prepared = try await loader.inlineArtifact(for: mediaIdentity(blobID: "after-failure")) { payload in
+            PreparedDisplayHTML(source: String(decoding: payload.data, as: UTF8.self))
+        }
+        #expect(prepared.source == "# prepared")
+        #expect(loader.metrics().inlineArtifactFlights == 0)
+    }
+
     @Test("item LRU evicts the oldest tiny thumbnail deterministically")
     func itemBound() async throws {
         let fixture = try SessionScenarioBuilder(seed: 6_303).generatedImageFixture(
@@ -610,7 +669,10 @@ struct ChatMediaLoaderTests {
             thumbnailCount: 0,
             decodedThumbnailBytes: 0,
             thumbnailFlights: 0,
-            hasFullPreviewFlight: false
+            hasFullPreviewFlight: false,
+            retainedInlineArtifactCount: 0,
+            retainedInlineArtifactBytes: 0,
+            inlineArtifactFlights: 0
         ))
 
         let gate = MediaFetchGate(payload: .init(data: fixture.encodedData, mimeType: "image/png"))
@@ -809,5 +871,35 @@ private actor MediaFetchGate {
         let waiters = fetchWaiters
         fetchWaiters.removeAll()
         waiters.forEach { $0.resume() }
+    }
+}
+
+/// A fetch source that holds its first fetch and then fails every one of them,
+/// until the test admits one: an inline flight's own failure path needs a real
+/// error, not a cancellation.
+private actor MediaFailingFetchGate {
+    private var fetchHolders: [CheckedContinuation<Void, Never>] = []
+    private var failing = false
+    private var admitting = false
+
+    func fetch(_ identity: ChatMediaIdentity) async throws -> ChatMediaPayload {
+        _ = identity
+        if !failing {
+            await withCheckedContinuation { fetchHolders.append($0) }
+        }
+        guard admitting else { throw ChatMediaLoadError.staleIdentity }
+        try Task.checkCancellation()
+        return ChatMediaPayload(data: Data("# prepared".utf8), mimeType: "text/markdown")
+    }
+
+    func failEveryFetch() {
+        failing = true
+        let holders = fetchHolders
+        fetchHolders.removeAll()
+        holders.forEach { $0.resume() }
+    }
+
+    func admitNextFetch() {
+        admitting = true
     }
 }
