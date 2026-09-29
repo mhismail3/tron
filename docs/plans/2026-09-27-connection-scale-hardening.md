@@ -665,9 +665,9 @@ rows are in priority order.
 | --- | --- | --- | --- | --- |
 | R-1 | Done | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | orchestrator, 2026-09-29: merged to `main` with four known misses the user accepted in writing (see handoff); F-4..F-7 own them |
 | F-4 | Claimed | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-4), 2026-09-30 |
-| F-5 | Claimed | Prompt admission p99 ~610 ms against 250 ms in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567, with F-6 and F-7), 2026-09-30 |
-| F-6 | Claimed | Event loop p99 ~38 ms against 20 ms, max up to 1.4 s under load; attribute with a CPU profile | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30 |
-| F-7 | Claimed | Warm `session.open` p99 ~335 ms against 300 ms | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30 |
+| F-5 | Blocked | Prompt admission p99 ~610 ms against 250 ms in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567, with F-6 and F-7), 2026-09-30; full-size profile failed in prime before mixed-window evidence (see handoff) |
+| F-6 | Blocked | Event loop p99 ~38 ms against 20 ms, max up to 1.4 s under load; attribute with a CPU profile | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30; host too loaded for qualifying attribution and full-size profile failed in prime (see handoff) |
+| F-7 | Blocked | Warm `session.open` p99 ~335 ms against 300 ms | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30; full-size profile failed in prime before measured windows (see handoff) |
 | R-2 | Ready | User installs the Mac Release build and the iOS build; agent verifies the deployment | R-1 | E-3d owes one user action: prove the LAN kill switch on the installed release (`launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off`, user restarts the Gateway, `lan.listener state=disabled reason=setting_off` appears) |
 | R-3 | Ready | User runs Tron normally for at least 24 hours, then exports phone logs | R-2 | |
 | R-4 | Ready | Analyse the day with the triage tool; check real-use exit criteria; open Phase 3 rows | R-3 | Read `lan.listener` transitions and `transport=lan` on `http.upgrade` to see whether the lane carried the day (E-3d) |
@@ -1859,6 +1859,36 @@ Read the numbers as one sample per case.
 - Met: `session.list` p99 94–127 ms (one 1.5 s iteration under load); cold large open p99 ~530 ms; catalog walks 0; blackhole recovery 17–70 ms; restart reconnect max 5.8–7.2 s with 0 requests over 1 s in the quiet run (G-13's criterion; 1 in one loaded iteration); pong misses 0 outside the stream case.
 - Missed (user accepted in writing 2026-09-29, "Merge now, fix misses after"): bandwidth-stream ping-to-pong ~24 s / 2 misses per run (F-4); prompt admission p99 ~610 ms (F-5); event-loop p99 ~38 ms and max 217 ms quiet / 1.4 s loaded (F-6); warm open p99 ~335 ms (F-7).
 - Installed for rollback: Mac app 0.1.0 (8); launcher still logs a refused stale external selection of `0.1.0-beta.7-source-1790559163986`.
+
+### 2026-09-30 — F-567 qualification attempt (worker)
+
+- Result: no product change. The required full-size CPU-profile run
+  (`scripts/tron-profile gateway --scenario multi-session --no-build --iterations 1 --cases none --cpu-profile`)
+  exited 6 in `prime`: `session.list` returned retryable `busy` (“The session
+  catalog has not been read yet”) through the driver's 40 × 250 ms retry limit.
+  Its fixture log records no first `catalog.reconciled` before the 11.5 s prime
+  window closed. No F-5/F-6/F-7 metric was produced, so the rows remain Blocked.
+- Evidence: failed run
+  `~/Library/Developer/Tron/profiles/gateway/20260929T234124Z-multi-session-0d7ab5`
+  (`driver-prime.log`, `fixture/gateway.jsonl`, prime CPU profile). A 400-file /
+  96 MiB smoke completed at
+  `~/Library/Developer/Tron/profiles/gateway/20260929T234418Z-multi-session-0dc352`,
+  but the host was heavily loaded (1-minute load 66 on 18 CPUs, one simulator
+  active), producing only one sample and invalidating it as qualification or
+  before/after evidence. It is not used to claim any target.
+- Finding: first full-size run makes the existing prime retry horizon shorter
+  than this fixture's first catalog cut on this run. That is a harness/readiness
+  boundary, not sufficient evidence to raise a timeout or alter production
+  behavior. The prior R-1 artifacts' O-3 spans and delay histograms cannot
+  identify a new fix's same-run effect; no change was made speculatively.
+- Changes: plan status and handoff only.
+- Deviations: blocked rather than claim the target without quiet-host numbers.
+- For the next agent: after the fixture's catalog-readiness boundary and host
+  contention are resolved, retry the exact full-size CPU-profile command on a
+  quiet host, inspect `rpc.completed` stages/unaccounted time for prompt/open,
+  `gateway.resources` event-loop records and the profile from the mixed window;
+  implement only an owner-level cause supported by that evidence, then rerun
+  against an equivalent baseline and candidate before marking any row Done.
 
 ### Draft · 2026-09-27 · connection investigation session
 
