@@ -4762,7 +4762,7 @@ final class ChatViewScrollHarness {
         let newestEnd = TranscriptWindowOracle.isFlipped(scrollView) ? -inset.top : maximumOffset
         let proposed = newestEnd - (TranscriptWindowOracle.isFlipped(scrollView) ? -points : points)
         scrollView.setContentOffset(
-            CGPoint(x: scrollView.contentOffset.x, y: max(0, proposed)),
+            CGPoint(x: scrollView.contentOffset.x, y: min(maximumOffset, max(-inset.top, proposed))),
             animated: false
         )
         scrollView.layoutIfNeeded()
