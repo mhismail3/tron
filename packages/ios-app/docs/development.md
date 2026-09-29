@@ -945,15 +945,41 @@ transition diff of 0.0528, at the send entrance's frame 43. The phases are class
 `ChatVisualParitySpec.transitionPhases`, so which frames are compared tightly is
 the scenario's own declaration and every phase not named there is tight by
 default. Sampling is normalized so the compared states reproduce wherever they
-can: the transcript's native offset is snapped to a whole point before a frame
-is rendered, a rendered frame may be re-aligned by up to 2 points vertically in
-half-point steps, a rendered frame may be matched to a recorded frame one
-boundary away, and each scenario settles on the rendered pixels (not the
-recorder's layout sample stream) before its fixed frame sequence begins. CT-25
+can: only the estimated-end orientation's native offset is snapped to a whole
+point before rendering, a rendered frame may be re-aligned by up to 2 points vertically, a
+rendered frame may be matched to a recorded frame one boundary away, and each
+scenario settles on the rendered pixels (not the recorder's layout sample
+stream) before its fixed frame sequence begins. CT-25
 measured removing the offset snap: the gate stayed green in three runs, but the
 opened-long-history reference's stable frames moved to 0.019 of their 0.025
-bound, so the snap still carries that reference's determinism and its removal
-belongs with CT-23's exact origin. The suite runs in about 60 s.
+bound, so today's path retains it. The orientation owner excludes the exact-origin
+path: rounding its applied negative inset by even a third of a point moves it
+off the native pin and makes subsequent margin changes preserve that displaced
+offset. Capture must observe the keyboard, not scroll it. The keyboard parity
+scenario also checks the settled row against the composer before comparing
+pixels. The suite runs in about 60 s.
+
+The alignment search's step is per frame (CT-23 stage 2). A frame in a stable
+phase is searched at one display pixel — a third of a point on this lane's
+device — matching the display-pixel placement of pinned row frames. Today's
+reference uses whole-point offset normalization; the candidate's exact origin
+is never moved for a capture. Transition frames keep the half-point step their
+own bound was measured with. The finer step is not enough on its own, and the
+gate states it: today's container pins to the `LazyVStack`'s own estimated
+content height, so it settles at a 12.667 pt tail clearance where its contract is
+12 pt, while an exactly pinned candidate settles at 12.000. The reference
+therefore carries a 0.667 pt (two display pixel) offset, and the 2-point bands
+are sensitive to the capture's ink phase: the finer search finds that offset
+(the reported shift is 0.333-0.667 pt) but the opened-long-history scenario's
+stable frames still read 0.0277-0.0285 against the 0.025 bound, and
+`ordinary-send-keyboard-up`'s pinned frame can sit on either side of the bound
+(0.02498 with the pre-margin viewport, 0.02505 with margins, identical row
+positions; their image-to-image RMS is 0.00165). Scenario-wide `maxDiff` may
+belong to a permitted transition and must not be reported as the failed stable
+frame's magnitude; `report.json` names each frame's own magnitude and bound.
+Today's path stays 10/10 in the same runs. Closing it needs either a re-record
+(excluded by the CT-12 rule above) or a comparison that is insensitive to the
+capture's ink phase, and CT-12/CT-25's owner owns that decision.
 
 What the gate cannot resolve, measured on this lane: the exact rise and duration
 of a sub-60 ms-phase transition. A frame must force a screen update to carry the
@@ -2435,3 +2461,33 @@ defaults, logs, or UserDefaults.
 ### Diagnostic source identity
 
 The app build stamps `TronBuildIdentity.json` into its signed resources with the source commit and dirty state. Export Diagnostics includes that app identity independently of the connected Gateway revision. The JSONL bundle retains only bounded RPC method/request IDs, outcome, code, and duration; it never serializes request parameters or arbitrary error details. Missing build identity is reported as unknown.
+
+
+#### Transcript orientation experiment (CT-23)
+
+Release retains today's newest-at-end transcript and has no evaluation row.
+For the temporary device comparison, `Tron Device` / `LocalDevice` alone defines
+`TRON_TRANSCRIPT_ORIENTATION_EVALUATION` (alongside `TRON_PRIVATE_VARIABLE_BLUR`).
+It defaults to the flipped, newest-at-origin transcript. Settings → Data &
+Diagnostics → **Flipped chat transcript (evaluation)** writes the app-local
+`tron.transcript.flippedEvaluation` preference; off selects today's path. Fully
+quit and relaunch after changing it: the app freezes selection at launch, before
+Settings or chat opens. Compare the navigation-bar fade in both modes. This
+condition, preference and Settings row are temporary and retire at CT-19 cutover.
+
+Hosted Test and optimized DevicePerformance both compile `HOSTED_TEST`; prefix a test or
+`scripts/tron-profile ios` invocation with
+`TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin` to measure the development
+origin-anchored path (`end` selects today's path). Hosted selection ignores the
+evaluation preference; no Release or ordinary device build reads this environment switch.
+CT13 and profile scenario metrics name the orientation. Compare matched
+`streaming-reply` and `tool-loop` reports from both orientations with
+`scripts/tron-profile compare`; simulator measurements are not device proof.
+
+
+`ChatRowStabilityTests.rowStabilityJourney` traverses overlapping viewports
+before visiting the oldest loaded history; a direct jump can skip an entire
+lazy fixture. Phase-height comparisons read the probe's settled records and
+wait for the entrance owner's settlement, not a guessed number of display
+frames. Thinking-row mount/measurement and the unchanged 0.5 pt phase bound
+remain gates in both orientations.

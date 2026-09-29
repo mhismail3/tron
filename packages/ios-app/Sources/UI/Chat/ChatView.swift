@@ -13,6 +13,9 @@ struct ChatView: View {
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
+    /// The transcript's vertical orientation (CT-23's development switch).
+    /// Today's path is the default and it is fixed for the life of the view.
+    private let transcriptOrientation: ChatTranscriptOrientation
     #if HOSTED_TEST
     let hostedProbe: ChatHostedProbe?
     #endif
@@ -68,7 +71,8 @@ struct ChatView: View {
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
-        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
+        transcriptOrientation: ChatTranscriptOrientation = .selected
     ) {
         self.sessionID = sessionID
         self.initialEditorText = initialEditorText
@@ -80,8 +84,12 @@ struct ChatView: View {
         self.hostedProbe = hostedProbe
         self.displayFrameScheduler = displayFrameScheduler
         self.performanceSignposts = performanceSignposts
+        self.transcriptOrientation = transcriptOrientation
         _composerScope = State(initialValue: nil)
-        _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
+        _scrollCoordinator = State(initialValue: ChatScrollCoordinator(
+            frameScheduler: displayFrameScheduler,
+            orientation: transcriptOrientation
+        ))
         _transcriptPresentation = State(initialValue: ChatTranscriptPresentationStore(
             performanceSignposts: performanceSignposts,
             installationFrameScheduler: displayFrameScheduler
@@ -98,7 +106,8 @@ struct ChatView: View {
         initialSearchResult: SessionSearchResult? = nil,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
-        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
+        transcriptOrientation: ChatTranscriptOrientation = .selected
     ) {
         self.sessionID = sessionID
         self.initialEditorText = initialEditorText
@@ -109,8 +118,12 @@ struct ChatView: View {
         self.onForkCreated = onForkCreated
         self.displayFrameScheduler = displayFrameScheduler
         self.performanceSignposts = performanceSignposts
+        self.transcriptOrientation = transcriptOrientation
         _composerScope = State(initialValue: nil)
-        _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
+        _scrollCoordinator = State(initialValue: ChatScrollCoordinator(
+            frameScheduler: displayFrameScheduler,
+            orientation: transcriptOrientation
+        ))
         _transcriptPresentation = State(initialValue: ChatTranscriptPresentationStore(
             performanceSignposts: performanceSignposts,
             installationFrameScheduler: displayFrameScheduler
@@ -875,14 +888,18 @@ struct ChatView: View {
         )
         guard let installed, scrollCoordinator.canAutomaticallyFollow else { return }
         let rows = ChatPhysicalTranscriptRowPolicy.rows(
-            installed: installed, canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+            installed: installed,
+            canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
+            orientation: transcriptOrientation
         )
         let previousTail = baseline.flatMap {
             ChatPhysicalTranscriptRowPolicy.rows(
-                installed: $0, canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
-            ).last
+                installed: $0,
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
+                orientation: transcriptOrientation
+            ).newest
         }
-        guard let tail = rows.last, tail.id != previousTail?.id else { return }
+        guard let tail = rows.newest, tail.id != previousTail?.id else { return }
         // Reuse the exact native target/settlement lease; detached readers
         // never enter this path and no entrance animation is replayed.
         scrollCoordinator.discreteTailInserted(renderedID: tail.semanticID, physicalTargetID: tail.id)
@@ -913,32 +930,31 @@ struct ChatView: View {
         let physicalRowPositions: [String: Int] = installed.map {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
+                orientation: transcriptOrientation
             )
             let hasEarlierMessages = ($0.sourceWindow.originalStart ?? 0) > 0
             var positions = Dictionary(uniqueKeysWithValues: rows.enumerated().map {
-                ($0.element.id, $0.offset + (hasEarlierMessages ? 1 : 0))
+                (
+                    $0.element.id,
+                    transcriptOrientation.visualPosition(
+                        ofSpinePosition: $0.offset, count: rows.count
+                    ) + (hasEarlierMessages ? 1 : 0)
+                )
             })
             if hasEarlierMessages { positions["earlier-messages"] = 0 }
             return positions
         } ?? [:]
-        let physicalTerminalPosition: Int? = installed.flatMap {
-            let rows = ChatPhysicalTranscriptRowPolicy.rows(
-                installed: $0,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
-            )
-            let leadingEarlierRow = ($0.sourceWindow.originalStart ?? 0) > 0 ? 1 : 0
-            return rows.indices.last.map { $0 + leadingEarlierRow }
-                ?? (leadingEarlierRow > 0 ? 0 : nil)
-        }
         let terminalPhysicalID = installed.flatMap {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
+                orientation: transcriptOrientation
             )
-            if let terminal = rows.last { return terminal.id }
+            if let terminal = rows.newest { return terminal.id }
             return ($0.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil
         }
+        let physicalTerminalPosition = terminalPhysicalID.flatMap { physicalRowPositions[$0] }
         // Keep the native physical target while transferring its geometry
         // owner atomically with prompt/tool payload replacement.
         scrollCoordinator.reconcileMaterializationRows { physicalID in
@@ -971,10 +987,18 @@ struct ChatView: View {
     private func settleTranscriptEntrance(renderedID: String) {
         guard let active = layoutTransaction.generation,
               active.joined.contains(.transcriptGrowth),
-              !active.settled.contains(.transcriptGrowth),
-              let generation = scrollCoordinator.layoutTransactionForSettledEntrance(
-                renderedID: renderedID
-              ) else { return }
+              !active.settled.contains(.transcriptGrowth) else { return }
+        guard !transcriptOrientation.mountsNewestRowWithContent else {
+            // No materialization lease exists on the origin-anchored path to
+            // certify which entrance owes the layout transaction: the newest row
+            // is on screen by construction, so the store's own entrance
+            // settlement settles the growth participant directly.
+            layoutTransaction.settle(active.id, source: .transcriptGrowth)
+            return
+        }
+        guard let generation = scrollCoordinator.layoutTransactionForSettledEntrance(
+            renderedID: renderedID
+        ) else { return }
         layoutTransaction.settle(generation, source: .transcriptGrowth)
     }
 
@@ -1262,6 +1286,7 @@ struct ChatView: View {
             admitsNativeCallbacks: admitsNativeScrollCallbacks,
             responseState: responseState,
             mutatingQueuedMessageIDs: sessionPresentation.mutatingQueuedMessageIDs,
+            orientation: transcriptOrientation,
             scrollPosition: $transcriptScrollPosition,
             earlierRow: { installed in earlierMessagesChip(installed: installed) },
             openingSurface: { openingSurface },
@@ -2070,23 +2095,27 @@ struct ChatView: View {
         if (retainsInstalledPresentation || retainsDetachedCut), let retained = transcriptPresentation.installed {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: retained,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
+                orientation: transcriptOrientation
             )
-            let terminalID = rows.last?.id
+            let terminalID = rows.newest?.id
                 ?? ((retained.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil)
             let hasEarlierMessages = (retained.sourceWindow.originalStart ?? 0) > 0
             var physicalPositions = Dictionary(uniqueKeysWithValues: rows.enumerated().map {
-                ($0.element.id, $0.offset + (hasEarlierMessages ? 1 : 0))
+                (
+                    $0.element.id,
+                    transcriptOrientation.visualPosition(
+                        ofSpinePosition: $0.offset, count: rows.count
+                    ) + (hasEarlierMessages ? 1 : 0)
+                )
             })
             if hasEarlierMessages { physicalPositions["earlier-messages"] = 0 }
-            let leadingEarlierRow = hasEarlierMessages ? 1 : 0
             scrollCoordinator.projectionInstalled(
                 structure: retained.physicalRowSpineIdentity,
                 terminalPhysicalID: terminalID,
                 projectionTag: retained.tag,
                 physicalRowPositions: physicalPositions,
-                physicalTerminalPosition: rows.indices.last.map { $0 + leadingEarlierRow }
-                    ?? (leadingEarlierRow > 0 ? 0 : nil)
+                physicalTerminalPosition: terminalID.flatMap { physicalPositions[$0] }
             )
         }
         let interval = performanceSignposts.begin(.firstReadyFrame)
@@ -2558,11 +2587,12 @@ struct ChatView: View {
     private func physicalOpeningTailID(for installed: InstalledChatTranscript) -> String {
         let rows = ChatPhysicalTranscriptRowPolicy.rows(
             installed: installed,
-            canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+            canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
+            orientation: transcriptOrientation
         )
         // Target the current physical terminal row so lazy content realizes its
         // natural tail. The marker remains the separate settlement oracle.
-        if let terminal = rows.last { return terminal.id }
+        if let terminal = rows.newest { return terminal.id }
         if (installed.sourceWindow.originalStart ?? 0) > 0 { return "earlier-messages" }
         return "transcript-bottom"
     }
@@ -2610,10 +2640,23 @@ struct ChatView: View {
             return .discarded
         }
         let activation = viewportActivation
-        let settlement = await scrollCoordinator.waitForOpeningTailSettlement()
-        #if HOSTED_TEST
-        await hostedProbe?.openingSettlementReturned?(settlement)
-        #endif
+        let settlement: ChatScrollCoordinator.OpeningTailSettlementResult
+        if transcriptOrientation.pinsToEstimatedOrigin {
+            settlement = await scrollCoordinator.waitForOpeningTailSettlement()
+            #if HOSTED_TEST
+            await hostedProbe?.openingSettlementReturned?(settlement)
+            #endif
+        } else {
+            // The newest row is the exact content origin on the first layout
+            // pass, so one covered frame installs the settled viewport: there is
+            // no physical settlement proof to wait for, and the reveal below is
+            // unchanged.
+            do { try await displayFrameScheduler.nextFrame() } catch {
+                performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                return .discarded
+            }
+            settlement = .settled
+        }
         // A deadline owns physical settlement, not authority. Fence failures
         // as well as successes before either can publish or retire a runtime.
         guard !Task.isCancelled,
@@ -2662,6 +2705,16 @@ struct ChatView: View {
         guard !Task.isCancelled,
               sessionPresentation.open.epoch == epoch,
               sessionPresentation.open.phase == .positioning else { return false }
+        guard transcriptOrientation.pinsToEstimatedOrigin else {
+            // The newest row is the exact content origin on the first layout
+            // pass, so there is nothing to position and no physical origin
+            // evidence to wait for. Ownership still runs to the first ready
+            // frame, which is what keeps intake and asynchronous content gated
+            // through the reveal exactly as today.
+            return !Task.isCancelled
+                && sessionPresentation.open.epoch == epoch
+                && sessionPresentation.open.phase == .positioning
+        }
         let context = ensureInteractionTraceContext()
         model.chatInteractionTrace.opening(
             .positioningBegan,
@@ -2697,11 +2750,11 @@ struct ChatView: View {
                 installStableTailTarget()
             case .materialize(let renderedID):
                 var target = ScrollPosition(idType: String.self)
-                target.scrollTo(id: renderedID, anchor: .bottom)
+                target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
                 transcriptScrollPosition = target
             case .openingTail(let renderedID):
                 var target = ScrollPosition(idType: String.self)
-                target.scrollTo(id: renderedID, anchor: .bottom)
+                target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
                 transcriptScrollPosition = target
             case .tail where command.origin == .pastEndRepair
                     || command.origin == .targetFreeRebase:
@@ -2712,12 +2765,20 @@ struct ChatView: View {
                 // admitted exactly when marker evidence is unavailable or has
                 // proved unreliable, so neither may depend on the marker.
                 var target = ScrollPosition(idType: String.self)
-                target.scrollTo(edge: .bottom)
+                target.scrollTo(edge: transcriptOrientation.newestEdge)
                 transcriptScrollPosition = target
             case .tail:
-                transcriptScrollPosition.scrollTo(edge: .bottom)
+                transcriptScrollPosition.scrollTo(edge: transcriptOrientation.newestEdge)
             case .offsetY(let offsetY):
-                transcriptScrollPosition.scrollTo(y: offsetY)
+                // The coordinator computes points in its own model, which is the
+                // scroll view's offset on today's path and its reflection on the
+                // origin-anchored one. Reflecting a point back is the owner's
+                // mapping: without it a point near the newest row scrolls the
+                // view the same distance the other way, into the oldest history.
+                transcriptScrollPosition.scrollTo(y: transcriptOrientation.scrollOffsetY(
+                    forModelOffsetY: offsetY,
+                    geometry: scrollCoordinator.latestGeometry
+                ))
             }
         }
         switch command.animation {
@@ -2752,7 +2813,7 @@ struct ChatView: View {
     private func installStableTailTarget() {
         // A fresh value forces SwiftUI to apply the marker target after drift.
         var target = ScrollPosition(idType: String.self)
-        target.scrollTo(id: "transcript-bottom", anchor: .bottom)
+        target.scrollTo(id: "transcript-bottom", anchor: transcriptOrientation.newestEndAnchor)
         transcriptScrollPosition = target
     }
 
@@ -2770,6 +2831,9 @@ struct ChatView: View {
 
     @MainActor
     private func applyViewportMode(_ mode: ChatViewportMode) {
+        #if HOSTED_TEST
+        hostedProbe?.recordTargetRelease()
+        #endif
         guard mode == .anchored || scrollCoordinator.canInstallPersistentBottomPosition else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true

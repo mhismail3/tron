@@ -950,7 +950,10 @@ struct ChatViewScrollHarnessTests {
                 )
                 print(metrics.line)
                 #expect(
-                    transcriptBottomGateOutcome(try #require(metrics.coverage)) == .asExpected,
+                    transcriptBottomGateOutcome(
+                        try #require(metrics.coverage),
+                        expectation: .current(for: harness.orientation)
+                    ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
                 #expect(
@@ -961,7 +964,18 @@ struct ChatViewScrollHarnessTests {
                     metrics.tallRowHeight > 1_000,
                     "the shape's tall row was realized and measured as the estimate-stressing row"
                 )
-                #expect(metrics.materializations > 0, "the send materialized its tail")
+                // Today's send has to materialize its lazy tail; the
+                // origin-anchored transcript's newest row is the content origin,
+                // so there is nothing to materialize and the count must stay
+                // zero.
+                if harness.orientation.mountsNewestRowWithContent {
+                    #expect(
+                        metrics.materializations == 0,
+                        "the origin-anchored transcript has no lazy tail to materialize"
+                    )
+                } else {
+                    #expect(metrics.materializations > 0, "the send materialized its tail")
+                }
             }
         }
     }
@@ -1060,17 +1074,27 @@ struct ChatViewScrollHarnessTests {
                 )
                 print(metrics.line)
                 #expect(
-                    transcriptBottomGateOutcome(try #require(metrics.coverage)) == .asExpected,
+                    transcriptBottomGateOutcome(
+                        try #require(metrics.coverage),
+                        expectation: .current(for: harness.orientation)
+                    ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
                 #expect(
                     samples.count == phaseLengths.reduce(0, +),
                     "the scenario ran every sampled display boundary"
                 )
-                #expect(
-                    metrics.materializations >= cycles,
-                    "every cycle's admitted send materialized its tail"
-                )
+                if harness.orientation.mountsNewestRowWithContent {
+                    #expect(
+                        metrics.materializations == 0,
+                        "the origin-anchored transcript has no lazy tail to materialize"
+                    )
+                } else {
+                    #expect(
+                        metrics.materializations >= cycles,
+                        "every cycle's admitted send materialized its tail"
+                    )
+                }
             }
         }
     }
@@ -1158,7 +1182,10 @@ struct ChatViewScrollHarnessTests {
                 )
                 print(metrics.line)
                 #expect(
-                    transcriptBottomGateOutcome(try #require(metrics.coverage)) == .asExpected,
+                    transcriptBottomGateOutcome(
+                        try #require(metrics.coverage),
+                        expectation: .current(for: harness.orientation)
+                    ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
                 #expect(
@@ -1230,7 +1257,10 @@ struct ChatViewScrollHarnessTests {
                 )
                 print(metrics.line)
                 #expect(
-                    transcriptBottomGateOutcome(try #require(metrics.coverage)) == .asExpected,
+                    transcriptBottomGateOutcome(
+                        try #require(metrics.coverage),
+                        expectation: .current(for: harness.orientation)
+                    ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
                 #expect(
@@ -1297,14 +1327,16 @@ struct ChatViewScrollHarnessTests {
                     }
                 }
                 try await measurePhase(phaseLengths[0])
-                samples.append(contentsOf: try await harness.driveKeyboardInset(show))
+                let showRamp = try await harness.driveKeyboardInset(show)
+                samples.append(contentsOf: showRamp)
                 let shownSettled = try await harness.newestRowSettledAtComposer()
                 try harness.setComposerDraftText(
                     "First line of the draft\nSecond line\nThird line\nFourth line"
                 )
                 try await measurePhase(phaseLengths[2])
                 try harness.setComposerDraftText("")
-                samples.append(contentsOf: try await harness.driveKeyboardInset(hide))
+                let hideRamp = try await harness.driveKeyboardInset(hide)
+                samples.append(contentsOf: hideRamp)
                 let hiddenSettled = try await harness.newestRowSettledAtComposer()
                 try await measurePhase(phaseLengths[4])
 
@@ -1347,6 +1379,56 @@ struct ChatViewScrollHarnessTests {
                     abs(hidden - TranscriptWindowOracle.tailSpacing) <= 6,
                     "the newest row settled \(ct2Number(hidden)) pt from the composer after the dismissal: \(metrics.line)"
                 )
+                // The keyboard's own transition frames, not only its settled
+                // ends: a transcript whose inset lands at the composer's edge
+                // rides the keyboard's transaction frame for frame, while one
+                // that reserves it anywhere else measures the whole keyboard
+                // height as a gap inside the ramp the reader is watching.
+                let ramp = (showRamp + hideRamp).compactMap(\.clearance)
+                let rampWorstGap = ramp.map { abs($0 - TranscriptWindowOracle.tailSpacing) }.max()
+                print("CT25-KEYBOARD-RAMP boundaries=\(ramp.count)"
+                    + " worstGap=\(rampWorstGap.map(ct2Number) ?? "none")")
+                #expect(
+                    ramp.count == show.boundaries + hide.boundaries,
+                    "every driven transition boundary measured a newest row: \(metrics.line)"
+                )
+                switch KeyboardRampExpectation.current(for: .selected) {
+                case .ridesTheComposerEdge:
+                    #expect(
+                        (rampWorstGap ?? .infinity) <= KeyboardRampExpectation.tolerance,
+                        "the keyboard's ramp left the newest row \(rampWorstGap.map(ct2Number) ?? "unknown") pt from the composer: \(metrics.line)"
+                    )
+                case .measuresTheKnownDrop:
+                    #expect(
+                        (rampWorstGap ?? 0) > KeyboardRampExpectation.tolerance,
+                        "today's path stopped measuring the ramp's known drop: \(metrics.line)"
+                    )
+                }
+                // Failure modes: a cached reflection classifies an unchanged raw
+                // marker against the previous viewport; mixing the inset source
+                // with applied geometry invents a distance during the ramp.
+                // The reflect-on-arrival negative-control revision must fail here.
+                if harness.orientation.presentsNewestRowFirst {
+                    for (index, sample) in (showRamp + hideRamp).enumerated() {
+                        #expect(sample.distanceFromNewest <= 0.5,
+                            "boundary \(index) distance=\(sample.distanceFromNewest)")
+                        #expect(sample.tailState?.contains("tail=aligned ") == true,
+                            "boundary \(index): \(sample.tailState ?? "missing marker evidence")")
+                    }
+                }
+                let displacedOpeningViewports = harness.traceRecords.count {
+                    $0.record.event == "chat.anomaly.opening-viewport-displaced"
+                }
+                print("CT25-OPENING-ANOMALY displaced=\(displacedOpeningViewports)")
+                // Measured, not gated: with the frames adapted (P1-2) a *pinned*
+                // transcript's marker classifies `aligned` at the composer edge —
+                // the pinned dump reads `[663, 675]` against the viewport's 675 —
+                // but the opening still passes through un-settled states that can
+                // record one displaced viewport (measured: `displaced=0` in four
+                // focused runs and 1 in one heavy suite run). That transient is
+                // the opening's own, not the pinned misclassification the review
+                // named, so the count is printed for comparison instead of gating
+                // a fixture that reproduces it one run in five.
             }
         }
     }
@@ -1395,11 +1477,394 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // The origin-anchored transcript's one piece of chrome (CT-23 stage 2): the
+    // automatic scroll edge effect at the pinned end.
+    //
+    // iOS 26 sizes that effect's band from the scroll view's own geometry, and
+    // under the flip it makes the band the whole scroll view viewport instead of
+    // the bar-sized one: measured 844 pt against 170.8 pt (106 pt with the hard
+    // style) for every style, scroll position, content size and inset, with the
+    // band's position (the visual top) unchanged. Drawn at that size it is a
+    // whole-viewport wash — 0.105 of the parity gate's difference against 0.018
+    // with it suppressed, and visible on the simulator's own screen — while the
+    // chat's own top blur is unchanged by the flip and still owns the chrome.
+    // So the origin-anchored path suppresses the pinned end's effect and today's
+    // path must keep the effect it has always drawn: this is the test that fails
+    // if the suppression is dropped or applied to the other path.
+    @Test("only the origin-anchored transcript suppresses the pinned end's scroll edge effect")
+    func originAnchoredTranscriptSuppressesPinnedEndScrollEdgeEffect() async throws {
+        try await withTestWatchdog(timeout: .seconds(40)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_284)
+                .openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, orientation: .newestAtOrigin) { harness in
+                let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+                #expect(
+                    scrollView.topEdgeEffect.isHidden,
+                    "the origin-anchored transcript suppresses the pinned end's automatic effect"
+                )
+                #expect(
+                    !scrollView.bottomEdgeEffect.isHidden,
+                    "the origin-anchored transcript leaves the other edge's effect alone"
+                )
+            }
+            try await withHarness(snapshot: snapshot, orientation: .newestAtEnd) { harness in
+                let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+                #expect(
+                    !scrollView.topEdgeEffect.isHidden,
+                    "today's transcript keeps the edge effect it has always drawn"
+                )
+                #expect(!scrollView.bottomEdgeEffect.isHidden)
+            }
+        }
+    }
+
     // The window oracle's orientation read, as a failure mode: a container that
     // flips the scroll view *and* an ancestor renders upright, so the read has to
     // multiply the signs along the layer chain instead of stopping at the first
     // negative `m22`. Reading it as flipped would send `scrollReader`'s newest end
     // and every pinned check the wrong way on exactly that container.
+    // MARK: CT-23 stage 4: accessibility, the status-bar tap and the context menu
+
+    /// Why a context-menu preview is not the source lifted in place, or `nil`
+    /// when it is.
+    ///
+    /// The preview is the source's own view, so its geometry is the source's own
+    /// geometry: the transcript's flip and each row's counter-flip are ancestor
+    /// render transforms, and a preview built from the source's own transform is
+    /// upright by construction. A preview that carried the transcript's flip —
+    /// the failure mode the origin-anchored transcript creates — would lift the
+    /// bubble mirrored, and one built in the flipped container's coordinates
+    /// would lift away from the finger.
+    enum ContextMenuPreviewPlacement {
+        static let tolerance: CGFloat = 0.5
+
+        static func failure(
+            sourceWindowFrame: CGRect,
+            targetTransform: CGAffineTransform,
+            containerCenterInWindow: CGPoint,
+            previewSize: CGSize,
+            containerRendersFlipped: Bool,
+            previewViewRendersFlipped: Bool
+        ) -> String? {
+            guard targetTransform == .identity else {
+                return "the preview target carries a transform \(targetTransform)"
+            }
+            guard !containerRendersFlipped else {
+                return "the preview's container renders flipped"
+            }
+            guard !previewViewRendersFlipped else {
+                return "the preview's view renders flipped"
+            }
+            let expected = CGPoint(x: sourceWindowFrame.midX, y: sourceWindowFrame.midY)
+            guard abs(containerCenterInWindow.x - expected.x) <= tolerance,
+                  abs(containerCenterInWindow.y - expected.y) <= tolerance else {
+                return "the preview is centered at \(containerCenterInWindow), not over the source at \(expected)"
+            }
+            guard abs(previewSize.width - sourceWindowFrame.width) <= tolerance,
+                  abs(previewSize.height - sourceWindowFrame.height) <= tolerance else {
+                return "the preview is \(previewSize), not the source's \(sourceWindowFrame.size)"
+            }
+            return nil
+        }
+    }
+
+    /// Why VoiceOver would not read the transcript's elements in the order the
+    /// reader sees them, or `nil` when it would.
+    ///
+    /// VoiceOver reads a container's elements in the accessibility tree's own
+    /// order, which follows the view order, and a sort priority sorts highest
+    /// first within that container; equal priorities keep the tree order, which
+    /// is what the product does without a priority at all. `priority` is what
+    /// the orientation owner gives each content spine position.
+    func voiceOverOrderFailure(
+        orientation: ChatTranscriptOrientation,
+        count: Int,
+        priority: (Int) -> Double
+    ) -> String? {
+        let spinePositions = Array(0..<count)
+        let ranked = spinePositions.sorted { lhs, rhs in
+            let left = priority(lhs)
+            let right = priority(rhs)
+            if left != right { return left > right }
+            return lhs < rhs
+        }
+        let expected = spinePositions
+            .map { orientation.visualPosition(ofSpinePosition: $0, count: count) }
+            .sorted()
+        let actual = ranked.map { orientation.visualPosition(ofSpinePosition: $0, count: count) }
+        guard actual != expected else { return nil }
+        return "the accessibility order would be \(actual), not the visual order \(expected)"
+    }
+
+    @Test("the accessibility reading order puts the oldest row first on both transcript orientations")
+    func accessibilityReadingOrderFollowsTheVisualOrder() {
+        let count = 24
+        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+            let failure = voiceOverOrderFailure(orientation: orientation, count: count) {
+                orientation.voiceOverSortPriority(forSpinePosition: $0)
+            }
+            #expect(failure == nil, "\(orientation): \(failure ?? "")")
+        }
+        // The failure mode the priority exists for: the same origin-anchored
+        // transcript with no priority applied reads bottom-up, which is what the
+        // tree order gives.
+        let unprioritized = voiceOverOrderFailure(orientation: .newestAtOrigin, count: count) { _ in 0 }
+        #expect(unprioritized != nil, "\(unprioritized ?? "")")
+        // A reversed priority is not a fix, and applying one to today's path
+        // breaks the order today's transcript already has.
+        let reversed = voiceOverOrderFailure(orientation: .newestAtOrigin, count: count) {
+            Double(count - 1 - $0)
+        }
+        #expect(reversed != nil, "\(reversed ?? "")")
+        let appliedToToday = voiceOverOrderFailure(orientation: .newestAtEnd, count: count) {
+            Double($0)
+        }
+        #expect(appliedToToday != nil, "\(appliedToToday ?? "")")
+    }
+
+    @Test("the context-menu preview gate fails a mirrored, displaced or resized preview")
+    func contextMenuPreviewPlacementGateRejectsAMirroredPreview() {
+        let source = CGRect(x: 40, y: 700, width: 231, height: 36)
+        let center = CGPoint(x: source.midX, y: source.midY)
+        func failure(
+            transform: CGAffineTransform = .identity,
+            center: CGPoint = .zero,
+            size: CGSize? = nil,
+            containerFlipped: Bool = false,
+            previewFlipped: Bool = false
+        ) -> String? {
+            ContextMenuPreviewPlacement.failure(
+                sourceWindowFrame: source,
+                targetTransform: transform,
+                containerCenterInWindow: center == .zero ? CGPoint(x: source.midX, y: source.midY) : center,
+                previewSize: size ?? source.size,
+                containerRendersFlipped: containerFlipped,
+                previewViewRendersFlipped: previewFlipped
+            )
+        }
+        #expect(failure() == nil)
+        #expect(failure(transform: CGAffineTransform(scaleX: 1, y: -1)) != nil, "the transcript's flip")
+        #expect(failure(center: CGPoint(x: source.midX, y: source.midY - 1)) != nil, "one point away")
+        #expect(failure(size: CGSize(width: source.width, height: source.height + 1)) != nil, "one point taller")
+        #expect(failure(containerFlipped: true) != nil, "a flipped container")
+        #expect(failure(previewFlipped: true) != nil, "a flipped preview view")
+    }
+
+    @Test("the prompt menu's preview is upright and in place on both transcript orientations")
+    func promptContextMenuPreviewIsUprightAndInPlace() async throws {
+        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
+            ($0, try transcriptMenuSnapshot())
+        }
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            for (orientation, snapshot) in snapshots {
+                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
+                    let ready = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
+                    }
+                    #expect(
+                        ready.observation.visibleRowIDs.contains("menu-prompt"),
+                        "\(orientation): the prompt row's menu surface must be mounted"
+                    )
+                    try await harness.driveFrameBoundary()
+                    let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+                    #expect(
+                        TranscriptWindowOracle.isFlipped(scrollView) == orientation.presentsNewestRowFirst,
+                        "\(orientation): this journey must run on the orientation's own path"
+                    )
+                    let surfaces = harness.promptContextMenuSurfaces()
+                    #expect(!surfaces.isEmpty, "\(orientation): the production menu surface must be mounted")
+                    for surface in surfaces {
+                        let windowFrame = surface.view.convert(surface.view.bounds, to: nil)
+                        let configuration = surface.owner.contextMenuInteraction(
+                            surface.interaction,
+                            configurationForMenuAtLocation: surface.view.convert(
+                                CGPoint(x: windowFrame.midX, y: windowFrame.midY), from: nil
+                            )
+                        )
+                        #expect(configuration != nil, "\(orientation): the menu must open over the prompt")
+                        guard let configuration else { continue }
+                        let identifier: any NSCopying = configuration.identifier ?? ("preview-gate" as NSString)
+                        guard let preview = surface.owner.contextMenuInteraction(
+                            surface.interaction, configuration: configuration,
+                            highlightPreviewForItemWithIdentifier: identifier
+                        ) else {
+                            Issue.record("\(orientation): the production preview must exist")
+                            continue
+                        }
+                        guard let container = preview.target.container as? UIView else {
+                            Issue.record("\(orientation): the preview must name a container view")
+                            continue
+                        }
+                        let failure = ContextMenuPreviewPlacement.failure(
+                            sourceWindowFrame: windowFrame,
+                            targetTransform: preview.target.transform,
+                            containerCenterInWindow: container.convert(preview.target.center, to: nil),
+                            previewSize: preview.view.bounds.size,
+                            containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
+                            previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
+                        )
+                        #expect(failure == nil, "\(orientation): \(failure ?? "")")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test("the display card's context menu resolves at the card on both transcript orientations")
+    func displayCardContextMenuResolvesAtTheCard() async throws {
+        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
+            ($0, try transcriptMenuSnapshot())
+        }
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            for (orientation, snapshot) in snapshots {
+                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
+                    }
+                    try await harness.driveFrameBoundary()
+                    guard let bridge = harness.swiftUIContextMenuBridge(),
+                          let delegate = bridge.interaction.delegate else {
+                        Issue.record("\(orientation): SwiftUI's context-menu bridge must be reachable")
+                        return
+                    }
+                    let root = harness.visibleRootView
+                    let rows = TranscriptWindowOracle.rows(in: root).filter(\.isOnScreen)
+                    var resolving: [String] = []
+                    for row in rows {
+                        let location = CGPoint(x: row.windowFrame.midX, y: row.windowFrame.minY + 12)
+                        if delegate.contextMenuInteraction(
+                            bridge.interaction,
+                            configurationForMenuAtLocation: bridge.view.convert(location, from: nil)
+                        ) != nil {
+                            resolving.append(row.semanticID)
+                        }
+                    }
+                    // Failure mode: SwiftUI selects the flipped scroll-content
+                    // host as the preview target even though the card renders
+                    // upright through its row's counter-flip.
+                    if let displayRow = rows.first(where: { $0.semanticID == resolving.first }) {
+                        let point = CGPoint(x: displayRow.windowFrame.midX, y: displayRow.windowFrame.minY + 12)
+                        let configuration = try #require(delegate.contextMenuInteraction(
+                            bridge.interaction,
+                            configurationForMenuAtLocation: bridge.view.convert(point, from: nil)
+                        ))
+                        let preview = try #require(delegate.contextMenuInteraction?(
+                            bridge.interaction,
+                            configuration: configuration,
+                            highlightPreviewForItemWithIdentifier: configuration.identifier ?? ("preview-gate" as NSString)
+                        ))
+                        let container = try #require(preview.target.container as? UIView)
+                        let failure = ContextMenuPreviewPlacement.failure(
+                            sourceWindowFrame: preview.view.convert(preview.view.bounds, to: nil),
+                            targetTransform: preview.target.transform,
+                            containerCenterInWindow: container.convert(preview.target.center, to: nil),
+                            previewSize: preview.view.bounds.size,
+                            containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
+                            previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
+                        )
+                        if orientation == .newestAtOrigin {
+                            // Open CT-23 blocker: SwiftUI's public preview delegate
+                            // targets the flipped scroll host. Recorded as a known
+                            // issue so it stays visible, and fails once it is fixed.
+                            withKnownIssue("CT-23: the display-card preview renders flipped on the origin path") {
+                                #expect(failure == nil, "\(orientation): \(failure ?? "")")
+                            }
+                        } else {
+                            #expect(failure == nil, "\(orientation): \(failure ?? "")")
+                        }
+                    }
+                    // The display card is the only row with a SwiftUI
+                    // `.contextMenu`; a bridge that resolved everywhere would
+                    // prove nothing about the card.
+                    #expect(
+                        resolving.count == 1 && resolving.first?.contains("display") == true,
+                        "\(orientation): the card's menu resolves at \(resolving)"
+                    )
+                }
+            }
+        }
+    }
+
+    @Test("the system's scroll-to-top lands on the newest end of the origin-anchored transcript")
+    func scrollToTopLandsOnTheContentTop() async throws {
+        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
+            ($0, try transcriptScrollToTopSnapshot())
+        }
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            for (orientation, snapshot) in snapshots {
+                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
+                    }
+                    try await harness.driveFrameBoundary()
+                    let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+                    let pinnedOffset = scrollView.contentOffset.y
+                    let contentTop = -scrollView.adjustedContentInset.top
+                    let legalMaximum = max(
+                        contentTop,
+                        scrollView.contentSize.height - scrollView.bounds.height
+                            + scrollView.adjustedContentInset.bottom
+                    )
+                    #expect(legalMaximum > contentTop, "\(orientation): the journey needs scroll range")
+                    // The origin-anchored transcript's pinned newest end *is* its
+                    // content top; today's transcript pins at its content end.
+                    #expect(
+                        orientation.presentsNewestRowFirst
+                            ? pinnedOffset == contentTop : pinnedOffset != contentTop,
+                        "\(orientation): the pinned end relative to the content top"
+                    )
+                    // What UIKit's status-bar tap does: the scroll view's
+                    // content top, `-adjustedContentInset.top`. Today's
+                    // transcript pins at its content end, so the tap reaches the
+                    // oldest loaded history; the origin-anchored transcript pins
+                    // at its content origin, so its content top *is* the pinned
+                    // newest end and the tap stays there. The user's requirement
+                    // — the tap reaches the oldest loaded history — is therefore
+                    // unmet on the origin-anchored path, and this gate records
+                    // the landing so that decision has a measured baseline.
+                    scrollView.setContentOffset(
+                        CGPoint(x: scrollView.contentOffset.x, y: contentTop),
+                        animated: false
+                    )
+                    for _ in 0..<3 { try await harness.driveFrameBoundary() }
+                    if orientation.presentsNewestRowFirst {
+                        #expect(
+                            scrollView.contentOffset.y == pinnedOffset,
+                            "\(orientation): the content top is the pinned newest end"
+                        )
+                        #expect(
+                            harness.isPinnedToBottom(),
+                            "\(orientation): the newest row stays at the composer"
+                        )
+                    } else {
+                        let topRow = try #require(harness.visuallyTopmostOnScreenRow())
+                        #expect(
+                            topRow.semanticID == harness.firstTranscriptID,
+                            "\(orientation): the tap reaches the oldest loaded history at \(topRow.semanticID)"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func transcriptMenuSnapshot() throws -> SessionSnapshot {
+        var snapshot = try harnessInlineMarkdownDisplaySnapshot()
+        snapshot.transcript.append(try harnessUserMessage(id: "menu-prompt", text: "A prompt with a context menu."))
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = snapshot.transcript.count
+        return snapshot
+    }
+
+    private func transcriptScrollToTopSnapshot() throws -> SessionSnapshot {
+        var snapshot = try SessionScenarioBuilder(seed: 1_300).openingTail(targetEncodedBytes: 10_000)
+        snapshot.transcript = SessionScenarioBuilder(seed: 1_300).historyPage(count: 15, longRowBytes: 600)
+        snapshot.transcript.append(try harnessUserMessage(id: "scroll-to-top-prompt", text: "A prompt."))
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = snapshot.transcript.count
+        return snapshot
+    }
+
     @Test("the orientation read multiplies the flip along the layer chain")
     func orientationReadMultipliesTheFlipAlongTheChain() {
         let root = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -1549,6 +2014,7 @@ struct ChatViewScrollHarnessTests {
         let maxRatio = ratios.max { ratioOf($0) < ratioOf($1) }
         var metrics = CT24Metrics()
         metrics.shape = shape
+        metrics.orientation = harness.orientation.presentsNewestRowFirst ? "origin" : "end"
         metrics.samples = samples.count
         metrics.blankBoundaries = coverage.blankBoundaries
         metrics.blankAfterSettle = coverage.blankAfterSettle
@@ -1591,6 +2057,7 @@ struct ChatViewScrollHarnessTests {
         )
         var metrics = CT2Metrics()
         metrics.shape = shape
+        metrics.orientation = harness.orientation.presentsNewestRowFirst ? "origin" : "end"
         metrics.samples = samples.count
         metrics.blankBoundaries = coverage.blankBoundaries
         metrics.blankAfterSettle = coverage.blankAfterSettle
@@ -3288,6 +3755,113 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // CT-23 P1-1: the catch-up's staged step.
+    //
+    // The coordinator computes that point in its own model. Today's model is the
+    // scroll view's own offset, so the point clamps to the legal end and the
+    // reader jumps to the newest row. The origin-anchored transcript's model is
+    // the reflection of that offset, so the same point, unreflected, lands
+    // thousands of points into the oldest loaded history and the smooth step then
+    // animates the whole transcript back. The observable is the reader's own
+    // newest row: it is on screen at every boundary of a catch-up that landed at
+    // the newest end, and not mounted at all on one that landed in history. The
+    // gate holds on both orientations — today's path passes it by clamping — so it
+    // is one gate rather than a per-orientation expectation.
+    @Test("a staged catch-up lands at the newest end on both transcript orientations")
+    func stagedCatchUpLandsAtTheNewestEnd() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_231)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            snapshot.transcript = try (0..<60).map { index in
+                try harnessRichAssistantMessage(
+                    id: "catch-up-anchor-\(index)",
+                    presentationID: "catch-up-anchor-turn-\(index)",
+                    thinkingLines: [],
+                    text: Array(
+                        repeating: "Catch-up row \(index) keeps its own height while the reader is away.",
+                        count: 1 + index % 4
+                    ).joined(separator: "\n\n")
+                )
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            let newestRowID = "catch-up-anchor-turn-59"
+            try await withHarness(snapshot: snapshot) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.visibleRowIDs.contains(newestRowID)
+                }
+                try await harness.detachReaderMidHistory()
+                #expect(
+                    harness.probeObservation.isDetached,
+                    "the real scroll detached the reader: \(harness.pinnedDescription())"
+                )
+                let commandBaseline = harness.probeObservation.scrollCommandCount
+                harness.driveCatchUp(reduceMotion: false)
+                var boundaries = 0
+                var observedBoundaries = 0
+                var boundariesWithoutTheNewestRow: [Int] = []
+                var stagedOffset: CGFloat?
+                while boundaries < 60 {
+                    try await harness.driveFrameBoundary()
+                    boundaries += 1
+                    // The staged command is delivered on its own update pass;
+                    // boundaries before it are the reader's own position, not
+                    // the catch-up's.
+                    guard harness.probeObservation.scrollCommandCount > commandBaseline else {
+                        continue
+                    }
+                    observedBoundaries += 1
+                    if stagedOffset == nil {
+                        stagedOffset = try harness.nativeTranscriptScrollViewForTesting()
+                            .contentOffset.y
+                    }
+                    if !harness.probeObservation.visibleRowIDs.contains(newestRowID) {
+                        boundariesWithoutTheNewestRow.append(boundaries)
+                    }
+                    if !harness.probeObservation.isDetached, harness.isPinnedToBottom() { break }
+                }
+                let settled = try await harness.newestRowSettledAtComposer(boundaries: 120)
+                let clearance = try #require(
+                    settled.clearance,
+                    "the catch-up settled with no newest row: \(harness.pinnedDescription())"
+                )
+                #expect(observedBoundaries > 0, "the catch-up issued no scroll command")
+                // The staged step's own landing: the staged point the coordinator
+                // computes is a point near the newest end, and on the
+                // origin-anchored path it only *is* one once the owner has mapped
+                // it back to the scroll view's own offset. Unmapped, the same
+                // point is thousands of points into the oldest history, which the
+                // smooth second step then animates back.
+                let newestEnd = try harness.nativeNewestEndOffset()
+                let staged = try #require(stagedOffset, "the staged step measured no offset")
+                let viewport = try harness.nativeTranscriptScrollViewForTesting().bounds.height
+                #expect(
+                    abs(staged - newestEnd) <= viewport,
+                    "the staged step landed \(ct2Number(abs(staged - newestEnd))) pt from the newest end"
+                )
+                #expect(
+                    boundariesWithoutTheNewestRow.isEmpty,
+                    "the catch-up left the reader's newest row off screen at \(boundariesWithoutTheNewestRow.count) of \(observedBoundaries) boundaries: \(boundariesWithoutTheNewestRow)"
+                )
+                #expect(
+                    !harness.probeObservation.isDetached,
+                    "the catch-up returned to a pinned viewport: \(harness.pinnedDescription())"
+                )
+                // The newest row's own settle, judged by the shared oracle: the
+                // two legal pinned positions are the tail spacing and the
+                // terminal row's own overlap of the affordance, and the exact
+                // 12.0 the origin-anchored path keeps is the keyboard journey's
+                // measurement, not this one's.
+                #expect(
+                    harness.isPinnedToBottom(),
+                    "the caught-up transcript settled \(ct2Number(clearance)) pt from the composer: \(harness.pinnedDescription())"
+                )
+            }
+        }
+    }
+
     @Test("retained detached authority replacement preserves its installed cut")
     func retainedDetachedAuthorityReplacement() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -3430,10 +4004,13 @@ struct ChatViewScrollHarnessTests {
                     "the real scroll detached the reader: \(harness.pinnedDescription())"
                 )
                 // A detached reader owns the viewport: nothing the app does while
-                // they are away may write an automatic scroll command. This is
-                // the invariant the two synthetic zero-write fixtures asserted,
-                // measured here on the real view.
-                let commandBaseline = harness.probeObservation.automaticScrollCommandCount
+                // they are away may write a scroll command at all. This is the
+                // invariant the two synthetic zero-write fixtures asserted,
+                // measured here on the real view, and it is the count of every
+                // command rather than of the ones the application marked
+                // automatic — that flag is the same for both, so it could not
+                // have failed.
+                let commandBaseline = harness.probeObservation.scrollCommandCount
                 let anchor = try #require(
                     harness.readerAnchor(), "the detached reader had no on-screen row"
                 )
@@ -3471,13 +4048,22 @@ struct ChatViewScrollHarnessTests {
                     "streaming moved the detached reader by \(ct2Number(afterStreaming.windowMinY - anchor.windowMinY)) pt"
                 )
                 #expect(
-                    harness.probeObservation.automaticScrollCommandCount == commandBaseline,
-                    "streaming wrote an automatic scroll command while the reader was away"
+                    harness.probeObservation.scrollCommandCount == commandBaseline,
+                    "streaming wrote a scroll command while the reader was away"
                 )
 
                 // 2. The keyboard's inset cycle: the composer's own edge moves,
                 // which neither the reader's rows nor its position may follow.
-                try await harness.driveKeyboardInset(.show())
+                // A margin-only viewport must not clip away the reader's row
+                // midway through a keyboard transition, even if its offset holds.
+                let holdsReader: @MainActor () throws -> Void = {
+                    let current = try #require(harness.readerAnchor())
+                    #expect(current.physicalID == anchor.physicalID)
+                    #expect(current.instance == anchor.instance)
+                    #expect(abs(current.windowMinY - anchor.windowMinY) < 0.5)
+                    #expect(harness.probeObservation.scrollCommandCount == commandBaseline)
+                }
+                try await harness.driveKeyboardInset(.show(), onBoundary: holdsReader)
                 let afterShow = try #require(try await harness.settleReaderAnchor(to: anchor))
                 movements.append("keyboard-up:\(ct2Number(afterShow.windowMinY - anchor.windowMinY))")
                 #expect(
@@ -3485,7 +4071,7 @@ struct ChatViewScrollHarnessTests {
                         && abs(afterShow.windowMinY - anchor.windowMinY) <= 0.5,
                     "the keyboard moved the detached reader by \(ct2Number(afterShow.windowMinY - anchor.windowMinY)) pt"
                 )
-                try await harness.driveKeyboardInset(.hide())
+                try await harness.driveKeyboardInset(.hide(), onBoundary: holdsReader)
                 let afterHide = try #require(try await harness.settleReaderAnchor(to: anchor))
                 movements.append("keyboard-down:\(ct2Number(afterHide.windowMinY - anchor.windowMinY))")
                 #expect(
@@ -3494,8 +4080,8 @@ struct ChatViewScrollHarnessTests {
                     "the dismissal moved the detached reader by \(ct2Number(afterHide.windowMinY - anchor.windowMinY)) pt"
                 )
                 #expect(
-                    harness.probeObservation.automaticScrollCommandCount == commandBaseline,
-                    "the keyboard cycle wrote an automatic scroll command while the reader was away"
+                    harness.probeObservation.scrollCommandCount == commandBaseline,
+                    "the keyboard cycle wrote a scroll command while the reader was away"
                 )
 
                 // 3. A page load above the reader: older rows arrive at the far
@@ -3518,8 +4104,8 @@ struct ChatViewScrollHarnessTests {
                     "the page load moved the detached reader by \(ct2Number(afterPage.windowMinY - anchor.windowMinY)) pt"
                 )
                 #expect(
-                    harness.probeObservation.automaticScrollCommandCount == commandBaseline,
-                    "the page load wrote an automatic scroll command while the reader was away"
+                    harness.probeObservation.scrollCommandCount == commandBaseline,
+                    "the page load wrote a scroll command while the reader was away"
                 )
                 #expect(harness.probeObservation.isDetached, "the reader stayed away")
                 print("CT25-DETACH-METRICS anchor=\(anchor.physicalID) startY=\(ct2Number(anchor.windowMinY)) movements=\(movements.joined(separator: ","))")
@@ -3781,11 +4367,13 @@ struct ChatViewScrollHarnessTests {
 
     private func withHarness(
         seed: Int,
+        orientation: ChatTranscriptOrientation = .selected,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
         try await withHarness(
             snapshot: SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 10_000),
+            orientation: orientation,
             displayFrameScheduler: displayFrameScheduler,
             operation: operation
         )
@@ -3793,6 +4381,7 @@ struct ChatViewScrollHarnessTests {
 
     private func withHarness(
         snapshot: SessionSnapshot,
+        orientation: ChatTranscriptOrientation = .selected,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         enablesComposerSubmission: Bool = false,
         enablesPresentationCover: Bool = false,
@@ -3808,14 +4397,16 @@ struct ChatViewScrollHarnessTests {
                 displayFrameScheduler: displayFrameScheduler,
                 enablesPresentationCover: enablesPresentationCover,
                 usesRealOpening: usesRealOpening,
-                unansweredRPCMethods: unansweredRPCMethods
+                unansweredRPCMethods: unansweredRPCMethods,
+                orientation: orientation
             )
         } else {
             harness = try ChatViewScrollHarness(
                 snapshot: snapshot,
                 displayFrameScheduler: displayFrameScheduler,
                 enablesPresentationCover: enablesPresentationCover,
-                installsSubscribedSnapshot: installsSubscribedSnapshot || enablesPresentationCover
+                installsSubscribedSnapshot: installsSubscribedSnapshot || enablesPresentationCover,
+                orientation: orientation
             )
         }
         do {
@@ -4078,6 +4669,8 @@ struct KeyboardBoundarySample {
     let composerTop: CGFloat?
     let composerHeight: CGFloat
     let coverage: TranscriptBottomCoverage
+    let distanceFromNewest: CGFloat
+    let tailState: String?
 }
 
 /// One journey's bottom-coverage gate evidence, folded from its samples.
@@ -4115,16 +4708,45 @@ enum TranscriptBottomGateExpectation {
     /// CT-23's origin-anchored transcript anchors the newest row at the lazy
     /// stack's exact origin. Every sampled boundary must then keep the pinned
     /// bottom band covered and at least half the visible transcript in rows.
-    /// CT-23 flips this in the same change that flips the scroll view.
     case coveringBottomIsRequired
 
-    static let current = TranscriptBottomGateExpectation.uncoveringBottomIsTheKnownDefect
+    /// What a run in `orientation` must show. Today's path still reproduces the
+    /// defect its shapes were recorded from; the origin-anchored path must keep
+    /// the pinned bottom covered instead, so the same shape is a gate in both
+    /// directions rather than a measurement that can pass either way.
+    static func current(for orientation: ChatTranscriptOrientation) -> TranscriptBottomGateExpectation {
+        orientation.pinsToEstimatedOrigin ? .uncoveringBottomIsTheKnownDefect : .coveringBottomIsRequired
+    }
+
+    /// The default a caller that names no orientation gets: today's path.
+    static let current = current(for: .newestAtEnd)
 
     /// The floor the CT-23 path gates `minimumVisibleRowFraction` against: half
     /// the visible transcript. Every CT-2 and CT-24 shape's newest row is
     /// taller than the viewport (1,143-1,906 pt measured), so a pinned
     /// transcript covers it.
     static let coveredFractionFloor: CGFloat = 0.5
+}
+
+/// What the keyboard's own transition frames expect of the gap between the
+/// newest row and the composer.
+enum KeyboardRampExpectation {
+    /// The origin-anchored transcript applies the keyboard as a content margin
+    /// before its render transform, so the newest row must stay
+    /// within 3 pt of the tail spacing at every driven boundary of both
+    /// transitions — not only at their settled ends.
+    case ridesTheComposerEdge
+    /// Today's transcript keeps its pinned bottom from the lazy stack's own
+    /// content estimate, so the same ramp measures the known defect (this shape
+    /// swings to -681 pt) and is gated by that reproduction instead.
+    case measuresTheKnownDrop
+
+    /// The tolerance the composer-edge gate allows, the ±3 pt the plan names.
+    static let tolerance: CGFloat = 3
+
+    static func current(for orientation: ChatTranscriptOrientation) -> KeyboardRampExpectation {
+        orientation.pinsToEstimatedOrigin ? .measuresTheKnownDrop : .ridesTheComposerEdge
+    }
 }
 
 /// The verdict of one journey's bottom-coverage gate.
@@ -4167,6 +4789,10 @@ func transcriptBottomGateOutcome(
 /// rather than dropping the key, and every line diffs against every other.
 private struct CT2Metrics {
     var shape = ""
+    /// Which transcript orientation this journey measured. The gate the line is
+    /// judged against is `TranscriptBottomGateExpectation.current(for:)`, so the
+    /// line has to say which side of the switch produced it.
+    var orientation = ""
     var samples = 0
     var blankBoundaries = 0
     var blankAfterSettle = 0
@@ -4193,7 +4819,7 @@ private struct CT2Metrics {
 
     var line: String {
         "CT2-METRICS"
-            + " shape=\(shape) samples=\(samples)"
+            + " shape=\(shape) orientation=\(orientation) samples=\(samples)"
             + " blankBoundaries=\(blankBoundaries)/\(samples)"
             + " blankAfterSettle=\(blankAfterSettle)"
             + " longestBlankRun=\(longestBlankRun)"
@@ -4223,6 +4849,8 @@ private func ct2Number(_ value: CGFloat) -> String {
 /// One `CT24-METRICS` line per field shape.
 private struct CT24Metrics {
     var shape = ""
+    /// Which transcript orientation this journey measured, as for `CT2Metrics`.
+    var orientation = ""
     var samples = 0
     var blankBoundaries = 0
     var blankAfterSettle = 0
@@ -4241,7 +4869,7 @@ private struct CT24Metrics {
 
     var line: String {
         "CT24-METRICS"
-            + " shape=\(shape) samples=\(samples)"
+            + " shape=\(shape) orientation=\(orientation) samples=\(samples)"
             + " blankBoundaries=\(blankBoundaries)/\(samples)"
             + " blankAfterSettle=\(blankAfterSettle)"
             + " longestBlankRun=\(longestBlankRun)"
@@ -4456,6 +5084,15 @@ private func harnessCompactionItem(id: String) throws -> TranscriptItem {
     )
 }
 
+func harnessUserMessage(id: String, text: String) throws -> TranscriptItem {
+    try decodeTranscriptFixture(
+        TranscriptItem.self,
+        from: Data("""
+        {"id":"\(id)","parentId":null,"presentationId":"\(id)","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"\(id):text","ordinal":0,"type":"text","text":"\(text)"}]}
+        """.utf8)
+    )
+}
+
 func harnessMessage(id: String) throws -> TranscriptItem {
     try decodeTranscriptFixture(
         TranscriptItem.self,
@@ -4526,6 +5163,11 @@ final class ChatViewScrollHarness {
     private let window: UIWindow
     private let hostingController: UIHostingController<AnyView>
     private let cover = HarnessCoverState()
+    /// The transcript orientation this harness was built with. Every journey
+    /// reads it to say what it expects the pinned bottom to do, so the four
+    /// CT-2/CT-24 shapes are gates in both orientations against the same
+    /// reference.
+    let orientation: ChatTranscriptOrientation
 
     convenience init(
         snapshot: SessionSnapshot,
@@ -4534,7 +5176,8 @@ final class ChatViewScrollHarness {
         enablesPresentationCover: Bool = false,
         installsSubscribedSnapshot: Bool = true,
         scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
-        mediaFetch: ChatMediaFetch? = nil
+        mediaFetch: ChatMediaFetch? = nil,
+        orientation: ChatTranscriptOrientation = .selected
     ) throws {
         let dependencies = try Self.makeDependencies(
             enablesComposerSubmission: false,
@@ -4547,7 +5190,8 @@ final class ChatViewScrollHarness {
             dependencies: dependencies,
             installsSubscribedSnapshot: installsSubscribedSnapshot,
             enablesPresentationCover: enablesPresentationCover,
-            scrollCallbackMode: scrollCallbackMode
+            scrollCallbackMode: scrollCallbackMode,
+            orientation: orientation
         )
     }
 
@@ -4558,7 +5202,8 @@ final class ChatViewScrollHarness {
         enablesPresentationCover: Bool = false,
         usesRealOpening: Bool = false,
         unansweredRPCMethods: Set<String> = [],
-        mediaFetch: ChatMediaFetch? = nil
+        mediaFetch: ChatMediaFetch? = nil,
+        orientation: ChatTranscriptOrientation = .selected
     ) async throws -> ChatViewScrollHarness {
         let dependencies = try makeDependencies(
             enablesComposerSubmission: true,
@@ -4580,7 +5225,8 @@ final class ChatViewScrollHarness {
                 dependencies: dependencies,
                 installsSubscribedSnapshot: true,
                 enablesPresentationCover: enablesPresentationCover,
-                usesRealOpening: usesRealOpening
+                usesRealOpening: usesRealOpening,
+                orientation: orientation
             )
             if usesRealOpening { await harness.startRPCResponder(unansweredMethods: unansweredRPCMethods) }
             return harness
@@ -4661,9 +5307,11 @@ final class ChatViewScrollHarness {
         installsSubscribedSnapshot: Bool,
         enablesPresentationCover: Bool = false,
         usesRealOpening: Bool = false,
-        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic
+        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
+        orientation: ChatTranscriptOrientation = .selected
     ) throws {
         self.snapshot = snapshot
+        self.orientation = orientation
         transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
         firstTranscriptID = snapshot.transcript.first?.id ?? "transcript-bottom"
         lastTranscriptID = snapshot.transcript.last?.id ?? "transcript-bottom"
@@ -4709,7 +5357,8 @@ final class ChatViewScrollHarness {
                     sessionID: sessionID,
                     hostedProbe: probe,
                     displayFrameScheduler: displayFrameScheduler,
-                    performanceSignposts: performanceSignposts ?? signposts
+                    performanceSignposts: performanceSignposts ?? signposts,
+                    transcriptOrientation: orientation
                 )
             }
             .environment(model)
@@ -5030,6 +5679,19 @@ final class ChatViewScrollHarness {
         scrollView.layoutIfNeeded()
     }
 
+    /// The scroll view's own offset at the transcript's newest end: today the
+    /// legal maximum, and on a flipped transcript the content origin (see
+    /// `scrollReader(byVisualPoints:)`, which places the reader from it).
+    func nativeNewestEndOffset() throws -> CGFloat {
+        let scrollView = try nativeTranscriptScrollView()
+        let inset = scrollView.adjustedContentInset
+        let maximumOffset = max(
+            -inset.top,
+            scrollView.contentSize.height - scrollView.bounds.height + inset.bottom
+        )
+        return TranscriptWindowOracle.isFlipped(scrollView) ? -inset.top : maximumOffset
+    }
+
     /// Detach the reader the way a reader does: move the real transcript scroll
     /// view to the oldest end of the loaded history, which the coordinator reads
     /// as direct ownership (today's status-bar-tap path). The hand-written
@@ -5200,9 +5862,12 @@ final class ChatViewScrollHarness {
     /// fraction of a point run to run, which at 1x rendering re-rasterizes every
     /// glyph and reads as a whole-frame difference unrelated to what the gate is
     /// about. Snapping first makes the rendered position a deterministic
-    /// function of the layout instead of of the estimate; it changes no layout,
-    /// row, or state the product owns.
+    /// function of the layout instead of of the estimate on today's path.
+    /// Never round an exact-origin pin: a sub-point write moves it off the
+    /// applied margin, so SwiftUI correctly preserves that detached offset on
+    /// later inset changes instead of following the composer.
     func snapNativeTranscriptOffsetToWholePoint() throws {
+        guard orientation.pinsToEstimatedOrigin else { return }
         let scrollView = try nativeTranscriptScrollView()
         let snapped = scrollView.contentOffset.y.rounded()
         guard abs(snapped - scrollView.contentOffset.y) > 0.01 else { return }
@@ -5242,6 +5907,48 @@ final class ChatViewScrollHarness {
         let scrollView = try nativeTranscriptScrollView()
         scrollView.layer.setAffineTransform(CGAffineTransform(scaleX: 1, y: -1))
         scrollView.layoutIfNeeded()
+    }
+
+    /// The prompt rows' production context-menu surfaces: the native views that
+    /// carry the interaction, with the owner that builds their preview. The
+    /// prompt menu is the app's own UIKit interaction (the display cards' menus
+    /// are SwiftUI's, see `swiftUIContextMenuBridge`).
+    func promptContextMenuSurfaces() -> [(view: UIView, interaction: UIContextMenuInteraction, owner: ChatMessageContextMenuOwner)] {
+        Self.contextMenuViews(in: hostingController.view).compactMap { view in
+            guard let interaction = view.interactions.compactMap({ $0 as? UIContextMenuInteraction }).first,
+                  let owner = interaction.delegate as? ChatMessageContextMenuOwner else { return nil }
+            return (view, interaction, owner)
+        }
+    }
+
+    /// SwiftUI's own context-menu bridge, which resolves the display cards'
+    /// `.contextMenu` menus. `nil` when this build's SwiftUI presents them
+    /// differently, which fails the journey that needs it rather than passing
+    /// quietly. Its delegate is matched by name because the bridge is internal
+    /// to SwiftUI; the name is the only handle on it, and asking an unrelated
+    /// interaction's delegate for a configuration is not safe.
+    func swiftUIContextMenuBridge() -> (view: UIView, interaction: UIContextMenuInteraction)? {
+        for view in Self.contextMenuViews(in: hostingController.view) {
+            for case let interaction as UIContextMenuInteraction in view.interactions {
+                guard let delegate = interaction.delegate,
+                      String(describing: type(of: delegate)).hasSuffix("ContextMenuBridge") else { continue }
+                return (view, interaction)
+            }
+        }
+        return nil
+    }
+
+    /// The row the reader sees at the top of the transcript, or `nil` when no
+    /// mounted row is on screen.
+    func visuallyTopmostOnScreenRow() -> TranscriptWindowOracle.Row? {
+        TranscriptWindowOracle.rows(in: visibleRootView)
+            .filter(\.isOnScreen)
+            .min { $0.windowFrame.minY < $1.windowFrame.minY }
+    }
+
+    private static func contextMenuViews(in view: UIView) -> [UIView] {
+        let found = view.interactions.contains { $0 is UIContextMenuInteraction } ? [view] : []
+        return found + view.subviews.flatMap(contextMenuViews)
     }
 
     /// Luminance samples from the top of the chat, where the transcript
@@ -5446,7 +6153,9 @@ final class ChatViewScrollHarness {
                 uncoveredBand: !bottom.isBandCovered,
                 visibleRowFraction: bottom.visibleRowFraction,
                 newestRowClearance: bottom.clearance
-            )
+            ),
+            distanceFromNewest: probeObservation.geometry.distanceFromBottom,
+            tailState: traceRecords.first { $0.record.message.contains("tail=") }?.record.message
         )
     }
 
@@ -5541,13 +6250,17 @@ final class ChatViewScrollHarness {
     /// top edge and the newest row's bottom edge at each of those boundaries, in
     /// window coordinates.
     @discardableResult
-    func driveKeyboardInset(_ transition: KeyboardInsetTransition) async throws -> [KeyboardBoundarySample] {
+    func driveKeyboardInset(
+        _ transition: KeyboardInsetTransition,
+        onBoundary: (@MainActor () throws -> Void)? = nil
+    ) async throws -> [KeyboardBoundarySample] {
         beginKeyboardInset(transition)
         var samples: [KeyboardBoundarySample] = []
         for step in 1...max(1, transition.boundaries) {
             applyKeyboardInset(transition, step: step)
             try await driveFrameBoundary()
             samples.append(try keyboardBoundarySample())
+            try onBoundary?()
         }
         return samples
     }
@@ -6025,16 +6738,16 @@ enum TranscriptWindowOracle {
         return State(rows: rows, bottom: bottom, contentHeight: scroll.contentSize.height)
     }
 
-    /// Whether the transcript's scroll view is laid out newest-first (CT-23's
-    /// flip), read from the render tree: a vertical scale of -1 on the scroll
-    /// view's own layer or on one of its ancestors up to the window. The signs
-    /// multiply along the chain, because a flip on the scroll view and another on
-    /// an ancestor renders the content upright — reading the first negative
-    /// `m22` alone would call a doubly flipped container flipped and send every
-    /// orientation-dependent branch (`scrollReader`'s newest end, the pinned
-    /// checks) the wrong way.
-    static func isFlipped(_ scrollView: UIScrollView) -> Bool {
-        var layer: CALayer? = scrollView.layer
+    /// Whether this view renders flipped (CT-23's transcript layout), read from
+    /// the render tree: a vertical scale of -1 on the view's own layer or on one
+    /// of its ancestors up to the window. The signs multiply along the chain,
+    /// because a flip on the scroll view and another on an ancestor renders the
+    /// content upright — reading the first negative `m22` alone would call a
+    /// doubly flipped container flipped and send every orientation-dependent
+    /// branch (`scrollReader`'s newest end, the pinned checks, a context-menu
+    /// preview's uprightness) the wrong way.
+    static func isFlipped(_ view: UIView) -> Bool {
+        var layer: CALayer? = view.layer
         var flipped = false
         while let current = layer {
             if current.transform.m22 < 0 { flipped.toggle() }

@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-29, CT-27 merged with CT-25 and green on the merged base
+ - **Last updated:** 2026-09-29, CT-23 flip2 parity/row-stability root causes and bounded wakeup investigation
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -111,7 +111,7 @@ breaks context-menu previews.
 | CT-27 | Done | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | chat scroll session (worker lane ct-27-rows), 2026-09-28 |
 | CT-28 | Ready | Record-only invariant monitor in the product (pinned bottom band uncovered for more than 2 frames, detached anchor moved without input, opening revealed uncovered), deduplicated, reaching device exports and surviving relaunch; delete the noisy tail-edge trace records; write the missing send-choreography device checklist in `development.md` | CT-25 | |
 | CT-24 | Done | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
-| CT-23 | Claimed | Origin-anchored transcript spike: the transcript's scroll view is flipped so its content origin is the visual bottom, rows are counter-flipped and ordered newest first; judged by every yardstick plus the risk probes in Task details | CT-24 | chat scroll session, 2026-09-28 |
+| CT-23 | Blocked | One orientation owner, single-sample geometry and read-time frame reflection retained; origin's inner/outer safe-area exclusion fixes detached viewport clipping without offset commands. Four bottom gates ×3 pass with zero blank/uncovered boundaries; pinned/detached keyboard and catch-up pass. Final clean `9d606ec1d`: today parity 10/10, origin 9/10 (original opened-history residual; ordinary-send remains borderline across runs), row stability 14/14 both after correcting test traversal/settlement. Parity capture snaps today's estimated end only, never an exact origin pin; negative control reproduces keyboard detachment. Display SwiftUI preview, accessibility/status-bar requirements, navigation fade decision and additional full-checkpoint failures still block production cutover. Optimized streaming wakeups remain an open production-performance item after bounded bisection/trace investigation, not a device-evaluation blocker. Today's path/default unchanged; no Gateway/device lifecycle action. See the consolidated CT-23 flip2 status below for clean revisions, measurements, controls and remaining decisions | CT-24 | chat scroll session (worker lane ct23b), 2026-09-29 |
 | CT-22 | Claimed | Exact tail prototype (keep the SwiftUI `ScrollView`, rows and animations): measure two ways of making the pinned bottom exact on a throwaway branch. (a) Previously measured rows keep their last measured height when they leave the viewport. (b) The newest rows render in an eager stack below a `LazyVStack` of older history, so the bottom and everything near it are measured, never estimated; the boundary moves in coarse steps so rows rarely change parent. Judged by the CT-2 fixtures, the parity gate, the harness and CT-10's scale numbers | CT-20 | chat scroll investigation session, 2026-09-27 |
 | CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15, CT-20 | |
 | CT-17 | Needs scoping | Qualification: with the switch on, the CT-12 and CT-14 gates pass against the `main` reference, the CT-2 fixtures and a 512-row blank fixture read zero blank boundaries, every `ChatViewScrollHarnessTests` visible invariant holds, and frame cost, opening time and memory at 150, 300 and 512 heavy rows are no worse than CT-10's baseline | CT-16, CT-14, CT-10 | |
@@ -2402,3 +2402,1082 @@ pass only through eager-only repairs, stop and report.
 - For the next agent: CT-27 is complete and green on the merged base on
   `ct-27-rows`; the branch is ready for the supervisor's merge, and CT-23
   resumes against CT-25's gates unchanged.
+
+### CT-23 re-application stage 3 · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: the owner now maps every frame, correction and scroll point (review
+  P1-1, P1-2, P2-2, P2-3), the keyboard's own ramp and the flipped path's opening
+  classification are gated (P2-4, P1-2), and the detached reader's failure is
+  traced to its owner: **UIKit's overlay-inset adjustment**, not this app's
+  anchors. P1-3 is not fixed and is left as the next stage's first task with the
+  stack that names its cause.
+
+  **(a) The frame space is measured, and frames now enter through the owner.**
+  The flipped scroll view's own `ScrollView` frames measure *upward* from the
+  visual bottom: at the pinned tail the 12 pt marker reports `[0, 12]` while it
+  is drawn at `[663, 675]` (window), the composer edge being
+  `containerHeight = 675` — so `transcriptFrame(_:containerHeight:)` reflects
+  them about the container, and `semanticFrameChanged` is the one place that
+  applies it. Consumers then read today's semantics: `semanticAnchor` picks the
+  visually topmost row (it picked the visually *lowest* before), and the marker's
+  own placement classifies as `aligned` when pinned. With that adapter the
+  review's false `chat.anomaly.opening-viewport-displaced` at a *pinned* opening
+  is gone (the pinned dump reads the marker at the composer edge), but the
+  opening still passes through un-settled states that can record one: the
+  keyboard journey measures `displaced=0` in seven focused runs and 1 in two of
+  the three heavy suite runs, so the count is printed and not gated — that
+  transient is the opening's own, not the pinned misclassification the review
+  named.
+
+  **(b) Every `.offsetY` command goes through the owner.** The staged catch-up's
+  point, the layout restore's correction and the prepend correction were the
+  three sites that handed the coordinator's model directly to `scrollTo(y:)`,
+  which on the flipped path is the *reflection* of the scroll view's offset: the
+  staged point alone landed ~6,900 pt into the oldest history, and the smooth
+  second step then animated the whole transcript back. Now
+  `correctedOffsetY(currentModelOffsetY:visualOffset:)` owns the correction's sign
+  and the `max(0, …)` clamp (which is today's model only), and
+  `scrollOffsetY(forModelOffsetY:geometry:)` maps the model point back at
+  `ChatView`'s single `.offsetY` destination; `ChatScrollCoordinator
+  .prependCorrectionOffset` is deleted. The new journey
+  `a staged catch-up lands at the newest end on both transcript orientations`
+  (reduceMotion false, both orientations) gates it on the staged step's own
+  landing *and* on the reader's newest row staying on screen until the settle; its
+  negative control (the mapping removed, one line) fails by 6,895.7 pt.
+
+  **(c) The keyboard's ramp is gated, and it holds.** `CT25-KEYBOARD-RAMP`
+  measures the gap at every driven boundary of both transitions: the flipped path
+  reads worst gap **1.9-3.0 pt** across six runs against the ±3 the plan names
+  (1.9-2.4 in five, 3.0 once), and today's path
+  reads 257-96,305 pt, i.e. the same ramp reproduces the known drop and is gated
+  by that reproduction (the two-sided expectation `KeyboardRampExpectation`).
+  `keyboardInsetAtWrongEdgeFailsTheComposerGate` still passes.
+
+  **(d) One owner, proven by grep.** `isFlipped`, `.newestAtOrigin`,
+  `.newestAtEnd` appear only inside `ChatTranscriptOrientation` and the test
+  oracle; the product's five gated sites ask the owner's semantic questions and
+  the six end-naming sites go through its anchors, edges and padding sets.
+  `physicalRowPositions`/`physicalTerminalPosition` now report the transcript's
+  visual order through `visualPosition(ofSpinePosition:count:)` (review P2-3).
+
+  **(e) The detached reader's throw is UIKit's, and it is measured.** With the
+  reader detached mid-history on the flipped path, the keyboard show moves the
+  scroll view's own offset from 1194 to -inset.top (the pinned end) in one step,
+  with **no scroll command written** (`commands=0`). A harness-only KVO observer
+  on the transcript `UIScrollView`'s `contentOffset` names the owner from the
+  first move's stack: `-[UIScrollView setSafeAreaInsets:]` →
+  `_UIScrollViewAdjustForOverlayInsetsChangeIfNecessary` → SwiftUI's
+  `HostingScrollView.PlatformContainer.updateSafeAreaInsets()`. Nothing
+  app-side: no SwiftUI default-scroll anchor, no `ScrollPosition`
+  re-application. The per-step numbers (offset / `adjustedContentInset.top`):
+  1194/53 → 1169.7/96.3 → 1135/131 → 1092.3/173.7 → 1045/221 → 997.7/268.3 →
+  955/311 → 920.3/345.7 → **-805.3/345.7** (one -1,725.7 step past the legal
+  minimum) → **-345.7/345.7** (clamped back to the pinned end). Today's path runs
+  the same adjustment but its changing inset is the *bottom* one, which UIKit
+  leaves alone (offset 5411 unchanged through the same steps), which is why the
+  CT-25 journey passes there. Consequences, both measured: (1) the journey's
+  earlier "5.7 / 10.0 pt" readings were the oracle comparing a *different* row
+  after the throw (the reader's row identity changes with it), so its 0.5 pt bar
+  was never about a drift; (2) the harness detaches with `setContentOffset`, not
+  a pan, so SwiftUI never records a user-scrolled item and has nothing to keep
+  (`userPosition=0` in the trace). A row `ScrollPosition` target *does* make
+  SwiftUI keep the row (its window y held at -26.0 across show/hide/page-load,
+  3 of the journey's 4 steps at exactly 0.0), but it installs by aligning a row
+  edge to the viewport edge — a 151 pt jump (it targeted `detach-anchor-turn-55`
+  at frame 8.67 while the reader's visible top was `detach-anchor-turn-43` at
+  -35.3), a 4.3 pt/identity change at keyboard-up, and it broke
+  `detached-reader-catch-up` parity (0.062 against 0.025). Removed; the tip tree
+  has no row target, no detached-anchor question and no driver change.
+
+- Evidence (lane ct23b, products built from this worktree's own source state,
+  every run under `~/Library/Developer/Tron/ios/test-runs/`; orientation selected
+  with `TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION`):
+
+  | what | run dirs |
+  | --- | --- |
+  | the frame space, both paths, one pinned dump each | `140834Z-run.yKw3IC` (today), `140919Z-run.qb8Usa` (flipped; marker `[0,12]` raw = `[779,791]` window) |
+  | the catch-up journey and the keyboard journey, flipped | `152029Z-run.eBwr0U`, `153821Z-run.a6XFN8` and three runs after the gate's final form: all pass, ramp worst gap 1.9-2.4 pt, displaced opening viewports 0 |
+  | the same, today's path | `152051Z-run.qi63RY`, `153847Z-run.flnhPH`: all pass, ramp 96,304.8-96,305.3 pt (the known drop reproduces) |
+  | the staged step's negative control | `153724Z-run.pyyFVO`: the mapping removed, the staged step lands 6,895.7 pt from the newest end and the journey fails |
+  | the four focused journeys, flipped | `153821Z-run.a6XFN8`: ramp 1.9, anomaly 0, catch-up and the wrong-edge control pass, the CT-25 detach journey fails exactly as at stage 2 |
+  | the same, today's path | `153847Z-run.flnhPH`: all four pass |
+  | the full harness, flipped | `152554Z-run.lkSUMH`: 67 tests, 48 events, all in the classes the plan already assigns to CT-19 (materialization/past-end lease counts 0 vs 2, the opening's own shape, the detach journey) |
+  | the full harness and parity, today's path | `152146Z-run.ZSblHH`: 69 tests, 1 failure (`displacedRetainedResume`, the CT-9 flake), parity **10/10 pass** |
+  | the full harness and parity, flipped, final tip | `155445Z-run.owG3tC`: 69 tests, 51 events, every failing name in the plan's classified lists (the materialization/lease mechanisms CT-19 deletes with their tests, the orientation-assuming oracle control, the CT-9 flake, the CT-25 detach journey, the parity gate) |
+  | parity, flipped, twice | `151133Z-run.tROTu6`, `151307Z-run.GaHwOf`: **7/10** each, the three failures all the documented 0.333 px pinned-offset/ink-phase class (`opened-long-history-at-rest` 0.028-0.029, `ordinary-send-keyboard-up` 0.048-0.057, `keyboard-safe-area-inset` 0.047); transitions pass |
+  | the offset's owner, KVO stack | `153228Z-run.C9vRIn`, `153255Z-run.8nlAR8` (harness-only probe, deleted) |
+
+- Changes: `ChatTranscriptOrientation.swift` (`transcriptFrame`,
+  `correctedOffsetY`, `scrollOffsetY`, `visualPosition`),
+  `ChatScrollCoordinator.swift` (frames enter through the owner, corrections
+  through the owner, `prependCorrectionOffset` deleted),
+  `ChatView.swift` (the one `.offsetY` destination, the two position sites),
+  `ChatViewScrollHarnessTests.swift` (the catch-up journey and its landing
+  assertion, `KeyboardRampExpectation`, the ramp and opening-classification
+  gates, `nativeNewestEndOffset`, the detach journey's zero-write assertions now
+  counting every command), this plan.
+- Deviations: the detach journey's `automaticScrollCommandCount` assertions could
+  not fail (`isAutomatic` is the same on both sides of the only recorder), so
+  they now count `scrollCommandCount`, which holds on both paths (measured) and
+  is the invariant the journey means. The opening-displacement anomaly is gated
+  only where the classification is now exact (the flipped path); today's path
+  measures 0-1 of its own without a gate. The detached row target was implemented
+  as reviewed, measured, and removed again with its measurements kept.
+- Open, with owners, in the order the evidence supports:
+  1. **P1-3, and its cause is now known (supervisor's direction, 2026-09-29).**
+     On the flipped path the composer/keyboard inset arrives as the scroll view's
+     safe-area inset, so UIKit's overlay-inset adjustment moves a detached
+     reader's offset (measured above). The supervisor's prescribed fix, for the
+     next stage: on the flipped path the scroll view ignores the vertical safe
+     areas (container and keyboard) and the owner applies the two insets as
+     content margins (`contentMargins` for `.scrollContent` and the indicators),
+     sourced from an unflipped reader in the same layout pass — margins only, no
+     safe-area application, so no overlay-inset adjustment. Then measure the
+     pinned keyboard journey's ramp, the CT-25 detached journeys, parity both
+     orientations, and today's keyboard journey. If the pinned origin does not
+     follow a margin change, the reported fix is the pinned origin's own anchor
+     (`defaultScrollAnchor` for `.sizeChanges` at the newest edge), not a scroll
+     command. Only if that cannot hold both pinned and detached: SwiftUI's own
+     preservation of a user-scrolled item, validated by an XCUITest with a real
+     swipe and the real keyboard rather than by a harness fake.
+  2. The flipped path's parity stays 7/10, the same class stage 2 documented (the
+     committed reference carries today's 0.667 pt pin and the 2-point bands carry
+     the capture's ink phase); the reference is re-recorded at CT-19's cutover.
+  3. The flipped harness's remaining 48 events are the mechanisms CT-19 deletes
+     (their tests with them), unchanged from stages 1-2.
+- For the next agent: the tip is one clean stage-3 commit on top of stage 2. Start
+  with 1 above (the inset seam), because it is the one change that can close P1-3
+  without a harness fake; keep the catch-up journey and the ramp gate where they
+  are, and re-run parity both ways before and after.
+
+### CT-23 re-application stage 5 · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: the flipped scroll view now applies the swapped vertical safe-area
+  values as `.scrollContent` and `.scrollIndicators` content margins, and ignores
+  `.container` and `.keyboard` vertical safe areas before the orientation
+  transform. Today's orientation remains the default and bypasses these changes.
+  The first committed form built, but the keyboard gate measured a 166 pt
+  overshoot and was reverted as a mechanism by the next step. The final order
+  eliminated that extra inset: the flipped keyboard journey measured 0/56 blank
+  boundaries, 0 uncovered-band boundaries, settled clearance 12 pt, and ramp
+  worst gap 1.9 pt. The flipped detached journey then failed at keyboard-up:
+  its visible anchor row moved 189.7 pt and changed identity, although streaming,
+  keyboard-down and page-load samples moved 0.0 pt. This does not satisfy the
+  pinned-and-detached contract; stop here, with no persistent anchor or command
+  workaround added. CT-25's explicit fallback remains a real-swipe, real-keyboard
+  XCUITest validating SwiftUI preservation of the user-scrolled item.
+- Diagnostic evidence (the temporary test-only margin/offset/safe-area logging
+  was removed before this handoff): keyboard plus detached run
+  `20260929T171157Z-run.JdS3gS`, built from clean HEAD `a7f2804e3`, lane `ct23b`.
+  At all 24 driven keyboard show/hide boundaries, native `contentOffset.y` equaled
+  `-adjustedContentInset.top`; after the final modifier order the native scroll
+  view's vertical `safeAreaInsets` were 0 at the sampled transitions (one
+  intermediate bottom-only value was 79.3 pt). The keyboard gate passed, but
+  the detached test failed on the keyboard show as noted above. Earlier probes:
+  `20260929T170326Z-run.ja6st1` (initial pinned regression, 166 pt ramp error),
+  `20260929T170656Z-run.CazgbR` (initial inset fix, detached stable 0.0 pt but
+  pinned gap 166 pt), all from their respective clean committed HEADs.
+- Changes: `ChatTranscriptOrientation.swift` owns margin mapping and the two
+  explicit ignored safe-area regions; `ChatTranscriptScrollView.swift` reads the
+  insets from the unflipped `GeometryReader` in the same pass and applies the
+  inset modifier before the orientation transform. The temporary diagnostic
+  edits to `ChatViewScrollHarnessTests.swift` have been removed; its existing
+  keyboard and detach gates remain the behavior oracles.
+- Open: the keyboard safe-area path is now pinned-correct, but the detached
+  keyboard-show journey regresses at 189.7 pt. No final parity, bottom gates, or
+  today's path confirmation was run because the user-directed stop condition
+  (pinned and detached must both hold) was reached.
+- For the next agent: resolve the detached-reader movement without introducing
+  scroll commands or timers; if this margin-based path cannot preserve both
+  contracts, implement only the approved fallback (SwiftUI preservation of a
+  user-scrolled item under an XCUITest with real swipe and real keyboard).
+
+### CT-23 re-application stage 2 · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: stage 2's two visible-rendering problems are diagnosed with controls.
+  (a) The wash is the system's automatic soft scroll edge effect, and the product
+  now suppresses it at the flipped transcript's pinned end: parity went **2/10 to
+  9/10** on the flipped path, and today's path stays 10/10. (b) The tall-insertion
+  transient is **measured and does not reproduce on this base**: the flipped
+  shapes hold `minVisibleRowFraction` 0.984-1.0 at every boundary while today's
+  path blanks in the same runs. The one frame still failing parity, and the
+  under-bar fade the suppression removes, are both named below with their
+  measurements; the fade's fix needs the supervisor's decision (reported).
+
+  **(a1) The wash is the automatic scroll edge effect, measured on the screen and
+  in one process.** With the flipped transcript pinned, iOS 26's automatic soft
+  edge effect is drawn with a band as tall as the whole scroll view — its effect
+  layer measures 844 pt against the 170.8 pt the unflipped transcript gets (106 pt
+  with the `.hard` style), for every style, scroll position, content size, inset
+  and keyboard state, with the band's *position* (the visual top) unchanged; only
+  hiding it removes its contribution. The simulator's own screen (not just the
+  capture path, so the spike's "capture artifact?" question is closed) shows the
+  whole transcript washed out with the nav bar and composer crisp; suppressing the
+  effect makes it crisp. In one run, the parity region's difference is 0.10458
+  with the effect and 0.01805 with it suppressed at the same state, and
+  re-enabling it brings the wash straight back (`origin-forced-on`). The review's
+  fractional-pixel lead is disproved: every on-screen row's window frame lands on
+  a whole device pixel in both orientations. Product: the owner answers
+  `suppressesPinnedEndScrollEdgeEffect` and the scroll view applies
+  `.scrollEdgeEffectHidden(..., for: newestEdge)`, so today's path keeps the
+  effect it has always drawn (its own product state differs by 0.00058 from the
+  same state with the effect forced on). Its gate is
+  `only the origin-anchored transcript suppresses the pinned end's scroll edge
+  effect`, which fails if the suppression is dropped or applied to the other path.
+
+  **(a2) The one frame still failing parity is the reference's own sub-point
+  pinned offset, and the finer alignment cannot absorb it.** Today's path pins to
+  the lazy stack's *estimated* content height: it settles at a 12.667 pt tail
+  clearance where the contract is 12 pt. An origin-anchored transcript pins
+  exactly (12.000 in the same runs). The same rows land exactly 2 device px apart,
+  integral on both sides, so the difference is a sub-point (0.667 pt) pinned
+  offset — the class of imprecision CT-23 removes. The committed reference was
+  recorded from today's container, so a candidate can only match it by
+  reproducing that offset. The approved device-pixel alignment step was added
+  (`ChatVisualParitySpec.transitionAlignmentStep` for transition frames, one
+  display pixel for stable frames, whole-frame uniform shift only) and it *finds*
+  the offset (the reported shift is 0.333-0.667 pt), but the residual stays
+  0.0277-0.0285 against the 0.025 stable bound for `opened-long-history-at-rest`
+  and 0.025-0.050 on `ordinary-send-keyboard-up`'s stable frames across two runs:
+  the 2-point bands are sensitive to the capture's ink phase, so the difference is
+  rendering rather than position and no shift can absorb it. Today's path reads
+  0.0133 on the same scenario in the same runs. Recorded in
+  `packages/ios-app/docs/development.md`, whose gate section now states the
+  reference's 12.667 pt pin and this limit.
+
+  **(a3) The chrome the suppression removes — reported, not yet fixed.** Today's
+  under-bar fade *is* that effect: hiding it on today's path changes the
+  navigation band by 0.059 and the parity region by 0.008, and the composer band
+  by 0.000. On the flipped path the effect draws as the wash instead, so today's
+  fade cannot be had from it: the system sizes the band to the viewport whatever
+  the style, so no public knob yields a correct band under the flip. Keeping the
+  suppression therefore leaves the flipped path with the chat's own top blur only
+  (a small, real difference under the navigation bar), and a substitute would be
+  transcript-owned chrome rather than the system effect. Reported to the
+  supervisor with the options; nothing hand-drawn was built.
+
+  **(b) The tall-insertion transient is measured and does not reproduce.**
+  A 60-boundary per-frame dump of both CT-24 shapes on the flipped path (the
+  resync shape's insertion included) reads `minVisibleRowFraction` 0.984-0.995 at
+  every boundary, with the previous newest row always adjacent to the inserted
+  rows and never pushed away: the 1 pt rows are the entrance's own measured
+  footprint in the layout, so no boundary leaves the viewport bare, and the
+  insertions grow from that footprint in place (measured heights 1.0 → 200.3 →
+  607.0 → … → 1,854.7 pt over about ten boundaries). The review's 711 pt hole
+  needs an inserted row to reserve an *estimated* slot while rendering its 1 pt
+  footprint; that is not what this base's row structure does. The floor is already
+  the CT-24 journeys' gate (0.5 via `TranscriptBottomGateExpectation`), its unit
+  control covers the "band covered but viewport sparse" case (a 0.2 fraction is
+  rejected), and the hosted control — today's path judged as if it had to cover
+  the bottom — fails both journeys naming `minVisibleRowFraction=0.0`.
+
+- Evidence (lane ct23b, products built from this worktree's own source state,
+  every run under `~/Library/Developer/Tron/ios/test-runs/`; the orientation is
+  selected with `TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`):
+
+  | what | run dirs |
+  | --- | --- |
+  | the six-field-shape gates + keyboard journey, flipped | `135245Z.rKwUsF`: 0/72, 0/340, 0/90, 0/68 blank, 0 uncovered, `minVisibleRowFraction=1.0`, `tailClearanceSettled=12.0`, `repairCommands=materialize:0,physical:0,pastEnd:0`; keyboard journey 0/56, clearance 12.0 |
+  | the same, today's path | `135333Z.2NE9WQ`: 56/72, 62/340, 77/90, 27/68 blank, fraction 0.0, `tailClearanceSettled` 12.7 or none; keyboard journey 1/56 blank, clearance range [-674.2, 96317.3] |
+  | parity, flipped (2 runs) | `134704Z.0UypI0`, `134821Z.JIGDhq`: 9/10 and 8/10; wash gone, `opened-long-history-at-rest` 0.0277/0.0285 at shift 0.667/0.333 |
+  | parity, today's path | `135045Z.CGDglb`: 10/10 (worst stable 0.0133) |
+  | the alignment change's control | `fingerprintAlignmentAbsorbsOnlyADevicePixelPinnedOffset`: a 0.667 pt pinned offset is absorbed, a 3 pt uniform shift is clamped at the allowance edge and fails, a 24% wash fails, a progressive row-spacing change fails |
+  | the edge-effect finding, in one process | `123607Z.1WUHLd` (wash = the top edge effect; hiding it: 0.0181), `124004Z.ClOr38` (per-edge: hiding the bottom changes nothing), `130729Z.ikK5hF` (`origin-product` 0.01805 vs `origin-forced-on` 0.10458), `130335Z.ACJk50`, `132131Z.KJPYbG` (band and position dumps: 844 pt vs 170.8/106 pt; rows integral in device pixels) |
+  | the tall-insertion dump | the same lane's CT-23-boundary probes: flipped 0.984-0.995 across 110 boundaries of both shapes, today's path 0.0 |
+  | the floor gate's hosted control | `130559Z.Ymu2Iu`: today's path judged as covering fails both CT-24 journeys with `minVisibleRowFraction=0.0` |
+  | the on-screen proof | `packages/ios-app/build/ct23-stage2/onscreen-*.png` (simulator screens, git-ignored): today, flipped with the wash, flipped suppressed, flipped with the effect forced back on |
+
+- Changes: `ChatTranscriptOrientation.swift` (`suppressesPinnedEndScrollEdgeEffect`),
+  `ChatTranscriptScrollView.swift` (the suppression at the transcript scroll
+  view), `ChatVisualParityTests.swift` (the per-phase alignment step, the
+  alignment's own failure-mode test), `ChatViewScrollHarnessTests.swift` (the
+  suppression's two-sided gate), `packages/ios-app/docs/development.md` (the
+  alignment step, the reference's 12.667 pt pin and the limit it creates), this
+  plan.
+- Deviations: the probes this stage used (the band dump, the effect-layer dump,
+  the placement probe, the parity-shape diagnosis) were investigation tools and
+  are deleted; the branch carries their runs' evidence and no print-only test.
+- Kept on purpose: all five gated mechanisms with their command origins, traces
+  and harness counters (CT-19 deletes them once the flip passes every gate);
+  `snapNativeTranscriptOffsetToWholePoint`; the CT-2/CT-24 estimate fields.
+- Open, with owners, in the order the evidence supports:
+  1. **The under-bar chrome — decided, and it goes to the user as a product
+     decision.** The system's soft edge effect cannot render its bar-sized band
+     under the flip (measured: viewport-sized — 844 pt — for every style, scroll
+     position, content size and inset, against 170.8 pt soft / 106 pt hard
+     unflipped), and today's under-bar fade is that effect (its contribution:
+     navigation band 0.059, parity region 0.008, composer band 0.000 — there is
+     no separate composer-edge fade). The supervisor's decision (2026-09-29) is to
+     keep the suppression and build no replica; the two options — keep the flipped
+     path on the chat's own top blur alone, or add transcript-owned chrome that
+     replaces the fade — are the user's to weigh on the device, with these
+     measurements and the retained on-screen captures as the evidence.
+  2. **The committed reference's 0.667 pt pinned offset and the capture's ink
+     phase — accepted for this stage (supervisor, 2026-09-29).** The flipped path
+     is 9/10 and that is the documented cause: today's container pins at a
+     12.667 pt tail clearance against the 12.0 contract, the committed reference
+     carries that offset, and the 2-point bands are sensitive to the capture's ink
+     phase, so the finer device-pixel alignment finds the offset but cannot absorb
+     it (0.0277-0.0285 for `opened-long-history-at-rest`; 0.025-0.050 on
+     `ordinary-send-keyboard-up`'s stable frames across two runs; today's path
+     10/10 at 0.0133). No gate is loosened further and the reference is not
+     re-recorded now: it is re-recorded on the flipped path at CT-19's cutover,
+     after the user approves the look on the device, under the existing
+     provenance rules (a reviewed recording revision, never one from the
+     candidate). `packages/ios-app/docs/development.md` states the same limit.
+  3. The review's remaining flip-path items, unchanged from stage 1: the `.offsetY`
+     catch-up mapping (P1-1), adapted or deleted row and marker frames with the
+     anomaly classifier (P1-2), the detached reader's row-identity anchor (P1-3),
+     the status-bar tap (P1-5), context menus, VoiceOver order and scroll
+     direction, and optimized-profiler numbers (P2-6).
+  4. `displacedRetainedResume`'s load flake is CT-9's.
+
+### CT-23 re-application stage 1 · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: the origin-anchored transcript is re-applied on `main`'s post-CT-25/
+  CT-27 structure and measured. `ChatTranscriptOrientation` is the one owner: the
+  render flip on the scroll view, the counter-flip every content element applies
+  through the same modifier, the row spine's newest-first order, the layout edge,
+  anchor and padding set a transcript-relative name maps to, the sign a layout
+  offset keeps, and the geometry the coordinator reads (the `ScrollGeometry` read
+  moved out of the scroll view into the owner). No caller branches on the flip
+  (review finding P2-2): the five gated sites ask one of three semantic questions
+  — `presentsNewestRowFirst`, `mountsNewestRowWithContent`, `pinsToEstimatedOrigin`
+  — and every end-naming site goes through the owner. The flip is the whole
+  composer/keyboard inset mechanism (the flipped scroll view's own mirrored safe
+  areas; no `GeometryReader`, no margin), the opening is install → one frame →
+  reveal, and the five estimated-end mechanisms are gated off, not deleted.
+
+  With the switch off today's path is unchanged: parity 10/10, the four field
+  shapes still reproduce their blank, and the full harness is 64/65 with only the
+  recorded `displacedRetainedResume` load flake (CT-9) — which passes in isolation
+  in the same lane. With the switch on the four bottom gates pass three runs each
+  with zero blank boundaries, zero uncovered-band boundaries,
+  `minVisibleRowFraction=1.0` and the newest row settled at exactly 12.0 pt; the
+  keyboard journey passes three runs at the same 12.0 pt. The spike's one-frame
+  tall-insertion sliver (`minVisibleRowFraction` 0.0-0.1 on the CT-24 shapes) does
+  not appear on CT-27's row structure in these runs. The one visible gate still
+  failing is the parity region's wash, unchanged from the spike: 8 of 10 scenarios
+  differ by 0.083-0.096 with every worst frame matching at `shift1.0`.
+
+- Evidence (lane ct23b, products built from this worktree's own source state,
+  clean: this branch's revisions `e1f1ff05d` (all runs below) and `5648eeba9`
+  (the four-gate confirmation in (1)); every run under
+  `~/Library/Developer/Tron/ios/test-runs/`; the orientation is selected with
+  `TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`):
+
+  **(1) The four bottom gates with the switch on, three runs each** (each run is
+  one invocation of all four journeys; `TranscriptBottomGateExpectation
+  .current(for:)` = `coveringBottomIsRequired`):
+
+  | shape | blank | uncovered band | min visible row fraction | newest-row clearance | run dirs |
+  | --- | --- | --- | --- | --- | --- |
+  | CT-2 many tall replies (72) | 0 | 0 | 1.0 | 12.0 | `114234Z.ODYqM9`, `114317Z.sfTJa8`, `114347Z.MEwz8J` |
+  | CT-2 keyboard cycles + sends (340) | 0 | 0 | 1.0 | 12.0 | same three |
+  | CT-24 resync under tall newest (90) | 0 | 0 | 1.0 | 12.0 | same three |
+  | CT-24 send under tall newest (68) | 0 | 0 | 1.0 | 12.0 | same three |
+
+  All twelve journeys report `repairCommands=materialize:0,physical:0,pastEnd:0`
+  and `tailDisplacements=0`: nothing on the flipped path asks for a repair. The
+  CT-24 shapes' realized tall rows measure 1,762.7 and 1,897.3 pt, and every
+  CT-2/CT-24 line carries `orientation=origin`, so a line says which side of the
+  switch produced it. The same four gates on the branch's revision after two
+  readability edits with identical behaviour (a negated guard and the metrics
+  label) read identically: `121920Z.FJGhEx`, 0 blank, 0 uncovered,
+  `minVisibleRowFraction=1.0`, clearance 12.0 in all four shapes.
+
+  **(2) The same gates and the keyboard journey with the switch off**
+  (`114542Z.OXo8es`): the four shapes still reproduce the field defect — 56/72,
+  183/340, 77/90 and 14/68 blank boundaries — so every gate passes as
+  `uncoveringBottomIsTheKnownDefect`, and the journey is unchanged by the
+  restructure. The keyboard journey settles at 12.3 pt on today's path, but its
+  own ramp swings `[-674.2, 96317.3]` and one boundary in the keyboard phase
+  blanks with `minVisibleRowFraction=0.0`.
+
+  **(3) The keyboard's own inset path with the switch on, three runs**
+  (`114512Z.Au7qjG`, `121014Z.tytsZm`, `121034Z.fSRAmi`): every run passes with
+  `blankBoundaries=0/56`, `uncoveredBandBoundaries=0`,
+  `minVisibleRowFraction=1.0`, `clearanceRange=[4.0,12.0]` and
+  `settledClearance=12.0` at both settled boundaries (`p2`-`p4` are exactly 12.0;
+  the low 4.0 is the phase before the keyboard's inset is driven, and `p1` reads
+  9.0-9.6 as the inset lands). Today's path on the same journey: see (2).
+
+  **(4) `ChatVisualParityTests`, all ten scenarios.**
+  - Switch **off** (`114640Z.276JYr`): 10/10 pass (worst 0.05488 transition,
+    0.01355 stable) — the content extraction, the owner-mapped anchors and the
+    conditional orientation modifier do not move today's path.
+  - Switch **on** (`114809Z.1DnXAg`): 2/10 pass. `short-transcript-at-rest`
+    passes at 0.00293 and `oldest-row-at-visual-top` now passes at 0.01861 (the
+    spike's orientation-specific far-top clamp is gone; `main`'s verbatim
+    legal-range clamp and the committed reference agree). The other eight fail at
+    0.08291-0.09553 from `frame0:rest` on against their 0.025 stable bound, every
+    worst frame best-matching at `shift1.0` — the spike's ~24%-contrast wash over
+    the parity band (`opened-long-history-at-rest`, `ordinary-send-keyboard-up`,
+    `streaming-tail-growth`, `queued-card-to-sent-row`, `tool-chip-entrance`,
+    `earlier-page-load-at-rest`, `detached-reader-catch-up`,
+    `keyboard-safe-area-inset`). The keyboard scenario's failure is now the wash
+    alone: the inset path it drives passes (3).
+
+  **(5) The full `ChatViewScrollHarnessTests`, both orientations.**
+  - Switch **off** (`120258Z.unRrkY`): 64/65 pass, 110.1 s suite; the single
+    failure is `displacedRetainedResume`'s 15 s watchdog under the full suite, the
+    load flake CT-9 records (`120921Z.OQ4a2s` passes it in isolation in the same
+    lane). So the switch-off restructure is a no-op for the whole harness.
+  - Switch **on** (`114955Z.8vxLGo`): 48/65 pass and 17 fail (33 issues, 273 s),
+    all classified:
+    - *Asserts a mechanism the flip retires (13, for CT-19 to delete with their
+      tests)*: the tail-materialization command counts (`an ordinary send over a
+      mixed-height lazy history settles on its native tail`,
+      `agent response and compaction settlement retain mounted physical rows`,
+      `ordinary discrete transcript insertion materializes and reveals exactly
+      once`, `running tool entrance uses displayed install when desired completion
+      advances first`, `real tool group topology inserts one chip under native
+      viewport pinning`), the `ScrollPosition` target lease and its release
+      (`resumed multiline send settles from native row geometry during keyboard
+      resize`, and the watchdogs of `ordinary send keeps one stable tail through
+      target release`, `short and long history preserve the mounted prompt through
+      acknowledgement and successor`, `a real managed sheet freezes covered chat
+      and uncovers to the latest native frame`, `retained detached authority
+      replacement preserves its installed cut`), the target-free rebase
+      (`dynamic-height retained pinned view rebases native rows after
+      displacement`), the past-end net (`a sustained past-end pinned viewport
+      returns to the tail through one disabled repair`), and the lease trace
+      (`chat.lease.semantic-handoff`).
+    - *The flipped opening's own shape (3)*: `production unfinished opening
+      retains its exact subscription across cover and settles an accepted upload
+      once` and `real opening deadline failures publish only for their current
+      live owner` deadlock in their hosted waits, because install → one frame →
+      reveal never publishes the physical settlement they hold, and `cancelled
+      frame wait closes readiness exactly once` sees a different first-ready
+      sequence because the flipped opening runs no positioning pass. These
+      journeys are owed by the opening rewrite, not by this stage.
+    - *A test premise that assumes today's orientation (1)*:
+      `a flipped transcript without counter-flipped rows fails the window oracle`
+      flips the native scroll view by hand and expects the removed scroll-space
+      measurement to read the legal end; on a run whose spine is already
+      newest-first that end is 3,006 pt away.
+    - *Visible behaviour not yet implemented (1)*: `a detached reader holds its
+      top row through streaming, a keyboard cycle and a page load` — the
+      reader's top row moves 10.0 pt and changes identity
+      (`detach-anchor-turn-43` → `detach-anchor-turn-54`) across the earlier-page
+      load, and the keyboard cycle moves it too. This is the row-identity
+      detached anchor the 2026-09-29 review decided, still owed.
+
+- Changes: `ChatTranscriptOrientation.swift` (new, the owner and the one modifier
+  both the transcript and each content element apply),
+  `ChatTranscriptScrollView.swift` (the spine's newest-first order and `newest`
+  accessor, the content split into `transcriptContent`/`earlierMessagesRow` with
+  the orientation's end mapping and the counter-flip, the owner-mapped anchors and
+  geometry reads, the gated lazy-tail request, the `ScrollGeometry` read moved to
+  the owner), `ChatScrollCoordinator.swift` (the orientation and the four gated
+  mechanisms), `ChatView.swift` (the orientation field, the semantic-question
+  gates, the commands mapped through the owner's anchors and edge),
+  `ChatViewScrollHarnessTests.swift` (per-run orientation selection,
+  `TranscriptBottomGateExpectation.current(for:)`, the per-orientation
+  materialization expectation, the orientation field on both metrics lines).
+- Deviations from the spike, all deliberate:
+  - Review P2-2 is fixed rather than carried: the spike's raw `isFlipped` branches
+    at nine sites are three semantic questions on the owner, and the row
+    counter-flip is the owner's modifier instead of an inline `scaleEffect`.
+  - The print-only contrast probe (`ct23FlippedParityContrast`, `ct23Ink`) and its
+    `CT24-TRANSIENT`/`CT25-KEYBOARD-TRACE` diagnostics were **not** ported: the
+    testing policy excludes shipping tests that assert nothing, and this stage's
+    evidence does not need them. The parity failure above is therefore named by
+    the gate's own retained captures and its `shift1.0` framing, not by a new
+    probe.
+  - `main`'s verbatim legal-range clamp replaces the spike's orientation-specific
+    far-top clamp, so `oldest-row-at-visual-top` passes on the flipped path (4).
+  - The stage-1 spike's CT-24 `minVisibleRowFraction` deviation (1-2 of 90
+    boundaries at 0.0-0.1, the "sliver") did not reproduce on `main`'s CT-27 row
+    structure in three runs (1). It stays on the CT-7 device checklist rather than
+    being declared fixed, because these are hosted runs of one fixture.
+  - Row and collection *positions* (`physicalRowPositions`,
+  `physicalTerminalPosition`) still read the spine's visual order, so the
+  diagnostic `requestedRowOffsetFromTerminal` is inverted on the flipped path
+  (review P2-3). Diagnostic only; left for the stage that owns the flip's traces.
+- Kept on purpose: all five gated mechanisms with their command origins, traces
+  and harness counters (CT-19 deletes them once the flip passes every gate);
+  `snapNativeTranscriptOffsetToWholePoint`; the CT-2/CT-24 estimate fields; the
+  `.offsetY` scroll destination unmapped (review P1-1 — the staged catch-up is the
+  one command the flip still receives in mirrored coordinates, and replacing it
+  with a row or edge target is a design decision, not a port).
+- Open, with owners, in the order the evidence supports:
+  1. **The parity wash** (P1-6): 8/10 scenarios, 0.083-0.096, every worst frame at
+     `shift1.0`. The spike's bisection ruled out the capture path, capture scale,
+     the inset swap, the reveal opacity, the entrance wrapper, the row content,
+     the scroll structure, `scrollEdgeEffectStyle`, and a plain blur; what remains
+     is the row/marker *host* layer, the anchor modifiers on the scroll view, and
+     the UIKit-backed pieces inside rows.
+  2. **The detached reader's row-identity anchor** (decided 2026-09-29): the CT-25
+     B3 journey still fails on the flipped path (5).
+  3. The review's other flip-path items, each unmeasured here: the `.offsetY`
+     catch-up mapping (P1-1), adapted or deleted row and marker frames with the
+     anomaly classifier (P1-2), a row-identity detached anchor (P1-3), an entrance
+     that does not leave the viewport for a tall insertion (P1-4 — not observed in
+     (1), still a CT-7 item), the status-bar tap (P1-5, a user decision if only a
+     private reach-in would do it), context menus, VoiceOver order and scroll
+     direction, and optimized-profiler numbers (P2-6).
+  4. The `displacedRetainedResume` load flake is CT-9's, recorded again here; it is
+     not a correctness failure and this stage did not change it.
+- For the next agent: the flip is on `ct-23-flip2` (this worktree), today's path is
+  untouched, and stage 2 should start with the parity wash because it gates every
+  other visual probe, then the detached reader's row-identity anchor, then the
+  `ChatViewScrollHarnessTests` journeys the flip retires, which CT-19 deletes with
+  the mechanisms.
+
+### CT-23 re-application stage 4 · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: stage 4 remains **Blocked**. The stage-4 source state was committed at
+  `6c6665566` before its evidence runs; every run below used products from this
+  worktree and a clean HEAD. The existing element-order, prompt preview, menu
+  resolution and content-top gates pass. They do not close the distinct
+  VoiceOver scrolling or display-card preview gates. The origin path makes the
+  system's content-top landing the pinned newest row, so the user's
+  oldest-loaded-history status-bar requirement is unmet. No private UIKit
+  reach-in was added.
+- Evidence (lane `ct23b`, run bundles in `~/Library/Developer/Tron/ios/test-runs/`):
+
+  | Gate | Result | Evidence |
+  | --- | --- | --- |
+  | Prompt/UIKit context-menu preview, both orientations | Pass | `20260929T173535Z-run.1jsZxC`; preview is upright, identity target and centered over the source. |
+  | Display-card/SwiftUI context menu | Menu-resolution gate passes both orientations; preview remains open | `20260929T173535Z-run.1jsZxC`; the public SwiftUI delegate probe (`20260929T172356Z-run.LPhoGC`) showed the origin preview container rendering flipped. A candidate source-owner swap to the existing UIKit interaction found two overlapping hosting surfaces on today's orientation and zero mounted-source intersections on the origin orientation; it was reverted without shipping. The earlier 7.25 pt displacement used the row marker, not the card's own source frame, and is not evidence of a card defect. |
+  | VoiceOver element reading order | Pass, with negative controls for absent and reversed priorities | `20260929T173535Z-run.1jsZxC`; oldest-first order holds in both orientations. |
+  | VoiceOver accessibility-scroll direction | Not gated | The stage-4 tests do not dispatch an accessibility scroll action and inspect the resulting visual row sequence. Still required before cutover. |
+  | Status-bar tap | Blocked by public API surface | The hosted landing gate in `20260929T173535Z-run.1jsZxC` demonstrates today's content-top reaches oldest loaded history; on the origin path the content top is the newest/pinned end. SwiftUI provides public scroll-position/scroll-to commands but no public status-bar-tap callback that lets this `ScrollView` redirect that system command. `UIScrollViewDelegate` could receive it only if the SwiftUI-owned scroll view were reached/owned; no private reach-in was used. |
+  | Scroll-edge parity | Known, intentional tradeoff; user confirmation remains open | iOS 26 soft edge layer: origin 844 pt, today 170.8 pt (hard-style control 106 pt); origin hides the pinned edge effect to prevent the viewport wash. Removing it on today's path changes the navigation band by 0.059, parity region by 0.008, composer band by 0.000. Keep suppression and do not build a replica per the 2026-09-29 decision. Device review must still show the nav band/fade side-by-side and confirm whether the suppressed fade is acceptable. |
+  | 150/300/512 scale, origin | 3/3 complete runs for every shape | `20260929T173616Z-run.dLIlxo`, `20260929T173704Z-run.uYPBvi`, `20260929T173750Z-run.3Mj7Py`. All shapes end pinned at 12 pt; no compensation commands. Median first-ready: 181.7/145.5/150.4 ms; ready memory: 497.2/569.6/579.5 MB; median scroll step: 1.0/1.0/1.0 ms; median streaming interval: 18.2/25.4/33.3 ms. Against CT-10 (324/350/475 ms ready, 497/583/613 MB, 0.8 ms scroll step, 33/50/50 ms streaming), opening and memory are within-or-better, scroll step is 0.2 ms higher at each size, and streaming medians are equal-or-better. |
+  | 150/300/512 scale, today's orientation | Only two complete measured runs; third run's 150-row opening missed readiness | `20260929T173839Z-run.S6C0oo`, `20260929T173933Z-run.g7JxcZ`, `20260929T174027Z-run.kzapZK`. First-ready at 150 in run 3 was not published within 60 s (two prior runs: 295.2/280.4 ms); 300/512 completed in all runs. Completed runs show 150/300/512 first-ready about 280–295/184–200/211–233 ms and memory around 500/518/592 MB. All today-path send phases end detached (`pinned=false`, 387–454 pt clearance); this is existing estimate-compensation behavior, not a scale fixture pass. The incomplete 150-row trial is retained as a blocker, not discarded. |
+  | Optimized profiler (`streaming-reply`, `tool-loop`) | Not run in both orientations | `scripts/tron-profile ios --list` confirms the scenarios, but `ChatTranscriptOrientation.selected` reads the orientation variable only under `#if HOSTED_TEST`; the optimized DevicePerformance build cannot select `.newestAtOrigin`. No profile data is claimed. |
+
+- Status-bar API finding was checked against the available iOS 26.5 SDK; no iOS 27 SDK was present in this worktree's Xcode, so no iOS 27 API claim is made. Options for the user: (1) keep the flipped transcript and accept that
+  the system tap stays at the newest end (does not meet the stated requirement);
+  (2) replace the system gesture with a product-owned “oldest loaded history”
+  command/affordance, which is not the same status-bar interaction; or (3) use a
+  scroll container Tron owns and can give the public UIKit scroll-to-top delegate
+  callback, which is a container/architecture change and outside this spike. Do
+  not intercept the status bar through private reach-in.
+- Device checklist additions: compare today's under-navigation fade and the
+  suppressed flipped band side-by-side on the same phone, then record the user's
+  accept/reject decision; stream a tall newest row and inspect whether the
+  `minVisibleRowFraction=0.984–0.995` one-frame dip observed across 110 hosted
+  boundaries ever presents as a visible sliver on device; perform real VoiceOver
+  element traversal and three-finger scrolling at mid-history in both directions;
+  confirm the real status-bar-tap behavior if an approved replacement is chosen.
+  Hosted scroll-edge metrics do not substitute for those device observations.
+- CT-19 cutover remains gated. Once every gate is approved and passes, delete the
+  development orientation switch and `newestAtEnd` path, the estimated-end
+  materialization/physical-tail/past-end/opening-settlement/prepend-restoration
+  compensations and their command traces/counters/tests, the tail-band workaround,
+  and obsolete orientation-specific test branches. Keep the single
+  `ChatTranscriptOrientation` owner, the invariant monitor, and the row-identity
+  detached anchor. Do not delete a mechanism before its owning green regression
+  runs; the tall-row device question and the navigation fade decision remain on
+  the device checklist.
+- Work committed on this branch after stage 3: the CT-23 stage-4 findings below
+  are handoff evidence only; the temporary source-owner menu experiment was
+  reverted (`6c6665566`) after it failed to identify one actual display-card
+  source in both orientations. No product menu change remains from stage 4.
+
+### CT-23 review fixes · 2026-09-29 · chat scroll session (worker lane ct23b)
+
+- Result: review findings F2/F3/F7/F8 and the raw-frame portion of F1 are being
+  addressed before evidence runs. The inset reader is mounted only for the
+  origin-anchored branch; semantic row/marker samples retain raw frames and are
+  reflected using the coordinator's current container height when read. VoiceOver
+  priorities are always applied, and row positions are enumerated without an
+  ID-keyed dictionary. Documentation now records the development orientation
+  switch and the margin-based inset owner.
+- Evidence: pending. Required checks remain parity in today's orientation 10/10,
+  the full harness with the switch off, flipped keyboard-ramp alignment at every
+  boundary, the flipped `ChatRowStabilityTests`, and applicable negative controls.
+- Changes: `ChatScrollCoordinator.swift`, `ChatTranscriptOrientation.swift`,
+  `ChatTranscriptScrollView.swift`, `ChatViewScrollHarnessTests.swift`,
+  `packages/ios-app/docs/architecture.md`, this plan.
+- Adapter contract (supervisor): each reported geometry is derived entirely
+  from one `ScrollGeometry` callback, including container size and the actually
+  applied `contentInsets`; the separate `GeometryReader` values only source the
+  margins and are never mixed into observed geometry. Successive callbacks need
+  no frame fence. Stored raw frames are reflected using that latest observed
+  container height when read. This adapter contract is implemented; F4's
+  keyboard-ramp gate remains pending.
+- Open: evidence and the flipped-reflection negative control remain pending.
+
+
+### CT-23 flip2 status · 2026-09-29 · worker lane ct23b
+
+**Blocked for production cutover; available for user-owned device evaluation.**
+The detached keyboard defect is fixed declaratively. Parity capture no longer
+moves an exact pin, and both row-stability suites pass after correcting test
+settlement/traversal. Preview orientation, the remaining parity residual and
+accessibility/status-bar requirements remain open. Today's orientation is still
+the default; no Gateway lifecycle or device action was performed.
+
+Final product/test revision: **`9d606ec1d`**, source-identical to `eb81e2f71` after
+all diagnostic controls were reverted. Final focused runs have
+`source.dirty=false`; earlier bottom/scale/full-checkpoint evidence remains at
+clean `448a97b79`. Optimized repeat/attribution evidence is at clean `eb81e2f71`.
+Subsequent changes update this handoff only. Test artifacts are under
+`~/Library/Developer/Tron/ios/test-runs/`, profiles under
+`~/Library/Developer/Tron/profiles/ios/`.
+
+#### Root cause and changes
+
+- **F1/F4:** `1712fea02` already implements the supervisor's single-sample
+  adapter contract. Geometry is exclusively one `ScrollGeometry` sample,
+  including actually applied content insets; the unflipped reader only sources
+  margins. Raw semantic frames are reflected when read using the latest
+  container height. The pinned keyboard journey now gates distance-from-newest
+  ≤0.5 pt and `tail=aligned` at all 24 ramp boundaries. The latter samples the
+  newest bounded production tail trace, not a reconstructed classifier.
+- **Detached keyboard show:** the previous overlay-inset offset throw is no
+  longer the cause with margins. Harness-only KVO at clean `edff9c7b0`, run
+  `20260929T181514Z-run.HAyuAc`, records **no offset movement**: offset 1213
+  throughout, commands 0. SwiftUI's `HostingScrollView.updateContext` calls
+  `setContentInset`/`setContentSize` and writes the same offset; no layout-restore
+  or offsetY command moves it. Late in show, the native frame shrinks from
+  y=0/h=844 to y=166/h=678. The original row remains at -35.3 but is clipped;
+  the next row at 154.3 becomes the visible anchor. The reported 189.7 pt was
+  this identity selection, not movement of the original row.
+- **Fix:** the orientation owner excludes vertical safe areas outside the scroll
+  flip as well as inside. Inner exclusion prevents UIKit overlay-inset
+  adjustment; outer exclusion prevents the transformed viewport from shrinking
+  and clipping the reader. `ChatTranscriptViewportModifier` owns margins, flip
+  and both exclusions together; row counter-flips do not inherit viewport
+  modifiers. Today's branch returns content without any of them. No position
+  target, timer, retry or compensating command was added. Clean `befb6f540`
+  (`20260929T181708Z-run.oaamdq`) first measured both pinned and detached holding;
+  the permanent detached gate now checks row ID, instance, <0.5 pt and zero
+  commands at every show/hide boundary as well as settled streaming/page load.
+  The conditional real-swipe XCUITest fallback was not needed: the in-app
+  declarative change holds both contracts in the hosted journey. This is not
+  proof of the physical keyboard's transaction.
+- **Controls:** clean `dc33ef1cc`, `20260929T182311Z-run.lowvrR`, reflects on
+  arrival again and fails the new pinned marker gate at every ramp boundary.
+  Clean `76774af55`, `20260929T182408Z-run.vkd4sQ`, removes only outer exclusion
+  and fails detached row/instance preservation, reproducing 189.7 pt. Both
+  controls are reverted; KVO and per-boundary native dumps are deleted.
+- **Display menu:** clean `64606f008`, `20260929T182722Z-run.J7pAPF`, observes
+  SwiftUI's actual public highlight-preview delegate. Its source is an upright
+  `PortalGroupMarkerView`, 358×214 pt; its target is `HostingScrollView` with
+  identity target transform, whose ancestor chain is flipped only on origin.
+  Public SwiftUI `compositingGroup()` on the card does not change that target
+  (`a86db8b71`, `20260929T182838Z-run.NMq0e4`); the experiment is reverted.
+  The retained gate now judges the preview against **its actual card source**,
+  not the larger row marker, and fails for the flipped container. Its existing
+  negative controls reject a mirrored target/view/container, displacement and
+  wrong size. No preview fix is claimed from this bounded investigation and no
+  substitute card was shipped. SwiftUI's standard context-menu API offers no
+  target-container argument. Options requiring further work/approval: explicit
+  SwiftUI preview content (not the same live card lifted in place), a stable
+  source-owned UIKit menu boundary, or a container without the ancestor flip.
+  Delegate geometry proves the unresolved target transform; it is not an
+  on-device menu-animation capture.
+- **Optimized switch:** contrary to the prior review premise,
+  `DevicePerformance.xcconfig` already compiles `HOSTED_TEST`; no production
+  switch expansion was needed. Both optimized profile logs explicitly report
+  `transcript_orientation=newestAtOrigin`/`newestAtEnd`. Documentation records
+  the existing selection command; CT13 metrics now include orientation.
+
+#### Clean gates (revision stated where newer than `448a97b79`)
+
+| Gate | Latest result | Run directories |
+| --- | --- | --- |
+| Four CT-2/CT-24 bottom journeys ×3, origin | All 12 pass: 0 blank and uncovered boundaries, minVisibleRowFraction=1.0, settled clearance 12.0, no materialization/physical/past-end repairs | `20260929T184933Z-run.fMfwd5`, `20260929T185003Z-run.s7k0Ct`, `20260929T185033Z-run.nPnevI` |
+| Same four ×3, today | All known-defect expectations reproduce: minVisibleRowFraction=0.0; blanks 56/72, 61–62/340, 78/90, 26–30/68. Not a claim of covering the bottom | `20260929T185103Z-run.cDNBAI`, `20260929T185136Z-run.UeJKvm`, `20260929T185209Z-run.6W7aR9` |
+| Keyboard + staged catch-up + detached, origin | All pass at `9d606ec1d`. Ramp worst gap 2.4 pt from 12; distance ≤0.5 pt and aligned-marker gates pass at every ramp boundary. Detached streaming/show/hide/page movement 0.0, same ID/instance through keyboard, zero commands | `20260929T204625Z-run.FsVOxb` |
+| Same journeys, today | All pass existing expectations at `9d606ec1d`. Detached 0.0 throughout; keyboard reproduces known ramp drop (93,399.7 pt), settles at 12.3 | `20260929T204813Z-run.5u2RG2` |
+| Parity, today | **10/10** at `9d606ec1d` | `20260929T204813Z-run.5u2RG2` |
+| Parity, origin | **9/10** at `9d606ec1d`; only opened-history 0.02766 fails. Ordinary-send stable maximum 0.0249985 is barely inside 0.025; earlier clean corrected run was 8/10 with 0.02515 ordinary-send, so repeat stability is not claimed | `20260929T204625Z-run.FsVOxb`; earlier `20260929T192640Z-run.q9vL2e` |
+| Full harness + parity + row stability, origin | 88 tests, 42 issues. Contains retained estimated-end/lease/opening test assumptions, menu gate, row-stability journey and parity failures; **not green**. Additional covered-catalog/prepend watchdogs remain untriaged; not all failures are declared retired mechanisms | `20260929T183920Z-run.pKUJBZ` |
+| Full harness + parity + row stability, today | 88 tests, 3 issues: the menu test explicitly runs origin too and fails there; `displacedRetainedResume` and `unifiedResponseAndNotificationSettlement` watchdogs. Both watchdog cases pass focused at same source | `20260929T184532Z-run.firSJ8`; focused `20260929T190539Z-run.s8qLIk` |
+| ChatRowStabilityTests, origin | **14/14** at `9d606ec1d`: thinking 99/66 pt, overflowing; zero settled phase variants/post-mount resizes; native remounts 9/9; entrance identity stable. Two inline-display within-mount 20 pt changes remain measured, not newly fixed | `20260929T204625Z-run.FsVOxb` |
+| ChatRowStabilityTests, today | **14/14**, same measurements at `9d606ec1d` | `20260929T204813Z-run.5u2RG2` |
+| Prompt/UIKit preview and preview negative controls | Pass both orientations; display/SwiftUI preview separately fails | Both full runs above |
+| Accessibility / status-bar | Existing priority-model test passes; **no hosted accessibility-tree or scroll-action proof**. Existing content-top test demonstrates origin reaches newest, not required oldest; **requirement unmet**, not a pass | Both full runs above |
+
+#### Parity and row-stability regression attribution
+
+The parity capture's `snapNativeTranscriptOffsetToWholePoint` rounded the exact
+margin pin (for example −63.333 to −63). Subsequent inset changes preserve that
+now-detached native offset, leaving the row 326 pt below the composer. The
+normal keyboard journey never writes offsets and passes. The helper now keeps
+normalization on today's estimated-end path and skips it only through the
+orientation owner's `pinsToEstimatedOrigin`. The new settled keyboard/composer
+pin assertions fail under clean negative control `0a13aa890`, run
+`20260929T204423Z-run.f10mIr`: clearances −314 and −375.3 pt. Control reverted.
+Removing only outer exclusion or restoring arrival-time reflection did not
+repair parity (both 7/10); pre-margin viewport restored 9/10, and removing the
+capture's offset write restored the keyboard scenario without a product change.
+
+Scenario-by-scenario comparison to stage 2 (`cf6bb60b8`,
+`20260929T134704Z-run.0UypI0`) versus final `9d606ec1d` follows. Values are
+scenario-wide maxima, **not necessarily the failing stable frame**; transition
+bound is 0.065, stable bound 0.025, both unchanged.
+
+| Scenario | Stage 2 maximum/verdict | Final maximum/verdict |
+| --- | --- | --- |
+| opened long history | 0.02769 / fail | 0.02766 / fail |
+| ordinary send | 0.05733 / pass | 0.05067 / pass |
+| streaming tail | 0.04150 / pass | 0.03623 / pass |
+| queued replacement | 0.04960 / pass | 0.04889 / pass |
+| tool entrance | 0.04405 / pass | 0.02787 / pass |
+| earlier page | 0.02012 / pass | 0.02025 / pass |
+| detached catch-up | 0.02272 / pass | 0.02262 / pass |
+| keyboard inset | 0.04705 / pass | 0.04682 / pass |
+| short rest | 0.00337 / pass | 0.00204 / pass |
+| oldest row | 0.01823 / pass | 0.01878 / pass |
+
+The reference's documented 12.667 pt pin versus origin's exact 12.0 pt remains.
+The borderline ordinary-send pinned frame measured 0.02498 pre-margin versus
+0.02505 after removing only the capture write (later corrected run 0.02515,
+final 0.0249985). Corresponding images differ by RMS 0.00165 with identical
+measured row positions. This is evidence of a small ink/pin residual, not proof
+that every failing pixel has one cause, nor permission to loosen the bound or
+re-record the reference. Opened-history is the original stage-2 residual.
+The final focused selection is 18/19 tests origin (one parity issue), 19/19 today;
+it does not replace the earlier full-checkpoint failures above.
+
+Row-stability's teleport skipped the thinking fixture's lazy range; its guessed
+ten-boundary entrance wait also admitted animated heights that the production
+stability recorder explicitly excludes. The journey now walks overlapping half
+viewports and waits for the entrance's owning settled record. Phase comparisons
+read that recorder's settled height rather than raw animated frames. No thinking
+layout or counter-flip correction was warranted. Prior clean baseline
+`1712fea02`, `20260929T181229Z-run.cFbUB1`, and `448a97b79` full origin run are the
+negative traversal/settlement evidence; both final suites now actually mount and
+measure thinking. Temporary logs, forced PNG retention and offset probes are
+removed.
+
+#### Scale and optimized profiles
+
+Every 150/300/512 shape opened in all three trials in both orientations (the
+prior today's 150-row readiness miss did not reproduce). CT13 opening snapshots
+are still during the reveal (4.0–4.7 pt); the phase-end measurements below are the
+settled evidence. Median values across the three trials:
+
+| Orientation | First ready ms, 150/300/512 | Ready MB | Scroll step ms | Stream interval ms |
+| --- | --- | --- | --- | --- |
+| origin | 207.6 / 136.9 / 158.4 | 497.3 / 570.1 / 579.9 | 1.0 / 0.9 / 1.0 | 16.7 / 22.0 / 30.8 |
+| today | 299.9 / 199.4 / 234.6 | 500.5 / 572.1 / 593.7 | 1.0 / 1.0 / 1.0 | 16.7 / 21.5 / 31.7 |
+
+Origin ends every send phase pinned at 12.0; today ends detached at 387–432 pt,
+as before. Scale is measurement, not proof of a passing send UX. Runs:
+origin `20260929T185250Z-run.C1srBC`, `20260929T185331Z-run.j4Yqf7`,
+`20260929T185411Z-run.J56pem`; today `20260929T185451Z-run.3L0HEh`,
+`20260929T185535Z-run.je9QIa`, `20260929T185621Z-run.TAmXVA`.
+
+`scripts/tron-profile ios --self-test` passed all CPU/disk/wakeup controls
+(`20260929T183718Z-control-37a8c0`, `20260929T183741Z-control-cpu-6a3bd6`,
+`20260929T183801Z-control-disk-2b40cd`, `20260929T183820Z-control-wakeups-6b0ff8`).
+Both product scenarios ran five measured iterations with the optimized build:
+
+| Scenario | Today → origin reports | `scripts/tron-profile compare` |
+| --- | --- | --- |
+| streaming-reply | `20260929T185716Z-streaming-reply-9dd4f3` → `20260929T190107Z-streaming-reply-c97d9a` | CPU 3.984→3.718 s (−6.7%), main thread −7.3%, peak footprint 73.83→69.50 MiB (−5.9%); **interrupt wakeups 2649→2849 (+7.6%) is a flagged regression**, 6 improvements |
+| tool-loop | `20260929T185853Z-tool-loop-d854fd` → `20260929T190243Z-tool-loop-d22961` | CPU within noise (−1.0%), peak footprint 72.53→67.02 MiB (−7.6%); no flagged regressions |
+
+Reports and logs retain clean source identity and actual orientation. Reproduce
+with `TRON_IOS_TEST_LANE=ct23b TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`
+(or `end`) before `scripts/tron-profile ios --scenario streaming-reply --scenario
+tool-loop`, then `scripts/tron-profile compare <today-report-dir> <origin-report-dir>`.
+These are simulator comparisons, not device performance or energy proof.
+
+**Bounded wakeup investigation (all controls reverted).** Five-iteration repeats
+at `eb81e2f71`: today `20260929T194050Z-streaming-reply-071bd7`, origin
+`20260929T193907Z-streaming-reply-841df9`, interrupt medians **2592→2808 (+8.3%)**,
+MAD 58/18, identical 74 transport frames and 12.005 s windows. The owning
+`compare` labels this repeat *within noise* (±257.972 wakeups), unlike the earlier
++7.6% flagged comparison; the direction reproduces but statistical acceptance
+is not settled. Earlier CPU −6.7% and footprint −5.9% remain separate measurements,
+not energy proof or justification to dismiss wakeups.
+
+Time Profiler captures `20260929T193633Z-streaming-reply-trace-time-profiler-b07607`
+(origin) and `20260929T193756Z-streaming-reply-trace-time-profiler-e49af0` (today)
+attribute CPU to normal render/layout work. Exported `runloop-events`, filtered
+to the report PID and measured window, show main-loop iterations 4331/4057,
+SwiftUI.AsyncRenderer 101/46, UIKit animation-loop 530/528. These are **run-loop
+iterations, not interrupt attribution**; `ProfileMainLoop.wait` is the enclosing
+run-loop driver, not evidence of busy polling. No production timer was added.
+
+Each approved bisection used a temporary clean commit, optimized rebuild and
+three requested Time Profiler iterations; readiness failures yield no accepted
+performance comparison. Figures below are medians; traced metrics are not fed
+into `compare`.
+
+| Control | Clean revision / profile run | Interrupts / AsyncRenderer iterations per window |
+| --- | --- | --- |
+| Freeze only inset reader to matched fixture margins | `320e5e9f1` / `20260929T195420Z-streaming-reply-trace-time-profiler-51e589` | 2750 (MAD47) / 104,106,105 |
+| Restore automatic edge effect | `78a9af2a8` / `20260929T200145Z-streaming-reply-trace-time-profiler-bf98b4` | 2718 (MAD75) / 102,107,101 |
+| Replace content margins with equivalent requested safe-area padding | `161a5b1cf` / `20260929T200909Z-streaming-reply-trace-time-profiler-fc777a` | Rejected before measurement: −71 pt tail clearance; not an equivalent rendered workload |
+| Remove only row counter-flips | `72ed19d00` / `20260929T201526Z-streaming-reply-trace-time-profiler-0df7f7` | 2423 (MAD59) / 101,103,103; UIKit iterations drop to 349,264,336, but rows are visually inverted |
+| Remove only viewport flip | `a2d288ae9` / `20260929T203444Z-streaming-reply-trace-time-profiler-c6ba23` | Rejected before measurement: −112 pt tail clearance, visible fraction 0.88 |
+
+The row control implicates transformed rendering but does **not** isolate an
+avoidable timer or explain AsyncRenderer's increase. An equivalent
+nonanimating center reflection (`7330d1b5f`) kept pinned/detached/row-stability
+journeys working but returned **2809 interrupts (MAD16)** over five untraced
+iterations (`20260929T202709Z-streaming-reply-c3f5fe`); no gain, so reverted.
+It also did not clear parity. No speculative transform replacement ships.
+
+The approved temporary System Trace mapping (`a44eda2d9`) captured
+`20260929T204100Z-streaming-reply-trace-system-trace-86dbf0`; the owning exporter
+refused its 392 MiB trace because projected export memory was 7.6 GiB against
+the 2 GiB limit. No budget bypass or scheduler-source claim; mapping reverted.
+The 60-minute investigation ended with the source restored. A smaller, targeted
+scheduler capture on a supported environment is the missing decisive signal;
+this incident is **not closed**. Retained trace bundles and their
+`attribution.json` window/PID fields allow re-export of `runloop-events` with
+`xcrun xctrace export --input <trace> --xpath
+'/trace-toc/run[@number="1"]/data/table[@schema="runloop-events"]'`.
+
+#### Open items, user decisions and device checklist
+
+1. Fix/validate display preview without replacing the real-card lift; origin
+   parity must meet its unchanged bound consistently; diagnose remaining
+   full-harness watchdogs. Row-stability traversal/settlement is fixed, not an
+   outstanding product-row defect. No production cutover.
+2. Continue interrupt-wakeup attribution before production performance acceptance;
+   this open item does not block a user-owned device test build (supervisor
+   direction). Measure per-keyboard-frame body work before an F3 CPU claim.
+3. **Status-bar user decision still required:** keep origin and accept newest
+   (violates the current requirement), add a product-owned oldest-history command
+   (not the same interaction), or adopt a container Tron owns with the public
+   UIKit scroll-to-top delegate. No private reach-in. Existing requirement is
+   oldest loaded history, unchanged by this work.
+4. **Navigation fade decision still required:** keep the approved suppression
+   and chat's own top blur only, or approve transcript-owned replacement chrome.
+   No replica added. Prior effect-band measurements remain 844 pt origin versus
+   170.8 pt today (106 hard style); those are historical, not remeasured here.
+5. Device checklist (user-owned; no install performed): real keyboard show/hide
+   and interactive dismissal while pinned and detached, tall-streaming and
+   insertion slivers, menu lift/selection/links/sheets, overscroll at both ends,
+   VoiceOver traversal and three-finger scrolling, status-bar oldest-history
+   behavior, side-by-side under-navigation fade acceptance, and scroll continuity
+   through reconnect/page load. Hosted stills and driven insets do not prove
+   these interactions. Accessibility tree/scroll-action tests remain owed.
+6. CT-19 deletion list remains deferred until the owning gates and user decisions
+   pass; neither today's path nor its five estimated-end mechanisms were removed.
+
+Lane cleanup completed with `scripts/tron-ios-test lane-remove ct23b`;
+`status --all` confirms no ct23b lane and no booted simulator. No other lane
+was removed or released by hand. Retained run/profile roots and live-worktree
+build products are separate from the deleted lane's simulator/state.
+
+
+### CT-23 device evaluation build · 2026-09-29 · worker lane ct23b
+
+User-approved evaluation only; CT-23 remains blocked for production cutover.
+Implementation and validation are owned in `/private/tmp/tron-ct23b`; no Gateway
+lifecycle, device installation, or upstream Git action is authorized.
+
+- Step 1: guard the viewport-mode release probe with `HOSTED_TEST`, matching its
+  declaration and the adjacent release path. Non-hosted LocalDevice and Release
+  compilation are the regression gates, to run after the evaluation switch lands.
+- Step 2: prepend excursion now consumes the same owner-adapted frame as anchor
+  capture. Both ChatView installation paths look up the terminal ID in their
+  existing visual-position map (including the earlier-messages fallback), not
+  the spine's last index. Existing `hostedPrependBarrier` (≤2 pt excursion),
+  terminal opening, and full origin harness are the regressions; no bounds or
+  expectations changed. This corrects diagnostics, not observed reader movement.
+- Step 3: LocalDevice alone compiles the evaluation preference and diagnostics
+  toggle. The app eagerly freezes the static selection at launch (not first chat),
+  defaulting to origin. Hosted selection still uses only the environment; Release
+  keeps today and compiles neither the key nor Settings row. Owning development
+  documentation describes the comparison and CT-19 removal.
+- Evidence and user-owned install/checklist handoff follow below after clean commits.
+
+Evaluation selection failure modes (before implementation): absent preference
+must select origin; false must select today; changing Settings must not mutate
+an already launched session; hosted environment selection must remain independent
+of this preference; Release must not contain the preference or row. Validate the
+compile boundaries with LocalDevice/Release builds, preserve hosted integration
+gates in both orientations, and leave real Settings/relaunch comparison explicitly
+on the user's device checklist. No isolated tests or production test hooks added.
+
+#### Evaluation artifact and clean evidence
+
+Implementation commits (all committed before evidence): `28f9142d8` guards the
+hosted probe; `9172a19ec` corrects the two diagnostic-coordinate consumers;
+`dc0387e9d` adds the LocalDevice-only preference/row and launch freeze. All runs
+below have clean source identity `dc0387e9d` in `/private/tmp/tron-ct23b`.
+No tests, expectations, tolerances, reference images or watchdogs were changed.
+The existing hosted integration journeys and non-hosted compile checks are the
+regressions; no isolated tests were added.
+
+**Device-evaluation artifact prepared, not installed. Production cutover remains
+blocked.** Signed generic-device builds both succeeded using project signing,
+without `CODE_SIGNING_ALLOWED=NO`. The LocalDevice artifact additionally passes
+`scripts/validate-ios-artifact.py --configuration LocalDevice --require-profile`.
+Read-only `scripts/verify-gateway-protocol-contract.py` confirms source, this iOS
+artifact and `/Applications/Tron.app` all use Gateway protocol v6 (minimum v6).
+No Gateway action is required or authorized by this work.
+
+Build root: `~/Library/Developer/Tron/ios/ct23-device-evaluation/`.
+The prepared signed app is
+`LocalDevice/Build/Products/LocalDevice-iphoneos/TronMobile.app` under that root;
+its `TronBuildIdentity.json` records `dc0387e9d`, `dirty:false`.
+`local-device-build.log`, `release-build.log`, and `hosted-build.log` retain build
+output. Binary string inspection finds the evaluation key/label in LocalDevice
+and neither in Release. Release's build is **compile validation only**: the
+optional signed-artifact validator fails its development `aps-environment`
+against Release's production requirement under the available project signing.
+This is not a distribution-ready Release artifact; no signing policy was changed.
+
+Generic-device compile commands, from the worktree root:
+
+```bash
+scripts/tron ios generate
+(cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj \
+  -scheme 'Tron Device' -configuration LocalDevice \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath "$HOME/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice")
+(cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj \
+  -scheme 'Tron Release' -configuration Release \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath "$HOME/Library/Developer/Tron/ios/ct23-device-evaluation/Release")
+TRON_IOS_TEST_LANE=ct23b scripts/tron-ios-test build
+```
+
+Hosted artifacts below are under `~/Library/Developer/Tron/ios/test-runs/`;
+each retains `metadata.json`, `test.log`, `summary.json`, and `TestResults.xcresult`.
+
+| Gate | Result | Run |
+| --- | --- | --- |
+| Origin page-barrier/prepend | 1/1 pass; unchanged ≤2 pt excursion gate | `20260929T211210Z-run.MRW8Qv` |
+| Full `ChatViewScrollHarnessTests`, origin, once | 72 tests / 29 issues; all classified below, not green | `20260929T211235Z-run.ShLPKQ` |
+| Four bottom journeys, origin, once each in that full run | 0 blank/uncovered at all 72/340/90/68 boundaries; minimum visible fraction 1.0; settled clearance 12.0 pt | Same full run; no redundant second bottom run |
+| Focused origin keyboard, detached, staged catch-up | 3/3 pass; 24 ramp boundaries, worst gap 1.9 pt, distance/aligned gates pass; detached movement 0.0 in streaming/show/hide/page phases, same ID/instance, zero keyboard commands | `20260929T211731Z-run.fVTops` |
+| Origin unchanged parity | **7/10 scenarios**, 3 issues: opened history 0.02826; ordinary-send pinned 0.02564; keyboard pinned 0.02550 and dismissal 0.02504 (stable bound 0.025) | Same focused origin run |
+| Focused today keyboard, detached, catch-up and parity | 5/5 tests; parity **10/10 scenarios**; detached movement 0.0. Keyboard still reproduces today's known one blank boundary and 96,304.3 pt ramp excursion, then settles at 12.3 pt; not a bottom-coverage pass | `20260929T211902Z-run.CFRO0b` |
+| Focused failure triage, origin | cancellation, forced retained displacement and detached authority replacement all reproduce, 3/3 fail; not labeled flakes | `20260929T212046Z-run.STgKmR` |
+
+An initial prepend invocation omitted Swift Testing's `()` selector suffix:
+`20260929T211144Z-run.n3ZIly` ran zero tests and the runner correctly rejected it.
+It supplies no passing evidence; the corrected invocation above executed one.
+Parity report copies are retained as `parity-origin-report.json` and
+`parity-end-report.json` under the build root so today's run does not overwrite
+origin's report. Source-policy checks (3 tests) and full personal-info guard pass.
+
+Reproduce the full run and the corrected page gate:
+
+```bash
+TRON_IOS_TEST_LANE=ct23b TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin \
+  scripts/tron-ios-test run \
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/hostedPrependBarrier()'
+TRON_IOS_TEST_LANE=ct23b TRON_IOS_TEST_TIER=ui-validation \
+  TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin scripts/tron-ios-test run \
+  --only-testing TronMobileTests/ChatViewScrollHarnessTests
+```
+
+For the focused journeys/parity, run once with `origin` and once with `end`:
+
+```bash
+TRON_IOS_TEST_LANE=ct23b TRON_IOS_TEST_TIER=ui-validation \
+  TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin scripts/tron-ios-test run \
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/safeAreaKeyboardInsetKeepsNewestRowAtComposer()' \
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/detachedReaderHoldsItsTopRowThroughStreamingKeyboardAndPage()' \
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/stagedCatchUpLandsAtTheNewestEnd()' \
+  --only-testing TronMobileTests/ChatVisualParityTests
+```
+
+#### Full-origin failure triage (every remaining issue)
+
+“Retired mechanism” here means disabled on origin, **not** permission to delete
+its tests yet. CT-19 must replace the mechanism-specific waits with visible
+behavior gates while removing the mechanism and today's path together. These
+failures do not establish that all downstream assertions, never reached, pass.
+
+| Case (issue count) | Classification and inspected cause |
+| --- | --- |
+| `ordinarySendKeepsStableTail` (1 watchdog) | Retired mechanism: waits for a materialization command and subsequent target release; origin issues neither. |
+| `resumedMultilineSendSettlesDuringKeyboardResize` (1) | Retired mechanism: requires the materialization target-release increment. |
+| `mixedHeightLazyHistorySendSettlesOnNativeTail` (1) | Retired mechanism: requires exactly one materialization command; origin records zero. |
+| `resumedSendAcknowledgementSuccessor` (6 watchdogs, all parameters) | Retired mechanism: every sent-row wait also requires 1–2 materialization commands (and lease release phase). |
+| `managedSheetFreezesCoveredChat` (1 watchdog) | Retired mechanism: uncover waits for the old target-release increment in addition to visible newest content. |
+| `openingDeadlineRevalidatesOwner` (3 watchdogs, all owners) | Retired mechanism: holds the estimated-end post-reveal settlement/deadline callback; origin never enters that owner. |
+| `displacedRetainedResume` (1 watchdog, repeats focused) | Retired mechanism: deliberately moves the native offset 180 pt while retaining pinned intent, then invokes foreground's physical-tail repair. Origin explicitly disables that repair; final clearance is −168 pt. This is not evidence that spontaneous native displacement is impossible; device foreground/reader continuity remains required. |
+| `pastEndRepairReturnsToTail` (4) | Retired mechanism: demands repair/command increments at two boundaries; origin records zero. |
+| `unifiedResponseAndNotificationSettlement` (2), `ordinaryDiscreteInsertionEntrance` (2), `toolGroupTopologySettlement` (1) | Retired mechanism: demand two materialization commands for insertion/settlement; origin records zero. |
+| `displayedInstallOwnsRunningToolEntrance` (2) | Retired mechanism: expects the same two commands and the materialization handoff trace; neither exists on origin. |
+| `flippedTranscriptWithoutCounterFlippedRowsFailsTheOracle` (1) | Retired measurement assumption: its auxiliary precondition reads the native maximum as newest; origin is pinned at native minimum (difference 3006 pt). Actual window-oracle negative expectations pass; no gate was removed. |
+| `displayCardContextMenuResolvesAtTheCard` (1) | **Real behavior, reported/open:** actual SwiftUI preview container renders flipped on origin. Known blocker, not fixed. |
+| `cancelledReadyFrame` (1, repeats focused) | **Real diagnostic behavior, reported/open:** cancellation in origin's covered-frame await ends the first-ready interval as `discarded`, not the test's `cancelled`. Source is `completePositionedOpening`'s origin catch. Intervals still close; no user-facing opening failure was demonstrated by this assertion. |
+| `retainedDetachedAuthorityReplacement` (1 watchdog, repeats focused) | **Real behavior gate, reported/open:** after authority replacement and the harness's programmatic return to native newest, the old cut remains anchored; no new projection install arrives. Final old row is visible at 12 pt, coordinator mode remains anchored. The helper sends an offset, not a native pan phase; real manual-return semantics versus helper insufficiency are unresolved. Do not dismiss as retired or claim detached replacement passes. |
+
+Total: **26 retired-mechanism/measurement issues + 3 real-behavior issues**.
+**Flakes: none established in this run.** Covered-catalog cases and prepend pass
+this checkpoint; earlier watchdogs are not silently carried forward as failures.
+Origin's parity regressions/residuals above also remain real failing acceptance
+gates; ordinary-send repeat stability was already open, and the new keyboard
+stable-frame failure is reported rather than rerun away or the reference loosened.
+
+#### User-owned install, toggle and device checklist
+
+Run only when the user is ready to install, from this exact worktree:
+
+```bash
+cd /private/tmp/tron-ct23b
+scripts/tron-ios-device install
+```
+
+The helper builds the canonical `Tron Device` / `LocalDevice` app, verifies the
+then-current Stable Gateway protocol and installs/launches on the selected phone.
+It may rebuild into its normal incremental products rather than reuse the generic
+whole-module compile artifact. No protocol bypass or device performance scheme
+is needed. The agent has **not** run this command or installed anything.
+
+Flipped is **on by default**. In Settings → Data & Diagnostics, switch
+**Flipped chat transcript (evaluation)** off for today's path or on for origin.
+The footer says **Applies after relaunch**: fully quit/relaunch between modes;
+changing it never changes an already launched chat. Confirm the default and both
+relaunch selections on device (compile checks do not prove Settings interaction).
+This preference, row and compile condition retire at CT-19, not in Release.
+
+Compare both modes on the same phone, especially:
+
+- Blank screens on foreground/resync and send under very tall newest replies.
+- Keyboard open/close while pinned and while scrolled up; reading row and position
+  hold. Include manual return to newest after a detached authority reconnect.
+- Streaming and tall new-row **first-frame** coverage, not just settled pinning.
+- Long-press menus on **messages and display cards**. Known: the display-card
+  preview container renders flipped; prompt-menu hosted geometry passes.
+- VoiceOver reading order and three-finger scrolling both directions; hosted
+  priority checks are not an accessibility-tree/scroll-action proof.
+- Status-bar tap: known origin behavior goes to **newest**, not oldest history.
+- **Navigation-bar fade side by side**, using the toggle and relaunch; origin
+  suppresses the native pinned-edge effect. Record accept/reject, not inference
+  from hosted parity or a still image.
+- Opening speed, foreground continuity, and anything that looks or feels different
+  from today. Device keyboard timing, interaction animation and energy are unproven.
+
+Cleanup completed: `scripts/tron-ios-test lane-remove ct23b` removed this worker's
+lane and retained the live worktree's reusable products. Final
+`scripts/tron-ios-test status --all` reports no booted simulators and no running
+Simulator.app; no other lane was removed. The worktree and Git index are clean.
+Review remains a separate required gate; this handoff is not production approval.
+
+### CT-23 merged for device evaluation · 2026-09-29 · chat scroll session (supervisor)
+
+- Result: at the user's request the origin-anchored transcript merges to
+  `main` behind its switch, after the user's first device check ("looks good,
+  all working well so far"). Today's path stays the default in Release and in
+  hosted tests; `LocalDevice` builds default to the flipped transcript with the
+  Settings evaluation toggle, so the user's normal device builds from `main`
+  carry it. This is evaluation, not the CT-19 cutover: the switch, today's path
+  and the estimated-end mechanisms stay until the open items close.
+- Evidence: rebased on `main`; full default unit tier 1,920 tests: one failure,
+  the pre-existing `displacedRetainedResume` load watchdog (passes focused twice,
+  run `20260929T230657Z-run.m6OeqA`); the flipped display-card preview gate is a
+  recorded known issue. `unifiedResponseAndNotificationSettlement` timed out once
+  under suite load and passed focused twice.
+- Open, in order: (1) the user's device finding: on the flipped path the pinned
+  content jumps instead of following animated bottom obstructions (the command
+  and skills sheet; likely also composer growth and the real keyboard), because
+  the obstruction is applied as content margins rather than animated safe-area
+  insets; the fix is designed in the stopped 'animated obstruction follow' task
+  (reproduce with real animations, then make the clearance animate in the
+  causing transaction without moving a detached reader). (2) Display-card
+  context-menu preview renders flipped. (3) Status-bar tap reaches the newest
+  row; user decision. (4) Navigation-bar fade; user decision after comparison.
+  (5) Parity residual on the flipped path (7/10, pinned-offset class).
+  (6) Streaming interrupt wakeups +7.6-8.3%.

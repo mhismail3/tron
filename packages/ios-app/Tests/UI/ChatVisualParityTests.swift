@@ -71,11 +71,25 @@ enum ChatVisualParitySpec {
     }
 
     /// How far a candidate frame may be re-aligned vertically, in points, before
-    /// its diff counts, at half-point steps. A pinned transcript settles within a
-    /// point or two run to run — the harness's own tail checks allow 2 — so an
-    /// unaligned comparison would measure the recorded container's own settle as
-    /// if it were a layout change.
+    /// its diff counts. A pinned transcript settles within a point or two run to
+    /// run — the harness's own tail checks allow 2 — so an unaligned comparison
+    /// would measure the recorded container's own settle as if it were a layout
+    /// change.
+    ///
+    /// The search's step is per frame (see `alignmentStep`): a frame in a stable
+    /// phase is searched at one display pixel, because the harness snaps a pinned
+    /// transcript's offset and every row lands on a whole display pixel, so two
+    /// pinned transcripts — the recorded container and an exactly pinned
+    /// candidate — can only differ by a whole number of them. Today's container
+    /// pins to the lazy stack's own estimated content height and settles 0.667 pt
+    /// (two device pixels on this lane) above the 12 pt tail its contract states,
+    /// which is exactly the class of difference the origin-anchored transcript
+    /// removes; a half-point search cannot resolve the remaining two-thirds of a
+    /// point, and the 2 pt bands are sensitive enough to see it. Transition
+    /// frames keep the half-point step their own bound was measured with.
     static let alignmentPoints = 2.0
+    /// The alignment step for a frame in a transition phase, in points.
+    static let transitionAlignmentStep = 0.5
 
     /// How many frames away a candidate frame may be matched to a recorded frame.
     /// Every display frame is captured now, so a recorded frame index is the same
@@ -127,14 +141,16 @@ struct ChatVisualParityFingerprint: Equatable {
     /// The frame's diff against its reference after the best alignment: the
     /// normalized RMS luminance difference of the row profile (which is what a
     /// vertical move changes) minimized over re-alignments of at most
-    /// `alignmentPoints` points at half-point steps, plus the unshifted column
+    /// `alignmentPoints` points at `step`-point steps, plus the unshifted column
     /// profile. The row profile is resampled by linear interpolation for a
     /// fractional re-alignment, so the ±2-point allowance does not need a finer
-    /// stored profile.
+    /// stored profile. The alignment is one uniform shift of the whole frame;
+    /// nothing per-region can be re-aligned away.
     static func magnitude(
         _ candidate: ChatVisualParityFingerprint,
         _ reference: ChatVisualParityFingerprint,
-        alignmentPoints: Double
+        alignmentPoints: Double,
+        step: Double = ChatVisualParitySpec.transitionAlignmentStep
     ) -> (magnitude: Double, shift: Double) {
         guard candidate.rows.count == reference.rows.count,
               candidate.columns.count == reference.columns.count,
@@ -145,9 +161,9 @@ struct ChatVisualParityFingerprint: Equatable {
             columnSquared += delta * delta
         }
         var best = (magnitude: Double.infinity, shift: 0.0)
-        var points = -alignmentPoints
-        while points <= alignmentPoints {
-            defer { points += 0.5 }
+        let steps = Int((alignmentPoints * 2 / step).rounded())
+        for index in 0...max(0, steps) {
+            let points = -alignmentPoints + Double(index) * step
             let bands = points / Double(ChatVisualParitySpec.rowStep)
             var squared = 0.0
             var count = 0
@@ -424,14 +440,8 @@ final class ChatVisualParityRunner {
         self.recordsArtifacts = recordsArtifacts
     }
 
-    /// Capture the transcript region as this boundary's frame. The transcript's
-    /// settled native offset moves by a fraction of a point run to run, so the
-    /// offset is snapped to a whole point first: what the gate compares is then a
-    /// deterministic function of the layout rather than of the lazy estimate.
-    /// CT-25 measured removing it (see the plan's stage B2 entry): the gate stays
-    /// green, but the existing opened-long-history reference's stable frames move
-    /// to 0.019 of their 0.025 bound, so the snap still carries the reference's
-    /// determinism and F9's removal belongs with CT-23's exact origin.
+    /// Capture the transcript without moving an exact-origin pin. Only the
+    /// estimated-end orientation uses the reference's whole-point normalization.
     func capture(_ phase: String) {
         try? harness.snapNativeTranscriptOffsetToWholePoint()
         let rendered = harness.renderedParityFrame(
@@ -485,7 +495,7 @@ final class ChatVisualParityRunner {
         var stable = 0
         for _ in 0..<cap {
             try await harness.driveFrameBoundary()
-            try? harness.snapNativeTranscriptOffsetToWholePoint()
+                try? harness.snapNativeTranscriptOffsetToWholePoint()
             let fingerprint = ChatVisualParityFingerprint(harness.renderedParityFrame(
                 scale: ChatVisualParitySpec.renderScale,
                 rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
@@ -946,11 +956,16 @@ private func keyboardSafeAreaInset() async throws -> ChatVisualParityRunner {
         try await run.advance("pinned", boundaries: 2)
         try await run.driveKeyboardInset(.show(boundaries: 8), phase: "keyboard-up")
         try await run.settle()
+        // Failure mode: capture normalization writes a sub-point native offset,
+        // detaching SwiftUI's exact pin before later margin samples arrive.
+        // The capture must observe, not create, a keyboard displacement.
+        #expect(harness.isPinnedToBottom(), "keyboard show: \(parityPinnedDescription(harness))")
         try await run.advance("keyboard-up-settled", boundaries: 2)
         try harness.setComposerDraftText(
             "First line of the draft\nSecond line\nThird line\nFourth line"
         )
         try await run.settle()
+        #expect(harness.isPinnedToBottom(), "composer growth: \(parityPinnedDescription(harness))")
         try await run.advance("composer-growth", boundaries: 2)
         try harness.setComposerDraftText("")
         try await run.settle()
@@ -1237,13 +1252,29 @@ enum ChatVisualParityGate {
                 frames: [], worstFrames: [], maximumMagnitude: .infinity, passed: false, note: shape
             )
         }
+        /// Whether either side of a compared frame is in a transition phase: the
+        /// frames judged by the stable bound are the ones whose alignment is
+        /// searched at the pinned transcript's own resolution.
+        func isTransition(recordedPhase: String, renderedPhase: String) -> Bool {
+            ChatVisualParitySpec.isTransitionPhase(recordedPhase)
+                || ChatVisualParitySpec.isTransitionPhase(renderedPhase)
+        }
         /// The bound a compared frame is judged against: the transition bound
         /// where either side's phase is a transition, the stable bound otherwise.
         func allowed(recordedPhase: String, renderedPhase: String) -> Double {
-            ChatVisualParitySpec.isTransitionPhase(recordedPhase)
-                || ChatVisualParitySpec.isTransitionPhase(renderedPhase)
+            isTransition(recordedPhase: recordedPhase, renderedPhase: renderedPhase)
                 ? transitionTolerance
                 : tolerance
+        }
+        /// The alignment step for a compared frame: one display pixel where
+        /// neither side is in a transition, the half-point step otherwise. The
+        /// pinned frames the stable bound judges are pixel-snapped on both sides,
+        /// so their relative offset is a whole number of display pixels.
+        let pinnedAlignmentStep = 1 / Double(run.harness.visibleRootView.traitCollection.displayScale)
+        func alignmentStep(recordedPhase: String, renderedPhase: String) -> Double {
+            isTransition(recordedPhase: recordedPhase, renderedPhase: renderedPhase)
+                ? ChatVisualParitySpec.transitionAlignmentStep
+                : pinnedAlignmentStep
         }
         func nearest(candidate: ChatVisualParityFingerprint, in range: ClosedRange<Int>) -> (magnitude: Double, frame: Int, shift: Double) {
             var best = (magnitude: Double.infinity, frame: 0, shift: 0.0)
@@ -1251,7 +1282,11 @@ enum ChatVisualParityGate {
                 let diff = ChatVisualParityFingerprint.magnitude(
                     candidate,
                     recorded[index],
-                    alignmentPoints: ChatVisualParitySpec.alignmentPoints
+                    alignmentPoints: ChatVisualParitySpec.alignmentPoints,
+                    step: alignmentStep(
+                        recordedPhase: reference.frames[index].phase,
+                        renderedPhase: run.frames[index].phase
+                    )
                 )
                 if diff.magnitude < best.magnitude {
                     best = (diff.magnitude, index, diff.shift)
@@ -1283,7 +1318,11 @@ enum ChatVisualParityGate {
                 let diff = ChatVisualParityFingerprint.magnitude(
                     rendered[index],
                     recorded[referenceIndex],
-                    alignmentPoints: ChatVisualParitySpec.alignmentPoints
+                    alignmentPoints: ChatVisualParitySpec.alignmentPoints,
+                    step: alignmentStep(
+                        recordedPhase: reference.frames[referenceIndex].phase,
+                        renderedPhase: run.frames[index].phase
+                    )
                 )
                 if diff.magnitude < best.magnitude {
                     best = (diff.magnitude, referenceIndex)
@@ -1327,6 +1366,91 @@ enum ChatVisualParityGate {
 struct ChatVisualParityTests {
     // A measurement, not a unit invariant: it renders the chat hundreds of
     // times, so it runs only in the UIValidation tier (see `UIValidationTier`).
+    // The alignment search's own failure modes, measured on a committed reference
+    // frame rather than on synthetic bands: the device-pixel step the pinned
+    // frames need resolves a whole-pixel offset, and nothing wider is absorbed —
+    // not a shift beyond the allowance, not a wash, and not a differential move
+    // like a row-spacing change, because the alignment is one uniform shift.
+    @MainActor
+    @Test("the fingerprint's alignment absorbs a device-pixel pinned offset and nothing wider")
+    func fingerprintAlignmentAbsorbsOnlyADevicePixelPinnedOffset() throws {
+        let manifest = try ChatVisualParityStore.readManifest()
+        let scenario = try #require(
+            manifest.scenarios.first { $0.id == "opened-long-history-at-rest" }
+        )
+        let frame = try #require(scenario.frames.first)
+        let reference = ChatVisualParityFingerprint(
+            width: frame.width,
+            height: frame.height,
+            rows: frame.rows.values,
+            columns: frame.columns.values
+        )
+        func resampled(_ rows: [UInt8], byBands bands: Double) -> [UInt8] {
+            rows.indices.map { index in
+                let position = Double(index) + bands
+                guard position >= 0, position <= Double(rows.count - 1) else { return rows[index] }
+                let lower = Int(position.rounded(.down))
+                let fraction = position - Double(lower)
+                let upper = min(lower + 1, rows.count - 1)
+                return UInt8(
+                    (Double(rows[lower]) * (1 - fraction) + Double(rows[upper]) * fraction).rounded()
+                )
+            }
+        }
+        func fingerprint(_ rows: [UInt8]) -> ChatVisualParityFingerprint {
+            ChatVisualParityFingerprint(
+                width: frame.width, height: frame.height, rows: rows, columns: frame.columns.values
+            )
+        }
+        func magnitude(_ rows: [UInt8], step: Double = 1.0 / 3.0) -> (magnitude: Double, shift: Double) {
+            ChatVisualParityFingerprint.magnitude(
+                fingerprint(rows),
+                reference,
+                alignmentPoints: ChatVisualParitySpec.alignmentPoints,
+                step: step
+            )
+        }
+        let bandsPerPoint = 1 / Double(ChatVisualParitySpec.rowStep)
+
+        // A whole-device-pixel pinned offset — the 0.667 pt today's estimated
+        // pinned end sits above the 12 pt tail — is absorbed.
+        #expect(
+            magnitude(resampled(frame.rows.values, byBands: 0.667 * bandsPerPoint)).magnitude
+                < ChatVisualParitySpec.tolerance
+        )
+        // The same model at the half-point step the transition frames use is not
+        // a claim about resolution — an interpolated profile cannot see a sixth
+        // of a band — so what the finer step buys is measured on the lane by the
+        // gate itself, whose frames are rasterized rather than resampled.
+
+        // A uniform 3 pt shift is beyond the ±2 pt allowance: the search clamps
+        // at its edge and the frame still fails.
+        let wider = magnitude(resampled(frame.rows.values, byBands: 3 * bandsPerPoint))
+        #expect(abs(wider.shift) == ChatVisualParitySpec.alignmentPoints)
+        #expect(wider.magnitude > ChatVisualParitySpec.tolerance)
+
+        // A wash — the ~24 percent contrast loss the flipped path had while the
+        // system edge effect covered the whole viewport — is not a move at all.
+        let washed = magnitude(frame.rows.values.map { value in
+            UInt8((255 - (255 - Double(value)) * 0.76).rounded())
+        })
+        #expect(washed.magnitude > ChatVisualParitySpec.tolerance)
+
+        // A row-spacing change is a differential move, not a uniform one: rows
+        // below a split move away from rows above it, and it accumulates, so a
+        // single whole-frame shift cannot bring the two ends back together.
+        let stretched = frame.rows.values.indices.map { index -> UInt8 in
+            let split = frame.rows.values.count / 2
+            guard index >= split else { return frame.rows.values[index] }
+            let rowsBelow = Double(index - split)
+            return resampled(
+                frame.rows.values,
+                byBands: -rowsBelow * 2 * bandsPerPoint / 10
+            )[index]
+        }
+        #expect(magnitude(stretched).magnitude > ChatVisualParitySpec.tolerance)
+    }
+
     @Test("recorded reference frames match the rendered transcript within tolerance")
     func recordedReferenceFramesMatchRenderedTranscript() async throws {
         try await withTestWatchdog(timeout: .seconds(300)) {

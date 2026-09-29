@@ -150,6 +150,10 @@ struct TronMobileApp: App {
     private let pendingShares = UserDefaultsPendingShareStore()
 
     init() {
+        #if TRON_TRANSCRIPT_ORIENTATION_EVALUATION
+        // Freeze before Settings can change the preference, even before the first chat opens.
+        _ = ChatTranscriptOrientation.selected
+        #endif
         let store = IOSClientDiagnosticStore(defaults: .standard)
         let model = AppModel(client: GatewayClient(diagnosticStore: store), diagnosticStore: store,
                              notificationInbox: NotificationInboxCoordinator(defaults: .standard))
