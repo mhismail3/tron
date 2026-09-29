@@ -6,6 +6,19 @@ import { drainDurableWriteStats } from "../util/durable-json.js";
 import { ConnectionOwner } from "./connection-owner.js";
 
 describe("ConnectionOwner", () => {
+  it("exposes paid Jev tagging only through the generic connection approval policy", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-jev-tag-connection-"));
+    try {
+    const owner = new ConnectionOwner(home);
+    const setup = await owner.execute({ kind: "setup.begin", commandId: "jev-tag-begin-0001", instanceId: "tagger", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
+    await owner.execute({ kind: "setup.complete", commandId: "jev-tag-complete-0001", operationId: setup.operationId, instanceId: "tagger", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 500, recurringApproved: false } });
+    await owner.recordProviderObservation("tagger", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
+    expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "unavailable", detail: "Paid access approval is required for this capability" }));
+    await owner.execute({ kind: "policy.update", commandId: "jev-tag-approve-0001", instanceId: "tagger", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
+    await owner.recordProviderObservation("tagger", 2, { credentialAvailability: "available", providerIdentity: "admitted" });
+    expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "available" }));
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
   it("keeps two same-provider accounts isolated and requires exact setup operations", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-connections-"));
     try {

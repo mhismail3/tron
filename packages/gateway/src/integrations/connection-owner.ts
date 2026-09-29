@@ -55,6 +55,14 @@ const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] = [
   },
   {
     schemaVersion: 1,
+    id: "knowledge.jev",
+    implementation: "knowledge-connector",
+    displayName: "Jev tagging",
+    setupMethods: ["token"],
+    capabilities: [{ id: "tag", displayName: "Tag Knowledge sources", effects: ["paid"], supported: true }],
+  },
+  {
+    schemaVersion: 1,
     id: "knowledge.x",
     implementation: "knowledge-connector",
     displayName: "X bookmarks",
