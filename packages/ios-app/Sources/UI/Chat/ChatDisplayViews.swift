@@ -232,7 +232,6 @@ struct DisplayToolView: View {
                 .accessibilityHidden(disclosure.phase != .collapsed)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .compositingGroup()
         .contextMenu {
             Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
         }
@@ -302,7 +301,6 @@ struct DisplayToolView: View {
             accessibilityValue: display?.title,
             action: activatePill
         )
-        .compositingGroup()
         .contextMenu {
             Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
         }

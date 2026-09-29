@@ -2455,3 +2455,15 @@ defaults, logs, or UserDefaults.
 ### Diagnostic source identity
 
 The app build stamps `TronBuildIdentity.json` into its signed resources with the source commit and dirty state. Export Diagnostics includes that app identity independently of the connected Gateway revision. The JSONL bundle retains only bounded RPC method/request IDs, outcome, code, and duration; it never serializes request parameters or arbitrary error details. Missing build identity is reported as unknown.
+
+
+#### Transcript orientation experiment (CT-23)
+
+Today's newest-at-end transcript is the default. Hosted Test and optimized
+DevicePerformance both compile `HOSTED_TEST`; prefix a test or
+`scripts/tron-profile ios` invocation with
+`TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin` to measure the development
+origin-anchored path. No Release or ordinary device build reads this switch.
+CT13 and profile scenario metrics name the orientation. Compare matched
+`streaming-reply` and `tool-loop` reports from both orientations with
+`scripts/tron-profile compare`; simulator measurements are not device proof.

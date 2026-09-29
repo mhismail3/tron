@@ -1754,9 +1754,15 @@ struct ChatViewScrollHarnessTests {
                             highlightPreviewForItemWithIdentifier: configuration.identifier ?? ("preview-gate" as NSString)
                         ))
                         let container = try #require(preview.target.container as? UIView)
-                        print("CT23-MENU orientation=\(orientation) source=\(type(of: preview.view)) bounds=\(preview.view.bounds) frame=\(preview.view.convert(preview.view.bounds, to: nil)) target=\(type(of: container)) center=\(preview.target.center) transform=\(preview.target.transform) sourceFlipped=\(TranscriptWindowOracle.isFlipped(preview.view)) containerFlipped=\(TranscriptWindowOracle.isFlipped(container))")
-                        #expect(!TranscriptWindowOracle.isFlipped(container),
-                            "\(orientation): SwiftUI's card preview inherits the scroll container's flip")
+                        let failure = ContextMenuPreviewPlacement.failure(
+                            sourceWindowFrame: preview.view.convert(preview.view.bounds, to: nil),
+                            targetTransform: preview.target.transform,
+                            containerCenterInWindow: container.convert(preview.target.center, to: nil),
+                            previewSize: preview.view.bounds.size,
+                            containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
+                            previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
+                        )
+                        #expect(failure == nil, "\(orientation): \(failure ?? "")")
                     }
                     // The display card is the only row with a SwiftUI
                     // `.contextMenu`; a bridge that resolved everywhere would

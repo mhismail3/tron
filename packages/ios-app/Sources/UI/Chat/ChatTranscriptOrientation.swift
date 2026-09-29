@@ -23,7 +23,8 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     case newestAtOrigin
 
     /// The development switch. Today's path is the default, and only a hosted
-    /// build can select the origin-anchored path: a whole hosted run selects it
+    /// build (including optimized DevicePerformance) can select the origin-anchored
+    /// path: a whole hosted run selects it
     /// with `TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`, so one suite runs both
     /// ways against the same committed reference.
     static let selected: ChatTranscriptOrientation = {
