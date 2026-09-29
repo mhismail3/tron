@@ -589,6 +589,18 @@ private func parityUserMessage(id: String, text: String) throws -> TranscriptIte
     )
 }
 
+/// The transcript's pinned state in window coordinates, for a parity failure
+/// message: the visual gap between the newest row and the composer (12 pt while
+/// pinned), whether the pinned bottom band was covered, and how much of the
+/// visible transcript the rows covered.
+@MainActor
+private func parityPinnedDescription(_ harness: ChatViewScrollHarness) -> String {
+    let bottom = harness.transcriptBottom()
+    return "clearance=\(harness.newestRowClearance().map { String(format: "%.1f", Double($0)) } ?? "none")"
+        + " bandCovered=\(bottom.isBandCovered)"
+        + " visibleFraction=\(String(format: "%.2f", Double(bottom.visibleRowFraction)))"
+}
+
 private func parityStreamingText(step: Int) -> String {
     (1...step).map { paragraph in
         "Streaming paragraph \(paragraph) of step \(step) grows the tail assistant row."
@@ -627,8 +639,10 @@ private func openedLongHistoryAtRest() async throws -> ChatVisualParityRunner {
         // run of rendered stillness before its frames.
         try await run.settle(stableBoundaries: 40, cap: 240)
         try await run.advance("rest", boundaries: 8)
-        let tailError = try run.harness.nativeTranscriptDistanceFromTail()
-        #expect(tailError <= 2, "the opened history stayed pinned: tail error \(tailError)")
+        #expect(
+            run.harness.isPinnedToBottom(),
+            "the opened history stayed pinned: \(parityPinnedDescription(run.harness))"
+        )
     }
 }
 
@@ -660,8 +674,10 @@ private func ordinarySendWithKeyboardUp() async throws -> ChatVisualParityRunner
         harness.resize(height: 844)
         try await run.advance("keyboard-dismissal", boundaries: ParityTransitionFrames.keyboardViewport)
         try await run.advance("settled", boundaries: 3)
-        let tailError = try harness.nativeTranscriptDistanceFromTail()
-        #expect(tailError <= 2, "the send settled on the native tail: tail error \(tailError)")
+        #expect(
+            harness.isPinnedToBottom(),
+            "the send settled on the pinned bottom: \(parityPinnedDescription(harness))"
+        )
     }
 }
 
@@ -729,8 +745,10 @@ private func queuedCardToSentRow() async throws -> ChatVisualParityRunner {
         try await run.advance("replacement", boundaries: ParityTransitionFrames.queuedReplacement)
         try await run.settle()
         try await run.advance("replacement-settled", boundaries: 3)
-        let tailError = try harness.nativeTranscriptDistanceFromTail()
-        #expect(tailError <= 2, "the queued replacement held the tail: tail error \(tailError)")
+        #expect(
+            harness.isPinnedToBottom(),
+            "the queued replacement held the pinned bottom: \(parityPinnedDescription(harness))"
+        )
     }
 }
 
