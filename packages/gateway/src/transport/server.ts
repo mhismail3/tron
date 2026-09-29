@@ -710,14 +710,6 @@ function isFrameRefusal(error: Error): boolean {
 
 /** The structured ending of one upgrade. `reason` is what triage groups on; the
  * message carries the human detail. */
-/** The wire close reason for a protocol mismatch: the version range is the only
- * fact that tells the peer whether its own app or this Gateway is the stale
- * build, and a close code alone cannot carry it (F-3). Fits the WebSocket
- * control-frame reason bound of 123 bytes. */
-function protocolMismatchCloseReason(): string {
-  return JSON.stringify({ code: "protocol_mismatch", gatewayProtocol: PROTOCOL_VERSION, minProtocol: MIN_PROTOCOL_VERSION });
-}
-
 interface UpgradeEnding {
   reason:
     | "request_capacity" | "unexpected_path" | "warming_up" | "shutting_down"
@@ -733,6 +725,14 @@ interface UpgradeEnding {
   /** Overrides the level rule for an ending the Gateway expects and clients
    * retry: readiness and shutdown refusals are info, not a warning. */
   level?: LogLevel;
+}
+
+/** The wire close reason for a protocol mismatch: the version range is the only
+ * fact that tells the peer whether its own app or this Gateway is the stale
+ * build, and a close code alone cannot carry it (F-3). Fits the WebSocket
+ * control-frame reason bound of 123 bytes. */
+function protocolMismatchCloseReason(): string {
+  return JSON.stringify({ code: "protocol_mismatch", gatewayProtocol: PROTOCOL_VERSION, minProtocol: MIN_PROTOCOL_VERSION });
 }
 
 /** One episode of inbound silence, from its last frame to the next one. */
