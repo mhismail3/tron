@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-29, CT-25 merged; CT-27 review fixes
+- **Last updated:** 2026-09-29, CT-27 merged with CT-25 and green on the merged base
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -2331,3 +2331,74 @@ pass only through eager-only repairs, stop and report.
   informational notice offers no activation and a detail-bearing notice still
   does, that a card above the retention ceiling renders on device, and that a
   trace's tail slides smoothly while it streams.
+
+### CT-27 merged with CT-25 · 2026-09-29 · chat scroll session (worker lane ct27)
+
+- Result: `ct-27-rows` builds and passes on the merged base. The merge
+  (`4b27f3a21`) brought CT-25's window-coordinate oracles to `main` and deleted
+  every scroll-space chat-test helper, which `ChatRowStabilityTests` still
+  called, so the suite did not compile. It is ported onto CT-25's API; no
+  product code changed.
+
+  **The port** (fixture only, `ChatRowStabilityTests.swift`):
+  - `scrollReader(byVisualPoints:)` replaces
+    `displaceNativeTranscriptFromTail` for the oldest-row and return moves (the
+    journey's oldest phases and `detachToOldestAndReturn`);
+  - `detachReaderMidHistory()` replaces the journey's hand-driven detach: the
+    reader moves 1.5 viewports up the real view and the pan's own phase
+    callbacks are reported, instead of the deleted sequence writing an offset
+    and a container height no scroll view produced;
+  - `returnReaderToPinnedTail()` replaces the raw move back to offset 0, so a
+    return waits for the coordinator's own pinned state;
+  - native-row reads move from `isVisible`/`frame` to
+    `isOnScreen`/`windowFrame`.
+
+- Evidence (lane ct27, products built and stamped `dirty: false` at
+  `da63e3ffbb7724dfa2f4a666c71db84ba1e7725f`, run directories under
+  `~/Library/Developer/Tron/ios/test-runs/`):
+  - `ChatRowStabilityTests` 14/14 in 18.2 s (`20260929T100509Z-run.HdFVVr`,
+    ui-validation). The journey prints
+    `ROW-STABILITY phases=open,entrance,detached,oldest-1,return-1,oldest-2,return-2
+    postMountResizes=0 maxPostMountResize=0.0 resizedRows=0 remountedRows=0
+    remounts=8/9 withinMountVariants=2:…display-inline-a=1/1@20.0,…display-inline-b=1/1@20.0
+    crossMountVariants=0 phaseVariants=0 … entranceIdentityStable=true
+    excludedRows=1 semanticFrameCallbacks=230`: the journey reaches the oldest
+    loaded row and returns twice, and every settled-row invariant holds.
+  - Parity gate 10/10 in 59.8 s (`20260929T100610Z-run.dKvnrj`, ui-validation)
+    against the committed v2 manifest — not re-recorded; worst transitions
+    `ordinary-send-keyboard-up` 0.05494, `tool-chip-entrance` 0.05220,
+    `queued-card-to-sent-row` 0.05015, `streaming-tail-growth` 0.03748 against
+    the 0.065 bound, at-rest worst 0.01418 against 0.025, `verdict=pass`.
+  - `ChatViewScrollHarnessTests` 65/65 in 86.9 s
+    (`20260929T101017Z-run.XpxNK1`). The first full-suite run
+    (`20260929T100736Z-run.riFWq0`) failed one test,
+    `displacedRetainedResume()`, by its 15 s watchdog under the full suite's
+    load; it passes alone in 7.6 s (`20260929T100944Z-run.Kz8PNa`) and in the
+    re-run, so it is the known load-related watchdog flake this stage and
+    CT-25's stage A already recorded, not a CT-27 regression (the port touches
+    no code that test drives).
+  - `ChatMediaLoaderTests`, `ChatTranscriptPresentationStoreTests`,
+    `ChatTranscriptProjectionKernelTests`, `ThinkingTraceSheetTests` and
+    `SessionSheetPresentationTests` (unit tier): 147 tests pass in 6.8 s
+    (`20260929T101219Z-run.96gomc`). The unit plan skips most of
+    `SessionSheetPresentationTests`, so it also ran in the ui-validation tier:
+    23/23 in 72.2 s (`20260929T101333Z-run.JzZtlX`).
+- Changes: the merge commit `4b27f3a21` (supervisor) and `da63e3ffb`
+  (`packages/ios-app/Tests/UI/ChatRowStabilityTests.swift`, this plan).
+- Deviations:
+  - `detachToOldestAndReturn` detaches through `detachReaderByRealScroll` (the
+    status-bar path, which lands at the oldest loaded row) rather than a
+    mid-history scroll, because its callers' subject is a row leaving and
+    re-entering the lazy range. The journey's own detach phase keeps the
+    mid-history `detachReaderMidHistory`, so the streaming and keyboard phases
+    have a viewport above the anchor to move.
+  - `ROW-STABILITY-INLINE` reads `heights=242.0,242.0` where the pre-merge
+    review measured `216.0,216.0`: a measurement timing difference (the fixture
+    reads the row frame as soon as the loader retains both artifacts), not a
+    product change — the settled-height fixture still reports `216.0,216.0`.
+- Not done here: `main` is not pushed and CT-23 stays out of scope. The
+  `displacedRetainedResume` watchdog flake is recorded, not fixed; it is the
+  heavy-suite load flake, not a correctness failure.
+- For the next agent: CT-27 is complete and green on the merged base on
+  `ct-27-rows`; the branch is ready for the supervisor's merge, and CT-23
+  resumes against CT-25's gates unchanged.
