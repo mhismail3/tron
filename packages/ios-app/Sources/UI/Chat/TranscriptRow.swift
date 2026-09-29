@@ -522,7 +522,7 @@ private struct ThinkingBlock: View {
             }
             traceViewport(inline: inline)
                 .contentShape(Rectangle())
-                .onTapGesture { openDetails(inline: inline) }
+                .onTapGesture { openDetails() }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
@@ -533,12 +533,17 @@ private struct ThinkingBlock: View {
 
     /// The full trace belongs to the transcript, not to this row: streaming
     /// pushes the row out of lazy realization, and the sheet must outlive it.
-    private func openDetails(inline: MarkdownPresentation.Inline) {
+    /// The route carries the trace's identity and the content this row resolved,
+    /// and the sheet follows the install's own content from there.
+    private func openDetails() {
         guard isOverflowing, let sheetRoutes else { return }
         sheetRoutes.present(.thinkingTrace(ChatThinkingTraceSheetRoute(
             identity: traceIdentity,
-            inline: inline,
-            streaming: animatesInsertion
+            opened: ChatThinkingTraceContent(
+                segments: segments,
+                preparedText: preparedText,
+                streaming: animatesInsertion
+            )
         )))
     }
 
@@ -555,7 +560,7 @@ private struct ThinkingBlock: View {
     }
 
     private var traceIdentity: String {
-        "thinking-run:\(segments.first?.id ?? "empty")"
+        ChatThinkingTraceContent.identity(of: segments)
     }
 
     /// The compact row is a tail projection, not a nested scroll surface:
@@ -668,27 +673,7 @@ private struct ThinkingBlock: View {
     }
 
     private var preparedInline: MarkdownPresentation.Inline {
-        let source = segments.map(\.text).joined(separator: "\n")
-        var attributed = AttributedString()
-        var allPrepared = true
-        for (index, segment) in segments.enumerated() {
-            if index > 0 { attributed += AttributedString("\n") }
-            guard let prepared = preparedText.thinkingInline(
-                identity: segment.id,
-                source: segment.text
-            ), let value = prepared.attributedString else {
-                allPrepared = false
-                break
-            }
-            attributed += value
-        }
-        if allPrepared {
-            return MarkdownPresentation.Inline(source: source, attributedString: attributed)
-        }
-        // Explicitly paged history can exceed the asynchronously warmed tail.
-        // Lazily realized older thinking rows still receive the same exact
-        // Markdown semantics through the bounded cold-parser fallback.
-        return MarkdownPresentation.Inline(source: source, reflowSoftLineBreaks: false)
+        ChatThinkingTraceContent.inline(of: segments, preparedText: preparedText)
     }
 }
 

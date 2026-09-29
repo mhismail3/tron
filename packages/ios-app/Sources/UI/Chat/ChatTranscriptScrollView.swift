@@ -755,6 +755,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             installationTag: installed?.tag,
             resolveToolRun: { callIDs, tag in
                 transcriptPresentation.resolveToolDetails(callIDs: callIDs, installationTag: tag)
+            },
+            resolveThinkingTrace: { identity in
+                transcriptPresentation.resolveThinkingTrace(identity)
+            },
+            resolveNotificationDetail: { eventID in
+                transcriptPresentation.resolveNotificationDetail(eventID)
             }
         ))
         .defaultScrollAnchor(.bottom, for: .initialOffset)

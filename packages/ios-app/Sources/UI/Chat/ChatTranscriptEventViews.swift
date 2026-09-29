@@ -102,8 +102,9 @@ struct ChatNotificationView: View {
             message: "detailID=\(detailID) sourceBytes=\(presentation.body?.utf8.count ?? 0)"
         )
         sheetRoutes?.present(.notificationDetail(ChatNotificationDetailSheetRoute(
-            presentation: presentation,
-            detailID: detailID
+            eventID: presentation.id,
+            detailID: detailID,
+            opened: presentation
         )))
     }
 

@@ -788,8 +788,13 @@ struct ReadOnlySubagentSessionSheet: View {
         }
         // A child transcript's tool runs render as ordinary cards, so this host
         // never resolves a tool-run route; it presents the thinking and event
-        // detail routes their rows ask for.
-        .modifier(ChatTranscriptSheetHost(routes: sheetRoutes))
+        // detail routes their rows ask for, resolved from this transcript's own
+        // projection.
+        .modifier(ChatTranscriptSheetHost(
+            routes: sheetRoutes,
+            resolveThinkingTrace: { store.resolveThinkingTrace($0) },
+            resolveNotificationDetail: { store.resolveNotificationDetail($0) }
+        ))
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
         // Native tail anchoring must track lazy Markdown measurement and sheet

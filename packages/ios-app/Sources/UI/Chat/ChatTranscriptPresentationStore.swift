@@ -747,6 +747,27 @@ struct InstalledChatTranscript: Hashable, Sendable {
         return resolveToolDetails(callIDs: callIDs)
     }
 
+    /// The trace an open thinking detail follows, resolved by the identity its
+    /// row presented: the row's own install answers, so the sheet keeps growing
+    /// with the trace after the row that opened it is gone.
+    func resolveThinkingTrace(_ identity: String) -> ChatThinkingTraceContent? {
+        guard let resolved = ChatTranscriptDetailResolution.thinkingTrace(
+            in: timeline.items,
+            identity: identity
+        ) else { return nil }
+        return ChatThinkingTraceContent(
+            segments: resolved.segments,
+            preparedText: preparedText(for: resolved.item),
+            streaming: resolved.streaming
+        )
+    }
+
+    /// The transcript event an open detail follows, resolved by the identity its
+    /// pill presented so a body that is still arriving keeps filling the sheet.
+    func resolveNotificationDetail(_ eventID: String) -> ChatNotificationPresentation? {
+        ChatTranscriptDetailResolution.notificationDetail(in: timeline.items, eventID: eventID)
+    }
+
     func toolPayloadRevision(for item: ChatTranscriptRenderItem) -> ChatToolPayloadRevision {
         guard case .toolRun(let run) = item else { return .empty }
         return ChatToolPayloadRevision(
@@ -1663,6 +1684,18 @@ final class ChatTranscriptPresentationStore {
     ) -> [ChatToolPresentation]? {
         guard let installed, installed.tag == installationTag else { return nil }
         return installed.resolveToolDetails(callIDs: callIDs, installationTag: installationTag)
+    }
+
+    /// The content an open thinking detail follows, resolved from the installed
+    /// projection the rows themselves render from. The sheet reads this while it
+    /// is presented, so an install that grows the trace re-renders it.
+    func resolveThinkingTrace(_ identity: String) -> ChatThinkingTraceContent? {
+        installed?.resolveThinkingTrace(identity)
+    }
+
+    /// The presentation an open event detail follows, from the same install.
+    func resolveNotificationDetail(_ eventID: String) -> ChatNotificationPresentation? {
+        installed?.resolveNotificationDetail(eventID)
     }
 
     /// O(1) newest-first materialization hint. The ordered ledger is already

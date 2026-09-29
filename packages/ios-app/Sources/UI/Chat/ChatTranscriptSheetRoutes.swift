@@ -16,17 +16,22 @@ struct ChatToolRunSheetRoute: Equatable, Sendable {
     let state: ToolRunResolvedState
 }
 
-/// One wrapped thinking trace's full detail.
+/// One wrapped thinking trace's full detail. The route carries the trace's
+/// identity and the content the row resolved; the host resolves the trace again
+/// from the install it owns, so a trace that is still arriving keeps growing in
+/// the sheet that outlives its row.
 struct ChatThinkingTraceSheetRoute: Equatable, Sendable {
     let identity: String
-    let inline: MarkdownPresentation.Inline
-    let streaming: Bool
+    let opened: ChatThinkingTraceContent
 }
 
-/// One transcript event's detail, with the identity its diagnostics carry.
+/// One transcript event's detail, with the identity its diagnostics carry. The
+/// event's own presentation is resolved from the current install for the same
+/// reason: a notice whose body is still arriving keeps filling the open sheet.
 struct ChatNotificationDetailSheetRoute: Equatable, Sendable {
-    let presentation: ChatNotificationPresentation
+    let eventID: String
     let detailID: UUID
+    let opened: ChatNotificationPresentation
 }
 
 enum ChatTranscriptSheetRoute: Equatable, Identifiable {
@@ -38,7 +43,7 @@ enum ChatTranscriptSheetRoute: Equatable, Identifiable {
         switch self {
         case .toolRun(let route): "chat.tool-run.\(route.runID)"
         case .thinkingTrace(let route): "chat.thinking-trace.\(route.identity)"
-        case .notificationDetail(let route): "chat.transcript-event-detail.\(route.presentation.id)"
+        case .notificationDetail(let route): "chat.transcript-event-detail.\(route.eventID)"
         }
     }
 
@@ -87,6 +92,11 @@ struct ChatTranscriptSheetHost: ViewModifier {
     let routes: ChatTranscriptSheetRouteOwner
     var installationTag: ChatTranscriptProjectionTag?
     var resolveToolRun: (([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?)?
+    /// Resolves a detail route's own content from the install this transcript
+    /// owns. The row presents an identity; the sheet reads the current content,
+    /// so an open detail follows what the transcript installs next.
+    var resolveThinkingTrace: ((String) -> ChatThinkingTraceContent?)?
+    var resolveNotificationDetail: ((String) -> ChatNotificationPresentation?)?
 
     @Environment(AppModel.self) private var model
     @Environment(\.displayPresentationHandler) private var presentDisplay
@@ -145,15 +155,17 @@ struct ChatTranscriptSheetHost: ViewModifier {
                 onDismiss: { routes.dismiss() }
             )
         case .thinkingTrace(let value):
-            ThinkingTraceDetailSheet(
-                inline: value.inline,
+            LiveThinkingTraceSheet(
                 identity: value.identity,
-                streaming: value.streaming
+                opened: value.opened,
+                resolve: resolveThinkingTrace
             )
         case .notificationDetail(let value):
-            ChatNotificationDetailSheet(
-                presentation: value.presentation,
-                detailID: value.detailID
+            LiveNotificationDetailSheet(
+                eventID: value.eventID,
+                detailID: value.detailID,
+                opened: value.opened,
+                resolve: resolveNotificationDetail
             )
         }
     }
@@ -207,5 +219,56 @@ struct ChatTranscriptSheetHost: ViewModifier {
             profile: model.selectedGatewayProfileID(),
             active: active
         ) { presentDisplay?(command) }
+    }
+}
+
+/// A row's thinking detail, rendered from the content the transcript's current
+/// install owns. The row presents only the trace's identity, so a trace that is
+/// still arriving keeps growing in the sheet that outlives the row that opened
+/// it — the tail-follow the compact row cannot own.
+private struct LiveThinkingTraceSheet: View {
+    let identity: String
+    let opened: ChatThinkingTraceContent
+    let resolve: ((String) -> ChatThinkingTraceContent?)?
+    /// The last content the install resolved. A bounded source window can drop
+    /// the row that opened the sheet while the sheet is still up; the sheet then
+    /// keeps following the trace it has rather than reverting to what the row
+    /// knew when it presented it.
+    @State private var followed: ChatThinkingTraceContent?
+
+    var body: some View {
+        let live = resolve?(identity)
+        let content = live ?? followed ?? opened
+        ThinkingTraceDetailSheet(
+            inline: content.inline,
+            identity: identity,
+            streaming: content.streaming
+        )
+        .onChange(of: live, initial: true) { _, resolved in
+            guard let resolved else { return }
+            followed = resolved
+        }
+    }
+}
+
+/// A row's event detail, rendered the same way: the pill presents its event's
+/// identity, and the sheet renders whatever the current install publishes for it.
+private struct LiveNotificationDetailSheet: View {
+    let eventID: String
+    let detailID: UUID
+    let opened: ChatNotificationPresentation
+    let resolve: ((String) -> ChatNotificationPresentation?)?
+    @State private var followed: ChatNotificationPresentation?
+
+    var body: some View {
+        let live = resolve?(eventID)
+        ChatNotificationDetailSheet(
+            presentation: live ?? followed ?? opened,
+            detailID: detailID
+        )
+        .onChange(of: live, initial: true) { _, resolved in
+            guard let resolved else { return }
+            followed = resolved
+        }
     }
 }
