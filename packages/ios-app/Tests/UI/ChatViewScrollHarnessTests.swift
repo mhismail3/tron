@@ -1752,7 +1752,7 @@ struct ChatViewScrollHarnessTests {
                         Issue.record("\(orientation): the display card's menu configuration must resolve")
                         continue
                     }
-                    let preview = delegate.contextMenuInteraction(
+                    let preview = delegate.contextMenuInteraction?(
                         bridge.interaction,
                         configuration: configuration,
                         highlightPreviewForItemWithIdentifier: configuration.identifier ?? ("preview-gate" as NSString)
