@@ -1305,7 +1305,7 @@ struct ChatViewScrollHarnessTests {
             let diagnosis = CT23ChromeDiagnosis()
             for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
                 let label = orientation.presentsNewestRowFirst ? "origin" : "end"
-                for state in ["pinned", "history300"] {
+                for state in ["pinned"] {
                     var snapshot = try SessionScenarioBuilder(seed: 1_282).openingTail(targetEncodedBytes: 10_000)
                     snapshot.acceptsQueuedPrompts = false
                     snapshot.transcript = try (0..<40).map { index in
@@ -1353,6 +1353,10 @@ struct ChatViewScrollHarnessTests {
                             if variant.name != "product" {
                                 try? harness.ct23DiagnosisSetEdgeEffectsHidden(top: false, bottom: false)
                                 try await harness.driveFrameBoundary()
+                            }
+                            if state == "pinned", variant.name != "no-bottom" {
+                                print("CT23-LAYERS orientation=\(label) variant=\(variant.name)"
+                                    + " \(try harness.ct23DiagnosisEffectLayers())")
                             }
                         }
                     }
@@ -5404,6 +5408,44 @@ final class ChatViewScrollHarness {
         let scrollView = try nativeTranscriptScrollView()
         scrollView.topEdgeEffect.isHidden = top
         scrollView.bottomEdgeEffect.isHidden = bottom
+    }
+
+    /// TEMPORARY (CT-23 stage 2 diagnosis): the effect-carrying layers of the
+    /// transcript's scroll view subtree, with their frames in the scroll view's
+    /// own coordinate space and in the window's.
+    func ct23DiagnosisEffectLayers() throws -> String {
+        let scrollView = try nativeTranscriptScrollView()
+        guard let window = hostingController.view.window else { return "no-window" }
+        var lines: [String] = []
+        func walk(_ layer: CALayer, depth: Int) {
+            guard depth <= 4 else { return }
+            let name = String(describing: type(of: layer))
+            let interesting = ["Effect", "Backdrop", "Blur", "Glass", "Material", "ScrollEdge", "Gradient"]
+            if interesting.contains(where: { name.contains($0) }) || layer.name != nil {
+                let inScroll = frameCorner(layer, in: scrollView.layer)
+                let inWindow = frameCorner(layer, in: window.layer)
+                lines.append("\(name)@depth\(depth)"
+                    + " scroll=\(inScroll) window=\(inWindow)"
+                    + " anchor=\(layer.anchorPoint) size=\(layer.bounds.size)"
+                    + " hidden=\(layer.isHidden) opacity=\(layer.opacity)"
+                    + " name=\(layer.name ?? "-")")
+            }
+            for sublayer in layer.sublayers ?? [] { walk(sublayer, depth: depth + 1) }
+        }
+        walk(scrollView.layer, depth: 0)
+        for subview in scrollView.subviews {
+            let name = String(describing: type(of: subview))
+            lines.append("VIEW \(name) frame=\(subview.frame) hidden=\(subview.isHidden) alpha=\(subview.alpha)")
+        }
+        return lines.joined(separator: " | ")
+    }
+
+    private func frameCorner(_ layer: CALayer, in other: CALayer) -> String {
+        let rect = layer.convert(layer.bounds, to: other)
+        return String(
+            format: "(%.1f,%.1f,%.1f,%.1f)",
+            Double(rect.minX), Double(rect.minY), Double(rect.width), Double(rect.height)
+        )
     }
 
     private func nativeTranscriptScrollView() throws -> UIScrollView {
