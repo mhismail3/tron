@@ -819,7 +819,9 @@ export interface KnowledgeCurationJob {
   reason?: string;
 }
 
-export interface KnowledgeTagRequest { commandId: string; sourceId: string; expectedRevision: string; connectionId: string; }
+/** `connectionId` names the Jev connection that pays; when omitted the single
+ * enabled, approved Jev connection is used, and none or several is refused. */
+export interface KnowledgeTagRequest { commandId: string; sourceId: string; expectedRevision: string; connectionId?: string; }
 export interface KnowledgeTagRunRequest { commandId: string; connectionId: string; limit?: number; }
 export interface KnowledgeTagBudgetRequest { connectionId: string; }
 export interface KnowledgeTagBudgetReconcileRequest { connectionId: string; attemptId: string; }

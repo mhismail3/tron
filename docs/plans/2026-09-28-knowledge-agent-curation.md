@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-28
 - **Status:** Active
-- **Last updated:** 2026-09-29, K1–K4, K6 and K8 done; K7 in progress
+- **Last updated:** 2026-09-29, K1–K4 and K6–K8 done
 - **Goal:** Agents keep every Library entry summarized, tagged, judged for freshness and correctly scoped, guided by the user's own takes, so useful sources surface on their own in future work.
 
 ## Goal and constraints
@@ -151,7 +151,7 @@ screenshots of each state. Device validation by the user after K9.
 | K4 | Done | Jev tagger with monthly budget and re-tag triggers | K1, K3 | luna-worker, 2026-09-29 |
 | K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
 | K6 | Done | Your take, verdicts and freshness policy; freshness- and scope-aware retrieval | K1, K3 | luna-worker, 2026-09-29 |
-| K7 | In progress | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | luna-worker, 2026-09-29 |
+| K7 | Done | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | luna-worker + supervisor, 2026-09-29 |
 | K8 | Done | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | luna-worker, 2026-09-29 |
 | K9 | Ready | Maintainer runtime update and live capability check | K1–K8 | — |
 | K10 | Ready | Seed: agent drafts the vocabulary from the 276 entries; user edits it | K9 | — |
@@ -541,7 +541,7 @@ Drafted from the 2026-09-28 interview and approved by the user the same day,
 with the reliability and interaction bars added at the user's request. K1–K4, K6 and K8 are complete; K3/K6 were integrated on `knowledge/k1-k6`; K7 is in progress.
 
 
-### K7 · In progress · 2026-09-29 · luna-worker · `knowledge/k7-ios`
+### K7 · Done · 2026-09-29 · luna-worker, completed by supervisor · `knowledge/k7-ios`
 
 - Result: Native source records adopt K1/K3/K6 take, controlled-tag selection,
   verdict, vocabulary config, asynchronous summary-job, and enriched row DTOs;
@@ -588,6 +588,32 @@ with the reliability and interaction bars added at the user's request. K1–K4, 
   No screenshot files exist yet under
   `~/.tron/workspace/files/k7-screenshots/`. K7 therefore remains In
   progress; do not hand off as accepted or mark Done.
+- Completion (supervisor, after three worker passes stopped short): mounted
+  interaction coverage now runs out of process. `HostedKnowledgeDetailFixture`
+  (HOSTED_TEST, `-tron-knowledge-detail-fixture`) mounts the real
+  `KnowledgeDetailSheet` against a scripted in-app Gateway that holds summary,
+  take and tag work until a journey completes or fails it, emits the Gateway's
+  exact job event shape, and drops the link to exercise the real reconnect owner.
+  `TronKnowledgeDetailUITests` (5 journeys, all passing, result bundle
+  `~/Library/Developer/Tron/ios/test-runs/20260929T165938Z-run.JQkfuY/TestResults.xcresult`):
+  `testSummaryRunsInBackgroundAcrossCloseAndReconnect` (double tap → one job;
+  close/reopen shows running; job finished while offline appears after
+  reconnect; no second job), `testFailedRegenerationKeepsSummaryAndOffersRetry`,
+  `testTakeAutosavesKeepsDraftOnConflictAndFailureAndRetags`,
+  `testFailedRetagKeepsTagsAndRetries`, `testPersonalScopeEntry`.
+  Defects the journeys and review found and fixed: (1) the Gateway broadcast
+  `knowledge.curation.job` without `startedAt`, so iOS dropped every job event;
+  it now broadcasts the whole job (`KnowledgeModelsTests.testCurationJobEventDecodesTheGatewayBroadcastShape`,
+  with a negative control on the old shape); (2) a successful retried take left
+  the stale conflict banner visible; (3) a failed re-tag had no Retry
+  (`knowledge.source.tag` now resolves the single approved Jev connection when
+  none is named; Gateway test in `knowledge-tagger.test.ts`); (4) "Updating
+  tags" was shown twice. Journeys insert take text through UIKit's text-input
+  path because the simulator keyboard's inline predictions commit extra words;
+  keystroke typing during an in-flight save stays covered in-process.
+  Screenshots (simulator renders of the real state machine):
+  `~/.tron/workspace/files/k7-screenshots/k7-{default,generating,summary-tags,summary-failure-retry,superseded-replacement,updating-tags,take-conflict,take-save-failure-retry,tag-failure-retry,personal-scope}.png`.
+  Device validation remains the user's after K9.
 
 
 ### K8 · Done · 2026-09-29 · luna-worker · `knowledge/k8-multi-collection`

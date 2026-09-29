@@ -122,3 +122,7 @@ A mismatch with the current title/text withholds the obsolete summary; metadata
 and admission changes alone do not invalidate it. Older unbound assessments remain
 stored summaries, not a certification of current evidence. The Gateway and native
 regressions share a URL, quote, newline, and Unicode digest vector.
+
+Entry Detail's background work and autosave are validated out of process by
+`TronKnowledgeDetailUITests` against the hosted scripted Gateway; see
+[iOS development](development.md).

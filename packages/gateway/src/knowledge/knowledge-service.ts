@@ -417,18 +417,20 @@ export class KnowledgeService {
 
   private async startTag(request: KnowledgeTagRequest): Promise<{ job: import("./knowledge-contract.js").KnowledgeCurationJob }> {
     if (!this.tagging) throw new GatewayError("unsupported", "Jev Knowledge tagging is not installed");
-    if (!request.commandId || request.commandId.length > 160 || !request.sourceId || !request.expectedRevision || !request.connectionId) throw new GatewayError("invalid_request", "Tagging requires commandId, sourceId, expectedRevision and connectionId");
+    if (!request.commandId || request.commandId.length > 160 || !request.sourceId || !request.expectedRevision) throw new GatewayError("invalid_request", "Tagging requires commandId, sourceId and expectedRevision");
     const existing = this.jobs.find(request.commandId);
     if (existing) {
       if (existing.sourceId !== request.sourceId || existing.operation !== "tags") throw new KnowledgeCurationRefusal("command-id-reuse", "This command ID already started different curation work");
       return { job: existing };
     }
+    const connectionId = request.connectionId ?? await this.taggingConnectionId();
+    if (!connectionId) throw new GatewayError("unsupported", "Jev tagging needs exactly one enabled Jev connection with approved paid access");
     const record = await this.store.read(request.sourceId, undefined, false, true, true);
     if (!record || record.kind !== "source") throw new GatewayError("conflict", "Source is unavailable, excluded, or forgotten");
     if (record.revisionId !== request.expectedRevision) throw new KnowledgeCurationRefusal("stale-revision", "Source revision changed before tagging began", record.revisionId);
     const job = this.jobs.start({
       commandId: request.commandId, operation: "tags", sourceId: request.sourceId,
-      run: signal => this.runOwned("tag", async ownedSignal => this.runTag(request.sourceId, request.expectedRevision, request.connectionId, request.commandId, ownedSignal), signal),
+      run: signal => this.runOwned("tag", async ownedSignal => this.runTag(request.sourceId, request.expectedRevision, connectionId, request.commandId, ownedSignal), signal),
     });
     return { job };
   }
@@ -904,8 +906,8 @@ export class KnowledgeService {
         return { text: `Source summary ${result.job.status} for ${result.job.sourceId} (commandId ${result.job.commandId}); query action=curationJob for its outcome.`, details: result };
       }
       case "tagSource": {
-        if (!parameters.commandId || !parameters.sourceId || !parameters.expectedRevision || !parameters.connectionId) throw new GatewayError("invalid_request", "tagSource requires commandId, sourceId, expectedRevision and connectionId");
-        const details = await this.startTag({ commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.expectedRevision, connectionId: parameters.connectionId });
+        if (!parameters.commandId || !parameters.sourceId || !parameters.expectedRevision) throw new GatewayError("invalid_request", "tagSource requires commandId, sourceId and expectedRevision");
+        const details = await this.startTag({ commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.expectedRevision, ...(parameters.connectionId ? { connectionId: parameters.connectionId } : {}) });
         return { text: `Knowledge tag job ${details.job.status} for ${details.job.sourceId}; query curationJob for its outcome.`, details };
       }
       case "retagQueue": {

@@ -195,6 +195,15 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let sourceId: String; let expectedRevision: String }
         return try await mutate("knowledge.source.summarize", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision), commandID: commandID)
     }
+    /// Starts one owned re-tag job; the Gateway uses the single approved Jev
+    /// connection and refuses when paid tagging is not set up.
+    func retag(sourceID: String, expectedRevision: String, commandID: String) async throws -> KnowledgeCurationJob {
+        struct Params: Encodable { let sourceId: String; let expectedRevision: String }
+        struct Started: Decodable { let job: KnowledgeCurationJob }
+        let value: Started = try await mutate("knowledge.source.tag", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision), commandID: commandID)
+        guard value.job.sourceId == sourceID, value.job.operation == "tags" else { throw invalidResponse() }
+        return value.job
+    }
     func curationJobs(sourceID: String) async throws -> KnowledgeCurationJobsResponse {
         struct Params: Encodable { let sourceId: String; let limit: Int }
         let value: KnowledgeCurationJobsResponse = try await request("knowledge.curation.jobs", Params(sourceId: sourceID, limit: 25))

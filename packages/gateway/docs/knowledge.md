@@ -171,14 +171,18 @@ placement or relations.
 ### Jev tag decisions and paid-work ownership
 
 `knowledge.source.tag` (agent tool `tagSource`) accepts one source's exact
-`expectedRevision` and one `knowledge.jev` `connectionId`; it returns an owned
+`expectedRevision` and optionally a `knowledge.jev` `connectionId` (omitted, it
+uses the single enabled Jev connection with approved paid access and refuses
+none or several); it returns an owned
 `tags` job instead of waiting for Jev. `knowledge.tags.run` (agent tool
 `retagQueue`) owns one bounded queue run of 1..25 entries from the canonical
 `knowledge.tags.retag-needed` query. Repeated command IDs observe the existing
 job. `knowledge.curation.jobs` reports its state. On every owned job's
 `running` → `done` or `failed` transition, the Gateway publishes
-`knowledge.curation.job` with `sourceId`, `commandId`, `operation`, `status`,
-and the terminal `revisionId` or actionable `code`/`reason`. This is an
+`knowledge.curation.job` carrying the whole job, the same shape
+`knowledge.curation.jobs` returns (`commandId`, `operation`, `sourceId`,
+`status`, `startedAt`, `finishedAt` and the terminal `revisionId` or actionable
+`code`/`reason`), so one client decoder serves both. This is an
 invalidation/event signal, not a state mirror: clients query `knowledge.curation.jobs`
 on open, reconnect, and this event, then read the committed record revision.
 Terminal notifications share the Gateway event transport with the coalesced

@@ -1304,6 +1304,8 @@ struct KnowledgeDetailView: View {
     @State private var takeExpectedRevision: String
     @State private var summaryJob: KnowledgeCurationJob?
     @State private var taggingJob: KnowledgeCurationJob?
+    @State private var retagError: String?
+    @State private var retagCommandID: String?
     @State private var jobsRequestGeneration = 0
     @State private var summaryError: String?
     @State private var summaryCommandID: String?
@@ -1658,17 +1660,6 @@ struct KnowledgeDetailView: View {
                     Text(takeSaving ? "Saving…" : (source.take == nil ? "Private note · used to guide tagging and retrieval" : "Saved \(humanDate(source.take!.updatedAt))"))
                         .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                     Spacer()
-                    if taggingJob?.status == "running" {
-                        Text("Updating tags")
-                            .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-                    } else if tagsStale {
-                        Text("Needs re-tagging")
-                            .font(TronTypography.caption).foregroundStyle(Color.tronAmber)
-                    }
-                    if taggingJob?.status == "failed" {
-                        Text(taggingJob?.reason ?? "Re-tagging failed; your current tags are unchanged.")
-                            .font(TronTypography.caption).foregroundStyle(Color.tronAmber)
-                    }
                 }
                 if let takeCurrentText {
                     Text("The current saved take is: \(takeCurrentText.isEmpty ? "(empty)" : takeCurrentText)")
@@ -1686,9 +1677,21 @@ struct KnowledgeDetailView: View {
         }
         TronSettingsGroup("Tags and verdict", accent: .tronKnowledge) {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
-                if taggingJob?.status == "running" || tagsStale {
-                    Text(taggingJob?.status == "running" ? "Updating tags" : "Needs re-tagging")
-                        .font(TronTypography.caption).foregroundStyle(taggingJob?.status == "running" ? Color.tronTextSecondary : Color.tronAmber)
+                if taggingJob?.status == "running" {
+                    Label("Updating tags", systemImage: "arrow.triangle.2.circlepath")
+                        .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                } else if taggingJob?.status == "failed" || retagError != nil {
+                    HStack {
+                        Text(retagError ?? taggingJob?.reason ?? "Re-tagging failed; your current tags are unchanged.")
+                            .font(TronTypography.caption).foregroundStyle(Color.tronAmber)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button("Retry tagging") { startRetag() }
+                            .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+                            .disabled(!admitsOrigin)
+                    }
+                } else if tagsStale {
+                    Text("Needs re-tagging").font(TronTypography.caption).foregroundStyle(Color.tronAmber)
                 }
                 sourceTagLabels(source)
                 Menu {
@@ -2005,6 +2008,29 @@ struct KnowledgeDetailView: View {
         }
     }
 
+    /// One explicit re-tag. A repeated tap while the command is unsettled reuses
+    /// its command ID, so the Gateway observes one job and one charge.
+    private func startRetag() {
+        guard admitsOrigin else { retagError = "Gateway changed; reopen this entry."; return }
+        let identity = origin
+        let command = retagCommandID ?? UUID().uuidString.lowercased()
+        retagCommandID = command
+        retagError = nil
+        let sourceID = currentRecord.id, revision = currentRecord.revisionId
+        Task { @MainActor in
+            do {
+                let job = try await model.knowledge.retag(sourceID: sourceID, expectedRevision: revision, commandID: command)
+                guard model.knowledgePresentationIdentity == identity, currentRecord.id == sourceID else { return }
+                taggingJob = job
+                retagCommandID = nil
+            } catch {
+                guard model.knowledgePresentationIdentity == identity, currentRecord.id == sourceID else { return }
+                retagError = error.localizedDescription
+                if (error as? GatewayFailure)?.code != "outcome_unknown" { retagCommandID = nil }
+            }
+        }
+    }
+
     private func observeCurationJobs() async {
         guard model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
         let identity = origin
@@ -2046,6 +2072,8 @@ struct KnowledgeDetailView: View {
             if case .source(let saved) = result.record.content {
                 currentRecord = result.record
                 takeExpectedRevision = result.record.revisionId
+                // A saved draft resolves any earlier conflict it was retried over.
+                takeCurrentText = nil
                 if takeDraft == submitted { takeDraft = saved.take?.text ?? ""; KnowledgeTakeDraftRegistry.shared.clear(profileID: origin.profileID, recordID: currentRecord.id) }
             }
             let newerDraftRemains = takeDraft != submitted

@@ -599,6 +599,36 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertNotEqual(KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: "changed"), KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: ""))
     }
 
+    /// Failure mode: the Gateway's `knowledge.curation.job` broadcast omitted
+    /// `startedAt`, so every job event failed to decode and an open Entry Detail
+    /// never learned that its summary or re-tag finished. The payload below is
+    /// the whole job exactly as `gateway-main.ts` broadcasts it.
+    func testCurationJobEventDecodesTheGatewayBroadcastShape() {
+        let done: JSONValue = .object([
+            "commandId": .string("summary-1"), "operation": .string("summary"), "sourceId": .string("source-1"),
+            "status": .string("done"), "startedAt": .string("2026-09-29T00:00:00.000Z"),
+            "finishedAt": .string("2026-09-29T00:00:03.000Z"), "revisionId": .string("revision-2"),
+        ])
+        guard case .knowledgeCurationJob(let job) = GatewayEvent(type: "event", topic: "knowledge.curation.job", sessionId: nil, payload: done).preparation else {
+            return XCTFail("The Gateway's job event must decode")
+        }
+        XCTAssertEqual(job.status, "done"); XCTAssertEqual(job.revisionId, "revision-2")
+        let failed: JSONValue = .object([
+            "commandId": .string("tags-1"), "operation": .string("tags"), "sourceId": .string("source-1"), "status": .string("failed"),
+            "startedAt": .string("2026-09-29T00:00:00.000Z"), "finishedAt": .string("2026-09-29T00:00:01.000Z"),
+            "code": .string("budget-exhausted"), "reason": .string("This month's tagging budget is spent."),
+        ])
+        guard case .knowledgeCurationJob(let failure) = GatewayEvent(type: "event", topic: "knowledge.curation.job", sessionId: nil, payload: failed).preparation else {
+            return XCTFail("A failed job event must decode")
+        }
+        XCTAssertEqual(failure.code, "budget-exhausted")
+        // Negative control: the old broadcast shape, without startedAt, is dropped.
+        var legacy = done.objectValue!; legacy.removeValue(forKey: "startedAt")
+        if case .knowledgeCurationJob = GatewayEvent(type: "event", topic: "knowledge.curation.job", sessionId: nil, payload: .object(legacy)).preparation {
+            XCTFail("A job without startedAt is not the Gateway contract")
+        }
+    }
+
     func testSummaryDigestMatchesGatewayEncodingAndIgnoresMetadataUpdates() throws {
         let title = "A / B"
         let text = "https://example.com/a\n\"Quoted\" 🌲"

@@ -1792,6 +1792,14 @@ configuration `Test`, and plan `UIValidation`, under `scripts/ios-test-lock.py` 
 `scripts/ios-test-simulator.py validate`. Use `-only-testing:TronMobileUITests/TronSmokeUITests/<test>`
 for focused interaction checks rather than running every journey during diagnosis.
 
+`TronKnowledgeDetailUITests` drives Entry Detail against the hosted scripted
+Gateway (`-tron-knowledge-detail-fixture`): summary jobs across a double tap,
+close/reopen and reconnect; take autosave, conflict and failure retry; re-tag
+progress, failure and retry; and superseded/personal presentation. The fixture
+holds each job until the journey completes or fails it and inserts take text
+through UIKit's text-input path, because simulator inline predictions commit
+extra words.
+
 `TronSmokeUITests.testRuntimeBehaviorThinkingSliderOpensAfterDefaultsConsolidation`
 launches the test-only Agent Defaults fixture and taps the real moved Thinking control,
 then verifies its slider opens. It guards against losing the configuration-slider host when

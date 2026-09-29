@@ -95,6 +95,8 @@ struct TronMobileApp: App {
                 HostedAutomationFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-archive-fixture") {
                 HostedSessionArchiveFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-knowledge-detail-fixture") {
+                HostedKnowledgeDetailFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-dashboard-menu-fixture") {
                 HostedDashboardMenuFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-accessibility-fixture") {

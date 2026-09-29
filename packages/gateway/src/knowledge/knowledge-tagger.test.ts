@@ -82,6 +82,18 @@ describe("Knowledge Jev tagging", () => {
     const verdict = await service.invoke({ operation: "knowledge.source.curate", request: { commandId: "free-verdict-after-budget", operation: "verdict", producer: { actor: "user" }, items: [{ recordId: source.id, expectedRevision: source.revisionId, verdict: { verdict: "evergreen" } }] } }) as { outcomes: Array<{ status: string }> };
     expect(verdict.outcomes[0]?.status).toBe("applied");
   });
+  // Failure mode: the app has no Jev connection ID, so an explicit re-tag must
+  // resolve the single approved connection, and refuse clearly when none is.
+  it("re-tags one entry through the single approved Jev connection when none is named", async () => {
+    const fixture = await taggingFixture();
+    const source = fixture.records[0]!;
+    const started = await fixture.service.invoke({ operation: "knowledge.source.tag", request: { commandId: "tag-default-connection", sourceId: source.id, expectedRevision: source.revisionId } }) as { job: { status: string } };
+    expect(started.job.status).toBe("running");
+    expect((await waitJob(fixture.service, "tag-default-connection")).status).toBe("done");
+    await fixture.owner.execute({ kind: "policy.update", commandId: "tag-default-unapprove", instanceId: "tagger", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 500, recurringApproved: false } });
+    const current = (await fixture.store.read(source.id))!;
+    await expect(fixture.service.invoke({ operation: "knowledge.source.tag", request: { commandId: "tag-default-refused", sourceId: source.id, expectedRevision: current.revisionId } })).rejects.toThrow(/exactly one enabled Jev connection with approved paid access/);
+  });
   it("uses a strict confidence threshold and omits boundary ties", () => {
     expect(KNOWLEDGE_TAG_CONFIDENCE_THRESHOLD).toBe(0.65);
     expect(chooseKnowledgeTags({ tag_alpha: { type: "noul", noul: 0.9 }, tag_beta: { type: "noul", noul: 0.65 }, tag_gamma: { type: "noul", noul: 0.64 } }, ["alpha", "beta", "gamma"])).toEqual(["alpha"]);
