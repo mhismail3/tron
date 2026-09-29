@@ -339,10 +339,14 @@ struct ProviderAuthCoordinatorTests {
                 let oldReads = try await requests(in: 1...2, socket: harness.socket)
                 harness.owner.clearProfile()
                 try await respondCatalog(oldReads, marker: "old", socket: harness.socket)
+                // The profile clear abandons the retired pair, so `C-6` appends
+                // one `cancel` control frame per abandoned read. Waiting for
+                // both keeps the fresh pair at a known index in the write log.
+                try await harness.socket.waitUntilSent(count: 5)
                 let fresh = Task { await harness.owner.refreshCatalog(target: .global) }
                 defer { fresh.cancel() }
-                try await harness.socket.waitUntilSent(count: 5)
-                try await respondCatalog(requests(in: 3...4, socket: harness.socket), marker: "fresh", socket: harness.socket)
+                try await harness.socket.waitUntilSent(count: 7)
+                try await respondCatalog(requests(in: 5...6, socket: harness.socket), marker: "fresh", socket: harness.socket)
                 #expect(await fresh.value)
                 #expect(harness.owner.catalog(for: .global)?.providers.first?.id == "fresh")
                 #expect(harness.delegate.completionErrors.isEmpty)
@@ -350,8 +354,8 @@ struct ProviderAuthCoordinatorTests {
                 // The successful catalog load warms the picker's Recent rail
                 // before the refresh returns, so the refresh is one frame more
                 // than its catalog pair.
-                try await respondToRecentModelsWarm(at: 5, socket: harness.socket)
-                #expect(await harness.socket.sentFrames().count == 6)
+                try await respondToRecentModelsWarm(at: 7, socket: harness.socket)
+                #expect(await harness.socket.sentFrames().count == 8)
                 harness.owner.clearProfile()
                 await harness.client.close()
             } catch {
