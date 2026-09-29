@@ -2246,13 +2246,14 @@ struct KnowledgeConfigurationView: View {
     @State private var error: String?
     @State private var identity: KnowledgePresentationIdentity?
     private var supportsGlobalObservation: Bool { model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.globalObservationCapability) == true }
+    private var catalogModels: [ModelSummary] { model.providerCatalog(for: .global)?.models ?? [] }
 
     var body: some View {
         KnowledgeFormSheet(title: "Observation", isWorking: saving, actionDisabled: config == nil, onAction: save) {
             if config == nil && error == nil { TronLoadingState(label: "Loading configuration…") }
             TronSettingsGroup("Observer", accent: .tronKnowledge) {
-                TronSelectionSheetRow(icon: "cpu", title: "Model", value: chosenModel?.id ?? "Choose", accent: .tronKnowledge) {
-                    ModelPicker(selection: $chosenModel, models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? [])
+                TronSelectionSheetRow(icon: "cpu", title: "Model", value: SessionModelSelectionPresentation.modelName(chosenModel, catalog: catalogModels), accent: .tronKnowledge) {
+                    ModelPicker(selection: $chosenModel, models: catalogModels.filter(\.available))
                         .tronNavigationTitle("Observation model", accent: .tronKnowledge)
                         .presentationDetents([.large])
                 }
@@ -2260,14 +2261,24 @@ struct KnowledgeConfigurationView: View {
             .disabled(config == nil)
             .tronSettingsCaption("The model is used for future eligible turns; earlier turns are not backfilled.")
             TronSettingsGroup("Source enrichment", accent: .tronKnowledge) {
-                TronSelectionSheetRow(icon: "sparkles", title: "Summary model", value: chosenEnrichmentModel?.id ?? config?.enrichment?.model ?? "Choose", accent: .tronKnowledge) {
-                    ModelPicker(selection: Binding(get: { chosenEnrichmentModel }, set: { chosenEnrichmentModel = $0; enrichmentModelChanged = true }), models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? [])
-                        .tronNavigationTitle("Summary model", accent: .tronKnowledge)
-                        .presentationDetents([.large])
-                }
-                if chosenEnrichmentModel != nil || config?.enrichment?.model != nil {
-                    Button("Clear summary model", role: .destructive) { chosenEnrichmentModel = nil; enrichmentModelChanged = true }
-                        .accessibilityIdentifier("knowledge.clearSummaryModel")
+                VStack(spacing: 0) {
+                    TronSelectionSheetRow(icon: "sparkles", title: "Summary model", value: SessionModelSelectionPresentation.modelName(chosenEnrichmentModel, catalog: catalogModels), accent: .tronKnowledge) {
+                        ModelPicker(selection: Binding(get: { chosenEnrichmentModel }, set: { chosenEnrichmentModel = $0; enrichmentModelChanged = true }), models: catalogModels.filter(\.available))
+                            .tronNavigationTitle("Summary model", accent: .tronKnowledge)
+                            .presentationDetents([.large])
+                    }
+                    if chosenEnrichmentModel != nil {
+                        TronSettingsDivider(accent: .tronKnowledge)
+                        TronSettingsRow(icon: "xmark.circle", title: "Clear summary model",
+                                        subtitle: "Summaries stay off until you choose a model again", accent: .tronKnowledge) {
+                            Button { chosenEnrichmentModel = nil; enrichmentModelChanged = true } label: {
+                                TronInlineActionLabel("Clear", accent: .tronKnowledge)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Clear summary model")
+                            .accessibilityIdentifier("knowledge.clearSummaryModel")
+                        }
+                    }
                 }
             }
             .disabled(config == nil)
