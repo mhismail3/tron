@@ -686,6 +686,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
 
     var body: some View {
+        GeometryReader { insetReader in
         let physicalRows = installed.map {
             ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
@@ -724,6 +725,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // and the navigation inset at the far end as native content insets that
         // ride the keyboard's own transaction.
         .chatTranscriptOrientation(orientation)
+        .chatTranscriptInsets(orientation, safeAreaInsets: insetReader.safeAreaInsets)
         // The sheet a row asked for is presented here, outside the lazy stack, so
         // streaming a row out of realization cannot dismiss it. The resolver is
         // the same installed projection the rows are rendered from, so the
@@ -934,6 +936,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             }
         }
         .overlay { openingSurface() }
+        }
     }
 
     /// The transcript's scrollable content. The tail affordance and the

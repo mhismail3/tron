@@ -178,6 +178,19 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
         return (pinnedModelOffsetY - modelOffsetY) - geometry.bottomInset
     }
 
+    /// Insets read by the unflipped transcript container are re-applied as
+    /// margins only on the origin-anchored path. The flipped scroll view ignores
+    /// these safe areas, so UIKit never receives a changing overlay inset.
+    func scrollMargins(for safeAreaInsets: EdgeInsets) -> EdgeInsets {
+        guard self == .newestAtOrigin else { return .init() }
+        return EdgeInsets(
+            top: safeAreaInsets.bottom,
+            leading: 0,
+            bottom: safeAreaInsets.top,
+            trailing: 0
+        )
+    }
+
     /// The accessibility sort priority for the element at `spinePosition` of the
     /// transcript's content spine, which makes VoiceOver read the transcript in
     /// the order the reader sees it.
@@ -272,25 +285,13 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
 /// origin, and the row's own application of the same value cancels it for the
 /// row's content while leaving the row's position in the origin-anchored order.
 ///
-/// The flip is the whole inset mechanism: no margin is added and no safe area is
-/// ignored, because the scroll view's own vertical safe-area insets arrive
-/// already mirrored by the render transform. Measured on the origin-anchored path
-/// through the keyboard's own inset (the CT-25 stage B1 driver, one driven
-/// display boundary per curve step, hosted lane ct23): the scroll view's
-/// `safeAreaInsets.top` is the composer/keyboard inset and its
-/// `safeAreaInsets.bottom` is the navigation inset at every boundary — 53/116 at
-/// rest, 389/116 with the keyboard up, 450.3/116 with a four-line draft — so the
-/// composer inset lands at the content origin (the pinned newest row) and the
-/// navigation inset at the far end, both as native content insets that ride the
-/// keyboard's transaction.
-///
-/// Reading the insets in an unflipped `GeometryReader` and re-applying them
-/// swapped is what the blueprint proposed, and it is wrong on this OS: the read
-/// is doubled by the mirroring the scroll view already applies. With
-/// `contentMargins(..., for: .scrollContent)` and `.ignoresSafeArea(.vertical)`
-/// the scroll view's own safe area measured 166 pt at keyboard-up and 277.7 pt
-/// with the four-line draft, added to the margin, so the newest row settled
-/// 166-290 pt above the composer instead of at it.
+/// On the origin-anchored path the owner reads safe-area insets from an
+/// unflipped `GeometryReader` in the same layout pass, ignores the scroll view's
+/// vertical container and keyboard safe areas, and applies the swapped values as
+/// content and indicator margins. This prevents the changing composer/keyboard
+/// inset from reaching UIKit's overlay-inset adjustment for the flipped scroll
+/// view, which otherwise moves detached readers to the pinned end. Today's path
+/// does not ignore safe areas or add margins.
 /// The CT-23 accessibility order. It is the same decision as the render flip:
 /// today's transcript's view order already is its visual order and the modifier
 /// applies nothing, while the origin-anchored transcript's reversed view order
@@ -305,6 +306,26 @@ private struct ChatTranscriptVoiceOverOrderModifier: ViewModifier {
             content
         } else {
             content.accessibilitySortPriority(priority)
+        }
+    }
+}
+
+private struct ChatTranscriptInsetsModifier: ViewModifier {
+    let orientation: ChatTranscriptOrientation
+    let safeAreaInsets: EdgeInsets
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if orientation.presentsNewestRowFirst {
+            let margins = orientation.scrollMargins(for: safeAreaInsets)
+            content
+                .ignoresSafeArea(.all, edges: .vertical)
+                .contentMargins(.top, margins.top, for: .scrollContent)
+                .contentMargins(.bottom, margins.bottom, for: .scrollContent)
+                .contentMargins(.top, margins.top, for: .scrollIndicators)
+                .contentMargins(.bottom, margins.bottom, for: .scrollIndicators)
+        } else {
+            content
         }
     }
 }
@@ -326,6 +347,20 @@ extension View {
     /// it to its scroll view and each row applies it to its own element.
     func chatTranscriptOrientation(_ orientation: ChatTranscriptOrientation) -> some View {
         modifier(ChatTranscriptOrientationModifier(orientation: orientation))
+    }
+
+    /// Reads safe areas before the render flip and reapplies the swapped values
+    /// as margins only on the origin-anchored scroll view.
+    func chatTranscriptInsets(
+        _ orientation: ChatTranscriptOrientation,
+        safeAreaInsets: EdgeInsets
+    ) -> some View {
+        modifier(
+            ChatTranscriptInsetsModifier(
+                orientation: orientation,
+                safeAreaInsets: safeAreaInsets
+            )
+        )
     }
 
     /// Gives this transcript element the accessibility order the reader sees:
