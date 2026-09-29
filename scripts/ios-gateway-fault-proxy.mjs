@@ -331,6 +331,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
         TRON_MACHINE_GROUP_ID: "tron-ios-e2e",
         TRON_GATEWAY_HOST: "127.0.0.1",
         TRON_GATEWAY_PORT: String(targetPort),
+        // A restarted fixture Gateway keeps the lane the caller asked for, or
+        // the phone would re-learn an advertisement this run dials.
+        ...(process.env.TRON_E2E_LAN_ENDPOINT ? { TRON_GATEWAY_LAN_ENDPOINT: process.env.TRON_E2E_LAN_ENDPOINT } : {}),
       },
       stdio: "ignore",
     });

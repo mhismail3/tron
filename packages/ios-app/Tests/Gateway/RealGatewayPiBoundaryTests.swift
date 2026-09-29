@@ -510,6 +510,149 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         }
     }
 
+    /// E-3c: the two lanes the phone races at home, dialed against the fixture
+    /// Gateway's own pinned LAN listener (`scripts/ios-gateway-e2e-test run-lan`
+    /// starts it with the lane on). The advertised endpoint and pin come from the
+    /// pairing response, the lane serves its own certificate and WebSocket, and
+    /// the pin is checked by the socket's own trust evaluation, so every leg runs
+    /// production code end to end.
+    ///
+    /// Done when: the saved leg blackholed for 90 s is invisible to the
+    /// connection the LAN lane carries; a blocked LAN lane falls back to the
+    /// saved lane within the stagger plus one handshake; and a pin that does not
+    /// match the served certificate sends no credential.
+    func testRacesLanAndTailscaleLanes() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let portText = environment["TRON_E2E_PORT"],
+              let port = Int(portText),
+              let code = environment["TRON_E2E_CODE"],
+              let proxyToken = environment["TRON_E2E_PROXY_TOKEN"] else {
+            throw XCTSkip("Run through scripts/ios-gateway-e2e-test run-lan to provide the fixture Gateway.")
+        }
+        let invitation = PairingInvitation(
+            host: "127.0.0.1",
+            port: port,
+            code: code,
+            machineId: "tron-ios-e2e",
+            label: "Tron iOS E2E"
+        )
+        let (paired, token) = try await GatewayPairer().pair(invitation, deviceName: "LAN lane race")
+        let advertised = try XCTUnwrap(paired.lanEndpoints.first, "The fixture Gateway must advertise its LAN lane")
+        let pin = try XCTUnwrap(paired.lanPin, "The fixture Gateway must advertise the LAN lane's pin")
+        XCTAssertEqual(Data(base64Encoded: pin)?.count, 32, "The advertised pin must be a 256-bit public-key pin")
+        NSLog("e-3c: LAN lane advertised at \(advertised.host):\(advertised.port)")
+        // The lane is dialed only on Wi-Fi (D-5). The simulator reports this Mac's
+        // wired path, so the phone's own path fact is an input of this leg: the
+        // subject is the race's behavior on Wi-Fi, not this host's uplink.
+        let onWifi: @Sendable () -> String? = { "wifi,other" }
+        try await control("pass", port: port, token: proxyToken)
+
+        // (1) A phone on Wi-Fi reaches its Mac over the LAN lane.
+        let lanClient = makeClient(networkPath: onWifi)
+        _ = try await lanClient.connect(profile: paired, token: token)
+        let lanHandshakes = await successfulHandshakes(of: lanClient)
+        XCTAssertEqual(lanHandshakes.count, 1)
+        XCTAssertEqual(lanHandshakes.first?.handshake?.transport, "lan")
+
+        // (2) The saved lane blackholed for 90 s is invisible to that
+        // connection: the proxy drops every byte the other lane would carry while
+        // the LAN socket keeps answering.
+        try await control("blackhole", port: port, token: proxyToken)
+        NSLog("e-3c: 90 s blackhole of the saved lane starts over a live LAN connection")
+        let outageStarted = ContinuousClock().now
+        while outageStarted.duration(to: ContinuousClock().now) < .seconds(90) {
+            _ = try await lanClient.requestValue("system.info", EmptyParams(), timeout: .seconds(10))
+            try await Task.sleep(for: .seconds(5))
+        }
+        try await control("pass", port: port, token: proxyToken)
+        let survivingHandshakes = await successfulHandshakes(of: lanClient)
+        XCTAssertEqual(survivingHandshakes.count, 1, "A blackholed saved lane must not reconnect the LAN connection")
+        XCTAssertEqual(survivingHandshakes.first?.handshake?.transport, "lan")
+        let lanDiagnostics = await lanClient.diagnostics()
+        XCTAssertFalse(lanDiagnostics.contains { $0.outcome == .failure && $0.stage == .helloReceive })
+        await lanClient.close()
+        NSLog("e-3c: the 90 s blackhole left the LAN connection up")
+
+        // (3) A blocked LAN lane costs the stagger plus one handshake: the saved
+        // lane wins, and the attempt records the lane it lost.
+        let blockedPort = try blockedLoopbackPort()
+        var blocked = paired
+        blocked.lanEndpoints = [try XCTUnwrap(GatewayLanEndpoint(host: "127.0.0.1", port: blockedPort))]
+        let blockedClient = makeClient(networkPath: onWifi)
+        let attemptStarted = ContinuousClock().now
+        _ = try await blockedClient.connect(profile: blocked, token: token)
+        let fallbackElapsed = attemptStarted.duration(to: ContinuousClock().now)
+        let fallbackHandshakes = await successfulHandshakes(of: blockedClient)
+        XCTAssertEqual(fallbackHandshakes.first?.handshake?.transport, "tailscale",
+                       "A blocked LAN lane must fall back to the saved endpoint")
+        XCTAssertLessThan(fallbackElapsed, .milliseconds(1_750),
+                          "The saved lane must win within the LAN stagger (250 ms) plus one handshake")
+        let blockedLaneLosses = await lanFailures(of: blockedClient)
+        XCTAssertFalse(blockedLaneLosses.isEmpty, "The attempt must record the LAN lane it lost")
+        await blockedClient.close()
+
+        // (4) A pin that does not match the served certificate sends no
+        // credential: the LAN lane is refused at its trust challenge, before the
+        // upgrade request that carries the device token is written, and the saved
+        // lane carries the connection.
+        var mismatched = paired
+        mismatched.lanPin = Data(repeating: 0x5a, count: 32).base64EncodedString()
+        let mismatchedClient = makeClient(networkPath: onWifi)
+        _ = try await mismatchedClient.connect(profile: mismatched, token: token)
+        let mismatchedHandshakes = await successfulHandshakes(of: mismatchedClient)
+        XCTAssertEqual(mismatchedHandshakes.first?.handshake?.transport, "tailscale",
+                       "A lane whose pin is refused must not carry the connection")
+        let refusals = await lanFailures(of: mismatchedClient)
+        let refusedPin = try XCTUnwrap(
+            refusals.first { $0.reason == .lanPinMismatch },
+            "The LAN lane must report the refused pin"
+        )
+        XCTAssertEqual(refusedPin.handshake?.transportOpened, false,
+                       "A refused pin must leave the transport unopened, so no credential-bearing request was written")
+        await mismatchedClient.close()
+    }
+
+    /// The successful hello of each epoch this client installed, newest last.
+    private func successfulHandshakes(of client: GatewayClient) async -> [GatewayConnectionDiagnostic] {
+        await client.diagnostics()
+            .filter { $0.outcome == .success && $0.stage == .helloReceive }
+            .sorted { $0.sequence < $1.sequence }
+    }
+
+    /// The LAN lane's failures on this client, in the order they were recorded.
+    private func lanFailures(of client: GatewayClient) async -> [GatewayConnectionDiagnostic] {
+        await client.diagnostics()
+            .filter { $0.outcome == .failure && $0.handshake?.transport == "lan" }
+            .sorted { $0.sequence < $1.sequence }
+    }
+
+    /// A loopback port nothing answers on: the blocked LAN lane this fixture can
+    /// state without touching the host's own network.
+    private func blockedLoopbackPort() throws -> Int {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw BoundaryFailure.invalidFixture("The blocked lane needs a socket") }
+        defer { close(descriptor) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = 0
+        let bound = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                bind(descriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0 else { throw BoundaryFailure.invalidFixture("The blocked lane could not bind") }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                getsockname(descriptor, socketAddress, &length)
+            }
+        }
+        guard named == 0 else { throw BoundaryFailure.invalidFixture("The blocked lane could not read its port") }
+        return Int(UInt16(bigEndian: address.sin_port))
+    }
+
     /// C-1: a 90 s blackhole under a foreground app. Recovery must keep
     /// attempting at its scheduled cadence for the whole outage, resolve within
     /// one attempt of the path's return, and never report `reconnect.stalled`.
@@ -993,8 +1136,8 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         }
     }
 
-    private func makeClient() -> GatewayClient {
-        let client = GatewayClient()
+    private func makeClient(networkPath: (@Sendable () -> String?)? = nil) -> GatewayClient {
+        let client = networkPath.map { path in GatewayClient(networkPath: path) } ?? GatewayClient()
         addTeardownBlock { await client.close() }
         return client
     }
