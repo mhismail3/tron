@@ -2451,7 +2451,10 @@ pass only through eager-only repairs, stop and report.
   and `tailDisplacements=0`: nothing on the flipped path asks for a repair. The
   CT-24 shapes' realized tall rows measure 1,762.7 and 1,897.3 pt, and every
   CT-2/CT-24 line carries `orientation=origin`, so a line says which side of the
-  switch produced it.
+  switch produced it. The same four gates on the handoff revision
+  (`121543Z.otL2D8`, whose sources differ from `e1f1ff05d` only by one doc
+  comment) read identically: 0 blank, 0 uncovered, `minVisibleRowFraction=1.0`,
+  clearance 12.0 in all four shapes.
 
   **(2) The same gates and the keyboard journey with the switch off**
   (`114542Z.OXo8es`): the four shapes still reproduce the field defect — 56/72,
