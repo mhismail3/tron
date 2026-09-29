@@ -5342,6 +5342,18 @@ final class ChatViewScrollHarness {
         scrollView.bottomEdgeEffect.isHidden = bottom
     }
 
+    /// TEMPORARY (CT-23 stage 2 diagnosis): the native transcript view's own
+    /// geometry, so the band can be related to it.
+    func ct23DiagnosisScrollViewState() -> String {
+        guard let scrollView = Self.nativeTranscriptScrollView(in: hostingController.view) else {
+            return "no-scroll-view"
+        }
+        return "offset=\(String(format: "%.2f", Double(scrollView.contentOffset.y)))"
+            + " content=\(String(format: "%.2f", Double(scrollView.contentSize.height)))"
+            + " bounds=\(String(format: "%.2f", Double(scrollView.bounds.height)))"
+            + " inset=\(String(format: "%.2f/%.2f", Double(scrollView.adjustedContentInset.top), Double(scrollView.adjustedContentInset.bottom)))"
+    }
+
     /// TEMPORARY (CT-23 stage 2 diagnosis): the effect layers' window frames, so
     /// the band the system drew can be read off directly.
     func ct23DiagnosisEffectBand() -> String {
