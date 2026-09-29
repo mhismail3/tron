@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, CT-2
+- **Last updated:** 2026-09-28, CT-27
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -108,7 +108,7 @@ breaks context-menu previews.
 | CT-20 | Done | Spike on a throwaway branch: settle CT-15's four unverified assumptions with a minimal container hosting the real row views, judged by the CT-12 and CT-14 gates and CT-10's numbers. Starts after the user approves CT-15 | CT-15, CT-14, CT-10| chat scroll investigation session, 2026-09-27 |
 | CT-25 | Claimed | Oracle foundation, on `main` before any CT-23 judgement: window-coordinate bottom-band, newest-row and composer helpers replace every scroll-space tail/visibility helper; real-scroll detach driver; a safe-area keyboard scenario (`additionalSafeAreaInsets` on the keyboard curve plus multi-line composer growth); motion-direction probe; short-transcript and oldest-row parity scenarios; parity manifest records its source revision; blank counts and recorder truncation fail runs; scale and profiler drivers use the window helpers. Each proven on `main` with a negative control | none | chat scroll session (worker lanes), 2026-09-28 |
 | CT-26 | Ready | Hot-path foundation, on `main`: one stable transcript actions object and synthesized-Equatable per-row inputs (no closures into row hosts); `ChatView` observation split (projection driver, composer, installed-commit observer as their own views); one `ChatPhysicalRowIndex` per install owning row order; observation granularity (delete `displayedSemanticIDCount`, guard entrance-set writes, pass per-row entrance state down, evidence bookkeeping not observed); equality fast paths and per-install precomputation; render-count budgets in `scripts/tron-profile ios` scenarios; hosted probes mounted only under a hosted probe | none | |
-| CT-27 | Claimed | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | chat scroll session (worker lanes), 2026-09-28 |
+| CT-27 | Done | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | chat scroll session (worker lane ct-27-rows), 2026-09-28 |
 | CT-28 | Ready | Record-only invariant monitor in the product (pinned bottom band uncovered for more than 2 frames, detached anchor moved without input, opening revealed uncovered), deduplicated, reaching device exports and surviving relaunch; delete the noisy tail-edge trace records; write the missing send-choreography device checklist in `development.md` | CT-25 | |
 | CT-24 | Claimed | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
 | CT-23 | Claimed | Origin-anchored transcript spike: the transcript's scroll view is flipped so its content origin is the visual bottom, rows are counter-flipped and ordered newest first; judged by every yardstick plus the risk probes in Task details | CT-24 | chat scroll session, 2026-09-28 |
@@ -117,7 +117,7 @@ breaks context-menu previews.
 | CT-17 | Needs scoping | Qualification: with the switch on, the CT-12 and CT-14 gates pass against the `main` reference, the CT-2 fixtures and a 512-row blank fixture read zero blank boundaries, every `ChatViewScrollHarnessTests` visible invariant holds, and frame cost, opening time and memory at 150, 300 and 512 heavy rows are no worse than CT-10's baseline | CT-16, CT-14, CT-10 | |
 | CT-18 | Needs approval | Device comparison: the user runs both containers on the phone through the send, keyboard, streaming, long-session and resume checklist and approves the cutover | CT-17 | |
 | CT-19 | Needs scoping | Cutover: make the container the only transcript, then delete the `LazyVStack` path and the compensations it needed, one per commit, each with its tests, trace events and docs (materialization lease and fail-open, 1 pt entrance footprint, lazy-realization opening proof, layout-epoch frame invalidation, tail-affordance overlap, past-end repair and physical tail repair if CT-17 shows them unused); update `packages/ios-app/docs/architecture.md` and `packages/ios-app/docs/development.md` | CT-18 | |
-| CT-7 | Needs scoping | Final device validation with the user after cutover: the send choreography checklist in `packages/ios-app/docs/development.md`, plus long sessions with tall replies across keyboard, foreground and resume | CT-19 | |
+| CT-7 | Needs scoping | Final device validation with the user after cutover: the send choreography checklist in `packages/ios-app/docs/development.md`, plus long sessions with tall replies across keyboard, foreground and resume. Also the row-state durability the hosted harness cannot force a real remount for: a collapsed inline display card that comes back collapsed, a row-owned detail sheet surviving the row being discarded (CT-27 F11), and F1's Liquid Glass press region | CT-19 | |
 
 ## Task details
 
@@ -1312,3 +1312,118 @@ pass only through eager-only repairs, stop and report.
   regression guards; the disclosure phase's durability should be re-checked on
   the CT-7 device checklist, where SwiftUI discards row state more aggressively
   than this harness shows.
+
+### CT-27 stage C (F11) · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: a row's detail sheet is presented by the transcript, not by the row.
+  `ChatTranscriptSheetRoutes.swift` (new) holds the three route values (a tool
+  run's detail, a wrapped thinking trace, a transcript event's detail), the
+  row-facing owner (`ChatTranscriptSheetRouteOwner`, owned by
+  `ChatTranscriptPresentationStore` and cleared in its `reset()`) and
+  `ChatTranscriptSheetHost`, mounted once above the rows in
+  `ChatTranscriptScrollView` and in the read-only child transcript's own scroll
+  view.
+  - The host re-resolves an open tool run from the projection it owns on every
+    install (`resolveToolDetails(callIDs:installationTag:)`), retires a route that
+    no longer resolves, and owns the deferred `ToolDisplayHandoff` the row used to
+    own. The opened run keeps its identity; only the install generation and the
+    resolved payloads move with the projection.
+  - A dismissal is not a cancellation. The interrupted checkpoint cancelled the
+    staged handoff on every route change, including the transition to nil, so the
+    deferred display command was dropped. Cancelling only when a *new* route is
+    presented fixed it, caught by `SessionSheetPresentationTests`.
+  - `ToolRunView`, `ThinkingBlock` and `ChatNotificationView` present through the
+    environment owner. A row rendered outside a transcript (a bare fixture) has no
+    detail action instead of a second owner; the read-only child transcript's rows
+    keep their own owner.
+- Evidence (lane ct27, all products rebuilt from this worktree):
+  - `ChatRowStabilityTests` 10/10 in 9.8 s (`20260929T065153Z-run.y5mY7w`): the new
+    `toolDetailOutlivesItsStreamingRow` printed
+    `streamed=4575.0 viewports=6.8 rowLeftViewport=true sheetPresented=true
+    detailMounted=true` — a grouped run's detail opens from the row's own chip,
+    the reader streams 4,575 pt (6.8 viewports) until the row leaves the viewport,
+    and the sheet with its own rows is still presented.
+  - `SessionSheetPresentationTests` under the UI-validation tier: the five
+    grouped-route tests pass after `checkGroupedHandoff`'s fixture mounts its run
+    through `ChatTranscriptSheetHost`, as the mounted chat does.
+  - Parity gate 7/7 in 45.7 s (`20260929T065433Z-run.ibWLJi`): worst frame
+    `tool-chip-entrance` 0.05174 against the 0.065 transition bound,
+    `streaming-tail-growth` 0.03704.
+  - Full `ChatViewScrollHarnessTests` 54/55 in 103.7 s
+    (`20260929T065558Z-run.F0U2rS`): the only failure is the pre-existing
+    `displacedRetainedResume` 15 s watchdog timeout recorded since stage A;
+    `hostedOpeningRevealIsMonotonic` passed here.
+  - `ChatTranscriptPresentationStoreTests` 54/54 (`20260929T065937Z-run.7hTpZn`).
+- Audit correction (negative control): F11's premise is **not reproducible in
+  this hosted harness**. With the row-owned sheet restored (one build, then
+  reverted), the same journey still passed — `rowLeftViewport=true` with the sheet
+  still presented — because the harness keeps a lazy row's view alive: the row's
+  own chip retires (`onDisappear`) while its view, and a row-owned sheet, survives.
+  The fixture therefore proves the route path (open, refresh from the install, and
+  presentation surviving streaming that pushes the row out of the viewport), not
+  the discarded row. F11's discard case joins the state-durability items on the
+  CT-7 device checklist, as stage B's correction already asked.
+- Deviations: (a) the notification detail's presentation identity now carries its
+  event id (`chat.transcript-event-detail.<id>`) instead of one constant identity;
+  nothing else read the constant. (b) The attachment and file preview requests and
+  the read-only child's tool detail stay row-owned: F11's list names the tool,
+  thinking and notification details, and the child's tool rows are not part of the
+  main transcript's lazy window.
+- Changes: `ChatTranscriptSheetRoutes.swift` (new), `ChatToolRunViews.swift`,
+  `ChatTranscriptEventViews.swift`, `ChatTranscriptPresentationStore.swift`,
+  `ChatTranscriptScrollView.swift`, `SessionProcessSheets.swift`,
+  `TranscriptRow.swift`, `ChatRowStabilityTests.swift`,
+  `ChatViewScrollHarnessTests.swift`, `SessionSheetPresentationTests.swift`.
+
+### CT-27 completed · 2026-09-28 · chat scroll session (worker lane ct-27-rows)
+
+- Result: the row-stability foundation is done on `ct-27-rows` (not merged, not
+  pushed), one commit per finding plus the branch's plan commits:
+  `a8e9e3745` F13, `e5d6ae642` F1, `fad397c93` F5, `60159b86a` F9, `c16acbe28`
+  F10, `9999c265c` B1 measurement, `8ff12834a` F2, `bff461f27` F3, `c6b48deaa` F8,
+  `b4fdbddaa` F5 follow-up, `3b2ac8f79` F12, `a0e81d907` F4, `41c1ac37b` F11.
+  The audit's F1-F5, F8-F13 are addressed; F6 and F7 are flip-specific and stay
+  with CT-23.
+- Final evidence (lane ct27, products rebuilt from this worktree, run directories
+  under `~/Library/Developer/Tron/ios/test-runs/`):
+  - Row stability: `ChatRowStabilityTests` 10/10. The journey reports
+    `postMountResizes=0 remountedRows=0 phaseVariants=0` with
+    `withinMountVariants=2` (both inline markdown displays' 20 pt change as their
+    card content arrives at readiness, which is F4's path and *not* a settled
+    row re-measuring itself), `entranceIdentityStable=true`,
+    `collapsedStaysCollapsed=true`, `inlineDisplaysStable=true`,
+    `excludedRows=1`, `semanticFrameCallbacks=233`.
+  - Parity: 7/7, worst transition `tool-chip-entrance` 0.05174 against 0.065
+    (CT-14 motion evidence unchanged within the gate).
+  - Full `ChatViewScrollHarnessTests` 54/55, only the pre-existing
+    `displacedRetainedResume` watchdog timeout.
+  - `ChatTranscriptPresentationStoreTests` 54/54 and the previously run 206 unit
+    tests in the store, ledger and sheet suites.
+- Deviations and audit corrections the next agent must not rediscover:
+  - **This harness never forces a real remount.** A row keeps one native and one
+    content view identity across the journey's detach and oldest-row scroll while
+    its own `onAppear`/`onDisappear` fire 2-4 times, so SwiftUI preserves row
+    `@State` here. Therefore F3's (lost disclosure state), F9's (canonical handoff
+    switch) and F11's (discarded row dismisses its sheet) premises are not
+    reproducible hosted; their fixes rest on the source argument, their guards and
+    the audit's direction. The journey's `remounts`/`remountedRows` fields count
+    `onAppear` re-fires, not new mounts; stage A's wording overstated them.
+  - F5 has no hosted height oracle (the height it pinned was always the natural
+    height, and the F13 counter reads zero either way); F2's thinking growth and
+    F8's notification replacement have no parity scenario, so their motion is
+    preserved by construction rather than gate-verified. F10's first committed
+    frame for a truncated notice is still the flat material, as recorded in stage
+    A.
+  - F4's inline starvation path needs a media source, so the plain stability
+    harness reports `inlineDisplaysPrepared=false`; `twoAdjacentInlineDisplaysBothPrepare`
+    and `inlineDisplayKeepsPreparedDocumentAcrossScroll` are the fixtures that
+    serve artifacts and assert the prepared state, one fetch per identity.
+  - CT-25's real-scroll detach driver is not on this branch: the journey moves the
+    real native scroll view and admits the reader's interaction phase through the
+    coordinator's own path, with the probe in `.native` callback mode.
+- On the CT-7 device checklist (added to its scope): the collapsed inline display
+  card coming back collapsed, a detail sheet surviving its row being discarded,
+  and F1's Liquid Glass press-and-drag region — the three durability checks this
+  hosted harness cannot force.
+- Not in CT-27: F6/F7's flip probes, CT-25's oracle foundation and CT-26's hot
+  path remain for their own tasks.
