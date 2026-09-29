@@ -3450,6 +3450,8 @@ Compare both modes on the same phone, especially:
 - Opening speed, foreground continuity, and anything that looks or feels different
   from today. Device keyboard timing, interaction animation and energy are unproven.
 
-After evidence is finished, release this worker's lane with
-`scripts/tron-ios-test lane-remove ct23b`; never remove another session's lane.
+Cleanup completed: `scripts/tron-ios-test lane-remove ct23b` removed this worker's
+lane and retained the live worktree's reusable products. Final
+`scripts/tron-ios-test status --all` reports no booted simulators and no running
+Simulator.app; no other lane was removed. The worktree and Git index are clean.
 Review remains a separate required gate; this handoff is not production approval.
