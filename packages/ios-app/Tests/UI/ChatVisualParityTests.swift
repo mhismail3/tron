@@ -1370,6 +1370,15 @@ enum ChatVisualParityShapeDiagnosis {
             _ = try await harness.recorder.waitUntil { $0.observation.isReady }
             for _ in 0..<120 { try await harness.driveFrameBoundary() }
             try harness.snapNativeTranscriptOffsetToWholePoint()
+            let scrollView = try harness.nativeTranscriptScrollViewForTesting()
+            print("CT23-PARITY-SHAPE orientation=\(label)"
+                + " offset=\(String(format: "%.4f", Double(scrollView.contentOffset.y)))"
+                + " content=\(String(format: "%.4f", Double(scrollView.contentSize.height)))"
+                + " bounds=\(String(format: "%.4f", Double(scrollView.bounds.height)))"
+                + " inset=\(String(format: "%.4f/%.4f", Double(scrollView.adjustedContentInset.top), Double(scrollView.adjustedContentInset.bottom)))"
+                + " safeArea=\(String(format: "%.4f/%.4f", Double(scrollView.safeAreaInsets.top), Double(scrollView.safeAreaInsets.bottom)))"
+                + " legalMin=\(String(format: "%.4f", Double(-scrollView.adjustedContentInset.top)))"
+                + " legalMax=\(String(format: "%.4f", Double(scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom)))")
             let rows = TranscriptWindowOracle.rows(in: harness.visibleRootView).filter(\.isOnScreen)
             let scale = harness.visibleRootView.traitCollection.displayScale
             print("CT23-PARITY-SHAPE orientation=\(label)"
