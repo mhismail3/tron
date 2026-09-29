@@ -862,6 +862,11 @@ for ((i=1; i<=$#; i++)); do
   if [[ \"${!i}\" == -resultBundlePath ]]; then j=$((i + 1)); bundle=\"${!j}\"; fi
 done
 if [[ \" $* \" == *' test-without-building '* ]]; then
+  if [[ -n \"${FAKE_XCODE_ENV_LOG:-}\" ]]; then
+    printf '%s\\n' \\
+      \"TRON_SOURCE_REVISION=${TEST_RUNNER_TRON_SOURCE_REVISION:-}\" \\
+      \"TRON_SOURCE_DIRTY=${TEST_RUNNER_TRON_SOURCE_DIRTY:-}\" > \"$FAKE_XCODE_ENV_LOG\"
+  fi
   if [[ \"${FAKE_RUNNER_MODE:-success}\" != missing-bundle && -n \"$bundle\" ]]; then mkdir -p \"$bundle\"; fi
   if [[ \"${FAKE_RUNNER_MODE:-success}\" == timeout ]]; then sleep 30; fi
   exit \"${FAKE_XCODE_STATUS:-0}\"
@@ -1093,6 +1098,19 @@ exit 0
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.latest_metadata()["source"], self.source_identity())
+
+    def test_run_passes_the_source_revision_and_its_state_to_the_test_process(self) -> None:
+        # The parity gate records the revision its frames came from and refuses a
+        # tree that is not a clean commit, so both facts have to reach the hosted
+        # process: a revision alone cannot reproduce frames from a dirty tree.
+        log = self.root / "xcode-environment.log"
+        result = self.invoke(override={"FAKE_XCODE_ENV_LOG": str(log)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        identity = self.source_identity()
+        self.assertEqual(log.read_text().splitlines(), [
+            f"TRON_SOURCE_REVISION={identity['revision']}",
+            f"TRON_SOURCE_DIRTY={'true' if identity['dirty'] else 'false'}",
+        ])
 
     def test_default_products_directory_is_scoped_to_this_worktree(self) -> None:
         home = self.root / "home"

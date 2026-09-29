@@ -9,6 +9,9 @@ extension GatewayClient {
         let descriptor: LiveViewDescriptor
         private let request: URLRequest
         private let transport: BoundedHTTPDataTransport
+        /// The pin every request this lease makes must trust, carried from the
+        /// lane that admitted it (E-3c).
+        private let pin: String?
         private var closeTask: Task<Void, Never>?
 
         package struct Wire: Decodable {
@@ -16,7 +19,7 @@ extension GatewayClient {
             let descriptor: LiveViewDescriptor
         }
 
-        package init(wire: Wire, request: URLRequest, transport: BoundedHTTPDataTransport) throws {
+        package init(wire: Wire, request: URLRequest, transport: BoundedHTTPDataTransport, pin: String? = nil) throws {
             guard UUID(uuidString: wire.leaseId) != nil, wire.descriptor.isValid else { throw LiveError.invalidResponse }
             leaseId = wire.leaseId
             descriptor = wire.descriptor
@@ -28,6 +31,7 @@ extension GatewayClient {
             bound.setValue(wire.descriptor.generation, forHTTPHeaderField: "X-Tron-Live-Generation")
             self.request = bound
             self.transport = transport
+            self.pin = pin
         }
 
         package func frame(after sequence: Int) async throws -> LiveUpdate {
@@ -44,7 +48,7 @@ extension GatewayClient {
                 try Task.checkCancellation()
                 guard closeTask == nil else { throw CancellationError() }
                 do {
-                    let (data, response) = try await transport.data(for: request, maximumBytes: LiveFrame.maximumEncodedBytes)
+                    let (data, response) = try await transport.data(for: request, maximumBytes: LiveFrame.maximumEncodedBytes, pin: pin)
                     try Task.checkCancellation()
                     guard closeTask == nil else { throw CancellationError() }
                     guard response.url == request.url else { throw LiveError.invalidResponse }
@@ -76,9 +80,10 @@ extension GatewayClient {
             closing.httpMethod = "DELETE"
             closing.timeoutInterval = 5
             let transport = transport
+            let pin = pin
             let closeRequest = closing
             let cleanup = Task.detached {
-                _ = try? await transport.data(for: closeRequest, maximumBytes: 8_192)
+                _ = try? await transport.data(for: closeRequest, maximumBytes: 8_192, pin: pin)
             }
             closeTask = cleanup
             await cleanup.value

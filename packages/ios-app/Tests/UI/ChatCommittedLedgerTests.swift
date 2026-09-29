@@ -103,6 +103,7 @@ struct ChatCommittedLedgerTests {
             ChatTranscriptRenderRow(
                 item: item,
                 preparedText: installed.preparedText(for: item),
+                inlineDisclosurePhase: DisplayInlineDisclosureState(),
                 installationTag: installed.tag,
                 toolPayloadRevision: installed.toolPayloadRevision(for: item),
                 resolveToolDetails: { _ in nil },

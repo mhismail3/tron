@@ -3,6 +3,7 @@ import { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
+import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -58,6 +59,32 @@ describe("stable gateway protocol client", () => {
     await expect(client.connect()).rejects.toMatchObject({ code: "protocol_mismatch" });
     expect(requestCount).toBe(0);
     client.close();
+  });
+
+  it("reports the Gateway's typed protocol refusal instead of retrying it", async () => {
+    const { sockets, url } = await fixture();
+    sockets.on("connection", (socket) => {
+      socket.on("message", (raw) => {
+        const frame = JSON.parse(raw.toString()) as any;
+        // Exactly what the Gateway's own refusal sends: application close 4006
+        // and a JSON reason carrying the Gateway's protocol range.
+        if (frame.type === "hello") {
+          socket.close(PROTOCOL_MISMATCH_CLOSE_CODE, JSON.stringify({
+            code: "protocol_mismatch", gatewayProtocol: PROTOCOL_VERSION, minProtocol: MIN_PROTOCOL_VERSION,
+          }));
+        }
+      });
+    });
+    const client = new GatewayProtocolClient(url, "local-token");
+    // A version pair is permanent: reporting the raw reason as a retryable
+    // transport error keeps this client reconnecting forever.
+    const failure = await client.connect().then(
+      () => undefined,
+      (error: unknown) => error as GatewayClientError,
+    );
+    expect(failure).toMatchObject({ code: "protocol_mismatch", retryable: false });
+    expect(failure?.message).toContain("Update the Gateway");
+    expect(failure?.message).not.toContain("{");
   });
 
   it("ignores stale socket callbacks after a replacement connection", async () => {

@@ -175,7 +175,16 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   out instead of holding the entry, and the return then starts the next attempt
   at once. Only
   authentication, authorization, protocol, and identity
-  failures stop automatic recovery. The WebSocket open and the hello after it
+  failures stop automatic recovery. A hello whose protocol the Gateway cannot
+  speak is refused with the application close code 4006
+  (`PROTOCOL_MISMATCH_CLOSE_CODE`) and a close reason that carries
+  `{"code":"protocol_mismatch","gatewayProtocol","minProtocol"}`, so the phone
+  names which build must update instead of retrying a version pair that can
+  never connect; the same refusal keeps its `http.upgrade` record with
+  `reason=protocol_mismatch` and `peerProtocolVersion`. A Gateway built before
+  that refusal still closes the same hello with `1008 "protocol version
+  mismatch"`, which the phone reads as a retryable transport failure, so the
+  typed close only protects a Mac that runs it. The WebSocket open and the hello after it
   have separate bounds: a socket that never opens gives up at the 5-second
   `clientTransportOpenDeadline`, and only a socket that opened may spend the
   15-second `clientHelloDeadline` on hello and authentication, so a down path is
@@ -397,6 +406,17 @@ quiet. The Gateway retires a socket only after three missed 25 s heartbeats
 18 s therefore ends with the socket still open and nothing but the records
 below; the worked example's 30–121 s flaps disconnect the phone.
 
+The release's own answer is the pinned LAN lane: while the phone and the Mac
+share a network, E-3c races the advertised LAN endpoint against the saved
+Tailscale endpoint and keeps the winner for the epoch, so a relay-only window
+on the tailnet never sits on the socket (E-3c, E-3d). The lane is on by default
+for a Gateway that is not bound to loopback; `--lan-endpoint off` or
+`TRON_GATEWAY_LAN_ENDPOINT=off` disables it, and that setting is the kill switch
+R-4 reviews. The Mac-supervised Gateway takes the variable through its launchd
+session instead — `launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off` and a restart
+the user performs, because the wrapper's plist arguments and environment are
+fixed ([transport](../README.md#transport)).
+
 - **Gateway records.** One `connection.inbound-silent` (warning) per silence
   episode per socket, written at the first heartbeat tick (every 25 s) that
   finds no inbound frame for `INBOUND_SILENCE_WARNING_MS` (12 s) with liveness
@@ -556,6 +576,17 @@ not a speculative cache — is what makes that true.
   remote-close metadata, and loss of an accepted response followed by durable
   receipt/canonical exactly-once verification. A skipped boundary case fails the
   runner. CI runs this boundary for source changes, not only SDK upgrades.
+- `scripts/ios-gateway-e2e-test run-lan` renews the same private Gateway with its
+  pinned LAN lane bound to this Mac's private address and runs the E-3c two-lane
+  case: the app pairs over the proxy, races the advertised pinned lane against
+  the saved Tailscale endpoint, and then holds a live LAN connection through a
+  90 s blackhole of the saved lane (WebSocket frames and plain HTTP), where an
+  attachment upload is the route that proves the epoch's HTTP requests followed
+  the winning lane. The same case blocks the lane at a listening socket that
+  never answers TLS, so the saved lane must win after the 250 ms stagger and the
+  losing socket must be retired rather than left dialing. It needs a private
+  address on this host; the lane is off for the boundary case above, which keeps
+  the fault proxy on every leg it drives. CI runs it after the boundary case.
 - Build source, then run `node --expose-gc packages/gateway/scripts/measure-projection.mjs`
   from the repository root (`--extended` adds 25k/100k-entry histories;
   `--baseline /path/to/compiled/dist` enables balanced comparisons). The tool

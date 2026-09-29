@@ -1,57 +1,79 @@
 import Foundation
 
 package struct BoundedHTTPDataTransport: Sendable {
-    let dataForRequest: @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)
+    let dataForRequest: @Sendable (URLRequest, Int, String?) async throws -> (Data, HTTPURLResponse)
 
-    package init(dataForRequest: @escaping @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)) {
+    package init(dataForRequest: @escaping @Sendable (URLRequest, Int, String?) async throws -> (Data, HTTPURLResponse)) {
         self.dataForRequest = dataForRequest
     }
 
-    package func data(
-        for request: URLRequest,
-        maximumBytes: Int
-    ) async throws -> (Data, HTTPURLResponse) {
-        precondition(maximumBytes >= 0)
-        return try await dataForRequest(request, maximumBytes)
+    /// A transport that never pins: the saved endpoint keeps the platform's own
+    /// trust, and a fixture standing in for it needs none (E-3c).
+    package init(dataForRequest: @escaping @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)) {
+        self.init { request, maximumBytes, _ in try await dataForRequest(request, maximumBytes) }
     }
 
-    static let urlSession = BoundedHTTPDataTransport { request, maximumBytes in
-        try await BoundedURLSessionDataLoader.load(request, maximumBytes: maximumBytes)
+    /// `pin` is the public key the served certificate must hash to while this
+    /// route runs over a pinned LAN lane (E-3c); nil keeps the platform's own
+    /// TLS evaluation, which is what the saved endpoint gets.
+    package func data(
+        for request: URLRequest,
+        maximumBytes: Int,
+        pin: String? = nil
+    ) async throws -> (Data, HTTPURLResponse) {
+        precondition(maximumBytes >= 0)
+        return try await dataForRequest(request, maximumBytes, pin)
+    }
+
+    static let urlSession = BoundedHTTPDataTransport { request, maximumBytes, pin in
+        try await BoundedURLSessionDataLoader.load(request, maximumBytes: maximumBytes, pinnedPublicKey: pin)
     }
 
     /// Credential-bearing capability requests never follow redirects.
-    package static let noRedirects = BoundedHTTPDataTransport { request, maximumBytes in
+    package static let noRedirects = BoundedHTTPDataTransport { request, maximumBytes, pin in
         try await BoundedURLSessionDataLoader.load(
             request,
             maximumBytes: maximumBytes,
-            allowsRedirects: false
+            allowsRedirects: false,
+            pinnedPublicKey: pin
         )
     }
 }
 
 package struct BoundedHTTPUploadTransport: Sendable {
-    let dataForFileRequest: @Sendable (URLRequest, URL, Int) async throws -> (Data, HTTPURLResponse)
+    let dataForFileRequest: @Sendable (URLRequest, URL, Int, String?) async throws -> (Data, HTTPURLResponse)
 
+    package init(
+        dataForFileRequest: @escaping @Sendable (URLRequest, URL, Int, String?) async throws -> (Data, HTTPURLResponse)
+    ) {
+        self.dataForFileRequest = dataForFileRequest
+    }
+
+    /// A transport that never pins (see `BoundedHTTPDataTransport`).
     package init(
         dataForFileRequest: @escaping @Sendable (URLRequest, URL, Int) async throws -> (Data, HTTPURLResponse)
     ) {
-        self.dataForFileRequest = dataForFileRequest
+        self.init { request, fileURL, maximumBytes, _ in
+            try await dataForFileRequest(request, fileURL, maximumBytes)
+        }
     }
 
     package func data(
         for request: URLRequest,
         fileURL: URL,
-        maximumBytes: Int
+        maximumBytes: Int,
+        pin: String? = nil
     ) async throws -> (Data, HTTPURLResponse) {
         precondition(maximumBytes >= 0)
-        return try await dataForFileRequest(request, fileURL, maximumBytes)
+        return try await dataForFileRequest(request, fileURL, maximumBytes, pin)
     }
 
-    static let urlSession = BoundedHTTPUploadTransport { request, fileURL, maximumBytes in
+    static let urlSession = BoundedHTTPUploadTransport { request, fileURL, maximumBytes, pin in
         try await BoundedURLSessionDataLoader.load(
             request,
             uploadFileURL: fileURL,
-            maximumBytes: maximumBytes
+            maximumBytes: maximumBytes,
+            pinnedPublicKey: pin
         )
     }
 }
@@ -141,15 +163,20 @@ package final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegat
     private var terminalResult: Result<(Data, HTTPURLResponse), Error>?
     private let sessions: BoundedHTTPDataSessions
     private let allowsRedirects: Bool
+    /// The public key this request's certificate must hash to, or nil to keep
+    /// the platform's own trust evaluation (E-3c).
+    private let pinnedPublicKey: String?
 
     private init(
         maximumBytes: Int,
         sessions: BoundedHTTPDataSessions,
-        allowsRedirects: Bool
+        allowsRedirects: Bool,
+        pinnedPublicKey: String?
     ) {
         accumulator = BoundedHTTPBodyAccumulator(maximumBytes: maximumBytes)
         self.sessions = sessions
         self.allowsRedirects = allowsRedirects
+        self.pinnedPublicKey = pinnedPublicKey
     }
 
     package static func load(
@@ -157,12 +184,14 @@ package final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegat
         uploadFileURL: URL? = nil,
         maximumBytes: Int,
         sessions: BoundedHTTPDataSessions = .ephemeral,
-        allowsRedirects: Bool = true
+        allowsRedirects: Bool = true,
+        pinnedPublicKey: String? = nil
     ) async throws -> (Data, HTTPURLResponse) {
         let loader = BoundedURLSessionDataLoader(
             maximumBytes: maximumBytes,
             sessions: sessions,
-            allowsRedirects: allowsRedirects
+            allowsRedirects: allowsRedirects,
+            pinnedPublicKey: pinnedPublicKey
         )
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -189,7 +218,10 @@ package final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegat
 
         let task: URLSessionDataTask
         let ownedSession: URLSession?
-        if BoundedHTTPReadSession.admits(request, uploadFileURL: uploadFileURL) {
+        // A pinned request owns a fresh session: the shared read session has no
+        // delegate, and the lane's own certificate must be evaluated against the
+        // pin before URLSession writes the credential-bearing request (E-3c).
+        if pinnedPublicKey == nil, BoundedHTTPReadSession.admits(request, uploadFileURL: uploadFileURL) {
             task = sessions.readSession.dataTask(with: request)
             task.delegate = self
             ownedSession = nil
@@ -213,6 +245,18 @@ package final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegat
         self.task = task
         lock.unlock()
         task.resume()
+    }
+
+    package func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        GatewayLanPin.answerServerTrustChallenge(
+            challenge,
+            pin: pinnedPublicKey,
+            completionHandler: completionHandler
+        )
     }
 
     private func cancel() {

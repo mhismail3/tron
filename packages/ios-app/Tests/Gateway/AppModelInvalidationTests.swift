@@ -134,28 +134,20 @@ struct AppModelInvalidationTests {
 
     private func runProviderOrderingScenario() async throws {
         try await withConnectedClient { model, client, socket in
+            let reads = ScriptedReadLog(socket: socket)
             let session = ProviderCatalogTarget.session(id: "session-a")
 
             let globalLoad = Task { await model.refreshProviders(target: .global) }
-            try await socket.waitUntilSent(count: 3)
+            let globalPair = try await reads.waitForPair(scope: nil)
             let sessionLoad = Task { await model.refreshProviders(target: session) }
-            try await socket.waitUntilSent(count: 5)
-            for index in 1...2 {
-                let request = try await requestObject(at: index, on: socket)
-                #expect(request["params"]?.objectValue?["sessionId"] == nil)
-            }
-            for index in 3...4 {
-                let request = try await requestObject(at: index, on: socket)
-                #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
-            }
-            try await respondToCatalogRequests(at: 3...4, on: socket, marker: "session")
+            let sessionPair = try await reads.waitForPair(scope: "session-a")
+            try await respondToCatalogRequests(at: sessionPair, on: socket, marker: "session")
             _ = await sessionLoad.value
             // The first completed catalog load warms the picker's Recent rail
             // with one `model.recent` read. A non-empty answer keeps that rail
-            // warm, so no later catalog load repeats the warm and the frame
-            // indices below stay stable.
-            try await respondToRecentModelsWarm(at: 5, on: socket)
-            try await respondToCatalogRequests(at: 1...2, on: socket, marker: "global")
+            // warm, so no later catalog load repeats the warm.
+            try await respondToRecentModelsWarm(on: socket, reads: reads)
+            try await respondToCatalogRequests(at: globalPair, on: socket, marker: "global")
             _ = await globalLoad.value
 
             #expect(model.providerCatalog(for: .global)?.providers.first?.id == "global")
@@ -164,12 +156,12 @@ struct AppModelInvalidationTests {
             #expect(model.providerCatalog(for: session)?.models.first?.id == "session-model")
 
             let olderLoad = Task { await model.refreshProviders(target: .global) }
-            try await socket.waitUntilSent(count: 8)
+            let olderPair = try await reads.waitForPair(scope: nil)
             let newerLoad = Task { await model.refreshProviders(target: .global) }
-            try await socket.waitUntilSent(count: 10)
-            try await respondToCatalogRequests(at: 8...9, on: socket, marker: "newer")
+            let newerPair = try await reads.waitForPair(scope: nil)
+            try await respondToCatalogRequests(at: newerPair, on: socket, marker: "newer")
             _ = await newerLoad.value
-            try await respondToCatalogRequests(at: 6...7, on: socket, marker: "older")
+            try await respondToCatalogRequests(at: olderPair, on: socket, marker: "older")
             _ = await olderLoad.value
 
             #expect(model.providerCatalog(for: .global)?.providers.first?.id == "newer")
@@ -178,9 +170,8 @@ struct AppModelInvalidationTests {
             let auth = Task {
                 try await model.beginAuth(providerID: "session", authType: "api_key", target: session)
             }
-            try await socket.waitUntilSent(count: 11)
             try await respond(
-                toFrameAt: 10,
+                toFrameAt: reads.waitFor(method: "auth.begin", scope: "session-a"),
                 on: socket,
                 result: .object(["operationId": .string("auth-operation")])
             )
@@ -194,40 +185,37 @@ struct AppModelInvalidationTests {
                     payload: .object(["operationId": .string("auth-operation"), "success": .bool(true)])
                 ))
             }
-            try await socket.waitUntilSent(count: 13)
-            for index in 11...12 {
-                let request = try await requestObject(at: index, on: socket)
-                #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
-            }
+            let authenticatedPair = try await reads.waitForPair(scope: "session-a")
             let authenticatedPublication = observeProviderPublication(model, target: session)
-            try await respondToCatalogRequests(at: 11...12, on: socket, marker: "authenticated")
+            try await respondToCatalogRequests(at: authenticatedPair, on: socket, marker: "authenticated")
             await completion.value
             try await awaitPublication(authenticatedPublication)
             #expect(model.providerCatalog(for: session)?.providers.first?.id == "authenticated")
 
+            let sentBeforeUnknownCompletion = await socket.sentFrames().count
             await model.handle(GatewayEvent(
                 type: "event",
                 topic: "auth.completed",
                 sessionId: nil,
                 payload: .object(["operationId": .string("unknown-operation"), "success": .bool(true)])
             ))
-            let sentCountAfterUnknownCompletion = await socket.sentFrames().count
-            #expect(sentCountAfterUnknownCompletion == 13)
+            #expect(await socket.sentFrames().count == sentBeforeUnknownCompletion)
 
             let secondAuth = Task {
                 try await model.beginAuth(providerID: "session", authType: "api_key", target: session)
             }
-            try await socket.waitUntilSent(count: 14)
             try await respond(
-                toFrameAt: 13,
+                toFrameAt: reads.waitFor(method: "auth.begin", scope: "session-a"),
                 on: socket,
                 result: .object(["operationId": .string("failed-cancel-operation")])
             )
             try await secondAuth.value
 
             let cancellation = Task { await model.cancelAuth(operationID: "failed-cancel-operation") }
-            try await socket.waitUntilSent(count: 15)
-            try await respondFailure(toFrameAt: 14, on: socket)
+            try await respondFailure(
+                toFrameAt: reads.waitFor(method: "auth.cancel", scope: nil),
+                on: socket
+            )
             await cancellation.value
 
             let completionAfterFailedCancel = Task {
@@ -238,13 +226,9 @@ struct AppModelInvalidationTests {
                     payload: .object(["operationId": .string("failed-cancel-operation"), "success": .bool(true)])
                 ))
             }
-            try await socket.waitUntilSent(count: 17)
-            for index in 15...16 {
-                let request = try await requestObject(at: index, on: socket)
-                #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
-            }
+            let afterFailedCancelPair = try await reads.waitForPair(scope: "session-a")
             let completionPublication = observeProviderPublication(model, target: session)
-            try await respondToCatalogRequests(at: 15...16, on: socket, marker: "after-failed-cancel")
+            try await respondToCatalogRequests(at: afterFailedCancelPair, on: socket, marker: "after-failed-cancel")
             await completionAfterFailedCancel.value
             try await awaitPublication(completionPublication)
             #expect(model.providerCatalog(for: session)?.providers.first?.id == "after-failed-cancel")
@@ -427,7 +411,7 @@ struct AppModelInvalidationTests {
     }
 
     private func respondToCatalogRequests(
-        at indices: ClosedRange<Int>,
+        at indices: [Int],
         on socket: ScriptedGatewaySocket,
         marker: String
     ) async throws {
@@ -473,17 +457,14 @@ struct AppModelInvalidationTests {
     }
 
     /// A successful catalog load warms the model picker's Recent rail with one
-    /// `model.recent` read, which this suite's exact frame indices have to
-    /// account for. The non-empty answer is the point: it leaves the rail warm,
-    /// so no later catalog load repeats the read.
+    /// `model.recent` read, which this suite has to account for. The non-empty
+    /// answer is the point: it leaves the rail warm, so no later catalog load
+    /// repeats the read.
     private func respondToRecentModelsWarm(
-        at index: Int,
-        on socket: ScriptedGatewaySocket
+        on socket: ScriptedGatewaySocket,
+        reads: ScriptedReadLog
     ) async throws {
-        try #require(
-            await socket.waitUntilSent(count: index + 1, within: .seconds(2)),
-            "the catalog's Recent-rail warm request was not sent"
-        )
+        let index = try await reads.waitFor(method: "model.recent", scope: nil)
         let request = try await requestObject(at: index, on: socket)
         #expect(request["method"] == .string("model.recent"))
         try await respond(
@@ -528,5 +509,74 @@ struct AppModelInvalidationTests {
             "ok": .bool(true),
             "result": result,
         ])))
+    }
+}
+
+/// The scripted socket's write log addressed by what each read is, not where it
+/// lands. A `cancel` control frame (`C-6`) or a read the model appends for a
+/// reason the scenario did not pin (the picker's Recent-rail warm) appends a
+/// frame, which shifts every later index; answering a shifted index leaves the
+/// load the scenario meant to answer waiting forever, and the gate reports that
+/// as a wait that ignores cancellation (`F-1`, `T-5`).
+///
+/// A read is found by method and scope and then reserved, so a second read with
+/// the same method and scope is still distinguishable: the scenario answers two
+/// `provider.list`/`model.list` pairs for `.global` out of order on purpose.
+/// The order of the two requests inside one pair is not fixed (they are spawned
+/// concurrently), so each is found by its own method.
+@MainActor
+private final class ScriptedReadLog {
+    private let socket: ScriptedGatewaySocket
+    private var reserved: Set<Int> = []
+
+    init(socket: ScriptedGatewaySocket) {
+        self.socket = socket
+    }
+
+    /// The oldest request frame the scenario has not answered yet whose method
+    /// and scope match; a control frame carries no method and is skipped.
+    func waitFor(method: String, scope: String?) async throws -> Int {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while true {
+            if let index = try await nextIndex(method: method, scope: scope) {
+                reserved.insert(index)
+                return index
+            }
+            guard ContinuousClock.now < deadline else { throw ScriptedReadMissing(method: method, scope: scope) }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+    }
+
+    /// Both reads of one catalog load for `scope`, oldest first.
+    func waitForPair(scope: String?) async throws -> [Int] {
+        [
+            try await waitFor(method: "provider.list", scope: scope),
+            try await waitFor(method: "model.list", scope: scope),
+        ]
+    }
+
+    private func nextIndex(method: String, scope: String?) async throws -> Int? {
+        let frames = await socket.sentFrames()
+        for index in frames.indices where !reserved.contains(index) {
+            guard let request = try? JSONDecoder.gateway.decode(JSONValue.self, from: frames[index]).objectValue,
+                  request["type"] == .string("request"),
+                  request["method"] == .string(method),
+                  request["params"]?.objectValue?["sessionId"]?.stringValue == scope
+            else { continue }
+            return index
+        }
+        return nil
+    }
+}
+
+/// No request for the read ever reached the scripted socket: the test names the
+/// read it was waiting for instead of expiring its watchdog on a load that can
+/// never be answered.
+private struct ScriptedReadMissing: Error, CustomStringConvertible {
+    let method: String
+    let scope: String?
+
+    var description: String {
+        "the scenario never sent \(method)" + (scope.map { " for \($0)" } ?? "")
     }
 }

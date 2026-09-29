@@ -13,31 +13,43 @@ package struct BoundedHTTPDownloadedFile: Sendable {
 }
 
 package struct BoundedHTTPFileTransport: Sendable {
-    let downloadForRequest: @Sendable (URLRequest, Int) async throws -> BoundedHTTPDownloadedFile
+    let downloadForRequest: @Sendable (URLRequest, Int, String?) async throws -> BoundedHTTPDownloadedFile
 
     package init(
-        downloadForRequest: @escaping @Sendable (URLRequest, Int) async throws -> BoundedHTTPDownloadedFile
+        downloadForRequest: @escaping @Sendable (URLRequest, Int, String?) async throws -> BoundedHTTPDownloadedFile
     ) {
         self.downloadForRequest = downloadForRequest
     }
 
+    /// A transport that never pins (see `BoundedHTTPDataTransport`).
+    package init(
+        downloadForRequest: @escaping @Sendable (URLRequest, Int) async throws -> BoundedHTTPDownloadedFile
+    ) {
+        self.init { request, maximumBytes, _ in try await downloadForRequest(request, maximumBytes) }
+    }
+
+    /// `pin` is the public key the served certificate must hash to while this
+    /// route runs over a pinned LAN lane (E-3c); nil keeps the platform's own
+    /// TLS evaluation, which is what the saved endpoint gets.
     func download(
         for request: URLRequest,
-        maximumBytes: Int
+        maximumBytes: Int,
+        pin: String? = nil
     ) async throws -> BoundedHTTPDownloadedFile {
         precondition(maximumBytes >= 0)
-        return try await downloadForRequest(request, maximumBytes)
+        return try await downloadForRequest(request, maximumBytes, pin)
     }
 
     static let urlSession = urlSession(configuration: .ephemeral)
 
     static func urlSession(configuration: URLSessionConfiguration) -> BoundedHTTPFileTransport {
         let sessions = BoundedHTTPFileSessions(configuration: configuration)
-        return BoundedHTTPFileTransport { request, maximumBytes in
+        return BoundedHTTPFileTransport { request, maximumBytes, pin in
             try await BoundedURLSessionFileLoader.load(
                 request,
                 maximumBytes: maximumBytes,
-                sessions: sessions
+                sessions: sessions,
+                pinnedPublicKey: pin
             )
         }
     }
@@ -215,21 +227,27 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
     private var stagedURL: URL?
     private var remainingResumeAttempts = 2
     private var terminalResult: Result<BoundedHTTPDownloadedFile, Error>?
+    /// The public key this download's certificate must hash to, or nil to keep
+    /// the platform's own trust evaluation (E-3c).
+    private let pinnedPublicKey: String?
 
     private init(
         maximumBytes: Int,
         sessions: BoundedHTTPFileSessions,
-        stagedURL: URL
+        stagedURL: URL,
+        pinnedPublicKey: String?
     ) {
         admission = BoundedHTTPFileAdmission(maximumBytes: maximumBytes)
         self.sessions = sessions
         self.stagedURL = stagedURL
+        self.pinnedPublicKey = pinnedPublicKey
     }
 
     package static func load(
         _ request: URLRequest,
         maximumBytes: Int,
-        sessions: BoundedHTTPFileSessions
+        sessions: BoundedHTTPFileSessions,
+        pinnedPublicKey: String? = nil
     ) async throws -> BoundedHTTPDownloadedFile {
         let stagedURL = try BoundedHTTPFileStaging.shared.reserveDestination(
             incomingBytes: Int64(maximumBytes)
@@ -237,7 +255,8 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         let loader = BoundedURLSessionFileLoader(
             maximumBytes: maximumBytes,
             sessions: sessions,
-            stagedURL: stagedURL
+            stagedURL: stagedURL,
+            pinnedPublicKey: pinnedPublicKey
         )
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -261,7 +280,9 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         self.continuation = continuation
         lock.unlock()
 
-        let ownsSession = !BoundedHTTPReadSession.admits(request)
+        // A pinned download owns a fresh session (see
+        // `BoundedURLSessionDataLoader.start`).
+        let ownsSession = pinnedPublicKey != nil || !BoundedHTTPReadSession.admits(request)
         let session = ownsSession
             ? URLSession(configuration: sessions.configuration, delegate: self, delegateQueue: nil)
             : sessions.readSession
@@ -283,6 +304,18 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
 
     private func cancel() {
         finish(.failure(CancellationError()))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        GatewayLanPin.answerServerTrustChallenge(
+            challenge,
+            pin: pinnedPublicKey,
+            completionHandler: completionHandler
+        )
     }
 
     func urlSession(

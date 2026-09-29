@@ -6,6 +6,11 @@
 - **Last updated:** 2026-09-28, G-8a/G-8d/T-1 Done: an unchanged extension artifact costs one `stat` and no read, the ambient pass stays bound and reports a stop, and both read lanes retry a replace before warning (see the handoff)
 - **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
+- **Last updated:** 2026-09-29, E-3d Done after review fixes: the LAN lane is on by default for a Gateway that is not bound to loopback (`--lan-endpoint on` still forces it on for a loopback bind), and the kill switch on the Mac-supervised release is the launchd session's `TRON_GATEWAY_LAN_ENDPOINT` (see the handoff)
+- **Last updated:** 2026-09-29, E-3c2 Done: HTTP routes on the epoch's winning lane (live view, media, uploads, with the lane's pin) and the E-3c two-lane E2E cases both land; the E2E's blocked-lane leg now proves the 250 ms stagger and a retired LAN socket, and its blackhole leg uploads an attachment through a proxied HTTP blackhole
+
+- **Last updated:** 2026-09-29, F-2 Done: the O-6b page leg's refusal was the driver mounting six presentations on one mobile connection (one presentation slot, by contract); the lane now abandons a superseded page with the phone's own `cancel`, the repro is green with zero `session.sync` refusals, and the driver's page leg no longer fails on a mount the connection retired by design (see the handoff)
+- **Last updated:** 2026-09-29, G-3a Done: streaming progress follows the snapshot rule — a `session.progress` frame is projected and serialized only for a session with a subscriber (the O-6a CPU profile's throttled-flush subtree 551.7 → 193.5 ms, the subscriber's wire frames unchanged at 177 → 178; see the handoff)
 
 - **Last updated:** 2026-09-28, G-13 review response 1: the row is Blocked, not
   Done — no run has met the restart criterion — the startup budget's stated
@@ -73,6 +78,11 @@
 - **Last updated:** 2026-09-28, T-2 review round 1 addressed: the kill is another worktree's run on the same default-lane simulator, and T-3 tracks the lease that did not serialize them
 
 - **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes the session state a newer snapshot re-states with the one `session.rebaseline` that covers it, fencing one-shot frames a snapshot cannot restore (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
+- **Last updated:** 2026-09-29, F-3 Done: the Gateway's protocol-mismatch refusal is now a typed close (4006 plus `{code, gatewayProtocol, minProtocol}`), so the phone stops retrying that profile instead of looping, and the failure names the older app or the older Mac (see the handoff)
+
+- **Last updated:** 2026-09-29, F-3 review round 1 addressed: no compatibility bridge for a Gateway built before that close (Option B — those Macs keep retrying until they are updated), a background profile's stop message reaches the device detail, the LAN lane names a typed refusal instead of `lan_unreachable`, and the terminal client maps close 4006 to a non-retryable `protocol_mismatch`
+
+- **Last updated:** 2026-09-29, T-6 Done: neither registry load flake was a product race — the large-streamed-write case spent its 5 s `waitUntil` guard on 3,188 provider chunks (its 51 KB arguments and assertions unchanged, chunk size pinned), and the discovery helper capped its wait for a running pass at 5 s (it now waits for the pass to end and keeps the deadline for its own retries); see the handoff
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -611,7 +621,7 @@ rows are in priority order.
 | G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | merged `hardening/integration`; `verifiedCut` unified into `reconciledCut`, G-9 keeps the periodic reconcile, `searchIdentities()` reads the index rows. Owning suite 237/237, merge gate 363/363; O-6a p99 is the orchestrator's quiet-host run |
 | G-1d | Done | Catalog contract in the docs: `connection-resilience.md` and the README's catalog paragraphs now describe the index owner, its three feeds, reconciliation, JSONL authority and rebuild on loss; no doc describes a request-path walk | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-1d`) |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
-| G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
+| G-3a | Done | Streaming progress for a session with no subscriber is no longer projected (`flushPendingProgress` and `message_end`'s finalized frame both return before `projectMessage`/`safeJson`); the row's measured stretch is the O-6a CPU profile's flush subtree 551.7 → 193.5 ms — see the handoff | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-29 (branch `hardening/g-3a`) |
 | C-2 | Done | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-5 | Done | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -629,8 +639,9 @@ rows are in priority order.
 | G-5a | Done | The Mac app admits the argv G-5's launcher execs: Stable admission, registration repair, Debug admission and `mac verify` require the launcher's exact command; a refused admission names its check; the menu keeps Pause when admission refuses; `protocol_mismatch` records the peer's version | G-5 | direct session on `main`, 2026-09-29 (see handoff) |
 | E-3a | Done | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3b | Done | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
-| E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
+| E-3c | Done | LAN endpoint, phone side: pin validation, staggered race, seamless fallback (race, pin and denial record land; HTTP routes and the two-leg E2E cases do not - see the handoff) | E-3b, C-3 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| E-3c2 | Done | Finish E-3c: HTTP routes (live view, media, uploads) use the winning lane's base with the same pin; the two-leg E2E cases (Tailscale leg blackholed 90 s → no visible disconnect; LAN leg blocked → Tailscale wins within stagger + one handshake; pin mismatch sends no credential) in `scripts/ios-gateway-e2e-test` (both halves land: the routes follow the winning lane's base and pin, and the E2E's legs — including an upload through the blackhole — pass) | E-3c | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| E-3d | Done | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | orchestrator-dispatched deepseek-worker, 2026-09-29 |
 | G-13 | Blocked | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`/`.close_to_listening_ms`, read from the new process's own record; the case reports G-13's criterion with its numbers. Blocked, not Done: the criterion is a "Done when" and no run has met it — the measured misses are host-bound plus two named causes (the old process's 2 s `work-settle` grace and the storm upgrades serialized by `DeviceStore`'s credential mutex), which need rows of their own or a quiet-host R-1 run; see the handoff |
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8a | Done | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-8a`; the atomic-replace check fails 4/4 before the fix and passes; the watcher lane's pending debounce also owns the retry now) |
@@ -642,18 +653,24 @@ rows are in priority order.
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-4 | Done | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28; the killer is XCTest's per-test execution-time allowance (XCTestCore reports `Restarting after unexpected exit, crash, or test timeout`) SIGKILLing the app (`Test crashed with signal kill`), and the test it lands on is the process's CPU-heaviest because `IOSClientDiagnosticBuffer.redactedMessage` matched URLs super-quadratically (3 ms at 512 characters, 654 ms at 4,096; the export test 8.646-10.297 s -> 0.072 s); see the T-4 handoff |
-| T-5 | Ready | `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` hit its 5 s watchdog once in the full iOS run on `419a67a53` ("blocked on a wait that ignores cancellation"); passes alone 3/3. Check whether it waits on a write-log index a C-6 cancel frame can shift (as F-1 found) and make it robust | F-1 | |
-| F-2 | Ready | O-6b `bandwidth` page leg fails on integration with `session.sync` conflict "Session synchronization is no longer owned by this token" (run `20260928T235606Z-multi-session-471100`); `--cases none` passes. Decide driver artifact (concurrent page mounts on one connection) vs Gateway regression (C-6/G-12 barrier handling) and fix at the owner | O-6b | |
+| T-5 | Done | `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` hit its 5 s watchdog once in the full iOS run on `419a67a53` ("blocked on a wait that ignores cancellation"); passes alone 3/3. Check whether it waits on a write-log index a C-6 cancel frame can shift (as F-1 found) and make it robust. **Blocked on validation only:** the scenario no longer indexes the write log by position (it finds each read by method and scope), but the owned iOS lane was leased by another worker for this whole session, so the suite was never compiled or run; see the handoff | F-1 | orchestrator-dispatched deepseek-worker, 2026-09-29 |
+| F-2 | Done | O-6b `bandwidth` page leg fails on integration with `session.sync` conflict "Session synchronization is no longer owned by this token" (run `20260928T235606Z-multi-session-471100`); `--cases none` passes. Decide driver artifact (concurrent page mounts on one connection) vs Gateway regression (C-6/G-12 barrier handling) and fix at the owner. **Fixed in the driver** (F-2 second pass): the earlier "Gateway regression" reading came from matching the refusal to the wrong frame — the first `session.open`+`session.sync` on the fresh connection succeeds (104-byte answer, then a successful `session.presentation.set`), and the refusals are the six concurrent page lanes racing the Gateway's documented one-presentation-per-mobile-connection rule. The same conflict storm (264) is present in the `--cases bandwidth` run cited as passing, so the reconnect is not the trigger; the lane now abandons a superseded page with the phone's own `cancel` frame instead of synchronizing it. Repro `--cases blackhole,bandwidth` is green (run `20260929T073639Z-multi-session-e06f2e`: `link_use` 0.993, `max_in_flight` 6, zero `session.sync` conflicts); see the handoff | O-6b | orchestrator-dispatched deepseek-worker, 2026-09-29 (second pass on branch `hardening/f-2`) |
+| F-3 | Done | A protocol mismatch reads as a generic transport failure on the phone: the Gateway closes 1008 without a machine-readable reason, so the phone retries forever and shows no "update this Mac" state (2026-09-29, a protocol-5 MacBook Pro profile left the Knowledge dashboard loading). Send a typed close reason for protocol mismatch; the phone stops retrying that profile and shows which side needs updating | E-3b | orchestrator-dispatched deepseek-worker, 2026-09-29 (branch `hardening/f-3`): the Gateway refuses an unspeakable hello with application close 4006 (`PROTOCOL_MISMATCH_CLOSE_CODE`) plus a JSON close reason carrying `{protocol_mismatch, gatewayProtocol, minProtocol}`; the phone classifies that close as non-retryable `protocol_mismatch` and its stop names the build to update, for the lifecycle and the dashboard pool, with the device detail's Status group showing the reason durably |
+| T-6 | Done | Load flakes in `runtime-registry.integration.test.ts`: "keeps a large streamed write visible through snapshot recovery and canonical handoff" (fails intermittently on `main` too) and "does not reopen an unchanged ambient artifact for a live slot" (G-8a, failed once in a combined run, passes alone 3/3). Make both deterministic | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-29 (branch `hardening/t-6`; neither was a product race: the write case spent its 5 s `waitUntil` guard streaming 3,188 provider chunks, and the discovery helper capped its wait for a running pass at 5 s — see the handoff) |
 | C-7 | Done | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/c-7`; the connection epoch now owns its event reader) |
 
 ### Phase 2 — Release and one evaluation day
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| R-1 | Ready | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | |
-| R-2 | Ready | User installs the Mac Release build and the iOS build; agent verifies the deployment | R-1 | |
+| R-1 | Done | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | orchestrator, 2026-09-29: merged to `main` with four known misses the user accepted in writing (see handoff); F-4..F-7 own them |
+| F-4 | Ready | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | |
+| F-5 | Ready | Prompt admission p99 ~610 ms against 250 ms in `multi-session` | R-1 | |
+| F-6 | Ready | Event loop p99 ~38 ms against 20 ms, max up to 1.4 s under load; attribute with a CPU profile | R-1 | |
+| F-7 | Ready | Warm `session.open` p99 ~335 ms against 300 ms | R-1 | |
+| R-2 | Ready | User installs the Mac Release build and the iOS build; agent verifies the deployment | R-1 | E-3d owes one user action: prove the LAN kill switch on the installed release (`launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off`, user restarts the Gateway, `lan.listener state=disabled reason=setting_off` appears) |
 | R-3 | Ready | User runs Tron normally for at least 24 hours, then exports phone logs | R-2 | |
-| R-4 | Ready | Analyse the day with the triage tool; check real-use exit criteria; open Phase 3 rows | R-3 | |
+| R-4 | Ready | Analyse the day with the triage tool; check real-use exit criteria; open Phase 3 rows | R-3 | Read `lan.listener` transitions and `transport=lan` on `http.upgrade` to see whether the lane carried the day (E-3d) |
 
 ### Phase 3 — Follow-ups from the evaluation day
 
@@ -1834,6 +1851,14 @@ Read the numbers as one sample per case.
   baseline, not something the leg is tuned for.
 
 ## Handoff log
+
+### 2026-09-29 — R-1 release candidate (orchestrator)
+
+- Gates on `hardening/integration` after the final `main` merge (no conflicts): Gateway build + tsc clean; 710/710 across transport, config, client, session-archive and runtime-registry; `scripts/ios-gateway-e2e-test all` green (162 s) and `run-lan` green (108 s); full iOS unit run 1,976 passed, 2 failed — `ChatViewScrollHarnessTests/displacedRetainedResume` and `resourcePickerSourceSelection`, which fail identically on a clean `main` worktree (from `main`'s transcript work, not this plan).
+- Candidate `multi-session` runs (3 iterations each, all cases): `20260929T111158Z-multi-session-b0aca7` (host load 3→1) and `20260929T113821Z-multi-session-6ff73f` (load up to 15). The alternating `main` runs (`…d0ed0e`, `…2e6140`) failed in iteration 1 on the pre-F-2 driver's `session.sync` conflict, so there is no same-host `main` pair; the provisional column stands.
+- Met: `session.list` p99 94–127 ms (one 1.5 s iteration under load); cold large open p99 ~530 ms; catalog walks 0; blackhole recovery 17–70 ms; restart reconnect max 5.8–7.2 s with 0 requests over 1 s in the quiet run (G-13's criterion; 1 in one loaded iteration); pong misses 0 outside the stream case.
+- Missed (user accepted in writing 2026-09-29, "Merge now, fix misses after"): bandwidth-stream ping-to-pong ~24 s / 2 misses per run (F-4); prompt admission p99 ~610 ms (F-5); event-loop p99 ~38 ms and max 217 ms quiet / 1.4 s loaded (F-6); warm open p99 ~335 ms (F-7).
+- Installed for rollback: Mac app 0.1.0 (8); launcher still logs a refused stale external selection of `0.1.0-beta.7-source-1790559163986`.
 
 ### Draft · 2026-09-27 · connection investigation session
 
@@ -9387,6 +9412,232 @@ wait).
 - Deviations: no code change aims at the two causes above, so the criterion is
   still not demonstrated; the quiet-host run remains the orchestrator's.
 
+### E-3c · Blocked · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3c`)
+
+- Result: the phone-side race, the pinned trust and the fallback are built and
+  covered by focused tests; the task is **not Done**. `GatewayClient` now dials
+  the profile's advertised LAN lane first (with its pin) and the saved Tailscale
+  lane after `LAN_RACE_STAGGER` (250 ms, `GatewayClient.lanRaceStagger`) unless
+  the LAN lane's hello already completed; the first authenticated hello wins,
+  every losing lane is closed before it can carry work (including one that
+  opened while the winner was taken), a reconnect races both lanes at once
+  (liveness loss never waits the stagger), a lane that carried this network path
+  skips the stagger next time, and a LAN dial the system reports as "not
+  connected" while Tailscale reached the Mac marks the install's Local Network
+  permission denied (`GatewayLanPermissionRecord`, `gateway.lan-permission-denied`)
+  and stops dialing the lane. `GatewayLanPin.admitsServerTrust` is the pinned
+  lane's whole TLS evaluation (the challenge is cancelled on a pin mismatch,
+  during the handshake and before URLSession writes the credential-bearing
+  request); an unpinned lane keeps the platform's own evaluation. Losing lanes
+  are recorded, and the winning hello records `transport=lan|tailscale`
+  (`GatewayHandshakeDiagnostic.transport`, `packages/ios-app/docs/events.md`).
+- Evidence: `scripts/tron-ios-test build` clean; `scripts/tron-ios-test run
+  --only-testing TronMobileTests/GatewayClientLanLaneTests --only-testing
+  TronMobileTests/GatewayClientTransportTests --only-testing
+  TronMobileTests/GatewayProtocolContractTests` 89/89 including the six new LAN-lane
+  cases (the LAN lane wins before the staggered lane dials and only the LAN dial
+  carries the pin; a LAN lane that never answers is retired and the saved endpoint
+  wins after >= 250 ms; a reconnect dials both lanes in < 200 ms; a lane this
+  network already carries skips the stagger; a pin-refused lane is named
+  `lan_pin_mismatch`, its socket sent nothing, and the lane that carried the
+  attempt is the one whose dial holds the credential; a recorded denial is not dialed
+  again), and the shared-fixture case now also asserts
+  `admitsServerTrust` admits the fixture certificate for its pin and refuses
+  another. `scripts/tron-ios-test run --only-testing
+  TronMobileTests/GatewayClientLanLaneTests ... AppModelReconnectTests
+  GatewayDiagnosticsServiceTests` 155/155; `DashboardStateOwnerTests`,
+  `AppModelLifecycleTests`, `GatewayLogExportTests`, `AppModelEventTests`,
+  `AppModelPairingAttemptTests` 122/122.
+- Deviations: (1) Do item 3 ("HTTP routes use the winning endpoint for that
+  epoch") is **not implemented**: live-view, media/blob and upload routes still
+  address `profile.httpURL`, so a LAN-won epoch reads HTTP over Tailscale. The
+  `BoundedHTTPDataTransport`/upload/file transports have no pin plumbing yet, so
+  routing them over the LAN lane would fail TLS closed; that work plus its pin
+  plumbing is the remaining half of the item. (2) The two-leg E2E cases are
+  **not written**: `scripts/ios-gateway-e2e-test` still runs its single loopback
+  proxy leg, so the "Tailscale leg blackholed 90 s -> no visible disconnect" and
+  "LAN leg blocked -> Tailscale wins within the stagger plus one handshake" cases
+  have no harness yet. The lane's advertisement is the Gateway's own bind, so a
+  controllable second leg needs either a TLS+WS fixture proxy that injects the
+  advertisement (and computes a pin over its own certificate) or a Gateway
+  fixture seam for the advertised address; both are harness work this budget did
+  not reach. (3) `AppModelReconnectTests`' maintenance-restart-watchdog case
+  advanced the manual clock on an ambiguous signal (two 90 s sleeps, the restart
+  watchdog and no ordering guarantee that the reconnect loop had parked first);
+  the faster lane-close path exposed it and it is now fenced on the loop's own
+  `reconnect.delay` record before the advance. No production behavior changed for
+  that test.
+- For E-3d: **do not enable the LAN endpoint by default on this evidence.** The
+  two E2E cases E-3d's own text requires have not run; the focused tests prove
+  the race's decisions, not a live 90 s Tailscale blackhole or a blocked LAN leg.
+- For the next agent: the seams are `GatewayClient.dialPlan(for:)` (lane
+  eligibility: Wi-Fi, a pin, an endpoint, not denied), `raceLanes`/`attemptLeg`
+  (per-lane dial and retirement) and
+  `GatewaySocketFactory.makeConnection(_:pin:)`/`BoundedURLSessionDataLoader.load`
+  for the HTTP pin. The winner's route is not kept client-side: the HTTP item
+  adds its own winning-endpoint base.
+
+### E-3c · Blocked · review fixes · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3c`)
+
+- Result: the four major findings of the review and the cheap minors are fixed;
+  the task stays Blocked (item 3 and both E2E cases still open).
+  (1) The attempt reports a lane's *answer*, not the last lane to end: a Mac
+  refusal (401/403/503), a pin refusal or a protocol/identity mismatch from any
+  lane outranks a transport failure, so a revoked device the LAN lane refuses
+  with 401 reaches `unauthorized` instead of retrying the saved lane's timeout;
+  the LAN record maps an upgrade failure through the shared classifier instead
+  of `lan_unreachable`.
+  (2) The stagger is skipped only when the *saved* lane is the one this network
+  carried; a remembered LAN win keeps the LAN first with a 250 ms head start
+  (50 ms on a reconnect), an equal finish in a no-head-start race goes to the LAN
+  lane, and a race that never learned why the LAN lane lost cannot overwrite a
+  remembered LAN win.
+  (3) The denied Local Network permission is detected from state production has:
+  the app's path monitor writes `NWPath.unsatisfiedReason == .localNetworkDenied`
+  into `GatewayLanPermissionRecord` (a later reading clears it), and the pinned
+  lane dials with `waitsForConnectivity = false` so a blocked lane fails inside
+  the connect budget; both paths record `lan_denied` once per launch.
+  (4) The `gateway.connection` row names `transport-race`, `transport=lan|tailscale`
+  and the three LAN reasons, and the path-snapshot comment no longer claims it
+  never gates a connection.
+  Minors: the reported failure's record is the newest one (so
+  `latestHandshakeDiagnostic` and `gateway.attempt` read the reported lane), the
+  staggered lane wakes as soon as the lane ahead fails, a single-route attempt
+  records no `transport` and a `hello-receive` failure infers an opened socket,
+  the unused `currentRoute`/HTTP-route-base scaffolding is deleted, and an attempt
+  owns its lane sockets so `close()` and `retireForBackground()` end a handshake
+  in flight. Rejected: none.
+- Evidence: `scripts/tron-ios-test build` clean; `--only-testing
+  TronMobileTests/GatewayClientLanLaneTests` (15 cases, including the LAN-401
+  race, the remembered-LAN head start, the equal-finish tie, the monitor-reported
+  denial and the close that ends an in-flight lane) with `GatewayClientTransportTests`,
+  `GatewayProtocolContractTests`, `AppModelReconnectTests`,
+  `GatewayDiagnosticsServiceTests`, `DashboardStateOwnerTests` and
+  `GatewayPairingTransportTests` 236/236 (`20260929T082003Z-run.2DdkCd`). The pin test
+  now fails the pinned dial the way production does (`URLError.cancelled`, the
+  socket's own cancelled trust challenge) instead of an injected
+  `.serverCertificateUntrusted`. `scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- What is left: item 3 (HTTP routes on the winning endpoint) and the two E2E
+  cases, unchanged from the entry above. The denial is now reachable in
+  production (the path monitor's `unsatisfiedReason` and a pinned dial that fails
+  as not connected) but was not observed on a device in this session; the
+  E2E/device run is still what proves it. `AppModelPerformanceSignpostTests`'
+  "presentation open and authoritative resync close distinct intervals" is a
+  pre-existing flake under load: it failed 1/3 in a six-suite run on this branch
+  both with and without these fixes, and passes alone.
+
+### E-3c2 · Blocked · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3c2`)
+
+- Result: E-3c's two-lane E2E cases are built and pass against the fixture
+  Gateway's own pinned LAN listener; item 3 (HTTP routes on the winning lane)
+  is **not done**, so the row is Blocked, not Done.
+  `scripts/ios-gateway-e2e-test run-lan` renews the fixture with the lane on
+  (`TRON_GATEWAY_LAN_ENDPOINT=on`, also preserved across the proxy's
+  `restart-gateway`) and runs one new case,
+  `TronMobileTests/RealGatewayPiBoundaryTests.testRacesLanAndTailscaleLanes`,
+  which pairs through the existing fault proxy and then dials production code
+  end to end: the advertised endpoint and pin come from the pairing response
+  (E-3b), the lane's own TLS certificate, WebSocket and hello carry the
+  connection, and the pin is checked by the socket's trust evaluation.
+  Its four legs: (1) a Wi-Fi phone's handshake transport is `lan` (the fixture
+  advertised `192.168.4.24:53058`); (2) the saved lane blackholed at the fault
+  proxy for 90 s left that connection up - the leg answers `system.info` every
+  5 s through the blackhole (18 requests), keeps one successful handshake and
+  records no `helloReceive` failure; (3) a blocked LAN lane
+  (`127.0.0.1:<free loopback port>`) fell back to `tailscale` within the
+  250 ms stagger plus one handshake (the leg asserts < 1.75 s) and the attempt
+  recorded the LAN lane it lost; (4) a profile pinned to a value the served
+  certificate does not match produced `lan_pin_mismatch` with
+  `handshake.transportOpened == false` while the saved lane carried the
+  connection, so no credential-bearing upgrade was written.
+- Evidence: `scripts/ios-gateway-e2e-test build` clean;
+  `scripts/ios-gateway-e2e-test run-lan` green in 106 s (status 0), case passed
+  in 91.6 s. Retained artifact:
+  `.../tron-ios-gateway-e2e-501/results/20260929T084513Z-run.yMXeBw/FocusedE2E.xcresult`
+  (`summary.json`: passedTests 1, failedTests 0, skippedTests 0) plus the
+  per-attempt `test.log` in the same directory. The unchanged boundary test
+  also re-ran green on this branch with the lane off
+  (`scripts/ios-gateway-e2e-test run`, `testStreamsReconnectsAndSettlesExtensionTools`
+  passed in 164.8 s, status 0, artifact
+  `.../results/20260929T085003Z-run.eBMbuH`), so the harness change leaves `run`
+  as it was. No Gateway source changed, so
+  the Gateway merge gate does not apply; `scripts/check-documentation-policy.py`
+  and `scripts/personal-info-guard.sh` pass.
+- Deviations: (a) the lane-on fixture is a new `run-lan` command instead of
+  flipping `run`, so the boundary test keeps the fault proxy on every leg it
+  drives - turning the lane on there would let a LAN win bypass the proxy's
+  fault modes. (b) The lane is dialed only on Wi-Fi (E-3c's own gate) and the
+  simulator reports this Mac's wired path, so the new case states the phone's
+  own path through `GatewayClient`'s existing `networkPath` initializer seam;
+  no production change. (c) The blocked lane is the fixture's own unreachable
+  loopback endpoint: blocking this Mac's real LAN address is not a fixture's
+  job. (d) "Sends no credential" is asserted from the phone's own refusal with
+  the transport never opened (the trust challenge is cancelled before the
+  upgrade request is written); the byte-level "the socket wrote nothing"
+  assertion stays in the focused test.
+- What is left: E-3c's Do item 3 - live view, media/blob and upload HTTP routes
+  still address `profile.httpURL`, and
+  `BoundedHTTPDataTransport`/`BoundedHTTPFileTransport` have no pin plumbing, so
+  routing them over a LAN-won epoch needs the pin carried into those transports
+  and the winning endpoint kept client-side. That is one focused change with
+  `scripts/tron-ios-test run` cases; it is not started here (landed in the
+  review-fix entry below).
+- For E-3d: the two E2E cases E-3d's text requires now pass on this evidence
+  (`run-lan`), so `lanEndpoint.enabled` default true is defensible for the
+  release; the setting stays the kill switch for R-4. No host network or
+  installed app was touched by these runs: `run-lan` starts its own fixture
+  Gateway (loopback plus this Mac's own LAN address on an ephemeral port) and
+  removes it when the command ends.
+
+### E-3c2 · review fixes · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3c2`)
+
+- Result: the review's two majors and three minors are fixed, and E-3c's Do item
+  3 lands, so E-3c2 is Done. An epoch keeps the route it won with; every
+  authenticated HTTP route that connection owns (live view, blob/media reads,
+  staged export files, upload staging and discard) composes its base from the
+  winning lane's own endpoint and passes that lane's pin to the transport
+  instead of addressing `profile.httpURL`, and a request with no epoch or a
+  saved-endpoint epoch keeps the saved endpoint. The three bounded HTTP
+  transports take an optional `pin` (a 2-argument closure still compiles for
+  every fixture), both URLSession loaders answer the server-trust challenge
+  through `GatewayLanPin.answerServerTrustChallenge`, a pinned request owns a
+  fresh session so the pin decides TLS before any credential-bearing byte, and
+  `LiveLease` carries the pin to its frame and close requests. The E2E's
+  blocked-LAN leg is now a listening socket that never accepts — TCP connects
+  and TLS hangs, what a client-isolated network does, not a refused port — and
+  asserts the saved lane wins at or after the 250 ms stagger and within stagger
+  plus one handshake, that the losing LAN socket was accepted and drained to EOF
+  (retired, not left dialing), and that the retired lane records no failure. The
+  90 s leg arms the fault proxy's new opt-in HTTP blackhole and uploads an
+  attachment every 5 s through it: the proxied saved lane cannot answer that
+  POST, so its 18 answers are the proof that HTTP followed the winning lane.
+- Evidence: `scripts/tron-ios-test build` clean;
+  `scripts/tron-ios-test run --only-testing
+  TronMobileTests/GatewayClientLanLaneTests` 17/17 including two new cases (a LAN
+  epoch routes media, the staged export file and an upload to
+  `https://192.168.1.24:9847` with the profile's pin; a saved-endpoint epoch
+  keeps `http://gateway.test:9847` with no pin) with `GatewayClientTransportTests`
+  76/76 (`20260929T091728Z-run.3ZuwEN`). `scripts/ios-gateway-e2e-test build`
+  clean; `scripts/ios-gateway-e2e-test run-lan` green in 112 s (status 0), case
+  passed in 92.1 s, artifact
+  `.../tron-ios-gateway-e2e-501/results/20260929T092123Z-run.w5HPgm/FocusedE2E.xcresult`;
+  that run's fixture logged `lan.listener state=bound port=60445`, one LAN
+  connection opening in 2 ms, and 18 staged uploads while the proxy blackholed
+  the saved lane's HTTP. `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Deviations: the proxy's HTTP blackhole is opt-in (`{"mode":"blackhole",
+  "http":true}`) so the other legs keep reading their fixture through the proxy
+  while a socket is blackholed; `run-lan` is a hosted-CI step after the boundary
+  case (it needs this host's private address, which the lane binds), and
+  `packages/ios-app/docs/development.md`, `packages/ios-app/docs/architecture.md`
+  and `packages/gateway/docs/connection-resilience.md` now describe `run-lan`
+  and the HTTP half.
+- For E-3d: every E-3c E2E leg passes on this evidence, HTTP routes included, so
+  `lanEndpoint.enabled` default true is defensible for the release; the setting
+  stays the kill switch for R-4. E-3c's own row is left for the orchestrator:
+  its Do items 1, 2, 3, 4 and 5 now all land across E-3c/E-3c2.
+
 ### E-3b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
 
 - Result: a paired phone learns the LAN lane on the two channels it already
@@ -10046,3 +10297,421 @@ recovery gaps; all three were fixed on the same branch.
   persists it, covered by `logger.test.ts` ("persists the protocol version a
   refused hello asked for", red first with `expected undefined to be 5`); the
   field reaches the installed app with the next Mac build.
+
+### G-3a · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/g-3a`)
+
+- Result: streaming progress now follows the rule `publishSnapshot` already
+  follows. `flushPendingProgress` returns before `projectMessage` /
+  `boundStreamingProgressItem` / `safeJson` when `sessionAudience(id)` is 0, and
+  `message_end`'s finalized declaration is serialized only with an audience. The
+  two things beside those frames are slot state and stay on every path: the
+  stream identity capture (`captureStreamIdentity`) and the tool-invocation
+  group latch (`toolInvocationGroups`, which the projection in
+  `finalizeToolInvocationGroups` still computes).
+- Evidence:
+  - Focused case `projects no streaming progress for a session with no
+    subscriber and resumes it on subscribe` in
+    `runtime-registry.integration.test.ts`: an unsubscribed stream settles with
+    zero `session.progress` frames, then a subscribed stream produces frames
+    (last one carries the watched text). Passes in 1.9 s; on the reverted half
+    (source stashed, test kept) it fails at the zero-frame assertion
+    (`1 failed | 244 skipped`).
+  - Owning file: 244 passed | 1 failed. The failure is "keeps a large streamed
+    write visible through snapshot recovery and canonical handoff" (its 5 s
+    `!slot.isBusy` wait), and the unmodified file fails the same case the same
+    way in a full-file run (243 passed | 1 failed); R-1's handoff already
+    records it failing on `main`, so it is a pre-existing full-file flake, not a
+    G-3a regression. That case reads `session.progress` frames, so it now
+    subscribes an audience (G-3 deviation 4).
+  - O-6a smokes, G-11's parameters (`--scenario multi-session --no-build
+    --iterations 1 --cases none --catalog-files 100 --catalog-mib 512
+    --mixed-seconds 30 --cpu-profile`): before
+    `~/Library/Developer/Tron/profiles/gateway/20260929T061112Z-multi-session-4b25f5`,
+    after `…/20260929T061654Z-multi-session-a18c7f`; both reports and both
+    iteration CPU profiles are retained at
+    `~/.tron/workspace/files/hardening/g-3a/` with the arithmetic in its
+    `attribution.txt`, so the numbers outlive the profile sweep.
+    - CPU profile, the same call path (the throttled timer's
+      `flushPendingProgress`): exclusive subtree **551.7 → 193.5 ms** of 14.0 →
+      13.8 s non-idle CPU (3.9% → 1.4%). The children the guard removes are
+      `toolLabels` 129.7 → 7.5 ms, `projectMessage` 115.4 → 3.0 ms, `safeJson`
+      75.0 → 0 ms, `boundStreamingProgressItem` 39.6 → 0 ms; what remains is the
+      one subscribed session plus the guard itself (`sessionAudience` 22.9 ms +
+      the `id` getter 26.4 ms over the run's ~3,200 no-audience windows).
+    - Wire parity for the subscriber: mobile `session.progress` 177 → 178
+      frames, 229,687 → 229,792 bytes. The projected frames a subscriber
+      receives did not change.
+    - Event loop: overall max 87.1 → 62.6 ms, p99 16.8 → 8.5 ms; no-subscriber
+      window max 13.0 → 10.5 ms. Both runs were on a load ~10 host and the
+      82 ms single run G-11 measured did not reproduce here (this branch's
+      largest single flush run is ~9 ms before the fix), so the max delta stays
+      inside host noise: the load-robust evidence is the profile attribution
+      above plus the focused case. The exit numbers (max ≤ 250 ms, p99 ≤ 20 ms)
+      remain O-6a's to measure.
+  - Merge gate: this branch's base is `hardening/integration`'s head
+    (`5eb6fa505`, 0 commits behind, nothing to merge); 133/133 across
+    `session-archive`, `server-capacity`, `sync-protocol`, `stall-diagnostics`,
+    `server-heartbeat` and `server-http-lifecycle` integration/unit files;
+    `npx tsc --noEmit -p .` clean. No message shape changed, so protocol stays 6.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: one commit on `hardening/g-3a` (`packages/gateway/src/sessions/runtime-slot.ts`,
+  its integration test, `packages/gateway/README.md`, this plan).
+- Tasks added: none.
+- Kept on purpose: `captureStreamIdentity` on the flush path — the streaming
+  identity is slot state a later snapshot projects, and `message_update` captures
+  it outside the flush too, so keeping the call preserves the subscribed path
+  byte for byte; the pending message is still dropped per window (there is
+  nothing to carry without an audience); the leading-edge/trailing-timer shape of
+  `emitProgress` is unchanged, so a subscribed stream keeps its cadence.
+- Deviations: (1) The plan has no `### G-3a` task-details section; the row,
+  G-3's handoff ("G-3a owns the same rule for streaming progress frames") and
+  the review nit are the whole contract, so the rule implemented is the row's
+  no-audience one — not chunking or incrementally projecting the subscribed
+  path, which no measurement here shows over 50 ms. (2) `finalizeToolInvocationGroups`
+  keeps its projection and guards only the frame, because the group latch needs
+  the projection. (3) One fixture gained an audience (the large-streamed-write
+  case, above). (4) The before/after numbers are reported as profile
+  attribution and wire parity rather than as an event-loop max delta, because
+  the max is host noise on this host (see Evidence).
+- For the next agent: a subscribed session still re-projects the whole
+  cumulative streaming message once per 150 ms window (`projectMessage` +
+  `boundStreamingProgressItem` + `safeJson` + `toolLabels`); if R-1's event-loop
+  max is still driven by a subscribed stream, the next owner is an incremental
+  streaming projection at the same site, and the guard above is what makes that
+  work only about the one session a client is watching. A nonzero
+  `unaudiencedSnapshotBuilds` warning still means an audience check was lost. The
+  `session.progress` rule now matches `session.snapshot`: no subscriber, no
+  frame.
+
+### T-5 · Blocked · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/t-5`)
+
+- Result: `AppModelInvalidationTests/providerCatalogResponsesRemainKeyed` no
+  longer addresses the write log by position. The pair of reads each catalog
+  load sends is found by method and scope and reserved, so an extra frame (a
+  `cancel` control frame or a read the model appends for a reason the scenario
+  did not pin) can no longer shift a tracked read: before, a shifted index
+  answered the wrong request, the load the scenario meant to answer was never
+  answered, and the scenario's `await load.value` ignored the watchdog's
+  cancellation - the reported "blocked on a wait that ignores cancellation",
+  since awaiting a child `Task`'s value does not observe the waiter's
+  cancellation. A read that never reaches the socket now fails with a named
+  `ScriptedReadMissing` instead of expiring the watchdog. The two `.global`
+  pairs the scenario answers out of order stay distinguishable because each
+  discovered read is reserved; which of `provider.list`/`model.list` is written
+  first is not fixed (they are spawned concurrently), and neither was the old
+  test's assumption - it filtered by method.
+- What the check found: this scenario cannot be shown to receive a C-6 `cancel`
+  frame - every load's Task is awaited, the scripted socket answers every
+  request, `model.recent` and `auth.*` are never cancelled - so the shift class
+  here is any read the model appends, not a cancel frame specifically. The fix
+  covers both, and the addressing no longer depends on which class it was.
+- Blocked on: validation. Every attempt at `scripts/tron-ios-test build` and
+  `run` returned `error: iOS test simulator is already leased` for this
+  worktree's whole session (first a stale-content holder, then the E-3c worker
+  on the default lane, `pid 22138`), so the edited file was never compiled and
+  the suite was never run. The change must be built and run
+  (`scripts/tron-ios-test build` then `scripts/tron-ios-test run
+  --only-testing TronMobileTests/AppModelInvalidationTests`) before it is merged.
+- For the next agent: with the writes found by identity, the remaining
+  positional assumption in the same file is `settingsResponsesRemainKeyed`,
+  which still indexes frames 1-4 and 3-5 absolutely and has the same shape.
+
+### F-2 · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/f-2`, second pass)
+
+- Root cause (driver, not Gateway): the O-6b page leg mounts `bandwidthInFlight`
+  (default 6) pages **concurrently on the one mobile connection**, and a mobile
+  connection holds exactly one presentation. `server.ts`'s `beginSynchronization`
+  calls `revokePresentationOwners` for a `presentationOnly` (clientRole `mobile`)
+  connection, which retires every other session's synchronization and
+  subscription — synchronized or not. When the pages arrive faster than the cap
+  delivers them, each page's `session.sync` reaches the Gateway after the next
+  lane's open already retired its barrier, so `completeSynchronization` refuses it
+  with "Session synchronization is no longer owned by this token". Every lane then
+  retries, stays in lockstep, and a lane exhausts `retry("mount")`'s 40 attempts,
+  which fails the driver (exit 1).
+- The earlier "Gateway regression" reading was a mis-read of the artifact: in
+  `20260929T072833Z-multi-session-357ca1` the first `session.open` on the fresh
+  connection is answered with a 603,526-byte page, its `session.sync` answer is
+  **104 bytes** (a success - `{synchronized:true}` is 104, the refusal is 188),
+  and the `session.presentation.set` right after it succeeds, which is only
+  possible once that barrier committed. The 271 refusals are the six page lanes.
+  The reconnect is not the trigger: the run cited as passing
+  (`20260929T061808Z-multi-session-9ebc17`, `--cases bandwidth`) carries **264
+  identical `session.sync` conflicts** and only survived because its lanes drifted
+  out of lockstep inside the retry budget.
+- Fix (driver): `RecordingClient.openPresentation` numbers each `session.open`
+  sent on a socket and reports whether a newer attempt superseded it;
+  `MountedChat.open` then abandons a superseded page with the `{type:"cancel"}`
+  frame the phone sends for a read it stopped waiting for (`C-6`,
+  `GatewayDisposableReadPolicy` admits `session.open`) instead of synchronizing
+  it. The page's bytes are still the load the connection carried, so the leg's
+  measurements are unchanged in kind and its lane no longer fails on a mount the
+  connection retired by design. `scripts/tron-profile-gateway-driver.mjs`.
+- Contract pinned: `sync-protocol.integration.test.ts` gains "mobile presentation
+  slot" — an answered mobile page whose successor retires it, the refusal of its
+  `syncToken`, the phone's `cancel`, the newer page's commit, and the re-opened
+  page synchronizing normally. The rule is now stated in `packages/gateway/README.md`
+  (transport invariant 4) and the bandwidth leg's paragraph describes the new shape.
+- Evidence (this branch): repro `scripts/tron-profile gateway --scenario
+  multi-session --no-build --iterations 1 --catalog-files 300 --catalog-mib 256
+  --mixed-seconds 60 --cases blackhole,bandwidth` is **green** in 5.0 min —
+  `20260929T073639Z-multi-session-e06f2e`: `impairment.bandwidth.link_use` 0.993,
+  `delivered_bytes_per_second` 248,270 B/s, `max_in_flight` 6, 327 operations,
+  `max_ping_to_pong_ms` 1,840, 0 pong misses, 0 unexpected closes, and **zero
+  `session.sync` refusals** in the fixture Gateway log (the failure run carried
+  271). Before the fix the same command failed 1/1 on this branch
+  (`20260929T072833Z-multi-session-357ca1`, 271 conflicts, driver exit 1).
+  `npx vitest run src/transport/sync-protocol.integration.test.ts` 6/6, and the
+  driver's own stub suites (`MultiDriverImpairment`, `MultiDriverWindows`,
+  `ImpairmentCases`, `RelayBackpressure`) 25/25.
+- Left for other rows (not F-2): the `bandwidth-stream` leg has the same
+  one-presentation premise — it mounts up to `bandwidthStreamSessions` (7) chats
+  sequentially on the one mobile connection, so each mount retires the previous
+  subscription and its reported `streams` count is opens issued, not live
+  subscriptions (one running session's ~300 kB/s of decoded state is what the leg
+  actually measured). It passes today because sequential mounts synchronize before
+  the next open, and because one stream alone out-produces the 0.08 Mbit/s cap.
+  Proposed follow-up row: measure that leg as one live stream (or hold its streams
+  on a technical connection), with its README paragraph and validator floor.
+
+#### F-2 first pass (branch `hardening/t-5`) — superseded by the entry above
+
+- Decided (then): **Gateway regression**, not a driver artifact. Concurrent page mounts
+  on one connection are not the trigger: `scripts/tron-profile gateway
+  --scenario multi-session --no-build --iterations 1 --catalog-files 300
+  --catalog-mib 256 --mixed-seconds 60 --cases bandwidth` passes
+  (`20260929T061808Z-multi-session-9ebc17`), while the same command with
+  `--cases blackhole,bandwidth` fails 2/2 (`20260929T062215Z-multi-session-cbeb96`,
+  and the row's original `20260928T235606Z-multi-session-471100`). The trigger is
+  the mobile's fresh connection after the Gateway closes its blackholed socket by
+  heartbeat timeout (`connection.heartbeat-timeout`), not the page leg itself.
+- Evidence (all three runs agree): the mobile reconnects, `connection.opened`
+  records a new connection id, and the **first** `session.open` on it is answered
+  (604179 bytes in `cbeb96`), the `session.sync` that immediately follows with
+  that response's `syncToken` is refused with `conflict` "Session synchronization
+  is no longer owned by this token" 0.7 ms later, and 243 more `session.sync`
+  refusals follow on that one connection until the run ends. The open response
+  and the refused sync are on the same socket (the driver's timeline shows no
+  reconnect between them), so `server.ts`'s `completeSynchronization` refuses a
+  token its own `beginSynchronization` had just installed for that connection.
+  `session.progress` frames arrive unquarantined right after the refusal, so the
+  session's `SessionSyncBarrier` was already gone - the synchronization was
+  revoked, not merely mismatched. No `gateway.shed`, `transport.resyncRequired` or
+  other warning record precedes it.
+- Repro artifact: `~/Library/Developer/Tron/profiles/gateway/20260929T062215Z-multi-session-cbeb96`
+  (`driver-iteration-1.log` names the failure; `fixture/gateway.jsonl` carries the
+  243 `rpc.error session.sync` records on `640e5b53`).
+- Left: the root cause. Candidates narrowed by the evidence, in the transport
+  barrier paths (`src/transport/server.ts`): the open handler's
+  `releaseOwnSynchronizations` (`finally`, when `rpcOutcome` is not success),
+  `revokeAbandonedOpen`, and `beginSynchronization`'s deterministic replacement
+  of an installed token. The failing open is the first mount on a connection that
+  replaces one the Gateway closed itself, which points at a revoke that outlives
+  the connection that owned the open, or at a delivered open response whose
+  barrier is released before its `session.sync` can commit. Start from a focused
+  `sync-protocol.integration.test.ts` case that reproduces "open answered, then
+  the sync of that same token refused" before touching the code.
+- Deviation: F-2 was dispatched to this lane with T-5; the two are unrelated and
+  the T-5 change (iOS test) does not touch the Gateway, so nothing here depends on
+  an unvalidated edit.
+
+### T-6 · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/t-6`)
+
+- Result: both cases are deterministic, and neither flake was a product race.
+  (1) "keeps a large streamed write visible through snapshot recovery and
+  canonical handoff" spent 4.3–5.4 s of its 5 s `waitUntil(() => !slot.isBusy)`
+  guard streaming the same 51 KB write: the faux provider's default 12–20
+  character chunks make 3,188 chunks, each paying a real ~1.7 ms `setTimeout`
+  floor, so the case sat ~0.7 s from its own guard and any host load tipped it
+  over. The write's size and every assertion stay; only the provider's chunk size
+  changed (`tokenSize: { min: 32, max: 32 }`, 400 chunks).
+  (2) "does not reopen an unchanged ambient artifact for a live slot" failed as
+  `extension artifact discovery stayed in flight`: `discoverExtensionArtifactsUntil`
+  capped its wait for an *interval* pass at 5 s, and one pass over this case's
+  production-shaped root (2,498 entries, 558 `status.json`) is 90–216 ms idle but
+  far longer on a loaded host. The helper now waits for the running pass to end
+  and keeps its 5 s `deadline` for the retries it starts itself, so
+  "did not settle" stays bounded and the test's own timeout reports a pass that
+  never ends.
+- Evidence: reproduction on the pre-change file — whole file twice in parallel:
+  run B failed test 1 at `waitUntil` (line 6692); 12 targeted runs of test 2 under
+  two parallel whole-file runs: run 11 failed `stayed in flight` (line 5738). The
+  same case measured by the helper's own probe: an interval pass takes 141–334 ms
+  to wait out and a pass 90–216 ms idle (test 2 alone 2.4 s). The single frame
+  test 1 asserts on is unchanged by the pacing: the finalized declaration with a
+  4,238-byte argument preview, `streaming` equal to the published frame
+  (`declarations` was already length 1 before the change, at every chunk size
+  from 4 to the default). After the change: `npx vitest run
+  src/sessions/runtime-registry.integration.test.ts` **245/245, three runs in
+  parallel, 127.9–129.5 s of tests**; 8/8 targeted runs of each case under three
+  parallel whole-file runs; test 1 alone 647–756 ms of test time (4.34–5.4 s
+  before). Merge gate on this branch (already up to date with
+  `hardening/integration` `18185b61f`): six-file transport set **134/134**,
+  `npx tsc --noEmit -p .` clean, `python3 scripts/check-documentation-policy.py`
+  and `scripts/personal-info-guard.sh` pass.
+- Changes: `packages/gateway/src/sessions/runtime-registry.integration.test.ts`
+  only (the discovery helper's barrier and the write case's provider pacing). No
+  product code and no owning doc change: no behavior changed.
+- Keeping on purpose: the 51 KB write, the 2,498-directory fixture, and every
+  assertion of both cases.
+- For the next agent: the discovery helper's remaining 5 s is a *retry* budget
+  for predicates, not a pass budget. The ambient pass itself is bounded per pass
+  by entries (4,096) and reads (1,024), not by time, and one pass over a
+  production-shaped root costs one `stat` per entry every 750 ms — measured here
+  at 90–216 ms idle. A future row that wants pass *latency* bounded, rather than
+  pass *work*, starts there; the two cases are deterministic without it.
+
+
+### E-3d · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3d`)
+
+- Result: `lanEndpoint.enabled` defaults to true for a Gateway that is not bound
+  to loopback, so the release and the evaluation day serve the pinned LAN lane;
+  a loopback bind (`127.0.0.0/8`, `::1`, `localhost`) keeps one loopback
+  listener exactly as before E-3a, and `--lan-endpoint on` forces the lane on
+  there. `--lan-endpoint off` and `TRON_GATEWAY_LAN_ENDPOINT=off` take it down
+  and stay the kill switch for R-4. The parser, the CLI/env precedence and the
+  invalid-value refusal are unchanged.
+- Review fixes (both majors): (1) the kill switch is now documented on the route
+  the Mac-supervised release can actually take. The wrapper's LaunchAgent
+  program arguments and environment are the ownership contract
+  (`ExistingInstallDetector`, `LiveLaunchAgentManager`, `StableGatewayProvenance`
+  all reject any extra flag or variable), so neither spelling can ride in the
+  plist; `launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off` reaches the Gateway
+  because `tron-gateway-launcher.c` only `setenv`s a fixed list and then
+  `execv`s. The README and connection-resilience doc name that route, its
+  `launchctl unsetenv` reversal, the next-start scope, and the
+  `reason=setting_off` record; both state that the end-to-end proof on an
+  installed release is still owed (R-2/R-4, see the row notes). Nothing was set
+  on this host. (2) The default now reads the resolved bind host, so profiling
+  and qualification fixtures that bind loopback (`scripts/tron-profile-gateway`,
+  O-6a/O-6b, G-13) create no certificate, open no second listener and poll
+  nothing, and the `AGENTS.md` "developer default is loopback" invariant is true
+  again.
+- Evidence: `scripts/ios-gateway-e2e-test run-lan` green 108 s (status 0, case
+  passed 93.1 s, 1/1 with 0 failures), artifact
+  `${TMPDIR}/tron-ios-gateway-e2e-501/results/20260929T102055Z-run.ZnxmTI/FocusedE2E.xcresult`.
+  Focused Gateway suites: `npx vitest run src/config.test.ts
+  src/transport/lan-endpoint.integration.test.ts` **40/40** in 19.4 s; the config
+  case now asserts loopback default off, non-loopback default on (flag and env),
+  `--lan-endpoint on` with loopback, and the invalid-value refusal. Default proof
+  at the process level, three private fixtures from this worktree's
+  `dist/index.js` (own `HOME`/`TRON_DATA_DIR`/`PI_CODING_AGENT_DIR`, free port,
+  started and killed by this worker): loopback with **no** LAN setting logged
+  `LAN endpoint disabled (state=disabled reason=setting_off)` and wrote no
+  certificate directory; loopback with `on` logged `state=bound`; `tailscale`
+  with **no** LAN setting logged `state=bound`. Merge gate with
+  `hardening/integration` at `adb0887b6` (already the branch's base, nothing to
+  merge): transport six-file set **134/134**, runtime-registry **245/245**,
+  `npx tsc --noEmit -p .` clean. `python3 scripts/check-documentation-policy.py`
+  and `scripts/personal-info-guard.sh` pass.
+- Changes: `packages/gateway/src/config.ts` (host-scoped default),
+  `packages/gateway/src/config.test.ts`, `packages/gateway/README.md` transport
+  section, `packages/gateway/docs/connection-resilience.md` (Tailscale flaps),
+  `AGENTS.md` exposure invariant. No transport, iOS or E2E-harness change: the
+  harness's explicit `off` for the boundary case and `on` for `run-lan` still
+  win over either default.
+- Keeping on purpose: the harness's explicit `e2e_lan_endpoint` values. They are
+  not redundant with the default: `run` needs the lane off so the fault proxy
+  owns every leg of the boundary case, and the explicit values keep both E2E legs
+  reproducible whatever the default is.
+- Deviations: the release default is host-scoped (the review's option 2a), not a
+  bare `true`; a loopback-bound Gateway therefore needs `--lan-endpoint on` for
+  the lane.
+- For the next agent (R-2): the LAN kill switch's end-to-end proof on an
+  installed release is owed — `launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off`,
+  the user restarts the Gateway, and `lan.listener state=disabled
+  reason=setting_off` appears. For R-4: the evaluation day's LAN review reads
+  `lan.listener` transitions plus `transport=lan` on `http.upgrade`, so a user
+  who turned the lane off is distinguishable from a Mac that never had a private
+  address (`reason=no_private_address`), and a loopback-bound Gateway is
+  distinguishable too (`reason=setting_off` with no user switch).
+
+### F-3 · Done · 2026-09-29 · orchestrator-dispatched deepseek-worker (branch `hardening/f-3`)
+
+- Result: a hello whose protocol the Mac cannot speak is now a typed close
+  (`PROTOCOL_MISMATCH_CLOSE_CODE` 4006 + JSON close reason
+  `{code:"protocol_mismatch",gatewayProtocol,minProtocol}`), and the phone
+  classifies that close as the non-retryable `protocol_mismatch` it already
+  stops recovery on, with a message that names the build to update ("Update Tron
+  on the Mac" / "Update Tron on this iPhone"). Both the selected lifecycle and a
+  dashboard pool entry stop retrying; the device-detail Status group shows the
+  reason durably, and the transient notice keeps the existing surface.
+- Changes: `packages/gateway/src/transport/server.ts` (close code, reason
+  builder, `closeFailedConnection` gains the optional wire reason),
+  `packages/ios-app/Core/Gateway/GatewaySocketTransport.swift` (peer close
+  reason on `GatewaySocketMetadata`), `GatewayProtocolContract.swift`
+  (`GatewayProtocolMismatchClose`: close code, reason decode, message),
+  `GatewayClient.swift` (classify the hello close; the post-hello range check
+  now uses the same message), `packages/ios-app/Sources/UI/Settings/ConnectionSettingsView.swift`
+  (Status group shows the selected profile's stop reason), owning tests, and the
+  gateway connection-resilience + iOS development docs.
+- Evidence: `npx vitest run src/transport/server-http-lifecycle.integration.test.ts`
+  **21/21** (the refusal case is now `it.each([5, 99])`: asserts close 4006, the
+  JSON range, and the ≤123-byte control-frame bound); merge gate on this branch
+  (up to date with `hardening/integration` `adb0887b6`): six-file transport set
+  **135/135** in 37.7 s, `npx vitest run src/sessions/runtime-registry.integration.test.ts`
+  **245/245** in 139.1 s, `npx tsc --noEmit -p .` clean.
+  iOS (lane `F3`, `scripts/tron-ios-test build` + `run`): 3 suites
+  **175/175** in 10.3 s (`20260929T095829Z-run.IIpJMs`), including
+  `GatewayClientTransportTests/a typed protocol-mismatch close names the build
+  that must update` (older Mac and older app), `AppModelReconnectTests/a
+  protocol-mismatch close stops recovery and names the stale build` (state
+  `.offline("…Update Tron on the Mac")`, one socket attempt, `reconnect.stopped
+  … code=protocol_mismatch nonRetryable=true`), and `DashboardStateOwnerTests/
+  dashboard protocol mismatch stops retrying the background profile`
+  (`.offline`, `factory.requests.count == 1`).
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Kept on purpose: 1008-class refusals for `hello_required`/`invalid_frame`/
+  revocation; the `http.upgrade` record (unchanged, already
+  `reason=protocol_mismatch` + `peerProtocolVersion`); the existing
+  `GatewayRecoveryFailurePolicy`/pool non-retryable plumbing and the post-hello
+  range check; a protocol-5 *phone* still cannot decode the new close, which no
+  phone-side change can fix.
+- Deviation: none beyond the durable Status-group row (the notice alone is
+  transient); the close reason is not added to the iOS `gateway.connection`
+  record — the existing `closeCode=4006` + `reason=protocol_mismatch` pair
+  already names it in one step.
+- For the next agent: the 4006 code and reason shape are the contract
+  (`packages/gateway/docs/connection-resilience.md`, "Failure boundaries"); a
+  future protocol bump keeps `PROTOCOL_VERSION`/`MIN_PROTOCOL_VERSION` in
+  `config/GatewayProtocol.json` as the single authority. A real-device check of
+  the old-Mac scenario is R-2's install, not this row.
+
+#### F-3 review round 1 · 2026-09-29
+
+- Result: (1) **no compatibility bridge** for a Gateway built before this close
+  (Option B, orchestrator decision): `1008 "protocol version mismatch"` stays a
+  retryable transport failure, every fixture now models the close a shipped
+  Gateway actually sends (4006 carrying the Gateway's own protocol range), and
+  the Gateway README, `connection-resilience.md` and the iOS contract state that
+  a Mac must run an F-3 Gateway before the typed close protects it. (2) A
+  background profile's non-retryable stop keeps its message on the pool entry
+  (`stopReason(for:)`), publishes it with the state, and the device detail reads
+  it for any profile via `AppModel.dashboardConnectionStopReason(for:)`. (3) A
+  protocol/identity mismatch on the LAN lane is reported as its own reason
+  instead of `lan_unreachable`. (4) The terminal client maps close 4006 to a
+  non-retryable `protocol_mismatch` naming the stale side instead of showing the
+  raw JSON reason.
+- Changes: `packages/gateway/src/version.ts` now owns
+  `PROTOCOL_MISMATCH_CLOSE_CODE` (the transport and the terminal client both read
+  it; `server.ts` cannot be imported from a client process),
+  `src/client/gateway-client.ts`, `DashboardGatewayConnectionPool.swift`,
+  `AppModel.swift`, `ConnectionSettingsView.swift`, `GatewayClient.swift`,
+  `GatewayProtocolContract.swift`, the owning tests, the three docs.
+- Evidence: `npx vitest run src/transport/server-http-lifecycle.integration.test.ts`
+  **21/21**, `npx vitest run src/client/gateway-client.test.ts` **5/5**; merge
+  gate on this branch (up to date with `hardening/integration` `adb0887b6`):
+  six-file transport set **135/135** in 15.7 s, `runtime-registry.integration.test.ts`
+  **245/245** in 72.4 s, `npx tsc --noEmit -p .` clean. iOS (lane `F3`): three
+  suites **177/177** (`20260929T102047Z-run.Yl0vZd`) plus `GatewayClientLanLaneTests`
+  **18/18** (`20260929T102149Z-run.HEP2Er`); reverting only the LAN change makes
+  the new LAN test fail (`.lanUnreachable` vs `.protocolMismatch`), so it is not
+  vacuous, and the narrowed range-message assertion re-ran
+  `GatewayClientTransportTests` **61/61**. `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- For the next agent: the Option B residual is real — a phone whose Mac still
+  runs a pre-F-3 Gateway keeps retrying the mismatch until that Mac is updated,
+  and R-2 installs both sides; the close code now lives in
+  `packages/gateway/src/version.ts`.

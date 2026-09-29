@@ -48,7 +48,12 @@ promotion and rollback treat that rejected external pointer as bounded history
 and use the validated signed bundle as their recovery authority; they never
 require the incompatible payload to become admissible again. Do not widen the
 advertised minimum or allow a mixed v5/v6 pair merely to bypass that handoff.
-Ordinary same-major updates continue through the owned Gateway update flow.
+Ordinary same-major updates continue through the owned Gateway update flow. A
+Gateway built before the typed protocol-mismatch close (F-3) still refuses an
+unspeakable hello with `1008 "protocol version mismatch"` and no version range,
+and mobile clients treat that as a retryable transport failure: every Mac must
+run a Gateway that sends the typed close before the phone can stop retrying it
+and name the build to update.
 
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
 app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
@@ -728,10 +733,14 @@ ownership, diagnostics, qualification commands, and remaining platform limits.
 For failure-boundary interpretation, evidence collection, and regression
 expectations, see [connection resilience and diagnosis](docs/connection-resilience.md).
 
-A second, TLS-only listener can serve the Mac's private LAN address, so a phone
-at home does not depend on Tailscale's path (E-3a). It is off unless
-`--lan-endpoint on` or `TRON_GATEWAY_LAN_ENDPOINT=on` enables it (E-3d decides
-the release default; the setting stays the kill switch). It binds only an
+A second, TLS-only listener serves the Mac's private LAN address, so a phone
+at home does not depend on Tailscale's path (E-3a). It is on by default (E-3d)
+for a Gateway that is not bound to loopback; a loopback bind (`127.0.0.0/8`,
+`::1`, `localhost`) keeps one loopback listener like the developer default and
+needs `--lan-endpoint on` to serve the lane. `--lan-endpoint off` or
+`TRON_GATEWAY_LAN_ENDPOINT=off` is the kill switch for a Mac or a network where
+the lane misbehaves, and `on` overrides a loopback default the same way. It
+binds only an
 RFC 1918 or IPv6 ULA address the Mac actually has — never a wildcard, never
 link-local, never Tailscale's own ranges — on the main listener's port, rebinds
 when the preferred address changes, and disables itself when the Mac has none.
@@ -749,6 +758,19 @@ accepted connection's `http.upgrade` record names the leg it arrived on
 (`transport=lan`, `tailscale` or `primary`), and each bind, rebind or disable
 writes one `lan.listener` record with its state, address family and port but not
 the address ([observability](docs/observability.md)).
+
+The Mac-supervised Gateway can take neither spelling in its own arguments: its
+LaunchAgent program arguments and environment are the ownership contract the
+wrapper checks before registration and against the running process
+(`ExistingInstallDetector`, `StableGatewayProvenance` in the Mac app). Its kill
+switch is the launchd session's environment, which the launcher inherits and
+passes on unchanged (`packages/mac-app/scripts/tron-gateway-launcher.c`):
+`launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off`, then a Gateway restart the
+user performs; `launchctl unsetenv TRON_GATEWAY_LAN_ENDPOINT` hands the default
+back. The variable applies from the next Gateway start, and one
+`lan.listener state=disabled reason=setting_off` record is the evidence that it
+took effect. That route has not been proved end to end on an installed release
+yet.
 
 A paired device learns the lane on the two channels it already owns (E-3b): the
 `POST /v1/pair` response and every `hello` answer carry `lanEndpoints` —
@@ -1141,7 +1163,13 @@ watching it. The transport also counts the recipients of every snapshot frame it
 is handed, and a projection no ready socket could receive is recorded as
 unaudienced and warns (`UNAUDIENCED_SNAPSHOT_WARNING`) rather than passing as an
 ordinary build. A client that subscribes later receives its snapshot through the
-ordinary open and synchronization path. Streaming progress republishes the cumulative live message, so
+ordinary open and synchronization path. Streaming progress follows the same
+rule: without a subscriber the slot projects and serializes no `session.progress`
+frame, neither the paced cumulative one nor message_end's finalized declaration;
+stream identity capture and the tool-invocation group latch those frames are
+built beside stay slot state and still run, and the first frame after a client
+subscribes carries the cumulative message its snapshot already restored.
+Streaming progress republishes the cumulative live message, so
 updates are throttled to at most one frame, carrying the newest message, per
 150 ms window while they keep arriving (the first update after a quiet window
 stays immediate, and a snapshot publishes any pending frame ahead of itself),
@@ -2369,6 +2397,15 @@ ownership rather than interpreting unavailable membership as an empty catalog.
    a stale “already synchronizing” conflict. Concurrent opens for the same connection and
    session are rejected before they can replace the owner; establishment and synchronization
    commit are request-and-token exact. Distinct sessions and connections remain independent.
+   A connection whose `hello` declared `clientRole: "mobile"` instead holds **one mobile
+   presentation**: a newer `session.open` retires every other session's synchronization and
+   subscription on that connection, synchronized or not, so several answers are never mounted
+   on one mobile connection at once and only the newest one can synchronize — an earlier
+   answer's `syncToken` is refused with `conflict` (the phone replaces its mounted chat and
+   cancels the page it stopped waiting for, it does not keep two). A technical client on its
+   own connection keeps independent subscriptions.
+   `sync-protocol.integration.test.ts` covers the retiring mobile open and both sides of that
+   boundary.
 5. Reconnect/open returns complete current runtime state plus a bounded canonical
    transcript tail, not durable missed-event replay; older transcript pages remain
    available through branch-stable anchors.
@@ -2697,9 +2734,14 @@ cannot hold the catalog, and it takes the same per-host profile lock.
     sending socket when it is spent — until the receiving socket drains — so a
     queued pong waits behind the data in flight on the Gateway's side of the
     link. The workload keeps `bandwidthInFlight` (default 6) full bounded
-    transcript pages in flight at once, each on its own session (the Gateway
-    admits one `session.open` per session per connection), and reports the peak
-    it held (`.max_in_flight`) and the load that peak asked the Gateway to send,
+    transcript pages in flight at once, each on its own session, as a phone
+    switching chats faster than the capped link can deliver them: a mobile
+    connection holds one presentation, so the newest `session.open` retires the
+    page before it and only that mount synchronizes — every earlier page is
+    abandoned with the `cancel` frame the phone sends for a read it stopped
+    waiting for, and its bytes are still the load this connection carried. The
+    leg reports the peak it held (`.max_in_flight`) and the load that peak asked
+    the Gateway to send,
     in the decoder's bytes (`.offered_in_flight_bytes` — the unit the Gateway's
     own 8 MiB outbound queue is bounded in) and in wire bytes
     (`.offered_in_flight_wire_bytes`). A leg is rejected unless it filled at

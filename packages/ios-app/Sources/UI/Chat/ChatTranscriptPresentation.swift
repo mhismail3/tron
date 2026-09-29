@@ -1616,6 +1616,107 @@ struct ChatThinkingRun: Hashable, Identifiable, Sendable {
     let segments: [ChatThinkingSegment]
 }
 
+/// The compact thinking trace's own content, resolved by identity from the
+/// install that renders it. One value serves the row that shows the trace and
+/// the detail sheet that outlives it, so both follow the same source.
+struct ChatThinkingTraceContent: Hashable, Sendable {
+    let inline: MarkdownPresentation.Inline
+    /// Whether the trace is still arriving. A sheet opened on a streaming trace
+    /// follows its tail; a completed trace rests at its beginning.
+    let streaming: Bool
+
+    init(segments: [ChatThinkingSegment], preparedText: ChatTextPreparationSnapshot, streaming: Bool) {
+        inline = Self.inline(of: segments, preparedText: preparedText)
+        self.streaming = streaming
+    }
+
+    /// The identity a row presents and a sheet resolves.
+    static func identity(of segments: [ChatThinkingSegment]) -> String {
+        "thinking-run:\(segments.first?.id ?? "empty")"
+    }
+
+    /// The trace's rendered content, assembled from the prepared segments the row
+    /// itself renders from. Explicitly paged history can exceed the
+    /// asynchronously warmed tail, so lazily realized older thinking keeps the
+    /// same exact Markdown semantics through the bounded cold-parser fallback.
+    static func inline(
+        of segments: [ChatThinkingSegment],
+        preparedText: ChatTextPreparationSnapshot
+    ) -> MarkdownPresentation.Inline {
+        let source = segments.map(\.text).joined(separator: "\n")
+        var attributed = AttributedString()
+        var allPrepared = true
+        for (index, segment) in segments.enumerated() {
+            if index > 0 { attributed += AttributedString("\n") }
+            guard let prepared = preparedText.thinkingInline(
+                identity: segment.id,
+                source: segment.text
+            ), let value = prepared.attributedString else {
+                allPrepared = false
+                break
+            }
+            attributed += value
+        }
+        if allPrepared {
+            return MarkdownPresentation.Inline(source: source, attributedString: attributed)
+        }
+        return MarkdownPresentation.Inline(source: source, reflowSoftLineBreaks: false)
+    }
+}
+
+/// Resolves the detail content a transcript install publishes for the identity a
+/// row presented. The main transcript and a read-only child transcript resolve
+/// their open details the same way, each from the projection that owns it.
+enum ChatTranscriptDetailResolution {
+    /// The thinking run an open trace detail follows, with the item that renders
+    /// it (the item owns the prepared text the trace is assembled from) and
+    /// whether that row is still streaming. A canonical transcript row renders
+    /// settled content; only a live message presentation streams.
+    static func thinkingTrace(
+        in items: ChatTranscriptItems,
+        identity: String
+    ) -> (item: ChatTranscriptRenderItem, segments: [ChatThinkingSegment], streaming: Bool)? {
+        for item in items {
+            let parts: [ChatMessagePart]
+            let streaming: Bool
+            switch item {
+            case .message(let message):
+                parts = message.parts
+                streaming = message.streaming
+            case .transcript(let transcript):
+                parts = ChatTranscriptPresentation.messageParts(in: transcript)
+                streaming = false
+            case .toolRun, .notification:
+                continue
+            }
+            for part in parts {
+                guard case .thinking(let run) = part,
+                      ChatThinkingTraceContent.identity(of: run.segments) == identity else { continue }
+                return (item, run.segments, streaming)
+            }
+        }
+        return nil
+    }
+
+    /// The presentation an open event detail follows.
+    static func notificationDetail(
+        in items: ChatTranscriptItems,
+        eventID: String
+    ) -> ChatNotificationPresentation? {
+        for item in items {
+            if case .notification(let presentation) = item, presentation.id == eventID {
+                return presentation
+            }
+            if case .transcript(let transcript) = item,
+               let presentation = ChatNotificationPresentation.canonical(transcript, globalOrdinal: nil),
+               presentation.id == eventID {
+                return presentation
+            }
+        }
+        return nil
+    }
+}
+
 enum ChatTranscriptRowIdentity {
     static func assistantMessage(_ item: TranscriptItem) -> String {
         item.role == .assistant ? item.presentationId : item.id

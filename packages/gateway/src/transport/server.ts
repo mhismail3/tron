@@ -17,7 +17,7 @@ import type { GatewayLogger, LogLevel } from "./logger.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { formatHostEvidence, formatStallEvidence, formatResourceSample, ResourceSampler, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler } from "./stall-diagnostics.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
-import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
+import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { bytes, RequestSpan, runInRequestSpan, stage, wait } from "./request-span.js";
@@ -721,6 +721,14 @@ interface UpgradeEnding {
   /** Overrides the level rule for an ending the Gateway expects and clients
    * retry: readiness and shutdown refusals are info, not a warning. */
   level?: LogLevel;
+}
+
+/** The wire close reason for a protocol mismatch: the version range is the only
+ * fact that tells the peer whether its own app or this Gateway is the stale
+ * build, and a close code alone cannot carry it (F-3). Fits the WebSocket
+ * control-frame reason bound of 123 bytes. */
+function protocolMismatchCloseReason(): string {
+  return JSON.stringify({ code: "protocol_mismatch", gatewayProtocol: PROTOCOL_VERSION, minProtocol: MIN_PROTOCOL_VERSION });
 }
 
 /** One episode of inbound silence, from its last frame to the next one. */
@@ -2185,7 +2193,8 @@ export class GatewayServer {
         this.finishUpgrade(connection.upgrade, "rejected", "hello",
           `protocol version mismatch: peer ${protocol}, Gateway accepts ${MIN_PROTOCOL_VERSION}-${PROTOCOL_VERSION}`,
           { reason: "protocol_mismatch", peerProtocolVersion: protocol });
-        return this.closeFailedConnection(connection, 1008, "protocol version mismatch");
+        return this.closeFailedConnection(
+          connection, PROTOCOL_MISMATCH_CLOSE_CODE, "protocol version mismatch", undefined, protocolMismatchCloseReason());
       }
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
@@ -3165,7 +3174,14 @@ export class GatewayServer {
     this.options.auth.detachClient(connection.id);
   }
 
-  private closeFailedConnection(connection: Connection, code: number, reason: string, ending?: UpgradeEnding): void {
+  private closeFailedConnection(
+    connection: Connection,
+    code: number,
+    reason: string,
+    ending?: UpgradeEnding,
+    /** The wire close reason, when the peer decodes it rather than the log. */
+    closeReason?: string,
+  ): void {
     if (connection.closeInitiated) return;
     connection.closeInitiated = true;
     // The Gateway is ending this socket, so an attempt that never reached hello
@@ -3182,7 +3198,7 @@ export class GatewayServer {
       if (connection.socket.readyState !== WebSocket.CLOSED) connection.socket.terminate();
     }, 1_000);
     connection.closeDeadline.unref();
-    connection.socket.close(code, reason);
+    connection.socket.close(code, closeReason ?? reason);
   }
 
   /** Any inbound frame proves liveness, and it closes a logged silence episode. */

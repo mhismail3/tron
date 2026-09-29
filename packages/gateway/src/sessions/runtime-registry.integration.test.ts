@@ -93,17 +93,23 @@ function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
  * pass is up to 750 ms away. A test that asserts on an artifact must run a pass
  * of its own instead of treating the awaited call as a barrier, so wait out any
  * in-flight pass and then await one this call starts; `settled` names the state
- * that pass must publish (T-1). */
+ * that pass must publish (T-1). Waiting out a running pass is not bounded by wall
+ * clock: a pass walks a production-shaped root of thousands of directory entries
+ * and a loaded host stretches that past any fixed guess, which reported a pass
+ * that was merely slow as one that would never settle (T-6). The deadline below
+ * bounds only the retries this helper starts, and the test's own timeout reports
+ * a pass that never ends. */
 async function discoverExtensionArtifactsUntil(registry: RuntimeRegistry, settled: () => boolean = () => true): Promise<void> {
   const state = registry as unknown as { artifactDiscoveryInFlight: boolean };
-  const deadline = Date.now() + 5_000;
+  // The budget counts only this helper's own passes: time spent waiting out an
+  // interval pass does not spend it.
+  let ownPassMs = 0;
   do {
-    while (state.artifactDiscoveryInFlight) {
-      if (Date.now() >= deadline) throw new Error("extension artifact discovery stayed in flight");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    while (state.artifactDiscoveryInFlight) await new Promise((resolve) => setTimeout(resolve, 10));
+    const startedAt = Date.now();
     await (registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
-  } while (!settled() && Date.now() < deadline);
+    ownPassMs += Date.now() - startedAt + 10;
+  } while (!settled() && ownPassMs < 5_000);
   if (!settled()) throw new Error("extension artifact discovery did not settle");
 }
 
@@ -6656,7 +6662,11 @@ export default function (pi) {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     const content = "Report line 🦌\\n".repeat(3_000);
     const path = join(cwd, "report.txt");
-    const faux = fauxProvider({ provider: "tron-large-streamed-write", tokensPerSecond: 100_000 });
+    // The write's 51 KB of arguments are what the live frame has to survive, so
+    // they stay; the chunk size only keeps the provider's per-chunk timer yield
+    // from spending seconds of wall clock (3,188 chunks at 100k tokens/s) on a
+    // case that asserts nothing about pacing.
+    const faux = fauxProvider({ provider: "tron-large-streamed-write", tokensPerSecond: 100_000, tokenSize: { min: 32, max: 32 } });
     faux.setResponses([
       fauxAssistantMessage([
         { type: "text", text: "Here is the summary before the report." },
@@ -6684,6 +6694,8 @@ export default function (pi) {
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     currentSlot = slot;
+    // A test that reads published progress frames has to be a subscriber (G-3a).
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("Write a report");
@@ -6816,6 +6828,70 @@ export default function (pi) {
       .map((part) => part.type === "text" ? part.text : "")
       .join("");
     expect(transcriptText).toContain(text.trimEnd());
+  });
+
+  // G-3a: the progress frame is the whole cumulative streaming message
+  // re-projected and serialized on every flush window, so an unsubscribed
+  // session must pay for none of it. The subscriber record is the slot's whole
+  // audience fact, the same one `publishSnapshot` reads.
+  it("projects no streaming progress for a session with no subscriber and resumes it on subscribe", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-streaming-unwatched-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    // Deterministic 1-token chunks at 100 tokens/second: the first half streams
+    // with no subscriber, the second with one, and both cross several 150 ms
+    // flush windows.
+    const unwatched = "unwatched chunk ".repeat(20);
+    const watched = "watched chunk ".repeat(20);
+    const faux = fauxProvider({ provider: "tron-streaming-unwatched", tokensPerSecond: 100, tokenSize: { min: 1, max: 1 } });
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    faux.setResponses([fauxAssistantMessage(unwatched), fauxAssistantMessage(watched)]);
+    const events: Array<{ topic: string; payload: { data?: any } }> = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels,
+      trust: new TrustService(agentDir),
+      broadcast: (_sessionId, topic, payload) => events.push({ topic, payload: payload as { data?: any } }),
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const unwatchedPrompt = slot.prompt("stream unobserved");
+    await waitUntil(() => slot.snapshot().streaming !== undefined);
+    await unwatchedPrompt;
+    await waitUntil(() => !slot.isBusy);
+    // The response streamed to completion (its canonical message is settled),
+    // so the absent frames are the rule and not a stream that never ran.
+    expect(slot.snapshot().transcript.some((item) => item.kind === "message"
+      && item.role === "assistant" && item.content.some((part) => part.type === "text" && part.text.includes(unwatched.trimEnd())))).toBe(true);
+    expect(events.filter((event) => event.topic === "session.progress")).toHaveLength(0);
+
+    subscribeAudience(registry, slot.id);
+    await slot.prompt("stream observed");
+    await waitUntil(() => !slot.isBusy);
+    const frames = events.filter((event) => event.topic === "session.progress");
+    expect(frames.length).toBeGreaterThanOrEqual(2);
+    const lastFrame = frames.at(-1)!.payload.data.message;
+    expect(lastFrame.content
+      .filter((part: any) => part.type === "text")
+      .map((part: any) => part.text)
+      .join("").trimEnd()).toBe(watched.trimEnd());
+    // Nothing from the unobserved stream leaks into the observed one.
+    expect(JSON.stringify(frames)).not.toContain("unwatched chunk");
   });
 
   it.each(["message_start", "message_end"] as const)(

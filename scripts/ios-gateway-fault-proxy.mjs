@@ -96,11 +96,18 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           return;
         }
         if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
+        if (next.http !== undefined && (next.mode !== "blackhole" || typeof next.http !== "boolean")) throw new Error("invalid http blackhole");
         if (next.mode === "reject-upgrade" && ![401, 403, 503].includes(next.status)) throw new Error("invalid rejection status");
         if (next.mode === "drop-prompt-response" && (typeof next.commandId !== "string" || !/^[A-Za-z0-9._:-]{8,160}$/.test(next.commandId))) throw new Error("invalid command identity");
         if (intercepted && next.mode !== "pass") throw new Error("reset the owned fault before arming another");
         policy = { mode: next.mode, ...(next.commandId ? { commandId: next.commandId } : {}),
-          ...(next.mode === "reject-upgrade" ? { status: next.status } : {}) };
+          ...(next.mode === "reject-upgrade" ? { status: next.status } : {}),
+          // A blackhole that covers plain HTTP as well as WebSocket frames lets
+          // a case prove a route came over the other lane: the proxied leg
+          // cannot answer it at all, so a success names the route. Off unless
+          // asked, because the other legs keep reading their fixture through
+          // this proxy while a socket is blackholed.
+          ...(next.http === true ? { http: true } : {}) };
         if (next.mode === "pass") {
           intercepted = false;
           for (const bridge of bridges) bridge.release();
@@ -111,6 +118,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     }
     // Pairing/health/assets use the exact same owned upstream, never a target
     // URL supplied by the HTTP client. The fixture exposes no general proxy.
+    if (policy.mode === "blackhole" && policy.http) { request.destroy(); return; }
     try { await checkTarget(); } catch { answer(response, 503, { error: "owned fixture unavailable" }); return; }
     if (closing || response.destroyed || request.aborted) return;
     const upstream = upstreamRequest({ host: "127.0.0.1", port: targetPort, method: request.method,
@@ -331,6 +339,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
         TRON_MACHINE_GROUP_ID: "tron-ios-e2e",
         TRON_GATEWAY_HOST: "127.0.0.1",
         TRON_GATEWAY_PORT: String(targetPort),
+        // A restarted fixture Gateway keeps the lane the caller asked for, or
+        // the phone would re-learn an advertisement this run dials.
+        ...(process.env.TRON_E2E_LAN_ENDPOINT ? { TRON_GATEWAY_LAN_ENDPOINT: process.env.TRON_E2E_LAN_ENDPOINT } : {}),
       },
       stdio: "ignore",
     });

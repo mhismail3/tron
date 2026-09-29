@@ -24,6 +24,18 @@ enum ChatEntranceGrowthPolicy {
     /// row's layout bounds. The entrance reveal owns only vertical admission;
     /// this transparent gutter keeps those effects out of its clip boundary.
     static let effectOverflow: CGFloat = 24
+    /// A settled row's clip covers this far past its own bounds in every
+    /// direction. The clip node is present at every progress — removing it at
+    /// admission switched the row's view structure — so at progress 1 it must not
+    /// trim any surface a row draws past its animated frame. The largest is an
+    /// inline display card's expansion: its host animates from the collapsed pill
+    /// to the card while the card's expanded layer keeps its natural height, so
+    /// the card overhangs its own frame by up to its bounded viewport plus its
+    /// header. Liquid Glass press expansion, shadows and a prompt's selection
+    /// chrome fit inside that too.
+    static let settledOverflow: CGFloat = DisplayInlineLayoutPolicy.maximumViewportHeight
+        + DisplayInlineLayoutPolicy.controlTouchTarget
+        + effectOverflow
     /// Height interpolation is a layout optimization for compact arrivals, not
     /// a transcript admission requirement. Keeping very tall rows at their
     /// natural height prevents a single large prompt or Markdown response from
@@ -45,13 +57,19 @@ enum ChatEntranceGrowthPolicy {
         return min(natural, max(1, natural * normalizedProgress(progress)))
     }
 
-    static func requiresClip(progress: CGFloat) -> Bool {
-        normalizedProgress(progress) < 1
-    }
-
+    /// The admission clip: vertically inset while the row is still being
+    /// admitted, and past every edge of the row at progress 1. The clip is
+    /// applied at every progress, because removing the node at admission is what
+    /// switched the row's view structure and discarded the state below it; at
+    /// progress 1 it constrains neither the row's shadows nor its press region.
     static func clipRect(in bounds: CGRect, progress: CGFloat) -> CGRect {
-        let hiddenVerticalOverflow = effectOverflow * (1 - normalizedProgress(progress))
-        return bounds.insetBy(dx: 0, dy: hiddenVerticalOverflow)
+        let normalized = normalizedProgress(progress)
+        guard normalized < 1 else {
+            return bounds.insetBy(dx: -settledOverflow, dy: -settledOverflow)
+        }
+        // Horizontal overflow stays available to native text and glass effects
+        // throughout incremental growth; only the vertical admission is clipped.
+        return bounds.insetBy(dx: -effectOverflow, dy: effectOverflow * (1 - normalized))
     }
 }
 
@@ -92,6 +110,11 @@ private struct ChatIncrementalContentMeasurement<Identity: Equatable & Sendable>
 /// Canonical text and controls are installed immediately at natural size, then
 /// clipped by one local height while ordinary additions expand. Width changes,
 /// replacement/shrink, covered surfaces, and large backlogs install atomically.
+///
+/// A settled row owns no height here at all: pinning one would lay the row out at
+/// a stale height whenever its width, Dynamic Type or document changed, and would
+/// write state on every mount for nothing. The pinned height is released when a
+/// stream ends, after any growth animation still in flight completes.
 struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content: View>: View {
     let identity: Identity
     let streaming: Bool
@@ -102,6 +125,7 @@ struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content:
     @State private var presentedHeight: CGFloat?
     @State private var measuredIdentity: Identity?
     @State private var measuredWidth: CGFloat?
+    @State private var isAnimatingGrowth = false
 
     init(
         identity: Identity,
@@ -128,6 +152,12 @@ struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content:
             }
             .frame(height: presentedHeight, alignment: .top)
             .chatIncrementalVerticalClip()
+            .onChange(of: streaming) { _, isStreaming in
+                if !isStreaming { releaseSettledHeight() }
+            }
+            .onChange(of: isAnimatingGrowth) { _, isAnimating in
+                if !isAnimating { releaseSettledHeight() }
+            }
     }
 
     @MainActor
@@ -147,17 +177,39 @@ struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content:
         )
         measuredIdentity = measurement.identity
         measuredWidth = measurement.width
+        guard streaming || isAnimatingGrowth else {
+            releaseSettledHeight()
+            return
+        }
         if animates {
-            var transaction = Transaction(animation: .smooth(
-                duration: ChatIncrementalContentGrowthPolicy.duration
-            ))
-            transaction.admitsChatIncrementalGrowthAnimation = true
-            withTransaction(transaction) { presentedHeight = measurement.height }
+            let animation = Animation.smooth(duration: ChatIncrementalContentGrowthPolicy.duration)
+            isAnimatingGrowth = true
+            withAnimation(animation, completionCriteria: .logicallyComplete) {
+                // The growth marker travels with the height write itself:
+                // `chatStableTranscriptUpdates` reads it to keep a projection
+                // change in the same update from erasing this animation.
+                var transaction = Transaction(animation: animation)
+                transaction.admitsChatIncrementalGrowthAnimation = true
+                withTransaction(transaction) { presentedHeight = measurement.height }
+            } completion: {
+                isAnimatingGrowth = false
+            }
         } else {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) { presentedHeight = measurement.height }
         }
+    }
+
+    /// A settled row keeps no pinned height. `onChange` re-enters through a fresh
+    /// body, so this reads the current `streaming` and animation state rather
+    /// than the values captured when an animation started.
+    @MainActor
+    private func releaseSettledHeight() {
+        guard !streaming, !isAnimatingGrowth, presentedHeight != nil else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { presentedHeight = nil }
     }
 }
 
@@ -256,21 +308,12 @@ private extension View {
             .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
     }
 
-    /// Keeps the measured-height entrance vertically bounded while preserving
-    /// the natural horizontal shadow and press-morph region. Vertical overflow
-    /// joins continuously as the row reaches its full admitted height.
-    @ViewBuilder
+    /// Clips only the animated vertical admission. The clip node is present at
+    /// every progress — a settled row's clip covers everything it can draw — so
+    /// admission never switches the row's view structure and the transcript chip
+    /// keeps its unconstrained Liquid Glass press-and-drag region.
     func chatEntranceGrowthClip(progress: CGFloat) -> some View {
-        if ChatEntranceGrowthPolicy.requiresClip(progress: progress) {
-            padding(ChatEntranceGrowthPolicy.effectOverflow)
-                .clipShape(ChatEntranceGrowthClipShape(progress: progress))
-                .padding(-ChatEntranceGrowthPolicy.effectOverflow)
-        } else {
-            // Once admission settles, remove the clipping node entirely. The
-            // transcript chip then has its unconstrained native Liquid Glass
-            // press-and-drag region.
-            self
-        }
+        clipShape(ChatEntranceGrowthClipShape(progress: progress))
     }
 }
 
@@ -504,6 +547,11 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
 struct ChatTranscriptRenderRow: View, Equatable {
     let item: ChatTranscriptRenderItem
     let preparedText: ChatTextPreparationSnapshot
+    /// The inline display card's disclosure phase, or the default phase for a
+    /// row without a display. It is part of the row's identity because the row is
+    /// `.equatable()`: an observable read below that boundary is skipped when the
+    /// row's inputs are unchanged.
+    let inlineDisclosurePhase: DisplayInlineDisclosureState
     let installationTag: ChatTranscriptProjectionTag
     let toolPayloadRevision: ChatToolPayloadRevision
     let resolveToolDetails: ([String]) -> [ChatToolPresentation]?
@@ -517,6 +565,7 @@ struct ChatTranscriptRenderRow: View, Equatable {
                 == rhs.preparedText.hiddenThinkingLabel else { return false }
         guard case .toolRun = lhs.item else { return true }
         return lhs.toolPayloadRevision == rhs.toolPayloadRevision
+            && lhs.inlineDisclosurePhase == rhs.inlineDisclosurePhase
     }
 
     @ViewBuilder var body: some View {
@@ -542,7 +591,8 @@ struct ChatTranscriptRenderRow: View, Equatable {
                 run: run,
                 installationTag: installationTag,
                 resolveDetails: { callIDs, _ in resolveToolDetails(callIDs) },
-                recordChip: recordToolChip
+                recordChip: recordToolChip,
+                inlineDisclosurePhase: inlineDisclosurePhase
             )
             .frame(maxWidth: .infinity, alignment: .leading)
         case .notification(let notification):

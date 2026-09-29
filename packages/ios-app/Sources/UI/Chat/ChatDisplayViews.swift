@@ -63,6 +63,20 @@ enum ToolDisplayActivation {
 
 typealias DisplayPresentationHandler = @MainActor @Sendable (DisplayPresentationCommand) -> Void
 
+/// The transcript's presentation store, which owns the inline display cards'
+/// disclosure phases so a lazily mounted row cannot lose them. The rows receive
+/// it from the transcript's own row installation.
+private struct ChatInlineDisclosureOwnerKey: EnvironmentKey {
+    static let defaultValue: ChatTranscriptPresentationStore? = nil
+}
+
+extension EnvironmentValues {
+    var chatInlineDisclosureOwner: ChatTranscriptPresentationStore? {
+        get { self[ChatInlineDisclosureOwnerKey.self] }
+        set { self[ChatInlineDisclosureOwnerKey.self] = newValue }
+    }
+}
+
 private struct DisplayPresentationHandlerKey: EnvironmentKey {
     static let defaultValue: DisplayPresentationHandler? = nil
 }
@@ -148,18 +162,21 @@ struct DisplayInlineDisclosureState: Equatable, Sendable {
 
 struct DisplayToolView: View {
     let tool: ChatToolDescriptor
+    /// The card's disclosure phase, read from the transcript's presentation store
+    /// by the row installation. The transcript's rows are `.equatable()`, so the
+    /// phase the card renders must arrive as an input.
+    let disclosure: DisplayInlineDisclosureState
     let onOpenTechnicalDetails: () -> Void
 
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.displayPresentationHandler) private var present
+    @Environment(\.chatInlineDisclosureOwner) private var disclosureOwner
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var disclosure = DisplayInlineDisclosureState()
-    @State private var expandedHeight: CGFloat = 0
-    @State private var pillHeight: CGFloat = 0
 
     private var display: DisplayProjection? { tool.display }
+    private var disclosureIdentity: String? { display?.disclosureIdentity }
     private var effectiveSurface: DisplaySurface {
         display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? tool.requestedDisplaySurface ?? .sheet
@@ -195,16 +212,17 @@ struct DisplayToolView: View {
 
     @ViewBuilder
     private func inlineDisclosureHost(_ display: DisplayProjection) -> some View {
-        ZStack(alignment: .topLeading) {
+        // Both layers are measured in the pass that places them, and only
+        // `progress` (1 = expanded) is animated, so the row's height is exact on
+        // its first frame and the collapse sequence is the fade followed by the
+        // contract.
+        DisclosureLayout(progress: disclosure.rendersInlineContainer ? 1 : 0) {
             inlineExpandedSurface(display)
                 .fixedSize(horizontal: false, vertical: true)
                 .opacity(disclosure.inlineOpacity)
                 .scaleEffect(disclosure.isCollapsed ? 0.985 : 1, anchor: .topLeading)
                 .allowsHitTesting(disclosure.phase == .expanded)
                 .accessibilityHidden(disclosure.phase != .expanded)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                    recordDisclosureHeight($0, expanded: true)
-                }
 
             displayPill
                 .fixedSize(horizontal: false, vertical: true)
@@ -212,11 +230,7 @@ struct DisplayToolView: View {
                 .scaleEffect(disclosure.isCollapsed ? 1 : 0.985, anchor: .topLeading)
                 .allowsHitTesting(disclosure.phase == .collapsed)
                 .accessibilityHidden(disclosure.phase != .collapsed)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                    recordDisclosureHeight($0, expanded: false)
-                }
         }
-        .frame(height: disclosureHeight, alignment: .top)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contextMenu {
             Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
@@ -239,22 +253,6 @@ struct DisplayToolView: View {
                 onCollapse: collapseInline,
                 onOpenSheet: inlineSheetAction(for: display)
             )
-        }
-    }
-
-    private var disclosureHeight: CGFloat? {
-        let measured = disclosure.rendersInlineContainer ? expandedHeight : pillHeight
-        return measured > 0 ? measured : nil
-    }
-
-    private func recordDisclosureHeight(_ height: CGFloat, expanded: Bool) {
-        guard height.isFinite, height > 0 else { return }
-        let current = expanded ? expandedHeight : pillHeight
-        guard abs(current - height) > 0.5 else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            if expanded { expandedHeight = height } else { pillHeight = height }
         }
     }
 
@@ -366,35 +364,46 @@ struct DisplayToolView: View {
     }
 
     private func collapseInline() {
-        guard let transition = disclosure.proposed(.collapse) else { return }
+        guard let identity = disclosureIdentity,
+              let transition = disclosureOwner?.proposedInlineDisclosure(
+                  identity: identity, direction: .collapse
+              ) else { return }
         // Both endpoints remain in one measured host. First fade the card and
         // its native shadow completely while preserving row height; only then
         // contract the invisible card region into the already-visible pill.
         withAnimation(disclosureFadeAnimation, completionCriteria: .logicallyComplete) {
-            guard disclosure.begin(transition) else { return }
+            disclosureOwner?.beginInlineDisclosure(identity: identity, transition: transition)
         } completion: {
-            guard disclosure.generation == transition.generation else { return }
+            guard disclosureOwner?.inlineDisclosurePhase(for: identity).generation
+                    == transition.generation else { return }
             withAnimation(disclosureLayoutAnimation) {
-                _ = disclosure.complete(transition)
+                disclosureOwner?.completeInlineDisclosure(identity: identity, transition: transition)
             }
         }
     }
 
     private func expandInline() {
-        guard let transition = disclosure.proposed(.expand) else { return }
+        guard let identity = disclosureIdentity,
+              let transition = disclosureOwner?.proposedInlineDisclosure(
+                  identity: identity, direction: .expand
+              ) else { return }
         // Growth cannot paint across following rows, so expansion can resize and
         // crossfade in one transaction without any temporary clipping surface.
         withAnimation(disclosureLayoutAnimation) {
-            guard disclosure.begin(transition) else { return }
-            _ = disclosure.complete(transition)
+            guard disclosureOwner?.beginInlineDisclosure(
+                identity: identity, transition: transition
+            ) == true else { return }
+            disclosureOwner?.completeInlineDisclosure(identity: identity, transition: transition)
         }
     }
 
     private func settleDisclosureWithoutAnimation() {
-        guard !disclosure.permitsInteraction else { return }
+        guard let identity = disclosureIdentity else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
-        withTransaction(transaction) { disclosure.settleTransientPhase() }
+        withTransaction(transaction) {
+            disclosureOwner?.settleInlineDisclosure(identity: identity)
+        }
     }
 }
 
@@ -443,11 +452,117 @@ enum DisplayInlineLayoutPolicy {
         PendingPhotoRemoveLayoutPolicy.previewSide * imageChipScale
     }
 
-    static func openingViewportHeight(for kind: DisplayKind) -> CGFloat {
+    /// The height an inline card reserves before its artifact is prepared,
+    /// decided by the kind it will render rather than by whether the payload has
+    /// arrived. It is the viewport its own content occupies, so preparing cannot
+    /// resize the row: an inline PDF renders in its 320-point viewport, and the
+    /// inline image chip is one exact square. Textual artifacts fill a bounded
+    /// 180-point viewport or their measured height, which the retained prepared
+    /// document makes exact on a remount.
+    static func reservedViewportHeight(for kind: DisplayKind) -> CGFloat {
         switch kind {
-        case .image, .video, .audio, .pdf: 220
+        case .image: imageChipSide
+        case .pdf: maximumViewportHeight
         case .markdown, .text, .code, .html, .document, .webpage, .hls, .browserLive, .nativeLive: 180
+        case .video, .audio: 220
         }
+    }
+
+    /// The disclosure host's height between the collapsed pill and the expanded
+    /// card. Progress is clamped, so a stale phase value can never ask the host
+    /// for a height beyond either end.
+    static func disclosureHeight(pill: CGFloat, expanded: CGFloat, progress: CGFloat) -> CGFloat {
+        let clamped = progress.isFinite ? min(1, max(0, progress)) : 0
+        return pill + (expanded - pill) * clamped
+    }
+}
+
+/// The inline display card's disclosure host: the expanded card and the
+/// collapsed pill, both measured in the pass that places them. `progress`
+/// (1 = expanded) is the layout's one animated input, so the row's height is
+/// exact on its first frame and only the collapse or expand sequence
+/// interpolates it. The two layers keep their natural heights and share their
+/// top edge; the invisible one is already opacity 0, so the shrinking host
+/// never clips it.
+private struct DisclosureLayout: Layout, Animatable {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    struct Cache {
+        var width: CGFloat?
+        var expandedHeight: CGFloat?
+        var pillHeight: CGFloat?
+    }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        // Async card content and Dynamic Type change both heights; animating
+        // `progress` alone does not, so each pass re-measures on a real change.
+        cache = Cache()
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) -> CGSize {
+        let width = proposal.width ?? Self.naturalWidth(subviews)
+        let measured = measure(width: width, subviews: subviews, cache: &cache)
+        return CGSize(
+            width: width,
+            height: DisplayInlineLayoutPolicy.disclosureHeight(
+                pill: measured.pill,
+                expanded: measured.expanded,
+                progress: progress
+            )
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Cache
+    ) {
+        let measured = measure(width: bounds.width, subviews: subviews, cache: &cache)
+        for (index, subview) in subviews.enumerated() {
+            subview.place(
+                at: CGPoint(x: bounds.minX, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(
+                    width: bounds.width,
+                    height: index == 0 ? measured.expanded : measured.pill
+                )
+            )
+        }
+    }
+
+    private func measure(
+        width: CGFloat,
+        subviews: Subviews,
+        cache: inout Cache
+    ) -> (expanded: CGFloat, pill: CGFloat) {
+        if cache.width == width,
+           let expanded = cache.expandedHeight,
+           let pill = cache.pillHeight {
+            return (expanded, pill)
+        }
+        let measurement = ProposedViewSize(width: width, height: nil)
+        let expanded = subviews.first?.sizeThatFits(measurement).height ?? 0
+        let pill = subviews.count > 1 ? subviews[1].sizeThatFits(measurement).height : 0
+        cache.width = width
+        cache.expandedHeight = expanded
+        cache.pillHeight = pill
+        return (expanded, pill)
+    }
+
+    private static func naturalWidth(_ subviews: Subviews) -> CGFloat {
+        subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
     }
 }
 
@@ -622,6 +737,15 @@ private struct DisplayInlineContainer: View {
                             accessibilityLabel: "Collapse \(display.title)",
                             action: onCollapse
                         )
+                        #if HOSTED_TEST
+                        // The hosted journey collapses a real mounted card
+                        // through its own collapse action; a tap cannot be
+                        // injected into a SwiftUI button.
+                        .modifier(HostedToolActionProbeModifier(
+                            id: "display-collapse:\(display.disclosureIdentity)",
+                            action: onCollapse
+                        ))
+                        #endif
                     }
                 }
             }
@@ -635,7 +759,7 @@ private struct DisplayInlineContainer: View {
                     inlineContent
                 } else {
                     TronLoadingState(label: "Preparing display…", accent: .tronLavender)
-                        .frame(height: DisplayInlineLayoutPolicy.openingViewportHeight(for: display.kind))
+                        .frame(height: DisplayInlineLayoutPolicy.reservedViewportHeight(for: display.kind))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .top)
@@ -844,11 +968,12 @@ private struct DisplayTextArtifactView: View {
     let context: DisplayRenderContext
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var prepared: PreparedAttachmentFilePreview?
-    @State private var failed = false
-    @State private var leaseID = UUID()
-    @State private var loadGeneration = 0
     @State private var loadedIdentity: ChatMediaIdentity?
+    @State private var loadedDocument: PreparedAttachmentFilePreview?
+    @State private var failed = false
+    #if HOSTED_TEST
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+    #endif
 
     var body: some View {
         Group {
@@ -858,14 +983,29 @@ private struct DisplayTextArtifactView: View {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
                 TronLoadingState(label: "Preparing content…", accent: .tronBlue)
-                    .frame(height: context == .inline ? 180 : 320)
+                    .frame(height: context == .inline
+                        ? DisplayInlineLayoutPolicy.reservedViewportHeight(for: display.kind)
+                        : DisplayInlineLayoutPolicy.maximumViewportHeight)
             }
         }
         .task(id: PresentationActivityTaskID(
             source: mediaIdentity,
             presentationActive: presentationActivity.allowsPresentationPublication
         )) { await load() }
-        .onDisappear { cancelLoad() }
+    }
+
+    /// What this card shows: the document its own load published, or — only for
+    /// the first frame after a remount — the document the loader retained for
+    /// this exact identity. The mounted card owns its value, so the loader's
+    /// bounded store can evict the identity under it without sending the card
+    /// back to a placeholder that resizes the row.
+    private var prepared: PreparedAttachmentFilePreview? {
+        guard let identity = mediaIdentity else { return nil }
+        if loadedIdentity == identity, let loadedDocument { return loadedDocument }
+        return model.chatMedia.retainedInlineArtifact(
+            for: identity,
+            as: PreparedAttachmentFilePreview.self
+        )
     }
 
     @ViewBuilder
@@ -907,49 +1047,47 @@ private struct DisplayTextArtifactView: View {
         return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
     }
 
-    private func cancelLoad() {
-        guard let identity = mediaIdentity else { return }
-        model.chatMedia.cancelFilePreview(for: identity, leaseID: leaseID)
-    }
-
     private func load() async {
         // Covered or retired surfaces neither start nor publish this work.
         guard presentationActivity.allowsPresentationPublication else { return }
         guard let artifact = display.artifact, let identity = mediaIdentity else {
-            loadGeneration &+= 1
-            prepared = nil
             failed = true
-            loadedIdentity = nil
             return
         }
-        // A completed preparation for this exact source stays mounted; only a
-        // new source, a failed attempt, or interrupted work reloads.
-        if loadedIdentity == identity, prepared != nil { return }
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        prepared = nil
+        // The document this card already holds, or the loader's retained one for
+        // this identity, is the answer: a mounted card starts no second request.
+        if prepared != nil { return }
         failed = false
         do {
-            let payload = try await model.chatMedia.filePreviewPayload(for: identity, leaseID: leaseID)
-            let value = try await AttachmentFilePreviewPolicy.prepare(
-                data: payload.data,
-                name: artifact.name,
-                mimeType: payload.mimeType
-            )
-            guard generation == loadGeneration,
-                  !Task.isCancelled,
-                  presentationActivity.allowsPresentationPublication else { return }
-            prepared = value
+            let document = try await model.chatMedia.inlineArtifact(for: identity) { payload in
+                return try await AttachmentFilePreviewPolicy.prepare(
+                    data: payload.data,
+                    name: artifact.name,
+                    mimeType: artifact.mimeType
+                )
+            }
+            // A retired surface or a superseded identity publishes nothing.
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
             loadedIdentity = identity
+            loadedDocument = document
+            #if HOSTED_TEST
+            // The card's own render, which nothing else can observe for an
+            // artifact the loader deliberately does not retain.
+            hostedRecorder?.recorder?.recordInlineArtifactPublication(
+                id: artifact.id,
+                bytes: document.accountedBytes
+            )
+            #endif
         } catch is CancellationError {
-            // Interrupted work publishes nothing, so the next activation retries.
-            return
+            // Interrupted work publishes nothing, so the next activation asks
+            // again instead of keeping a placeholder forever.
         } catch {
-            guard generation == loadGeneration,
-                  !Task.isCancelled,
-                  presentationActivity.allowsPresentationPublication else { return }
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
             failed = true
-            loadedIdentity = nil
         }
     }
 }
@@ -975,16 +1113,25 @@ private struct DisplayDocumentSummary: View {
     }
 }
 
+/// Prepared generated HTML, retained by `ChatMediaLoader` for its exact
+/// artifact identity like any other inline display artifact.
+struct PreparedDisplayHTML: Sendable, ChatInlineArtifact {
+    let source: String
+
+    var accountedBytes: Int { source.utf8.count }
+}
+
 private struct DisplayHTMLArtifactView: View {
     let sessionID: String?
     let display: DisplayProjection
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var html: String?
-    @State private var failed = false
-    @State private var leaseID = UUID()
-    @State private var loadGeneration = 0
     @State private var loadedIdentity: ChatMediaIdentity?
+    @State private var loadedHTML: String?
+    @State private var failed = false
+    #if HOSTED_TEST
+    @Environment(\.chatHostedRecorder) private var hostedRecorder
+    #endif
 
     var body: some View {
         Group {
@@ -1000,7 +1147,6 @@ private struct DisplayHTMLArtifactView: View {
             source: mediaIdentity,
             presentationActive: presentationActivity.allowsPresentationPublication
         )) { await load() }
-        .onDisappear { cancelLoad() }
     }
 
     private var mediaIdentity: ChatMediaIdentity? {
@@ -1008,9 +1154,14 @@ private struct DisplayHTMLArtifactView: View {
         return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
     }
 
-    private func cancelLoad() {
-        guard let identity = mediaIdentity else { return }
-        model.chatMedia.cancelFilePreview(for: identity, leaseID: leaseID)
+    /// Prepared markup this card loaded itself, or — only for the first frame
+    /// after a remount — the markup the loader retained for this exact source.
+    /// Markup above the loader's per-value ceiling is never retained, and the
+    /// card that prepared it still renders it.
+    private var html: String? {
+        guard let identity = mediaIdentity else { return nil }
+        if loadedIdentity == identity, let loadedHTML { return loadedHTML }
+        return model.chatMedia.retainedInlineArtifact(for: identity, as: PreparedDisplayHTML.self)?.source
     }
 
     private func load() async {
@@ -1018,38 +1169,40 @@ private struct DisplayHTMLArtifactView: View {
         guard presentationActivity.allowsPresentationPublication else { return }
         guard let artifact = display.artifact, artifact.size <= 5 * 1_024 * 1_024,
               let identity = mediaIdentity else {
-            loadGeneration &+= 1
-            html = nil
             failed = true
-            loadedIdentity = nil
             return
         }
-        // Prepared markup for this exact source stays mounted; only a new
-        // source, a failed attempt, or interrupted work reloads it.
-        if loadedIdentity == identity, html != nil { return }
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        html = nil
+        if html != nil { return }
         failed = false
         do {
-            let payload = try await model.chatMedia.filePreviewPayload(for: identity, leaseID: leaseID)
-            guard let source = String(data: payload.data, encoding: .utf8) else {
-                throw CocoaError(.fileReadCorruptFile)
+            let source = try await model.chatMedia.inlineArtifact(for: identity) { payload in
+                guard let source = String(data: payload.data, encoding: .utf8) else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+                return PreparedDisplayHTML(source: source)
             }
-            guard generation == loadGeneration,
-                  !Task.isCancelled,
-                  presentationActivity.allowsPresentationPublication else { return }
-            html = source
+            // A retired surface or a superseded identity publishes nothing.
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
             loadedIdentity = identity
+            loadedHTML = source.source
+            #if HOSTED_TEST
+            // The card's own render, which nothing else can observe for markup
+            // the loader deliberately does not retain.
+            hostedRecorder?.recorder?.recordInlineArtifactPublication(
+                id: artifact.id,
+                bytes: source.source.utf8.count
+            )
+            #endif
         } catch is CancellationError {
-            // Interrupted work publishes nothing, so the next activation retries.
-            return
+            // Interrupted work publishes nothing, so the next activation asks
+            // again instead of keeping a placeholder forever.
         } catch {
-            guard generation == loadGeneration,
-                  !Task.isCancelled,
-                  presentationActivity.allowsPresentationPublication else { return }
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
             failed = true
-            loadedIdentity = nil
         }
     }
 }

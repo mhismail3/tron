@@ -172,42 +172,51 @@ struct ChatCompactPillSurface<Content: View>: View {
             style: .continuous
         )
         let surfaceAccent = accentOverride ?? tone.surfaceColor
-        switch material {
-        case .glass:
-            content
-                .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .contentShape(shape)
-                .glassEffect(
-                    .regular.tint(surfaceAccent.opacity(0.18)).interactive(interactive),
-                    in: shape
-                )
-        case .flat:
-            content
-                .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .contentShape(shape)
-                .background(surfaceAccent.opacity(0.10), in: shape)
-                .overlay(shape.stroke(surfaceAccent.opacity(0.30), lineWidth: 0.5))
-        }
+        let isGlass = material == .glass
+        // One structure at every material: a value change from flat to glass
+        // must not remount the pill (a remount showed the flat frame before the
+        // measured glass one). The unused half of each pair is inert — a clear
+        // background and stroke, or an identity glass effect.
+        content
+            .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .contentShape(shape)
+            .background(surfaceAccent.opacity(isGlass ? 0 : 0.10), in: shape)
+            .overlay(shape.stroke(surfaceAccent.opacity(isGlass ? 0 : 0.30), lineWidth: 0.5))
+            .glassEffect(
+                isGlass
+                    ? .regular.tint(surfaceAccent.opacity(0.18)).interactive(interactive)
+                    : .identity,
+                in: shape
+            )
     }
 }
 
 private struct ChatCompactPillInteractionModifier: ViewModifier {
     let accessibilityLabel: String
     let accessibilityValue: String?
-    let action: () -> Void
+    /// Whether the pill is a control. A pill that owns no action keeps its own
+    /// accessibility element and label without the button trait.
+    let addsButtonTrait: Bool
+    /// The pill's own action, or nil for an informational pill. The interactive
+    /// half is attached at every value: a conditional here switched the pill's
+    /// structure and re-showed its flat frame across the truncation measurement
+    /// (F10, measured as two pill instances for one notice). A pill that owns no
+    /// action instead declares that it does not respond to user interaction, so
+    /// no activation is offered for a control the reader cannot act on.
+    let action: (() -> Void)?
 
     func body(content: Content) -> some View {
         content
             // The interactive glass surface remains the only visual press
             // owner. A wrapping Button would add a second touch-down phase.
-            .onTapGesture(perform: action)
+            .onTapGesture { action?() }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityLabel)
             .accessibilityValue(accessibilityValue ?? "")
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { action() }
+            .accessibilityAddTraits(addsButtonTrait ? .isButton : [])
+            .accessibilityAction { action?() }
+            .accessibilityRespondsToUserInteraction(action != nil)
     }
 }
 
@@ -215,11 +224,13 @@ extension View {
     func chatCompactPillInteraction(
         accessibilityLabel: String,
         accessibilityValue: String? = nil,
-        action: @escaping () -> Void
+        addsButtonTrait: Bool = true,
+        action: (() -> Void)? = nil
     ) -> some View {
         modifier(ChatCompactPillInteractionModifier(
             accessibilityLabel: accessibilityLabel,
             accessibilityValue: accessibilityValue,
+            addsButtonTrait: addsButtonTrait,
             action: action
         ))
     }
