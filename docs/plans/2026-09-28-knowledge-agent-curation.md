@@ -487,6 +487,15 @@ uses the tag definitions/categories/decay classes, and asks
   the same field through `knowledge.config` using the complete current config
   and its revision fence. No live Knowledge store was changed by this work.
 - Tasks added: none. No Gateway rebuild/restart or paid provider call was made.
+- Supervisor review: the worker's intake queued enrichment at eight separate
+  exit points with conflicting conditions, and most required a complete capture,
+  so partial research captures — every X post and GitHub page — would never be
+  summarized at intake. Replaced by one `queueSettledEnrichment` step in a
+  `finally` on every intake and sweep item, reading the latest committed revision
+  and requiring only readable text.
+  `knowledge-intake-enrichment.test.ts` "summarizes a partial research capture
+  once its intake settles" fails with the old complete-only rule (negative
+  control run).
 
 ### K6 · Done · 2026-09-29 · luna-worker · `knowledge/k6-take-freshness`
 

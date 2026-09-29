@@ -17,9 +17,12 @@ function response(value: unknown): ConnectorHTTPResponse { return { status: 200,
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true}))); });
 
-/** Failure modes in docs/plans/k5-failure-modes.md. This drives the actual
- * connector and KnowledgeService owners with local model/Jev fakes, never live
- * credentials or paid providers; its outcome JSON is written under test temp. */
+/** Failure modes: a model or tagging failure blocks other items; unapproved
+ * tagging drops the summary; intake waits on model latency; a rerun re-charges;
+ * summary and tagging race admission; partial captures (every X post) never
+ * get a summary. This drives the actual connector and KnowledgeService owners
+ * with local model/Jev fakes, never live credentials or paid providers; its
+ * outcome JSON is written under test temp. */
 describe("K5 Raindrop intake enrichment", () => {
   it("keeps a summary when Jev is unapproved, reports the skip, and lets another item survive model failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-failure-e2e-")); roots.push(root);
@@ -144,4 +147,42 @@ describe("K5 Raindrop intake enrichment", () => {
     expect(persisted.items).toHaveLength(10);
     expect(persisted.items.every(item => item.summary && item.tagIds?.includes("workflow"))).toBe(true);
   });
+
+  it("summarizes a partial research capture once its intake settles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-k5-partial-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const initial = await store.config();
+    await store.configure("k5-partial-config", { ...initial, enrichment: { model: "fixture/deepseek" } });
+    const summarized: string[] = [];
+    const fakeModel: KnowledgeGenerationModel = {
+      async reflect() { return "reflect"; }, async synthesize() { return "synthesis"; },
+      async summarizeSource(input) { summarized.push(input.sessionId); return { text: "Partial summary" }; },
+      async assess() { return { summary: "assessment", evidenceQuality: "high", freshness: "current" }; },
+    };
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel);
+    const items = [{ _id: 7, title: "A repository", link: "https://github.com/example/repository", created: "2026-09-28T00:00:00Z", collection: { $id: 111 } }];
+    const extension = new KnowledgeConnectorExtension(store, {
+      credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]])),
+      resolveHost: async () => ["93.184.216.34"],
+      // GitHub UI captures are always partial, like every X post: readable
+      // text survives, but repository completeness is not certified.
+      sourceFetch: async () => new Response("A repository README describing how the project works. ".repeat(8), { headers: { "content-type": "text/plain" } }),
+      http: async url => {
+        if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+        if (url.includes("/raindrops/111")) return response({ items });
+        throw new Error(`Unexpected fake provider endpoint ${url}`);
+      },
+      queueSummary: source => service.queueIntakeSummary(source),
+      sleep: async () => {}, now: () => "2026-09-29T00:00:00.000Z",
+    });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("partial-config"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:fixture" } });
+    const intake = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("partial-run"), sourceCollection: "111", dryRun: false, limit: 1, pilot: { id: "partial-pilot", maxItems: 1, budgetCents: 10 } } }) as { outcomes: Array<{ sourceId?: string }> };
+    const sourceId = intake.outcomes[0]?.sourceId;
+    const captured = await store.read(sourceId!, undefined, false, true, true);
+    expect(captured?.kind === "source" && captured.content.captureDisposition).not.toBe("complete");
+    expect(captured?.kind === "source" && captured.content.text).toBeTruthy();
+    for (let attempt = 0; attempt < 400 && summarized.length === 0; attempt += 1) await new Promise(resolve => setTimeout(resolve, 5));
+    expect(summarized).toEqual([sourceId]);
+  });
 });
+

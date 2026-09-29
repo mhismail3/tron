@@ -535,6 +535,18 @@ export class KnowledgeConnectorExtension {
     return updated.record;
   }
 
+  /** Enrichment follows an entry once its intake has settled, against the
+   * latest committed revision, so it never races admission or a move. Any
+   * readable text qualifies: partial captures (every X post) are summarized as
+   * sampled evidence. Queue admission cannot roll back captured evidence. */
+  private async queueSettledEnrichment(sourceId: string | undefined): Promise<void> {
+    if (!sourceId || !this.options.queueSummary) return;
+    try {
+      const latest = await this.store.read(sourceId, undefined, false, true, true);
+      if (latest?.kind === "source" && latest.content.text) this.options.queueSummary(latest);
+    } catch { /* A later intake or explicit summarize retries. */ }
+  }
+
   private async intake(request: KnowledgeRaindropIntakeRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
     const connectionAuthority = await this.connectionFor(request.connectionId, "raindrop", Boolean(this.options.connections));
     const state = await this.store.connectorState("raindrop");
@@ -644,10 +656,10 @@ export class KnowledgeConnectorExtension {
             if (live.allowWrites && destination && destination !== sourceCollection) {
               const result = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: admitted, expectedRevision: admitted.revisionId, identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, sourceCollection, destination, ...(request.connectionId ? { connectionId: request.connectionId } : {}), ...(expectedSetupRevision !== undefined ? { expectedSetupRevision } : {}) }, signal);
               if (result.status === "moved") { moved += 1; setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted and its approved collection move was verified", assessment: "not-run", move: "moved" }); }
-              else { pending += 1; setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted; approved remote move remains unresolved", assessment: "not-run", move: result.status }); if (source.content.text) { try { this.options.queueSummary?.(source); } catch { /* Queue admission cannot roll back captured evidence. */ } } continue; }
+              else { pending += 1; setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted; approved remote move remains unresolved", assessment: "not-run", move: result.status }); continue; }
             } else setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted from its saved Raindrop link and metadata", assessment: "not-run", move: "not-attempted" });
             await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), "raindrop", current => { const next = current ?? live; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id || candidate.collectionId !== sourceCollection), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), capturedCollections: collectionProgress(next.capturedCollections, item.id, sourceCollection), remaining: Math.max(0, next.pending.length - 1) }; });
-            if (source.content.text) { try { this.options.queueSummary?.(source); } catch { /* Queue admission cannot roll back captured evidence. */ } }
+           
             continue;
           }
           if (source.content.captureDisposition !== "complete" || item.metadataComplete === false || !source.content.text) {
@@ -668,7 +680,7 @@ export class KnowledgeConnectorExtension {
           if (assessmentCurrent) assessmentOutcome = "reused";
           setOutcome(item, { ...sourceRef, disposition: "pending", assessment: assessmentOutcome, move: "not-attempted", reason: "Assessment and admission in progress" });
           if (!assessmentCurrent) {
-            if (!this.options.assessment) { pending += 1; lastError = "Jev source assessment is not configured"; setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: "not-run", move: "not-attempted" }); try { this.options.queueSummary?.(source); } catch { /* Queue admission cannot roll back captured evidence. */ } continue; }
+            if (!this.options.assessment) { pending += 1; lastError = "Jev source assessment is not configured"; setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: "not-run", move: "not-attempted" }); continue; }
             let dispatched = false;
             try {
               const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => { await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, cohortId); dispatched = true; } }, this.options.assessment);
@@ -676,7 +688,7 @@ export class KnowledgeConnectorExtension {
               setOutcome(item, { ...sourceRef, assessment: assessmentOutcome });
               const usage = assessment?.usage ? { inputTokens: assessment.usage.inputTokens, outputTokens: assessment.usage.outputTokens, estimatedCostCents: assessment.usage.estimatedCostCents } : undefined;
               await this.settleAssessment(command(request.commandId, `assess-${item.id}`), item.id, cohortId, usage);
-            } catch (error) { assessmentFailed += 1; pending += 1; lastError = dispatched ? "Jev assessment outcome is uncertain; reconcile before retrying" : (error instanceof Error ? error.message : "Jev assessment failed"); setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: dispatched ? "dispatched-uncertain" : "preflight-failed", move: "not-attempted" }); try { this.options.queueSummary?.(source); } catch { /* Queue admission cannot roll back captured evidence. */ } continue; }
+            } catch (error) { assessmentFailed += 1; pending += 1; lastError = dispatched ? "Jev assessment outcome is uncertain; reconcile before retrying" : (error instanceof Error ? error.message : "Jev assessment failed"); setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: dispatched ? "dispatched-uncertain" : "preflight-failed", move: "not-attempted" }); continue; }
           }
           const finalInterests = (await this.store.config()).currentInterests ?? [];
           if (!assessment || (assessment.model === JEV_DEFAULT_MODEL && assessment.coverage !== undefined && (assessment.coverage !== "full" && assessment.coverage !== "sampled")) || (assessment.model === JEV_DEFAULT_MODEL && assessment.inputDigest !== undefined && (assessment.profileVersion !== jevProfileVersion(finalInterests) || assessment.inputDigest !== jevInputDigest({ title: source.content.title, text: source.content.text ?? "", interests: finalInterests, source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt } }, finalInterests)))) throw new GatewayError("conflict", "Source assessment authority changed before admission");
@@ -686,20 +698,20 @@ export class KnowledgeConnectorExtension {
           setOutcome(item, { ...sourceRef, disposition: status, assessment: assessmentOutcome });
           if (status === "archived") archived += 1; else retained += 1;
           const destination = mapping ? mapping.destination : live.destination;
-          if (!live.allowWrites || !destination || item.collectionId === destination) { pending += 1; setOutcome(item, { ...sourceRef, disposition: status, reason: "Remote move is not authorized or destination is unavailable", assessment: assessmentOutcome, move: "not-attempted" }); if (source.content.text && source.content.captureDisposition === "complete") { try { this.options.queueSummary?.(source); } catch { /* Queue admission cannot roll back captured evidence. */ } } continue; }
+          if (!live.allowWrites || !destination || item.collectionId === destination) { pending += 1; setOutcome(item, { ...sourceRef, disposition: status, reason: "Remote move is not authorized or destination is unavailable", assessment: assessmentOutcome, move: "not-attempted" }); if (source.content.text && source.content.captureDisposition === "complete") { } continue; }
           const movedResult = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: admitted, expectedRevision: admitted.revisionId, identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, sourceCollection, destination, ...(request.connectionId ? { connectionId: request.connectionId } : {}), ...(expectedSetupRevision !== undefined ? { expectedSetupRevision } : {}) }, signal);
           if (movedResult.status !== "moved") {
             pending += 1; lastError = "Raindrop destination move could not be verified";
             setOutcome(item, { ...sourceRef, disposition: status, reason: lastError, assessment: assessmentOutcome, move: movedResult.status });
-            if (source.content.text && source.content.captureDisposition === "complete") { try { this.options.queueSummary?.(source); } catch { /* Queue admission cannot roll back captured evidence. */ } }
+            if (source.content.text && source.content.captureDisposition === "complete") { }
             if ((await this.store.connectorState("raindrop"))?.pendingRemote) { for (const tail of approvedItems.slice(approvedItems.indexOf(item) + 1)) setOutcome(tail, { disposition: "pending", reason: "Blocked by unresolved remote effect; reconcile before processing", assessment: "not-run", move: "blocked" }); break; }
             continue;
           }
           moved += 1;
           setOutcome(item, { ...sourceRef, disposition: status, reason: "Locally admitted and remotely verified", assessment: assessmentOutcome, move: "moved" });
           await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), "raindrop", current => { const next = current ?? live; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id || candidate.collectionId !== sourceCollection), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), capturedCollections: collectionProgress(next.capturedCollections, item.id, sourceCollection), remaining: Math.max(0, next.pending.length - 1) }; });
-          if (source.content.text && source.content.captureDisposition === "complete") { try { this.options.queueSummary?.(source); } catch { /* Queue admission cannot roll back captured evidence. */ } }
-        } catch (error) { pending += 1; lastError = error instanceof Error ? error.message : "Raindrop intake failed"; const prior = outcomeMap.get(item.id); if (prior?.move === "moved") setOutcome(item, { reason: "Remote move verified; local completion receipt requires reconciliation", assessment: prior.assessment, move: "moved" }); else setOutcome(item, { disposition: prior?.disposition ?? "pending", reason: lastError, assessment: prior?.assessment ?? "not-run", move: prior?.move ?? "not-attempted" }); const captured = prior?.sourceId ? await this.store.read(prior.sourceId, undefined, false, true, true) : undefined; if (captured?.kind === "source" && captured.content.text && (captured.scope === "personal" || captured.content.captureDisposition === "complete")) { try { this.options.queueSummary?.(captured); } catch { /* Queue admission cannot roll back captured evidence. */ } } }
+          if (source.content.text && source.content.captureDisposition === "complete") { }
+        } catch (error) { pending += 1; lastError = error instanceof Error ? error.message : "Raindrop intake failed"; const prior = outcomeMap.get(item.id); if (prior?.move === "moved") setOutcome(item, { reason: "Remote move verified; local completion receipt requires reconciliation", assessment: prior.assessment, move: "moved" }); else setOutcome(item, { disposition: prior?.disposition ?? "pending", reason: lastError, assessment: prior?.assessment ?? "not-run", move: prior?.move ?? "not-attempted" }); } finally { await this.queueSettledEnrichment(outcomeMap.get(item.id)?.sourceId); }
       }
       const finalState = await this.store.connectorState("raindrop") ?? live;
       const finalAuthority = cohortAuthority ? (finalState.assessmentPilots?.[sourceCollection]?.id === cohortId ? finalState.assessmentPilots[sourceCollection] : finalState.assessmentPilot?.id === cohortId ? finalState.assessmentPilot : finalState.assessmentApprovals?.find(item => item.id === cohortId) ?? cohortAuthority) : undefined;
@@ -806,6 +818,7 @@ export class KnowledgeConnectorExtension {
       let captured = 0; let partial = 0; let lastError: string | undefined;
       const selectedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
       for (const item of selectedPending.slice(0, limit)) {
+        let sweptSourceId: string | undefined;
         try {
           const live = await this.store.connectorState(connector);
           if (!live || live.accountId !== current.accountId || live.scope !== current.scope || live.credentialRef !== current.credentialRef || live.enabled !== current.enabled) throw new GatewayError("conflict", "Connector configuration changed during the run");
@@ -813,6 +826,7 @@ export class KnowledgeConnectorExtension {
           if (connector === "raindrop" && item.collectionId !== selectedCollection) throw new GatewayError("conflict", "Pending Raindrop item no longer belongs to this collection");
           const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: mappedScope, title: item.title, origin: "connector", identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), ...(item.publishedAt ? { sourcePublishedAt: item.publishedAt } : {}), ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
           let capturedRecord = result.record;
+          sweptSourceId = capturedRecord.id;
           if (capturedRecord.scope !== mappedScope) {
             const placed = await this.store.curateSource({ commandId: command(request.commandId, `scope-${item.id}-${mappedScope}`), operation: "placement", producer: { actor: "connector" }, item: { recordId: capturedRecord.id, expectedRevision: capturedRecord.revisionId, placement: { scope: mappedScope } } });
             capturedRecord = placed.record as KnowledgeRecord & { kind: "source" };
@@ -834,12 +848,11 @@ export class KnowledgeConnectorExtension {
           const destination = mapping ? mapping.destination : state.destination;
           if (connector === "raindrop" && state.allowWrites && destination && item.collectionId && item.collectionId !== destination) {
             const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: capturedRecord, expectedRevision: capturedRecord.revisionId, identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(selectedCollection ? { sourceCollection: selectedCollection } : {}), destination, ...(request.connectionId ? { connectionId: request.connectionId } : {}), ...(expectedSetupRevision !== undefined ? { expectedSetupRevision } : {}) }, signal);
-            if (moved.status !== "moved") { lastError = moved.status === "unsupported" ? "Approved Raindrop move is unavailable" : "Raindrop move could not be verified"; if (capturedRecord.content.text && (mappedScope === "personal" || capturedRecord.content.captureDisposition === "complete")) { try { this.options.queueSummary?.(capturedRecord); } catch { /* Queue admission cannot roll back captured evidence. */ } } break; }
+            if (moved.status !== "moved") { lastError = moved.status === "unsupported" ? "Approved Raindrop move is unavailable" : "Raindrop move could not be verified"; break; }
           }
           captured += 1;
           state = await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), connector, value => { const next = value ?? state; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id || (connector === "raindrop" && candidate.collectionId !== selectedCollection)), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), ...(connector === "raindrop" && selectedCollection ? { capturedCollections: collectionProgress(next.capturedCollections, item.id, selectedCollection) } : {}), remaining: Math.max(0, next.pending.length - 1) }; });
-          if (capturedRecord.content.text && (mappedScope === "personal" || capturedRecord.content.captureDisposition === "complete")) { try { this.options.queueSummary?.(capturedRecord); } catch { /* Queue admission cannot roll back captured evidence. */ } }
-        } catch (error) { lastError = error instanceof Error ? error.message : "Connector capture failed"; break; }
+        } catch (error) { lastError = error instanceof Error ? error.message : "Connector capture failed"; break; } finally { await this.queueSettledEnrichment(sweptSourceId); }
       }
       state = await this.store.updateConnectorState(command(request.commandId, "finish"), connector, value => ({ ...(value ?? state), health: lastError ? "partial" : "ready", ...(lastError ? { lastError } : {}), lastRunAt: this.now(), remaining: value?.pending.length ?? state.pending.length }));
       clearTimeout(deadline);

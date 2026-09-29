@@ -798,10 +798,11 @@ than silently skipped. Remote destinations are configured per source collection
 and still require the connection's independent `allowWrites` approval.
 
 After each Raindrop item's capture, K2 save-time recovery, and existing inline
-assessment/admission/move processing settles, eligible complete research sources
-and personal sources with readable text enqueue one Gateway-owned summary job
-without waiting for the model. Missing personal text is not fabricated or
-summarized, and incomplete research remains pending for re-capture. A successful
+assessment/admission/move processing settles (a single step on every exit path
+of the item), its latest committed revision enqueues one Gateway-owned summary
+job without waiting for the model when it has readable text. Partial captures —
+every X post and GitHub page — qualify and are summarized as sampled evidence;
+a source with no readable text gets no summary, and nothing is fabricated. A successful
 summary job queues its K4 tag job; both are observable through
 `knowledge.curation.jobs` / `knowledge.curation.job`. Intake command IDs are
 derived from the exact source revision; an existing summary with the same
