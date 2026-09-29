@@ -950,7 +950,10 @@ struct ChatViewScrollHarnessTests {
                 )
                 print(metrics.line)
                 #expect(
-                    transcriptBottomGateOutcome(try #require(metrics.coverage)) == .asExpected,
+                    transcriptBottomGateOutcome(
+                        try #require(metrics.coverage),
+                        expectation: .current(for: harness.orientation)
+                    ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
                 #expect(
@@ -961,7 +964,18 @@ struct ChatViewScrollHarnessTests {
                     metrics.tallRowHeight > 1_000,
                     "the shape's tall row was realized and measured as the estimate-stressing row"
                 )
-                #expect(metrics.materializations > 0, "the send materialized its tail")
+                // Today's send has to materialize its lazy tail; the
+                // origin-anchored transcript's newest row is the content origin,
+                // so there is nothing to materialize and the count must stay
+                // zero.
+                if harness.orientation.mountsNewestRowWithContent {
+                    #expect(
+                        metrics.materializations == 0,
+                        "the origin-anchored transcript has no lazy tail to materialize"
+                    )
+                } else {
+                    #expect(metrics.materializations > 0, "the send materialized its tail")
+                }
             }
         }
     }
@@ -1060,17 +1074,27 @@ struct ChatViewScrollHarnessTests {
                 )
                 print(metrics.line)
                 #expect(
-                    transcriptBottomGateOutcome(try #require(metrics.coverage)) == .asExpected,
+                    transcriptBottomGateOutcome(
+                        try #require(metrics.coverage),
+                        expectation: .current(for: harness.orientation)
+                    ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
                 #expect(
                     samples.count == phaseLengths.reduce(0, +),
                     "the scenario ran every sampled display boundary"
                 )
-                #expect(
-                    metrics.materializations >= cycles,
-                    "every cycle's admitted send materialized its tail"
-                )
+                if harness.orientation.mountsNewestRowWithContent {
+                    #expect(
+                        metrics.materializations == 0,
+                        "the origin-anchored transcript has no lazy tail to materialize"
+                    )
+                } else {
+                    #expect(
+                        metrics.materializations >= cycles,
+                        "every cycle's admitted send materialized its tail"
+                    )
+                }
             }
         }
     }
@@ -1158,7 +1182,10 @@ struct ChatViewScrollHarnessTests {
                 )
                 print(metrics.line)
                 #expect(
-                    transcriptBottomGateOutcome(try #require(metrics.coverage)) == .asExpected,
+                    transcriptBottomGateOutcome(
+                        try #require(metrics.coverage),
+                        expectation: .current(for: harness.orientation)
+                    ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
                 #expect(
@@ -1230,7 +1257,10 @@ struct ChatViewScrollHarnessTests {
                 )
                 print(metrics.line)
                 #expect(
-                    transcriptBottomGateOutcome(try #require(metrics.coverage)) == .asExpected,
+                    transcriptBottomGateOutcome(
+                        try #require(metrics.coverage),
+                        expectation: .current(for: harness.orientation)
+                    ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
                 #expect(
@@ -1549,6 +1579,7 @@ struct ChatViewScrollHarnessTests {
         let maxRatio = ratios.max { ratioOf($0) < ratioOf($1) }
         var metrics = CT24Metrics()
         metrics.shape = shape
+        metrics.orientation = harness.orientation.pinsToEstimatedOrigin ? "end" : "origin"
         metrics.samples = samples.count
         metrics.blankBoundaries = coverage.blankBoundaries
         metrics.blankAfterSettle = coverage.blankAfterSettle
@@ -1591,6 +1622,7 @@ struct ChatViewScrollHarnessTests {
         )
         var metrics = CT2Metrics()
         metrics.shape = shape
+        metrics.orientation = harness.orientation.pinsToEstimatedOrigin ? "end" : "origin"
         metrics.samples = samples.count
         metrics.blankBoundaries = coverage.blankBoundaries
         metrics.blankAfterSettle = coverage.blankAfterSettle
@@ -3781,11 +3813,13 @@ struct ChatViewScrollHarnessTests {
 
     private func withHarness(
         seed: Int,
+        orientation: ChatTranscriptOrientation = .selected,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
         try await withHarness(
             snapshot: SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 10_000),
+            orientation: orientation,
             displayFrameScheduler: displayFrameScheduler,
             operation: operation
         )
@@ -3793,6 +3827,7 @@ struct ChatViewScrollHarnessTests {
 
     private func withHarness(
         snapshot: SessionSnapshot,
+        orientation: ChatTranscriptOrientation = .selected,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         enablesComposerSubmission: Bool = false,
         enablesPresentationCover: Bool = false,
@@ -3808,14 +3843,16 @@ struct ChatViewScrollHarnessTests {
                 displayFrameScheduler: displayFrameScheduler,
                 enablesPresentationCover: enablesPresentationCover,
                 usesRealOpening: usesRealOpening,
-                unansweredRPCMethods: unansweredRPCMethods
+                unansweredRPCMethods: unansweredRPCMethods,
+                orientation: orientation
             )
         } else {
             harness = try ChatViewScrollHarness(
                 snapshot: snapshot,
                 displayFrameScheduler: displayFrameScheduler,
                 enablesPresentationCover: enablesPresentationCover,
-                installsSubscribedSnapshot: installsSubscribedSnapshot || enablesPresentationCover
+                installsSubscribedSnapshot: installsSubscribedSnapshot || enablesPresentationCover,
+                orientation: orientation
             )
         }
         do {
@@ -4115,10 +4152,18 @@ enum TranscriptBottomGateExpectation {
     /// CT-23's origin-anchored transcript anchors the newest row at the lazy
     /// stack's exact origin. Every sampled boundary must then keep the pinned
     /// bottom band covered and at least half the visible transcript in rows.
-    /// CT-23 flips this in the same change that flips the scroll view.
     case coveringBottomIsRequired
 
-    static let current = TranscriptBottomGateExpectation.uncoveringBottomIsTheKnownDefect
+    /// What a run in `orientation` must show. Today's path still reproduces the
+    /// defect its shapes were recorded from; the origin-anchored path must keep
+    /// the pinned bottom covered instead, so the same shape is a gate in both
+    /// directions rather than a measurement that can pass either way.
+    static func current(for orientation: ChatTranscriptOrientation) -> TranscriptBottomGateExpectation {
+        orientation.pinsToEstimatedOrigin ? .uncoveringBottomIsTheKnownDefect : .coveringBottomIsRequired
+    }
+
+    /// The default a caller that names no orientation gets: today's path.
+    static let current = current(for: .newestAtEnd)
 
     /// The floor the CT-23 path gates `minimumVisibleRowFraction` against: half
     /// the visible transcript. Every CT-2 and CT-24 shape's newest row is
@@ -4167,6 +4212,10 @@ func transcriptBottomGateOutcome(
 /// rather than dropping the key, and every line diffs against every other.
 private struct CT2Metrics {
     var shape = ""
+    /// Which transcript orientation this journey measured. The gate the line is
+    /// judged against is `TranscriptBottomGateExpectation.current(for:)`, so the
+    /// line has to say which side of the switch produced it.
+    var orientation = ""
     var samples = 0
     var blankBoundaries = 0
     var blankAfterSettle = 0
@@ -4193,7 +4242,7 @@ private struct CT2Metrics {
 
     var line: String {
         "CT2-METRICS"
-            + " shape=\(shape) samples=\(samples)"
+            + " shape=\(shape) orientation=\(orientation) samples=\(samples)"
             + " blankBoundaries=\(blankBoundaries)/\(samples)"
             + " blankAfterSettle=\(blankAfterSettle)"
             + " longestBlankRun=\(longestBlankRun)"
@@ -4223,6 +4272,8 @@ private func ct2Number(_ value: CGFloat) -> String {
 /// One `CT24-METRICS` line per field shape.
 private struct CT24Metrics {
     var shape = ""
+    /// Which transcript orientation this journey measured, as for `CT2Metrics`.
+    var orientation = ""
     var samples = 0
     var blankBoundaries = 0
     var blankAfterSettle = 0
@@ -4241,7 +4292,7 @@ private struct CT24Metrics {
 
     var line: String {
         "CT24-METRICS"
-            + " shape=\(shape) samples=\(samples)"
+            + " shape=\(shape) orientation=\(orientation) samples=\(samples)"
             + " blankBoundaries=\(blankBoundaries)/\(samples)"
             + " blankAfterSettle=\(blankAfterSettle)"
             + " longestBlankRun=\(longestBlankRun)"
@@ -4526,6 +4577,11 @@ final class ChatViewScrollHarness {
     private let window: UIWindow
     private let hostingController: UIHostingController<AnyView>
     private let cover = HarnessCoverState()
+    /// The transcript orientation this harness was built with. Every journey
+    /// reads it to say what it expects the pinned bottom to do, so the four
+    /// CT-2/CT-24 shapes are gates in both orientations against the same
+    /// reference.
+    let orientation: ChatTranscriptOrientation
 
     convenience init(
         snapshot: SessionSnapshot,
@@ -4534,7 +4590,8 @@ final class ChatViewScrollHarness {
         enablesPresentationCover: Bool = false,
         installsSubscribedSnapshot: Bool = true,
         scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
-        mediaFetch: ChatMediaFetch? = nil
+        mediaFetch: ChatMediaFetch? = nil,
+        orientation: ChatTranscriptOrientation = .selected
     ) throws {
         let dependencies = try Self.makeDependencies(
             enablesComposerSubmission: false,
@@ -4547,7 +4604,8 @@ final class ChatViewScrollHarness {
             dependencies: dependencies,
             installsSubscribedSnapshot: installsSubscribedSnapshot,
             enablesPresentationCover: enablesPresentationCover,
-            scrollCallbackMode: scrollCallbackMode
+            scrollCallbackMode: scrollCallbackMode,
+            orientation: orientation
         )
     }
 
@@ -4558,7 +4616,8 @@ final class ChatViewScrollHarness {
         enablesPresentationCover: Bool = false,
         usesRealOpening: Bool = false,
         unansweredRPCMethods: Set<String> = [],
-        mediaFetch: ChatMediaFetch? = nil
+        mediaFetch: ChatMediaFetch? = nil,
+        orientation: ChatTranscriptOrientation = .selected
     ) async throws -> ChatViewScrollHarness {
         let dependencies = try makeDependencies(
             enablesComposerSubmission: true,
@@ -4580,7 +4639,8 @@ final class ChatViewScrollHarness {
                 dependencies: dependencies,
                 installsSubscribedSnapshot: true,
                 enablesPresentationCover: enablesPresentationCover,
-                usesRealOpening: usesRealOpening
+                usesRealOpening: usesRealOpening,
+                orientation: orientation
             )
             if usesRealOpening { await harness.startRPCResponder(unansweredMethods: unansweredRPCMethods) }
             return harness
@@ -4661,9 +4721,11 @@ final class ChatViewScrollHarness {
         installsSubscribedSnapshot: Bool,
         enablesPresentationCover: Bool = false,
         usesRealOpening: Bool = false,
-        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic
+        scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
+        orientation: ChatTranscriptOrientation = .selected
     ) throws {
         self.snapshot = snapshot
+        self.orientation = orientation
         transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
         firstTranscriptID = snapshot.transcript.first?.id ?? "transcript-bottom"
         lastTranscriptID = snapshot.transcript.last?.id ?? "transcript-bottom"
@@ -4709,7 +4771,8 @@ final class ChatViewScrollHarness {
                     sessionID: sessionID,
                     hostedProbe: probe,
                     displayFrameScheduler: displayFrameScheduler,
-                    performanceSignposts: performanceSignposts ?? signposts
+                    performanceSignposts: performanceSignposts ?? signposts,
+                    transcriptOrientation: orientation
                 )
             }
             .environment(model)

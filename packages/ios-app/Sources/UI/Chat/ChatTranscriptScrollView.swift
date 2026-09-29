@@ -78,6 +78,14 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
 
     let installed: InstalledChatTranscript
     let canonicalAliases: [String: String]
+    /// Whether the spine presents the newest row first (CT-23's origin-anchored
+    /// transcript). It is an O(1) index reversal of the same storage, so one
+    /// spine serves both orientations and no caller copies or re-sorts rows.
+    let presentsNewestRowFirst: Bool
+
+    /// The newest row: the row the pinned transcript anchors, and the row a
+    /// send's transition belongs to.
+    var newest: ChatPhysicalTranscriptRow? { presentsNewestRowFirst ? first : last }
 
     private var canonicalCount: Int { installed.committedLedger.items.count }
     private var liveCount: Int { installed.liveRegion.items.count }
@@ -99,7 +107,7 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
 
     subscript(position: Int) -> ChatPhysicalTranscriptRow {
         precondition(indices.contains(position))
-        var index = position
+        var index = presentsNewestRowFirst ? endIndex - 1 - position : position
         if index < canonicalCount {
             if index == canonicalCount - 1, let fusion = boundaryFusion {
                 return transcriptRow(.toolRun(fusion.run), isCommitted: true)
@@ -204,14 +212,16 @@ struct ChatPhysicalToolRunFusion: Hashable {
 enum ChatPhysicalTranscriptRowPolicy {
     static func rows(
         installed: InstalledChatTranscript,
-        canonicalAliases: [String: String]
+        canonicalAliases: [String: String],
+        orientation: ChatTranscriptOrientation = .newestAtEnd
     ) -> ChatPhysicalTranscriptRows {
         ChatPhysicalTranscriptRows(
             installed: installed,
             canonicalAliases: admittedAliases(
                 installed: installed,
                 candidates: canonicalAliases
-            )
+            ),
+            presentsNewestRowFirst: orientation.presentsNewestRowFirst
         )
     }
 
@@ -660,6 +670,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let admitsNativeCallbacks: Bool
     let responseState: ChatResponseState?
     let mutatingQueuedMessageIDs: Set<String>
+    let orientation: ChatTranscriptOrientation
     @Binding var scrollPosition: ScrollPosition
     let earlierRow: (InstalledChatTranscript) -> Earlier
     let openingSurface: () -> Opening
@@ -678,10 +689,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         let physicalRows = installed.map {
             ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
-                canonicalAliases: canonicalSubmissionAliases
+                canonicalAliases: canonicalSubmissionAliases,
+                orientation: orientation
             )
         }
-        let terminalPhysicalID = physicalRows?.last?.id
+        let terminalPhysicalID = physicalRows?.newest?.id
         let terminalMaterializationID = terminalPhysicalID ?? installed.flatMap {
             guard physicalRows?.isEmpty == true,
                   ($0.sourceWindow.originalStart ?? 0) > 0 else { return nil }
@@ -697,59 +709,21 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         let terminalRowOwnsTailAffordance = terminalRowOwnsMaterializationTarget
             || terminalRowOwnsOpeningTarget
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if let installed, let physicalRows {
-                        if (installed.sourceWindow.originalStart ?? 0) > 0 {
-                            stableRow(
-                                semanticID: "earlier-messages",
-                                installedTag: installed.tag,
-                                entranceState: .none,
-                                terminalPhysicalID: terminalMaterializationID,
-                                rowStability: .notARow
-                            ) {
-                                earlierRow(installed)
-                                    .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
-                                    .padding(.bottom, terminalMaterializationID == "earlier-messages"
-                                        && terminalRowOwnsTailAffordance
-                                        ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0)
-                            }
-                            .id("earlier-messages")
-                        }
-                        ForEach(physicalRows) { row in
-                            physicalRowHost(
-                                row,
-                                terminalPhysicalID: terminalPhysicalID,
-                                terminalMaterializationID: terminalMaterializationID,
-                                terminalRowOwnsTailAffordance:
-                                    terminalRowOwnsTailAffordance,
-                                installed: installed
-                            )
-                        }
-                    }
-                }
-                tailMarker(
-                    terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance
-                )
-            }
-            // Register the complete transcript layout once. Independent row
-            // and marker registrations can disagree as lazy estimates settle.
-            .scrollTargetLayout()
-            .padding(.top, 12)
-            .chatStableTranscriptUpdates(projectionIdentity: installed?.tag)
-            // Physical lift settlement remains hidden. Once settled, one
-            // covered `.presenting` frame installs a separate visual entrance;
-            // `.presented` then fades/rises the immutable commit without
-            // changing its scroll geometry or admitting concurrent input.
-            .offset(y: hasSettledOpeningOffset || reduceMotion ? 0 : 8)
-            .opacity(presentationPhase == .presenting ? 0 : 1)
-            .offset(y: presentationPhase == .presenting && !reduceMotion ? 8 : 0)
-            .accessibilityHidden(!isReady)
-            .allowsHitTesting(isReady)
+            transcriptContent(
+                installed: installed,
+                physicalRows: physicalRows,
+                terminalPhysicalID: terminalPhysicalID,
+                terminalMaterializationID: terminalMaterializationID,
+                terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance
+            )
         }
-        // Pinned presentations are bottom-owned even when the transcript is
-        // empty or shorter than the viewport. Anchored readers retain their
-        // semantic position through the coordinator's restore transaction.
+        // The flip belongs on the scroll view itself, outside the sheet host and
+        // the observations that read its geometry, and it is the whole inset
+        // mechanism: the flipped view's own vertical safe-area insets arrive
+        // mirrored, so the composer/keyboard inset lands at the content origin
+        // and the navigation inset at the far end as native content insets that
+        // ride the keyboard's own transaction.
+        .chatTranscriptOrientation(orientation)
         // The sheet a row asked for is presented here, outside the lazy stack, so
         // streaming a row out of realization cannot dismiss it. The resolver is
         // the same installed projection the rows are rendered from, so the
@@ -773,13 +747,19 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // the rows use.
         .environment(\.chatHostedRecorder, ChatHostedRecorderBox(recorder: hostedRecorder))
         #endif
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(.bottom, for: .alignment)
+        // Pinned presentations are anchored at the newest end even when the
+        // transcript is empty or shorter than the viewport. Anchored readers
+        // retain their semantic position through the coordinator's restore
+        // transaction.
+        .defaultScrollAnchor(orientation.newestEndAnchor, for: .initialOffset)
+        .defaultScrollAnchor(orientation.newestEndAnchor, for: .alignment)
         // Positioning is pinned-owned even while the opaque opening surface is
-        // mounted; switching this role to top would undo underflow alignment
-        // before the exact tail evidence is admitted.
+        // mounted; switching this role to the oldest end would undo underflow
+        // alignment before the exact origin evidence is admitted.
         .defaultScrollAnchor(
-            scrollCoordinator.usesPinnedSizeChangeAnchor ? .bottom : .top,
+            scrollCoordinator.usesPinnedSizeChangeAnchor
+                ? orientation.newestEndAnchor
+                : orientation.oldestEndAnchor,
             for: .sizeChanges
         )
         // Native size-change anchoring owns ordinary pinned layout changes.
@@ -798,7 +778,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         }
         .onScrollGeometryChange(for: ChatScrollGeometryObservation.self) { value in
             ChatScrollGeometryObservation(
-                geometry: ChatTranscriptGeometry(value),
+                geometry: orientation.coordinatorGeometry(value),
                 viewportActivation: viewportActivation,
                 presentationEpoch: presentationEpoch,
                 presentationPhase: presentationPhase
@@ -844,7 +824,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             scrollCoordinator.scrollPhaseChanged(
                 from: oldPhase,
                 to: newPhase,
-                finalGeometry: ChatTranscriptGeometry(context.geometry)
+                finalGeometry: orientation.coordinatorGeometry(context.geometry)
             )
         }
         .onChange(of: scrollCoordinator.commandRevision) { _, _ in
@@ -947,6 +927,112 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .overlay { openingSurface() }
     }
 
+    /// The transcript's scrollable content. The tail affordance and the
+    /// earlier-messages row each sit at one of the transcript's visual ends,
+    /// which are the content origin and the far end of the origin-anchored
+    /// order. Every element applies the orientation modifier as its outermost
+    /// modifier: that counter-flip leaves the element's own content upright —
+    /// entrance rise, streaming growth, context menu, selection — while its
+    /// position stays in the transcript's order.
+    @ViewBuilder
+    private func transcriptContent(
+        installed: InstalledChatTranscript?,
+        physicalRows: ChatPhysicalTranscriptRows?,
+        terminalPhysicalID: String?,
+        terminalMaterializationID: String?,
+        terminalRowOwnsTailAffordance: Bool
+    ) -> some View {
+        let hasEarlierMessages = (installed?.sourceWindow.originalStart ?? 0) > 0
+        let newestFirst = orientation.presentsNewestRowFirst
+        VStack(alignment: .leading, spacing: 0) {
+            if newestFirst {
+                tailMarker(terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance)
+            }
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if let installed, let physicalRows {
+                    if !newestFirst, hasEarlierMessages {
+                        earlierMessagesRow(
+                            installed: installed,
+                            terminalMaterializationID: terminalMaterializationID,
+                            terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance
+                        )
+                    }
+                    ForEach(physicalRows) { row in
+                        physicalRowHost(
+                            row,
+                            terminalPhysicalID: terminalPhysicalID,
+                            terminalMaterializationID: terminalMaterializationID,
+                            terminalRowOwnsTailAffordance:
+                                terminalRowOwnsTailAffordance,
+                            installed: installed
+                        )
+                        .chatTranscriptOrientation(orientation)
+                    }
+                    if newestFirst, hasEarlierMessages {
+                        earlierMessagesRow(
+                            installed: installed,
+                            terminalMaterializationID: terminalMaterializationID,
+                            terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance
+                        )
+                        // Older history appends at the far end, where an estimate
+                        // only sizes the scroll range: a page load moves nothing
+                        // on screen.
+                        .chatTranscriptOrientation(orientation)
+                    }
+                }
+            }
+            if !newestFirst {
+                tailMarker(terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance)
+            }
+        }
+        // Register the complete transcript layout once. Independent row
+        // and marker registrations can disagree as lazy estimates settle.
+        .scrollTargetLayout()
+        .padding(orientation.paddingEdgeSet(.top), 12)
+        .chatStableTranscriptUpdates(projectionIdentity: installed?.tag)
+        // Physical lift settlement remains hidden. Once settled, one
+        // covered `.presenting` frame installs a separate visual entrance;
+        // `.presented` then fades/rises the immutable commit without
+        // changing its scroll geometry or admitting concurrent input. The lift
+        // is a layout offset inside the flipped transcript, so it keeps the
+        // screen direction of today's rise.
+        .offset(y: orientation.screenOffset(
+            forLayoutRise: hasSettledOpeningOffset || reduceMotion ? 0 : 8
+        ))
+        .opacity(presentationPhase == .presenting ? 0 : 1)
+        .offset(y: orientation.screenOffset(
+            forLayoutRise: presentationPhase == .presenting && !reduceMotion ? 8 : 0
+        ))
+        .accessibilityHidden(!isReady)
+        .allowsHitTesting(isReady)
+    }
+
+    /// The earlier-messages row: the transcript's oldest end, where older history
+    /// appends once the order is origin-anchored.
+    private func earlierMessagesRow(
+        installed: InstalledChatTranscript,
+        terminalMaterializationID: String?,
+        terminalRowOwnsTailAffordance: Bool
+    ) -> some View {
+        stableRow(
+            semanticID: "earlier-messages",
+            installedTag: installed.tag,
+            entranceState: .none,
+            terminalPhysicalID: terminalMaterializationID,
+            rowStability: .notARow
+        ) {
+            earlierRow(installed)
+                .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                .padding(
+                    orientation.paddingEdgeSet(.bottom),
+                    terminalMaterializationID == "earlier-messages"
+                        && terminalRowOwnsTailAffordance
+                        ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0
+                )
+        }
+        .id("earlier-messages")
+    }
+
     private func promptEntrance(
         for row: ChatPhysicalTranscriptRow,
         installed: InstalledChatTranscript
@@ -1010,8 +1096,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         }
         // The exact row target includes the complete affordance. The eager
         // marker overlaps that same empty band so both targets end identically.
+        // The band is the 12 pt the pinned transcript keeps above the composer,
+        // which is the content origin once the order is origin-anchored.
         .padding(
-            .bottom,
+            orientation.paddingEdgeSet(.bottom),
             row.id == terminalPhysicalID && terminalRowOwnsTailAffordance
                 ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0
         )
@@ -1295,6 +1383,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     /// including assistant/tool/notification rows inserted before a queue tail.
     /// Lifecycle rows are capped by the authoritative 32-item queue budget.
     private var lazyTailMaterializationRequest: ChatLazyTailMaterializationRequest? {
+        // The origin-anchored transcript's newest row is the exact content origin
+        // and is on screen by construction: there is no lazy tail to realize and
+        // no zero-height fail-open to run. The row's own geometry admission
+        // resolves its entrance, as every other mounted row's does.
+        guard !orientation.mountsNewestRowWithContent else { return nil }
         guard let installed else { return nil }
         if let id = transcriptPresentation.newestPendingEntranceID,
            !canonicalSubmissionIDs.contains(id),
@@ -1465,22 +1558,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             // Keep one full-size measurable marker. While the row owns the
             // target, overlap its padding instead of splitting the affordance
             // into fractional heights that round differently at target release.
-            .padding(.top, terminalRowOwnsTailAffordance
+            .padding(orientation.paddingEdgeSet(.top), terminalRowOwnsTailAffordance
                 ? -ChatTranscriptLayoutConstants.tailAffordanceHeight : 0)
-    }
-}
-
-/// The native viewport read belongs to the scroll view that observes SwiftUI
-/// geometry; the value and its bounds stay in Support/ChatViewport.swift.
-extension ChatTranscriptGeometry {
-    init(_ geometry: ScrollGeometry) {
-        self.init(
-            offsetY: geometry.contentOffset.y,
-            contentHeight: geometry.contentSize.height,
-            containerHeight: geometry.containerSize.height,
-            bottomInset: geometry.contentInsets.bottom,
-            visibleTopY: geometry.visibleRect.minY,
-            visibleBottomY: geometry.visibleRect.maxY
-        )
     }
 }

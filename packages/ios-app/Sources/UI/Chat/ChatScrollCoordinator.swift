@@ -180,6 +180,12 @@ final class ChatScrollCoordinator {
     #endif
 
     private let frameScheduler: DisplayFrameScheduler
+    /// The transcript's vertical orientation. Geometry reaches this coordinator
+    /// already adapted by the orientation owner, so every decision below still
+    /// reads one model — `distanceFromBottom` is the distance from the newest
+    /// row — and only the mechanisms that exist to chase an estimated end are
+    /// gated off while the newest row is the exact content origin.
+    private let orientation: ChatTranscriptOrientation
     private let clock: MonotonicClock
     private let openingTailTimeout: Duration
     private var presentation = 0
@@ -304,10 +310,12 @@ final class ChatScrollCoordinator {
 
     init(
         frameScheduler: DisplayFrameScheduler = .displayLink,
+        orientation: ChatTranscriptOrientation = .newestAtEnd,
         clock: MonotonicClock = .continuous,
         openingTailTimeout: Duration = ChatScrollCoordinator.defaultOpeningTailTimeout
     ) {
         self.frameScheduler = frameScheduler
+        self.orientation = orientation
         self.clock = clock
         self.openingTailTimeout = openingTailTimeout
     }
@@ -756,6 +764,11 @@ final class ChatScrollCoordinator {
     }
 
     private func reconcileRetainedViewport(with current: ChatTranscriptGeometry) {
+        // The retained-viewport rebase exists to recover a pinned viewport whose
+        // target retired against an estimated content end. The origin-anchored
+        // transcript re-anchors at the exact origin, so the mechanism is gated
+        // off, not deleted (CT-19).
+        guard orientation.pinsToEstimatedOrigin else { return }
         guard retainedViewportReconciliationState != .idle, current.isValid else { return }
         if isUserInteracting {
             retainedViewportReconciliationState = .idle
@@ -1291,6 +1304,12 @@ final class ChatScrollCoordinator {
         physicalTargetID: String? = nil,
         layoutTransactionID: Int? = nil
     ) -> Bool {
+        // The origin-anchored transcript's newest row is the exact content origin,
+        // so it is on screen the moment it is installed: there is no lazy tail to
+        // realize against an estimate, and no lease to certify the entrance that
+        // owes a layout transaction. The caller settles that growth participant
+        // directly.
+        guard orientation.mountsNewestRowWithContent == false else { return false }
         let physicalTargetID = physicalTargetID ?? renderedID
         guard !renderedID.isEmpty, !physicalTargetID.isEmpty,
               canAutomaticallyFollow else { return false }
@@ -2883,6 +2902,14 @@ final class ChatScrollCoordinator {
     }
 
     private func schedulePhysicalTailRepairIfNeeded() {
+        // The marker this repair chases is only authoritative at an estimated
+        // content end. The origin-anchored transcript's origin is exact, so the
+        // mechanism is gated off rather than deleted (CT-19 removes it).
+        guard orientation.pinsToEstimatedOrigin else {
+            physicalTailRepairTask?.cancel()
+            physicalTailRepairTask = nil
+            return
+        }
         guard let evidence = physicalTailEvidence,
               evidence.presentationEpoch == presentation,
               evidence.layoutEpoch == layoutEpoch,
@@ -3050,6 +3077,12 @@ final class ChatScrollCoordinator {
     /// replaced it — to remain past the legal bottom after a full frame of
     /// layout. A transient that overshoots for one frame is never corrected.
     private func schedulePastEndRepairIfNeeded() {
+        // A viewport stranded past an estimated content bottom cannot happen once
+        // the pinned end is the exact origin. Gated off, not deleted (CT-19).
+        guard orientation.pinsToEstimatedOrigin else {
+            cancelPastEndRepair()
+            return
+        }
         guard admitsPastEndRepair, pastEndRepairLayoutEpoch != layoutEpoch else {
             cancelPastEndRepair()
             return
