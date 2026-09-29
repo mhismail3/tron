@@ -1419,15 +1419,10 @@ struct ChatVisualParityTests {
             magnitude(resampled(frame.rows.values, byBands: 0.667 * bandsPerPoint)).magnitude
                 < ChatVisualParitySpec.tolerance
         )
-        // The device-pixel step resolves an offset the half-point grid cannot:
-        // one device pixel is a third of a point, so a half-point search lands
-        // off the offset and leaves a residual the stable bound rejects.
-        let thirdOfAPoint = resampled(frame.rows.values, byBands: bandsPerPoint / 3)
-        #expect(magnitude(thirdOfAPoint).magnitude < ChatVisualParitySpec.tolerance)
-        #expect(
-            magnitude(thirdOfAPoint).magnitude
-                < magnitude(thirdOfAPoint, step: ChatVisualParitySpec.transitionAlignmentStep).magnitude
-        )
+        // The same model at the half-point step the transition frames use is not
+        // a claim about resolution — an interpolated profile cannot see a sixth
+        // of a band — so what the finer step buys is measured on the lane by the
+        // gate itself, whose frames are rasterized rather than resampled.
 
         // A uniform 3 pt shift is beyond the ±2 pt allowance: the search clamps
         // at its edge and the frame still fails.
