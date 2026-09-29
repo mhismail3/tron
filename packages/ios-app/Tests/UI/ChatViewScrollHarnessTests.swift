@@ -1404,12 +1404,18 @@ struct ChatViewScrollHarnessTests {
                         "today's path stopped measuring the ramp's known drop: \(metrics.line)"
                     )
                 }
-                // The tail marker's own placement has to read as pinned on both
-                // orientations. A marker measured in the scroll view's own
-                // untranslated frames reports a correctly pinned origin-anchored
-                // transcript as thousands of points away, and the product records
-                // exactly that as a displaced viewport — the anomaly a device
-                // export would carry.
+                // Failure modes: a cached reflection classifies an unchanged raw
+                // marker against the previous viewport; mixing the inset source
+                // with applied geometry invents a distance during the ramp.
+                // The reflect-on-arrival negative-control revision must fail here.
+                if harness.orientation.presentsNewestRowFirst {
+                    for (index, sample) in (showRamp + hideRamp).enumerated() {
+                        #expect(sample.distanceFromNewest <= 0.5,
+                            "boundary \(index) distance=\(sample.distanceFromNewest)")
+                        #expect(sample.tailState?.contains("tail=aligned ") == true,
+                            "boundary \(index): \(sample.tailState ?? "missing marker evidence")")
+                    }
+                }
                 let displacedOpeningViewports = harness.traceRecords.count {
                     $0.record.event == "chat.anomaly.opening-viewport-displaced"
                 }
@@ -4014,7 +4020,16 @@ struct ChatViewScrollHarnessTests {
 
                 // 2. The keyboard's inset cycle: the composer's own edge moves,
                 // which neither the reader's rows nor its position may follow.
-                try await harness.driveKeyboardInset(.show())
+                // A margin-only viewport must not clip away the reader's row
+                // midway through a keyboard transition, even if its offset holds.
+                let holdsReader: @MainActor () throws -> Void = {
+                    let current = try #require(harness.readerAnchor())
+                    #expect(current.physicalID == anchor.physicalID)
+                    #expect(current.instance == anchor.instance)
+                    #expect(abs(current.windowMinY - anchor.windowMinY) < 0.5)
+                    #expect(harness.probeObservation.scrollCommandCount == commandBaseline)
+                }
+                try await harness.driveKeyboardInset(.show(), onBoundary: holdsReader)
                 let afterShow = try #require(try await harness.settleReaderAnchor(to: anchor))
                 movements.append("keyboard-up:\(ct2Number(afterShow.windowMinY - anchor.windowMinY))")
                 #expect(
@@ -4022,7 +4037,7 @@ struct ChatViewScrollHarnessTests {
                         && abs(afterShow.windowMinY - anchor.windowMinY) <= 0.5,
                     "the keyboard moved the detached reader by \(ct2Number(afterShow.windowMinY - anchor.windowMinY)) pt"
                 )
-                try await harness.driveKeyboardInset(.hide())
+                try await harness.driveKeyboardInset(.hide(), onBoundary: holdsReader)
                 let afterHide = try #require(try await harness.settleReaderAnchor(to: anchor))
                 movements.append("keyboard-down:\(ct2Number(afterHide.windowMinY - anchor.windowMinY))")
                 #expect(
@@ -4620,6 +4635,8 @@ struct KeyboardBoundarySample {
     let composerTop: CGFloat?
     let composerHeight: CGFloat
     let coverage: TranscriptBottomCoverage
+    let distanceFromNewest: CGFloat
+    let tailState: String?
 }
 
 /// One journey's bottom-coverage gate evidence, folded from its samples.
@@ -6099,7 +6116,9 @@ final class ChatViewScrollHarness {
                 uncoveredBand: !bottom.isBandCovered,
                 visibleRowFraction: bottom.visibleRowFraction,
                 newestRowClearance: bottom.clearance
-            )
+            ),
+            distanceFromNewest: probeObservation.geometry.distanceFromBottom,
+            tailState: traceRecords.last { $0.record.message.contains("tail=") }?.record.message
         )
     }
 
@@ -6194,20 +6213,17 @@ final class ChatViewScrollHarness {
     /// top edge and the newest row's bottom edge at each of those boundaries, in
     /// window coordinates.
     @discardableResult
-    func driveKeyboardInset(_ transition: KeyboardInsetTransition) async throws -> [KeyboardBoundarySample] {
-        // TEMP CT-23: identify the native owner of detached keyboard movement.
-        let native = try nativeTranscriptScrollView()
-        let observation = native.observe(\.contentOffset, options: [.old, .new]) { view, change in
-            print("CT23-OFFSET old=\(String(describing: change.oldValue)) new=\(view.contentOffset) inset=\(view.contentInset) adjusted=\(view.adjustedContentInset) safe=\(view.safeAreaInsets) size=\(view.contentSize) bounds=\(view.bounds) stack=\(Thread.callStackSymbols.joined(separator: " | "))")
-        }
-        defer { observation.invalidate() }
+    func driveKeyboardInset(
+        _ transition: KeyboardInsetTransition,
+        onBoundary: (@MainActor () throws -> Void)? = nil
+    ) async throws -> [KeyboardBoundarySample] {
         beginKeyboardInset(transition)
         var samples: [KeyboardBoundarySample] = []
         for step in 1...max(1, transition.boundaries) {
             applyKeyboardInset(transition, step: step)
             try await driveFrameBoundary()
             samples.append(try keyboardBoundarySample())
-            print("CT23-BOUNDARY step=\(step) detached=\(probeObservation.isDetached) commands=\(probeObservation.scrollCommandCount) offset=\(native.contentOffset) inset=\(native.contentInset) adjusted=\(native.adjustedContentInset) safe=\(native.safeAreaInsets) size=\(native.contentSize) bounds=\(native.bounds) frame=\(native.convert(native.bounds, to: nil)) geometry=\(probeObservation.geometry) reader=\(String(describing: readerAnchor()))")
+            try onBoundary?()
         }
         return samples
     }

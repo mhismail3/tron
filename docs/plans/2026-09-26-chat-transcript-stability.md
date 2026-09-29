@@ -3001,3 +3001,28 @@ pass only through eager-only repairs, stop and report.
   container height when read. This adapter contract is implemented; F4's
   keyboard-ramp gate remains pending.
 - Open: evidence and the flipped-reflection negative control remain pending.
+
+
+### CT-23 flip2 status · 2026-09-29 · worker lane ct23b
+
+- In progress: at clean `1712fea02`, today's parity is **10/10** and full
+  harness has only `displacedRetainedResume`'s known watchdog failure
+  (`20260929T180911Z-run.tdxmhW`). Flipped row-stability + keyboard + detached
+  (`20260929T181229Z-run.cFbUB1`) reproduced detached 189.7 pt; row-stability
+  journey fails with an unmeasured thinking fixture and entrance height
+  61.7→62.7; other row-stability cases pass.
+- Root cause at clean `edff9c7b0` (`20260929T181514Z-run.HAyuAc`): KVO
+  records **no offset change**, offset 1213 throughout, commands 0. The native
+  scroll frame shrinks from y=0/h=844 to y=166/h=678 late in keyboard show.
+  The reader row stays at -35.3 but is clipped; the next row at 154.3 becomes
+  the oracle's top row. The earlier overlay-inset offset throw is no longer
+  the cause with margins. SwiftUI's size-change anchor issues no offset move.
+- Declarative fix at `befb6f540`: safe-area exclusion outside the scroll flip
+  as well as inside. Clean `20260929T181708Z-run.oaamdq` passes pinned and
+  detached: keyboard ramp worst gap 0.5 pt; detached streaming/show/hide/page
+  movement 0.0 pt with the same identity, no commands, native frame y=0/h=844.
+  No row target, timer or compensating scroll was added. The temporary KVO
+  diagnostics are removed; per-boundary detached and geometry gates replace
+  them. Reflect-on-arrival and outer-exclusion negative controls are next.
+- All later gates, profile runs, product decisions and device checks remain
+  pending; earlier stage tables are not evidence at this revision.

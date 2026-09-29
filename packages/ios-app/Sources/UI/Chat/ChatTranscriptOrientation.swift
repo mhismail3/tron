@@ -116,7 +116,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// viewport. Every consumer reads one space — the reader's anchor row, the
     /// tail marker's placement against the viewport, an entrance's visibility
     /// test, a correction's signed residual — so the reflection belongs here,
-    /// at the one place frames enter the coordinator, and nowhere else.
+    /// when the coordinator reads stored raw frames, and nowhere else.
     /// `containerHeight` is the model's own visible height; before the first
     /// geometry sample there is no space to reflect into and the frame is
     /// returned unchanged.
@@ -291,10 +291,11 @@ private struct ChatTranscriptVoiceOverOrderModifier: ViewModifier {
 
 /// The origin-anchored inset adapter reads safe areas before the render flip,
 /// ignores the scroll view's vertical container and keyboard safe areas, and
-/// applies swapped values as scroll-content and indicator margins. This keeps
-/// the changing keyboard inset out of UIKit's overlay-inset adjustment. Today's
-/// path does not ignore safe areas or add margins.
-private struct ChatTranscriptInsetsModifier: ViewModifier {
+/// applies swapped values as scroll-content and indicator margins. Exclusion
+/// inside the flip prevents UIKit overlay-inset adjustment; exclusion outside
+/// keeps the transformed viewport from shrinking and clipping a detached row
+/// when the keyboard crosses its center. Today's path bypasses both.
+private struct ChatTranscriptViewportModifier: ViewModifier {
     let orientation: ChatTranscriptOrientation
     let safeAreaInsets: EdgeInsets
 
@@ -338,14 +339,14 @@ extension View {
         modifier(ChatTranscriptOrientationModifier(orientation: orientation))
     }
 
-    /// Reads safe areas before the render flip and reapplies the swapped values
-    /// as margins only on the origin-anchored scroll view.
-    func chatTranscriptInsets(
+    /// Applies the scroll viewport's margins, flip and safe-area exclusion
+    /// together. Row counter-flips do not inherit viewport layout modifiers.
+    func chatTranscriptViewport(
         _ orientation: ChatTranscriptOrientation,
         safeAreaInsets: EdgeInsets
     ) -> some View {
         modifier(
-            ChatTranscriptInsetsModifier(
+            ChatTranscriptViewportModifier(
                 orientation: orientation,
                 safeAreaInsets: safeAreaInsets
             )
