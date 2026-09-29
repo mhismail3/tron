@@ -1246,6 +1246,139 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // The keyboard's own input, which no journey drove before: the bottom safe
+    // area moves through the keyboard's intermediate positions while the history
+    // keeps tall replies in its measured set. `resize(height:)` changes the whole
+    // window, which the flip does not touch; the keyboard changes only the
+    // composer's inset, which is where CT-23's swapped mobile margins have to
+    // land. Every sampled boundary records the gap between the composer's top
+    // edge and the newest row's bottom edge in window coordinates (P0-1).
+    @Test("keyboard safe-area inset keeps the newest row measured at the composer", .enabled(if: UIValidationTier.isActive))
+    func safeAreaKeyboardInsetKeepsNewestRowAtComposer() async throws {
+        try await withTestWatchdog(timeout: .seconds(120)) {
+            // The CT-2 shape's content: 140 rows whose last eight measure about
+            // 1,300 pt, the tallest measured set a container change can
+            // re-derive an estimate from.
+            let rowCount = 140
+            let tallRowIndices = Set((rowCount - 8)..<rowCount)
+            let terminalSemanticID = "ct25-keyboard-turn-\(rowCount - 1)"
+            var snapshot = try SessionScenarioBuilder(seed: 1_268)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            snapshot.transcript = try (0..<rowCount).map { index in
+                try harnessRichAssistantMessage(
+                    id: "ct25-keyboard-history-\(index)",
+                    presentationID: "ct25-keyboard-turn-\(index)",
+                    thinkingLines: [],
+                    text: tallRowIndices.contains(index)
+                        ? harnessTallEstimateRowText(index)
+                        : "Short history row \(index) stays one line."
+                )
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains {
+                        $0.semanticID == terminalSemanticID && $0.isOnScreen
+                    }
+                }
+                // Phases: the opened history settling, the keyboard's inset
+                // transition, the composer's multi-line growth, the dismissal's
+                // transition, and the settled rest after it.
+                let show = KeyboardInsetTransition.show()
+                let hide = KeyboardInsetTransition.hide()
+                let phaseLengths: [Int] = [8, show.boundaries, 16, hide.boundaries, 8]
+                var samples: [KeyboardBoundarySample] = []
+                let measurePhase: @MainActor (Int) async throws -> Void = { length in
+                    for _ in 0..<length {
+                        try await harness.driveFrameBoundary()
+                        try samples.append(harness.keyboardBoundarySample())
+                    }
+                }
+                try await measurePhase(phaseLengths[0])
+                samples.append(contentsOf: try await harness.driveKeyboardInset(show))
+                let shownSettled = try await harness.newestRowSettledAtComposer()
+                try harness.setComposerDraftText(
+                    "First line of the draft\nSecond line\nThird line\nFourth line"
+                )
+                try await measurePhase(phaseLengths[2])
+                try harness.setComposerDraftText("")
+                samples.append(contentsOf: try await harness.driveKeyboardInset(hide))
+                let hiddenSettled = try await harness.newestRowSettledAtComposer()
+                try await measurePhase(phaseLengths[4])
+
+                let metrics = harness.keyboardMetrics(samples: samples, phaseLengths: phaseLengths)
+                print(metrics.line)
+                #expect(
+                    samples.count == phaseLengths.reduce(0, +),
+                    "the scenario ran every sampled display boundary"
+                )
+                let composerSpan = try #require(metrics.composerHeightSpan)
+                #expect(
+                    composerSpan.upperBound - composerSpan.lowerBound > 8,
+                    "the multi-line draft grew the composer: \(metrics.line)"
+                )
+                let topSpan = try #require(metrics.composerTopSpan)
+                #expect(
+                    topSpan.upperBound - topSpan.lowerBound > 200,
+                    "the keyboard's inset moved the composer across the window: \(metrics.line)"
+                )
+                // The keyboard moves the composer's own inset, so the transcript
+                // must land back on the pinned tail once the keyboard
+                // transition's own clock has run. This is the check the flip can
+                // break and today's gates never made: with the keyboard inset
+                // applied at the wrong edge the newest row settles away from the
+                // composer, while `resize(height:)` would have kept it there
+                // without any correction at all.
+                let shown = try #require(
+                    shownSettled.clearance,
+                    "the keyboard-up transition settled with no newest row: \(metrics.line)"
+                )
+                #expect(
+                    abs(shown - TranscriptWindowOracle.tailSpacing) <= 6,
+                    "the newest row settled \(ct2Number(shown)) pt from the composer with the keyboard up: \(metrics.line)"
+                )
+                let hidden = try #require(
+                    hiddenSettled.clearance,
+                    "the dismissal settled with no newest row: \(metrics.line)"
+                )
+                #expect(
+                    abs(hidden - TranscriptWindowOracle.tailSpacing) <= 6,
+                    "the newest row settled \(ct2Number(hidden)) pt from the composer after the dismissal: \(metrics.line)"
+                )
+            }
+        }
+    }
+
+    // The safe-area scenario's own negative control. Flipping the transcript the
+    // way CT-23 will, without the rows counter-flipped, is exactly the failure the
+    // keyboard gate exists to catch: the newest row leaves the composer edge, and
+    // because this is the composer's own inset the failure survives the whole
+    // transition instead of only one of its frames.
+    @Test("a keyboard inset over a flipped transcript fails the composer gate")
+    func keyboardInsetOverFlippedTranscriptFailsTheComposerGate() async throws {
+        try await withTestWatchdog(timeout: .seconds(30)) {
+            try await withHarness(seed: 1_272) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeSettledAtBottom
+                }
+                try harness.flipNativeTranscriptWithoutCounterFlippingRows()
+                try await harness.driveKeyboardInset(.show())
+                let settled = try await harness.newestRowSettledAtComposer()
+                let clearance = try #require(settled.clearance)
+                #expect(
+                    !harness.isPinnedToBottom(),
+                    "the flipped transcript's newest row left the pinned band: \(harness.pinnedDescription())"
+                )
+                #expect(
+                    abs(clearance - TranscriptWindowOracle.tailSpacing) > 6,
+                    "the flipped transcript's newest row settled \(ct2Number(clearance)) pt from the composer"
+                )
+            }
+        }
+    }
+
     // The bottom-coverage gate's own failure modes, in isolation: it must not
     // pass a run that leaves the pinned bottom uncovered on CT-23's path, and it
     // must not pass today's path when the fixture stopped reproducing the blank.
@@ -3650,6 +3783,59 @@ struct CT24BoundarySample {
     let coverage: TranscriptBottomCoverage
 }
 
+/// The keyboard's own input to the chat: the window's bottom safe area moves
+/// to `height`, the way UIKit moves it for a keyboard.
+///
+/// `resize(height:)` changes the whole window, which the flip does not touch.
+/// The keyboard changes only the bottom safe area — the composer's sole inset
+/// owner — so this is the one path CT-23's swapped insets change, and the
+/// parity gate never drove it. The inset is stepped through the curve's own
+/// intermediate positions one driven boundary at a time instead of running on
+/// the wall clock, so a recorded boundary means the same inset in every run.
+struct KeyboardInsetTransition: Sendable {
+    let height: CGFloat
+    let duration: Double
+    let curve: UIView.AnimationCurve
+    /// The driven display boundaries the inset's steps are spread over. The
+    /// keyboard interpolates for `duration`; this lane's boundary is about
+    /// one display frame, so the count stands for that duration here.
+    let boundaries: Int
+
+    /// A full-height keyboard on this window at the iOS keyboard's usual
+    /// 250 ms curve, the transition a real keyboard delivers.
+    static func show(
+        height: CGFloat = 336,
+        duration: Double = 0.25,
+        curve: UIView.AnimationCurve = .easeInOut,
+        boundaries: Int = 12
+    ) -> KeyboardInsetTransition {
+        KeyboardInsetTransition(
+            height: height, duration: duration, curve: curve, boundaries: boundaries
+        )
+    }
+
+    /// The same transition back to no keyboard.
+    static func hide(
+        duration: Double = 0.25,
+        curve: UIView.AnimationCurve = .easeInOut,
+        boundaries: Int = 12
+    ) -> KeyboardInsetTransition {
+        KeyboardInsetTransition(height: 0, duration: duration, curve: curve, boundaries: boundaries)
+    }
+}
+
+/// One display boundary of the safe-area keyboard journey: the gap the reader
+/// sees between the newest row's bottom edge and the composer's top edge, the
+/// composer's own top edge and height, all in window coordinates. The gap is the
+/// quantity P0-1's scenario records; the composer's absolute position is what
+/// shows the keyboard's inset actually moved it.
+struct KeyboardBoundarySample {
+    let clearance: CGFloat?
+    let composerTop: CGFloat?
+    let composerHeight: CGFloat
+    let coverage: TranscriptBottomCoverage
+}
+
 /// One journey's bottom-coverage gate evidence, folded from its samples.
 struct TranscriptCoverageSummary: Sendable, Equatable {
     let samples: Int
@@ -3825,6 +4011,42 @@ private struct CT24Metrics {
             + " uncoveredBandBoundaries=\(uncoveredBandBoundaries)"
             + " minVisibleRowFraction=\(ct2Number(minimumVisibleRowFraction))"
             + " newestRowClearanceSettled=\(newestRowClearanceSettled.map(ct2Number) ?? "none")"
+    }
+}
+
+/// One `CT25-KEYBOARD-METRICS` line: the safe-area keyboard journey's bottom
+/// coverage, the composer gap the reader sees and the composer's own position,
+/// phase by phase. The gap is the quantity P0-1's scenario exists to record, so
+/// its range and its settled value are on the line rather than only in the run
+/// log.
+fileprivate struct KeyboardMetrics {
+    var shape = "safe-area-keyboard"
+    var samples = 0
+    var blankBoundaries = 0
+    var uncoveredBandBoundaries = 0
+    var longestBlankRun = 0
+    var blankPhases = "none"
+    var minimumVisibleRowFraction: CGFloat = 0
+    var clearanceRange: ClosedRange<CGFloat>?
+    var settledClearance: CGFloat?
+    var composerHeightSpan: ClosedRange<CGFloat>?
+    var composerTopSpan: ClosedRange<CGFloat>?
+    var phaseClearances: [String] = []
+    var coverage: TranscriptCoverageSummary?
+
+    var line: String {
+        "CT25-KEYBOARD-METRICS"
+            + " shape=\(shape) samples=\(samples)"
+            + " blankBoundaries=\(blankBoundaries)/\(samples)"
+            + " uncoveredBandBoundaries=\(uncoveredBandBoundaries)"
+            + " longestBlankRun=\(longestBlankRun)"
+            + " blankPhases=\(blankPhases)"
+            + " minVisibleRowFraction=\(ct2Number(minimumVisibleRowFraction))"
+            + " clearanceRange=[\(clearanceRange.map { "\(ct2Number($0.lowerBound)),\(ct2Number($0.upperBound))" } ?? "none")]"
+            + " settledClearance=\(settledClearance.map(ct2Number) ?? "none")"
+            + " composerHeightSpan=[\(composerHeightSpan.map { "\(ct2Number($0.lowerBound)),\(ct2Number($0.upperBound))" } ?? "none")]"
+            + " composerTopSpan=[\(composerTopSpan.map { "\(ct2Number($0.lowerBound)),\(ct2Number($0.upperBound))" } ?? "none")]"
+            + " phaseClearances=\(phaseClearances.joined(separator: ","))"
     }
 }
 
@@ -4824,11 +5046,197 @@ final class ChatViewScrollHarness {
         return (squared / Double(first.count)).squareRoot()
     }
 
+    /// One driven boundary of the safe-area keyboard journey: the visual gap
+    /// between the composer's top edge and the newest row's bottom edge, the
+    /// composer's own top edge and height, and the boundary's bottom coverage,
+    /// all in window coordinates.
+    fileprivate func keyboardBoundarySample() throws -> KeyboardBoundarySample {
+        let bottom = transcriptBottom()
+        let rows = TranscriptWindowOracle.rows(in: hostingController.view)
+        let composer = TranscriptWindowOracle.composerFrame(in: hostingController.view)
+        return KeyboardBoundarySample(
+            clearance: bottom.clearance,
+            composerTop: composer?.minY ?? bottom.composerTop,
+            composerHeight: composer?.height ?? 0,
+            coverage: TranscriptBottomCoverage(
+                blank: !rows.contains { $0.isOnScreen },
+                uncoveredBand: !bottom.isBandCovered,
+                visibleRowFraction: bottom.visibleRowFraction,
+                newestRowClearance: bottom.clearance
+            )
+        )
+    }
+
+    /// Advance driven boundaries until the newest row is back inside the pinned
+    /// band, up to `boundaries`, and report the boundary's own sample. A
+    /// keyboard or send transition is owned by the layout transaction's clock,
+    /// which may re-anchor the tail a few frames after the transition's own
+    /// frames, so a journey that gates the settled position waits for it here
+    /// instead of guessing a frame count. This is not a retry: it is the same
+    /// wait every other pinned journey makes, and a transcript that never
+    /// returns fails the caller's own assertion.
+    func newestRowSettledAtComposer(boundaries: Int = 40) async throws -> KeyboardBoundarySample {
+        for _ in 0..<boundaries {
+            if isPinnedToBottom() { break }
+            try await driveFrameBoundary()
+        }
+        return try keyboardBoundarySample()
+    }
+
+    /// The safe-area keyboard journey's `CT25-KEYBOARD-METRICS` line, folded
+    /// from its per-boundary samples.
+    fileprivate func keyboardMetrics(
+        samples: [KeyboardBoundarySample],
+        phaseLengths: [Int]
+    ) -> KeyboardMetrics {
+        var metrics = KeyboardMetrics()
+        metrics.samples = samples.count
+        let shape = blankShape(
+            blankBoundaries: samples.map(\.coverage.blank), phaseLengths: phaseLengths
+        )
+        metrics.blankBoundaries = shape.blank
+        metrics.longestBlankRun = shape.longestRun
+        metrics.blankPhases = shape.phases
+        metrics.uncoveredBandBoundaries = samples.count { $0.coverage.uncoveredBand }
+        metrics.minimumVisibleRowFraction = samples.map(\.coverage.visibleRowFraction).min() ?? 0
+        metrics.coverage = TranscriptCoverageSummary(
+            samples: samples.map(\.coverage), phaseLengths: phaseLengths
+        )
+        let clearances = samples.compactMap(\.clearance)
+        metrics.clearanceRange = clearances.min().flatMap { minimum in
+            clearances.max().map { minimum...$0 }
+        }
+        metrics.settledClearance = samples.last?.clearance
+        let heights = samples.map(\.composerHeight)
+        metrics.composerHeightSpan = heights.min().flatMap { minimum in
+            heights.max().map { minimum...$0 }
+        }
+        let tops = samples.compactMap(\.composerTop)
+        metrics.composerTopSpan = tops.min().flatMap { minimum in
+            tops.max().map { minimum...$0 }
+        }
+        var index = 0
+        for (phase, length) in phaseLengths.enumerated() {
+            let end = min(samples.count, index + length)
+            guard index < end else { break }
+            let phaseClearances = samples[index..<end].compactMap(\.clearance)
+            metrics.phaseClearances.append(
+                "p\(phase):[\(phaseClearances.min().map(ct2Number) ?? "none"),\(phaseClearances.max().map(ct2Number) ?? "none")]"
+            )
+            index = end
+        }
+        return metrics
+    }
+
     func resize(height: CGFloat) {
         window.frame = CGRect(x: 0, y: 0, width: 390, height: height)
         hostingController.view.frame = window.bounds
         hostingController.view.setNeedsLayout()
         hostingController.view.layoutIfNeeded()
+    }
+
+    /// Drive the keyboard's inset transition, posting the keyboard notification
+    /// UIKit posts and then moving the bottom safe area through the curve's own
+    /// values. One driven display boundary per step, so a journey samples the
+    /// keyboard's intermediate frames deterministically; the returned samples
+    /// are the gap between the composer's top edge and the newest row's bottom
+    /// edge at each of those boundaries, in window coordinates.
+    @discardableResult
+    func driveKeyboardInset(_ transition: KeyboardInsetTransition) async throws -> [KeyboardBoundarySample] {
+        postKeyboardFrame(transition)
+        var samples: [KeyboardBoundarySample] = []
+        for step in 1...max(1, transition.boundaries) {
+            let progress = Double(step) / Double(max(1, transition.boundaries))
+            applyKeyboardInset(
+                transition.height * Self.keyboardProgress(progress, curve: transition.curve)
+            )
+            try await driveFrameBoundary()
+            samples.append(try keyboardBoundarySample())
+        }
+        return samples
+    }
+
+    /// The bottom safe area a keyboard owns, applied without a notification:
+    /// for a journey that needs the inset at a stated height while it drives the
+    /// chat itself.
+    func applyKeyboardInset(_ height: CGFloat) {
+        hostingController.additionalSafeAreaInsets = UIEdgeInsets(
+            top: 0, left: 0, bottom: height, right: 0
+        )
+        hostingController.view.setNeedsLayout()
+        hostingController.view.layoutIfNeeded()
+    }
+
+    /// The keyboard's own end-frame notification, in the form UIKit delivers it:
+    /// `ChatKeyboardObserver` reads the same three user-info keys, so the layout
+    /// transaction takes the keyboard it takes on a device.
+    private func postKeyboardFrame(_ transition: KeyboardInsetTransition) {
+        let endFrame = window.convert(
+            CGRect(
+                x: 0, y: window.bounds.maxY - transition.height,
+                width: window.bounds.width, height: transition.height
+            ),
+            to: nil
+        )
+        NotificationCenter.default.post(
+            name: transition.height > 0
+                ? UIResponder.keyboardWillChangeFrameNotification
+                : UIResponder.keyboardWillHideNotification,
+            object: nil,
+            userInfo: [
+                UIResponder.keyboardAnimationDurationUserInfoKey: NSNumber(value: transition.duration),
+                UIResponder.keyboardAnimationCurveUserInfoKey: NSNumber(value: transition.curve.rawValue),
+                UIResponder.keyboardFrameEndUserInfoKey: NSValue(cgRect: endFrame),
+            ]
+        )
+    }
+
+    /// UIKit's keyboard curve evaluated at `progress`. The public
+    /// `UIView.AnimationCurve` cases map one-to-one onto `CAMediaTimingFunction`'s
+    /// named curves, so the intermediate positions are the curve's own rather
+    /// than a substituted approximation of it.
+    static func keyboardProgress(_ progress: Double, curve: UIView.AnimationCurve) -> CGFloat {
+        let name: CAMediaTimingFunctionName = switch curve {
+        case .linear: .linear
+        case .easeIn: .easeIn
+        case .easeOut: .easeOut
+        default: .easeInEaseOut
+        }
+        let function = CAMediaTimingFunction(name: name)
+        var first = [Float](repeating: 0, count: 2)
+        var second = [Float](repeating: 0, count: 2)
+        function.getControlPoint(at: 1, values: &first)
+        function.getControlPoint(at: 2, values: &second)
+        let target = CGFloat(progress)
+        // The curve's x axis is progress and its y axis is the fraction applied.
+        var lower: CGFloat = 0
+        var upper: CGFloat = 1
+        for _ in 0..<24 {
+            let middle = (lower + upper) / 2
+            if cubic(first[0], first[1], second[0], second[1], middle).x < target {
+                lower = middle
+            } else {
+                upper = middle
+            }
+        }
+        let resolved = (lower + upper) / 2
+        let sample = cubic(first[0], first[1], second[0], second[1], resolved)
+        guard sample.x != 0 else { return 0 }
+        return min(1, max(0, sample.y))
+    }
+
+    /// A cubic Bézier's point at parameter `t`, for the four control values
+    /// `CAMediaTimingFunction` reports.
+    private static func cubic(
+        _ x1: Float, _ y1: Float, _ x2: Float, _ y2: Float, _ t: CGFloat
+    ) -> (x: CGFloat, y: CGFloat) {
+        let inverse = 1 - t
+        func axis(_ first: Float, _ second: Float) -> CGFloat {
+            3 * inverse * inverse * t * CGFloat(first)
+                + 3 * inverse * t * t * CGFloat(second)
+                + t * t * t
+        }
+        return (axis(x1, x2), axis(y1, y2))
     }
 
     struct FloatingLayout {
@@ -5098,6 +5506,15 @@ enum TranscriptWindowOracle {
     static func rows(in root: UIView) -> [Row] { state(in: root).rows }
 
     static func bottom(in root: UIView) -> Bottom { state(in: root).bottom }
+
+    /// The composer marker's frame in window coordinates: the one structural
+    /// inset owner's own frame, which is where the keyboard's safe area lands.
+    static func composerFrame(in root: UIView) -> CGRect? {
+        guard let window = root.window else { return nil }
+        return markers(in: root)
+            .first { $0.physicalID == ChatHostedNativeRowProbe.composerID }
+            .map { $0.layer.convert($0.bounds, to: window.layer).standardized }
+    }
 
     /// Whether the newest row's bottom edge sits within `tolerance` points of
     /// the pinned band: the decision the profiling scenarios make about a

@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-28, CT-24
+- **Last updated:** 2026-09-29, CT-25
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -1089,3 +1089,66 @@ pass only through eager-only repairs, stop and report.
   `nativeBottom` for a recorded display frame, and
   `TranscriptBottomGateExpectation` for what the pinned bottom must do before and
   after CT-23.
+
+### CT-25 stage B1 · 2026-09-29 · chat scroll session (worker lanes)
+
+- Result: the keyboard's own inset path is driven and recorded, the first oracle
+  of stage B (external P0-1). `resize(height:)` changes the whole window, which
+  the flip does not touch; a keyboard changes only the composer's own bottom safe
+  area. The harness now drives that: `KeyboardInsetTransition` posts the keyboard
+  notification UIKit posts (duration, curve, end frame, as `ChatKeyboardObserver`
+  reads them) and then steps `additionalSafeAreaInsets.bottom` through the curve
+  values `CAMediaTimingFunction` reports for it, one driven boundary per step, so
+  a recorded boundary means one inset in every run. The journey
+  `safeAreaKeyboardInsetKeepsNewestRowAtComposer` opens the CT-2 shape (140 rows,
+  the last eight ~1,300 pt), samples the gap between the composer's top edge and
+  the newest row's bottom edge in window coordinates at every boundary of the
+  show transition, a multi-line draft's composer growth and the dismissal, prints
+  one `CT25-KEYBOARD-METRICS` line, and gates the *settled* position: after each
+  transition the newest row must land back at the pinned tail.
+- Evidence (lane ct25, products from this worktree's own source state, all under
+  `~/Library/Developer/Tron/ios/test-runs/`):
+  - Three consecutive runs of the journey pass, 1.62-1.68 s each
+    (`20260929T015148Z-run.x9cT3b`, `20260929T015210Z-run.TjH8ER`,
+    `20260929T015233Z-run.YPKRSe`, plus two more with the control below):
+
+    ```
+    CT25-KEYBOARD-METRICS shape=safe-area-keyboard samples=56 blankBoundaries=0/56 uncoveredBandBoundaries=0 longestBlankRun=0 blankPhases=none minVisibleRowFraction=1.0 clearanceRange=[-660.2,12.7] settledClearance=12.7 composerHeightSpan=[49.0,110.3] composerTopSpan=[393.7,791.0] phaseClearances=p0:[5.8,10.6],p1:[-660.2,12.0],p2:[12.7,12.7],p3:[12.7,12.7],p4:[12.7,12.7]
+    ```
+
+    The inset the driver applies is real: the composer's own top edge spans
+    393.7-791.0 pt and its height 49.0-110.3 pt, so the keyboard moved the
+    composer and the multi-line draft grew it. Every phase's settled clearance is
+    the 12 pt tail spacing.
+  - Negative control, three consecutive passing runs
+    (`20260929T015536Z-run.yACgdB`, `20260929T015613Z-run.k6xbpg`,
+    `20260929T015636Z-run.o0YH7m`), 1.05-1.32 s each: flipping the transcript the
+    way CT-23 will, without the rows counter-flipped, then driving the same
+    keyboard inset, leaves the newest row away from the composer, so
+    `keyboardInsetOverFlippedTranscriptFailsTheComposerGate` passes only because
+    the gate it checks fails there — the same failure mode CT-23's unswapped
+    insets would produce.
+- Changes: this commit (`packages/ios-app/Tests/UI/ChatViewScrollHarnessTests.swift`,
+  this plan).
+- Deviations:
+  - The gate is the transition's *settled* position, not every frame, and the
+    per-boundary excursion is recorded rather than gated. Measured across the
+    five runs above, the ramp's own excursion is not reproducible: the newest
+    row's clearance reaches -660 or -246 pt at some boundary of the show
+    transition in some runs and stays within the band in others, while the
+    settled position is always the tail. The layout transaction's clock owns
+    those frames, and the excursion is a measurement of that clock, not a stable
+    gate: an `uncoveringBottomIsTheKnownDefect` gate here failed on the runs that
+    happened to keep the band covered (0 of 56 boundaries), which would make the
+    fixture flake rather than prove anything. P0-1's own proof is the settled
+    check ("the new checks pass on `main`", with the flip as the negative
+    control), which is what this gate is.
+  - The keyboard notification is posted rather than produced by the simulator's
+    software keyboard, so the app's `ChatKeyboardObserver`/layout-transaction path
+    runs against a stated end frame. The inset itself is the real mechanism
+    (UIKit owns it on a device); the P0-1 text suggested one UI test with the real
+    software keyboard, which F10 tracks as an XCUITest journey and this stage did
+    not add.
+- For the next agent: the parity gate needs this scenario too (stage B2), and the
+  manifest needs a per-scenario `recordedFrom` before any reference is recorded
+  from this branch (F9).
