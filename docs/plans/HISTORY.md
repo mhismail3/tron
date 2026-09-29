@@ -143,3 +143,12 @@ Append entries in this format when closing a plan (see [the plan protocol](READM
 - Deviations: R-1 was answered from an incident investigation rather than five days of passive collection.
 - Lessons: option B (tolerating missed pongs) would not have prevented any observed episode; path outages dominate.
 - Knowledge moved to: the connection and scale hardening plan (`2026-09-27-connection-scale-hardening.md`).
+
+## 2026-09-23 → 2026-09-28 · Knowledge agent enrichment · Abandoned (superseded)
+
+- Plan: `2026-09-23-knowledge-agent-enrichment.md`, deleted in commit `plan(knowledge-agent-curation): approve; supersede agent enrichment; claim K1 and K2`.
+- Outcome: no task was started. The user's 2026-09-28 interview widened the goal to agent curation (tags from a controlled vocabulary, verdicts, the user's takes, freshness and scope-aware retrieval), so the plan was replaced by `2026-09-28-knowledge-agent-curation.md`, which carries its evidence-binding, date-recovery and dashboard-invalidation requirements in K1, K2 and K6.
+- Key commits: none.
+- Deviations: none.
+- Lessons: the three DeepSeek summary candidates it retained were never importable because they were built from freshly fetched pages, not the saved evidence revision.
+- Knowledge moved to: `2026-09-28-knowledge-agent-curation.md`.
