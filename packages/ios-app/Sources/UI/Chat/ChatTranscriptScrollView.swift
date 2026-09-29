@@ -688,9 +688,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     @ViewBuilder
     var body: some View {
         if orientation.presentsNewestRowFirst {
-            GeometryReader { insetReader in
-                transcriptBody(safeAreaInsets: insetReader.safeAreaInsets)
-            }
+            // Temporary CT-23 profile control: freeze the 402×874 fixture's
+            // unchanged safe area to isolate the reader's render dependency.
+            transcriptBody(safeAreaInsets: .init(top: 116, leading: 0, bottom: 83, trailing: 0))
         } else {
             transcriptBody(safeAreaInsets: .init())
         }
