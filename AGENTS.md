@@ -93,10 +93,11 @@
 - Mutation requests carry command IDs and use bounded idempotency receipts.
 - Project trust gates executable project resources but is not a sandbox.
 - Exposure binds explicitly to its interface; developer default is
-  loopback. Tailscale exposure binds its own interface, and the optional LAN
-  endpoint (off unless enabled) binds only a private address the host has —
-  never a wildcard — and is TLS-only with a certificate only an explicit
-  rotation replaces.
+  loopback. Tailscale exposure binds its own interface, and the LAN
+  endpoint (on by default unless the main listener is loopback, turned off by
+  its own setting) binds only a private address the host has — never a
+  wildcard — and is TLS-only with a certificate only an explicit rotation
+  replaces.
 - The Mac wrapper's local credential is separate from mobile device credentials
   and legacy authentication.
 - Do not open one canonical session concurrently in another runtime client; the

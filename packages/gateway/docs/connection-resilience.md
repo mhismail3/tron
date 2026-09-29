@@ -397,6 +397,17 @@ quiet. The Gateway retires a socket only after three missed 25 s heartbeats
 18 s therefore ends with the socket still open and nothing but the records
 below; the worked example's 30–121 s flaps disconnect the phone.
 
+The release's own answer is the pinned LAN lane: while the phone and the Mac
+share a network, E-3c races the advertised LAN endpoint against the saved
+Tailscale endpoint and keeps the winner for the epoch, so a relay-only window
+on the tailnet never sits on the socket (E-3c, E-3d). The lane is on by default
+for a Gateway that is not bound to loopback; `--lan-endpoint off` or
+`TRON_GATEWAY_LAN_ENDPOINT=off` disables it, and that setting is the kill switch
+R-4 reviews. The Mac-supervised Gateway takes the variable through its launchd
+session instead — `launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off` and a restart
+the user performs, because the wrapper's plist arguments and environment are
+fixed ([transport](../README.md#transport)).
+
 - **Gateway records.** One `connection.inbound-silent` (warning) per silence
   episode per socket, written at the first heartbeat tick (every 25 s) that
   finds no inbound frame for `INBOUND_SILENCE_WARNING_MS` (12 s) with liveness
