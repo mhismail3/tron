@@ -15,12 +15,24 @@ function model(): KnowledgeGenerationModel {
   return {
     async reflect() { return "generated handoff"; },
     async synthesize() { return "generated synthesis"; },
-    async summarizeSource() { return { text: "A substantive source summary.", tags: [{ label: "AI agents", kind: "semantic" as const }] }; },
+    async summarizeSource() { return { text: "A substantive source summary." }; },
     async assess() { return { summary: "Useful source", evidenceQuality: "high", freshness: "current" }; },
   };
 }
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
+
+/** Generation is owned background work, so a caller observes it instead of
+ * holding a request open for it. */
+async function waitForJob(service: KnowledgeService, commandId: string) {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const listed = await service.invoke({ operation: "knowledge.curation.jobs", request: { commandId } }) as { jobs: Array<{ status: string; revisionId?: string; code?: string }> };
+    const job = listed.jobs[0];
+    if (job && job.status !== "running") return job;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  throw new Error("Summary job did not settle");
+}
 
 describe("KnowledgeService integration", () => {
   it("clears only an exact failed cut through a durable, replayable terminal skip", async () => {
@@ -61,17 +73,20 @@ describe("KnowledgeService integration", () => {
     const source = await store.captureSource({ commandId: "source-summary-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Thread", text: "A post and its saved replies", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" } } });
     let input = "";
     let generations = 0;
-    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async summarizeSource(request) { generations += 1; input = request.sourceText; return { text: "A post with some saved replies.", tags: [{ label: "AI agents", kind: "semantic" }] }; } }));
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async summarizeSource(request) { generations += 1; input = request.sourceText; return { text: "A post with some saved replies." }; } }));
     const action = { operation: "knowledge.source.summarize" as const, request: { commandId: "source-summary-generate", sourceId: source.record.id, expectedRevision: source.record.revisionId } };
-    const result = await service.invoke(action);
+    const accepted = await service.invoke(action) as { job: { status: string } };
+    // Accepted, not awaited: generation is owned background work.
+    expect(accepted.job.status).toBe("running");
+    expect(await waitForJob(service, "source-summary-generate")).toMatchObject({ status: "done" });
     expect(input).toContain("coverage=sampled");
     expect(input).toContain("disposition=partial");
-    expect(result).toMatchObject({ record: { content: { summary: { text: "A post with some saved replies.", tags: [{ label: "AI agents", kind: "semantic" }], sourceRevisionId: source.record.revisionId, coverage: "sampled" } } } });
-    const replay = await service.invoke(action);
-    expect(replay).toMatchObject({ record: { content: { summary: { text: "A post with some saved replies." } } } });
+    const replay = await service.invoke(action) as { job: { status: string } };
+    expect(replay.job.status).toBe("done");
     expect(generations).toBe(1);
     const updated = await store.read(source.record.id);
     expect(updated?.content.assessment).toBeUndefined();
+    expect(updated?.content.summary).toMatchObject({ text: "A post with some saved replies.", sourceRevisionId: source.record.revisionId, coverage: "sampled", producer: { actor: "agent" } });
     expect(updated?.content.summary?.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
   });
 

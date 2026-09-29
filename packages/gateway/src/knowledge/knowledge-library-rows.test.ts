@@ -89,7 +89,7 @@ describe("Knowledge library rows", () => {
     const { store } = await fixture();
     const record = await capture(store, 1, 200);
     const text = record.content.text ?? "";
-    const summary = (digest: string) => ({ text: "Generated summary", tags: [], generatedAt: "2026-02-01T00:00:00Z", sourceRevisionId: record.revisionId, evidenceDigest: digest, coverage: "sampled" as const });
+    const summary = (digest: string) => ({ text: "Generated summary", generatedAt: "2026-02-01T00:00:00Z", sourceRevisionId: record.revisionId, evidenceDigest: digest, coverage: "sampled" as const, producer: { actor: "agent" as const } });
     const stale = await store.captureSource({ commandId: "row-library-summary-stale", expectedRevision: record.revisionId, record: { kind: "source", id: record.id, createdAt: record.createdAt, scope: record.scope, provenance: record.provenance, relations: [], content: { ...(record.content as object), summary: summary("b".repeat(64)) } as never } });
     expect((await store.listSourceRows({ kind: "source", projection: "sourceRow", ids: [record.id] })).rows[0]?.summary).toBeUndefined();
     const current = await store.captureSource({ commandId: "row-library-summary-current", expectedRevision: stale.record.revisionId, record: { kind: "source", id: record.id, createdAt: record.createdAt, scope: record.scope, provenance: record.provenance, relations: [], content: { ...(stale.record.content as object), summary: summary(sourceEvidenceDigest(record.content.title, text)) } as never } });

@@ -1305,8 +1305,11 @@ export class KnowledgeStore {
     try {
       return await this.mutate("knowledge.source.curate", input.commandId, request, async (state, paths) => {
         const head = state.records.get(input.item.recordId);
-        if (!head) throw new KnowledgeCurationRefusal("unknown-record", `Knowledge record ${input.item.recordId} is not available`);
+        // A forgotten record keeps its tombstone but loses its head. Report the
+        // erasure rather than a generic "unknown record", so a caller never
+        // retries work the user deliberately destroyed.
         if (state.suppressions.get(input.item.recordId)?.forgotten) throw new KnowledgeCurationRefusal("forgotten", "Knowledge record was forgotten and cannot be curated");
+        if (!head) throw new KnowledgeCurationRefusal("unknown-record", `Knowledge record ${input.item.recordId} is not available`);
         if (head.latestRevisionId !== input.item.expectedRevision) throw new KnowledgeCurationRefusal("stale-revision", `Knowledge record revision changed; expected ${input.item.expectedRevision} but ${head.latestRevisionId} is committed`, head.latestRevisionId);
         const current = await this.readRecord(paths, input.item.recordId, head.latestRevisionId);
         if (current.kind !== "source") throw new KnowledgeCurationRefusal("invalid-input", "Knowledge curation applies to source records only");

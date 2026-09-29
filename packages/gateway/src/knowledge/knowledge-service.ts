@@ -367,6 +367,14 @@ export class KnowledgeService {
   async summarize(request: { commandId: string; sourceId: string; expectedRevision: string }): Promise<KnowledgeSourceSummaryStart> {
     const record = await this.store.read(request.sourceId, undefined, false, true, true);
     if (!record || record.kind !== "source") throw new GatewayError("conflict", "Source is unavailable, excluded, or forgotten");
+    // A duplicate command answers with the run it already owns. The revision
+    // fence below belongs to *starting* work, not to observing it: the first
+    // generation advances the very revision the duplicate would name.
+    const existing = this.jobs.find(request.commandId);
+    if (existing) {
+      if (existing.sourceId !== request.sourceId) throw new KnowledgeCurationRefusal("command-id-reuse", "This command ID already started a summary for another entry; start a new command ID");
+      return { job: existing, record };
+    }
     if (record.revisionId !== request.expectedRevision) throw new GatewayError("conflict", `Source revision changed; ${record.revisionId} is committed`);
     const job = this.jobs.start({
       commandId: request.commandId,

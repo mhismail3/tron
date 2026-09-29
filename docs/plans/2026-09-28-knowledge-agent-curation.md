@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-28
 - **Status:** Active
-- **Last updated:** 2026-09-28, K1 and K2 claimed
+- **Last updated:** 2026-09-28, K1 done
 - **Goal:** Agents keep every Library entry summarized, tagged, judged for freshness and correctly scoped, guided by the user's own takes, so useful sources surface on their own in future work.
 
 ## Goal and constraints
@@ -145,7 +145,7 @@ screenshots of each state. Device validation by the user after K9.
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| K1 | Claimed | Typed enrichment and curation operations for agents, RPC and the agent tool | none | deepseek-worker, 2026-09-28 |
+| K1 | Done | Typed enrichment and curation operations for agents, RPC and the agent tool | none | deepseek-worker, 2026-09-28 |
 | K2 | Claimed | Clean evidence for summaries: extraction without site chrome, provider-date recovery | none | deepseek-worker, 2026-09-28 |
 | K3 | Ready | Tag vocabulary and tagging guidelines owned by Knowledge config | K1 | — |
 | K4 | Ready | Jev tagger with monthly budget and re-tag triggers | K1, K3 | — |
@@ -276,6 +276,44 @@ Shopping belong. K14 creates the intake automation and the weekly review
 session only after the user confirms the schedule.
 
 ## Handoff log
+
+### K1 · Done · 2026-09-28 · deepseek-worker
+
+- Result: `knowledge.source.curate` (RPC, capability `knowledge-curation.v1`, agent
+  tool `curate`) writes summaries, vocabulary-tag selections, verdicts, placement
+  and relations onto an exact revision; summary generation became owned
+  background work with a queryable job (`knowledge.curation.jobs`, tool
+  `summarize`/`curationJob`). Free-form summary tags were replaced by the
+  vocabulary selection so one taxonomy owns tagging.
+- Evidence: `npx vitest run src/knowledge/` — 288 passed, 20 files. The
+  acceptance case in `knowledge-curation.test.ts` drives the real agent tool
+  through a 25-entry batch with an injected conflict, a replay, a budget stop and
+  a restarted owner instance, and writes `knowledge-curation-outcome.json` under
+  its temp root (`applied` 10 / 24 / 24 / 5, one `stale-revision` conflict, 20
+  `skipped`). `src/transport/` passed on re-run (404); two log-rotation and
+  drain-timing cases failed once under host load and passed on re-run.
+- Changes: `feat(knowledge): add typed source curation to the store` (8a0e666e8);
+  `feat(knowledge): run curation batches and summary jobs through the owner`
+  (f30103e81); plus this plan/docs update.
+- Tasks added: none.
+- Kept on purpose: `knowledge.source.admission` (connector intake and explicit
+  restore) stays separate from curation placement, because intake carries rubric
+  and profile versions that a placement decision must not inherit. The
+  assessment model seam is unchanged; K5 selects the enrichment model.
+- Deviations: the store's `KnowledgeTagVocabulary` seam is a constructor seam
+  rather than a config field, because K3 owns the config shape; an empty
+  vocabulary refuses every tag write with `unknown-tag`. The curation gate is a
+  service constructor seam (K4 installs the Jev budget). `SourceSummary.tags` was
+  deleted rather than kept beside the vocabulary: the live corpus held zero
+  stored summaries (checked read-only against the running Gateway, 438 sources),
+  so the replacement needed no migration. An old iOS build cannot decode a
+  record summarized after this change until K7 lands — no such record can exist
+  until the Gateway is rebuilt at K9.
+- For the next agent: K3 fills `KnowledgeTagVocabulary` from config and must
+  record its revision; K4 tags through the `tags` curation operation and installs
+  the gate; K5 wires the enrichment model; K6 extends `curationInputsDigest` with
+  the user's take and must then re-tag; K7 adopts `tags`/`verdict` on iOS and
+  drives `summarize` + `curationJob` instead of awaiting a summary call.
 
 Drafted from the 2026-09-28 interview and approved by the user the same day,
 with the reliability and interaction bars added at the user's request. K1 and

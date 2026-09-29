@@ -90,9 +90,18 @@ export class KnowledgeCurationJobs {
   private readonly jobs = new Map<string, JobEntry>();
   constructor(private readonly maximum = 64, private readonly deadlineMs = 120_000) {}
 
+  /** The job one command ID already started, so a duplicate request observes
+   * that run instead of starting (and paying for) a second one. */
+  find(commandId: string): KnowledgeCurationJob | undefined { const entry = this.jobs.get(commandId); return entry ? { ...entry.job } : undefined; }
+
   start(input: { commandId: string; operation: KnowledgeCurationJob["operation"]; sourceId: string; run: KnowledgeCurationRunner }): KnowledgeCurationJob {
     const existing = this.jobs.get(input.commandId);
-    if (existing) return { ...existing.job };
+    if (existing) {
+      // A command ID is an identity, not a slot: reusing it for different work
+      // must be refused rather than answered with the earlier job.
+      if (existing.job.sourceId !== input.sourceId || existing.job.operation !== input.operation) throw new KnowledgeCurationRefusal("command-id-reuse", "This command ID already started a different curation job; start a new command ID");
+      return { ...existing.job };
+    }
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(new Error("Knowledge curation job deadline exceeded")), this.deadlineMs);
     deadline.unref?.();

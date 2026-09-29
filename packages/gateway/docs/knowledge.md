@@ -76,6 +76,65 @@ projection and exact state revision, because such a page cannot be resumed acros
 a corpus change without skipping or repeating rows. A cursor from an older state
 revision fails with `conflict` so the client reloads the first page.
 
+## Curation and enrichment
+
+`knowledge.source.curate` (capability `knowledge-curation.v1`, agent tool
+`curate`) writes **interpretation** onto an exact source revision: `summary`
+(text the caller produced, with its declared `full`/`sampled` coverage), `tags`
+(a selection of active vocabulary IDs), `verdict` (`evergreen`, `dated`,
+`superseded` with the entry that replaces it, or `archive`), `placement`
+(scope and/or admission) and `relation` (add or remove an edge to another
+entry). One batch carries one operation and 1..25 items. The owner derives every
+evidence binding itself: a summary's `sourceRevisionId` and `evidenceDigest` are
+computed from the committed record, so a caller can never stamp its own
+provenance onto stored text, and interpretation never replaces captured
+evidence, the original link, or a retained object.
+
+A batch is not a transaction. Each item is its own receipted mutation whose
+command ID is derived from the batch command and the entry, so:
+
+- one item's conflict, refusal or unexpected failure is that item's outcome and
+  never rolls back or blocks another;
+- a batch interrupted by a crash is re-run with the same command ID and its
+  applied items replay their committed revision instead of conflicting;
+- a changed payload under a reused command ID is refused with
+  `command-id-reuse`;
+- `stale-revision` is a `conflict` outcome that carries the committed
+  `currentRevision`, so a caller re-reads and retries deliberately;
+- an excluded entry reports `excluded`, a forgotten one `forgotten`, and neither
+  is silently overwritten.
+
+Each outcome reads back what it wrote (`stored`), so a caller can verify the
+committed fields without a second round trip. The batch's combined summary text
+is bounded (`KNOWLEDGE_CURATION_MAX_BATCH_SUMMARY_CHARS`), which keeps one
+response small enough for both the RPC frame and the model-visible tool bound.
+`unchanged` means the write was already committed: identical values never create
+a new revision.
+
+The **tag vocabulary** belongs to Knowledge configuration: its IDs, labels,
+definitions, decay classes and tagging guidelines. Until a vocabulary is
+installed, no tag ID is active and every tag write is refused as `unknown-tag`
+rather than inventing a taxonomy. A selection records the vocabulary revision it
+was validated against and `curationInputsDigest` (SHA-256 of the record's own
+title, readable text and current verdict), so editing the vocabulary flags
+re-tagging without making stored selections unreadable, while a change to the
+evidence itself does. The **curation gate** is consulted before each item; a
+refusal stops the batch and reports that item and every later one as `skipped`
+with the code, which is how the paid tagging owner stops dispatching once its
+budget is spoken for.
+
+Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
+owned background work, not a request that waits for a model: the call accepts a
+job and returns its state plus the source's current revision, the model runs
+outside the store lock, and the commit revalidates the exact source revision,
+configuration revision and privacy state before publishing. The job survives a
+dismissed sheet, a backgrounded app and a reconnect, and
+`knowledge.curation.jobs` (agent tool `curationJob`) reports `running`, `done`
+or `failed` with a typed code for one command ID or for one entry. A duplicate
+command ID observes the run it already started instead of starting — and paying
+for — a second one. Job state is process-local by design: the durable outcome is
+the committed revision, so a restart loses only `running`, never a write.
+
 ## Publication, upgrade, and recovery
 
 Objects and immutable revisions are synchronized before a single SQLite
@@ -327,6 +386,10 @@ must reconcile uncertain outcomes before retrying.
 
 `knowledge.source.triage` reads persisted current interests and publishes a
 separate source derivative only after the retained source is available.
+Generated `summary` text, the `tags` selection and the `verdict` are
+interpretations written through the curation operations above; each carries the
+producer that claimed it and the revision it was bound to, and none of them is
+evidence.
 
 `NoteContent` supports structured field values with exact evidence revisions,
 validity, explicit confirmation, privacy scope, freshness, corrections,
