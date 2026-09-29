@@ -9415,7 +9415,8 @@ wait).
   carries the pin; a LAN lane that never answers is retired and the saved endpoint
   wins after >= 250 ms; a reconnect dials both lanes in < 200 ms; a lane this
   network already carries skips the stagger; a pin-refused lane is named
-  `lan_pin_mismatch` and its socket sent nothing; a recorded denial is not dialed
+  `lan_pin_mismatch`, its socket sent nothing, and the lane that carried the
+  attempt is the one whose dial holds the credential; a recorded denial is not dialed
   again), and the shared-fixture case now also asserts
   `admitsServerTrust` admits the fixture certificate for its pin and refuses
   another. `scripts/tron-ios-test run --only-testing
