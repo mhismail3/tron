@@ -952,7 +952,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(
                     transcriptBottomGateOutcome(
                         try #require(metrics.coverage),
-                        expectation: .coveringBottomIsRequired
+                        expectation: .current(for: harness.orientation)
                     ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
@@ -1076,7 +1076,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(
                     transcriptBottomGateOutcome(
                         try #require(metrics.coverage),
-                        expectation: .coveringBottomIsRequired
+                        expectation: .current(for: harness.orientation)
                     ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
@@ -1184,7 +1184,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(
                     transcriptBottomGateOutcome(
                         try #require(metrics.coverage),
-                        expectation: .coveringBottomIsRequired
+                        expectation: .current(for: harness.orientation)
                     ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
@@ -1259,7 +1259,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(
                     transcriptBottomGateOutcome(
                         try #require(metrics.coverage),
-                        expectation: .coveringBottomIsRequired
+                        expectation: .current(for: harness.orientation)
                     ) == .asExpected,
                     "the pinned bottom's coverage: \(metrics.line)"
                 )
