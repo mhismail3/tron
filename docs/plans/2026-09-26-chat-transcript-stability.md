@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-29, CT-25
+- **Last updated:** 2026-09-29, CT-25 review fixes
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -1456,3 +1456,157 @@ pass only through eager-only repairs, stop and report.
   it to `coveringBottomIsRequired` in the same change, and every scenario,
   journey and anchor assertion above then has to hold in the flipped orientation
   — that is what CT-25 was for.
+
+### Review fixes (CT-25) · Done · 2026-09-29 · chat scroll session (worker lane)
+
+- Result: the CT-25 review's findings are fixed on `ct-25-oracles`, with the
+  parity reference re-recorded from a clean committed revision. Six commits:
+  `139bb1b26` (provenance, keyboard control, motion instrument, isFlipped,
+  restored coverage, mid-history detach), `66f2d8864` and `c18b3b084` (the fixes
+  the first hosted runs found), `8e058ba35` (the re-recorded reference), and this
+  plan entry. CT-23 stays out of scope.
+
+  **P1 — a recording named a revision that cannot reproduce its frames.**
+  `scripts/tron-ios-test` passed only `TRON_SOURCE_REVISION`, so a dirty tree
+  recorded frames under the ancestor commit it happened to sit on
+  (`20260929T022650Z-run.Pdb8pN`: `dirty: true` at `2297defc9`). It now passes
+  the source state it verified as `TEST_RUNNER_TRON_SOURCE_DIRTY` beside the
+  revision, and `ChatVisualParityGate.record` refuses unless that state is a
+  proven clean commit — an unstated state is not a clean one. The three CT-25
+  scenarios' stale entries were removed, the scenarios re-recorded from
+  `c18b3b08402f533ce3b03d96eb6d1ca2d39e473a`, and that revision added to
+  `ChatVisualParityReference.recordedRevisions`. `development.md`'s recording
+  steps now commit the scenario code before recording, check
+  `git status --porcelain`, and rebuild after the manifest commit before
+  verifying (the products are stamped with the state they were built from).
+
+  The far-end clamp (`e01863d88`) stays verbatim; its `-inset.top` lower bound
+  moves the `oldest-row-at-visual-top` reader by the transcript's 116 pt top
+  inset, which is why that scenario no longer matched the committed reference
+  (0.0547 against 0.025) and was re-recorded with the other two.
+
+  **P2 — the keyboard negative control mirrored the transcript.** It failed with
+  or without a keyboard, so it never isolated the inset's edge. It now drives the
+  keyboard's own transition (`driveKeyboardInsetAtWrongEdge`) while
+  `reserveKeyboardHeightAtTranscriptFarEdge` reserves the height at the
+  transcript's *far* edge — the offset past the legal bottom, which is the
+  geometry a wrongly swapped margin produces, with every row keeping its own
+  orientation and order. The control asserts the composer moved more than 200 pt
+  with its inset, so the failure is the inset's edge and not a missing
+  transition. Recorded for anyone re-trying the mechanism: a scroll-view
+  translation is compensated by `UIScrollView` and measured no clearance change
+  at all.
+
+  **P2 — the motion gate's pixel instrument asserted nothing.** `verticalProfile`,
+  `inkCentre` and `RenderedVerticalProfile` are deleted (their only assertion was
+  `centres.count >= 3`), and the reveal's direction is one pure decision,
+  `OpeningRevealDirection.failure(edges:)`: the newest row's committed window edge
+  must never move down and must step up by the reveal's 8 ± 3 pt lift. The
+  negative control feeds it the measured sequence and its reversal, plus a static
+  and an empty sequence, so the inverted reveal reaches the assertions instead of
+  the watchdog the three B4 attempts hit.
+
+  **P2 — coverage lost with the two synthetic fixtures.** Restored on the real
+  view, through the window oracle:
+  - `pinnedGrowthAndShrinkWriteNoPosition`: a pinned reply arrives and leaves
+    again; the only commands are the terminal row's own exact-realization lease,
+    and the tail holds the pinned band (growth clearance 8.0, shrink 12.3).
+  - `detachedRestructureAdmitsNoProjectionWork`: the keyboard's own inset cycle
+    against a mid-history detached viewport admits no projection work, no
+    projection install and no scroll command, and a reader who takes the viewport
+    back while a catch-up is admitted is still away with their unread state.
+  Two measurements recorded rather than hidden: shrinking the terminal row *in
+  place* with zero writes leaves the tail 65 pt under the composer (a field-shape
+  figure, not a requirement, so the shrink phase restores the baseline content
+  instead); and `automaticScrollCommandCount` is dead evidence —
+  `recordScrollCommand` is only ever called with `isAutomatic: false` — so the
+  restored fixtures count every command that is not a tail-row lease. Making that
+  counter live, or deleting it, belongs to the task that owns the probe's
+  evidence surface.
+
+  **P2 — the detach sat at the content's far edge.** `detachReaderMidHistory(byViewports: 1.5)`
+  scrolls the real view 1.5 viewports up and reports the pan's own phase
+  callbacks, so the streaming and keyboard phases of
+  `detachedReaderHoldsItsTopRowThroughStreamingKeyboardAndPage` can actually move
+  the anchor (the status-bar path's heuristic needs a visual top inside 2 pt, so
+  it always left the reader at offset 0, where nothing above could move it). The
+  status-bar helper stays for the journeys that only need a detached viewport.
+
+  **P2 — `isFlipped` stopped at the first negative `m22`.** It multiplies the signs
+  along the layer chain, so a container that flips both the scroll view and an
+  ancestor reads as upright, and
+  `orientationReadMultipliesTheFlipAlongTheChain` pins it: red against the
+  pre-fix body (failed at the double flip), green with the fix.
+
+- Evidence (lane ct25, products from this worktree's own source state, all under
+  `~/Library/Developer/Tron/ios/test-runs/`):
+  - A dirty run refuses to record: `20260929T074359Z-run.70qb1N` (revision
+    `e01863d88`, `dirty: true`, exit 65), each scenario's frames driven, then
+    `the parity reference was not recorded: this run's source tree is not proven
+    clean …` and no `build/parity-reference/manifest.json` written. The pre-record
+    tree carried exactly this defect, so the refusing run is the fix's own
+    before/after.
+  - The recording from the clean commit: `20260929T081225Z-run.FTfZyS`
+    (`c18b3b084`, exit 65 by design), each of the three:
+
+    ```
+    PARITY-RECORD scenario=keyboard-safe-area-inset frames=27 revision=c18b3b08402f533ce3b03d96eb6d1ca2d39e473a
+    PARITY-RECORD scenario=short-transcript-at-rest frames=8 revision=…
+    PARITY-RECORD scenario=oldest-row-at-visual-top frames=6 revision=…
+    ```
+
+    The merged manifest's seven reviewed entries are identical to the ones they
+    replaced (scenario-by-scenario comparison); only the three re-recorded
+    scenarios and their `recordedFrom` changed.
+  - `20260929T081608Z-run.MN2ESo`: `ChatViewScrollHarnessTests` +
+    `ChatVisualParityTests`, 66 tests in 2 suites, pass in 162.3 s, parity gate
+    10/10 `verdict=pass` — the three re-recorded scenarios at 0.02258
+    (keyboard-safe-area-inset), 0.00455 (short transcript) and 0.00264 (oldest
+    row at the visual top).
+  - The harness suite alone: 65 tests (`20260929T080850Z-run.JOT2h1`, the
+    UIValidation tier — 61 before this change plus the four new tests), with one
+    failure in `retiredComposerCatalogDoesNotPublish` that the same heavy suite
+    recorded twice in stage B4; it passes alone (`20260929T081137Z-run.io9XoI`) and
+    passed in the combined run above, so it is the load-related picker RPC-ordering
+    flake, not a regression.
+  - The new and changed tests, focused: 8 pass in 8.9 s
+    (`20260929T080731Z-run.IgrxxH`), including `CT25-KEYBOARD-METRICS …
+    settledClearance=12.7 composerTopSpan=[393.7,791.0]` from the correct-inset
+    journey beside the wrong-edge control,
+    `CT25-DETACH-METRICS anchor=detach-anchor-turn-43 startY=-35.7
+    movements=streaming:0.0,keyboard-up:0.0,keyboard-down:0.0,page-load:0.0` and
+    `CT25-MOTION-OPENING edges=[786.7 … 780.2]`.
+  - `isFlipped`'s test: red against the pre-fix body
+    (`20260929T082048Z-run.TWVpeT`, failed at the double flip), green with the fix
+    (`20260929T082202Z-run.xpAAyK`).
+  - `python3 scripts/test-ios-test-infrastructure.py`: 87 tests pass in 193 s, and
+    the new `RunnerFixture.test_run_passes_the_source_revision_and_its_state_to_the_test_process`
+    fails against the pre-fix runner (`TRON_SOURCE_DIRTY=` empty) and passes with
+    it.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: the commits named above (`scripts/tron-ios-test`,
+  `scripts/test-ios-test-infrastructure.py`,
+  `packages/ios-app/Tests/UI/ChatVisualParityTests.swift`,
+  `packages/ios-app/Tests/Fixtures/ChatVisualParityManifest.json`,
+  `packages/ios-app/Tests/UI/ChatViewScrollHarnessTests.swift`,
+  `packages/ios-app/docs/development.md`, this plan).
+- Deviations:
+  - The direction gate's negative control is its own predicate over the measured
+    sequence and its reversal, not a hosted inverted reveal: the B4 inversion
+    (both `.offset(y: 8)` modifiers negated) left the opening unsettled and all
+    three runs failed by watchdog, and a hosted inversion cannot be produced
+    without editing the product. The control reaches the two conditions the gate
+    enforces, which the watchdog runs never did.
+  - The restored pinned-growth/shrink assertions are green against the pre-fix
+    code as well: they restore coverage two deleted fixtures carried, they do not
+    guard a new fix. The red-before-green evidence in this entry belongs to the
+    provenance refusal, `isFlipped` and the two controls.
+  - `ChatRowStabilityTests` (CT-27) still has to be ported onto these helpers
+    when CT-27 rebases; this entry changes no helper CT-27 calls beyond
+    `isFlipped`'s body and the two fixtures' coverage.
+- For the next agent: CT-23 resumes against these gates, unchanged in substance —
+  the expectation switch, the ten parity scenarios and the anchor invariant all
+  hold, and a recording now needs a clean committed tree. The ui-validation tier
+  (`TRON_IOS_TEST_TIER=ui-validation`) is required for the parity gate, the
+  keyboard journey and the CT-2/CT-24 gates.
