@@ -3436,7 +3436,13 @@ struct ChatViewScrollHarnessTests {
                 let anchor = try #require(
                     harness.readerAnchor(), "the detached reader had no on-screen row"
                 )
-                #expect(anchor.windowMinY > 0, "the anchor row is on screen")
+                // The anchor is the topmost row intersecting the transcript's
+                // visible region, so it is on screen by construction and — the
+                // reader having stopped part-way — may start above that region.
+                #expect(
+                    anchor.windowMinY < harness.visibleRootView.bounds.height,
+                    "the anchor row is in the window"
+                )
                 var movements: [String] = []
 
                 // 1. Streaming while the reader is away: the installed
@@ -3548,10 +3554,12 @@ struct ChatViewScrollHarnessTests {
                 grown.transcript.append(try harnessAssistantMessage(
                     id: "pinned-growth-row",
                     presentationID: semanticID,
+                    // One wrapped paragraph: `harnessAssistantMessage` interpolates
+                    // its text into a JSON string, so it carries no newlines.
                     text: Array(
                         repeating: "The pinned reply grows while the reader stays at the tail.",
-                        count: 6
-                    ).joined(separator: "\n\n")
+                        count: 8
+                    ).joined(separator: " ")
                 ))
                 grown.transcriptTotal = (grown.transcriptTotal ?? grown.transcript.count - 1) + 1
                 grown.revision += 1
@@ -5527,16 +5535,21 @@ final class ChatViewScrollHarness {
     }
 
     /// Test-only: reserve `height` at the transcript's far edge instead of the
-    /// composer's, the way a wrongly swapped keyboard margin does. The real
-    /// scroll view cannot be positioned past its legal bottom — `setContentOffset`
-    /// and a drag both stop there — so the reservation is applied as the scroll
-    /// view's own translation, which is the geometry the wrong edge produces and
-    /// which the window oracle reads like any other row position. The composer
-    /// sits outside the scroll view, so its own edge is untouched.
+    /// composer's, the way a wrongly swapped keyboard margin does. The real scroll
+    /// view cannot be *dragged* past its legal bottom, so the reservation is
+    /// written as the offset beyond that bottom: the geometry the wrong edge
+    /// produces for the reader, with the rows keeping their own height and order
+    /// and the composer — outside the scroll view — keeping its own edge.
     func reserveKeyboardHeightAtTranscriptFarEdge(_ height: CGFloat) throws {
         let scrollView = try nativeTranscriptScrollView()
-        scrollView.transform = CGAffineTransform(translationX: 0, y: -height)
-        scrollView.layoutIfNeeded()
+        let maximumOffset = max(
+            -scrollView.adjustedContentInset.top,
+            scrollView.contentSize.height - scrollView.bounds.height
+                + scrollView.adjustedContentInset.bottom
+        )
+        scrollView.setContentOffset(
+            CGPoint(x: scrollView.contentOffset.x, y: maximumOffset + height), animated: false
+        )
     }
 
     /// The bottom safe area a keyboard owns, applied without a notification:
