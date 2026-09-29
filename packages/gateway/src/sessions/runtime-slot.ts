@@ -2379,6 +2379,14 @@ export class RuntimeSlot {
     if (!message || message.role !== "assistant") return false;
     this.captureStreamIdentity(message);
     if (!this.streamPresentationId || !this.streamStartedAt) return false;
+    // No audience, no projection, the rule `publishSnapshot` already follows: a
+    // progress frame re-projects and re-serializes the whole cumulative
+    // streaming message, so a session nobody subscribes to pays for a frame no
+    // socket can receive. The subscriber record is the slot's audience fact;
+    // stream identity is captured above either way, and a client that
+    // subscribes mid-stream receives the streaming item in its snapshot and the
+    // frames after it.
+    if (this.dependencies.sessionAudience(this.id) === 0) return false;
     const projected = projectMessage(
       "streaming",
       this.streamAnchorId ?? null,
@@ -2438,7 +2446,11 @@ export class RuntimeSlot {
       if (!oldest) break;
       this.toolInvocationGroups.delete(oldest);
     }
-    this.emit("session.progress", safeJson({ message: boundStreamingProgressItem(projected) }));
+    // The group latch above is slot state and stays whatever the audience is;
+    // the frame itself follows the no-audience rule of `flushPendingProgress`.
+    if (this.dependencies.sessionAudience(this.id) > 0) {
+      this.emit("session.progress", safeJson({ message: boundStreamingProgressItem(projected) }));
+    }
     const lastToolIndex = projected.content.findLastIndex(part => part.type === "toolCall");
     const lastBarrierIndex = projected.content.findLastIndex(part => part.type !== "toolCall");
     if (lastToolIndex < 0 || lastBarrierIndex > lastToolIndex) {

@@ -1131,7 +1131,13 @@ watching it. The transport also counts the recipients of every snapshot frame it
 is handed, and a projection no ready socket could receive is recorded as
 unaudienced and warns (`UNAUDIENCED_SNAPSHOT_WARNING`) rather than passing as an
 ordinary build. A client that subscribes later receives its snapshot through the
-ordinary open and synchronization path. Streaming progress republishes the cumulative live message, so
+ordinary open and synchronization path. Streaming progress follows the same
+rule: without a subscriber the slot projects and serializes no `session.progress`
+frame, neither the paced cumulative one nor message_end's finalized declaration;
+stream identity capture and the tool-invocation group latch those frames are
+built beside stay slot state and still run, and the first frame after a client
+subscribes carries the cumulative message its snapshot already restored.
+Streaming progress republishes the cumulative live message, so
 updates are throttled to at most one frame, carrying the newest message, per
 150 ms window while they keep arriving (the first update after a quiet window
 stays immediate, and a snapshot publishes any pending frame ahead of itself),
