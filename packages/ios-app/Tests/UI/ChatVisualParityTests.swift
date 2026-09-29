@@ -1150,6 +1150,35 @@ enum ChatVisualParityGate {
             ChatVisualParitySpec.transitionTolerance,
             manifest.transitionTolerance
         )
+        // TEMPORARY (CT-23 stage 2 diagnosis): where the candidate's profile
+        // differs from the reference, band by band, so a residual can be located
+        // on screen instead of only measured in aggregate.
+        for run in runs where run.id == "opened-long-history-at-rest" {
+            guard let reference = manifest.scenarios.first(where: { $0.id == run.id }),
+                  let frame = run.frames.first else { continue }
+            print("CT23-BANDS orientation-frames=\(run.frames.count) bands=\(frame.fingerprint.rows.count)")
+            let deltas = frame.fingerprint.rows.enumerated().map { index, value in
+                (index: index, delta: Int(value) - Int(reference.frames[0].rows.values[index]))
+            }
+            for worst in deltas.sorted(by: { abs($0.delta) > abs($1.delta) }).prefix(14) {
+                print("CT23-BANDS band=\(worst.index) y=\(worst.index * ChatVisualParitySpec.rowStep)"
+                    + " candidate=\(frame.fingerprint.rows[worst.index])"
+                    + " reference=\(reference.frames[0].rows.values[worst.index])"
+                    + " delta=\(worst.delta)")
+            }
+            var sums = [Int](repeating: 0, count: 5)
+            var counts = [Int](repeating: 0, count: 5)
+            for entry in deltas {
+                let bucket = min(4, entry.index / 64)
+                sums[bucket] += abs(entry.delta)
+                counts[bucket] += 1
+            }
+            print("CT23-BANDS meanabs 0-63=\(sums[0] / max(1, counts[0]))"
+                + " 64-127=\(sums[1] / max(1, counts[1]))"
+                + " 128-191=\(sums[2] / max(1, counts[2]))"
+                + " 192-255=\(sums[3] / max(1, counts[3]))"
+                + " 256+=\(sums[4] / max(1, counts[4]))")
+        }
         var scenarios: [ChatVisualParityReport.Scenario] = []
         var notes: [String] = []
         for run in runs {
