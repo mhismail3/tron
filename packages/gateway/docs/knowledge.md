@@ -57,8 +57,9 @@ the existing client policy already sends).
 
 The row's presentation rules have one owner, `sourceRowFields`: the original URI
 is the requested URI recorded for this exact saved-item identity else the
-canonical URI (HTTP(S) only); a provider save time is never presented as
-publication time for the connector whose legacy field was misfiled; and a
+canonical URI (HTTP(S) only); a provider save time recovered or captured from
+the provider's own save field is never presented as publication time for the
+connector whose legacy field was misfiled; and a
 generated summary is present only while its evidence digest still matches the
 record's title and readable text, truncated for the row.
 
@@ -351,6 +352,28 @@ derivative transaction after asynchronous revalidation. Connector calls fail as 
 
 `SourceContent` keeps the original immutable object (`object`) separate from its
 bounded readable extraction (`text`) and optional generated `assessment`.
+Readable text is a projection, not the evidence: the original bytes stay the
+record's authority and remain separately readable through their exact revision.
+The extractor (`extractReadableText`, owned by the source capture module) chooses
+what a saved page contributes to summaries and search using structure only, never
+a hostname or class-name allowlist. It tokenizes HTML with quote-, void- and
+raw-text-aware scanning (so `i < n` inside a script and a `<div>` inside a string
+never open elements), scores each element by the paragraph text in its own
+subtrees while ignoring chrome subtrees and link text, and reads the deepest
+element that still carries at least half of the page's own paragraph text and at
+least 120 characters. Site-level `header`/`footer`, `nav`, `aside`, `form`, and
+role/aria chrome are dropped; inside a chosen region an `article`'s own
+`header`/`footer` are kept because they carry its title and byline; sibling
+blocks that are only links (menus, breadcrumbs, file lists) are dropped once any
+sibling with text survives. Non-HTML media types pass through unchanged.
+
+That removal decides capture quality rather than assuming it. Text that is thin
+after chrome removal, a page whose text budget was mostly chrome, an app shell,
+and a page that only yielded its document title are all reported as partial with
+their own `captureReason` instead of being certified complete; a genuinely short
+article that the region rule isolated stays complete. A capture that needs
+evidence therefore stays pending, and nothing summarizes it as though the page
+had been read.
 An optional `preview` is an exact canonical image object reference, governed by
 normal source admission, suppression, historical-revision authority, and object
 cleanup—not a publisher URL fetched by iOS. HTML OpenGraph/Twitter image metadata
@@ -383,6 +406,21 @@ a bounded reason. Hidden, archived, pending, stale, cancelled, unsafe, invalid,
 oversized, and non-image results do not delete an existing preview. A repeated
 command or source that already has a preview performs no provider fetch; callers
 must reconcile uncertain outcomes before retrying.
+
+`recoverProviderSaveTime` is the owner-mediated save-time reconciliation: one
+source, one command ID, optional expected revision. It reads the provider payload
+already retained at that exact revision, with no network request and no
+credentials, and returns `recovered`, `present`, `absent`, `unsupported`, or
+`conflict` with a bounded reason. Raindrop's item `created` is the original save
+time; the payload must belong to that exact saved item, and `lastUpdate`, capture
+time, and file mtime are never substitutes for a save or publication time. A
+placeholder epoch, malformed instant, or future instant is refused; an existing
+save time is never overwritten; a misfiled publication time is never written or
+relocated; and a replayed command applies no second revision. A pending source is
+fenced from reading its own objects, so a caller that has just retained the
+payload may supply those bytes, which are accepted only when they hash to the
+representation that revision lists. Callers exposing this to an agent must
+translate `conflict` into a typed conflict.
 
 `knowledge.source.triage` reads persisted current interests and publishes a
 separate source derivative only after the retained source is available.
@@ -479,7 +517,8 @@ cancellation are not swallowed. Linked
 GitHub UI pages are downgraded to partial because a page/file view cannot certify
 repository or file completeness. Tiny HTML app shells are also downgraded to
 partial; a title, loading marker, or JavaScript-only shell is not substantive
-article extraction. Canonical URI is
+article extraction, and the same applies to a linked page whose text was almost
+entirely navigation. Canonical URI is
 `https://x.com/i/web/status/{id}`, while `captureReason` records provider, attempt
 outcomes, and coverage limits. Existing scope/revision/deduplication, retention,
 object-reading, and capture bounds remain authoritative. A retry matched by the

@@ -364,6 +364,29 @@ describe("safe source capture", () => {
     expect(captured.record.content.assessment).toBeUndefined();
   });
 
+  it("keeps the article, not the repository chrome, for a linked HTML page", async () => {
+    const { store } = await fixture();
+    const menu = Array.from({ length: 30 }, (_, index) => `<a href="/menu/${index}">Repository menu entry ${index}</a>`).join("");
+    const html = `<html><head><title>GitHub - example/project · GitHub</title></head><body>
+      <header><nav>${menu}</nav></header>
+      <main><article><h1>Project README</h1><p>A skill that designs loss functions for long-running autonomous agent loops, with a worked playbook.</p><p>Install it by copying the skill directory into your agent's skills folder.</p></article></main>
+      <footer><nav>${menu}</nav></footer></body></html>`;
+    const result = await captureSource(store, { commandId: command("chrome-page"), url: "https://example.com/repo", scope: "research" }, { fetcher: async () => new Response(html, { headers: { "content-type": "text/html" } }), resolveHost: publicResolver });
+    expect(result.record.content.captureDisposition).toBe("complete");
+    expect(result.record.content.text).toContain("designs loss functions for long-running autonomous agent loops");
+    expect(result.record.content.text).not.toContain("Repository menu entry");
+    // The original bytes stay the evidence even though the readable projection is smaller.
+    expect(result.record.content.object?.bytes).toBe(Buffer.byteLength(html));
+  });
+
+  it("marks a chrome-only page as needing evidence instead of complete", async () => {
+    const { store } = await fixture();
+    const menu = Array.from({ length: 60 }, (_, index) => `<a href="/menu/${index}">Navigation entry number ${index}</a>`).join("");
+    const result = await captureSource(store, { commandId: command("chrome-only"), url: "https://example.com/nav", scope: "research" }, { fetcher: async () => new Response(`<html><body><nav>${menu}</nav><main><p>Hi.</p></main></body></html>`, { headers: { "content-type": "text/html" } }), resolveHost: publicResolver });
+    expect(result.record.content.captureDisposition).toBe("partial");
+    expect(result.record.content.captureReason).toContain("substantive");
+  });
+
   it("upgrades an incomplete URL capture in place on retry", async () => {
     const { store } = await fixture();
     const partial = await captureSource(store, { commandId: command("partial-first"), url: "https://example.com/retry", scope: "research" }, { fetcher: async () => new Response("x".repeat(20), { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver, limits: { maxBytes: 5 } });

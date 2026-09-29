@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-28
 - **Status:** Active
-- **Last updated:** 2026-09-28, K1 done
+- **Last updated:** 2026-09-29, K1 and K2 done
 - **Goal:** Agents keep every Library entry summarized, tagged, judged for freshness and correctly scoped, guided by the user's own takes, so useful sources surface on their own in future work.
 
 ## Goal and constraints
@@ -146,7 +146,7 @@ screenshots of each state. Device validation by the user after K9.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | K1 | Done | Typed enrichment and curation operations for agents, RPC and the agent tool | none | deepseek-worker, 2026-09-28 |
-| K2 | Claimed | Clean evidence for summaries: extraction without site chrome, provider-date recovery | none | deepseek-worker, 2026-09-28 |
+| K2 | Done | Clean evidence for summaries: extraction without site chrome, provider-date recovery | none | deepseek-worker, 2026-09-29 |
 | K3 | Ready | Tag vocabulary and tagging guidelines owned by Knowledge config | K1 | — |
 | K4 | Ready | Jev tagger with monthly budget and re-tag triggers | K1, K3 | — |
 | K5 | Ready | DeepSeek enrichment model; summarize then tag at intake | K1, K2, K4 | — |
@@ -314,6 +314,58 @@ session only after the user confirms the schedule.
   the gate; K5 wires the enrichment model; K6 extends `curationInputsDigest` with
   the user's take and must then re-tag; K7 adopts `tags`/`verdict` on iOS and
   drives `summarize` + `curationJob` instead of awaiting a summary call.
+
+### K2 · Done · 2026-09-29 · deepseek-worker · `knowledge/k2-clean-evidence`
+
+- Result: The save-time reconciliation and the readable-text extractor are done.
+  `extractReadableText` (source-capture.ts) now reads the article rather than the
+  page chrome, and `recoverProviderSaveTime` recovers Raindrop's original save
+  time from the payload already retained at the exact revision. Both are exported
+  for K5/K10; the connector's intake and sweep paths call them.
+- Evidence: `npx vitest run src/knowledge` in `packages/gateway`: 21 files, 302
+  tests passed. Focused owners: `source-readable-text.test.ts` (14 failure-mode
+  tests, written before the implementation), `source-save-time.test.ts` (11),
+  `source-capture.test.ts` and `connectors.test.ts` (including one end-to-end
+  sweep that recovers the save time through the connector). Measured over 602
+  unique HTML pages retained in the live Library with a read-only script: chrome
+  phrases (Skip to content, Sign in, Notifications, Cookie, Pricing, …) fell from
+  1017 to 37, median readable text 14,161 → 7,335 characters, and no page with
+  more than 3,000 readable characters is marked partial (0 false positives).
+  Page-quality split after the change: 326 complete, 5 chrome-heavy, 18 app
+  shell, 11 title-only, 1 no text. The GitHub readme case was reproduced from a
+  real saved GitHub page: `<article>` (README, 4,560 characters) is chosen over
+  `<main>` (5,112 characters including repository chrome). Against a read-only
+  copy of the live Library (no writes), the reconciliation recovers a save time
+  for 273 of its 275 Raindrop sources, finds no evidence belonging to a different
+  item, and reports 2 whose retained payload carries no usable `created`.
+- Changes: `78042a73c` (extraction), `adfc5c70f` (save-time recovery),
+  `packages/gateway/docs/knowledge.md` in the same commits.
+- Tasks added: none.
+- Kept on purpose: `mergeHydratedContent` and the linked-target failure wording
+  are unchanged; the extractor keeps its output as single-space collapsed text
+  (no new block-newline formatting) so stored text, evidence digests and rows keep
+  their existing shape; a `confidence`-style score was not introduced, because the
+  region rule answers the only question the pipeline asks (which text is the
+  page's content).
+- Deviations: (1) The recovery reads retained provider evidence through the store's
+  object authorization, which fences pending sources from their own objects, so a
+  freshly captured source cannot be reconciled that way. Instead of weakening that
+  boundary (`knowledge-store.ts` is K1's file and the fence is deliberate), the
+  caller may pass the bytes it has just retained, and they are accepted only when
+  they hash to the representation the exact revision lists. (2) The sweep path
+  still passes no live save time, because recovery from retained evidence now
+  covers it; passing both would be two sources of truth. (3) Existing records keep
+  their old readable text until they are re-captured or explicitly re-extracted;
+  K2 did not rewrite the corpus. (4) `extractReadableText` is exported from
+  `source-capture.ts` rather than moved to a new module, to keep one home for the
+  source owner.
+- For the next agent: K5/K10 should call `recoverProviderSaveTime` (and, if a
+  pending source must be reconciled, pass the retained bytes as `evidence`); no
+  agent-facing operation exists yet, because that contract is K1's. K11 should
+  re-extract existing records rather than assume new text, since the 602 pages
+  measured above still hold pre-K2 text. The 34 pages now reported as
+  needing-evidence are the honest set to re-capture with a browser or the
+  provider, not to summarize.
 
 Drafted from the 2026-09-28 interview and approved by the user the same day,
 with the reliability and interaction bars added at the user's request. K1 and
