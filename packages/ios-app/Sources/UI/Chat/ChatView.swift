@@ -992,7 +992,7 @@ struct ChatView: View {
         guard let active = layoutTransaction.generation,
               active.joined.contains(.transcriptGrowth),
               !active.settled.contains(.transcriptGrowth) else { return }
-        guard transcriptOrientation.mountsNewestRowWithContent == false else {
+        guard !transcriptOrientation.mountsNewestRowWithContent else {
             // No materialization lease exists on the origin-anchored path to
             // certify which entrance owes the layout transaction: the newest row
             // is on screen by construction, so the store's own entrance

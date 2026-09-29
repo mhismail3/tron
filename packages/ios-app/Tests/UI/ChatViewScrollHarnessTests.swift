@@ -1579,7 +1579,7 @@ struct ChatViewScrollHarnessTests {
         let maxRatio = ratios.max { ratioOf($0) < ratioOf($1) }
         var metrics = CT24Metrics()
         metrics.shape = shape
-        metrics.orientation = harness.orientation.pinsToEstimatedOrigin ? "end" : "origin"
+        metrics.orientation = harness.orientation.presentsNewestRowFirst ? "origin" : "end"
         metrics.samples = samples.count
         metrics.blankBoundaries = coverage.blankBoundaries
         metrics.blankAfterSettle = coverage.blankAfterSettle
@@ -1622,7 +1622,7 @@ struct ChatViewScrollHarnessTests {
         )
         var metrics = CT2Metrics()
         metrics.shape = shape
-        metrics.orientation = harness.orientation.pinsToEstimatedOrigin ? "end" : "origin"
+        metrics.orientation = harness.orientation.presentsNewestRowFirst ? "origin" : "end"
         metrics.samples = samples.count
         metrics.blankBoundaries = coverage.blankBoundaries
         metrics.blankAfterSettle = coverage.blankAfterSettle

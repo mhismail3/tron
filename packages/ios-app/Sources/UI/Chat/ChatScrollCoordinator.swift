@@ -1309,7 +1309,7 @@ final class ChatScrollCoordinator {
         // realize against an estimate, and no lease to certify the entrance that
         // owes a layout transaction. The caller settles that growth participant
         // directly.
-        guard orientation.mountsNewestRowWithContent == false else { return false }
+        guard !orientation.mountsNewestRowWithContent else { return false }
         let physicalTargetID = physicalTargetID ?? renderedID
         guard !renderedID.isEmpty, !physicalTargetID.isEmpty,
               canAutomaticallyFollow else { return false }
