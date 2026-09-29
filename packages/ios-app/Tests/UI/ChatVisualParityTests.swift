@@ -440,15 +440,10 @@ final class ChatVisualParityRunner {
         self.recordsArtifacts = recordsArtifacts
     }
 
-    /// Capture the transcript region as this boundary's frame. The transcript's
-    /// settled native offset moves by a fraction of a point run to run, so the
-    /// offset is snapped to a whole point first: what the gate compares is then a
-    /// deterministic function of the layout rather than of the lazy estimate.
-    /// CT-25 measured removing it (see the plan's stage B2 entry): the gate stays
-    /// green, but the existing opened-long-history reference's stable frames move
-    /// to 0.019 of their 0.025 bound, so the snap still carries the reference's
-    /// determinism and F9's removal belongs with CT-23's exact origin.
+    /// Capture the transcript without moving an exact-origin pin. Only the
+    /// estimated-end orientation uses the reference's whole-point normalization.
     func capture(_ phase: String) {
+        try? harness.snapNativeTranscriptOffsetToWholePoint()
         let rendered = harness.renderedParityFrame(
             scale: ChatVisualParitySpec.renderScale,
             rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
@@ -504,7 +499,8 @@ final class ChatVisualParityRunner {
         var stable = 0
         for _ in 0..<cap {
             try await harness.driveFrameBoundary()
-                let fingerprint = ChatVisualParityFingerprint(harness.renderedParityFrame(
+                try? harness.snapNativeTranscriptOffsetToWholePoint()
+            let fingerprint = ChatVisualParityFingerprint(harness.renderedParityFrame(
                 scale: ChatVisualParitySpec.renderScale,
                 rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
                 columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
@@ -964,11 +960,16 @@ private func keyboardSafeAreaInset() async throws -> ChatVisualParityRunner {
         try await run.advance("pinned", boundaries: 2)
         try await run.driveKeyboardInset(.show(boundaries: 8), phase: "keyboard-up")
         try await run.settle()
+        // Failure mode: capture normalization writes a sub-point native offset,
+        // detaching SwiftUI's exact pin before later margin samples arrive.
+        // The capture must observe, not create, a keyboard displacement.
+        #expect(harness.isPinnedToBottom(), "keyboard show: \(parityPinnedDescription(harness))")
         try await run.advance("keyboard-up-settled", boundaries: 2)
         try harness.setComposerDraftText(
             "First line of the draft\nSecond line\nThird line\nFourth line"
         )
         try await run.settle()
+        #expect(harness.isPinnedToBottom(), "composer growth: \(parityPinnedDescription(harness))")
         try await run.advance("composer-growth", boundaries: 2)
         try harness.setComposerDraftText("")
         try await run.settle()

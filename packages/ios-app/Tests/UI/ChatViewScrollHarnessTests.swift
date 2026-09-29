@@ -5853,9 +5853,12 @@ final class ChatViewScrollHarness {
     /// fraction of a point run to run, which at 1x rendering re-rasterizes every
     /// glyph and reads as a whole-frame difference unrelated to what the gate is
     /// about. Snapping first makes the rendered position a deterministic
-    /// function of the layout instead of of the estimate; it changes no layout,
-    /// row, or state the product owns.
+    /// function of the layout instead of of the estimate on today's path.
+    /// Never round an exact-origin pin: a sub-point write moves it off the
+    /// applied margin, so SwiftUI correctly preserves that detached offset on
+    /// later inset changes instead of following the composer.
     func snapNativeTranscriptOffsetToWholePoint() throws {
+        guard orientation.pinsToEstimatedOrigin else { return }
         let scrollView = try nativeTranscriptScrollView()
         let snapped = scrollView.contentOffset.y.rounded()
         guard abs(snapped - scrollView.contentOffset.y) > 0.01 else { return }

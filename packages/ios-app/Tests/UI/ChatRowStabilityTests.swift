@@ -53,7 +53,12 @@ struct ChatRowStabilityTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.animatedEntranceCount > entranceBaseline
                 }
-                try await driveBoundaries(10, harness: harness)
+                // Failure mode: ten display boundaries can still be inside
+                // the entrance. Its production settled record, not a guessed
+                // duration, admits the height comparison in either orientation.
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.rowStabilityRecords[RowStabilityFixture.entranceRowID] != nil
+                }
                 report.capture(phase: "entrance", harness: harness)
 
                 // Detach with the real scroll driver: the native transcript view
@@ -67,6 +72,19 @@ struct ChatRowStabilityTests {
                 report.capture(phase: "detached", harness: harness)
 
                 for round in 1...2 {
+                    // Failure mode: teleporting from mid-history to the oldest
+                    // row skips a lazy fixture outside both realization ranges.
+                    // Walk overlapping viewports so every row kind is measured,
+                    // regardless of the stack's prefetch direction.
+                    let stride = harness.probeObservation.geometry.containerHeight / 2
+                    for step in 0..<80 {
+                        try harness.scrollReader(byVisualPoints: CGFloat(step) * stride)
+                        try await driveBoundaries(3, harness: harness)
+                        report.capture(phase: "traverse-\(round)-\(step)", harness: harness)
+                        if harness.recorder.samples.last?.nativeRows.contains(where: {
+                            $0.isOnScreen && $0.semanticID == RowStabilityFixture.oldestHistoryID
+                        }) == true { break }
+                    }
                     try harness.scrollReader(byVisualPoints: 10_000_000)
                     try await driveBoundaries(4, harness: harness)
                     report.capture(phase: "oldest-\(round)", harness: harness)
@@ -1218,10 +1236,11 @@ private struct RowStabilityReport {
         let observation = harness.probeObservation
         phases.append(phase)
         heightsByPhase[phase] = RowStabilityFixture.rowIDs.reduce(into: [:]) { values, id in
-            values[id] = observation.rowFrames[id]?.height
+            // A phase compares settled content, never an entrance's current
+            // animated height. The owning probe already excludes those frames.
+            values[id] = observation.rowStabilityRecords[id]?.latestHeight
         }
         collectNativeHeights(harness)
-        print("CT23-ROW-PHASE phase=\(phase) heights=\(heightsByPhase[phase] ?? [:]) records=\(observation.rowStabilityRecords.filter { RowStabilityFixture.rowIDs.contains($0.key) }) mounted=\(observation.physicalRowAppearanceCounts) excluded=\(observation.excludedRowStabilityIDs)")
     }
 
     /// Drains the retained display-frame samples into the per-mount height
