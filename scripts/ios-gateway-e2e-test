@@ -22,14 +22,42 @@ worktree_key="$(python3 "$identity_owner" worktree-key --worktree "$repo_root")"
   || { echo "error: cannot derive this worktree's E2E fixture key" >&2; exit 1; }
 run_root="${TRON_IOS_E2E_STATE_DIR:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-$UID-$worktree_key}"
 derived_data="${TRON_IOS_E2E_DERIVED_DATA:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-derived-$UID-$worktree_key}"
-test_state_root="${TRON_IOS_TEST_STATE_DIR:-$HOME/.tron/internal/ios-test}"
-# The lane root is what scripts/tron-ios-test sweeps and reports, so this
-# harness names, releases and reclaims exactly the lane the runner uses.
-test_discovery_root="${TRON_IOS_TEST_DISCOVERY_ROOT:-$(dirname "$test_state_root")}"
+process_owner="$repo_root/scripts/ios-test-process.py"
+simulator_owner="$repo_root/scripts/ios-test-simulator.py"
+lock_owner="$repo_root/scripts/ios-test-lock.py"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+command="${1:-all}"
+lane=""
+if (($#)); then shift; fi
+while (($#)); do
+  case "$1" in
+    --lane)
+      (($# >= 2)) && [[ -n "$2" && "$2" != -* ]] || die "--lane requires a lane name"
+      [[ -z "$lane" || "$lane" == "$2" ]] || die "--lane $2 conflicts with --lane $lane"
+      lane="$2"
+      shift 2
+      ;;
+    *) die "unsupported argument: $1 (see '$0 help')" ;;
+  esac
+done
+# The lane scripts/tron-ios-test would use for this worktree and selection, from
+# the one selection owner, so this harness leases, releases and reclaims exactly
+# the runner's lane.
+lane_selector=(lane --worktree "$repo_root")
+[[ -z "$lane" ]] || lane_selector+=(--lane "$lane")
+lane_selection="$(python3 "$simulator_owner" "${lane_selector[@]}")" || exit 1
+{
+  IFS= read -r test_lane
+  IFS= read -r test_state_root
+  IFS= read -r test_device_name
+  IFS= read -r test_discovery_root
+  IFS= read -r test_default_state_root
+} <<<"$lane_selection"
 simulator_marker="$test_state_root/simulator.json"
 test_lock="$test_state_root/lease.lock"
 development_state="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
-test_device_name="${TRON_IOS_TEST_DEVICE_NAME:-Tron iOS Tests}"
 state_file="$run_root/state.env"
 pid_file="$run_root/gateway.pid"
 log_file="$run_root/gateway.log"
@@ -42,9 +70,6 @@ proxy_script="$repo_root/scripts/ios-gateway-fault-proxy.mjs"
 # dial the lane itself.
 e2e_test_filter="TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
 e2e_lan_endpoint="off"
-process_owner="$repo_root/scripts/ios-test-process.py"
-simulator_owner="$repo_root/scripts/ios-test-simulator.py"
-lock_owner="$repo_root/scripts/ios-test-lock.py"
 mkdir -p "$test_state_root"
 chmod 700 "$test_state_root"
 simulator_args=(
@@ -54,7 +79,7 @@ simulator_args=(
   --name "$test_device_name"
   --development-state "$development_state"
   --discovery-root "$test_discovery_root"
-  --default-state-dir "$test_state_root"
+  --default-state-dir "$test_default_state_root"
   --worktree "$repo_root"
 )
 [[ "$run_root" != / && "$run_root" != "$HOME" && "$run_root" != "$repo_root" && ! -L "$run_root" ]] \
@@ -69,7 +94,7 @@ chmod 700 "$run_root"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/ios-gateway-e2e-test COMMAND
+Usage: scripts/ios-gateway-e2e-test COMMAND [--lane NAME]
 
 Commands:
   prepare   Install/build gateway if needed and start one persistent fixture.
@@ -89,19 +114,25 @@ Typical edit loop:
   scripts/ios-gateway-e2e-test build    # once, then after source edits
   scripts/ios-gateway-e2e-test run      # repeat; renews isolated Gateway/session state
 
+Options:
+  --lane NAME   The simulator lane, selected exactly as scripts/tron-ios-test selects it:
+                without one, a linked worktree uses its own lane and the primary
+                checkout the default lane; TRON_IOS_TEST_LANE is the environment form.
+
 Environment:
-  TRON_IOS_TEST_STATE_DIR       shared repository-owned test-simulator state (the lane)
+  TRON_IOS_TEST_LANE            the lane, as --lane
+  TRON_IOS_TEST_STATE_DIR       pre-lane state directory of the default lane (selects it)
   TRON_IOS_TEST_DISCOVERY_ROOT  lane root the shared sweep scans (default: the parent of the
-                                state directory)
-  TRON_IOS_TEST_DEVICE_NAME     device name of that lane
+                                default lane's state directory)
+  TRON_IOS_TEST_DEVICE_NAME     pre-lane device name of the default lane (selects it)
   TRON_IOS_E2E_STATE_DIR        persistent fixture directory (default: this worktree's
                                 $TMPDIR/tron-ios-gateway-e2e-UID-WORKTREE_KEY)
   TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData (default: this
                                 worktree's $TMPDIR/tron-ios-gateway-e2e-derived-UID-WORKTREE_KEY)
 
 The fixture and DerivedData are this worktree's: stop and clean touch no other
-worktree's fixture or DerivedData (clean still deletes the simulator of the
-lane it holds, which is shared by default). build stamps the products with
+worktree's fixture or DerivedData (clean also deletes the simulator of the
+lane it holds: this worktree's own lane unless one is selected). build stamps the products with
 this worktree's source identity (scripts/ios-test-build-identity.py) and run
 refuses products stamped for another worktree or another source state.
 
@@ -111,8 +142,6 @@ provisions, and keeps exit 73 when the shared provisioner refuses the boot
 because the Mac is short of memory.
 USAGE
 }
-
-die() { echo "error: $*" >&2; exit 1; }
 
 manifest_pi_version() {
   node -e 'const value=require(process.argv[1]).dependencies["@earendil-works/pi-coding-agent"]; if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value)) process.exit(1); process.stdout.write(value)' "$gateway_dir/package.json"
@@ -540,12 +569,12 @@ show_status() {
   else
     echo "Test products: $xctestrun (stale or built from another worktree's source state; run build)"
   fi
+  echo "Lane: $test_lane ($test_state_root)"
   python3 "$simulator_owner" status "${simulator_args[@]}" || true
   echo "Fixture: $run_root"
   echo "DerivedData: $derived_data"
 }
 
-command="${1:-all}"
 case "$command" in
   run-lan)
     e2e_test_filter="TronMobileTests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"
@@ -562,8 +591,10 @@ if [[ "$command" != status && "$command" != logs && "$command" != -h && "$comman
   # The same lease, and the same release, as scripts/tron-ios-test: when this
   # command ends, on success, failure, deadline or signal, the holder shuts down
   # the lane's simulator - and never the remembered Development simulator.
+  # The lane travels with the command, as in scripts/tron-ios-test: the command
+  # the holder starts re-derives every lane path from the lane it leased.
   exec python3 "$lock_owner" --lock "$test_lock" --marker "$simulator_marker" \
-    --development-state "$development_state" -- "$0" "$@"
+    --development-state "$development_state" -- "$0" "$command" --lane "$test_lane"
 fi
 case "$command" in
   prepare|build|run|run-lan|iterate|all|stop|clean)
