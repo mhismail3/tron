@@ -104,7 +104,7 @@ struct Pi099VisualEvidenceTests {
 
         let views: [Scene] = [
             scene("mcp-servers-global", MCPServersSettingsView(projectCWD: nil).environment(model)),
-            scene("mcp-servers-project", MCPServersSettingsView(projectCWD: "/fixture/trusted-project").environment(model)),
+            scene("mcp-servers-project", MCPServersSettingsView(projectCWD: "/fixture/trusted-project", initialScope: "project").environment(model)),
             scene("mcp-add-server-http", MCPAddServerPresentationEvidence(transport: "http", url: "https://mcp.example.test", command: "", validationMessage: nil)),
             scene("mcp-add-server-stdio", MCPAddServerPresentationEvidence(transport: "stdio", url: "", command: "", validationMessage: nil)),
             scene("extensions-codemode-tools", ExtensionsSettingsView(projectCWD: nil).environment(model)),

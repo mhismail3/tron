@@ -5,7 +5,6 @@ struct MCPServerList: Decodable {
     struct Server: Decodable, Identifiable {
         let name: String
         let scope: String
-        let source: String
         let enabled: Bool
         let exposure: String
         let transport: String
@@ -15,7 +14,7 @@ struct MCPServerList: Decodable {
         var id: String { name }
     }
     let servers: [Server]
-    let errors: [JSONValue]?
+    let errors: Int
 }
 
 enum MCPServerPresentationPolicy {
@@ -34,6 +33,7 @@ enum MCPServerPresentationPolicy {
     }
 
     static func isNeedsAuth(_ state: String) -> Bool { state == "needs-auth" }
+    static func shouldDismissTokenSheet(afterError error: String?) -> Bool { error == nil }
 }
 
 /// MCP configuration is owned by Pi's mcp.json; this screen is only an
@@ -43,7 +43,7 @@ struct MCPServersSettingsView: View {
     @Environment(\.tronPresentationActivity) private var activity
     let projectCWD: String?
     @State private var servers: [MCPServerList.Server] = []
-    @State private var serverErrors: [JSONValue] = []
+    @State private var serverErrorCount = 0
     @State private var selectedScope = "global"
     @State private var loading = false
     @State private var error: String?
@@ -58,6 +58,11 @@ struct MCPServersSettingsView: View {
     @State private var token = ""
     @State private var working = false
     @State private var authOperationID: String?
+
+    init(projectCWD: String?, initialScope: String = "global") {
+        self.projectCWD = projectCWD
+        _selectedScope = State(initialValue: initialScope)
+    }
 
     private var cwd: String? { selectedScope == "project" ? projectCWD : nil }
     private var visibleServers: [MCPServerList.Server] {
@@ -80,9 +85,9 @@ struct MCPServersSettingsView: View {
                 TronSettingsGroup("MCP Servers", detail: selectedScope == "global" ? "Global configuration" : "Trusted project configuration", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
                     if loading && servers.isEmpty { ProgressView("Loading MCP servers…").padding() }
                     else if visibleServers.isEmpty { TronPlaceholderState(title: "No MCP servers", detail: "Add a stdio or HTTP server to your configuration.", icon: "server.rack") }
-                    ForEach(Array(serverErrors.enumerated()), id: \.offset) { _, item in
-                        Text(item.objectValue?["message"]?.stringValue ?? item.stringValue ?? "MCP server reported an error")
-                            .font(TronTypography.caption).foregroundStyle(Color.tronError).padding(12).textSelection(.enabled)
+                    if serverErrorCount > 0 {
+                        Text("\(serverErrorCount) MCP configuration error\(serverErrorCount == 1 ? "" : "s")")
+                            .font(TronTypography.caption).foregroundStyle(Color.tronError).padding(12)
                     }
                     ForEach(visibleServers) { server in
                         serverRow(server)
@@ -174,12 +179,12 @@ struct MCPServersSettingsView: View {
     private func load() async {
         guard activity.allowsPresentationPublication else { return }
         let ticket = generation; let identity = model.knowledgePresentationIdentity
-        loading = true; error = nil
+        loading = true; error = nil; serverErrorCount = 0
         defer { if current(ticket, identity) { loading = false } }
         do {
             struct Params: Encodable { let scope: String; let cwd: String? }
             let loaded: MCPServerList = try await model.client.request("mcp.list", Params(scope: selectedScope, cwd: cwd))
-            guard current(ticket, identity) else { return }; servers = loaded.servers; serverErrors = loaded.errors ?? []
+            guard current(ticket, identity) else { return }; servers = loaded.servers; serverErrorCount = loaded.errors
         } catch {
             guard current(ticket, identity) else { return }
             if !(error is CancellationError) { self.error = error.localizedDescription }
@@ -221,7 +226,7 @@ struct MCPServersSettingsView: View {
     private func setToken() async {
         guard let name = tokenServer else { return }
         await mutate("mcp.token.set", ["server": .string(name), "token": .string(token)])
-        guard error == nil else { return }
+        guard MCPServerPresentationPolicy.shouldDismissTokenSheet(afterError: error) else { return }
         tokenServer = nil; token = ""
     }
     private func startAuth(_ server: String) async {

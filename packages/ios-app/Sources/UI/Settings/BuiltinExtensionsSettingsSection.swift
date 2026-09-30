@@ -30,7 +30,7 @@ struct BuiltinExtensionsSettingsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-        TronSettingsGroup("Built-in extensions", detail: "Settings for the agent and its extensions", accent: .tronCyan, surfaceStyle: .glass) {
+        TronSettingsGroup("Built-in extensions", detail: "Settings for the agent and its extensions", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
             if loading { ProgressView("Loading extension settings…").padding(12) }
             ForEach(builtins, id: \.self) { name in
                 TronToggleRow(
