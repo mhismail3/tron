@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-29, P99-6
+- **Last updated:** 2026-09-30, P99-22 part 2b
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -211,7 +211,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Upstream delta | Tron disposition | Task |
 | --- | --- | --- |
 | Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Adopt**; P99-22 part 1 verifies stdio/streamable-HTTP, direct/codemode/deferred exposure, resources, list changes, reconnect, trusted project config, process-group cleanup and Stop/drain lifecycle; adapter/admin migration remains | P99-6, P99-7, P99-8, P99-22 |
-| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 part 2a verifies nested concurrent ask_user serialization/Stop cleanup, durable notify quota/session attribution and schedule receipt replay safety; other first-party safety items remain | P99-3, P99-5, P99-6, P99-22 |
+| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 part 2a verifies nested concurrent ask_user serialization/Stop cleanup, durable notify quota/session attribution and schedule receipt replay safety; part 2b verifies desktop-action serialization and native-view session ownership. Nested display-artifact/browser-receipt presentation after reload remains unproven because Pi persists only nested call summaries; see P99-23. | P99-3, P99-5, P99-6, P99-22, P99-23 |
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7 | P99-10, P99-15 |
 | Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapt**: pass `getDeviceId` to `ModelRuntime.login`; redact `deviceId` from settings projection; fixed port 1455 shared with Codex legacy | P99-9 |
@@ -268,6 +268,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); structured per-session MCP status (user authorizes filing) | P99-8 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
 | P99-22 | Claimed | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | luna-worker, 2026-09-29 |
+| P99-23 | Needs scoping | Resolve and implement parent-owned persistence/projection for nested display artifacts and browser live-view receipts, with no child canonical rows or independent receipts | P99-22 | Unassigned |
 
 ## Task details
 
@@ -711,6 +712,16 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: the P99-22 row remains Claimed. P99-22 part 2a proves only ask_user, notify and schedule. Notification limits and receipts remain owned by NotificationService; schedule command IDs/receipts remain owned by GatewayScheduleToolOperations/CommandReceiptStore. The test uses actual persistent stores in temporary test directories.
 - Deviations: The full Gateway suite had two unrelated timing-sensitive failures under suite load; each passed its isolated rerun. No behavior or scope deviations.
 - For the next agent: P99-22 part 2b still owns desktop input/capture serialization, display/browser receipt attachment, Jev spend ceiling, and nested subagent handoff/foreground stop routing. Do not unblock P99-6 on this partial qualification.
+
+### P99-22 part 2b · Claimed · 2026-09-30 · luna-worker
+
+- Result: Added a faux-provider RuntimeRegistry E2E for concurrent nested computer and presentation tools. The Gateway projects every nested action under the single codemode parent live and after reopen; concurrent computer requests do not overlap, and the fake native client binds a selected view to the canonical session. The run also exposed that nested display/browser calls are summarized by Pi without their result presentation payloads, so their attachment/authorization is not qualified.
+- Evidence: Node 22.22.0 TypeScript check passed. Focused E2E passed 1/1 in Vitest 0.46 s (command wall 2.61 s). It retains `packages/gateway/test-results/pi-sdk-099-nested-presentation.json` (gitignored), including the live/cold-reload snapshots and fake native session binding. The full Gateway suite passed 2,310/2,310 tests across 213 files in 117.79 s. The test intentionally does not claim display-artifact or browser-receipt attachment; Pi's parent result has only `{id,name,args,status,durationMs,error}` child summaries.
+- Changes: added `packages/gateway/src/sessions/codemode-nested-presentation.integration.test.ts`; this matrix, P99-22 handoff and P99-23 task row. No production source changes.
+- Tasks added: P99-23 to scope bounded nested presentation data under the parent result/projection without child rows or receipts.
+- Kept on purpose: P99-22 remains Claimed. P99-22 part 2b proves desktop serialization and native session binding only; `display` artifact and browser receipt live/cold-reload attachment are not considered proven. No nested call becomes an independent canonical card.
+- Deviations: The approved plan does not specify how presentation receipts absent from Pi's persisted nested summaries become durable under the parent. I requested a decision through the coordination channel twice; both requests timed out without a reply. I did not invent a new persistence or protocol contract. The test uses a fake Cua client boundary and fake NativeLiveClient; it makes no host automation or network calls.
+- For the next agent: P99-23 must resolve the parent-only persistence seam and add its own E2E before P99-6 is unblocked. Do not claim display/browser receipt success from this test; do not add child rows or re-key a receipt to a nested child ID without an approved contract.
 
 ### Draft · Proposed · 2026-09-29 · planning session
 
