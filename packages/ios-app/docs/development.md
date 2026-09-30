@@ -2421,6 +2421,24 @@ scripts/tron-ios-test run \
 
 On a physical device verify solving-to-thinking-to-hidden expiry, simultaneous synchronous and asynchronous rows, and live-to-terminal updates. A no-edit worker used only as a visual lifecycle fixture must declare `agentContract: { version: 1 }` and an explicit reason-bearing `acceptance: { level: "none", reason: "visual lifecycle probe" }`; otherwise the legacy implementation completion guard can pause the worker after its command and final output have finished, which is canonical resumable state rather than a running process. The composer subagent orb must enter and leave with the same scoped spring as the catch-up arrow; Subagents, a tapped child transcript, and Subagent History open at medium and can expand to large. Row taps present a bottom sheet instead of a rightward push. Activity and History cards share the aggregate tool cards' scroll-optimized surface, 12-point corners, 12/11-point horizontal/vertical padding, and 8-point section spacing. The title leads; plain colored lifecycle text sits at the top-right immediately left of elapsed time on the same baseline, separated by a middle dot, with no status pill or icon (the settled-paused tag is the one exception: one muted pause glyph precedes `Paused`). Accessibility text sizes place the status/timing line below the title instead of squeezing the heading. A DETAILS block renders model/thinking/Started and counts/execution mode in the tool FILE/COMMAND field's 12-point medium code font, natural line spacing, and a 4-point caption gap. Metadata wraps rather than dropping counts. The LIVE OUTPUT (or terminal RESULT/ERROR) block uses the tool result's 11-point medium code font and shared bounded-tail fade, retaining three newest nonempty logical lines without clipping away the newest line when they wrap. Queued and paused previews say LATEST OUTPUT. The existing authoritative process projection updates the open sheet's output and lifecycle without a separate poller or transcript read; VoiceOver includes this bounded latest result. Activity uses one lazy row collection across running/completed headers and retained extension content, so an exact process keeps one identity rather than handing a stale live cell between separate collections. Orb-sheet rows retain the friendly local **Started** timestamp. Verify running counters advance each second without incoming progress, continue across scroll/remount and child-sheet round trips, and settle to the authoritative final duration; queued and unsettled paused rows stay fixed, and a paused row whose process exit the Gateway observed freezes at that settlement instant, leaves the running section for recent, shows the muted `Paused` tag, and loses its stop control. Backgrounded or covered sheets stop refreshing, then catch up from the same receipt-local clock when visible. The lifecycle text and active-sheet container color identify status: amber while in progress, success green after completion, and red after failure, stop, rejection, or interruption. History also uses amber for in-progress rows; terminal history cards and child-session chrome use `tronSubagent` seafoam (`#03C3A8`, darkened in light mode for contrast), as do subagent context/update/fork pills. The History title and Done action retain their originating Manage Session theme. Focused `SessionSheetPresentationTests` inspect rendered toolbar colors and capture light/dark rows under an unrelated inherited theme. Confirm queued and paused producer states say `QUEUED` and `PAUSED` rather than `LIVE ACTIVITY`, that a paused subagent without its process-exit proof reads `Pausing…` while a settled one reads `Paused`, and that a paused completion guard is resumable canonical state, not a still-running child process. Both subagent lists use the same scroll-optimized card treatment; history retains its bounded 400-row projection incrementally through a standard Load More pill. `TronAccessibilityUITests.testActivityValuesUpdateInTheSamePresentedSheet` verifies successive canonical output samples and terminal results replace the accessible preview. The native `Button` owns its label/value/hint directly: adding a second accessibility grouping creates a non-button proxy and duplicate actionable child. `SessionSheetPresentationTests.testSubagentResultsUpdateInOpenActivitySheet` waits for rendered input and a display frame before verifying native scroll identity, offset, and sheet detent. Active rows remain tappable before child-session binding, show a waiting state, and open the canonical tail once that binding appears. Short/empty child transcripts stay top-aligned while long newest pages open at the tail. Verify content is already visible without dragging on first open and after medium/large resizing, including long prepared Markdown; scrolling away must disable tail-following during subsequent resizing. Closing a child must reveal the same loaded history and cursor without an extra request, automatic Load More, or a spurious History changed card. An active child sheet shows the leading stop icon only when `process-transcript-abort.v1` is advertised; it stays muted gray while the lease loads, transitions to enabled red only after abort authority arrives, and tapping it disables the control and stops only that exact lease-bound execution through the synchronous parent abort or asynchronous trusted-controller path. Terminal sheets omit it, and earlier-page loading uses the same compact transcript pill as the main chat. Child transcript checks must verify the main transcript's zero-spacing stack, shared 16-point horizontal inset, 12-point top/tail affordances, eight-point row spacing, prepared Markdown in thinking and assistant text, one reconciled run chip per exact invocation/result identity during both live refresh and history paging, preserved orphan results, and no second process-summary tool/output card; explicit earlier paging, append-aware transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion remain correct. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
 
+The CT-23 child-sheet gesture boundary is exercised by
+`TronSubagentSheetScrollUITests` in the UI-validation tier. Its hosted launch
+fixture (`-tron-subagent-sheet-fixture`) opens the real managed read-only sheet
+through the normal canonical transcript lease. Both orientations receive physical
+window-coordinate content and header drags; retained screenshots accompany sheet
+frame, row movement, edge rubber-band, header resize/dismiss and check-button
+assertions. Run with `scripts/tron-ios-test run --only-testing
+TronMobileUITests/TronSubagentSheetScrollUITests` after a build, with
+`TRON_IOS_TEST_TIER=ui-validation`.
+
+Read-only child sheets prefer transcript scrolling at the medium detent via
+`.presentationContentInteraction(.scrolls)`. This does **not** prevent UIKit's
+edge-pull collapse/dismissal: the content-only gesture contract is still blocked
+in CT-23. The gesture matrix retains before/after frame evidence and the full
+journey intentionally fails on that boundary; it is not a green acceptance gate.
+Header drag and the check button retain native behavior. No scroll-tracking proxy,
+gesture delegate replacement or scroll repair is installed.
+
 ## Manual iOS release validation and delivery
 
 The repository does not archive or upload production iOS artifacts. A maintainer
@@ -2522,21 +2540,3 @@ remove the proxy and restore the native setting. **Device check still required:*
 tap the real status bar with empty composer and with attachments/chips/catalog in
 both orientations. Upright-at-rest device inversion remains open: hosted and
 XCUITest pixels do not reproduce the user's intermittent image/badge flip.
-
-The CT-23 child-sheet gesture boundary is exercised by
-`TronSubagentSheetScrollUITests` in the UI-validation tier. Its hosted launch
-fixture (`-tron-subagent-sheet-fixture`) opens the real managed read-only sheet
-through the normal canonical transcript lease. Both orientations receive physical
-window-coordinate content and header drags; retained screenshots accompany sheet
-frame, row movement, edge rubber-band, header resize/dismiss and check-button
-assertions. Run with `scripts/tron-ios-test run --only-testing
-TronMobileUITests/TronSubagentSheetScrollUITests` after a build, with
-`TRON_IOS_TEST_TIER=ui-validation`.
-
-Read-only child sheets prefer transcript scrolling at the medium detent via
-`.presentationContentInteraction(.scrolls)`. This does **not** prevent UIKit's
-edge-pull collapse/dismissal: the content-only gesture contract is still blocked
-in CT-23. The gesture matrix retains before/after frame evidence and the full
-journey intentionally fails on that boundary; it is not a green acceptance gate.
-Header drag and the check button retain native behavior. No scroll-tracking proxy,
-gesture delegate replacement or scroll repair is installed.

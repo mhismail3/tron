@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
- - **Last updated:** 2026-09-29, CT-23 flip2 parity/row-stability root causes and bounded wakeup investigation
+- **Last updated:** 2026-09-30, CT-23 child-sheet content scrolling blocker and bounded public-API evaluation
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -111,7 +111,7 @@ breaks context-menu previews.
 | CT-27 | Done | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | chat scroll session (worker lane ct-27-rows), 2026-09-28 |
 | CT-28 | Ready | Record-only invariant monitor in the product (pinned bottom band uncovered for more than 2 frames, detached anchor moved without input, opening revealed uncovered), deduplicated, reaching device exports and surviving relaunch; delete the noisy tail-edge trace records; write the missing send-choreography device checklist in `development.md` | CT-25 | |
 | CT-24 | Done | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
-| CT-23 | Blocked | Evaluation remains behind the orientation switch. Source-owned expanded-card UIKit previews and origin-only status-bar routing implemented; native preview/window-pixel, one-recipient composer matrix, public oldest-history delegate and coverage cleanup gates pass both orientations; final shared-sheet boundary correction at `86338f93a` also passes its negative-control-backed gate. Main checkpoint parity today 11/11, origin 9/11 (opened-history + borderline send); four origin bottom gates, obstruction follow, detached journeys, row stability and child sheets pass. Default tier retains one known displaced-resume watchdog; today top matrix has an unresolved `first=nil` boundary. Intermittent device at-rest image inversion, actual system taps, accessibility and prior navigation/performance/device checks remain open. Signed LocalDevice artifact prepared, not installed; lane ct23d removed. See **CT-23 display cards and status bar** handoff | CT-24 | chat scroll session (worker lane ct23d), 2026-09-30 |
+| CT-23 | Blocked | Evaluation remains behind the orientation switch. Public `.scrolls` preference now permits origin medium-history reading, but content-only gestures remain blocked: origin large newest-edge pulls collapse and today's oldest-edge pulls dismiss. Ineffective tracking/gesture experiments removed. Both-orientation sheet/freeze/status-bar gates pass; new real-app gesture gates remain red. Prior parity/top-matrix, at-rest image inversion, accessibility, performance/device items remain open; navigation-bar top-edge appearance accepted on device 2026-09-30. Signed LocalDevice prepared, not installed; lane ct23e removed. See **CT-23 subagent sheet content scrolling** handoff and prior display/status-bar handoff | CT-24 | chat scroll session (worker lane ct23e), 2026-09-30 |
 | CT-22 | Claimed | Exact tail prototype (keep the SwiftUI `ScrollView`, rows and animations): measure two ways of making the pinned bottom exact on a throwaway branch. (a) Previously measured rows keep their last measured height when they leave the viewport. (b) The newest rows render in an eager stack below a `LazyVStack` of older history, so the bottom and everything near it are measured, never estimated; the boundary moves in coarse steps so rows rarely change parent. Judged by the CT-2 fixtures, the parity gate, the harness and CT-10's scale numbers | CT-20 | chat scroll investigation session, 2026-09-27 |
 | CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15, CT-20 | |
 | CT-17 | Needs scoping | Qualification: with the switch on, the CT-12 and CT-14 gates pass against the `main` reference, the CT-2 fixtures and a 512-row blank fixture read zero blank boundaries, every `ChatViewScrollHarnessTests` visible invariant holds, and frame cost, opening time and memory at 150, 300 and 512 heavy rows are no worse than CT-10's baseline | CT-16, CT-14, CT-10 | |
@@ -3976,3 +3976,97 @@ code. Per supervisor direction, record an isolated orientation × detent × drag
 matrix before/after `.scrolls`; retain that modifier only if it strictly improves
 the boundary without a new regression. Full content-only gesture acceptance is
 blocked; no private API, delegate replacement, timer or offset repair will be added.
+
+
+#### CT-23 subagent sheet content scrolling — blocked handoff
+
+Final source/evidence checkpoint **`51b600d77`**, clean; documentation-only changes
+follow. The requested content-only gesture boundary is **not implemented** in full.
+Supervisor directed stopping after the bounded public tracking experiment failed,
+keeping only a proven strict improvement. The sole production change is
+`.presentationContentInteraction(.scrolls)` on `ReadOnlySubagentSessionSheet`.
+No experimental native view, recognizer, scroll recipient, delegate replacement,
+private API, timer or offset repair remains. Flip and detached freeze are untouched.
+
+The pre-fix real-app negative control is `92db9ec0f` /
+`20260930T084107Z-run.Qtb8px`. The first `.scrolls`-only checkpoint is
+`d163a520f` / `20260930T084258Z-run.y5T86O`. The controlled matrix repeats those
+results at clean baseline `6ff235a26` / `20260930T090946Z-run.3y1z0P` and final
+`51b600d77` / `20260930T091231Z-run.NMuHqW`. Each cell opens a fresh child sheet
+at newest; physical drags use window coordinates, not native flipped offsets.
+
+| Orientation | Detent | Finger | Before | After `.scrolls` |
+|---|---|---|---|---|
+| Today | Medium | Up | Stationary, newest-edge rubber band | Same |
+| Today | Medium | Down | Stationary sheet, history moves | Same |
+| Today | Large | Up | Stationary, newest-edge rubber band | Same |
+| Today | Large | Down | Stationary sheet, history moves | Same |
+| Origin | Medium | Up | Settles back at medium, no row motion | Same |
+| Origin | Medium | Down | **Expands to large; row does not scroll** | **Stationary medium; history scrolls** |
+| Origin | Large | Up | **Collapses to medium** | **Still collapses** |
+| Origin | Large | Down | Stationary sheet, history moves | Same |
+
+Native sheet scroll frame changes 450.97↔812 pt; header minY changes
+430.39↔78 pt. The full older-history journey additionally proves today's oldest-edge
+content pulls still dismiss. Header up-to-large, header swipe-down dismissal and
+check-button dismissal execute in the matrix in both modes without failures.
+These are endpoint assertions, not proof that the medium newest-edge drag never
+moves the sheet transiently: the user's continuous on-device pull remains open.
+There is no new failure in the measured eight cells; this is a bounded improvement,
+not acceptance of the original gesture requirement.
+
+Retained evidence under `~/Library/Developer/Tron/ios/test-runs/`:
+
+| Gate | Result | Run |
+|---|---|---|
+| New real-app matrix + both full gesture journeys | **Red**, expected reproduced boundary: matrix origin large pull collapses; today oldest-edge dismisses; origin full journey large pull collapses | `20260930T091231Z-run.NMuHqW` |
+| Full SessionSheetPresentationTests + ChatDisplayOrientationTests, origin | **29/29 pass** | `20260930T091550Z-run.tl2TZe` |
+| Same gates, today | **29/29 pass** | `20260930T091809Z-run.UzzIfl` |
+| Full default unit tier | **2,042 total: 1,993 passed, 48 skipped, 1 failed**, known displacedRetainedResume watchdog | `20260930T092015Z-run.LkeWHz` |
+| Focused retained-resume + child store | **10/10 pass** | `20260930T093006Z-run.FT5Cwc` |
+| Generic signed LocalDevice build + artifact validation | **Pass**, `51b600d77`, no install | `sheet-content-scrolling/ct23e-local-device-build.log` |
+
+The child opening gate now also asserts exactly one native status-bar recipient.
+Existing status-bar integration gates cross both orientations, composer variants,
+managed-sheet inheritance and bridge cleanup; real system tap delivery remains a
+device check. Origin child journey: pinned 253 frames, zero blanks, worst gap
+0.4777 pt; detached 95 frames, **0 pt movement**, frozen canonical intake retained.
+Existing accepted detent-animation limitation remains: origin collapse 14 blank
+frames and expansion 0, today collapse 18 and expansion 8. Today's historical
+estimate/detached behavior remains measurement-only, not a new parity claim.
+VoiceOver direction/actions require device validation; no accessibility owner changed.
+
+Reproduction: export `TRON_IOS_TEST_LANE=ct23e` and the pinned `TRON_XCODEGEN`,
+then `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build` and run with
+`--only-testing TronMobileUITests/TronSubagentSheetScrollUITests`. For hosted gates,
+use the same tier with `TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin` (then
+`end`) and `--only-testing TronMobileTests/SessionSheetPresentationTests
+--only-testing TronMobileTests/ChatDisplayOrientationTests`. Unqualified `run`
+without the UI-tier variable is the default unit tier. Every run retains its
+source identity, full log and xcresult; the matrix adds a JSON attachment and
+before/after screenshots. Negative runs before `92db9ec0f` are fixture setup
+failures, not evidence of the product bug.
+
+Convenient exported artifacts and logs:
+`~/Library/Developer/Tron/ios/ct23-device-evaluation/sheet-content-scrolling/`.
+`before/` and `after/` contain attachment manifests, matrix JSON and named PNGs.
+Seven of eight at-rest sheet-region screenshot pairs are pixel-identical; the
+remaining today-medium pair has mean absolute channel difference 0.0277/255.
+This is not an animation/device zero-visual-change certification; the tracking
+experiment was discarded on its functional failure before visual qualification.
+No display tool was available for inline presentation; inspect the named PNGs.
+The original user-device content-drag finding remains authoritative.
+
+Signed app: `~/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice/Build/Products/LocalDevice-iphoneos/TronMobile.app`.
+Built with the requested generic-device `Tron Device` / `LocalDevice` command;
+`validate-ios-artifact.py --configuration LocalDevice --require-profile` passes.
+No Gateway mutation, physical-device installation, push, remote git operation,
+or write to the primary workspace/internal workspace occurred. The user owns
+any future installation; **this artifact is a partial improvement, not a fix**.
+
+Cleanup: `lane-remove ct23e` completed. `status --all` shows no ct23e lane and no
+owned booted simulator. Documentation policy, personal-info guard and diff checks
+are the final documentation-commit checks. Navigation-bar top-edge appearance is
+closed by the user's 2026-09-30 device acceptance; all unrelated prior CT-23 risks
+remain open. Next work requires a proven public sheet/scroll ownership boundary,
+not another scroll repair or a claim that `.scrolls` prevents edge dismissal.
