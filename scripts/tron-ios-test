@@ -420,6 +420,9 @@ if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
   # simulator outlives the command that booted it.
   locker_arguments=(--lock "$LOCK" --marker "$MARKER" --development-state "$DEVELOPMENT_STATE")
   ((keep_booted)) && locker_arguments+=(--keep-booted)
+  # `clean` empties the lane down to its lease file, which only the holder can
+  # remove safely: it still holds the lease once the command tree has ended.
+  [[ "$command" == clean ]] && locker_arguments+=(--remove-empty-lane)
   # This lane travels with the command: the holder leases and releases the lane
   # the command runs in, and the command re-derives every lane path - state
   # directory, marker, device name - from its own arguments. Re-exec'ing without
@@ -431,12 +434,9 @@ if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
 else
   # A descendant of a leased command inherits the lease's own name. One that
   # names another lane would use that lane's simulator while holding no lease on
-  # it, so refuse rather than run unleased. The lease's lock file exists by now,
-  # so compare the files rather than the spellings: the same path reaches this
-  # command with or without a trailing slash, `./` or `//`, and every leased
-  # command would be refused on a spelling difference alone.
-  [[ -n "${TRON_IOS_TEST_LEASE_LOCK:-}" && "$TRON_IOS_TEST_LEASE_LOCK" -ef "$LOCK" ]] \
-    || die "this command names lane $LANE_LABEL, whose lease is $LOCK, but the inherited iOS test lease covers ${TRON_IOS_TEST_LEASE_LOCK:-no lane}; refusing to run on a lane this process does not hold"
+  # it, so refuse (74) rather than run unleased. The lease owner decides, for
+  # every lane tool alike.
+  python3 "$LOCKER" --lock "$LOCK" --verify-inherited "$LANE_LABEL" || exit $?
 fi
 
 if [[ "$command" == clean ]]; then

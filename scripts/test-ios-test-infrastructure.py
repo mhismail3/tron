@@ -3455,6 +3455,163 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             self.close_pipes(command)
 
 
+class InheritedLeaseFixture(LifecycleHarness, unittest.TestCase):
+    """W-34 (issue #126): every lane tool honours the lease it inherits, and
+    `clean` leaves no lane directory behind.
+
+    Failure modes these cases target, written before the code:
+
+    1. The Gateway E2E harness or the profiler, started by a descendant of a
+       leased command (so it inherits `TRON_IOS_TEST_LOCK_HELD`) and naming a
+       lane that lease does not cover, provisions, boots or deletes that lane's
+       simulator while holding no lease on it, because it only skips taking a
+       lease it inherits.
+    2. Their refusal differs from the runner's - another exit status or another
+       message - so a caller that handles the runner's refusal (74) mistakes
+       theirs for a test or destination failure; a copied check also drifts
+       from the runner's (it compares spellings, or accepts no inherited lease).
+    3. `clean` deletes the lane's simulator and marker but leaves the lane
+       directory holding only its lease file, which no sweep reclaims because
+       the sweep removes only marker-owned state.
+    4. Removing that directory takes something that is not the emptied lane's
+       own lease: a file or a nested lane inside it, or a lease file a command
+       that started in the lane meanwhile created and holds, so two commands
+       would hold the lane at once.
+    5. A lane whose directory `clean` removed cannot be used again.
+    """
+
+    REFUSAL = "error: this command names lane "
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.install_fake_xcodebuild()
+        self.environment = {
+            **self.environment,
+            **self.install_synthetic_xcodegen(self.root),
+            "TRON_IOS_E2E_STATE_DIR": str(self.root / "e2e-state"),
+            "TRON_IOS_E2E_DERIVED_DATA": str(self.root / "e2e-derived"),
+            "TRON_PROFILE_IOS_DERIVED_DATA": str(self.root / "profile-derived"),
+            "TRON_PROFILE_RESULTS_DIR": str(self.root / "profile-results"),
+        }
+        for inherited in ("TRON_IOS_TEST_LOCK_HELD", "TRON_IOS_TEST_LEASE_FD", "TRON_IOS_TEST_LEASE_LOCK"):
+            self.environment.pop(inherited, None)
+
+    def tool(self, tool: Path, *arguments: str, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(tool), *arguments], env=environment or self.environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180,
+        )
+
+    def refusal(self, result: subprocess.CompletedProcess[str]) -> str:
+        lines = [line for line in result.stderr.splitlines() if line.startswith(self.REFUSAL)]
+        self.assertEqual(len(lines), 1, result.stderr)
+        return lines[0]
+
+    def test_every_lane_tool_refuses_an_inherited_lease_for_another_lane_as_the_runner_does(self) -> None:
+        """Failure modes 1 and 2: one refusal, 74, before any simulator is touched."""
+        self.owned_lane("ios-test", UDID_A)
+        other = self.owned_lane("ios-test-other", UDID_B, device_name="Tron iOS Tests (other)") / "lease.lock"
+        other.write_text("")
+        commands = (
+            (RUNNER, ("run", "--only-testing", "TronMobileTests/StubTests")),
+            (E2E, ("build",)),
+            (E2E, ("clean",)),
+            (PROFILER, ("--scenario", "control", "--no-build")),
+        )
+        for inherited in ({"TRON_IOS_TEST_LEASE_LOCK": str(other)}, {}):
+            environment = {**self.environment, "TRON_IOS_TEST_LOCK_HELD": "1", **inherited}
+            refusals: dict[str, str] = {}
+            for tool, arguments in commands:
+                with self.subTest(tool=tool.name, arguments=arguments, inherited=inherited):
+                    self.log_path.unlink(missing_ok=True)
+                    result = self.tool(tool, *arguments, environment=environment)
+                    self.assertEqual(result.returncode, 74, result.stderr)
+                    line = self.refusal(result)
+                    self.assertIn(str(self.state / "lease.lock"), line)
+                    self.assertIn(str(other) if inherited else "covers no lane", line)
+                    refusals[f"{tool.name} {arguments[0]}"] = line
+                    self.assertEqual(self.simctl_commands(), [])
+                    self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+                    self.assertEqual(self.device_entry(UDID_B)["state"], "Booted")
+                    self.assertTrue((self.state / "simulator.json").exists())
+                    self.assertFalse((self.root / "e2e-derived/Build/Products").exists())
+            self.assertEqual(len(set(refusals.values())), 1, refusals)
+
+    def test_clean_removes_the_lane_directory_it_emptied_and_the_lane_is_usable_again(self) -> None:
+        """Failure modes 3 and 5: nothing of the lane survives `clean` in either tool."""
+        for tool, name in ((RUNNER, "alpha"), (E2E, "beta")):
+            with self.subTest(tool=tool.name):
+                environment = {**self.environment, "TRON_IOS_TEST_STATE_DIR": ""}
+                udid = UDID_C if name == "alpha" else UDID_D
+                lane = self.owned_lane(f"ios-test-{name}", udid, device_name=f"Tron iOS Tests ({name})")
+
+                cleaned = self.tool(tool, "clean", "--lane", name, environment=environment)
+                self.assertEqual(cleaned.returncode, 0, cleaned.stderr)
+                self.assertFalse(lane.exists(), sorted(path.name for path in lane.iterdir()) if lane.exists() else None)
+                self.assertFalse(self.present(udid))
+
+                again = self.tool(E2E, "build", "--lane", name, environment=environment)
+                self.assertEqual(again.returncode, 0, again.stderr)
+                marker = json.loads((lane / "simulator.json").read_text())
+                self.assertEqual(marker["name"], f"Tron iOS Tests ({name})")
+                self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+
+    def test_clean_keeps_a_lane_directory_that_holds_more_than_its_lease(self) -> None:
+        """Failure mode 4: only a directory holding nothing but the lease goes."""
+        notes = self.state / "notes.txt"
+        nested = self.discovery_root / "ios-test/ios-test-inner"
+        for tool in (RUNNER, E2E):
+            for kept in ("a file", "a nested lane"):
+                with self.subTest(tool=tool.name, kept=kept):
+                    self.owned_lane("ios-test", UDID_A)
+                    if kept == "a file":
+                        notes.write_text("not the tooling's\n")
+                    else:
+                        self.owned_lane("ios-test/ios-test-inner", UDID_B, device_name="Tron iOS Tests (inner)")
+                    result = self.tool(tool, "clean")
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((self.state / "simulator.json").exists())
+                    self.assertTrue((self.state / "lease.lock").exists())
+                    if kept == "a file":
+                        self.assertEqual(notes.read_text(), "not the tooling's\n")
+                        notes.unlink()
+                    else:
+                        self.assertTrue((nested / "simulator.json").exists())
+                        self.assertTrue(self.present(UDID_B))
+                        shutil.rmtree(nested)
+
+    def test_a_lease_file_another_command_now_holds_is_never_removed(self) -> None:
+        """Failure mode 4: the emptied lane's own lease, and no one else's, is removed."""
+        lane = self.discovery_root / "ios-test-race"
+        lane.mkdir()
+        removed, go = self.root / "removed", self.root / "go"
+        # The command loses the lane's lease file, and a command that starts in
+        # the lane meanwhile creates a new one and holds it.
+        holder = subprocess.Popen(
+            [
+                sys.executable, str(LOCK), "--lock", str(lane / "lease.lock"),
+                "--marker", str(lane / "simulator.json"),
+                "--development-state", str(self.development_marker), "--remove-empty-lane", "--",
+                "/bin/sh", "-c", 'rm -f "$1/lease.lock"; echo removed >"$2"; while [ ! -e "$3" ]; do sleep 0.05; done',
+                "sh", str(lane), str(removed), str(go),
+            ],
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        try:
+            self.wait_for(removed)
+            self.hold_lease(lane, command="run")
+            go.write_text("go\n")
+            _, stderr = holder.communicate(timeout=60)
+            self.assertEqual(holder.returncode, 0, stderr)
+            self.assertTrue(self.lock_holder(lane / "lease.lock"))
+            self.assertIn('"command": "run"', (lane / "lease.lock").read_text())
+        finally:
+            if holder.poll() is None:
+                holder.kill()
+                holder.wait(timeout=30)
+            self.close_pipes(holder)
+
+
 class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
     """W-17 (issue #99): each worktree defaults to a lane of its own.
 

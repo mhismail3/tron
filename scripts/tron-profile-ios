@@ -1017,6 +1017,12 @@ def main(argv: list[str]) -> int:
         except OSError as error:
             print(f"error: cannot start the iOS test lease holder: {error}", file=sys.stderr)
             return EXIT_RUNNER
+    # The runner's refusal (74), from the same owner: an inherited lease that
+    # does not cover this lane would leave this run on it unleased.
+    verified = run([sys.executable, str(LOCKER), "--lock", str(lane.state_root / "lease.lock"),
+                    "--verify-inherited", lane.label])
+    if verified.returncode != 0:
+        return verified.returncode
     try:
         profiler = Profiler(arguments, lane)
         profiler.sweep()

@@ -601,9 +601,15 @@ if [[ "$command" != status && "$command" != logs && "$command" != -h && "$comman
     # the lane's simulator - and never the remembered Development simulator.
     # The lane travels with the command, as in scripts/tron-ios-test: the command
     # the holder starts re-derives every lane path from the lane it leased.
-    exec python3 "$lock_owner" --lock "$test_lock" --marker "$simulator_marker" \
-      --development-state "$development_state" -- "$0" "$command" --lane "$test_lane"
+    lock_arguments=(--lock "$test_lock" --marker "$simulator_marker" --development-state "$development_state")
+    # As in scripts/tron-ios-test: only the holder can remove the lane
+    # directory `clean` empties down to its lease file.
+    [[ "$command" == clean ]] && lock_arguments+=(--remove-empty-lane)
+    exec python3 "$lock_owner" "${lock_arguments[@]}" -- "$0" "$command" --lane "$test_lane"
   fi
+  # The runner's refusal (74), from the same owner: an inherited lease that does
+  # not cover this lane would leave this command running on it unleased.
+  python3 "$lock_owner" --lock "$test_lock" --verify-inherited "$test_lane" || exit $?
 fi
 case "$command" in
   prepare|build|run|run-lan|iterate|all|stop|clean)
