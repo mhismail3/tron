@@ -6,7 +6,6 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
-import { JevDecisionClient } from "../knowledge/jev-client.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
@@ -15,6 +14,7 @@ const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  vi.unstubAllGlobals();
 });
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -34,22 +34,8 @@ describe("codemode nested Jev and subagent tools", () => {
     const extensionDir = join(cwd, ".pi", "extensions");
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(extensionDir, { recursive: true })]);
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
-    const jevResponse = JSON.stringify({
-      model: "jev-1.13.0",
-      answers: { decision: { type: "choice", choice: "yes", probabilities: { yes: 1, no: 0 }, confidence: 1 } },
-      usage: { input_tokens: 3, output_tokens: 2 },
-    });
     let activeJevRequests = 0;
     let maximumConcurrentJevRequests = 0;
-    const jevClient = new JevDecisionClient({ read: async () => "synthetic-test-credential" }, async (_url, init) => {
-      jevRequests.push(JSON.parse(init.body) as Record<string, unknown>);
-      activeJevRequests += 1;
-      maximumConcurrentJevRequests = Math.max(maximumConcurrentJevRequests, activeJevRequests);
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-        return { status: 200, body: jevResponse };
-      } finally { activeJevRequests -= 1; }
-    });
     const workspaceMarker = join(root, "tron", "workspace");
     const handoffPath = join(root, "handoff.txt");
     const subagentExtension = `import { writeFile } from "node:fs/promises";
@@ -69,6 +55,13 @@ export default function(pi) {
       writeFile(join(cwd, "README.md"), "fixture workspace\n"),
     ]);
     const jevRequests: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      jevRequests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      activeJevRequests += 1;
+      maximumConcurrentJevRequests = Math.max(maximumConcurrentJevRequests, activeJevRequests);
+      try { await new Promise((resolve) => setTimeout(resolve, 25)); return new Response(JSON.stringify({ model: "jev-latest", answers: { decision: { type: "choice", choice: "yes", probabilities: { yes: 1, no: 0 }, confidence: 1 } }, usage: { input_tokens: 3, output_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } }); }
+      finally { activeJevRequests -= 1; }
+    });
     const faux = fauxProvider({ provider: "tron-codemode-nested-delegation", tokensPerSecond: 10_000 });
     const request = (maxChargeCents: number, id: string) => ({
       state: { id }, maxChargeCents,
@@ -92,13 +85,14 @@ export default function(pi) {
     const modelRuntimeFactory = async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider);
+      await runtime.setRuntimeApiKey("typesafe", "synthetic-typesafe-key");
       return runtime;
     };
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
     const registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
-      jev: jevClient, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
     await registry.initialize();
@@ -127,6 +121,7 @@ export default function(pi) {
     expect(jevRequests).toHaveLength(2);
     expect(maximumConcurrentJevRequests).toBe(2);
     expect(jevRequests.map((item) => (item.state as { id: string }).id).sort()).toEqual(["admitted-a", "admitted-b"]);
+    expect(jevRequests.every((item) => item.model === "jev-latest")).toBe(true);
     expect(handedTask).toContain("[Tron workspace handoff]");
     expect(handedTask).toContain(workspaceMarker);
     expect(slot.snapshot().toolExecutions.map((tool) => tool.toolCallId)).toEqual(["delegation-parent"]);

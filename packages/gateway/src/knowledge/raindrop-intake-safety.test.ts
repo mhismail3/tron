@@ -22,7 +22,7 @@ async function fixture(options: { failFirstMove?: boolean; initialScope?: string
     resolveHost: async () => ["93.184.216.34"],
     sourceFetch: options.sourceFetch ?? (async url => new Response(`Distinct complete source evidence for ${url}`, { headers: { "content-type": "text/plain" } })),
     sleep: async () => {},
-    assessment: { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); observed.assessmentCalls += 1; return { summary: "Synthetic classification", evidenceQuality: "none", freshness: "unknown", recommendation: "retained", model: "jev-1.13.0" }; } },
+    assessment: { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); observed.assessmentCalls += 1; return { summary: "Synthetic classification", evidenceQuality: "none", freshness: "unknown", recommendation: "retained", model: "jev-latest" }; } },
     http: async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       const list = new URL(url).pathname.match(/\/raindrops\/(\d+)$/);

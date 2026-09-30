@@ -9,6 +9,7 @@ export const JEV_MAX_STATE_BYTES = 24_000;
 export const JEV_MAX_BODY_BYTES = 60_000;
 export const JEV_MAX_STATE_QUESTION_BYTES = 28_000;
 const JEV_MAX_QUESTIONS = 16;
+const JEV_MAX_RESPONSE_BYTES = 512_000;
 const JEV_MAX_JSON_DEPTH = 8;
 const INPUT_TOKEN_CEILING = 64_000;
 
@@ -52,7 +53,8 @@ function assertJSON(value: unknown): void {
   visit(value, 0);
 }
 function byteLength(value: unknown): number { return Buffer.byteLength(JSON.stringify(value), "utf8"); }
-function inputCostCents(tokens: number): number { return tokens * JEV_CLASSIFIER.inputUsdPerMillion / 10_000; }
+function inputCostCents(tokens: number): number { return tokens * JEV_CLASSIFIER.inputUsdPerMillion * 100 / 1_000_000; }
+export const JEV_MAX_ESTIMATED_CHARGE_CENTS = inputCostCents(INPUT_TOKEN_CEILING);
 function boundedString(value: unknown): string { return typeof value === "string" ? value : JSON.stringify(value); }
 function validatedContext(request: JevDecisionRequest): ClassifierContext {
   assertJSON(request.state); assertJSON(request.questions);
@@ -85,9 +87,9 @@ function answerRecord(result: Record<string, unknown>, request: JevDecisionReque
       answers[id] = { type: "noul", noul: answer.probability };
     } else if (question.type === "choice" && answer.type === "choice" && typeof answer.choice === "string" && isRecord(answer.probabilities) && typeof answer.confidence === "number") {
       const options = Object.keys(question.criteria);
-      if (!options.includes(answer.choice) || Object.keys(answer.probabilities).length !== options.length || options.some(option => typeof (answer.probabilities as Record<string, unknown>)[option] !== "number")) throw invalid();
+      if (!options.includes(answer.choice) || Object.keys(answer.probabilities).length !== options.length || options.some(option => { const probability = (answer.probabilities as Record<string, unknown>)[option]; return typeof probability !== "number" || !Number.isFinite(probability) || probability < 0 || probability > 1; }) || Math.abs(Object.values(answer.probabilities as Record<string, number>).reduce((sum, value) => sum + value, 0) - 1) > 0.02 || typeof answer.confidence !== "number" || !Number.isFinite(answer.confidence) || answer.confidence < 0 || answer.confidence > 1 || (answer.probabilities as Record<string, number>)[answer.choice] !== Math.max(...Object.values(answer.probabilities as Record<string, number>))) throw invalid();
       answers[id] = { type: "choice", choice: answer.choice, probabilities: answer.probabilities as Record<string, number>, confidence: answer.confidence };
-    } else if (question.type === "score" && answer.type === "score" && typeof answer.score === "number" && typeof answer.confidence === "number") {
+    } else if (question.type === "score" && answer.type === "score" && typeof answer.score === "number" && Number.isFinite(answer.score) && answer.score >= 0 && answer.score <= question.criteria.length - 1 && typeof answer.confidence === "number" && Number.isFinite(answer.confidence) && answer.confidence >= 0 && answer.confidence <= 1) {
       answers[id] = { type: "score", score: answer.score, legend: Object.fromEntries(question.criteria.map((criterion, index) => [String(index), boundedString(criterion)])), probabilities: {}, confidence: answer.confidence };
     } else throw invalid();
   }
@@ -96,7 +98,7 @@ function answerRecord(result: Record<string, unknown>, request: JevDecisionReque
 
 /** Bounded adapter over Pi's classifier path; Pi owns provider auth and HTTP dispatch. */
 export class JevDecisionClient {
-  constructor(private readonly runtime: ModelRuntime) {}
+  constructor(private readonly runtime: ModelRuntime, private readonly fetchImpl?: typeof fetch) {}
   async evaluate(request: JevDecisionRequest, signal: AbortSignal, context: JevDispatchContext = {}): Promise<JevDecisionResponse> {
     if (signal.aborted) throw new JevEvaluationError("Jev evaluation cancelled", "notSent");
     const requestedModel = request.model ?? JEV_DEFAULT_MODEL;
@@ -106,15 +108,29 @@ export class JevDecisionClient {
     if (context.maxChargeCents !== undefined && (!Number.isFinite(context.maxChargeCents) || context.maxChargeCents <= 0 || maxEstimatedChargeCents > context.maxChargeCents)) throw new Error("Jev request exceeds maxChargeCents before dispatch");
     const catalogModel = this.runtime.getModelOfType("classifier", JEV_CLASSIFIER.provider, JEV_DEFAULT_MODEL);
     if (!catalogModel) throw new Error("Pi's TypeSafe Jev classifier is unavailable");
+    if (!this.runtime.getProviderAuthStatus(JEV_CLASSIFIER.provider).configured) throw new Error("TypeSafe provider credential is not configured");
     // Keep Pi's catalog API/provider/limits while replacing only the catalog's
     // zero price in our accounting; it is not TypeSafe's billable price.
     const model = { ...catalogModel, cost: { input: JEV_CLASSIFIER.inputUsdPerMillion, output: JEV_CLASSIFIER.outputUsdPerMillion, cacheRead: 0, cacheWrite: 0 } } as ClassifierModel<ClassifierApi>;
     assertJSON(request);
-    await context.beforeDispatch?.();
-    if (signal.aborted) throw new JevEvaluationError("Jev evaluation cancelled", "notSent");
-    await context.onDispatch?.("sent");
     try {
-      const result = await this.runtime.classify(model, classifierContext, { signal });
+      await context.beforeDispatch?.();
+      if (signal.aborted) throw new JevEvaluationError("Jev evaluation cancelled", "notSent");
+      await context.onDispatch?.("sent");
+      if (signal.aborted) throw new JevEvaluationError("Jev evaluation cancelled", "notSent");
+    } catch (error) {
+      if (error instanceof JevEvaluationError) throw error;
+      throw new JevEvaluationError("Jev evaluation was not dispatched", "notSent");
+    }
+    try {
+      const upstreamFetch = this.fetchImpl ?? globalThis.fetch;
+      const boundedFetch: typeof fetch = async (input, init) => {
+        const response = await upstreamFetch(input, init);
+        const body = await response.text();
+        if (Buffer.byteLength(body, "utf8") > JEV_MAX_RESPONSE_BYTES) throw new Error("Jev classifier response exceeded its explicit bound");
+        return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+      };
+      const result = await this.runtime.classify(model, classifierContext, { signal, fetch: boundedFetch });
       if (signal.aborted) throw new Error("Jev evaluation cancelled after dispatch");
       if (result.stopReason !== "stop" || !isRecord(result.answers)) throw new Error("Jev classifier did not complete");
       const usage = result.usage;

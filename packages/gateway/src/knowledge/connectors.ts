@@ -683,7 +683,7 @@ export class KnowledgeConnectorExtension {
             if (!this.options.assessment) { pending += 1; lastError = "Jev source assessment is not configured"; setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: "not-run", move: "not-attempted" }); continue; }
             let dispatched = false;
             try {
-              const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => { await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, cohortId); dispatched = true; } }, this.options.assessment);
+              const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => { await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, cohortId); }, onDispatch: () => { dispatched = true; } }, this.options.assessment);
               assessment = triaged.assessment; source = triaged.source; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId }; assessmentOutcome = assessment.coverage === "sampled" ? "dispatched-settled-sampled" : "dispatched-settled";
               setOutcome(item, { ...sourceRef, assessment: assessmentOutcome });
               const usage = assessment?.usage ? { inputTokens: assessment.usage.inputTokens, outputTokens: assessment.usage.outputTokens, estimatedCostCents: assessment.usage.estimatedCostCents } : undefined;

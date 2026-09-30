@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,17 +6,12 @@ import { drainDurableWriteStats } from "../util/durable-json.js";
 import { ConnectionOwner } from "./connection-owner.js";
 
 describe("ConnectionOwner", () => {
-  it("exposes paid Jev tagging only through the generic connection approval policy", async () => {
-    const home = await mkdtemp(join(tmpdir(), "tron-jev-tag-connection-"));
+  it("rejects a persisted knowledge.jev connection with provider-credential guidance", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-legacy-jev-connection-"));
     try {
-    const owner = new ConnectionOwner(home);
-    const setup = await owner.execute({ kind: "setup.begin", commandId: "jev-tag-begin-0001", instanceId: "tagger", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
-    await owner.execute({ kind: "setup.complete", commandId: "jev-tag-complete-0001", operationId: setup.operationId, instanceId: "tagger", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 500, recurringApproved: false } });
-    await owner.recordProviderObservation("tagger", 1, { credentialAvailability: "available", providerIdentity: "unknown" });
-    expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "unavailable", detail: "Paid access approval is required for this capability" }));
-    await owner.execute({ kind: "policy.update", commandId: "jev-tag-approve-0001", instanceId: "tagger", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
-    await owner.recordProviderObservation("tagger", 2, { credentialAvailability: "available", providerIdentity: "unknown" });
-    expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "available" }));
+      const path = join(home, "state", "integrations"); await mkdir(path, { recursive: true });
+      await writeFile(join(path, "connections.json"), JSON.stringify({ schemaVersion: 1, stateRevision: 1, instances: { legacy: { definitionId: "knowledge.jev" } }, setupOperations: {}, receipts: {} }), { mode: 0o600 });
+      await expect(new ConnectionOwner(home).snapshot()).rejects.toThrow(/knowledge\.jev connection 'legacy'.*configure the typesafe provider credential/);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   it("validates and revision-fences Raindrop collection-to-scope mappings in connection configuration", async () => {

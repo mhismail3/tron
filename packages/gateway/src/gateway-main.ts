@@ -356,8 +356,8 @@ const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   ...(xPricing ? { xPricing } : {}),
   connections,
 });
-const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, connections, knowledgeCredentials);
-const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(modelRuntime), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections };
+const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, () => modelRuntime.getProviderAuthStatus("typesafe").configured);
+const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(modelRuntime), knowledgeTaggingBudget), budget: knowledgeTaggingBudget };
 const knowledge = new KnowledgeService(
   knowledgeStore,
   new KnowledgeObservationService(
@@ -383,8 +383,7 @@ const knowledge = new KnowledgeService(
   workRegistry,
   async operation => {
     if (operation !== "tags") return { ok: true };
-    const configured = (await connections.snapshot()).instances.filter(instance => instance.definitionId === "knowledge.jev" && instance.policy.enabled);
-    return knowledgeTaggingBudget.gate(configured.length === 1 ? configured[0]!.id : undefined);
+    return knowledgeTaggingBudget.gate("typesafe");
   },
   // The event carries the whole job, the same shape `knowledge.curation.jobs`
   // returns, so one client decoder serves both.

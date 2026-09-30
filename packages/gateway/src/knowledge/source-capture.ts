@@ -51,9 +51,9 @@ export interface SourceAssessmentModelInput {
   source: { uri?: string; mediaType?: string; capturedAt: string; collectionId?: string; captureDisposition?: SourceContent["captureDisposition"] };
 }
 
-/** The paid adapter must invoke beforeDispatch only after its own request
- * validation and credential lookup, immediately before its one POST. */
-export interface SourceAssessmentDispatchContext { beforeDispatch?: () => Promise<void>; }
+/** Durable reservation and dispatch certification are separate because Pi's
+ * classifier call may still fail locally after budget admission. */
+export interface SourceAssessmentDispatchContext { beforeDispatch?: () => Promise<void>; onDispatch?: () => Promise<void> | void; }
 export interface SourceAssessmentModel {
   assess(input: SourceAssessmentModelInput, signal: AbortSignal, context?: SourceAssessmentDispatchContext): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }>;
 }

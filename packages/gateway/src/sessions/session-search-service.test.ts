@@ -3,8 +3,9 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
-import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { JevDecisionClient, JevEvaluationError } from "../knowledge/jev-client.js";
 import { SessionSearchService, type SessionSearchEmbeddingClient } from "./session-search-service.js";
 import { SessionSearchIndex } from "./session-search-index.js";
@@ -12,6 +13,11 @@ import { SessionSearchAllowanceLedger } from "./session-search-allowance.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+async function jevRuntime(root: string, withKey = true) {
+  const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, credentials: new InMemoryCredentialStore(), refreshOnCreate: false, allowModelNetwork: false });
+  if (withKey) await runtime.setRuntimeApiKey("typesafe", "synthetic-typesafe-key");
+  return runtime;
+}
 
 const entries = [
   { type: "session", id: "s", cwd: "/tmp", timestamp: "2026-01-01T00:00:00Z" },
@@ -329,8 +335,10 @@ describe("SessionSearchService backend seams", () => {
   it("charges a real Jev HTTP success through the service", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-search-jev-http-")); roots.push(root);
     const allowance = await SessionSearchAllowanceLedger.open(join(root, "allowance.sqlite"));
-    const http = async () => ({ status: 200, body: JSON.stringify({ model: "jev-1.13.0", answers: { r0: { type: "score", score: 2, legend: { "0": "irrelevant", "1": "relevant", "2": "direct answer" }, probabilities: { "0": 0, "1": 0, "2": 1 }, confidence: 1 } }, usage: { input_tokens: 100, output_tokens: 1 } }) });
-    const jev = new JevDecisionClient(new InMemoryConnectorCredentialStore(new Map([["connector:jev:personal", "synthetic-token"]])), http);
+    const responseBody = { model: "jev-latest", answers: { r0: { type: "score", score: 2, confidence: 1 } }, usage: { input_tokens: 100, output_tokens: 1 } };
+    const runtime = await jevRuntime(root);
+    const fakeFetch: typeof fetch = async () => new Response(JSON.stringify(responseBody), { status: 200, headers: { "content-type": "application/json" } });
+    const jev = new JevDecisionClient(runtime, fakeFetch);
     const index = await SessionSearchIndex.open(join(root, "index.sqlite"));
     const service = new SessionSearchService(sessionsFor(), index, jev, allowance);
     service.setPolicy({ enabled: true, perQueryMicroCents: 300_000, dailyMicroCents: 300_000, policyRevision: 1 });
@@ -345,7 +353,8 @@ describe("SessionSearchService backend seams", () => {
   it("keeps a real HTTP malformed-response hold pending after dispatch", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-search-jev-malformed-")); roots.push(root);
     const allowance = await SessionSearchAllowanceLedger.open(join(root, "allowance.sqlite"));
-    const jev = new JevDecisionClient(new InMemoryConnectorCredentialStore(new Map([["connector:jev:personal", "synthetic-token"]])), async () => ({ status: 200, body: "not-json" }));
+    const runtime = await jevRuntime(root);
+    const jev = new JevDecisionClient(runtime, async () => new Response("not-json", { status: 200, headers: { "content-type": "application/json" } }));
     const index = await SessionSearchIndex.open(join(root, "index.sqlite"));
     const service = new SessionSearchService(sessionsFor(), index, jev, allowance);
     service.setPolicy({ enabled: true, perQueryMicroCents: 300_000, dailyMicroCents: 300_000, policyRevision: 1 });
@@ -359,7 +368,8 @@ describe("SessionSearchService backend seams", () => {
   it("does not reserve or spend when Jev capability is unavailable before dispatch", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-search-jev-no-token-")); roots.push(root);
     const allowance = await SessionSearchAllowanceLedger.open(join(root, "allowance.sqlite"));
-    const jev = new JevDecisionClient(new InMemoryConnectorCredentialStore(new Map()), async () => { throw new Error("must not dispatch"); });
+    const runtime = await jevRuntime(root, false);
+    const jev = new JevDecisionClient(runtime, async () => { throw new Error("must not dispatch"); });
     const index = await SessionSearchIndex.open(join(root, "index.sqlite"));
     const service = new SessionSearchService(sessionsFor(), index, jev, allowance);
     service.setPolicy({ enabled: true, perQueryMicroCents: 300_000, dailyMicroCents: 300_000, policyRevision: 1 });

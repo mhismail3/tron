@@ -78,7 +78,7 @@ describe("knowledge connectors", () => {
 
   it("re-scopes one canonical source when its bookmark moves to a mapped personal collection", async () => {
     let collection = "7";
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Useful research", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Useful research", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
     const { store, extension } = await mappedRaindropFixture(async url => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       const requested = /raindrops\/(\d+)/.exec(url)?.[1];
@@ -123,7 +123,7 @@ describe("knowledge connectors", () => {
   });
 
   it("keeps assessment pilot cohorts independent for each mapped research collection", async () => {
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
     const { store, extension } = await mappedRaindropFixture(async url => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       const collection = /raindrops\/(\d+)/.exec(url)?.[1];
@@ -139,7 +139,7 @@ describe("knowledge connectors", () => {
 
   it("uses only the selected collection's approved remote destination", async () => {
     let remoteCollection = "7";
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
     const writes: string[] = [];
     const { extension } = await mappedRaindropFixture(async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
@@ -542,7 +542,7 @@ describe("knowledge connectors", () => {
 
   it("captures, assesses, preserves collection provenance, and moves one bounded intake item", async () => {
     let collection = "111";
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Synthetic retained source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 4, estimatedCostCents: 0.00042, pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" } }; } };
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Synthetic retained source", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 4, estimatedCostCents: 0.00042, pricing: "typesafe-jev-latest-input-0.042-usd-per-million-output-free-estimate" } }; } };
     const { store, extension } = await fixture(async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "Synthetic item", link: "https://example.test/item", created: "2025-12-30T12:00:00Z", collection: { $id: 111 }, custom: { preserved: true } }] });
@@ -575,7 +575,7 @@ describe("knowledge connectors", () => {
 
   it("keeps paid pilot spend monotonic and fences exact-command assessment replay", async () => {
     let jevCalls = 0;
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); jevCalls += 1; return { summary: "bounded", evidenceQuality: "none", freshness: "unknown", model: "jev-1.13.0", recommendation: "retained", confidence: 0.9, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); jevCalls += 1; return { summary: "bounded", evidenceQuality: "none", freshness: "unknown", model: "jev-latest", recommendation: "retained", confidence: 0.9, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
     const { extension, store } = await fixture(async url => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "One", link: "https://example.test/one", collection: { $id: 111 } }, { _id: 2, title: "Two", link: "https://example.test/two", collection: { $id: 111 } }] });
@@ -619,6 +619,7 @@ describe("knowledge connectors", () => {
     const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) {
       if (preflight) { preflight = false; throw new Error("synthetic preflight rejection"); }
       await context?.beforeDispatch?.();
+      await context?.onDispatch?.();
       calls += 1;
       throw new Error("synthetic response uncertainty");
     } };
@@ -654,7 +655,7 @@ describe("knowledge connectors", () => {
 
   it.each(["completion", "admission"])("preserves the settled assessment when %s fails afterward", async failure => {
     let collection = "111";
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "synthetic", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "synthetic", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained", profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
     const { store, extension } = await fixture(async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "Receipt failure", link: "https://example.test/receipt", collection: { $id: 111 } }] });
@@ -691,7 +692,7 @@ describe("knowledge connectors", () => {
 
   it("appends an explicit renewed cohort without resetting the frozen pilot", async () => {
     let collection = "111";
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "synthetic", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "synthetic", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained", profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
     const { store, extension } = await fixture(async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "One", link: "https://example.test/one", collection: { $id: 111 } }, { _id: 2, title: "Two", link: "https://example.test/two", collection: { $id: 111 } }] });

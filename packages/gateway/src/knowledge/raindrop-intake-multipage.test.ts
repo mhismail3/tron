@@ -28,7 +28,7 @@ describe("Raindrop intake pagination and cohort accounting", () => {
     const assessment: SourceAssessmentModel = { async assess(input, _signal, context) {
       await context?.beforeDispatch?.();
       const interests: string[] = [];
-      return { summary: "synthetic assessment", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained" as const, profileVersion: jevProfileVersion(interests), rubricVersion: "tron-source-rubric-v2", inputDigest: jevInputDigest(input, interests) };
+      return { summary: "synthetic assessment", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained" as const, profileVersion: jevProfileVersion(interests), rubricVersion: "tron-source-rubric-v2", inputDigest: jevInputDigest(input, interests) };
     } };
     const options: KnowledgeConnectorOptions = {
       credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]])),

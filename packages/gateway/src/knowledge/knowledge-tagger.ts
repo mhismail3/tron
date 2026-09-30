@@ -1,10 +1,8 @@
 import { createHash } from "node:crypto";
 import type { JevAnswer, JevDecisionClient, JevQuestion } from "./jev-client.js";
-import { JEV_DEFAULT_MODEL } from "./jev-client.js";
+import { JEV_DEFAULT_MODEL, JEV_MAX_ESTIMATED_CHARGE_CENTS } from "./jev-client.js";
 import type { KnowledgeConnectorState, KnowledgeRecord, KnowledgeTagDefinition, KnowledgeTagVocabularyConfig } from "./knowledge-contract.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
-import type { ConnectionOwner } from "../integrations/connection-owner.js";
-import type { ConnectorCredentialStore } from "./connector-credentials.js";
 import { GatewayError } from "../errors.js";
 import { KnowledgeCurationRefusal } from "./knowledge-contract.js";
 
@@ -88,7 +86,7 @@ function attemptHash(connectionId: string, jobId: string, callIndex: number, mon
 }
 function budgetCommand(attemptId: string, stage: string): string { return `jev-tag-${stage}-${attemptId}`; }
 function emptyJevState(connectionId: string): KnowledgeConnectorState {
-  return { connector: "jev", connectionId, enabled: false, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false, pending: [], capturedIds: [], health: "setup-required", remaining: 0 };
+  return { connector: "jev", connectionId, enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: KNOWLEDGE_TAG_DEFAULT_MONTHLY_CAP_CENTS, recurringApproved: false, pending: [], capturedIds: [], health: "ready", remaining: 0 };
 }
 function rollBudget(state: KnowledgeConnectorState, month: string) {
   const old = state.taggingBudget;
@@ -98,20 +96,18 @@ function rollBudget(state: KnowledgeConnectorState, month: string) {
 }
 
 export class KnowledgeTaggingBudget {
-  constructor(private readonly store: KnowledgeStore, private readonly connections: Pick<ConnectionOwner, "resolveInstance" | "recordProviderObservation">, private readonly credentials: ConnectorCredentialStore) {}
+  constructor(private readonly store: KnowledgeStore, private readonly isTypesafeConfigured: () => boolean = () => true, private readonly monthlyCapCents = KNOWLEDGE_TAG_DEFAULT_MONTHLY_CAP_CENTS) {
+    if (!Number.isSafeInteger(monthlyCapCents) || monthlyCapCents < 1 || monthlyCapCents > 100_000) throw new Error("Knowledge tagging monthly cap is invalid");
+  }
 
-  private async authority(connectionId: string) {
-    const instance = await this.connections.resolveInstance(connectionId);
-    if (instance.definitionId !== "knowledge.jev" || instance.credentialRef !== "connector:jev:personal") throw new GatewayError("conflict", "Jev tagging requires the configured knowledge.jev Keychain connection");
-    if (!instance.policy.enabled || !instance.policy.paidAccessApproved || instance.policy.paidBudgetCents <= 0) throw new GatewayError("unsupported", "Jev tagging requires an enabled connection, paid-access approval, and a positive monthly cap");
-    const token = await this.credentials.read("connector:jev:personal");
-    await this.connections.recordProviderObservation(instance.id, instance.setupRevision, { credentialAvailability: token ? "available" : "unavailable", providerIdentity: "unknown" });
-    if (!token) throw new GatewayError("unsupported", "Jev Keychain credential is unavailable; configure connector:jev:personal before tagging");
-    return this.connections.resolveInstance(connectionId);
+  private async authority(providerId: string) {
+    if (providerId !== "typesafe") throw new GatewayError("conflict", "Knowledge tagging uses the configured TypeSafe provider credential");
+    if (!this.isTypesafeConfigured()) throw new GatewayError("unsupported", "TypeSafe provider credential is not configured");
+    return { id: providerId, policy: { enabled: true, paidAccessApproved: true, paidBudgetCents: this.monthlyCapCents } };
   }
 
   async gate(connectionId: string | undefined): Promise<{ ok: true } | { ok: false; code: "budget-exhausted" | "unavailable"; reason: string }> {
-    if (!connectionId) return { ok: false, code: "unavailable", reason: "Jev tagging is not configured; create and enable a knowledge.jev connection" };
+    if (!connectionId) return { ok: false, code: "unavailable", reason: "Jev tagging requires the configured TypeSafe provider credential" };
     try {
       const status = await this.status(connectionId);
       if (!status.enabled || !status.paidAccessApproved) return { ok: false, code: "unavailable", reason: "Jev paid tagging is disabled or not approved" };
@@ -123,8 +119,7 @@ export class KnowledgeTaggingBudget {
   }
 
   async status(connectionId: string) {
-    const instance = await this.connections.resolveInstance(connectionId);
-    if (instance.definitionId !== "knowledge.jev" || instance.credentialRef !== "connector:jev:personal") throw new GatewayError("conflict", "Jev tagging requires the configured knowledge.jev Keychain connection");
+    const instance = await this.authority(connectionId);
     const state = await this.store.connectorState("jev", connectionId);
     const month = budgetMonth();
     const ledger = rollBudget(state ?? emptyJevState(connectionId), month);
@@ -143,7 +138,7 @@ export class KnowledgeTaggingBudget {
     const existingState = await this.store.connectorState("jev", connectionId);
     if (existingState?.taggingBudget && rollBudget(existingState, month).attempts[id]) throw new GatewayError("conflict", "This Jev attempt already has a reservation; reconcile it instead of retrying");
     await this.store.updateConnectorState(budgetCommand(id, "reserve"), "jev", current => {
-      const state = current ?? { ...emptyJevState(connectionId), enabled: authority.policy.enabled, paidAccessApproved: authority.policy.paidAccessApproved, paidBudgetCents: authority.policy.paidBudgetCents, credentialRef: authority.credentialRef };
+      const state = current ?? { ...emptyJevState(connectionId), enabled: authority.policy.enabled, paidAccessApproved: authority.policy.paidAccessApproved, paidBudgetCents: authority.policy.paidBudgetCents };
       if (!state.enabled || !state.paidAccessApproved || state.paidBudgetCents <= 0 || state.paidBudgetCents !== authority.policy.paidBudgetCents) throw new GatewayError("conflict", "Jev tagging paid-access policy changed before reservation");
       const ledger = rollBudget(state, month);
       if (Object.values(ledger.attempts).some(attempt => attempt.month === month && (attempt.status === "uncertain" || attempt.status === "reserved"))) throw new GatewayError("conflict", "An uncertain Jev dispatch must be reconciled before more paid tagging");
@@ -256,6 +251,7 @@ export async function decideKnowledgeTags(
     const callIndex = callCount;
     const categoryEvidence = { ...evidence, text: utf8Prefix(evidence.text, 1_000) };
     const response = await client.evaluate({ model: JEV_DEFAULT_MODEL, state: { task: "Choose candidate tag categories", guidelines: utf8Prefix(vocabulary.guidelines, KNOWLEDGE_TAG_GUIDELINE_MAX_BYTES), source: categoryEvidence }, questions: categoryQuestions }, signal, {
+      maxChargeCents: JEV_MAX_ESTIMATED_CHARGE_CENTS,
       beforeDispatch: () => dispatch.beforeDispatch(callIndex),
       onDispatch: () => dispatch.onDispatch(callIndex),
     }).catch(async error => { await dispatch.uncertain(callIndex); throw error; });
@@ -275,6 +271,7 @@ export async function decideKnowledgeTags(
     const questions = Object.fromEntries(batch.map(tag => [`tag_${tag.id}`, tagQuestion(tag)]));
     const callIndex = callCount;
     const response = await client.evaluate({ model: JEV_DEFAULT_MODEL, state: { task: "Select every applicable controlled tag independently", source: evidence, guidelines: utf8Prefix(vocabulary.guidelines, KNOWLEDGE_TAG_GUIDELINE_MAX_BYTES), vocabularyRevision: vocabulary.revision }, questions }, signal, {
+      maxChargeCents: JEV_MAX_ESTIMATED_CHARGE_CENTS,
       beforeDispatch: () => dispatch.beforeDispatch(callIndex),
       onDispatch: () => dispatch.onDispatch(callIndex),
     }).catch(async error => { await dispatch.uncertain(callIndex); throw error; });

@@ -53,14 +53,6 @@ const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] = [
   },
   {
     schemaVersion: 1,
-    id: "knowledge.jev",
-    implementation: "knowledge-connector",
-    displayName: "Jev tagging",
-    setupMethods: ["token"],
-    capabilities: [{ id: "tag", displayName: "Tag Knowledge sources", effects: ["paid"], supported: true }],
-  },
-  {
-    schemaVersion: 1,
     id: "knowledge.x",
     implementation: "knowledge-connector",
     displayName: "X bookmarks",
@@ -95,7 +87,7 @@ function capabilityAvailability(
   if (!capability.supported) return { availability: "unsupported", detail: "Capability is not implemented by this adapter" };
   if (instance.health === "disconnected") return { availability: "unavailable", detail: "Connection is disconnected" };
   if (!instance.policy.enabled) return { availability: "disabled", detail: "Connection is disabled by policy" };
-  const providerPrerequisitesAdmitted = instance.credentialAvailability === "available" && (instance.providerIdentity === "admitted" || instance.definitionId === "knowledge.jev");
+  const providerPrerequisitesAdmitted = instance.credentialAvailability === "available" && instance.providerIdentity === "admitted";
   if (instance.health !== "ready" || !providerPrerequisitesAdmitted) {
     return { availability: "unavailable", detail: instance.lastError ?? prerequisiteDetail(instance) };
   }
@@ -207,8 +199,7 @@ export class ConnectionOwner {
         && observation.providerIdentity === "admitted"
         ? normalizeProviderDisplayName(observation.providerDisplayName)
         : undefined;
-      const localCredentialAdmission = instance.definitionId === "knowledge.jev" && observation.credentialAvailability === "available";
-      const health: ConnectionHealth = observation.credentialAvailability === "available" && (observation.providerIdentity === "admitted" || localCredentialAdmission) ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
+      const health: ConnectionHealth = observation.credentialAvailability === "available" && observation.providerIdentity === "admitted" ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
       // All four projected fields already hold these values (an absent
       // observation field projects as `unknown`, so it is compared that way),
       // so this is not a state transition: a read that re-observes the same
@@ -319,8 +310,12 @@ export class ConnectionOwner {
     try { read = await readSecureJson<unknown>(path, STATE_MAX_BYTES); }
     catch (error) { if (error instanceof SecureJsonFileError) throw new GatewayError("conflict", `Connection state is unavailable: ${error.message}`); throw error; }
     if (!read.present) return initialState();
-    try { validateConnectionState(read.value); return copy(read.value); }
-    catch (error) { throw new GatewayError("conflict", error instanceof Error ? `Connection state is unavailable: ${error.message}` : "Connection state is unavailable"); }
+    try {
+      const persisted = read.value as { instances?: Record<string, { definitionId?: unknown }> };
+      const legacyJev = persisted && typeof persisted === "object" && persisted.instances && Object.entries(persisted.instances).find(([, instance]) => instance?.definitionId === "knowledge.jev");
+      if (legacyJev) throw new Error(`Persisted knowledge.jev connection '${legacyJev[0]}' is no longer supported; configure the typesafe provider credential instead`);
+      validateConnectionState(read.value); return copy(read.value);
+    } catch (error) { throw new GatewayError("conflict", error instanceof Error ? `Connection state is unavailable: ${error.message}` : "Connection state is unavailable"); }
   }
 
   private async save(state: ConnectionOwnerState): Promise<void> {
