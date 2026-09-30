@@ -106,7 +106,7 @@ removed afterwards):
 
 | Owner | What exists only for MCP |
 | --- | --- |
-| `packages/gateway/src/integrations/mcp-adapter.ts` (303 lines) + test (222) | Official `@modelcontextprotocol/sdk` 1.25.2 client, HTTP endpoint lock, stdio env allowlist, bounded discovery (128 tools), `mcp_<instance>_<tool>` names, per-connection call lane, unknown-outcome reporting |
+| `mcp-adapter.ts` in `packages/gateway/src/integrations/` (303 lines, deleted in P99-7) + test (222) | Official `@modelcontextprotocol/sdk` 1.25.2 client, HTTP endpoint lock, stdio env allowlist, bounded discovery (128 tools), `mcp_<instance>_<tool>` names, per-connection call lane, unknown-outcome reporting |
 | `packages/gateway/src/integrations/connection-contract.ts`, `connection-owner.ts` | `mcp` implementation kind, `McpConnectionConfiguration`, `mcp.remote-http` definition, `endpoint`/`local-command` setup methods, `markRuntimeReady`, `admitRuntimeBinding` and `RuntimeBinding` (only caller is the adapter) |
 | `packages/gateway/src/sessions/runtime-slot.ts`, `runtime-registry.ts`, `packages/gateway/src/gateway-main.ts` | Adapter wiring and `tron-mcp-<n>` inline extensions |
 | `packages/gateway/src/protocol/types.ts`, `packages/gateway/src/sessions/gateway-work-registry.ts`, `packages/gateway/src/transport/gateway-service.ts` | `McpToolSource`, `modules.list.connections`, `mcp-tool-call` work kind |
