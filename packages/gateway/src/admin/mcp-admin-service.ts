@@ -14,9 +14,8 @@ const CLI_TIMEOUT_MS = 30_000;
 // sending stdin directly to a short-lived Security.framework writer instead.
 const KEYCHAIN_WRITE_SCRIPT = `import Foundation
 import Security
-let args = CommandLine.arguments
-let service = args[args.count - 2]
-let account = args[args.count - 1]
+let service = __SERVICE__
+let account = __ACCOUNT__
 let secret = FileHandle.standardInput.readDataToEndOfFile()
 guard !secret.isEmpty else { exit(2) }
 let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
@@ -41,7 +40,10 @@ export class MacKeychainMcpCredentialOwner implements McpCredentialOwner {
       throw new GatewayError("invalid_request", "MCP server or bearer token is invalid");
     }
     const account = `tron-mcp-${server}`;
-    const result = await runProcess("/usr/bin/swift", ["-e", KEYCHAIN_WRITE_SCRIPT, "--", "tron.mcp", account], { cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS, input: token });
+    const script = KEYCHAIN_WRITE_SCRIPT
+      .replace("__SERVICE__", JSON.stringify("tron.mcp"))
+      .replace("__ACCOUNT__", JSON.stringify(account));
+    const result = await runProcess("/usr/bin/swift", ["-e", script], { cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS, input: token });
     if (result.code !== 0) throw new GatewayError("internal", "Could not store the MCP bearer token in Keychain");
     return account;
   }
