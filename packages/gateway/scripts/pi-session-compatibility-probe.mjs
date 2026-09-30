@@ -55,6 +55,13 @@ function assertExpected(value, action) {
   if (!value.entries.some((entry) => entry.type === "thinking_level_change" && entry.thinkingLevel === "high")) throw new Error("thinking semantics were lost");
   if (!value.entries.some((entry) => entry.type === "label" && entry.label === "probe-label")) throw new Error("label semantics were lost");
   if (!value.entries.some((entry) => entry.type === "compaction" && entry.summary === "probe compaction")) throw new Error("compaction semantics were lost");
+  if (!value.entries.some((entry) => entry.type === "custom" && entry.customType === "codemode-store" && entry.data?.script === "return 42")) throw new Error("codemode store state was lost");
+  if (!value.entries.some((entry) => entry.type === "custom" && entry.customType === "virtual-model-state" && entry.data?.physicalModel === "fixture-physical")) throw new Error("virtual model state was lost");
+  if (!value.entries.some((entry) => entry.type === "custom" && entry.customType === "tool-search-loadout" && entry.data?.added?.includes("fixture_tool"))) throw new Error("tool-search loadout delta was lost");
+  const nested = value.entries.find((entry) => entry.type === "message" && entry.message?.role === "toolResult" && entry.message?.toolCallId === "rollback-parent")?.message;
+  if (!nested?.nestedCalls?.calls?.some((call) => call.id === "nested-1" && call.name === "fixture_tool")) throw new Error("nestedCalls were lost");
+  if (nested.content?.[0]?.text !== "parent result" || nested.structuredContent?.preserved !== true) throw new Error("parent result content was lost");
+  if (nested.details?.tronNested?.complete !== true) throw new Error("nested details extension data was lost");
   if (value.treeBranches < 1) throw new Error("branch semantics were lost");
   if (!value.settingsAuth?.settings || !value.settingsAuth?.auth?.includes("openai")) throw new Error("settings/auth state was lost");
   if (action === "read" && !value.settingsAuth.auth.includes("anthropic")) throw new Error("appended auth state was lost");
@@ -92,6 +99,16 @@ if (action === "write") {
   manager.appendCustomEntry("probe-custom", { stable: true });
   const customMessage = manager.appendCustomMessageEntry("probe-custom-message", "probe custom message", true, { stable: true });
   manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "probe assistant" }], api: "fixture", provider: "fixture", model: "fixture-model", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 1 });
+  manager.appendCustomEntry("codemode-store", { script: "return 42" });
+  manager.appendCustomEntry("virtual-model-state", { selected: "fixture-virtual", physicalModel: "fixture-physical" });
+  manager.appendModelChange("fixture", "fixture-virtual");
+  manager.appendCustomEntry("tool-search-loadout", { added: ["fixture_tool"], removed: [] });
+  manager.appendMessage({
+    role: "toolResult", toolCallId: "rollback-parent", toolName: "codemode", isError: false,
+    content: [{ type: "text", text: "parent result" }], structuredContent: { preserved: true },
+    nestedCalls: { complete: true, calls: [{ id: "nested-1", name: "fixture_tool", args: {}, status: "completed", durationMs: 3 }] },
+    details: { tronNested: { complete: true, display: [{ id: "fixture-artifact" }], browserLiveViews: [] } },
+  });
   manager.appendLabelChange(user, "probe-label");
   manager.branch(customMessage);
   manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "probe branch" }], api: "fixture", provider: "fixture", model: "fixture-model", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 1 });
