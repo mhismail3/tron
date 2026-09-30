@@ -216,11 +216,16 @@ jobs:
     # Source-level transport and native changes must exercise this boundary,
     # not only backing-SDK dependency upgrades.
     runs-on: macos-26
-    env:
-      TRON_IOS_E2E_STATE_DIR: ${{ runner.temp }}/tron-ios-gateway-e2e
-      TRON_IOS_E2E_DERIVED_DATA: ${{ runner.temp }}/tron-ios-gateway-e2e-derived
-      TRON_IOS_TEST_STATE_DIR: ${{ runner.temp }}/tron-ios-test-state
     steps:
+      # The runner context is not available in job-level env, so the E2E
+      # state roots are exported from RUNNER_TEMP for every later step.
+      - name: Scope E2E state to the runner's temporary directory
+        run: |
+          {
+            echo "TRON_IOS_E2E_STATE_DIR=$RUNNER_TEMP/tron-ios-gateway-e2e"
+            echo "TRON_IOS_E2E_DERIVED_DATA=$RUNNER_TEMP/tron-ios-gateway-e2e-derived"
+            echo "TRON_IOS_TEST_STATE_DIR=$RUNNER_TEMP/tron-ios-test-state"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
