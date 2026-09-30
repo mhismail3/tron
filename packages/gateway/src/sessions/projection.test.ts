@@ -1158,6 +1158,7 @@ describe("transcript projection", () => {
           calls: [
             { id: "outer/1", name: "read", status: "ok", arguments: { path: "README.md" }, durationMs: 12 },
             { id: "outer/2", name: "bash", status: "error", arguments: { command: "false" }, error: "exit 1" },
+            { id: "outer/3", name: "subagent", status: "unfinished", error: "x".repeat(600) },
           ],
         },
       },
@@ -1165,9 +1166,10 @@ describe("transcript projection", () => {
     );
     expect(nested).toMatchObject({
       role: "toolResult",
-      nestedCalls: { complete: true, calls: [
+      nestedCalls: { complete: false, calls: [
         { id: "outer/1", parentToolCallId: "outer", toolName: "read", status: "completed", arguments: { path: "README.md" } },
-        { id: "outer/2", parentToolCallId: "outer", toolName: "bash", status: "failed" },
+        { id: "outer/2", parentToolCallId: "outer", toolName: "bash", status: "failed", error: "exit 1" },
+        { id: "outer/3", parentToolCallId: "outer", toolName: "subagent", status: "unfinished", error: "x".repeat(512) },
       ] },
     });
     expect(Buffer.byteLength(JSON.stringify(nested))).toBeLessThan(10_000);

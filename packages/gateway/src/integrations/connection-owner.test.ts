@@ -6,12 +6,19 @@ import { drainDurableWriteStats } from "../util/durable-json.js";
 import { ConnectionOwner } from "./connection-owner.js";
 
 describe("ConnectionOwner", () => {
-  it("rejects a persisted knowledge.jev connection with provider-credential guidance", async () => {
+  it("rejects only a persisted knowledge.jev instance while keeping other connections readable", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-legacy-jev-connection-"));
     try {
-      const path = join(home, "state", "integrations"); await mkdir(path, { recursive: true });
-      await writeFile(join(path, "connections.json"), JSON.stringify({ schemaVersion: 1, stateRevision: 1, instances: { legacy: { definitionId: "knowledge.jev" } }, setupOperations: {}, receipts: {} }), { mode: 0o600 });
-      await expect(new ConnectionOwner(home).snapshot()).rejects.toThrow(/knowledge\.jev connection 'legacy'.*configure the typesafe provider credential/);
+      const owner = new ConnectionOwner(home);
+      const setup = await owner.execute({ kind: "setup.begin", commandId: "setup-healthy-001", instanceId: "healthy", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+      await owner.execute({ kind: "setup.complete", commandId: "setup-healthy-002", operationId: setup.operationId, instanceId: "healthy", providerAccountId: "42", credentialRef: "connector:raindrop:test", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+      const path = join(home, "state", "integrations", "connections.json");
+      const persisted = JSON.parse(await readFile(path, "utf8")) as { instances: Record<string, unknown> };
+      persisted.instances.legacy = { ...persisted.instances.healthy as object, definitionId: "knowledge.jev" };
+      await writeFile(path, JSON.stringify(persisted), { mode: 0o600 });
+      const snapshot = await owner.snapshot();
+      expect(snapshot.instances.map((instance) => instance.id)).toEqual(["healthy"]);
+      await expect(owner.resolveInstance("legacy")).rejects.toThrow(/knowledge\.jev connection 'legacy'.*configure the typesafe provider credential/);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   it("validates and revision-fences Raindrop collection-to-scope mappings in connection configuration", async () => {

@@ -198,6 +198,8 @@ struct ToolDetailPresentationTests {
             .object(["id": .string("parent/1"), "toolName": .string("mcp__calendar__events"),
                      "status": .string("failed"), "durationMs": .number(42),
                      "arguments": .object(["query": .string("today")])]),
+            .object(["id": .string("parent/2"), "toolName": .string("subagent"),
+                     "status": .string("unfinished"), "error": .string("Didn't finish")]),
         ])])
         let details: JSONValue = .object(["tronNested": .object([
             "complete": .bool(true), "display": .array([.object(["toolName": .string("display")])]),
@@ -208,8 +210,11 @@ struct ToolDetailPresentationTests {
         let presentation = ToolDetailPresentation(tool: tool)
         #expect(presentation.displayTitle == "Codemode")
         #expect(presentation.readableResult == "output")
-        #expect(presentation.nestedCalls.count == 1)
+        #expect(presentation.nestedCalls.count == 2)
         #expect(presentation.nestedCalls[0].status == .failed)
+        #expect(presentation.nestedCalls[1].status == .unfinished)
+        #expect(presentation.nestedCalls[1].status.displayLabel == "Didn't finish")
+        #expect(presentation.nestedCalls[1].error == "Didn't finish")
         #expect(!presentation.nestedCallsComplete)
         #expect(presentation.classifyCostUSD == 0.125)
         #expect(presentation.tronNestedComplete == true)

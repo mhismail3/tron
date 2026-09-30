@@ -1496,7 +1496,9 @@ never independent transcript rows, invocation receipts, segments, or extension a
 Live parent progress carries a bounded child list (32 calls; arguments at most 1 KiB, otherwise
 a byte count), and the canonical parent result carries Pi's bounded `nestedCalls` record with its
 `complete` flag. Child failures use `failed` even when the tool returns `isError` instead of
-throwing. Opaque `structuredContent` is not forwarded by generic live tool-result projection.
+throwing; Pi's `unfinished` child status remains an explicit terminal presentation state when
+recovered from history, and each child error is projected to at most 512 UTF-8 bytes. Opaque
+`structuredContent` is not forwarded by generic live tool-result projection.
 The integration E2E in `runtime-registry.integration.test.ts` exercises a faux-provider codemode
 script with parallel `read`, `bash`, and non-throwing failure calls; it retains
 `test-results/pi-sdk-099-nested-calls.json` for live and cold-reload inspection.

@@ -411,7 +411,10 @@ function projectNestedCalls(value: unknown): NestedToolCallsProjection {
       ? candidate as Record<string, unknown> : {};
     const id = typeof item.id === "string" ? item.id.slice(0, 512) : "";
     const toolName = typeof item.name === "string" ? item.name.slice(0, 256) : "unknown";
-    const status: NestedToolCallsProjection["calls"][number]["status"] = item.status === "ok" ? "completed" : item.status === "error" ? "failed" : "running";
+    const status: NestedToolCallsProjection["calls"][number]["status"] = item.status === "ok" ? "completed"
+      : item.status === "error" ? "failed" : item.status === "unfinished" ? "unfinished" : "running";
+    if (status === "unfinished") complete = false;
+    const error = typeof item.error === "string" ? boundedUtf8Prefix(item.error, 512) : undefined;
     let args: JsonValue | undefined;
     let argumentsBytes = typeof item.argumentsBytes === "number" && Number.isSafeInteger(item.argumentsBytes)
       ? Math.max(0, item.argumentsBytes) : undefined;
@@ -427,6 +430,7 @@ function projectNestedCalls(value: unknown): NestedToolCallsProjection {
     return {
       id, parentToolCallId: id.includes("/") ? id.slice(0, id.lastIndexOf("/")) : "",
       toolName, status,
+      ...(error === undefined ? {} : { error }),
       ...(args === undefined ? {} : { arguments: args }),
       ...(argumentsBytes === undefined ? {} : { argumentsBytes }),
       ...(durationMs === undefined ? {} : { durationMs }),

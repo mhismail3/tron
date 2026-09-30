@@ -132,6 +132,7 @@ function resultForInstance(instance: ConnectionInstance): Record<string, unknown
 
 export class ConnectionOwner {
   private readonly mutex = new AsyncMutex();
+  private readonly rejectedLegacyJevIds = new Set<string>();
   private readonly definitions: IntegrationDefinition[];
   constructor(private readonly tronHome: string, definitions: readonly IntegrationDefinition[] = BUILTIN_INTEGRATION_DEFINITIONS) {
     this.definitions = definitions.map(definition => { validateIntegrationDefinition(definition); return copy(definition); });
@@ -230,7 +231,12 @@ export class ConnectionOwner {
     return this.mutex.run(async () => {
       const state = await this.load(false);
       const instance = state.instances[instanceId];
-      if (!instance) throw conflict("Connection instance is unknown");
+      if (!instance) {
+        if (this.rejectedLegacyJevIds.has(instanceId)) {
+          throw conflict(`Persisted knowledge.jev connection '${instanceId}' is no longer supported; configure the typesafe provider credential instead`);
+        }
+        throw conflict("Connection instance is unknown");
+      }
       return copy(instance);
     });
   }
@@ -311,10 +317,14 @@ export class ConnectionOwner {
     catch (error) { if (error instanceof SecureJsonFileError) throw new GatewayError("conflict", `Connection state is unavailable: ${error.message}`); throw error; }
     if (!read.present) return initialState();
     try {
-      const persisted = read.value as { instances?: Record<string, { definitionId?: unknown }> };
-      const legacyJev = persisted && typeof persisted === "object" && persisted.instances && Object.entries(persisted.instances).find(([, instance]) => instance?.definitionId === "knowledge.jev");
-      if (legacyJev) throw new Error(`Persisted knowledge.jev connection '${legacyJev[0]}' is no longer supported; configure the typesafe provider credential instead`);
-      validateConnectionState(read.value); return copy(read.value);
+      const persisted = read.value as ConnectionOwnerState;
+      for (const [id, instance] of Object.entries(persisted.instances)) {
+        if (instance.definitionId === "knowledge.jev") this.rejectedLegacyJevIds.add(id);
+      }
+      const readable = copy(persisted);
+      for (const id of this.rejectedLegacyJevIds) delete readable.instances[id];
+      validateConnectionState(readable);
+      return readable;
     } catch (error) { throw new GatewayError("conflict", error instanceof Error ? `Connection state is unavailable: ${error.message}` : "Connection state is unavailable"); }
   }
 

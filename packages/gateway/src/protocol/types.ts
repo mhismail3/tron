@@ -509,7 +509,8 @@ export interface NestedToolExecutionState {
   id: string;
   parentToolCallId: string;
   toolName: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "unfinished";
+  error?: string;
   arguments?: JsonValue;
   argumentsBytes?: number;
   durationMs?: number;

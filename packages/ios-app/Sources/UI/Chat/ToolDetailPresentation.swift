@@ -6,10 +6,22 @@ enum ToolDetailKind: String, Sendable {
 }
 
 struct NestedToolCallPresentation: Hashable, Sendable, Identifiable {
-    enum Status: String, Hashable, Sendable { case running, completed, failed }
+    enum Status: String, Hashable, Sendable {
+        case running, completed, failed, unfinished
+
+        var displayLabel: String {
+            switch self {
+            case .running: "Running"
+            case .completed: "Completed"
+            case .failed: "Failed"
+            case .unfinished: "Didn't finish"
+            }
+        }
+    }
     let id: String
     let toolName: String
     let status: Status
+    let error: String?
     let durationMs: Int?
     let arguments: JSONValue?
     let argumentsBytes: Int?
@@ -971,6 +983,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
             let status = NestedToolCallPresentation.Status(rawValue: fields["status"]?.stringValue ?? "") ?? .running
             return NestedToolCallPresentation(
                 id: id, toolName: name, status: status,
+                error: fields["error"]?.stringValue,
                 durationMs: fields["durationMs"]?.intValue,
                 arguments: fields["arguments"],
                 argumentsBytes: fields["argumentsBytes"]?.intValue

@@ -138,6 +138,7 @@ import { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
+import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
@@ -2074,7 +2075,10 @@ export class RuntimeSlot {
       const item = candidate as Record<string, unknown>;
       if (typeof item.id !== "string" || typeof item.name !== "string") return [];
       const status: NestedToolExecutionState["status"] = item.status === "ok" ? "completed"
-        : item.status === "error" || item.status === "cancelled" ? "failed" : "running";
+        : item.status === "error" || item.status === "cancelled" ? "failed"
+          : item.status === "unfinished" ? "unfinished" : "running";
+      if (status === "unfinished") complete = false;
+      const error = typeof item.error === "string" ? boundedUtf8Prefix(item.error, 512) : undefined;
       const args = typeof item.args === "string" ? item.args : "";
       let argumentsValue: JsonValue | undefined;
       let argumentsBytes: number | undefined;
@@ -2091,6 +2095,7 @@ export class RuntimeSlot {
       return [{
         id, parentToolCallId: id.slice(0, Math.max(0, id.lastIndexOf("/"))),
         toolName: item.name.slice(0, 256), status,
+        ...(error === undefined ? {} : { error }),
         ...(argumentsValue === undefined ? {} : { arguments: argumentsValue }),
         ...(argumentsBytes === undefined ? {} : { argumentsBytes }),
         ...(durationMs === undefined ? {} : { durationMs }),

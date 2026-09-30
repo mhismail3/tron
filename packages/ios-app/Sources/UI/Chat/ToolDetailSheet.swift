@@ -261,7 +261,7 @@ struct ToolDetailSheet: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             .lineLimit(1)
                         Spacer(minLength: 4)
-                        Text([call.status.rawValue.capitalized, call.durationMs.map(ToolTiming.format(milliseconds:))].compactMap { $0 }.joined(separator: " · "))
+                        Text([call.status.displayLabel, call.durationMs.map(ToolTiming.format(milliseconds:))].compactMap { $0 }.joined(separator: " · "))
                             .font(TronTypography.code(size: TronTypography.sizeSecondary))
                             .foregroundStyle(Color.tronTextSecondary)
                         Image(systemName: "chevron.right")
@@ -426,6 +426,15 @@ struct ToolDetailSheet: View {
     }
 }
 
+private func nestedStatusIcon(_ status: NestedToolCallPresentation.Status) -> String {
+    switch status {
+    case .running: "hourglass"
+    case .completed: "checkmark.circle.fill"
+    case .failed: "exclamationmark.triangle.fill"
+    case .unfinished: "minus.circle"
+    }
+}
+
 private struct NestedToolCallDetailSheet: View {
     let call: NestedToolCallPresentation
     let accent: Color
@@ -433,9 +442,15 @@ private struct NestedToolCallDetailSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Label(call.status.rawValue.capitalized, systemImage: call.status == .failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                Label(call.status.displayLabel, systemImage: nestedStatusIcon(call.status))
                     .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(call.status == .failed ? Color.tronError : accent)
+                    .foregroundStyle(call.status == .failed ? Color.tronError : call.status == .unfinished ? Color.tronTextSecondary : accent)
+                if let error = call.error, !error.isEmpty {
+                    Text(error)
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronError)
+                        .textSelection(.enabled)
+                }
                 if let duration = call.durationMs {
                     Text(ToolTiming.format(milliseconds: duration))
                         .font(TronTypography.code(size: TronTypography.sizeBodySM))
