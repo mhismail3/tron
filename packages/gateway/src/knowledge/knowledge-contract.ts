@@ -134,6 +134,8 @@ export interface SourceAdmissionState {
   status: SourceAdmission;
   reason?: string;
   decidedAt: string;
+  /** Missing on older records; treated as a prior decision, never as intake-owned. */
+  producer?: SourceCurationProducer;
   profileVersion?: string;
   rubricVersion?: string;
 }
@@ -200,6 +202,8 @@ export interface SourceContent {
   uri?: string;
   /** Provider collection at capture time; provenance, not an admission authority. */
   collectionId?: string;
+  /** Producer of an explicit scope placement, distinct from capture's initial scope. */
+  scopeProducer?: SourceCurationProducer;
   /** Readable extraction, not a substitute for the original object. */
   text?: string;
   /** Immutable original bytes, when captured. */
@@ -1298,8 +1302,10 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       if (!admission || typeof admission !== "object" || Array.isArray(admission) || !["pending", "retained", "archived"].includes(admission.status as string)) throw new Error("Invalid source admission");
       assertTimestamp(admission.decidedAt, "source admission decidedAt");
       if (admission.reason !== undefined) boundedString(admission.reason, "source admission reason", 2_000);
+      if (admission.producer !== undefined) assertCurationProducer(admission.producer);
       for (const key of ["profileVersion", "rubricVersion"] as const) if (admission[key] !== undefined) boundedString(admission[key], `source admission ${key}`, 200);
     }
+    if (content.scopeProducer !== undefined) assertCurationProducer(content.scopeProducer);
     if (content.retention !== undefined) {
       const retention = content.retention as Record<string, unknown>;
       if (!retention || typeof retention !== "object" || Array.isArray(retention) || !["public", "restricted", "private"].includes(retention.sensitivity as string) || typeof retention.evidenceAvailable !== "boolean") throw new Error("Invalid source retention");

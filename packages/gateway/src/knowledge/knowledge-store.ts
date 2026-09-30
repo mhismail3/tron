@@ -1475,13 +1475,13 @@ export class KnowledgeStore {
   }
 
   /** Internal source/import owner write. The transport action accepts URLs only. */
-  async setSourceAdmission(request: { commandId: string; recordId: string; expectedRevision: string; status: import("./knowledge-contract.js").SourceAdmission; reason?: string; profileVersion?: string; rubricVersion?: string }): Promise<KnowledgeMutationResult> {
+  async setSourceAdmission(request: { commandId: string; recordId: string; expectedRevision: string; status: import("./knowledge-contract.js").SourceAdmission; reason?: string; producer?: SourceCurationProducer; profileVersion?: string; rubricVersion?: string }): Promise<KnowledgeMutationResult> {
     return this.mutate("knowledge.source.admission", request.commandId, request, async (state, paths) => {
       const head = state.records.get(request.recordId);
       if (!head || head.latestRevisionId !== request.expectedRevision) throw conflict("Source revision is stale or unavailable");
       const current = await this.readRecord(paths, request.recordId, head.latestRevisionId);
       if (current.kind !== "source") throw conflict("Source revision is unavailable");
-      const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
+      const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.producer ? { producer: request.producer } : {}), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, admission } }, request.expectedRevision);
     });
   }
@@ -1617,7 +1617,7 @@ export class KnowledgeStore {
         if (input.reason !== undefined && (typeof input.reason !== "string" || input.reason.length > 2_000)) throw new KnowledgeCurationRefusal("invalid-input", "A placement reason is at most 2000 characters");
         return {
           scope: input.scope ?? current.scope, relations: current.relations,
-          content: { ...content, ...(input.admission === undefined ? {} : { admission: { status: input.admission, ...(input.reason ? { reason: input.reason } : {}), decidedAt: decided } }) },
+          content: { ...content, ...(input.scope === undefined ? {} : { scopeProducer: producer }), ...(input.admission === undefined ? {} : { admission: { status: input.admission, ...(input.reason ? { reason: input.reason } : {}), decidedAt: decided, producer } }) },
         };
       }
       case "relation": {

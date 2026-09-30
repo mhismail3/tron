@@ -99,6 +99,39 @@ describe("knowledge connectors", () => {
     expect(sources[0]).toMatchObject({ scope: "personal", content: { identity: { provider: "raindrop", itemId: "77" }, collectionId: "8", admission: { status: "retained" } } });
   });
 
+  // Failure modes: a restored Jev archive must not be overwritten by intake;
+  // a user/agent scope placement must not be reset to the collection mapping;
+  // already-decided items must leave pending even when no remote move is made.
+  it("preserves decided admission and scope on rerun and drains decided bookmarks", async () => {
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    const { store, extension } = await mappedRaindropFixture(async url => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      if (url.includes("/raindrops/7?")) return response({ items: [
+        { _id: 701, title: "Archived by Jev", link: "https://example.com/701", collection: { $id: 7 } },
+        { _id: 702, title: "Placed by agent", link: "https://example.com/702", collection: { $id: 7 } },
+        { _id: 703, title: "Undecided source", link: "https://example.com/703", collection: { $id: 7 } },
+      ] });
+      throw new Error("unexpected provider request");
+    }, async () => new Response("Complete, useful article text for intake.", { headers: { "content-type": "text/plain" } }), assessment);
+    const first = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("decision-first"), connectionId: "mapped", sourceCollection: "7", dryRun: false, limit: 3, pilot: { id: "decision-pilot", maxItems: 3, budgetCents: 3 } } }) as any;
+    expect(first).toMatchObject({ retained: 3, pending: 0 });
+    const byIdentity = async (itemId: string) => await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId });
+    const archived = await byIdentity("701");
+    const jevArchived = await store.setSourceAdmission({ commandId: command("decision-jev-archive"), recordId: archived!.id, expectedRevision: archived!.revisionId, status: "archived", producer: { actor: "connector" }, reason: "Jev archive" });
+    await store.curateSource({ commandId: command("decision-restore-archive"), operation: "placement", producer: { actor: "agent" }, item: { recordId: archived!.id, expectedRevision: jevArchived.record.revisionId, placement: { admission: "retained", reason: "Restored after Jev archive" } } });
+    const placed = await byIdentity("702");
+    await store.curateSource({ commandId: command("decision-place-personal"), operation: "placement", producer: { actor: "agent" }, item: { recordId: placed!.id, expectedRevision: placed!.revisionId, placement: { scope: "personal" } } });
+    const rerun = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("decision-rerun"), connectionId: "mapped", sourceCollection: "7", dryRun: false, limit: 3, pilot: { id: "decision-pilot", maxItems: 3, budgetCents: 3 } } }) as any;
+    const restored = await byIdentity("701");
+    const personal = await byIdentity("702");
+    const stillUndecided = await byIdentity("703");
+    expect(restored?.content.admission).toMatchObject({ status: "retained" });
+    expect(personal?.scope).toBe("personal");
+    expect(stillUndecided?.content.admission).toMatchObject({ status: "retained" });
+    expect(rerun).toMatchObject({ retained: 0, pending: 0 });
+    expect((await store.connectorState("raindrop", "mapped"))?.pending).toHaveLength(0);
+  });
+
   it("keeps an intake admission behind a connection-configuration revision race", async () => {
     let owner: ConnectionOwner | undefined;
     let changed = false;

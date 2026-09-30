@@ -621,6 +621,10 @@ export class KnowledgeConnectorExtension {
         outcomeMap.set(item.id, { ...(previous ?? { itemId: item.id, title: item.title.slice(0, 512) }), ...patch, ...(patch.reason !== undefined ? { reason: patch.reason.slice(0, 2_000) } : {}) } as IntakeOutcome);
       };
       const canonicalFor = (itemId: string): Promise<KnowledgeRecord & { kind: "source" } | undefined> => this.store.sourceByIdentity({ provider: "raindrop", accountId: state.accountId!, itemId });
+      const markDone = async (itemId: string) => this.store.updateConnectorState(command(request.commandId, `done-${itemId}`), "raindrop", current => {
+        const next = current ?? live;
+        return { ...next, pending: next.pending.filter(candidate => candidate.id !== itemId || candidate.collectionId !== sourceCollection), capturedIds: [...new Set([...next.capturedIds, itemId])].slice(-2_000), capturedCollections: collectionProgress(next.capturedCollections, itemId, sourceCollection), remaining: Math.max(0, next.pending.length - 1) };
+      });
       const approvedItems = cohort.map(itemId => live.pending.find(item => item.id === itemId)).filter((item): item is NonNullable<typeof item> => Boolean(item));
       const approvedSet = new Set(approvedItems.map(item => item.id));
       for (const itemId of cohort) if (!approvedSet.has(itemId)) {
@@ -634,7 +638,18 @@ export class KnowledgeConnectorExtension {
           live = await this.store.connectorState("raindrop") ?? live;
           if (connectionAuthority && expectedSetupRevision !== (await this.connectionFor(request.connectionId, "raindrop", true))?.setupRevision) throw new GatewayError("conflict", "Raindrop collection mapping changed during intake; retry with the current setup revision");
           if (mapping && item.collectionId !== mapping.collectionId) throw new GatewayError("conflict", "Raindrop item collection does not match the selected mapping");
-          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: mappedScope, title: item.title, origin: "connector", ...(isPublicXPost(item.url) ? { publicPostLookup: true } : {}), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
+          const existing = await canonicalFor(item.id);
+          const admission = existing?.content.admission;
+          const decidedAdmission = admission && ((admission.producer?.actor === "user" || admission.producer?.actor === "agent") || (admission.status !== "pending" && admission.producer?.actor !== "connector"));
+          const decidedScope = existing && (existing.content.scopeProducer?.actor === "user" || existing.content.scopeProducer?.actor === "agent");
+          if (existing && (decidedAdmission || decidedScope)) {
+            const status = admission?.status === "archived" ? "archived" : "retained";
+            if (status === "archived") archived += 1; else retained += 1;
+            setOutcome(item, { sourceId: existing.id, sourceRevision: existing.revisionId, disposition: status, assessment: existing.content.assessment ? "reused" : "not-run", move: "not-attempted", reason: "Existing admission or user/agent placement is authoritative; intake left it unchanged" });
+            await markDone(item.id);
+            continue;
+          }
+          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: existing && !decidedScope ? existing.scope : mappedScope, title: item.title, origin: "connector", ...(isPublicXPost(item.url) ? { publicPostLookup: true } : {}), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
           let source = result.record;
           if (source.scope !== mappedScope) {
             const placed = await this.store.curateSource({ commandId: command(request.commandId, `scope-${item.id}-${mappedScope}`), operation: "placement", producer: { actor: "connector" }, item: { recordId: source.id, expectedRevision: source.revisionId, placement: { scope: mappedScope } } });
@@ -650,15 +665,15 @@ export class KnowledgeConnectorExtension {
           captured += 1;
           if (mappedScope === "personal") {
             if (connectionAuthority && expectedSetupRevision !== (await this.connectionFor(request.connectionId, "raindrop", true))?.setupRevision) throw new GatewayError("conflict", "Raindrop collection mapping changed during intake; retry with the current setup revision");
-            const admitted = source.content.admission?.status === "retained" ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-personal-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "retained", reason: "Personal collection uses Raindrop link, title, preview and saved note as sufficient evidence" })).record as KnowledgeRecord & { kind: "source" };
+            const admitted = source.content.admission?.status === "retained" ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-personal-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "retained", producer: { actor: "connector" }, reason: "Personal collection uses Raindrop link, title, preview and saved note as sufficient evidence" })).record as KnowledgeRecord & { kind: "source" };
             source = admitted; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId }; retained += 1;
             const destination = mapping ? mapping.destination : live.destination;
             if (live.allowWrites && destination && destination !== sourceCollection) {
               const result = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: admitted, expectedRevision: admitted.revisionId, identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, sourceCollection, destination, ...(request.connectionId ? { connectionId: request.connectionId } : {}), ...(expectedSetupRevision !== undefined ? { expectedSetupRevision } : {}) }, signal);
               if (result.status === "moved") { moved += 1; setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted and its approved collection move was verified", assessment: "not-run", move: "moved" }); }
-              else { pending += 1; setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted; approved remote move remains unresolved", assessment: "not-run", move: result.status }); continue; }
+              else { setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted; approved remote move remains unresolved", assessment: "not-run", move: result.status }); await markDone(item.id); continue; }
             } else setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted from its saved Raindrop link and metadata", assessment: "not-run", move: "not-attempted" });
-            await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), "raindrop", current => { const next = current ?? live; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id || candidate.collectionId !== sourceCollection), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), capturedCollections: collectionProgress(next.capturedCollections, item.id, sourceCollection), remaining: Math.max(0, next.pending.length - 1) }; });
+            await markDone(item.id);
            
             continue;
           }
@@ -666,7 +681,7 @@ export class KnowledgeConnectorExtension {
             // An incomplete re-capture leaves the bookmark pending but must not
             // revoke an admission already decided for the same canonical source.
             if (source.content.admission?.status !== "retained" && source.content.admission?.status !== "archived") {
-              const admission = await this.store.setSourceAdmission({ commandId: command(request.commandId, `pending-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "pending", reason: "Capture is incomplete or provider metadata is bounded without complete linked evidence" });
+              const admission = await this.store.setSourceAdmission({ commandId: command(request.commandId, `pending-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "pending", producer: { actor: "connector" }, reason: "Capture is incomplete or provider metadata is bounded without complete linked evidence" });
               source = admission.record as KnowledgeRecord & { kind: "source" }; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
             }
             pending += 1; setOutcome(item, { ...sourceRef, disposition: "pending", reason: source.content.captureReason ?? "Capture is incomplete or provider metadata is bounded without complete linked evidence", assessment: "not-run", move: "not-attempted" }); continue;
@@ -693,23 +708,24 @@ export class KnowledgeConnectorExtension {
           const finalInterests = (await this.store.config()).currentInterests ?? [];
           if (!assessment || (assessment.model === JEV_DEFAULT_MODEL && assessment.coverage !== undefined && (assessment.coverage !== "full" && assessment.coverage !== "sampled")) || (assessment.model === JEV_DEFAULT_MODEL && assessment.inputDigest !== undefined && (assessment.profileVersion !== jevProfileVersion(finalInterests) || assessment.inputDigest !== jevInputDigest({ title: source.content.title, text: source.content.text ?? "", interests: finalInterests, source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt } }, finalInterests)))) throw new GatewayError("conflict", "Source assessment authority changed before admission");
           const status = assessment.recommendation === "archived" ? "archived" : "retained";
-          const admitted = source.content.admission?.status === status ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status, reason: status === "archived" ? "Jev clear low-value classification; recoverable intake archive" : "Jev intake accepted source", ...(assessment?.profileVersion ? { profileVersion: assessment.profileVersion } : {}), ...(assessment?.rubricVersion ? { rubricVersion: assessment.rubricVersion } : {}) })).record as KnowledgeRecord & { kind: "source" };
+          const admitted = source.content.admission?.status === status ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status, producer: { actor: "connector" }, reason: status === "archived" ? "Jev clear low-value classification; recoverable intake archive" : "Jev intake accepted source", ...(assessment?.profileVersion ? { profileVersion: assessment.profileVersion } : {}), ...(assessment?.rubricVersion ? { rubricVersion: assessment.rubricVersion } : {}) })).record as KnowledgeRecord & { kind: "source" };
           source = admitted; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
           setOutcome(item, { ...sourceRef, disposition: status, assessment: assessmentOutcome });
           if (status === "archived") archived += 1; else retained += 1;
           const destination = mapping ? mapping.destination : live.destination;
-          if (!live.allowWrites || !destination || item.collectionId === destination) { pending += 1; setOutcome(item, { ...sourceRef, disposition: status, reason: "Remote move is not authorized or destination is unavailable", assessment: assessmentOutcome, move: "not-attempted" }); if (source.content.text && source.content.captureDisposition === "complete") { } continue; }
+          if (!live.allowWrites || !destination || item.collectionId === destination) { setOutcome(item, { ...sourceRef, disposition: status, reason: "Remote move is not authorized or destination is unavailable", assessment: assessmentOutcome, move: "not-attempted" }); await markDone(item.id); continue; }
           const movedResult = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: admitted, expectedRevision: admitted.revisionId, identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, sourceCollection, destination, ...(request.connectionId ? { connectionId: request.connectionId } : {}), ...(expectedSetupRevision !== undefined ? { expectedSetupRevision } : {}) }, signal);
           if (movedResult.status !== "moved") {
-            pending += 1; lastError = "Raindrop destination move could not be verified";
+            lastError = "Raindrop destination move could not be verified";
             setOutcome(item, { ...sourceRef, disposition: status, reason: lastError, assessment: assessmentOutcome, move: movedResult.status });
+            await markDone(item.id);
             if (source.content.text && source.content.captureDisposition === "complete") { }
             if ((await this.store.connectorState("raindrop"))?.pendingRemote) { for (const tail of approvedItems.slice(approvedItems.indexOf(item) + 1)) setOutcome(tail, { disposition: "pending", reason: "Blocked by unresolved remote effect; reconcile before processing", assessment: "not-run", move: "blocked" }); break; }
             continue;
           }
           moved += 1;
           setOutcome(item, { ...sourceRef, disposition: status, reason: "Locally admitted and remotely verified", assessment: assessmentOutcome, move: "moved" });
-          await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), "raindrop", current => { const next = current ?? live; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id || candidate.collectionId !== sourceCollection), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), capturedCollections: collectionProgress(next.capturedCollections, item.id, sourceCollection), remaining: Math.max(0, next.pending.length - 1) }; });
+          await markDone(item.id);
           if (source.content.text && source.content.captureDisposition === "complete") { }
         } catch (error) { pending += 1; lastError = error instanceof Error ? error.message : "Raindrop intake failed"; const prior = outcomeMap.get(item.id); if (prior?.move === "moved") setOutcome(item, { reason: "Remote move verified; local completion receipt requires reconciliation", assessment: prior.assessment, move: "moved" }); else setOutcome(item, { disposition: prior?.disposition ?? "pending", reason: lastError, assessment: prior?.assessment ?? "not-run", move: prior?.move ?? "not-attempted" }); } finally { await this.queueSettledEnrichment(outcomeMap.get(item.id)?.sourceId); }
       }

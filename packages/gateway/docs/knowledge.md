@@ -812,7 +812,14 @@ derived from the exact source revision; an existing summary with the same
 source-evidence digest and current tag input digest is reused on rerun. Summary
 or tag failure is recorded on that job without rewriting a committed admission;
 an item left pending by its existing assessment remains pending. Other cohort
-items continue. The order differs from the initial K5 draft: K8's existing Jev
+items continue. Intake-owned admission state records a connector producer; an
+explicit user/agent admission or scope placement remains authoritative on rerun.
+Legacy admissions without producer metadata are conservatively treated as prior
+decisions. Scope producer metadata is recorded for new explicit placements;
+legacy scope changes without it cannot be distinguished from prior intake
+placement. Decided bookmarks leave the connector pending queue even when no
+remote move is requested, and the invocation `pending` counter excludes retained
+or archived bookmarks that simply were not moved. The order differs from the initial K5 draft: K8's existing Jev
 admission does not consume summary/tags, and its receipt/budget/move authority
 remains independent of queued enrichment.
 
@@ -921,6 +928,6 @@ rejected locally before credential lookup or provider HTTP; provider failures
 remain sanitized.
 For Raindrop, `ConnectionInstance.raindropCollections` is the sole routing configuration: 1..64 unique numeric collection IDs map to `research` or `personal`, with an optional destination per source collection. Setup completion installs the mappings; `connections.policy.update` can replace them only against the exact `setupRevision`. Raindrop no longer needs a single selected collection in the generic connector scope. Intake requires a mapped collection, and when several are configured the caller must select one; an unmapped ID is rejected before discovery. Dry-run and pending results filter to that collection. Provider page receipts include the collection ID; offset discovery restarts at page zero because moving bookmarks shifts Raindrop's pages, while durable pending/captured identities are tracked by their last collection. The returned item's collection, when present, must match the requested collection; if absent, the exact collection endpoint is the provenance.
 
-Research retains the existing complete-capture → Jev assessment → admission path, with its pilot/receipt budget isolated by collection. Personal uses the original link, title, best-effort preview, and saved Raindrop note; failed or partial page fetches do not block `retained` admission and do not call Jev. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
+Research retains the existing complete-capture → Jev assessment → admission path, with its pilot/receipt budget isolated by collection. Personal uses the original link, title, best-effort preview, and saved Raindrop note; failed or partial page fetches do not block `retained` admission and do not call Jev. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope only when there is no authoritative user/agent admission or placement; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
 
 A remote move is authorized only by the existing connection `allowWrites` policy and the selected source collection's optional mapped destination, revalidated against the current setup revision at preflight and effect admission. No destination on a mapping means no move; another collection's destination cannot authorize it. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.
