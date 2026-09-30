@@ -3517,7 +3517,7 @@ the full viewport, fixing the native clip band. Supervisor approved the adapter
 contract revision: retain latest applied native geometry and current declared
 spacer; republish when either changes, with no observable geometry storage and no
 offset writes. Native geometry can stay unchanged while the declared spacer
-shrinks (negative control `4de6bcc31`: model 114.3 pt, actual marker 53 pt across
+shrinks (native-only negative control: model 114.3 pt, actual marker 53 pt across
 all 12 hide boundaries). Current source passes those ramp boundaries.
 
 Focused evidence so far (not final gates): `20260930T003408Z-run.uAsBBR`, all 22
@@ -3533,7 +3533,8 @@ and documentation cleanup are still in progress. Sheet task starts after follow 
 
 #### Follow checkpoint (committed before every evidence run)
 
-- Final follow source: `483ef7fbc`; full owned native layout change at `27349d638`.
+- Consolidated follow checkpoint: `face23a2c`. Earlier run metadata retains
+  pre-squash revision IDs; the checkpoint tree is unchanged by consolidation.
   Generic signed LocalDevice compilation succeeded at the requested
   `~/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice` path. Not installed.
 - Latest 24-phase pinned/detached motion + recent-activity width: origin
@@ -3609,3 +3610,99 @@ a presented row below the actual navigation bar. Supervisor approved moving both
 origin obstructions into lazy clearance items (first/newest, last/oldest), shared
 by main and child; scroll indicators retain margins. Re-gate main underflow and
 all follow owners after this correction, without a sheet-specific layout flag.
+
+#### CT-23 subagent session sheet — completed implementation handoff
+
+Final source `8dfa61804`, following `face23a2c` (animated follow) and `2ab495947`
+(shared child viewport/intake). Unpushed experimental history was consolidated;
+all evidence below ran from clean committed source. This handoff changes docs only.
+
+- Main and child now share orientation mapping, zero-copy order, counter-flips,
+  native anchors, full viewport and **both** lazy clearance items. Newest is first;
+  oldest is last; only indicator margins remain. No frame compensation, copied
+  animation curve, timer or origin-path growth scroll command was introduced.
+- Child canonical reads stay current while `ChatViewportMode` freezes detached
+  installed rows/text. Explicit earlier pages extend that installed cut without
+  admitting pending live rows; scrolling to newest installs current content.
+  No unread UI was added. Today's selected path retains its live-updating history,
+  estimated-end size-change policy and growth command.
+- The earlier native-offset-only short-sheet gate missed a row hidden behind the
+  navigation bar. Presented-row visibility below the **actual bar** now catches
+  it. Moving oldest clearance into content fixed that root cause for both owners;
+  short/empty placeholders, top alignment and long pinned layout are preserved.
+  Final hosted screenshots include the visibly restored short row; native geometry
+  alone is explicitly not compositor proof.
+
+Final UI evidence (under `~/Library/Developer/Tron/ios/test-runs/`, each with retained
+`TestResults.xcresult`, logs and JSON attachments):
+
+| Gate | Origin | Today |
+|---|---|---|
+| Main + child cross-owner run | `20260930T022611Z-run.8kmQfD` | `20260930T022932Z-run.hcJZMb` |
+| Main 24-phase pinned motion | 1,050 frames, gap error < 0.000001 pt | passes outside the previously named reference defects |
+| Main 24-phase detached motion | 1,026 frames, 0 pt movement, one instance | passes |
+| 16-state top-coverage matrix | passes | combined run briefly had no visible row; focused `20260930T023310Z-run.8vpbe9` passes |
+| Keyboard ramp / detached stream-keyboard-page | worst gap error 3.0 pt / all movements 0 pt | existing estimate excursions retained; detached passes |
+| Four bottom journeys | 72/340/90/68 frames; zero blank/uncovered boundaries, 12 pt settled gap | prior reference evidence retained |
+| Main short append, short contraction, short growth into overflow | all pass | all pass |
+| Row stability / recent activity width | pass | pass |
+| Main visual parity | 9/10; opened-history RMS 0.02821 vs 0.025 | 10/10 |
+| Child empty/short/long opening + presented-row visibility | passes | passes |
+| Child canonical append/growth | 253 frames, zero blanks, gap error 0.4777 pt | zero blanks, same gap class |
+| Child detached append/text change + earlier page | 94 frames, 0 pt movement, same instance; canonical advances and installed cut stays frozen | existing live-reader displacement retained |
+| Child scroll back to newest | latest rows install, zero blanks, settled gap passes | existing reference gaps retained |
+
+The exact follow-caller attribution control `20260930T020539Z-run.nrjnie` reproduced
+7/10 origin parity with the same static opened-history/send/keyboard RMS threshold
+family (no relaxed thresholds). Final 9/10 remains in that known residual class.
+Today's combined top-matrix failure was `first=nil` with a full native clip, not the
+fixed navigation clip band; the focused same-source gate passed.
+
+**Accepted open item: real UIKit detent resize.** The final child run has expansion
+0 blank frames / 319.2 pt worst gap error and collapse **13 blank frames** / 328.9 pt;
+today has 9 / 3,582.3 pt and 18 / 766.9 pt respectively. UIKit lays the nested scroll
+view out at the endpoint height while the enclosing sheet's presentation still
+animates. Supervisor accepted this shared limitation and the measured improvement
+for this task. Every detent frame is retained, not represented as a continuity pass.
+No compensation or substitute intermediate heights were added. Canonical recorded
+text growth was exercised; token-by-token child streaming is not this store's API.
+
+Default tier at final source: `20260930T023343Z-run.TLFUhL`, 2,034 total tests
+(1,923 Swift Testing cases), 1,989 passed, 43 skipped, one known display-card preview
+issue, one `displacedRetainedResume` watchdog failure. Focused displaced + child
+store owners pass in `20260930T024141Z-run.8mrMui`. An earlier full run also hit the
+`unifiedResponseAndNotificationSettlement` watchdog; it and all child store tests
+passed together on focused rerun, and it passes in the final full run. No
+`Observation tracking feedback loop` diagnostic was found; existing UIKit/editor
+warnings are not claimed to be absent.
+
+Reproduce with `scripts/tron-ios-test build`, then `TRON_IOS_TEST_TIER=ui-validation
+TEST_RUNNER_TRON_CHAT_TRANSCRIPT_ORIENTATION=origin scripts/tron-ios-test run` and
+`--only-testing` selectors for `ChatRowStabilityTests`, `ChatVisualParityTests`, the
+named main motion/band/keyboard/detached/bottom/short owners, and
+`SessionSheetPresentationTests/testSubagentTranscriptOriginJourneys` plus
+`testCompletedSubagentTranscriptOpensWithVisibleContentWithoutScrolling`. Repeat
+with `end`; the retained run logs contain the complete executed selector list.
+`ReadOnlySubagentSessionStoreTests` is the focused store owner; an unqualified
+`scripts/tron-ios-test run` is the default tier. Use lane `ct23c` and the pinned
+XcodeGen executable as for the follow checkpoint.
+
+Generic signed LocalDevice build at final source succeeded with `xcodebuild build
+-project TronMobile.xcodeproj -scheme 'Tron Device' -configuration LocalDevice
+-destination 'generic/platform=iOS' -derivedDataPath
+~/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice` from `packages/ios-app`.
+Artifact: `~/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice/Build/Products/LocalDevice-iphoneos/TronMobile.app`.
+**Not installed.** No Gateway lifecycle operation, deployment, remote git operation
+or device install occurred. `lane-remove ct23c` completed; no owned simulator remains
+running. The runner retained this live worktree's reusable products and evidence.
+
+Device checklist / residual review:
+- Confirm detached child history deliberately freezes and catches up by scrolling
+  back to newest; this is a behaviour change from today's sheet, with no unread UI.
+- Inspect real medium/large detent collapse: the 13-frame hosted blank band remains
+  open, even though origin improves the reference. Do not report it as fixed.
+- Confirm short sheet and main short-chat placement, navigation/composer clearance,
+  actual rotation and interactive keyboard dragging; the last two are unproven.
+- Existing display-card preview flip and static parity residual remain open.
+- Retain footer/retry order, row detail routes, accessibility order, environments,
+  detents and canonical lease/recovery ownership when addressing later work.
