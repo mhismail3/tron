@@ -2467,9 +2467,13 @@ export function proveDebugHandoffIdentity(before, after, manifest) {
 }
 
 /** Copy the exact selected and authenticated Debug payload into Stable as an
- * inactive candidate. Stable current.json and the 9847 process are untouched. */
+ * inactive candidate. Stable current.json and the 9847 process are untouched.
+ * `version`/`expectedFingerprint` are the candidate `tron-dev-state.mjs
+ * handoff-admission` admitted from its clean source record (#124); admission
+ * runs before this lock, so the selection is re-checked against it here, where
+ * a concurrent Debug apply or rollback can no longer change it. */
 export async function handoffDebugCandidate({
-  devHome, stableHome, stableBundledRoot, host, port = 9848, token,
+  devHome, stableHome, stableBundledRoot, version, expectedFingerprint, host, port = 9848, token,
   timeoutMs = 10_000, requestInfo, preflight = preflightPayload,
 }) {
   if (!isAbsolute(stableBundledRoot ?? "")) throw new Error("Debug handoff requires the installed Stable bundled payload root");
@@ -2478,6 +2482,9 @@ export async function handoffDebugCandidate({
   return withOperationLock(devPaths, () => withOperationLock(stablePaths, async () => {
     const selected = await currentSelection(devPaths);
     if (!selected) throw new Error("Debug handoff requires a selected immutable dev payload");
+    if (selected.version !== version || selected.payloadFingerprint !== expectedFingerprint) {
+      throw new Error(`Debug selection changed to ${selected.version} after handoff admitted ${version}; run scripts/tron dev handoff again`);
+    }
     const devRoot = join(devPaths.versionsRoot, selected.version);
     const devManifest = await validatePayload(devRoot, {
       channel: "dev", version: selected.version, payloadFingerprint: selected.payloadFingerprint,
@@ -2775,7 +2782,10 @@ async function main() {
     const requested = argument("--host") ?? "127.0.0.1";
     const host = resolveDeploymentHost(requested);
     const token = await readLocalCredential(join(devHome, "gateway", "local-auth.json"));
-    const result = await handoffDebugCandidate({ devHome, stableHome, stableBundledRoot, host, token });
+    const result = await handoffDebugCandidate({
+      devHome, stableHome, stableBundledRoot, host, token,
+      version: argument("--version"), expectedFingerprint: argument("--fingerprint"),
+    });
     console.log(JSON.stringify({ command, ...result }));
     return;
   }

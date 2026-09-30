@@ -2238,7 +2238,9 @@ terminal admission atomically only after proving no PTY is live, so an already-d
 The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
 separate Debug lifecycle on 9848 through the same immutable payload store and launcher.
 Its loopback-by-default handoff copies only an authenticated, selected Debug
-artifact into Stable as an inactive candidate after proving the same exact Debug
+artifact whose version and fingerprint match the clean candidate `scripts/tron dev`
+admitted (re-checked under the Debug payload lock)
+into Stable as an inactive candidate after proving the same exact Debug
 identity before and after the copy; it never selects or restarts Stable. Compatibility
 is checked against the actual installed/active Stable runtime, and Node/helper drift
 requires a manual Mac app replacement. Promotion pins version and fingerprint,

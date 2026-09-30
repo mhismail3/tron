@@ -1635,6 +1635,12 @@ test("duplicate promotion of the exact selected live candidate is verified and i
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+// Failure mode (#124): `scripts/tron dev handoff` admits the selected candidate
+// from its clean source record before this helper takes the dev operation
+// lock. A Debug apply or rollback accepted from iOS in between can select
+// another (dirty or unrecorded) payload that is running and ready, so the
+// pre/post identity proof passes for it. The handoff must copy only the exact
+// admitted version and fingerprint, re-checked under the lock.
 test("Debug handoff copies exact bytes only after post-proof and leaves Stable inactive", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-debug-handoff-"));
   try {
@@ -1656,8 +1662,27 @@ test("Debug handoff copies exact bytes only after post-proof and leaves Stable i
       sourceRevision: stagedDev.manifest.sourceRevision,
       runtimeEpoch: stagedDev.manifest.runtimeEpoch,
     };
+    const admitted = { version: stagedDev.manifest.version, expectedFingerprint: stagedDev.manifest.payloadFingerprint };
+
+    // Admission read another candidate; the selection has since moved to this
+    // running, ready payload, so its pre/post identity proof alone would pass.
+    const movedStableHome = join(root, "moved-stable-home");
+    for (const stale of [
+      { version: "admitted-debug", expectedFingerprint: admitted.expectedFingerprint },
+      { version: admitted.version, expectedFingerprint: "f".repeat(64) },
+    ]) {
+      await assert.rejects(handoffDebugCandidate({
+        devHome, stableHome: movedStableHome, stableBundledRoot: bundledStable, ...stale,
+        host: "127.0.0.1", token: "t".repeat(32), requestInfo: async () => info,
+        preflight: async () => stagedDev.manifest,
+      }), /after handoff admitted/);
+    }
+    await assert.rejects(
+      readFile(join(movedStableHome, "gateway", "payloads", "stable", "deployment-state.json")), /ENOENT/,
+    );
+
     const result = await handoffDebugCandidate({
-      devHome, stableHome, stableBundledRoot: bundledStable,
+      devHome, stableHome, stableBundledRoot: bundledStable, ...admitted,
       host: "127.0.0.1", token: "t".repeat(32), requestInfo: async () => info,
       preflight: async () => stagedDev.manifest,
     });
@@ -1702,7 +1727,7 @@ test("Debug handoff copies exact bytes only after post-proof and leaves Stable i
     const racedStableHome = join(root, "raced-stable-home");
     let reads = 0;
     await assert.rejects(handoffDebugCandidate({
-      devHome, stableHome: racedStableHome, stableBundledRoot: bundledStable,
+      devHome, stableHome: racedStableHome, stableBundledRoot: bundledStable, ...admitted,
       host: "127.0.0.1", token: "t".repeat(32), preflight: async () => stagedDev.manifest,
       requestInfo: async () => (++reads === 1 ? info : { ...info, runtimeEpoch: "replacement-epoch" }),
     }), /changed while/);
