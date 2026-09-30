@@ -940,10 +940,18 @@ private struct SubagentSheetScrollBoundary: UIViewRepresentable {
             var ancestor = superview
             while let view = ancestor, !(view is UIScrollView) { ancestor = view.superview }
             guard let owner = ancestor as? UIScrollView else { restore(); return }
-            guard owner !== scroll else { return }
-            restore()
-            scroll = owner
-            owner.addGestureRecognizer(boundary)
+            if owner !== scroll {
+                restore()
+                scroll = owner
+                owner.addGestureRecognizer(boundary)
+            }
+            var parent = owner.superview
+            while let view = parent {
+                for pan in view.gestureRecognizers?.compactMap({ $0 as? UIPanGestureRecognizer }) ?? [] {
+                    pan.require(toFail: boundary)
+                }
+                parent = view.superview
+            }
         }
         func restore() {
             scroll?.removeGestureRecognizer(boundary)
