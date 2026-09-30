@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { ConnectionOwner } from "../integrations/connection-owner.js";
@@ -23,8 +23,10 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
  * tagging drops the summary; intake waits on model latency; a rerun re-charges;
  * summary and tagging race admission; partial captures (every X post) never
  * get a summary. This drives the actual connector and KnowledgeService owners
- * with local model/Jev fakes, never live credentials or paid providers; its
- * outcome JSON is written under test temp. */
+ * with local model/Jev fakes, never live credentials or paid providers. Its
+ * outcome JSON is kept at packages/gateway/test-results/knowledge-intake-outcome.json
+ * inside the worktree that ran it, so concurrent runs in two worktrees keep two
+ * artifacts instead of overwriting one shared temp file. */
 describe("K5 Raindrop intake enrichment", () => {
   it("keeps a summary when Jev is unapproved, reports the skip, and lets another item survive model failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-failure-e2e-")); roots.push(root);
@@ -146,9 +148,8 @@ describe("K5 Raindrop intake enrichment", () => {
       commandId: command("run"), items: latestSources.map((record, index) => ({ itemId: intake.outcomes[index]!.itemId, sourceId: record?.id, revisionId: record?.revisionId, summary: record?.content.summary?.text, tagIds: record?.content.tags?.tagIds, jobs: finalJobs.jobs.filter(job => job.sourceId === record?.id).map(({ operation, status }) => ({ operation, status })) })),
       sequence,
     };
-    const artifactDirectory = join(tmpdir(), "tron-k5-test-results");
-    await mkdir(artifactDirectory, { recursive: true });
-    const artifact = join(artifactDirectory, "knowledge-intake-outcome.json");
+    const artifact = join(process.cwd(), "test-results", "knowledge-intake-outcome.json");
+    await mkdir(dirname(artifact), { recursive: true });
     await writeFile(artifact, `${JSON.stringify(report, null, 2)}\n`);
     console.info(`K5 intake outcome artifact: ${artifact}`);
     const persisted = JSON.parse(await readFile(artifact, "utf8")) as typeof report;

@@ -65,7 +65,8 @@ test-results/
 # Debug
 .debug/
 
-# Agent runtime state
+# Agent runtime state and local-only scratch notes (AGENTS.md, Keep the tree owned)
+progress.md
 .claude/scheduled_tasks.lock
 .pi/*
 !.pi/prompts/
