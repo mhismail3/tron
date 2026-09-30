@@ -38,7 +38,8 @@ Commands:
   build                Provision, generate, and build reusable test products.
   run                  Run reusable products; defaults to the complete unit target.
   diagnose             Explicit verbose-diagnostics run with a larger finite deadline.
-  status               Report toolchain, lane, owned simulator, lease, products, and latest result.
+  status               Report toolchain, lane, owned simulator, lease, products, and the newest
+                       run this worktree started in this lane.
   status --all         List every simulator that holds this Mac's memory: every lane with
                        its state, worktree, lease holder, uptime and disk size, every booted
                        simulator no lane owns, the Development simulator, and Simulator.app.
@@ -107,7 +108,7 @@ was given. Routine runs are serial, use an exact owned simulator UDID, disable
 verbose test diagnostics, and preserve unique complete logs plus xcresults under
 $HOME/Library/Developer/Tron/ios/test-runs by default; each run directory records
 the worktree and lane that produced it, which is what clean and prune scope and
-group by. Test products are built
+group by and what status resolves this lane's latest result from. Test products are built
 per worktree under $HOME/Library/Developer/Tron/ios/test-derived-data and stamped
 with the worktree and source state that produced them; run refuses products
 stamped for another worktree or another source state. diagnose never runs
@@ -334,7 +335,11 @@ if [[ "$command" == status ]]; then
   else
     echo "Test products: not built"
   fi
-  if [[ -L "$RESULTS_ROOT/latest" ]]; then echo "Latest result: $(readlink "$RESULTS_ROOT/latest")"; else echo "Latest result: none"; fi
+  # Resolved from the runs' own owners: the results root is shared by every
+  # worktree and lane, so no single pointer in it can name this lane's result.
+  latest_run="$(python3 "$SIMULATOR" latest-run --results-root "$RESULTS_ROOT" \
+    --worktree "$ROOT" --lane "$LANE_LABEL")" || exit "$EXIT_DESTINATION"
+  echo "Latest result: ${latest_run:-none}"
   exit 0
 fi
 
@@ -557,13 +562,11 @@ run_process() {
   fi
   write_metadata "$phase" "$status" || echo "warning: could not write run metadata: $metadata_path" >&2
   if ((status == 124)); then
-    ln -sfn "$run_dir" "$RESULTS_ROOT/latest"
     echo "error: $phase exceeded its process deadline; evidence: $evidence" >&2
     return "$EXIT_TIMEOUT"
   fi
   if ((status >= 128)); then return "$status"; fi
   if ((status != 0)); then
-    ln -sfn "$run_dir" "$RESULTS_ROOT/latest"
     if [[ "$phase" == build ]]; then return "$EXIT_BUILD_FAILURE"; else return "$EXIT_TEST_FAILURE"; fi
   fi
   return 0
@@ -690,7 +693,6 @@ run_tests() {
     fi
   fi
   write_metadata complete "$test_status" || echo "warning: could not finalize run metadata: $metadata_path" >&2
-  ln -sfn "$run_dir" "$RESULTS_ROOT/latest"
   if ((test_status == 0)); then
     echo "iOS test run complete: $run_dir"
   else
@@ -707,7 +709,6 @@ case "$command" in
   build)
     build_products
     write_metadata complete 0
-    ln -sfn "$run_dir" "$RESULTS_ROOT/latest"
     echo "Reusable iOS test products ready: $DERIVED_DATA/Build/Products"
     ;;
   run)

@@ -1,5 +1,5 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -21,8 +21,10 @@ import { SessionSearchIndex, type SearchIndexDocument, type SearchIndexStamp } f
 //    now reads the persisted per-row total, which is why the replace case below
 //    measures a document replacement whose whole time is not a budget scan.
 //
-// The measured after-numbers are kept at TRON_SEARCH_STALL_REPORT
-// (default $TMPDIR/tron-search-stall-report.json) for regeneration. Every case
+// The measured after-numbers are kept at TRON_SEARCH_STALL_REPORT (default
+// packages/gateway/test-results/session-search-stall.json, inside the worktree
+// that ran it, so concurrent runs in two worktrees keep two reports) for
+// regeneration. Every case
 // asserts the load-independent form of its claim: how often the loop was handed
 // back, and a stretch well below the operation's whole time once the host's own
 // scheduling floor is subtracted.
@@ -35,8 +37,10 @@ const STAMP: SearchIndexStamp = { fileIdentity: "file-1", size: 1, mtimeMs: 1 };
 /** Every case's measurement, written once at a stable path so the numbers in the
  * handoff can be regenerated with this file alone. */
 const measurements: Record<string, unknown> = {};
+const REPORT_PATH = process.env.TRON_SEARCH_STALL_REPORT ?? join(process.cwd(), "test-results", "session-search-stall.json");
 afterAll(async () => {
-  await writeFile(process.env.TRON_SEARCH_STALL_REPORT ?? join(tmpdir(), "tron-search-stall-report.json"), `${JSON.stringify(measurements, null, 2)}\n`);
+  await mkdir(dirname(REPORT_PATH), { recursive: true });
+  await writeFile(REPORT_PATH, `${JSON.stringify(measurements, null, 2)}\n`);
 });
 
 interface Stretch {

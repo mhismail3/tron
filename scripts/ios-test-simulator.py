@@ -4,8 +4,9 @@
 `lane` selects the one lane a command of any iOS test tool uses;
 provisioning, releasing and sweeping own the simulators a test command uses;
 memory admission refuses a boot the Mac cannot afford before it happens; the
-`simulators` view reports everything that holds memory; and pruning reclaims the
-runs and products finished commands leave behind.
+`simulators` view reports everything that holds memory; pruning reclaims the
+runs and products finished commands leave behind; and `latest-run` names one
+worktree's and lane's newest run in the shared results root.
 """
 
 from __future__ import annotations
@@ -1292,11 +1293,36 @@ def run_attribution(run: Path) -> tuple[str | None, str, float]:
     )
 
 
-def remove_dangling_latest(root: Path) -> None:
-    latest = root / "latest"
-    if latest.is_symlink() and not latest.exists():
-        latest.unlink()
-        print(f"removed the dangling results symlink {latest}")
+def latest_run(arguments: argparse.Namespace) -> int:
+    """Print the newest run this worktree started in this lane, or nothing.
+
+    The results root is shared by every worktree and lane, so the latest result
+    is resolved from each run's own owner rather than kept as one pointer in the
+    root, which named whichever run finished last anywhere (W-21, issue #101).
+    Runs in a lane never overlap - the lane's lease serializes them - so the
+    newest start is the newest run; the directory's modification time orders two
+    runs that started in the same second.
+    """
+    root = arguments.results_root
+    if not root.is_dir():
+        return 0
+    worktree = os.path.realpath(arguments.worktree)
+    newest: tuple[float, int, Path] | None = None
+    for run in root.iterdir():
+        if run.is_symlink() or not run.is_dir():
+            continue
+        owner, lane, started = run_attribution(run)
+        if owner is None or os.path.realpath(owner) != worktree or lane != arguments.lane:
+            continue
+        try:
+            changed = run.stat().st_mtime_ns
+        except OSError:
+            continue
+        if newest is None or (started, changed) > newest[:2]:
+            newest = (started, changed, run)
+    if newest is not None:
+        print(newest[2])
+    return 0
 
 
 def prune_runs(root: Path) -> int:
@@ -1334,7 +1360,6 @@ def prune_runs(root: Path) -> int:
                 f"removed result run {run.name} of {worktree} "
                 f"({human_duration(int(now - started))} old, beyond the newest {RUNS_KEPT_PER_WORKTREE})"
             )
-    remove_dangling_latest(root)
     return failures
 
 
@@ -1406,7 +1431,6 @@ def clean_runs(arguments: argparse.Namespace) -> int:
         except OSError as error:
             raise DestinationError(f"could not remove the result run {run}: {error}") from error
         removed += 1
-    remove_dangling_latest(root)
     print(f"removed {removed} result run(s) of {worktree} in lane {arguments.lane}")
     return 0
 
@@ -1510,7 +1534,7 @@ def parse_args() -> argparse.Namespace:
         "command",
         choices=(
             "provision", "validate", "status", "delete", "state", "shutdown", "sweep", "lane", "lanes",
-            "lane-remove", "simulators", "prune", "clean-runs", "development-uptime",
+            "lane-remove", "simulators", "prune", "clean-runs", "latest-run", "development-uptime",
         ),
     )
     parser.add_argument("--marker", type=Path)
@@ -1547,6 +1571,12 @@ def parse_args() -> argparse.Namespace:
         # Selection only: it reads no simulator, so it needs no Development state.
         if arguments.worktree is None:
             parser.error("lane requires --worktree")
+        return arguments
+    if arguments.command == "latest-run":
+        # Read-only over the results root: no simulator, no Development state.
+        for required in ("results_root", "worktree", "lane"):
+            if getattr(arguments, required) is None:
+                parser.error(f"latest-run requires --{required.replace('_', '-')}")
         return arguments
     if arguments.development_state is None:
         parser.error("the following arguments are required: --development-state")
@@ -1626,6 +1656,8 @@ def main() -> int:
             return prune_command(arguments)
         if arguments.command == "clean-runs":
             return clean_runs(arguments)
+        if arguments.command == "latest-run":
+            return latest_run(arguments)
         if arguments.command == "development-uptime":
             return development_uptime(arguments)
         if arguments.command == "state":
