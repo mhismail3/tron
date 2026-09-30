@@ -299,6 +299,28 @@ def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, **kwargs)
 
 
+class Lane:
+    """The lane scripts/tron-ios-test would use for this worktree and selection.
+
+    Asked of the one selection owner the runner and the Gateway E2E harness use,
+    so a profile run leases, releases and reclaims exactly the runner's lane.
+    """
+
+    def __init__(self, requested: str | None) -> None:
+        command = [sys.executable, str(SIMULATOR), "lane", "--worktree", str(ROOT)]
+        if requested is not None:
+            command += ["--lane", requested]
+        result = run(command, capture_output=True)
+        fields = result.stdout.splitlines()
+        if result.returncode != 0 or len(fields) != 5:
+            raise ProfileError(result.stderr.strip() or "cannot select the iOS test lane", EXIT_RUNNER)
+        self.label = fields[0]
+        self.state_root = Path(fields[1])
+        self.device_name = fields[2]
+        self.lane_root = Path(fields[3])
+        self.default_state_root = Path(fields[4])
+
+
 def bounded(log: Path, evidence: Path, overall: float, no_output: float, artifact: Path, command: list[str],
             environment: dict[str, str] | None = None) -> int:
     """Run under scripts/ios-test-process.py; the complete output goes only to `log`."""
@@ -560,19 +582,12 @@ class HostTraceLock:
 
 
 class Profiler:
-    def __init__(self, arguments: argparse.Namespace) -> None:
+    def __init__(self, arguments: argparse.Namespace, lane: Lane) -> None:
         self.arguments = arguments
         toolchain = self._toolchain()
         self.runtime = toolchain["TRON_CI_IOS_RUNTIME_VERSION"]
         self.device_type = toolchain["TRON_CI_IOS_SIMULATOR_NAME"]
-        self.state_root = Path(os.environ.get("TRON_IOS_TEST_STATE_DIR", Path.home() / ".tron/internal/ios-test"))
-        # The lane root is what the shared sweep scans and what `status --all`
-        # reports, so this lane is discovered, attributed and reclaimed exactly
-        # like the one scripts/tron-ios-test uses.
-        self.lane_root = Path(
-            os.environ.get("TRON_IOS_TEST_DISCOVERY_ROOT", self.state_root.parent)
-        )
-        self.device_name = os.environ.get("TRON_IOS_TEST_DEVICE_NAME", "Tron iOS Tests")
+        self.lane = lane
         self.development_state = development_state_path()
         worktree_key = run(
             [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(ROOT)],
@@ -599,15 +614,15 @@ class Profiler:
 
     def simulator_arguments(self) -> list[str]:
         return [
-            "--marker", str(self.state_root / "simulator.json"), "--runtime", self.runtime,
-            "--device-type", self.device_type, "--name", self.device_name,
+            "--marker", str(self.lane.state_root / "simulator.json"), "--runtime", self.runtime,
+            "--device-type", self.device_type, "--name", self.lane.device_name,
             "--development-state", str(self.development_state),
             # The lane root, the default lane and this worktree, so this lane is
             # discovered by the sweep, reported by the lane tables and recorded
             # as this worktree's. The owned directories and the Development
             # simulator are resolved by the shared owner, not here.
-            "--discovery-root", str(self.lane_root),
-            "--default-state-dir", str(self.state_root),
+            "--discovery-root", str(self.lane.lane_root),
+            "--default-state-dir", str(self.lane.default_state_root),
             "--worktree", str(ROOT),
         ]
 
@@ -620,7 +635,8 @@ class Profiler:
         """
         result = run(
             [sys.executable, str(SIMULATOR), "sweep",
-             "--discovery-root", str(self.lane_root),
+             "--discovery-root", str(self.lane.lane_root),
+             "--default-state-dir", str(self.lane.default_state_root),
              "--development-state", str(self.development_state)],
             capture_output=True,
         )
@@ -918,13 +934,16 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
             "73 simulator lease busy or the Mac refused the boot, 74 runner or extraction failure, 75 deadline exceeded,\n"
             "77 self-test failed.\n"
             "Shares the lane, the sweep, the lease, the release and the memory admission of scripts/tron-ios-test:\n"
-            "the lane's state directory is TRON_IOS_TEST_STATE_DIR in the lane root TRON_IOS_TEST_DISCOVERY_ROOT,\n"
-            "the scenario run releases the simulator it booted, and it refuses (73) rather than boot when the Mac is\n"
-            "short of memory. TRON_PROFILE_RESULTS_DIR and TRON_PROFILE_IOS_DERIVED_DATA own its own\n"
-            "reports and products. TRON_IOS_TEST_DEVICE_NAME names the device (shared with scripts/tron-ios-test)."
+            "--lane (or TRON_IOS_TEST_LANE) selects the lane exactly as the runner does - without one, a linked\n"
+            "worktree uses its own lane and the primary checkout the default lane, which the pre-lane\n"
+            "TRON_IOS_TEST_STATE_DIR and TRON_IOS_TEST_DEVICE_NAME also select - the scenario run releases the\n"
+            "simulator it booted, and it refuses (73) rather than boot when the Mac is short of memory.\n"
+            "TRON_PROFILE_RESULTS_DIR and TRON_PROFILE_IOS_DERIVED_DATA own its own reports and products."
         ),
     )
     parser.add_argument("--list", action="store_true", help="list scenarios and exit")
+    parser.add_argument("--lane", metavar="NAME",
+                        help="the simulator lane, as scripts/tron-ios-test --lane (default: this checkout's lane)")
     parser.add_argument("--scenario", action="append", default=[], metavar="NAME",
                         help="scenario to run (repeatable); 'all' runs every product scenario")
     parser.add_argument("--iterations", type=int, default=5, help="measured iterations per scenario (default 5)")
@@ -968,7 +987,11 @@ def main(argv: list[str]) -> int:
             for name, (_, window, description) in table.items():
                 print(f"  {name:<16} {window:>5g} s  {description}")
         return EXIT_OK
-    state_root = Path(os.environ.get("TRON_IOS_TEST_STATE_DIR", Path.home() / ".tron/internal/ios-test"))
+    try:
+        lane = Lane(arguments.lane)
+    except ProfileError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return error.code
     if os.environ.get("TRON_IOS_TEST_LOCK_HELD") != "1":
         # The same lease, and the same release, as scripts/tron-ios-test: when
         # this run ends, on success, failure, deadline or signal, the holder
@@ -980,19 +1003,22 @@ def main(argv: list[str]) -> int:
         # started that way is killed before it can release the simulator. As the
         # same process, this run's signal goes to the holder, which forwards it
         # to the command tree and releases the lane's simulator afterwards.
-        state_root.mkdir(parents=True, exist_ok=True)
-        os.chmod(state_root, 0o700)
+        # The lane travels with the run, as in scripts/tron-ios-test: the run the
+        # holder starts re-derives the lane it leased.
+        lane.state_root.mkdir(parents=True, exist_ok=True)
+        os.chmod(lane.state_root, 0o700)
         try:
             os.execv(sys.executable, [
-                sys.executable, str(LOCKER), "--lock", str(state_root / "lease.lock"),
-                "--marker", str(state_root / "simulator.json"),
-                "--development-state", str(development_state_path()), "--", str(Path(__file__).resolve()), *argv,
+                sys.executable, str(LOCKER), "--lock", str(lane.state_root / "lease.lock"),
+                "--marker", str(lane.state_root / "simulator.json"),
+                "--development-state", str(development_state_path()), "--", str(Path(__file__).resolve()),
+                *argv, "--lane", lane.label,
             ])
         except OSError as error:
             print(f"error: cannot start the iOS test lease holder: {error}", file=sys.stderr)
             return EXIT_RUNNER
     try:
-        profiler = Profiler(arguments)
+        profiler = Profiler(arguments, lane)
         profiler.sweep()
         profiler.provision()
         profiler.ensure_products()

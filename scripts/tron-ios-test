@@ -51,8 +51,9 @@ Commands:
                        a lane a live process holds (73) and state with no ownership marker (66).
   reap                 Shut down this repository's owned simulators that are booted
                        with no live lease (orphans of a crash, a kill or --keep-booted),
-                       delete lanes no command has used for 7 days, and prune results
-                       and products.
+                       delete lanes no command has used for 7 days or whose creating
+                       worktree no longer exists (never the default lane), and prune
+                       results and products.
   prune                Reclaim disk only: keep the newest 50 runs of each worktree plus
                        everything younger than 7 days, and delete the test products of
                        worktrees that no longer exist. Touches no simulator, so it takes
@@ -67,10 +68,13 @@ Selectors:
 Options:
   --all                 With `status`, list every simulator on this Mac (see above).
   --lane NAME           Use a named lane: the state directory <lane root>/ios-test-NAME and the
-                        device "Tron iOS Tests (NAME)". The default lane is the shared
-                        $HOME/.tron/internal/ios-test. TRON_IOS_TEST_LANE is the environment
-                        form; a named lane refuses TRON_IOS_TEST_STATE_DIR and
-                        TRON_IOS_TEST_DEVICE_NAME rather than guess which was meant.
+                        device "Tron iOS Tests (NAME)". Without one, a linked worktree uses
+                        its own lane, named by its worktree key, and the primary checkout
+                        uses the default lane $HOME/.tron/internal/ios-test ("Tron iOS
+                        Tests"), which `--lane default` selects from anywhere.
+                        TRON_IOS_TEST_LANE is the environment form; a named lane refuses
+                        TRON_IOS_TEST_STATE_DIR and TRON_IOS_TEST_DEVICE_NAME, which select
+                        the default lane, rather than guess which was meant.
   --keep-booted         Keep this lane's simulator booted when the command ends, for a
                         tight test-fix loop; only a command that provisions the simulator
                         takes it. The next command in this lane reuses it and the next
@@ -94,8 +98,9 @@ warning.
 Every command that provisions the simulator first releases orphaned owned lanes
 and prunes results and products; lanes a live process holds are never touched.
 The profiler (scripts/tron-profile ios) and the Gateway E2E harness
-(scripts/ios-gateway-e2e-test) lease, sweep, release and admit through these same
-paths, so a lane any of them created is reclaimed by the others.
+(scripts/ios-gateway-e2e-test) take the same --lane selection and lease, sweep,
+release and admit through these same paths, so a lane any of them created is
+reclaimed by the others.
 Commands release the simulator they
 use when they end, on success, failure, timeout or signal, unless --keep-booted
 was given. Routine runs are serial, use an exact owned simulator UDID, disable
@@ -114,20 +119,20 @@ die() { echo "error: $*" >&2; exit "$EXIT_RUNNER"; }
 
 # A lane is one state directory and one device name, so two agents on one Mac
 # never boot, lease or release each other's simulator. Lane selection happens
-# before any state path is derived because it decides them: --lane NAME (or
-# TRON_IOS_TEST_LANE) names a lane beside the default one, which keeps today's
-# directory and name. TRON_IOS_TEST_STATE_DIR and TRON_IOS_TEST_DEVICE_NAME are
-# the pre-lane spelling of that same choice and describe the default lane only;
-# a named lane refuses them instead of silently preferring one (SIM-10 removes
-# both overrides once every caller names its lane).
-lane="${TRON_IOS_TEST_LANE:-}"
+# before any state path is derived because it decides them, and it has one
+# owner shared with the profiler and the Gateway E2E harness (`lane` in
+# scripts/ios-test-simulator.py): --lane NAME or TRON_IOS_TEST_LANE, then the
+# pre-lane TRON_IOS_TEST_STATE_DIR/TRON_IOS_TEST_DEVICE_NAME (the default lane;
+# SIM-10 removes both), then this checkout's own lane - the default lane in the
+# primary checkout, the worktree-key lane in a linked worktree.
+lane=""
 remaining_arguments=()
 while (($#)); do
   case "$1" in
     --lane)
       (($# >= 2)) || die "--lane requires a name"
       [[ -n "$2" && "$2" != -* ]] || die "invalid lane name: ${2:-missing}"
-      [[ -z "$lane" || "$lane" == "$2" ]] || die "--lane $2 conflicts with TRON_IOS_TEST_LANE=$lane"
+      [[ -z "$lane" || "$lane" == "$2" ]] || die "--lane $2 conflicts with --lane $lane"
       lane="$2"
       shift 2
       ;;
@@ -170,37 +175,31 @@ clean_owned_directory() {
   rm -rf -- "$directory"
 }
 
-DEFAULT_STATE_ROOT="${TRON_IOS_TEST_STATE_DIR:-$HOME/.tron/internal/ios-test}"
-# Lanes are state directories: the default one, and the ones beside or inside
-# it. Named lanes live beside the default lane, under the lane root the sweep
+lane_selector=(lane --worktree "$ROOT")
+[[ -z "$lane" ]] || lane_selector+=(--lane "$lane")
+lane_selection="$(python3 "$SIMULATOR" "${lane_selector[@]}")" || exit "$EXIT_RUNNER"
+# The lane's own name: what `clean` scopes its runs by and what the lease, the
+# marker and every refusal message report. Lanes are state directories: the
+# default one, and the ones beside or inside it under the lane root the sweep
 # scans, which discovers them by ownership marker and never by device name.
-LANE_ROOT="${TRON_IOS_TEST_DISCOVERY_ROOT:-$(dirname "$DEFAULT_STATE_ROOT")}"
+{
+  IFS= read -r LANE_LABEL
+  IFS= read -r STATE_ROOT
+  IFS= read -r DEVICE_NAME
+  IFS= read -r LANE_ROOT
+  IFS= read -r DEFAULT_STATE_ROOT
+} <<<"$lane_selection"
+DISCOVERY_ROOT="$LANE_ROOT"
 
+# Only `lane-remove` names a lane other than its own.
 lane_directory() {
   local name="$1"
-  if [[ -z "$name" || "$name" == default ]]; then
+  if [[ "$name" == default ]]; then
     printf '%s\n' "$DEFAULT_STATE_ROOT"
   else
     printf '%s\n' "$LANE_ROOT/ios-test-$name"
   fi
 }
-
-if [[ -n "$lane" && "$lane" != default ]]; then
-  validate_lane_name "$lane"
-  [[ -z "${TRON_IOS_TEST_STATE_DIR:-}" ]] \
-    || die "--lane $lane cannot be combined with TRON_IOS_TEST_STATE_DIR"
-  [[ -z "${TRON_IOS_TEST_DEVICE_NAME:-}" ]] \
-    || die "--lane $lane cannot be combined with TRON_IOS_TEST_DEVICE_NAME"
-  STATE_ROOT="$(lane_directory "$lane")"
-  DISCOVERY_ROOT="$LANE_ROOT"
-  DEVICE_NAME="Tron iOS Tests ($lane)"
-else
-  # The default lane keeps today's directory and name, including the two
-  # pre-lane overrides the profiler and CI still set.
-  STATE_ROOT="$DEFAULT_STATE_ROOT"
-  DISCOVERY_ROOT="$LANE_ROOT"
-  DEVICE_NAME="${TRON_IOS_TEST_DEVICE_NAME:-Tron iOS Tests}"
-fi
 MARKER="$STATE_ROOT/simulator.json"
 LOCK="$STATE_ROOT/lease.lock"
 
@@ -211,9 +210,6 @@ LOCK="$STATE_ROOT/lease.lock"
 WORKTREE_KEY="$(python3 "$IDENTITY" worktree-key --worktree "$ROOT")" \
   || die "cannot derive this worktree's test product directory"
 DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-$PRODUCTS_ROOT/$WORKTREE_KEY}"
-# The lane's own name: what `clean` scopes its runs by and what the lease, the
-# marker and every refusal message report.
-LANE_LABEL="${lane:-default}"
 
 simulator_args=(
   --marker "$MARKER"
@@ -324,7 +320,7 @@ if [[ "$command" == status ]]; then
   echo "Canonical Xcode: $TRON_CI_XCODE_VERSION"
   echo "Canonical iOS runtime: $TRON_CI_IOS_RUNTIME_VERSION"
   echo "Canonical device type: $TRON_CI_IOS_SIMULATOR_NAME"
-  echo "Lane: ${lane:-default} ($STATE_ROOT)"
+  echo "Lane: $LANE_LABEL ($STATE_ROOT)"
   if [[ -s "$LOCK" ]]; then echo "Lease metadata: $(tr -d '\n' <"$LOCK")"; else echo "Lease: idle"; fi
   python3 "$SIMULATOR" status "${simulator_args[@]}" || exit "$EXIT_DESTINATION"
   echo "Worktree: $ROOT"
@@ -347,6 +343,7 @@ if [[ "$command" == reap ]]; then
   # shuts that lane's simulator down or removes the lane, so a running command
   # is never disturbed. Disk is reclaimed here too: every sweep prunes.
   python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" \
+    --default-state-dir "$DEFAULT_STATE_ROOT" \
     --results-root "$RESULTS_ROOT" --products-root "$PRODUCTS_ROOT" \
     --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
   exit 0
@@ -457,6 +454,7 @@ fi
 # lease a live process holds is never touched - including this lane, whose lease
 # this command already holds, which is why --keep-booted survives its own lane.
 if ! python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" \
+  --default-state-dir "$DEFAULT_STATE_ROOT" \
   --results-root "$RESULTS_ROOT" --products-root "$PRODUCTS_ROOT" \
   --development-state "$DEVELOPMENT_STATE"; then
   echo "warning: the orphaned-simulator sweep did not complete; continuing" >&2

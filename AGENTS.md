@@ -124,11 +124,13 @@ The live Gateway shares this Mac with every agent session. When memory runs
 short, host swapping slows it enough that phone reconnects fail. Clean up every
 process you start.
 
-- The iOS test tooling owns its simulators, not agent discipline. Every command
-  that boots one releases it when the command ends - success, failure, timeout
+- The iOS test tooling owns its simulators, not agent discipline. Each linked
+  worktree tests in its own simulator lane by default (the primary checkout in
+  the default lane), so parallel sessions need no lane flag. Every command
+  that boots a simulator releases it when the command ends - success, failure, timeout
   or signal - and each provisioning command first sweeps orphaned lanes and
-  expires lanes unused for 7 days; the runner's sweep also prunes old runs and
-  products. Do not shut down, delete or erase simulators by hand.
+  removes lanes unused for 7 days or whose worktree was deleted; the runner's
+  sweep also prunes old runs and products. Do not shut down, delete or erase simulators by hand.
 - Before starting a server, simulator, watcher, emulator or test runner, check
   whether a suitable one is already running and reuse it. For iOS tests, use the
   owned simulator from `scripts/tron-ios-test`; do not boot extra devices.

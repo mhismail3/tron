@@ -8,7 +8,8 @@ executing anything, so a shared or replaced products directory can never run a
 build from another worktree or another source state.
 
 Commands:
-  worktree-key      Print the directory name that owns a worktree's products.
+  worktree-key      Print the name that owns a worktree's products, E2E fixture
+                    and default lane.
   show              Print this worktree's current source identity as JSON.
   write             Stamp a products directory with the identity read on stdin.
   verify            Prove a products directory matches this worktree's source.
@@ -59,8 +60,12 @@ def repository_root(worktree: Path) -> Path:
 
 
 def worktree_key(worktree: Path) -> str:
-    """Directory name for one worktree's products under the shared build root."""
-    name = re.sub(r"[^A-Za-z0-9._-]", "-", os.path.realpath(worktree).rsplit("/", 1)[-1])[:48]
+    """One worktree's name under the shared roots: its products, its Gateway E2E
+    fixture and, in a linked worktree, its default simulator lane.
+
+    It starts with a letter or digit because a lane name must.
+    """
+    name = re.sub(r"[^A-Za-z0-9._-]", "-", os.path.realpath(worktree).rsplit("/", 1)[-1]).lstrip("._-")[:48]
     digest = hashlib.sha256(os.path.realpath(worktree).encode()).hexdigest()[:12]
     return f"{name or 'worktree'}-{digest}"
 

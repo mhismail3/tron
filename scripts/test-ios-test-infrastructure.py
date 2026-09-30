@@ -264,6 +264,9 @@ class ContainedFixture:
         lane root from HOME and from the state directory, both of which are
         contained here, so a fixture that needs its own value sets the variable
         (and the synthetic tools still refuse a value that escapes).
+        TRON_IOS_TEST_LANE and TRON_IOS_TEST_DEVICE_NAME are removed too: a
+        lane a developer exported would select another lane than the one a
+        case sets up, or conflict with its TRON_IOS_TEST_STATE_DIR.
         """
         self.contained_root = root
         home = root / "home"
@@ -286,6 +289,8 @@ class ContainedFixture:
         })
         environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
         environment.pop("TRON_IOS_TEST_DISCOVERY_ROOT", None)
+        environment.pop("TRON_IOS_TEST_LANE", None)
+        environment.pop("TRON_IOS_TEST_DEVICE_NAME", None)
         return environment
 
     def run_script(self, command: list[str], root: Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -1608,6 +1613,9 @@ from pathlib import Path
 
 inventory_path = Path(os.environ['FAKE_SIMCTL_INVENTORY'])
 arguments = sys.argv[1:]
+if arguments[:2] == ['xcresulttool', 'get']:
+    # The runner's summary of a focused run: one executed, passing test.
+    print('{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'); raise SystemExit(0)
 assert arguments[0] == 'simctl', arguments
 arguments = arguments[1:]
 log = os.environ.get('FAKE_SIMCTL_LOG')
@@ -3346,6 +3354,296 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
                 command.kill()
                 command.wait(timeout=30)
             self.close_pipes(command)
+
+
+class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
+    """W-17 (issue #99): each worktree defaults to a lane of its own.
+
+    The cases run the three tools from real git checkouts - a primary checkout
+    and linked worktrees of it - with no lane selected and no pre-lane
+    override, so every lane path is the tools' own default under the fixture's
+    HOME.
+
+    Failure modes these cases target, written before the code:
+
+    1. A command in a linked worktree that selects no lane uses the shared
+       default lane and its one lease, so a second worktree's run is refused
+       (73) while the first runs instead of running beside it.
+    2. The primary checkout stops using the default lane (`ios-test`, device
+       `Tron iOS Tests`) every existing caller and existing lane already name.
+    3. The worktree-derived lane replaces an explicit choice: `--lane NAME`,
+       `TRON_IOS_TEST_LANE`, `--lane default`, or the pre-lane
+       `TRON_IOS_TEST_STATE_DIR` that CI and profiling lanes set.
+    4. The profiler or the Gateway E2E harness selects a different lane than
+       the runner for the same worktree and selection - or cannot select one -
+       so it leases and releases a lane the runner does not use.
+    5. A worktree's lane is not attributed to its worktree in `status --all`,
+       or idle-lane expiry never removes it, so per-worktree lanes accumulate.
+    6. A worktree whose directory name starts with `.`, `-` or `_` derives a
+       lane name the lane validator refuses, so every command there fails.
+    7. A deleted worktree's lane - a simulator of gigabytes - outlives its
+       worktree for the whole idle period, because only idle expiry removes a
+       lane; or the removal that closes this takes a lane that is not the
+       deleted worktree's to lose: the default lane (whose marker may name a
+       deleted worktree that created it), a lane whose worktree still exists,
+       or a lane a live command holds.
+    8. A read-only command (`help`, `status`) in a linked worktree creates that
+       worktree's lane directory, which holds no ownership marker, so no sweep
+       ever reclaims it.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.install_fake_xcodebuild()
+        # The pinned XcodeGen, found first through TRON_CI_TOOLS_DIR, so the E2E
+        # build's project generation touches no real checkout.
+        self.synthetic_stub(self.bin / "xcodegen", "print('Version: 2.45.3')\n")
+        presets = self.root / "share/xcodegen/SettingPresets"
+        (presets / "Platforms").mkdir(parents=True)
+        for preset in ("base.yml", "Platforms/iOS.yml", "Platforms/macOS.yml"):
+            (presets / preset).write_text("preset\n")
+        self.environment = {
+            **self.environment,
+            "TRON_CI_TOOLS_DIR": str(self.root),
+            "TRON_PROFILE_IOS_DERIVED_DATA": str(self.root / "profile-derived"),
+            "TRON_PROFILE_RESULTS_DIR": str(self.root / "profile-results"),
+        }
+        # No lane and no pre-lane override: the tools derive every lane path.
+        self.environment.pop("TRON_IOS_TEST_STATE_DIR")
+        self.environment.pop("TRON_IOS_TEST_DISCOVERY_ROOT")
+        self.lane_root = self.home / ".tron/internal"
+        self.primary = self.root / "checkout"
+        ignore = shutil.ignore_patterns("__pycache__")
+        for relative in ("scripts", "config", ".github/workflows"):
+            shutil.copytree(ROOT / relative, self.primary / relative, ignore=ignore)
+        shutil.copy2(ROOT / ".node-version", self.primary / ".node-version")
+        self.git(self.primary, "init", "-q")
+        self.git(self.primary, "add", "-A")
+        self.git(self.primary, "-c", "user.name=Tron Tests", "-c", "user.email=tests@tron.invalid",
+                 "commit", "-q", "-m", "checkout")
+        self.checkout_tree(self.primary)
+
+    def git(self, worktree: Path, *arguments: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(worktree), *arguments], env=self.environment,
+            check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+
+    def checkout_tree(self, worktree: Path) -> None:
+        # Untracked and empty, so it changes no source identity; the E2E build's
+        # project generation runs inside it.
+        (worktree / "packages/ios-app").mkdir(parents=True)
+
+    def linked(self, name: str) -> Path:
+        worktree = self.root / name
+        self.git(self.primary, "worktree", "add", "-q", "--detach", str(worktree))
+        self.checkout_tree(worktree)
+        return worktree
+
+    def key(self, worktree: Path) -> str:
+        return subprocess.run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(worktree)],
+            env=self.environment, check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+
+    def tool(
+        self, worktree: Path, name: str, *arguments: str, environment: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(worktree / "scripts" / name), *arguments], env=environment or self.environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180,
+        )
+
+    def stamp_products(self, worktree: Path) -> None:
+        """This worktree's runner products, built from its current source."""
+        derived = self.home / "Library/Developer/Tron/ios/test-derived-data" / self.key(worktree)
+        (derived / "Build/Products").mkdir(parents=True)
+        (derived / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+        identity = subprocess.run(
+            [sys.executable, str(IDENTITY), "show", "--worktree", str(worktree)],
+            env=self.environment, check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout
+        subprocess.run(
+            [sys.executable, str(IDENTITY), "write", "--worktree", str(worktree), "--derived-data", str(derived)],
+            env=self.environment, check=True, text=True, input=identity,
+        )
+
+    def focused_run(self, worktree: Path) -> subprocess.CompletedProcess[str]:
+        return self.tool(worktree, "tron-ios-test", "run", "--only-testing", "TronMobileTests/StubTests")
+
+    def lane_marker(self, lane: Path) -> dict[str, object]:
+        return json.loads((lane / "simulator.json").read_text())
+
+    def assert_booted_only(self, udid: object) -> None:
+        """Every boot so far targeted `udid`, and nothing is left booted."""
+        boots = {line.split(" ")[1] for line in self.log_path.read_text().splitlines() if line.startswith("boot ")}
+        self.assertEqual(boots, {udid})
+        booted = [device["udid"] for devices in self.inventory()["devices"].values()
+                  for device in devices if device["state"] == "Booted"]
+        self.assertEqual(booted, [])
+
+    def assert_default_lane_untouched(self) -> None:
+        default = self.lane_root / "ios-test"
+        self.assertFalse((default / "simulator.json").exists())
+        self.assertFalse((default / "lease.lock").exists())
+
+    def test_each_linked_worktree_runs_in_its_own_lane_beside_the_other(self) -> None:
+        """Failure mode 1: a busy worktree lane never refuses another worktree."""
+        first, second = self.linked("first-worktree"), self.linked("second-worktree")
+        self.stamp_products(first)
+        self.stamp_products(second)
+        first_lane = self.lane_root / f"ios-test-{self.key(first)}"
+        first_lane.mkdir(parents=True)
+        # The first worktree's run is in flight: its lane's lease is held.
+        self.hold_lease(first_lane, command="run")
+
+        second_run = self.focused_run(second)
+        self.assertEqual(second_run.returncode, 0, second_run.stderr)
+        second_key = self.key(second)
+        marker = self.lane_marker(self.lane_root / f"ios-test-{second_key}")
+        self.assertEqual(marker["worktree"], os.path.realpath(second))
+        self.assertEqual(marker["name"], f"Tron iOS Tests ({second_key})")
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        results = self.home / "Library/Developer/Tron/ios/test-runs"
+        owner = json.loads(((results / "latest").resolve() / "owner.json").read_text())
+        self.assertEqual(owner["lane"], second_key)
+
+        # The first worktree's own default is the lane its in-flight run holds.
+        first_run = self.focused_run(first)
+        self.assertEqual(first_run.returncode, 73, first_run.stderr)
+        self.assert_default_lane_untouched()
+
+    def test_the_primary_checkout_keeps_the_default_lane(self) -> None:
+        """Failure mode 2: the primary checkout's lane is the one it always was."""
+        self.stamp_products(self.primary)
+        result = self.focused_run(self.primary)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        marker = self.lane_marker(self.lane_root / "ios-test")
+        self.assertEqual(marker["name"], "Tron iOS Tests")
+        self.assertEqual(marker["worktree"], os.path.realpath(self.primary))
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        self.assertEqual(sorted(path.name for path in self.lane_root.iterdir() if path.name.startswith("ios-test")),
+                         ["ios-test"])
+
+    def test_an_explicit_lane_wins_over_the_worktree_default(self) -> None:
+        """Failure mode 3: the derived lane is only the default."""
+        worktree = self.linked("explicit-worktree")
+        key = self.key(worktree)
+        ci_state = self.root / "ci-state"
+        cases = (
+            ((), {}, f"{key} ({self.lane_root}/ios-test-{key})"),
+            (("--lane", "default"), {}, f"default ({self.lane_root}/ios-test)"),
+            (("--lane", "alpha"), {}, f"alpha ({self.lane_root}/ios-test-alpha)"),
+            ((), {"TRON_IOS_TEST_LANE": "alpha"}, f"alpha ({self.lane_root}/ios-test-alpha)"),
+            ((), {"TRON_IOS_TEST_STATE_DIR": str(ci_state)}, f"default ({ci_state})"),
+        )
+        for arguments, override, lane in cases:
+            with self.subTest(arguments=arguments, override=override):
+                result = self.tool(worktree, "tron-ios-test", "status", *arguments,
+                                   environment={**self.environment, **override})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"Lane: {lane}\n", result.stdout)
+
+    def test_the_profiler_and_the_e2e_harness_lease_the_runners_lane(self) -> None:
+        """Failure mode 4: one selection names one lane in all three tools."""
+        worktree = self.linked("tools-worktree")
+        key = self.key(worktree)
+        for arguments, label in (((), key), (("--lane", "beta"), "beta")):
+            with self.subTest(lane=label):
+                self.log_path.unlink(missing_ok=True)
+                lane = self.lane_root / f"ios-test-{label}"
+                # --no-build refuses (74) once the lane is provisioned: no
+                # profiler products exist, so only the lane path runs.
+                profile = self.tool(worktree, "tron-profile-ios", "--scenario", "control", "--no-build", *arguments)
+                self.assertEqual(profile.returncode, 74, profile.stderr)
+                marker = self.lane_marker(lane)
+                self.assertEqual(marker["name"], f"Tron iOS Tests ({label})")
+                self.assertEqual(marker["worktree"], os.path.realpath(worktree))
+                self.assert_booted_only(marker["udid"])
+
+                # The command the lease holder starts boots the leased lane's
+                # simulator, not the one its own default would name.
+                build = self.tool(worktree, "ios-gateway-e2e-test", "build", *arguments)
+                self.assertEqual(build.returncode, 0, build.stderr)
+                self.assertEqual(self.lane_marker(lane)["udid"], marker["udid"])
+                self.assert_booted_only(marker["udid"])
+                self.assertEqual(self.simctl_commands().count("create"), 1)
+                status = self.tool(worktree, "ios-gateway-e2e-test", "status", *arguments)
+                self.assertEqual(status.returncode, 0, status.stderr)
+                self.assertIn(f"Lane: {label} ({lane})\n", status.stdout)
+        self.assert_default_lane_untouched()
+
+    def test_a_worktree_lane_is_attributed_and_expires_when_idle(self) -> None:
+        """Failure mode 5: a worktree lane is listed as its worktree's and reclaimed."""
+        worktree = self.linked("idle-worktree")
+        self.stamp_products(worktree)
+        result = self.focused_run(worktree)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        key = self.key(worktree)
+        lane = self.lane_root / f"ios-test-{key}"
+
+        status = self.tool(worktree, "tron-ios-test", "status", "--all")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertIn(os.path.realpath(worktree), self.status_row(status.stdout, f"lane {key}"))
+
+        marker = self.lane_marker(lane)
+        marker["last_used_epoch_seconds"] = int(time.time()) - 8 * 24 * 3600
+        (lane / "simulator.json").write_text(json.dumps(marker))
+        reap = self.tool(self.primary, "tron-ios-test", "reap")
+        self.assertEqual(reap.returncode, 0, reap.stderr)
+        self.assertFalse(lane.exists())
+        self.assertFalse(self.present(str(marker["udid"])))
+
+    def test_a_worktree_named_with_a_leading_symbol_still_has_a_lane(self) -> None:
+        """Failure mode 6: every worktree directory name derives a valid lane."""
+        for name in (".dot-worktree", "-dash-worktree", "_underscore-worktree"):
+            with self.subTest(worktree=name):
+                worktree = self.linked(name)
+                key = self.key(worktree)
+                result = self.tool(worktree, "tron-ios-test", "status")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"Lane: {key} ({self.lane_root}/ios-test-{key})\n", result.stdout)
+
+    def test_a_deleted_worktrees_lane_is_removed_by_the_next_sweep(self) -> None:
+        """Failure mode 7: a lane outlives its worktree only while a command holds it."""
+        gone, held, kept = (self.linked(name) for name in ("gone-worktree", "held-worktree", "kept-worktree"))
+        for worktree in (gone, held, kept):
+            self.stamp_products(worktree)
+            result = self.focused_run(worktree)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        # The default lane, created - and so attributed - by a worktree deleted below.
+        default_run = self.tool(gone, "tron-ios-test", "run", "--lane", "default",
+                                "--only-testing", "TronMobileTests/StubTests")
+        self.assertEqual(default_run.returncode, 0, default_run.stderr)
+        default_lane = self.lane_root / "ios-test"
+        self.assertEqual(self.lane_marker(default_lane)["worktree"], os.path.realpath(gone))
+        lanes = {worktree: self.lane_root / f"ios-test-{self.key(worktree)}" for worktree in (gone, held, kept)}
+        udids = {worktree: str(self.lane_marker(lane)["udid"]) for worktree, lane in lanes.items()}
+        gone_key = self.key(gone)
+        self.hold_lease(lanes[held], command="run")
+        for worktree in (gone, held):
+            self.git(self.primary, "worktree", "remove", "--force", str(worktree))
+
+        reap = self.tool(self.primary, "tron-ios-test", "reap")
+        self.assertEqual(reap.returncode, 0, reap.stderr)
+        self.assertIn(f"removed lane {gone_key}", reap.stdout)
+        self.assertFalse(lanes[gone].exists())
+        self.assertFalse(self.present(udids[gone]))
+        for lane, worktree in ((lanes[held], held), (lanes[kept], kept), (default_lane, gone)):
+            with self.subTest(kept=lane.name):
+                self.assertEqual(self.lane_marker(lane)["worktree"], os.path.realpath(worktree))
+                self.assertTrue(self.present(str(self.lane_marker(lane)["udid"])))
+
+    def test_a_read_only_command_creates_no_lane_state(self) -> None:
+        """Failure mode 8: only a command that leases the lane creates its directory."""
+        worktree = self.linked("read-only-worktree")
+        lane = self.lane_root / f"ios-test-{self.key(worktree)}"
+        for tool, command in (("tron-ios-test", "status"), ("ios-gateway-e2e-test", "help"),
+                              ("ios-gateway-e2e-test", "status")):
+            with self.subTest(tool=tool, command=command):
+                result = self.tool(worktree, tool, command)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(lane.exists())
 
 
 class DevelopmentSimulatorFixture(LifecycleHarness, unittest.TestCase):
