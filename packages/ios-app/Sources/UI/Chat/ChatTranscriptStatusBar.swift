@@ -52,7 +52,6 @@ struct ChatTranscriptStatusBar: UIViewRepresentable {
             previousScrollsToTop = scroll.scrollsToTop
             let proxy = UIScrollView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
             proxy.backgroundColor = .clear
-            proxy.isUserInteractionEnabled = false
             proxy.isAccessibilityElement = false
             proxy.accessibilityElementsHidden = true
             proxy.showsVerticalScrollIndicator = false
