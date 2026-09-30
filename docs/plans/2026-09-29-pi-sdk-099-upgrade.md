@@ -201,7 +201,7 @@ temp-file truncation; tools default to codemode exposure instead of direct
 declaration; a server listed in `mcp.json` needs no separate write approval
 several loaded runtimes each run their own stdio server process. Codemode
 scripts may call every `direct` tool, including interactive, paid and
-subagent tools (D-3). Each accepted delta is documented in `packages/gateway/docs/mcp.md`.
+subagent tools (D-3). Each accepted delta is documented in `packages/gateway/docs/mcp.md`. Pi's process-global markdown/select/settings helpers use deterministic `dark` colors rather than the host-owned RPC callback palette because no public per-instance global setter exists; the user confirmed this visible color difference on 2026-09-30; it is tracked for an upstream setter request in P99-19.
 
 ### Ownership rules for this plan
 
@@ -229,7 +229,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7: global administrative resource reload replays and removes virtual registrations; model.list marks virtual rows; context/compaction policy uses SDK-routed physical limits; assistant rows project physical identity and thinking level; SDK stats/usage remain attached to physical response models. Resume/fork/automatic retry/compaction cross-path integration evidence remains a P99-17 checkpoint. | P99-10, P99-15 |
 | Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapted**: AuthBroker passes the global SettingsManager's stable `getDeviceId`; settings projection omits `deviceId`; OpenAI and Codex legacy OAuth are serialized on shared fixed port 1455; provider list exposes both OpenAI methods without claiming OpenAI OAuth usage support. Fake-fetch AuthBroker test captures `urn:uuid` host ID and relays the callback through token exchange. | P99-9 |
-| `system` theme default; `#rgb`/`oklch()`/`okhsl()`; `theme.style()`, `theme.colors`, `theme.appearance`; revised dark/light | **Verify/adapt** Tron's RPC baseline theme and process-global helpers | P99-11 |
+| `system` theme default; `#rgb`/`oklch()`/`okhsl()`; `theme.style()`, `theme.colors`, `theme.appearance`; revised dark/light | **Adapted; user confirmed color delta on 2026-09-30**: process-global markdown/select/settings helpers explicitly initialize `dark` because the Gateway has no terminal and no public per-instance global setter; this output differs from the host-owned RPC callback baseline. Remote frames parse dark-theme truecolor into bounded RGB styles; callback-injected baseline output is unchanged. P99-19 should request a root-exported per-instance theme setter. | P99-11, P99-19 |
 | Classifier models (`ModelRuntime.classify`, TypeSafe `jev-latest`, inherited Jev on OpenRouter/Cloudflare/Vercel/OpenCode Zen) | **Adopt**: migrate Tron's Jev to `ModelRuntime.classify()` (D-6); codemode `models.classify` inherited | P99-12, P99-20 |
 | llama.cpp classifier; llama.cpp context-window fix | **Not applicable**: Tron does not load the llama.cpp built-in (factory not root-exported) | — |
 | `fullscreenWheelScrollLines` setting | **Not applicable** (TUI only); not added to the settings projection | — |
@@ -270,7 +270,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-8 | Claimed | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | luna-worker, 2026-09-29 |
 | P99-9 | Done | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | luna-worker, 2026-09-29 |
 | P99-10 | Done | Virtual models on the Gateway (D-7) | P99-3 | luna-worker, 2026-09-29 |
-| P99-11 | Claimed | Theme default and remote extension host rendering | P99-3 | luna-worker, 2026-09-29 |
+| P99-11 | Done | Theme default and remote extension host rendering | P99-3 | luna-worker, 2026-09-29 |
 | P99-12 | Claimed | Catalog, provider and classifier deltas; release dates; K3 policy | P99-2 | luna-worker, 2026-09-29 |
 | P99-13 | Claimed | `bash` structured output and empty-output change | P99-3 | luna-worker, 2026-09-29 |
 | P99-14 | Claimed | Qualify installed packages and subagent children against 0.99 | P99-6 | luna-worker, 2026-09-29 |
@@ -279,7 +279,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-17 | Ready | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | Unassigned |
 | P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
 | P99-20 | Claimed | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
-| P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); structured per-session MCP status (user authorizes filing) | P99-8 | Unassigned |
+| P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); root-export a per-instance theme setter; structured per-session MCP status (user authorizes filing) | P99-8, P99-11 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
 | P99-22 | Done | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | luna-worker, 2026-09-29 |
 | P99-23 | Done | Parent-owned persistence/projection for bounded nested display artifacts and trusted browser live-view receipts, with no child canonical rows or independent receipts | P99-22 | luna-worker, 2026-09-29 |
@@ -513,14 +513,26 @@ clauses from `packages/gateway/docs/connections.md`.
 
 ### P99-11 — Theme and remote extension host
 
-`packages/gateway/src/sessions/semantic-ui-broker.ts` calls
-`initTheme(undefined, false)`, which now selects the `system` theme (grey until
-terminal colors arrive, and the Gateway has no terminal). Pin the process-global
-theme to the previous effective baseline, then compare captured remote-widget
-frames and markdown helper output before and after; any color change is a
-behavior-delta stop. Confirm `theme.style()`, `theme.colors` and
-`theme.appearance` work on the RPC baseline `Theme`, and update the theme rows
-in the manifest.
+`packages/gateway/src/sessions/semantic-ui-broker.ts` explicitly initializes
+Pi's process-global theme as `dark`: the Gateway has no terminal, so `system`
+can remain grey/pending, and Pi exposes no public per-instance global theme
+setter. This yields deterministic dark-palette markdown/select/settings helper
+output and valid bounded RGB styles when parsed into remote frames. Global helper
+colors differ from the host-owned 256-color RPC callback baseline; the user
+confirmed this accepted delta on 2026-09-30 (request a root-exported per-instance
+setter under P99-19). `theme.style()`, `theme.colors` and `theme.appearance` are
+verified on the RPC baseline `Theme`; callback-injected rendering remains byte
+identical. Manifest rows describe both boundaries.
+
+### P99-11 · Done · 2026-09-30 · luna-worker
+
+- Result: Process-global Pi helpers are pinned to `dark`, avoiding the terminal-dependent system theme in the terminal-less Gateway. The RPC callback keeps its independently owned 256-color baseline; remote markdown frames parse dark-palette truecolor to valid RGB styles.
+- Evidence: Node 22.22.0 TypeScript check and `check:pi-sdk` passed; personal-info guard and `git diff --check` passed. Full `semantic-ui-broker.test.ts` passed 29/29 in 0.92 s; focused theme proof passed 1/1 in 0.44 s before the full file run; pre-fix capture showed the system helper frame diverged from the committed callback baseline (heading ANSI 3 vs 6 and code ANSI 5 vs 3). The test covers global markdown/select/settings helper stability under TERM/COLORFGBG/FORCE_COLOR changes, remote frame parsing, byte-identical callback baseline output, and baseline `style()`, `colors`, `appearance`.
+- Changes: `semantic-ui-broker.ts`, its test, `compatibility-manifest.ts`, and this plan.
+- Tasks added: none.
+- Kept on purpose: no private global symbol or deep package import; Pi's public root API has no process-global per-instance setter. RPC callback theme remains session-independent.
+- Deviations: Global helper output is dark-palette truecolor rather than the RPC callback's legacy ANSI-index palette. The user confirmed this accepted delta on 2026-09-30. P99-19 now includes an upstream request for a root-exported per-instance theme setter.
+- For the next agent: P99-19 should file the per-instance setter request; P99-17 should run the full Gateway validation.
 
 ### P99-12 — Catalog, provider and classifier deltas
 

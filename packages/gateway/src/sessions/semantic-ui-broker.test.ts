@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { getMarkdownTheme, getSelectListTheme, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { Markdown } from "@earendil-works/pi-tui";
+import { parseExtensionFrame } from "../extensions/host/frame-parser.js";
 import { SemanticUIBroker, type ExtensionNotificationInput } from "./semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
 import type { ExtensionInteraction, JsonValue } from "../protocol/types.js";
@@ -37,6 +40,59 @@ const form = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("SemanticUIBroker", () => {
+  it("pins global rendering to deterministic dark colors while preserving the RPC baseline", () => {
+    // Failure modes: a terminal-less system theme can render grey/pending; global
+    // helpers can vary with terminal environment; and RGB frame parsing can lose styles.
+    const broker = brokerWith();
+    const baseline = broker.context().theme;
+    const globalMarkdown = getMarkdownTheme();
+    const expectedMarkdown = {
+      heading: (text: string) => baseline.fg("mdHeading", text),
+      link: (text: string) => baseline.fg("mdLink", text),
+      linkUrl: (text: string) => baseline.fg("mdLinkUrl", text),
+      code: (text: string) => baseline.fg("mdCode", text),
+      codeBlock: (text: string) => baseline.fg("mdCodeBlock", text),
+      codeBlockBorder: (text: string) => baseline.fg("mdCodeBlockBorder", text),
+      quote: (text: string) => baseline.fg("mdQuote", text),
+      quoteBorder: (text: string) => baseline.fg("mdQuoteBorder", text),
+      hr: (text: string) => baseline.fg("mdHr", text),
+      listBullet: (text: string) => baseline.fg("mdListBullet", text),
+      bold: (text: string) => baseline.bold(text), italic: (text: string) => baseline.italic(text),
+      underline: (text: string) => baseline.underline(text), strikethrough: (text: string) => baseline.strikethrough(text),
+      highlightCode: (code: string) => code.split("\n").map((line) => baseline.fg("mdCodeBlock", line)),
+    };
+    const markdown = "# Heading\n\nA [link](https://example.test) and `code`.\n\n> quote\n\n- item";
+    const callbackFrameBefore = new Markdown(markdown, 0, 0, expectedMarkdown).render(48);
+    const currentFrame = new Markdown(markdown, 0, 0, globalMarkdown).render(48);
+    const parsedFrame = parseExtensionFrame(currentFrame);
+    expect(parsedFrame.ok).toBe(true);
+    expect(parsedFrame.frame.lines.some((line) => line.runs.some((run) => run.style.foreground?.startsWith("#")))).toBe(true);
+
+    const captureHelpers = () => ({
+      markdown: globalMarkdown.heading("heading"),
+      select: JSON.stringify(getSelectListTheme(), (_key, value) => typeof value === "function" ? value("sample") : value),
+      settings: JSON.stringify(getSettingsListTheme(), (_key, value) => typeof value === "function" ? value("sample") : value),
+    });
+    const pinnedOutput = captureHelpers();
+    const env = { term: process.env.TERM, colorfbg: process.env.COLORFGBG, forceColor: process.env.FORCE_COLOR };
+    try {
+      process.env.TERM = "dumb"; process.env.COLORFGBG = "15;0"; process.env.FORCE_COLOR = "0";
+      expect(captureHelpers()).toEqual(pinnedOutput);
+    } finally {
+      for (const [key, value] of [["TERM", env.term], ["COLORFGBG", env.colorfbg], ["FORCE_COLOR", env.forceColor]] as const) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+    const callbackFrameAfter = new Markdown(markdown, 0, 0, expectedMarkdown).render(48);
+    expect(callbackFrameAfter).toEqual(callbackFrameBefore);
+    // Process-global helper colors intentionally use Pi's deterministic dark palette;
+    // callback-injected RPC rendering remains on the committed ANSI baseline.
+    expect(baseline.style("style", { fg: "accent" })).toBe(baseline.fg("accent", "style"));
+    expect(baseline.colors.accent).toBeDefined();
+    expect(["dark", "light"]).toContain(baseline.appearance);
+    expect(baseline.appearance).toBe("dark");
+  });
+
   it("exposes the form capability on the host UI for any installed extension", async () => {
     const broker = brokerWith(() => {});
     // An independently authored extension feature-detects the documented key

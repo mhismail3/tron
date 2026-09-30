@@ -47,7 +47,7 @@ export const extensionPresentationCompatibility = {
   custom: entry("remote-component", "components.custom", "Foundation-only: one exclusive non-overlay custom owner is bounded in the dormant harness; overlay UX, input routing, and production activation are deferred."),
   addAutocompleteProvider: entry("remote-component", "editor.autocomplete", "Phase 4."),
   setEditorComponent: entry("remote-component", "editor.component", "Phase 4."), getEditorComponent: entry("remote-component", "editor.component", "Phase 4."),
-  theme: entry("explicit-fallback", "theme.baseline", "Pinned Pi has no public per-session process-global theme injection seam."),
+  theme: entry("native-semantic", "theme.baseline", "RPC callbacks receive the host-owned 256-color dark baseline; process-global Pi helpers are pinned to dark because the Gateway has no terminal and Pi exposes no public per-instance global setter."),
   getAllThemes: entry("remote-component", "theme.registry", "Phase 4."), getTheme: entry("remote-component", "theme.registry", "Phase 4."),
   setTheme: entry("remote-component", "theme.switch", "Phase 4."),
 } satisfies Record<keyof ExtensionUIContext, CompatibilityEntry>;
@@ -128,7 +128,7 @@ export const remoteTuiFeasibilityCompatibility = {
 
 export const rendererThemeCompatibility = {
   callbackInjectedTheme: entry("renderer", "renderer.callback-theme", "The public callback theme is authoritative for renderer execution."),
-  processGlobalHelpers: entry("explicit-fallback", "renderer.global-theme-helpers", "Pi exposes initialization but no public per-session process-global synchronization seam."),
+  processGlobalHelpers: entry("explicit-fallback", "renderer.global-theme-helpers", "Pi global markdown/select/settings helpers use its deterministic dark theme; this may differ from Tron's callback-injected 256-color RPC baseline until Pi root-exports a per-instance theme setter."),
 } as const;
 
 export const rendererContractCompatibility = {
