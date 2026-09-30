@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-17 h3 final cross-module validation
+- **Last updated:** 2026-09-30, P99-17 closed after review fixes
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -284,7 +284,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-14 | Done | Qualify installed packages and subagent children against 0.99 | P99-6 | luna-worker, 2026-09-30 |
 | P99-15 | Done | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | luna-worker, 2026-09-30 |
 | P99-16 | Done | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | luna-worker, 2026-09-30 |
-| P99-17 | Claimed | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | luna-worker, 2026-09-30 |
+| P99-17 | Done | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | luna-worker, 2026-09-30 |
 | P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
 | P99-20 | Done | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); root-export a per-instance theme setter; public per-session MCP status/process count (user authorizes filing) | P99-8, P99-11 | Unassigned |
@@ -745,6 +745,22 @@ from a session; Sign in with ChatGPT; select a virtual model if one is
 installed. Then close the plan per `docs/plans/README.md`.
 
 ## Handoff log
+
+### P99-17 · Done · 2026-09-30 · orchestrator session
+
+- Result: All independent-review blockers (B1 invalid `mcp.json` after `mcp.token.set`; B2 `mcp.list` failing on unhealthy servers and iOS decoding a field Pi does not emit; B3 MCP sign-in events never reaching iOS) and majors M1-M5 are fixed with tests that fail without the fix. The `mcp.list` row contract is `{ name, state, scope, enabled, exposure, transport, tools, error? }` with a bounded `error` and no `source` path (commit 229f2bec0). The planned follow-up re-review was stopped by the user; the orchestrator verified the blocker/major fixes in code instead (JSON newline, `adoptMCPAuthOperation` wiring, `isBuiltinMcpCommand` fail-closed admission, `Bearer` header, per-scope Keychain accounts).
+- Evidence: Node 22.22.0 `tsc` clean; `check:pi-sdk` coherent at 0.99.1; full Gateway Vitest 2,323 passed, 5 failed, 1 skipped (218 files, 188 s wall) at host load average ~87; all five failures passed on isolated rerun (27/27 across three files; 2/2 for the two RuntimeRegistry cases). `scripts/tron-ios-test build` passed (206 s); focused iOS suites MCPServerListTests, BuiltinExtensionsSettingsTests, ExtensionsCatalogPresentationTests, IntegrationModelsTests, SettingsRouteIdentityTests, ProviderAuthCoordinatorTests, ToolDetailPresentationTests and Pi099VisualEvidenceTests passed 85/85 (48 s). Earlier P99-17 entries hold the Mac, rollback, payload, HTML export and full iOS evidence.
+- Kept on purpose: no further full iOS or Mac run after the review fixes; they touched only the MCP settings/auth and nested-call presentation owners covered by the focused suites.
+- Open for P99-18: the user's approval to merge; Jev paid-tagging consent (TypeSafe key as consent with a fixed $5 monthly cap, or a separate opt-in and configurable cap); manual acceptance after the user installs a signed build (MCP OAuth sign-in from the iPhone, a codemode-exposed MCP tool call, Sign in with ChatGPT, a virtual model if installed). P99-19, P99-21 and P99-24 remain Needs scoping.
+
+### Review fixes r-gw-mcp · Done · 2026-09-30 · luna-worker
+
+- Result: Fixed B1 and the Gateway portion of B2; MCP sign-in failures/cancellation now settle failed (M1); `mcp.auth.start` admits only the marked Pi built-in MCP command and binds its operation target (M2); bearer headers resolve to `Bearer <token>` (M3); Keychain items and deletes are scoped to global or the canonical trusted project cwd hash (M4); bounded CLI timeout cleanup reaps Pi's detached direct stdio-server process groups without killing an unrelated process group (minor 3); authorization URLs must match the calling slot session/server (minor 4); `mcp.token.set` rejects unknown fields/invalid server names and maps config lock contention to retryable busy (minor 7 Gateway).
+- Evidence: Node 22.22.0 TypeScript check passed. Focused Gateway tests passed 49/49 across 5 files. Running the new service regressions against the pre-fix `HEAD` service implementation failed 4/4 selected cases: invalid saved JSON (B1), discarded exit-1 JSON (B2), missing busy mapping, and unscoped credential removal. The M1 error-notification regression failed before its adapter fix. The timeout test proves a TERM-resistant slow stdio server no longer survives and an unrelated detached fixture does survive. Real `/usr/bin/security -i` parser validation against a temporary `/tmp` keychain round-tripped 4 tokens containing spaces, quotes and backslashes through `find-generic-password -w`; the throwaway keychain was deleted. Documentation policy, personal-info guard, and Gateway `git diff --check` passed. No test fixture process remained.
+- Changes: Gateway MCP service, auth broker, extension ownership/adapter, runtime-slot and RPC validation; added a captured Pi 0.99.1 failed-list CLI payload fixture; updated `packages/gateway/docs/mcp.md` with the bounded status wire shape and D-2 local-user residual risk.
+- Commit: `1fe6db692c71b69fbe013ea3643230f44617dce5` (`fix(pi-sdk-099): review B1 B2 M1-M4 minor-3/4/7 MCP admin and sign-in`). Only `packages/gateway` paths were staged and committed; the shared worktree has no staged changes afterward.
+- Kept on purpose: process cleanup only signals a detached group when a bounded `ps` snapshot identifies its group leader as a direct child of this exact CLI invocation; it skips the Gateway group, PID/PGID 1 and non-matching groups. No process is selected by name or command line.
+- Deviations: B2's iOS decoding and B3 iOS auth-operation adoption were outside this Gateway group and remain with the iOS worker. `docs/plans/2026-09-29-pi-sdk-099-upgrade.md` was not edited; this handoff is provided separately for parent insertion. Full Gateway suites remain with the orchestrator.
 
 ### P99-17 review · Reopened · 2026-09-30 · orchestrator session
 
