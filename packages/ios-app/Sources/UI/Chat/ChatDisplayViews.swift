@@ -220,7 +220,7 @@ struct DisplayToolView: View {
             inlineExpandedSurface(display)
                 .modifier(ChatMessageCopyMenu(text: "", mutationIdentity: display.presentationIdentity, actions: [
                     ChatMessageMenuAction(id: .toolDetails, title: "Tool Details", icon: "info.circle",
-                        perform: onOpenTechnicalDetails)
+                        perform: { onOpenTechnicalDetails() })
                 ]))
                 .fixedSize(horizontal: false, vertical: true)
                 .opacity(disclosure.inlineOpacity)
