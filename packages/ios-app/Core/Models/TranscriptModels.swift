@@ -352,16 +352,17 @@ package struct MessageTranscriptItem: TranscriptPayload {
     package let content: [ContentPart]
     let provider: String?
     let modelId: String?
+    package let thinkingLevel: String?
     let stopReason: String?
     let errorMessage: String?
     package let toolCallId: String?
     let toolName: String?
     let toolLabel: String?
     let isError: Bool?
-    let nestedCalls: JSONValue?
-    let details: JSONValue?
+    package let nestedCalls: JSONValue?
+    package let details: JSONValue?
     let display: DisplayProjection?
-    let usage: JSONValue?
+    package let usage: JSONValue?
     let startedAt: String?
     let completedAt: String?
     let durationMs: Int?
@@ -372,7 +373,7 @@ package struct MessageTranscriptItem: TranscriptPayload {
     var extensionOrigin: ExtensionToolOrigin? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, stopReason,
+        case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, thinkingLevel, stopReason,
              errorMessage, toolCallId, toolName, toolLabel, isError, nestedCalls, details, display, usage, startedAt,
              completedAt, durationMs, lastProgressAt, progressSequence, toolSegmentId, semantic, extensionOrigin
     }
@@ -380,7 +381,7 @@ package struct MessageTranscriptItem: TranscriptPayload {
     package init(
         id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind, role: TranscriptItem.Role,
         presentationId: String, content: [ContentPart], provider: String? = nil, modelId: String? = nil,
-        stopReason: String? = nil, errorMessage: String? = nil, toolCallId: String? = nil, toolName: String? = nil,
+        thinkingLevel: String? = nil, stopReason: String? = nil, errorMessage: String? = nil, toolCallId: String? = nil, toolName: String? = nil,
         toolLabel: String? = nil, isError: Bool? = nil, nestedCalls: JSONValue? = nil, details: JSONValue? = nil,
         display: DisplayProjection? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
         completedAt: String? = nil, durationMs: Int? = nil, lastProgressAt: String? = nil,
@@ -390,6 +391,7 @@ package struct MessageTranscriptItem: TranscriptPayload {
     ) {
         self.id = id; self.parentId = parentId; self.timestamp = timestamp; self.kind = kind; self.role = role
         self.presentationId = presentationId; self.content = content; self.provider = provider; self.modelId = modelId
+        self.thinkingLevel = thinkingLevel
         self.stopReason = stopReason; self.errorMessage = errorMessage; self.toolCallId = toolCallId; self.toolName = toolName
         self.toolLabel = toolLabel; self.isError = isError; self.nestedCalls = nestedCalls
         self.details = details; self.display = display
@@ -427,6 +429,7 @@ package struct MessageTranscriptItem: TranscriptPayload {
         content = decodedContent
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         modelId = try values.decodeIfPresent(String.self, forKey: .modelId)
+        thinkingLevel = try values.decodeIfPresent(String.self, forKey: .thinkingLevel)
         stopReason = try values.decodeIfPresent(String.self, forKey: .stopReason)
         errorMessage = try values.decodeIfPresent(String.self, forKey: .errorMessage)
         toolCallId = try values.decodeIfPresent(String.self, forKey: .toolCallId)
@@ -736,6 +739,7 @@ package enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     }
     package var provider: String? { if case .message(let value) = self { value.provider } else { nil } }
     package var modelId: String? { if case .message(let value) = self { value.modelId } else { nil } }
+    package var thinkingLevel: String? { if case .message(let value) = self { value.thinkingLevel } else { nil } }
     var stopReason: String? { if case .message(let value) = self { value.stopReason } else { nil } }
     package var errorMessage: String? { if case .message(let value) = self { value.errorMessage } else { nil } }
     package var toolCallId: String? { if case .message(let value) = self { value.toolCallId } else { nil } }
@@ -744,6 +748,7 @@ package enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     package var extensionOrigin: ExtensionToolOrigin? { if case .message(let value) = self { value.extensionOrigin } else { nil } }
     package var toolSegmentId: String? { if case .message(let value) = self { value.toolSegmentId } else { nil } }
     package var isError: Bool? { if case .message(let value) = self { value.isError } else { nil } }
+    package var nestedCalls: JSONValue? { if case .message(let value) = self { value.nestedCalls } else { nil } }
     package var display: DisplayProjection? { if case .message(let value) = self { value.display } else { nil } }
     package var details: JSONValue? {
         switch self {
@@ -753,7 +758,7 @@ package enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         default: nil
         }
     }
-    var usage: JSONValue? {
+    package var usage: JSONValue? {
         switch self {
         case .message(let value): value.usage
         case .summary(let value): value.usage

@@ -6,6 +6,9 @@ struct ToolDetailSheet: View {
     let density: ToolDetailDisplayDensity
     @State private var showingTechnicalDetails = false
     @State private var showingChanges = false
+    @State private var selectedNestedCall: NestedToolCallPresentation?
+    @Environment(\.canonicalResourceSessionID) private var sessionID
+    @Environment(\.displayPresentationHandler) private var presentDisplay
 
     private var accent: Color { tool.error ? .tronError : ChatSemanticPillRole.tool.accent }
 
@@ -24,6 +27,9 @@ struct ToolDetailSheet: View {
                 chipSection(presentation)
                 primarySection(presentation)
                 resultSection(presentation)
+                nestedCallsSection(presentation)
+                attachmentSection(presentation)
+                classifyCostSection(presentation)
                 diffSection(presentation)
                 technicalDetailsButton
             }
@@ -49,6 +55,9 @@ struct ToolDetailSheet: View {
             identity: "chat.tool.technical.\(tool.id)"
         ) {
             ToolTechnicalDetailsSheet(tool: tool, presentation: presentation)
+        }
+        .tronManagedSheet(item: $selectedNestedCall, identity: { "chat.tool.nested.\(tool.id).\($0.id)" }) { nested in
+            NestedToolCallDetailSheet(call: nested, accent: accent)
         }
     }
 
@@ -203,10 +212,128 @@ struct ToolDetailSheet: View {
             }
         } else if let structured = presentation.structuredResult, presentation.diff == nil {
             structuredResultSection(structured)
-        } else if presentation.diff == nil {
+        } else if presentation.diff == nil, presentation.kind != .bash {
             Text(tool.isRunning ? "Waiting for the first runtime result." : "Completed without output.")
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextSecondary)
+        }
+    }
+
+    @ViewBuilder
+    private func nestedCallsSection(_ presentation: ToolDetailPresentation) -> some View {
+        if presentation.displayTitle == "Codemode", !presentation.nestedCalls.isEmpty {
+        VStack(alignment: .leading, spacing: 7) {
+            sectionLabel("Nested calls · \(presentation.nestedCalls.count)")
+            ForEach(presentation.nestedCalls) { call in
+                Button { selectedNestedCall = call } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: call.status == .failed ? "exclamationmark.triangle.fill" : "wrench.and.screwdriver")
+                            .foregroundStyle(call.status == .failed ? Color.tronError : accent)
+                        Text(ToolDetailPresentation.displayTitle(for: call.toolName))
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text([call.status.rawValue.capitalized, call.durationMs.map(ToolTiming.format(milliseconds:))].compactMap { $0 }.joined(separator: " · "))
+                            .font(TronTypography.code(size: TronTypography.sizeSecondary))
+                            .foregroundStyle(Color.tronTextSecondary)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: call.status == .failed ? .tronError : accent, tintOpacity: 0.06, interactive: true)
+                }
+                .buttonStyle(.plain)
+            }
+            if !presentation.nestedCallsComplete {
+                boundedPreviewNote("Some nested-call details were omitted by the Gateway.")
+            }
+        }
+        }
+    }
+
+    @ViewBuilder
+    private func attachmentSection(_ presentation: ToolDetailPresentation) -> some View {
+        if presentation.displayTitle == "Codemode",
+           let nested = tool.details?.objectValue?["tronNested"]?.objectValue {
+        let display = nested["display"]?.arrayValue ?? []
+        let browsers = nested["browserLiveViews"]?.arrayValue ?? []
+        if !display.isEmpty || !browsers.isEmpty {
+        VStack(alignment: .leading, spacing: 7) {
+            sectionLabel("Attachments")
+            ForEach(Array(display.enumerated()), id: \.offset) { _, item in
+                if let projection = item.objectValue?["display"],
+                   let display = try? projection.decode(DisplayProjection.self),
+                   let sessionID, let presentDisplay {
+                    Button {
+                        let route = DisplayRoute(sessionID: sessionID, display: display)
+                        let command: DisplayPresentationCommand = DisplayPresentationPolicy.activationSurface(for: display) == .floating
+                            ? .showFloating(route) : .showSheet(route)
+                        presentDisplay(command)
+                    } label: {
+                        Label(display.title.isEmpty ? "Open display attachment" : display.title, systemImage: "rectangle.on.rectangle")
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .tronGlassSurface(accent: accent, tintOpacity: 0.06, interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Label("Display artifact attached", systemImage: "rectangle.on.rectangle")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .tronGlassSurface(accent: accent, tintOpacity: 0.06)
+                }
+            }
+            ForEach(Array(browsers.enumerated()), id: \.offset) { _, item in
+                if let projection = item.objectValue?["display"],
+                   let display = try? projection.decode(DisplayProjection.self),
+                   let sessionID, let presentDisplay {
+                    Button {
+                        let route = DisplayRoute(sessionID: sessionID, display: display)
+                        let command: DisplayPresentationCommand = DisplayPresentationPolicy.activationSurface(for: display) == .floating
+                            ? .showFloating(route) : .showSheet(route)
+                        presentDisplay(command)
+                    } label: {
+                        Label(display.title.isEmpty ? "Open browser view" : display.title, systemImage: "safari")
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .tronGlassSurface(accent: accent, tintOpacity: 0.06, interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Label("Browser live view attached", systemImage: "safari")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .tronGlassSurface(accent: accent, tintOpacity: 0.06)
+                }
+            }
+            if nested["complete"]?.boolValue == false {
+                boundedPreviewNote("Some attachments were omitted.")
+            }
+        }
+        }
+        }
+    }
+
+    @ViewBuilder
+    private func classifyCostSection(_ presentation: ToolDetailPresentation) -> some View {
+        if let cost = presentation.classifyCostUSD {
+            HStack {
+                Label("Classification cost", systemImage: "dollarsign.circle")
+                    .font(TronTypography.secondaryDescription)
+                Spacer()
+                Text(cost.formatted(.currency(code: "USD").precision(.fractionLength(4...6))))
+                    .font(TronTypography.code(size: TronTypography.sizeSecondary))
+            }
+            .foregroundStyle(Color.tronTextSecondary)
+            .padding(10)
+            .tronGlassSurface(accent: accent, tintOpacity: 0.06)
         }
     }
 
@@ -248,6 +375,37 @@ struct ToolDetailSheet: View {
             .font(TronTypography.sans(size: TronTypography.sizeSecondary + TronSettingsLayoutPolicy.metadataSizeAdjustment))
             .foregroundStyle(Color.tronTextMuted)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct NestedToolCallDetailSheet: View {
+    let call: NestedToolCallPresentation
+    let accent: Color
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Label(call.status.rawValue.capitalized, systemImage: call.status == .failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(call.status == .failed ? Color.tronError : accent)
+                if let duration = call.durationMs {
+                    Text(ToolTiming.format(milliseconds: duration))
+                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(Color.tronTextSecondary)
+                }
+                if let arguments = call.arguments {
+                    TronStructuredJSONView(value: arguments, title: "Arguments", accent: accent, showsRawDisclosure: false)
+                } else if let bytes = call.argumentsBytes {
+                    Text("Arguments omitted (\(bytes) bytes).")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                }
+            }
+            .padding(16)
+        }
+        .tronScrollEdgeChrome()
+        .presentationDetents([.medium, .large])
+        .tronPresentation()
     }
 }
 

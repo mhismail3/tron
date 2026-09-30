@@ -1030,7 +1030,15 @@ bounded semantic presentation only for that selected tool: exact lowercase built
 command, query, diff, and readable result. Extension-authored Pi tool labels are projected separately from canonical
 invocation names and become the native row/detail title (for example, `subagent_wait` displays as **Subagent Wait**),
 while arbitrary extension tools may foreground only the first
-trusted common string key and otherwise lead with their result. Bash commands wrap to the available width
+trusted common string key and otherwise lead with their result. Pi codemode uses that same tool-detail route:
+its script and readable result lead, bounded nested invocations stay inside the parent detail with their own
+semantic status/duration and standard nested detail sheet, and `details.tronNested` attachments remain parent-owned.
+Admitted display descriptors use the existing session-bound display presentation route; no nested call becomes a
+canonical transcript row or independent receipt. MCP tool names use the projected server/tool identity, resource
+and search tools remain generic result cards, and session tool selection groups the runtime's tool inventory by
+namespace while keeping hidden exposures unavailable. Routed assistant rows use physical provider/model attribution;
+virtual model names are marked in the model and session selectors without replacing physical attribution. Bash keeps
+Pi's empty result empty rather than inventing `(no output)`. Bash commands wrap to the available width
 using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
 and boolean metadata remains unchanged. The final Technical details sub-sheet starts with larger, compact selectable

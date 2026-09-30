@@ -286,7 +286,11 @@ struct ChatCompactPillVisualState: Hashable, Sendable {
         return Self(
             id: run.id,
             title: run.title,
-            detail: single.map { ComposerResourceNameFormatter.friendly($0.subtitle) } ?? run.status,
+            detail: single.map { tool in
+                tool.toolName == "codemode" && tool.nestedCallCount > 0
+                    ? run.status
+                    : ComposerResourceNameFormatter.friendly(tool.subtitle)
+            } ?? run.status,
             icon: run.failureCount > 0
                 ? "exclamationmark.triangle.fill"
                 : single.map { ToolDetailPresentation.icon(for: $0.toolName ?? $0.title) }

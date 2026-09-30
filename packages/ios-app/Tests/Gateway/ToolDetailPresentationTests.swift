@@ -162,6 +162,59 @@ struct ToolDetailPresentationTests {
         ).text == "Running · 46.2s")
     }
 
+    @Test("new Pi tool families get generic human titles and bounded argument summaries")
+    func piToolTitlesAndArguments() {
+        let mcp = ToolDetailPresentation(tool: tool(
+            "mcp__calendar__find_events",
+            toolName: "mcp__calendar__find_events",
+            request: .object(["query": .string("today"), "limit": .number(10)])
+        ))
+        #expect(mcp.displayTitle == "calendar/find_events")
+        #expect(mcp.icon == "network")
+        #expect(mcp.primaryLabel == "Query")
+        #expect(mcp.primaryValue == "today")
+
+        let search = ToolDetailPresentation(tool: tool(
+            "tool_search", toolName: "tool_search",
+            request: .object(["query": .string("calendar")])
+        ))
+        #expect(search.displayTitle == "Search tools")
+        #expect(search.icon == "magnifyingglass")
+
+        let resource = ToolDetailPresentation(tool: tool(
+            "read_mcp_resource", toolName: "read_mcp_resource",
+            request: .object(["uri": .string("file:///notes")]),
+            response: .object(["contents": .array([.object(["text": .string("note")])])])
+        ))
+        #expect(resource.displayTitle == "Read MCP resource")
+        #expect(resource.primaryLabel == "Resource")
+        #expect(resource.readableResult == "note")
+        #expect(resource.structuredResult != nil)
+    }
+
+    @Test("codemode retains bounded nested calls and parent-owned attachments")
+    func codemodeNestedPresentation() {
+        let nested: JSONValue = .object(["complete": .bool(false), "calls": .array([
+            .object(["id": .string("parent/1"), "toolName": .string("mcp__calendar__events"),
+                     "status": .string("failed"), "durationMs": .number(42),
+                     "arguments": .object(["query": .string("today")])]),
+        ])])
+        let details: JSONValue = .object(["tronNested": .object([
+            "complete": .bool(true), "display": .array([.object(["toolName": .string("display")])]),
+            "browserLiveViews": .array([]),
+        ])])
+        let tool = self.tool("codemode", toolName: "codemode", content: "output", nestedCalls: nested, details: details,
+                             usage: .object(["cost": .object(["total": .number(0.125)])]))
+        let presentation = ToolDetailPresentation(tool: tool)
+        #expect(presentation.displayTitle == "Codemode")
+        #expect(presentation.readableResult == "output")
+        #expect(presentation.nestedCalls.count == 1)
+        #expect(presentation.nestedCalls[0].status == .failed)
+        #expect(!presentation.nestedCallsComplete)
+        #expect(presentation.classifyCostUSD == 0.125)
+        #expect(presentation.tronNestedComplete == true)
+    }
+
     @Test("command is complete and output state never falls back to its request")
     func commandAndExplicitEmptyOutput() {
         let command = "set -e\nprintf 'complete command'"
@@ -878,7 +931,10 @@ struct ToolDetailPresentationTests {
         response: JSONValue? = nil,
         content: String = "",
         fallbackContent: JSONValue? = nil,
-        outputTruncated: Bool = false
+        outputTruncated: Bool = false,
+        nestedCalls: JSONValue? = nil,
+        details: JSONValue? = nil,
+        usage: JSONValue? = nil
     ) -> ChatToolPresentation {
         ChatToolPresentation(
             id: "call-\(title)",
@@ -889,6 +945,9 @@ struct ToolDetailPresentationTests {
             response: response,
             content: content,
             fallbackContent: fallbackContent,
+            nestedCalls: nestedCalls,
+            details: details,
+            usage: usage,
             error: false,
             startedAt: "2026-01-01T00:00:00Z",
             completedAt: subtitle == "Running" ? nil : "2026-01-01T00:00:01Z",

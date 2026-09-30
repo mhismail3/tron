@@ -901,6 +901,9 @@ struct ChatToolPayload: Hashable, Sendable {
     let response: JSONValue?
     let content: String
     let fallbackContent: JSONValue?
+    let nestedCalls: JSONValue?
+    let details: JSONValue?
+    let usage: JSONValue?
 }
 
 struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
@@ -917,6 +920,8 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let lastProgressAt: String?
     let progressSequence: Int?
     let outputTruncated: Bool
+    let nestedCallCount: Int
+    let nestedFailureCount: Int
     let display: DisplayProjection?
     let requestedDisplaySurface: DisplaySurface?
     let extensionOrigin: ExtensionToolOrigin?
@@ -939,6 +944,9 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         lastProgressAt = tool.lastProgressAt
         progressSequence = tool.progressSequence
         outputTruncated = tool.outputTruncated
+        let nested = tool.nestedCalls?.objectValue?["calls"]?.arrayValue ?? []
+        nestedCallCount = min(32, nested.count)
+        nestedFailureCount = nested.prefix(32).filter { $0.objectValue?["status"]?.stringValue == "failed" }.count
         display = tool.display
         requestedDisplaySurface = tool.display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? DisplayPresentationPolicy.invocationSurface(toolName: tool.toolName, request: tool.request)
@@ -1011,6 +1019,9 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let response: JSONValue?
     let content: String
     let fallbackContent: JSONValue?
+    let nestedCalls: JSONValue?
+    let details: JSONValue?
+    let usage: JSONValue?
     let error: Bool
     let startedAt: String?
     let completedAt: String?
@@ -1036,6 +1047,9 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         response: JSONValue?,
         content: String,
         fallbackContent: JSONValue?,
+        nestedCalls: JSONValue? = nil,
+        details: JSONValue? = nil,
+        usage: JSONValue? = nil,
         error: Bool,
         startedAt: String?,
         completedAt: String?,
@@ -1060,6 +1074,9 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         self.response = response
         self.content = content
         self.fallbackContent = fallbackContent
+        self.nestedCalls = nestedCalls
+        self.details = details
+        self.usage = usage
         self.error = error
         self.startedAt = startedAt
         self.completedAt = completedAt
@@ -1086,6 +1103,9 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         response = payload.response
         content = payload.content
         fallbackContent = payload.fallbackContent
+        nestedCalls = payload.nestedCalls
+        details = payload.details
+        usage = payload.usage
         error = descriptor.error
         startedAt = descriptor.startedAt
         completedAt = descriptor.completedAt
@@ -1109,7 +1129,10 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
             request: request,
             response: response,
             content: content,
-            fallbackContent: fallbackContent
+            fallbackContent: fallbackContent,
+            nestedCalls: nestedCalls,
+            details: details,
+            usage: usage
         )
     }
 
@@ -1571,7 +1594,11 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     /// liveness. A paged or temporarily partial finalized group is still
     /// historical evidence when every visible descriptor is terminal.
     var isRunning: Bool { tools.contains(where: \.isRunning) }
-    var failureCount: Int { tools.filter(\.error).count }
+    var failureCount: Int {
+        tools.reduce(into: 0) { count, tool in
+            count += (tool.error ? 1 : 0) + (tool.toolName == "codemode" ? tool.nestedFailureCount : 0)
+        }
+    }
     var producerTitle: String? {
         let owners = tools.compactMap { $0.extensionOrigin?.owner }
         guard let first = owners.first,
@@ -1589,6 +1616,10 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         return producerTitle.map { "\($0) · \(value)" } ?? value
     }
     var status: String? {
+        if let codemode = tools.first(where: { $0.toolName == "codemode" }), codemode.nestedCallCount > 0 {
+            let failed = codemode.nestedFailureCount
+            return failed > 0 ? "\(codemode.nestedCallCount) nested · \(failed) failed" : "\(codemode.nestedCallCount) nested"
+        }
         if failureCount > 0 { return "\(failureCount) failed" }
         return isRunning ? "In progress" : "Completed"
     }

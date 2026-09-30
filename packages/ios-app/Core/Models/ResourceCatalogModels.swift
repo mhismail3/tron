@@ -411,6 +411,8 @@ package struct ModelSummary: Codable, Hashable, Identifiable, Sendable {
     /// USD per million tokens from the pinned SDK catalog. Absent when the
     /// Gateway has no price, which is not the same as free.
     package var cost: ModelTokenPrice? = nil
+    /// Present only when the Gateway reports that Pi routes this virtual model.
+    package var virtual: Bool? = nil
 
     package var ref: ModelRef { ModelRef(provider: provider, id: id) }
 }
