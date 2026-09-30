@@ -2688,7 +2688,7 @@ final class ChatScrollCoordinator {
             ?? command.flatMap { command in
                 switch command.destination {
                 case .materialize(let id), .openingTail(let id): id
-                case .tail, .offsetY: nil
+                case .tail, .offsetY, .oldestHistory: nil
                 }
             }
         guard let requestedPhysicalID,

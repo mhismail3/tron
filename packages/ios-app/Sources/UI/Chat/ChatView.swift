@@ -2757,7 +2757,7 @@ struct ChatView: View {
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
                 transcriptScrollPosition = target
             case .oldestHistory:
-                scrollPosition.scrollTo(edge: transcriptOrientation.oldestEdge)
+                transcriptScrollPosition.scrollTo(edge: transcriptOrientation.oldestEdge)
             case .openingTail(let renderedID):
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
