@@ -242,6 +242,8 @@ case "$command" in
   handoff)
     supervisor_live || { echo "Debug Gateway is not supervised and ready" >&2; exit 1; }
     [[ "$(status)" == *'"readiness":"ready"'* ]] || { echo "Debug Gateway is not ready" >&2; exit 1; }
+    # Stable only receives a candidate recorded as built from a clean tree.
+    "$NODE_BIN" "$STATE_HELPER" handoff-admission "$STATE_FILE" "$HOME/.tron-dev" || exit 1
     "$NODE_BIN" "$DEPLOY" handoff-debug --host "$HOST" --dev-home "$HOME/.tron-dev" --stable-home "$HOME/.tron" --stable-bundled-root /Applications/Tron.app/Contents/Resources/Gateway
     ;;
   start|restart)

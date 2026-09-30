@@ -303,6 +303,42 @@ function runningCandidateSource(state) {
   return state.candidateSources.find((entry) => entry?.runtimeEpoch === state.epoch);
 }
 
+async function selectedDevManifest(devHome) {
+  const root = join(resolve(devHome), "gateway", "payloads", "dev");
+  const selected = await readState(join(root, "current.json"));
+  if (selected.schema !== 1 || selected.kind !== "tron-gateway-selection" || selected.channel !== "dev"
+    || typeof selected.version !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(selected.version)
+    || typeof selected.payloadFingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(selected.payloadFingerprint)) {
+    throw new Error("Debug selection is missing or malformed");
+  }
+  const manifest = await readState(join(root, "versions", selected.version, "manifest.json"));
+  if (manifest.schema !== 1 || manifest.kind !== "tron-gateway-payload" || manifest.channel !== "dev"
+    || manifest.version !== selected.version || manifest.payloadFingerprint !== selected.payloadFingerprint
+    || typeof manifest.runtimeEpoch !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(manifest.runtimeEpoch)
+    || typeof manifest.sourceRevision !== "string" || !/^[A-Za-z0-9._-]{1,256}$/u.test(manifest.sourceRevision)) {
+    throw new Error("Debug selected manifest identity is missing or malformed");
+  }
+  return manifest;
+}
+
+// Stable must always be a known commit (#124). Handoff copies the selected dev
+// payload and proves the running Gateway is exactly it, so admission reads the
+// source record of that payload's runtime epoch - not the latest build or a
+// build sharing its fingerprint. Only an explicit clean record is admitted;
+// dirty and unknown dirtiness both fail closed.
+async function handoffAdmission(statePath, devHome) {
+  const manifest = await selectedDevManifest(devHome);
+  const state = await readState(statePath);
+  const source = Array.isArray(state.candidateSources)
+    ? state.candidateSources.find((entry) => entry?.runtimeEpoch === manifest.runtimeEpoch)
+    : undefined;
+  if (source?.dirty === false) return manifest;
+  const reason = source?.dirty === true
+    ? `was built from uncommitted changes${typeof source.worktree === "string" ? ` in ${source.worktree}` : ""}`
+    : "has no recorded source dirtiness";
+  throw new Error(`Debug handoff refused: candidate ${manifest.version} ${reason}; commit the changes, then run scripts/tron dev restart and hand off the clean candidate`);
+}
+
 const [command, ...args] = process.argv.slice(2);
 if (!command) throw new Error("missing lifecycle command");
 if (command === "transition") {
@@ -333,24 +369,17 @@ if (command === "transition") {
 } else if (command === "fingerprint") {
   process.stdout.write(`${await fingerprint(args[0])}\n`);
 } else if (command === "selected-identity") {
-  const home = resolve(args[0]);
-  const channel = args[1];
-  if (channel !== "dev") throw new Error("developer selection must use the dev channel");
-  const root = join(home, "gateway", "payloads", channel);
-  const selected = await readState(join(root, "current.json"));
-  if (selected.schema !== 1 || selected.kind !== "tron-gateway-selection" || selected.channel !== channel
-    || typeof selected.version !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(selected.version)
-    || typeof selected.payloadFingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(selected.payloadFingerprint)) {
-    throw new Error("Debug selection is missing or malformed");
-  }
-  const manifest = await readState(join(root, "versions", selected.version, "manifest.json"));
-  if (manifest.schema !== 1 || manifest.kind !== "tron-gateway-payload" || manifest.channel !== channel
-    || manifest.version !== selected.version || manifest.payloadFingerprint !== selected.payloadFingerprint
-    || typeof manifest.runtimeEpoch !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(manifest.runtimeEpoch)
-    || typeof manifest.sourceRevision !== "string" || !/^[A-Za-z0-9._-]{1,256}$/u.test(manifest.sourceRevision)) {
-    throw new Error("Debug selected manifest identity is missing or malformed");
-  }
+  if (args[1] !== "dev") throw new Error("developer selection must use the dev channel");
+  const manifest = await selectedDevManifest(args[0]);
   process.stdout.write(`${manifest.runtimeEpoch} ${manifest.sourceRevision} ${manifest.payloadFingerprint}\n`);
+} else if (command === "handoff-admission") {
+  if (!args[0] || !args[1]) throw new Error("handoff-admission requires lifecycle path and dev home");
+  try {
+    await handoffAdmission(args[0], args[1]);
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
 } else if (command === "validate-build-identity") {
   const value = args[0] ?? "";
   const match = /^([A-Za-z0-9._-]{1,128}) ([a-f0-9]{64}) ([A-Za-z0-9._-]{1,128})$/u.exec(value);

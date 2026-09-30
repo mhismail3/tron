@@ -155,7 +155,12 @@ accepted-run shutdown draining, and waits for truthful exact health identity.
 It refuses an unknown owner already listening on 9848. After testing, the user
 may initiate `scripts/tron dev handoff --tailscale`; it performs authenticated
 pre/post identity checks and copies the exact payload into Stable as an inactive
-candidate only after pre/post authenticated identity proof. Promotion still
+candidate only after pre/post authenticated identity proof. Stable is always a
+known commit: handoff refuses the selected candidate unless its runtime epoch's
+source record says it was built from a clean tree. A dirty candidate and one
+whose dirtiness is unknown (no record, or a record written before dirtiness was
+recorded) both fail closed; commit the changes, run `scripts/tron dev restart`,
+and hand off the resulting clean candidate. Promotion still
 requires explicit user confirmation in iOS pinned to version plus fingerprint. Debug and Stable RPCs are
 channel-bound; neither runtime can mutate the other channel. Do not
 replace `/Applications/Tron.app`, invoke production
