@@ -958,7 +958,6 @@ export interface KnowledgeConnectorState {
   connector: "raindrop" | "x" | "jev";
   /** Adapter state key. Generic account authority remains ConnectionOwner. */
   connectionId?: string;
-  setupRevision?: number;
   enabled: boolean;
   accountId?: string;
   scope?: string;

@@ -577,3 +577,25 @@ buy credits) and the consent; agents never do them.
 - Changes: review-fix commits.
 - Tasks added: none.
 - Deviations: No live Gateway interaction, rebuild, or lifecycle transition. The status route is exposed as the explicit agent action `connectorStatus`; the mutable runtime routine remains outside the repository at the specified workspace path.
+
+### C26–C27 final review fixes · Done · 2026-09-30 · knowledge-consolidation session
+
+- Result: fixed the follow-up review of `68d9d9216`. `raindropMove` no longer
+  answers `already-home` from the capture-time collection: the live Raindrop
+  location decides (a bookmark the user dragged out of its home is moved back),
+  and `already-home` is returned only when Raindrop reports it is already there
+  and no pending move of that operation exists. A refused X token refresh is
+  now an `XAuthorizationError`, so discovery records `auth-error` instead of a
+  generic `error`. The Knowledge connector state no longer keeps a private copy
+  of the connection setup revision (it went stale on every policy update); the
+  connection owner's revision is the only fence. Removed the unreachable X
+  OAuth run label. Routine step 4 now names `raindropMove`'s exact parameters.
+- Evidence: "derives remote destinations…" fails without the live-location
+  change (`already-home` instead of `moved`); "records an X auth error after a
+  policy update…" fails without the auth-error classification. Removing the
+  stale revision copy is a deletion with no separate regression: the discovery
+  path now records the auth error through its own classification. Knowledge,
+  integrations and transport suites 818/820; `knowledge-intake-enrichment`
+  passes alone (temp-dir cleanup race under load) and `request-span` fails on
+  `main` too.
+- Changes: this commit.

@@ -108,6 +108,38 @@ describe("X OAuth connection", () => {
     expect(calls.filter(url => url === "https://api.x.com/2/oauth2/token")).toHaveLength(2);
   });
 
+  // Failure mode: the adapter fenced its auth-error write on a private copy of
+  // the setup revision that went stale on every policy update, so after any
+  // policy change a revoked X login never reached the Knowledge connector state.
+  it("records an X auth error after a policy update when refresh is refused", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-x-oauth-auth-error-")); roots.push(root);
+    const owner = new ConnectionOwner(root);
+    const credentials = new Map<string, string>();
+    const credentialStore = { async read(reference: string) { return credentials.get(reference); }, async write(reference: string, value: string) { credentials.set(reference, value); }, async delete(reference: string) { credentials.delete(reference); } } as ConnectorCredentialStore & { write(reference: string, value: string): Promise<void>; delete(reference: string): Promise<void> };
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const extension = new KnowledgeConnectorExtension(store, {
+      credentials: credentialStore, connections: owner,
+      xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 1 }, sleep: async () => {},
+      http: async (url, init) => {
+        if (url === "https://api.x.com/2/oauth2/token" && init.method === "POST") {
+          const form = new URLSearchParams(init.body);
+          if (form.get("grant_type") === "refresh_token") return response({ error: "invalid_grant" }, 400);
+          return response({ token_type: "bearer", access_token: "access-1", refresh_token: "refresh-1", expires_in: 7_200 });
+        }
+        if (url.startsWith("https://api.x.com/2/users/me")) return response({ data: { id: "98765", username: "reader" } });
+        if (url.startsWith("https://api.x.com/2/users/98765/bookmarks")) return response({ errors: [{ title: "Unauthorized" }] }, 401);
+        throw new Error(`Unexpected X request ${url}`);
+      },
+    });
+    const started = await extension.invoke({ operation: "knowledge.x.oauth.begin", request: { commandId: "auth-error-start", instanceId: "x-reader", clientId: "client", redirectUri: "https://app.example/callback", policy } } as any) as any;
+    const callback = new URL("https://app.example/callback"); callback.searchParams.set("code", "code"); callback.searchParams.set("state", started.state);
+    await extension.invoke({ operation: "knowledge.x.oauth.complete", request: { commandId: "auth-error-complete", operationId: started.operationId, callbackUrl: callback.toString() } } as any);
+    const live = await owner.resolveInstance("x-reader");
+    await owner.execute({ kind: "policy.update", commandId: "auth-error-policy-update", instanceId: "x-reader", expectedSetupRevision: live.setupRevision, policy: { ...live.policy, paidBudgetCents: 50 } });
+    await expect(extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: "auth-error-discovery", connector: "x", connectionId: "x-reader", limit: 1 } } as any)).rejects.toThrow("reconnect the account");
+    expect(await store.connectorState("x", "x-reader")).toMatchObject({ health: "auth-error" });
+  });
+
   it("persists token rotation but fences the access token when setup changes during refresh", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-x-oauth-race-")); roots.push(root);
     const owner = new ConnectionOwner(root);

@@ -490,7 +490,6 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x" | "j
     }
   }
   for (const key of ["accountId", "scope", "credentialRef", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
-  if (state.setupRevision !== undefined && (!Number.isSafeInteger(state.setupRevision) || (state.setupRevision as number) < 1)) throw new KnowledgeStoreError("invalid", "Invalid connector setup revision");
   if (state.checkpoints !== undefined) {
     if (!state.checkpoints || typeof state.checkpoints !== "object" || Array.isArray(state.checkpoints) || Object.keys(state.checkpoints).length > 32) throw new KnowledgeStoreError("invalid", "Invalid connector checkpoints");
     for (const [key, value] of Object.entries(state.checkpoints as Record<string, unknown>)) if (key.length < 1 || key.length > 256 || typeof value !== "string" || value.length > 4_096) throw new KnowledgeStoreError("invalid", "Invalid connector checkpoint");

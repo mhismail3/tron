@@ -837,7 +837,7 @@ export class KnowledgeService {
       case "knowledge.raindrop.intake":
       case "knowledge.source.ingest":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
-        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : action.operation === "knowledge.raindrop.move" ? "Raindrop move" : action.operation.startsWith("knowledge.x.oauth") ? "X OAuth" : "Knowledge connector action", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
+        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : action.operation === "knowledge.raindrop.move" ? "Raindrop move" : "Knowledge connector action", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
     }
   }
 

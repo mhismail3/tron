@@ -228,6 +228,12 @@ function parseX(value: any): PendingItem[] {
   }).filter((item: PendingItem | undefined): item is PendingItem => Boolean(item));
 }
 
+/** A refused X token refresh: the login itself is gone, so the run's health is
+ * an authorization failure the user fixes by reconnecting, not a generic error. */
+class XAuthorizationError extends GatewayError {
+  constructor() { super("unsupported", "X authorization refresh failed; reconnect the account"); }
+}
+
 export class KnowledgeConnectorExtension {
   private readonly http: ConnectorHTTP;
   private readonly sleep: (milliseconds: number) => Promise<void>;
@@ -380,7 +386,7 @@ export class KnowledgeConnectorExtension {
     await this.options.connections.recordProviderObservation(attempt.instanceId, setupRevision, { credentialAvailability: "available", providerIdentity: "admitted" });
     await this.store.updateConnectorState(command(request.commandId, "x-oauth-state"), "x", current => {
       const sameAccount = current?.accountId === userId;
-      return { ...(sameAccount ? current! : initial("x")), connectionId: attempt.instanceId, setupRevision, accountId: userId, scope: userId, credentialRef, enabled: attempt.policy.enabled, allowWrites: attempt.policy.allowWrites, paidAccessApproved: attempt.policy.paidAccessApproved, paidBudgetCents: sameAccount ? current!.paidBudgetCents : attempt.policy.paidBudgetCents, recurringApproved: attempt.policy.recurringApproved, health: "ready" };
+      return { ...(sameAccount ? current! : initial("x")), connectionId: attempt.instanceId, accountId: userId, scope: userId, credentialRef, enabled: attempt.policy.enabled, allowWrites: attempt.policy.allowWrites, paidAccessApproved: attempt.policy.paidAccessApproved, paidBudgetCents: sameAccount ? current!.paidBudgetCents : attempt.policy.paidBudgetCents, recurringApproved: attempt.policy.recurringApproved, health: "ready" };
     }, undefined, attempt.instanceId);
     return result as Record<string, unknown>;
   }
@@ -415,9 +421,11 @@ export class KnowledgeConnectorExtension {
 
   private async markXAuthorizationError(connectionId: string, setupRevision: number): Promise<void> {
     try { await this.options.connections?.recordProviderObservation(connectionId, setupRevision, { credentialAvailability: "unavailable", providerIdentity: "unknown" }); } catch { return; }
+    // The connection owner's setup revision is the only fence; this adapter
+    // keeps no copy of it (a copy went stale on every policy update).
     const live = await this.connectionFor(connectionId, "x", true);
     if (!live || live.setupRevision !== setupRevision) return;
-    await this.store.updateConnectorState(command(connectionId, "x-auth-error"), "x", state => state?.connectionId === connectionId && state.setupRevision === setupRevision ? { ...state, health: "auth-error", lastError: "X authorization expired; reconnect the account" } : state ?? initial("x"), undefined, connectionId);
+    await this.store.updateConnectorState(command(connectionId, "x-auth-error"), "x", state => state?.connectionId === connectionId ? { ...state, health: "auth-error", lastError: "X authorization expired; reconnect the account" } : state ?? initial("x"), undefined, connectionId);
   }
 
   private async refreshXToken(connectionId: string, credentialRef: string, setupRevision: number, signal: AbortSignal): Promise<void> {
@@ -435,7 +443,7 @@ export class KnowledgeConnectorExtension {
     } catch (error) {
       await this.markXAuthorizationError(connectionId, setupRevision);
       if (error instanceof GatewayError && error.code === "conflict") throw error;
-      throw new GatewayError("unsupported", "X authorization refresh failed; reconnect the account");
+      throw new XAuthorizationError();
     }
   }
 
@@ -1069,7 +1077,6 @@ export class KnowledgeConnectorExtension {
     const itemId = identity?.provider === "raindrop" ? identity.itemId : source.content.origins?.find(origin => origin.identity?.provider === "raindrop")?.identity?.itemId;
     const accountId = identity?.provider === "raindrop" ? identity.accountId : source.content.origins?.find(origin => origin.identity?.provider === "raindrop")?.identity?.accountId;
     if (!itemId || !accountId || itemId !== request.itemId || accountId !== state.accountId) return { status: "conflict" };
-    if (sourceCollection === home.collectionId) return { status: "already-home" };
     return this.moveRaindrop({ commandId: request.commandId, itemId, source, expectedRevision: request.expectedRevision, identity: { provider: "raindrop", accountId, itemId }, connectionId: request.connectionId, expectedSetupRevision: authority.setupRevision }, signal);
   }
 
@@ -1166,7 +1173,7 @@ export class KnowledgeConnectorExtension {
       clearTimeout(deadline);
       return { connector, discovered: discovered.discovered, pending: scopedPending.length, remaining: state.remaining, health: state.health };
     } catch (error) {
-      const health = credentialUnavailable || error instanceof ConnectorHTTPError && authFailure(error.status) ? "auth-error" : error instanceof ConnectorHTTPError && error.status === 429 ? "rate-limited" : "error";
+      const health = credentialUnavailable || error instanceof XAuthorizationError || error instanceof ConnectorHTTPError && authFailure(error.status) ? "auth-error" : error instanceof ConnectorHTTPError && error.status === 429 ? "rate-limited" : "error";
       const message = error instanceof ConnectorHTTPError ? `Provider request failed (${error.status})` : error instanceof Error ? error.message : "Connector discovery failed";
       if (health === "auth-error") await this.recordAdmission(current, "unavailable", "unknown", request.commandId, expectedSetupRevision);
       if (message.includes("authenticated account does not match")) await this.recordAdmission(current, "available", "mismatch", request.commandId, expectedSetupRevision);
@@ -1271,7 +1278,7 @@ export class KnowledgeConnectorExtension {
 
   /** Raindrop-only reversible move. Capture must be locally complete and the
    * exact pending effect is durable before the provider mutation is attempted. */
-  private async moveRaindrop(input: { commandId: string; itemId: string; source: KnowledgeRecord & { kind: "source" }; expectedRevision?: string; identity?: { provider: string; accountId: string; itemId: string }; connectionId?: string; expectedSetupRevision?: number }, externalSignal?: AbortSignal): Promise<{ status: "moved" | "conflict" | "unsupported" }> {
+  private async moveRaindrop(input: { commandId: string; itemId: string; source: KnowledgeRecord & { kind: "source" }; expectedRevision?: string; identity?: { provider: string; accountId: string; itemId: string }; connectionId?: string; expectedSetupRevision?: number }, externalSignal?: AbortSignal): Promise<{ status: "moved" | "already-home" | "conflict" | "unsupported" }> {
     const state = await this.store.connectorState("raindrop"); if (!state?.enabled || !state.allowWrites || !state.credentialRef) return { status: "unsupported" };
     try { this.assertCredentialNamespace("raindrop", state.credentialRef); } catch { return { status: "unsupported" }; }
     if (!input.expectedRevision || !input.identity || input.identity.itemId !== input.itemId || input.source.revisionId !== input.expectedRevision) return { status: "conflict" };
@@ -1323,7 +1330,10 @@ export class KnowledgeConnectorExtension {
     if (!remoteItemId || remoteItemId !== input.identity.itemId || !originalCollectionId) return { status: "conflict" };
     // A crash may occur after the provider move and before local completion.
     // Destination is an acknowledged success; never reclassify or issue PUT again.
-    if (originalCollectionId === destination) return { status: "moved" };
+    // The live location is the authority. A bookmark already at its derived
+    // home is "already-home", except when this same operation's move is the
+    // durable pending effect (a crash after the PUT): that is its completion.
+    if (originalCollectionId === destination) return { status: latestState.pendingRemote?.operationId === input.commandId ? "moved" : "already-home" };
     const liveAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
     if (!liveAuthority?.raindropCollections?.some(mapping => mapping.collectionId === originalCollectionId)) return { status: "conflict" };
     const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: latestSource.id, basisRevisionId: latestSource.revisionId, provider: input.identity.provider, accountId: input.identity.accountId, originalCollectionId, destination, createdAt: this.now() };
