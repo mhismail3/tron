@@ -3,6 +3,7 @@ import { lstat, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { backgroundWork, type BackgroundWorkRegistration } from "../background-work.js";
 import { isIgnoredCatalogDirectory } from "./catalog-discovery.js";
+import { offLoop } from "../transport/request-span.js";
 import type {
   CatalogMetadataIndex,
   CatalogMetadataIndexRow,
@@ -388,7 +389,9 @@ export class SessionCatalog {
    * for a named session waits for that change to land instead of answering from
    * a cut that predates it. Nothing queued settles immediately. */
   awaitQueuedChanges(): Promise<void> {
-    return this.lane;
+    // Waiting for catalog work uses no event-loop time. Do not let this request
+    // hold the scheduler paused while the queued refresh tries to yield.
+    return offLoop(() => this.lane);
   }
 
   /** Session IDs a pass could read a header for but could not publish a row or
@@ -437,7 +440,7 @@ export class SessionCatalog {
   async searchIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
     // The startup durable load and its reconcile are already in this lane, so
     // one await is a completed cut rather than a second pass.
-    await this.lane;
+    await offLoop(() => this.lane);
     if (this.closed || !this.reconciledCut) return undefined;
     const duplicates = this.duplicateSessionIds();
     const identities = new Map<string, SessionCatalogIdentity>();

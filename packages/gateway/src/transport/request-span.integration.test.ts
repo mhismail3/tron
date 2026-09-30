@@ -108,6 +108,44 @@ function persistedRecords(path: string): Array<Record<string, unknown>> {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+describe("receipt-backed prompt request span", () => {
+  it("logs receipt persistence and measures only the same-command lane wait", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-request-span-receipt-"));
+    cleanups.push(async () => { await rm(root, { recursive: true, force: true }); });
+    const receipts = new CommandReceiptStore(root);
+    let releaseOperation!: () => void;
+    let markOperationStarted!: () => void;
+    const operationStarted = new Promise<void>((resolve) => { markOperationStarted = resolve; });
+    const operationGate = new Promise<void>((resolve) => { releaseOperation = resolve; });
+    const firstSpan = new RequestSpan();
+    const secondSpan = new RequestSpan();
+    const first = runInRequestSpan(firstSpan, () => receipts.execute(
+      "device", "session.prompt", "shared-command", async () => {
+        markOperationStarted();
+        await operationGate;
+        return { accepted: true };
+      },
+    ));
+    await operationStarted;
+    const second = runInRequestSpan(secondSpan, () => receipts.execute(
+      "device", "session.prompt", "shared-command", async () => ({ accepted: true }),
+    ));
+    const lockHeldAt = performance.now();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const lockHeldMs = performance.now() - lockHeldAt;
+    releaseOperation();
+    await Promise.all([first, second]);
+    const firstBreakdown = firstSpan.breakdown(1);
+    const secondBreakdown = secondSpan.breakdown(1);
+    expect(firstBreakdown?.stages).toContain("receipt.pending-persist");
+    expect(firstBreakdown?.stages).toContain("receipt.completed-persist");
+    expect(secondBreakdown?.stages).toContain("receipt.command-lane=");
+    const laneWaitMs = stagesOf(secondBreakdown!.stages).get("receipt.command-lane")!;
+    expect(laneWaitMs).toBeGreaterThan(0);
+    expect(laneWaitMs).toBeLessThanOrEqual(lockHeldMs + 20);
+  });
+});
+
 describe("cold session.open request span", () => {
   it("names a cold open's stages in the real logger's record and reports their volume", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-request-span-open-"));

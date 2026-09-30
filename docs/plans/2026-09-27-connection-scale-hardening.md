@@ -665,9 +665,9 @@ rows are in priority order.
 | --- | --- | --- | --- | --- |
 | R-1 | Done | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | orchestrator, 2026-09-29: merged to `main` with four known misses the user accepted in writing (see handoff); F-4..F-7 own them |
 | F-4 | Blocked | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-4), 2026-09-30; `ws.bufferedAmount` cannot bound bytes already accepted into kernel/path buffers, so the required mechanism and qualification remain outstanding (see handoff) |
-| F-5 | Blocked | Prompt admission p99 target 250 ms in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567, with F-6 and F-7), 2026-09-30; diagnostic p99 1,224.560 ms, attributed to slow durable receipt and run-marker writes, not queue/auth/response; remain blocked on durable-storage latency (see handoff) |
+| F-5 | Blocked | Prompt admission p99 target 250 ms in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567, with F-6 and F-7), 2026-09-30; diagnostic p99 1,224.560 ms, but retained record does not support stage attribution; remain blocked (see handoff) |
 | F-6 | Blocked | Event-loop delay p99 20 ms target; attribute with a CPU profile | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30; catalog metadata parsing now yields through G-9; diagnostic p99 34.630 ms/max 274.951 ms misses target and needs a qualifying quiet-host run (see handoff) |
-| F-7 | Done | Warm `session.open` p99 131.8 ms against 300 ms at host load 18 | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30; target met in full-size profile (see handoff) |
+| F-7 | Blocked | Warm `session.open` p99 300 ms target in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30; available F-567 runs all exceed target (368–3,559 ms); prior 131.8 ms run was baseline, not candidate (see handoff) |
 | T-7 | Done | The profiler prime's first `session.list` waits on a named catalog-readiness deadline (90 s) instead of the 40 x 250 ms measured-retry budget, which a 3,000-file fixture outlasts on a busy host | F-5, F-6, F-7 | orchestrator, 2026-09-30; `scripts/tron-profile-gateway-driver.mjs`, `test-tron-profile.py` OK |
 | R-2 | Ready | User installs the Mac Release build and the iOS build; agent verifies the deployment | R-1 | E-3d owes one user action: prove the LAN kill switch on the installed release (`launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off`, user restarts the Gateway, `lan.listener state=disabled reason=setting_off` appears) |
 | R-3 | Ready | User runs Tron normally for at least 24 hours, then exports phone logs | R-2 | |
@@ -1909,16 +1909,13 @@ Read the numbers as one sample per case.
   remains above the 20 ms p99 target; F-6 stays Blocked pending a quiet-host
   qualification. No per-task CPU attribution was obtained for this run.
 - F-5: prompt-admission p99/max was 1,224.560 ms in this one-iteration run.
-  Stage probes isolated a 1,088 ms prompt: pending/completed receipt persists
-  took 360/501 ms, prompt operation 322 ms (including run-marker persistence
-  260 ms), while command-lane/inventory queue waits were below 1 ms and
-  response write was 0.05 ms. This locates the tail at required durable storage
-  writes, not auth, queueing, or response transport. The pending fence and
-  completion receipt preserve accepted-mutation idempotency; the marker is
-  lifecycle ownership. No durability, deadline, or target semantics were
-  weakened. F-5 remains Blocked on durable-storage tail latency.
-- F-7: warm-open p99 131.8 ms at host load 18 met the 300 ms target. F-7 is
-  Done.
+  Its retained `rpc.completed` record has `unaccountedMs=1061` and no receipt,
+  marker, or lane stage breakdown, so the earlier 360/501/260 ms attribution is
+  unverified. F-5 remains Blocked; no durability semantics were changed.
+- F-7 remains Blocked. The 131.8 ms result came from baseline commit
+  `3c5711a77951`, not this candidate. Available candidate runs report warm-open
+  p99 2,152 ms (`003413Z`), 3,559 ms (`004726Z`), 368 ms (`005901Z`), and
+  509.272 ms (`010618Z`), all above the 300 ms target.
 - Validation: `npm run build`; focused `catalog-discovery.test.ts` and
   `command-receipts.test.ts` (30/30); the five-file rerun passed 317/318 tests.
   One pre-existing timing assertion in `request-span.integration.test.ts`
@@ -1930,6 +1927,17 @@ Read the numbers as one sample per case.
   qualification profile was not run: host load had risen to 22.66/18.77/17.96.
 - Changes: catalog owner, focused regression, prompt request-span stages and
   this task status/handoff; no changes to thresholds or deadlines.
+
+### 2026-09-30 — F-567 independent-review fixes (worker)
+
+- Fixed refresh/search deadlock: catalog waiters leave the request-competing
+  signal while waiting; regression covers a live `RequestSpan` with scheduler
+  contention and a 600-entry refresh.
+- Corrected F-5 attribution to unverified and returned F-7 to Blocked; candidate
+  warm-open p99 evidence is 368–3,559 ms. Focused catalog tests passed.
+- Added a receipt-backed prompt-span integration case for pending/completed
+  persistence stages and same-command lane wait; F-5/F-6/F-7 still need valid
+  qualification evidence.
 - For the next agent: rerun F-5/F-6 on a quiet host after checking `rpc.completed`
   `receipt.pending-persist`, `receipt.completed-persist`,
   `session.prompt.marker-persist`, `session.prompt.runtime-lane`,
