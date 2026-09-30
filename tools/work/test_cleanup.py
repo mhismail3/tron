@@ -204,12 +204,23 @@ class MergedRemovalTests(CleanupFixture):
         self.assertEqual(git(self.repo, "rev-parse", "--abbrev-ref", "HEAD"), BASE)
         self.assertTrue((self.repo / "README.md").exists())
 
-    # Failure mode 45: the caller's own shell sits in the worktree it cleans up.
+    # Failure mode 45: the owner's shell sits in the worktree it cleans up and
+    # stays its parent, as when an agent runs `work cleanup` after `land`.
     def test_the_owner_runs_it_from_inside_the_worktree(self):
-        path, branch, _ = self.task(7)
-        os.chdir(path)
-        code, out = self.cleanup(path)
-        self.assertEqual(code, 0, out)
+        branch = "feat/7-task"
+        claims.create_claim(self.repo, REMOTE, BASE, branch, 7, "session-a")
+        git(self.repo, "fetch", "-q", REMOTE)
+        path = self.root / "7-task"
+        git(self.repo, "worktree", "add", "-q", "--track", "-b", branch, str(path), f"{REMOTE}/{branch}")
+        head = self.commit(path, ".github/work.json", json.dumps(self.config))
+        git(path, "push", "-q", REMOTE, f"HEAD:refs/heads/{branch}")
+        self.add_pull(branch, head)
+        cli = Path(__file__).resolve().parent / "cli.py"
+        shell = subprocess.run(["bash", "-c", f"{sys.executable} {cli} cleanup; echo shell-cwd=$PWD"], cwd=path,
+                               capture_output=True, text=True, timeout=120)
+        self.assertEqual(shell.returncode, 0, shell.stdout + shell.stderr)
+        self.assertIn(f"shell-cwd={path}", shell.stdout)
+        self.assertIn("removed:", shell.stdout)
         self.assert_removed(path, branch)
 
 

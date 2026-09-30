@@ -80,11 +80,15 @@ def _shown(lines: List[str]) -> str:
 # ------------------------------------------------------------------- proofs
 
 
+def _under_root(tree: Worktree, settings: Settings) -> bool:
+    return settings.root in tree.path.parents
+
+
 def _scope(tree: Worktree, settings: Settings) -> Optional[str]:
     """Why the worktree is not a cleanup candidate at all, or None."""
     if tree.path == settings.primary:
         return "the primary checkout is never cleaned up"
-    if tree.path == settings.root or settings.root not in tree.path.parents:
+    if not _under_root(tree, settings):
         return "outside the worktree root"
     if tree.prunable or not tree.path.is_dir():
         return "its directory is missing; git worktree prune is the housekeeping procedure's"
@@ -114,12 +118,12 @@ def _merged_head(gh: Gh, branch: str, head: str, base: str) -> Tuple[Optional[st
     return None, "no pull request from it is merged into " + base + (f" (merged {', '.join(others)})" if others else "")
 
 
-def _local_blockers(tree: Worktree, head: str, settings: Settings) -> List[str]:
-    """Why removing the worktree now could lose something that is not in the merged head."""
+def _local_blockers(tree: Worktree, settings: Settings) -> List[str]:
+    """Why removing the worktree now could lose something that is not in its (merged) head."""
     path, reasons = tree.path, []
     current = _git(path, "rev-parse", "HEAD").stdout.strip()
-    if current != head:
-        reasons.append(f"HEAD moved to {current[:12]} after the merged head {head[:12]}")
+    if current != tree.head:
+        reasons.append(f"HEAD moved to {current[:12]} from {tree.head[:12]}")
     operation = land.operation_in_progress(path)
     if operation:
         reasons.append(f"a {operation} is in progress")
@@ -178,7 +182,7 @@ def _process_blockers(path: Path) -> List[str]:
 def _blockers(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[str], List[str]]:
     """(the pull request that merged the head, every reason the worktree must stay)."""
     pull, why = _merged_head(gh, tree.branch, tree.head, settings.base)
-    return pull, ([why] if why else []) + _local_blockers(tree, tree.head, settings) + _process_blockers(tree.path)
+    return pull, ([why] if why else []) + _local_blockers(tree, settings) + _process_blockers(tree.path)
 
 
 # ------------------------------------------------------------------ removal
@@ -216,14 +220,14 @@ def _release(path: Path, entry: dict) -> Optional[str]:
     return None
 
 
-def _remove(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[bool, str]:
+def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
     """Release, recheck, then remove the worktree, the local branch and the remote branch."""
     for entry in settings.releases:
         failure = _release(tree.path, entry)
         if failure:
             return False, f"release command {failure}"
     # The release commands take time; everything local is proven again right before removing.
-    reasons = _local_blockers(tree, tree.head, settings) + _process_blockers(tree.path)
+    reasons = _local_blockers(tree, settings) + _process_blockers(tree.path)
     if reasons:
         return False, "; ".join(reasons)
     removed = _git(settings.primary, "worktree", "remove", str(tree.path), check=False)
@@ -232,7 +236,11 @@ def _remove(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[bool, str]:
     # Only at the merged head: a branch moved since the check keeps its commits.
     deleted = _git(settings.primary, "update-ref", "-d", f"refs/heads/{tree.branch}", tree.head, check=False)
     local = "deleted" if deleted.returncode == 0 else f"kept ({deleted.stderr.strip()})"
-    remote = land.delete_branch(settings.primary, settings.remote, tree.branch, tree.head)
+    try:
+        remote = land.delete_branch(settings.primary, settings.remote, tree.branch, tree.head)
+    except land.LandError as error:
+        return False, (f"worktree removed, local branch {local}; {settings.remote}/{tree.branch} was left: {error}. "
+                       f"Delete it only if it is still at {tree.head[:12]}")
     return True, f"local branch {local}; {settings.remote}/{tree.branch} {remote}"
 
 
@@ -257,8 +265,9 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
         return os.path.relpath(tree.path, shown)
 
     if all_worktrees:
-        outside = [t for t in trees if t.path != primary and _scope(t, settings) == "outside the worktree root"]
-        candidates = sorted((t for t in trees if t not in outside and t.path != primary), key=lambda t: t.path)
+        others = [t for t in trees if t.path != primary]
+        outside = [t for t in others if not _under_root(t, settings)]
+        candidates = sorted((t for t in others if _under_root(t, settings)), key=lambda t: t.path)
     else:
         here = Path(_git(cwd, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
         candidates = [t for t in trees if t.path == here]
@@ -289,17 +298,17 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
                   f"release commands: {releases}")
             done += 1
             continue
-        ok, detail = _remove(gh, tree, settings)
+        ok, detail = _remove(tree, settings)
         if ok:
             print(f"removed:  {label} ({tree.branch} at {tree.head[:12]}, {pull} merged); {detail}")
             done += 1
         else:
-            print(f"kept:     {label} ({tree.branch}): {detail}")
+            print(f"stopped:  {label} ({tree.branch}): {detail}")
             failed += 1
 
     if all_worktrees:
         root = os.path.relpath(settings.root, shown)
-        print(f"{'would remove' if dry_run else 'removed'} {done}, kept {blocked + failed} under {root}; "
+        print(f"{'would remove' if dry_run else 'removed'} {done}, kept {blocked}, stopped {failed} under {root}; "
               f"{len(outside)} worktree{'s' if len(outside) != 1 else ''} outside {root} left to the "
               "housekeeping procedure")
         return 1 if failed else 0
