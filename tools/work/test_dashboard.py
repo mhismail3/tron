@@ -1,4 +1,4 @@
-"""Isolated checks for dashboard failure modes 12-23 in README.md.
+"""Isolated checks for dashboard failure modes 20-31 in README.md.
 
 Inputs are GitHub-shaped responses in the form the dashboard's queries return
 them (recorded from the live API, including a deleted-content Project item and
@@ -134,7 +134,7 @@ def model_of(**kwargs):
 
 
 class EscapingTests(unittest.TestCase):
-    # Failure mode 12.
+    # Failure mode 20.
     HOSTILE = '<script>alert(1)</script>"><img src=x onerror=alert(2)>'
 
     def test_github_text_is_escaped_and_nothing_external_loads(self):
@@ -155,7 +155,7 @@ class EscapingTests(unittest.TestCase):
 
 
 class GhostItemTests(unittest.TestCase):
-    # Failure mode 13.
+    # Failure mode 21.
     def test_items_without_usable_content_are_ignored_and_counted(self):
         model = model_of(items=[
             GHOST,
@@ -172,7 +172,7 @@ class GhostItemTests(unittest.TestCase):
 
 
 class StaleTests(unittest.TestCase):
-    # Failure mode 14.
+    # Failure mode 22.
     def stale_numbers(self, pushed, issue_comment=None, pr_comment=None):
         model = model_of(
             items=[item(issue(3, comment_hours_ago=issue_comment), status="In progress")],
@@ -198,7 +198,7 @@ class StaleTests(unittest.TestCase):
 
 
 class ForkPullTests(unittest.TestCase):
-    # Failure mode 21.
+    # Failure mode 29.
     def test_fork_pull_request_with_the_claim_branch_name_is_ignored(self):
         model = model_of(
             items=[item(issue(3), status="In progress")],
@@ -218,7 +218,7 @@ class ForkPullTests(unittest.TestCase):
 
 
 class DisagreementTests(unittest.TestCase):
-    # Failure mode 15.
+    # Failure mode 23.
     def test_each_kind_is_reported(self):
         model = model_of(
             items=[
@@ -246,7 +246,7 @@ class DisagreementTests(unittest.TestCase):
 
 
 class ReadyOrderTests(unittest.TestCase):
-    # Failure mode 16.
+    # Failure mode 24.
     def test_epic_rank_then_declared_priority_then_unblocked(self):
         model = model_of(items=[
             item(issue(100, labels=["epic"]), status="In progress", rank=2),
@@ -267,7 +267,7 @@ class ReadyOrderTests(unittest.TestCase):
 
 
 class OrphanTests(unittest.TestCase):
-    # Failure modes 17 and 18.
+    # Failure modes 25 and 26.
     def test_orphans_and_live_work(self):
         model = model_of(
             items=[item(issue(1), status="In progress"), item(issue(2, state="CLOSED"), status="Done")],
@@ -294,7 +294,7 @@ class OrphanTests(unittest.TestCase):
 
 
 class NeedsYouTests(unittest.TestCase):
-    # Failure mode 19.
+    # Failure mode 27.
     def test_label_or_status_and_only_open(self):
         model = model_of(
             items=[
@@ -335,7 +335,7 @@ def page(nodes, next_cursor=None):
 
 
 class PaginationTests(unittest.TestCase):
-    # Failure mode 20.
+    # Failure mode 28.
     def test_every_page_is_read_in_bounded_calls(self):
         gh = FakeGh({
             "items": {None: page([item(issue(n), status="Ready") for n in range(1, 101)], "c1"),
@@ -400,7 +400,7 @@ def git(cwd, *args):
 
 
 class RunTests(unittest.TestCase):
-    """Failure modes 22 and 23, through `run` with real Git and a stand-in `gh`."""
+    """Failure modes 30 and 31, through `run` with real Git and a stand-in `gh`."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

@@ -316,41 +316,41 @@ The names it reads (statuses, labels, fields, the verify context) come from the
 
 `test_dashboard.py` checks these against recorded GitHub-shaped responses.
 
-12. **GitHub text injects markup into the HTML.** Titles, labels and branch
+20. **GitHub text injects markup into the HTML.** Titles, labels and branch
     names are attacker-controlled in a public repository. Every such string is
     HTML-escaped, and only `https://` links are rendered.
-13. **A Project item without usable content crashes the run or shows up.**
+21. **A Project item without usable content crashes the run or shows up.**
     Deleting an issue before removing its Project item leaves an item whose
     content is null. Such items, drafts, pull requests and issues from other
     repositories are ignored and only counted.
-14. **Staleness is misjudged.** Last activity is the latest of the claim
+22. **Staleness is misjudged.** Last activity is the latest of the claim
     branch's head commit, the issue's latest comment and its pull request's
     latest comment, so a recent comment keeps an old branch fresh. A claim is
     stale only past 48 hours.
-15. **A disagreement between the claim branch and Status goes unreported.**
+23. **A disagreement between the claim branch and Status goes unreported.**
     Each of the three kinds above is reported, and a consistent claim is not.
-16. **The Ready queue is ordered wrongly.** Priority follows the declared option
+24. **The Ready queue is ordered wrongly.** Priority follows the declared option
     order, not the alphabetical order of names, and a parent epic's rank wins
     over the task's own.
-17. **An orphan is missed, or live work is called an orphan.** A worktree on the
+25. **An orphan is missed, or live work is called an orphan.** A worktree on the
     claim branch of an open issue is not an orphan; a worktree outside the
     worktree root is not reported at all.
-18. **Output leaks a local absolute path.** Worktrees appear only relative to
+26. **Output leaks a local absolute path.** Worktrees appear only relative to
     the checkout's parent directory.
-19. **A Needs-you item is missed.** A labeled issue that is not in the Project
+27. **A Needs-you item is missed.** A labeled issue that is not in the Project
     still appears, and closed issues do not.
-20. **Pagination drops items.** Every page of Project items, pull requests and
+28. **Pagination drops items.** Every page of Project items, pull requests and
     labeled issues is read, and the number of calls grows with pages, not with
     issues.
-21. **A fork's pull request is taken for the claim's pull request.** Claim
+29. **A fork's pull request is taken for the claim's pull request.** Claim
     branch names are public, so anyone can open a pull request from a fork with
     the same head name. Only pull requests whose head is in this repository
     count toward a claim's PR, checks and activity.
-22. **An orphan worktree misstates its issue.** A local worktree on a
+30. **An orphan worktree misstates its issue.** A local worktree on a
     claim-style branch with no remote branch is reported with its issue's real
     state, not as "does not exist", even when the issue is outside the Project.
     `RunTests` drives `run` against real Git and a stand-in `gh` executable.
-23. **A missing issue fails the run, or a missing repository reads as missing
+31. **A missing issue fails the run, or a missing repository reads as missing
     issues.** GitHub answers a lookup of a missing number with a `NOT_FOUND`
     error and exit status 1; that issue is reported as missing. A `NOT_FOUND`
     on the repository itself still fails the run.
