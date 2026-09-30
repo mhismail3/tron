@@ -24,7 +24,7 @@ import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESE
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorDiscover"), Type.Literal("connectorQueue"), Type.Literal("connectorAck"), Type.Literal("raindropMove"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("assessSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorDiscover"), Type.Literal("connectorQueue"), Type.Literal("connectorAck"), Type.Literal("raindropMove"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -80,6 +80,8 @@ const toolParameters = Type.Object({
   expectedRevision: Type.Optional(Type.String({ minLength: 16, maxLength: 80 })),
   budgetCents: Type.Optional(Type.Number({ minimum: 0, maximum: 1_000_000 })),
   attemptId: Type.Optional(Type.String({ minLength: 16, maxLength: 64 })),
+  assessor: Type.Optional(Type.Union([Type.Literal("jev"), Type.Literal("model")])),
+  maxChargeCents: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 100 })),
   tagCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   tagEdit: Type.Optional(Type.Union([
     Type.Object({ kind: Type.Literal("add"), tag: Type.Object({ id: Type.String({ minLength: 1, maxLength: 48 }), label: Type.String({ minLength: 1, maxLength: 80 }), definition: Type.String({ minLength: 1, maxLength: 512 }), category: Type.String({ minLength: 1, maxLength: 48 }), decayClass: Type.Union([Type.Literal("ages"), Type.Literal("stable")]), state: Type.Literal("active") }, { additionalProperties: false }) }, { additionalProperties: false }),
@@ -234,7 +236,7 @@ export interface KnowledgeExtensionSeam {
  * budget here and must refuse only operations that spend it: a spent tagging
  * budget never blocks free edits such as verdicts, placement or relations. */
 export type KnowledgeCurationGate = (operation: KnowledgeCurationRequest["operation"]) => { ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string } | Promise<{ ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string }>;
-export interface KnowledgeTaggingRuntime { engine: KnowledgeTaggingEngine; budget: KnowledgeTaggingBudget; connections: Pick<ConnectionOwner, "snapshot">; }
+export interface KnowledgeTaggingRuntime { engine: KnowledgeTaggingEngine; budget: KnowledgeTaggingBudget; connections: Pick<ConnectionOwner, "snapshot">; assessment?: SourceAssessmentModel; }
 
 export interface KnowledgeGenerationModel extends SourceAssessmentModel {
   reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal; maxOutputChars: number }): Promise<string>;
@@ -285,14 +287,16 @@ export class ModelRuntimeKnowledgeModel implements KnowledgeGenerationModel {
     bounded.text = input.text.slice(0, Math.max(0, this.limits.maxInputChars - inputOverhead));
     const request = JSON.stringify(bounded);
     if (request.length > this.limits.maxInputChars) throw new Error("Source assessment input exceeded its configured bound");
-    const raw = await this.complete("You are Tron's bounded source assessor. Return strict JSON with summary, contribution, whyItMatters, possibleUse, evidenceQuality (high|medium|low|none|unknown), and freshness (current|aging|stale|unknown).", request, signal, Math.max(128, Math.ceil(this.limits.maxOutputChars / 4)));
+    const raw = await this.complete("You are Tron's bounded source assessor. Use only the supplied source evidence and persisted interests. Return strict JSON with summary, contribution, whyItMatters, possibleUse, evidenceQuality (high|medium|low|none|unknown), freshness (current|aging|stale|unknown), recommendation (retained|archived|pending), confidence (number from 0 to 1), and classification (a short primary useful category). This is a recommendation only and never changes admission.", request, signal, Math.max(128, Math.ceil(this.limits.maxOutputChars / 4)));
     let value: unknown; try { value = JSON.parse(raw); } catch { throw new Error("Source assessor returned non-JSON output"); }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Source assessment is invalid");
     const result = value as Record<string, unknown>;
-    for (const key of ["summary", "evidenceQuality", "freshness"]) if (typeof result[key] !== "string" || !result[key]) throw new Error("Source assessment is incomplete");
+    for (const key of ["summary", "evidenceQuality", "freshness", "recommendation", "classification"]) if (typeof result[key] !== "string" || !result[key]) throw new Error("Source assessment is incomplete");
+    if (!Number.isFinite(result.confidence) || (result.confidence as number) < 0 || (result.confidence as number) > 1) throw new Error("Source assessment confidence is invalid");
+    if (!["retained", "archived", "pending"].includes(result.recommendation as string) || (result.classification as string).length > 80) throw new Error("Source assessment recommendation or classification is invalid");
     if (["summary", "contribution", "whyItMatters", "possibleUse"].some(key => typeof result[key] === "string" && (result[key] as string).length > this.limits.maxOutputChars)) throw new Error("Source assessment output exceeded its configured bound");
     if (!["high", "medium", "low", "none", "unknown"].includes(result.evidenceQuality as string) || !["current", "aging", "stale", "unknown"].includes(result.freshness as string)) throw new Error("Source assessment has invalid quality");
-    return { summary: result.summary as string, ...(typeof result.contribution === "string" ? { contribution: result.contribution } : {}), ...(typeof result.whyItMatters === "string" ? { whyItMatters: result.whyItMatters } : {}), ...(typeof result.possibleUse === "string" ? { possibleUse: result.possibleUse } : {}), evidenceQuality: result.evidenceQuality as SourceAssessment["evidenceQuality"], freshness: result.freshness as SourceAssessment["freshness"] };
+    return { summary: result.summary as string, ...(typeof result.contribution === "string" ? { contribution: result.contribution } : {}), ...(typeof result.whyItMatters === "string" ? { whyItMatters: result.whyItMatters } : {}), ...(typeof result.possibleUse === "string" ? { possibleUse: result.possibleUse } : {}), evidenceQuality: result.evidenceQuality as SourceAssessment["evidenceQuality"], freshness: result.freshness as SourceAssessment["freshness"], recommendation: result.recommendation as NonNullable<SourceAssessment["recommendation"]>, confidence: result.confidence as number, classification: result.classification as string };
   }
 }
 
@@ -723,11 +727,41 @@ export class KnowledgeService {
       }
       case "knowledge.tags.estimate": return this.estimateTaggingCost(action.request);
       case "knowledge.curation.jobs": return this.summaryJobs(action.request);
-      case "knowledge.source.triage": {
-        const config = await this.store.config();
-        const model = this.modelForConfig?.(config);
-        if (!model) throw new GatewayError("unsupported", "Knowledge assessment requires an explicitly configured model");
-        return this.runOwned("source triage", (signal, retirements) => triageSource(this.store, { ...action.request, signal, retirements }, model), signal);
+      case "knowledge.source.assess": {
+        const request = action.request;
+        if (request.assessor === "model") {
+          const config = await this.store.config();
+          const model = this.modelForConfig?.(config);
+          if (!model) throw new GatewayError("unsupported", "Source assessment requires an explicitly configured Knowledge model");
+          return this.runOwned("source assessment", (signal, retirements) => triageSource(this.store, { commandId: request.commandId, sourceId: request.sourceId, expectedRevision: request.expectedRevision, signal, retirements }, model), signal);
+        }
+        const tagging = this.tagging;
+        const assessmentModel = tagging?.assessment;
+        if (!tagging || !assessmentModel) throw new GatewayError("unsupported", "Jev source assessment is not installed");
+        if (request.maxChargeCents !== undefined && (!Number.isFinite(request.maxChargeCents) || request.maxChargeCents <= 0 || request.maxChargeCents > 100)) throw new GatewayError("invalid_request", "Jev assessment maxChargeCents must be greater than zero and at most 100 cents");
+        const connectionId = await tagging.budget.connectionId();
+        if (!connectionId) throw new GatewayError("unsupported", "Jev assessment needs exactly one enabled Jev connection with approved paid access");
+        return this.runOwned("Jev source assessment", async (signal, retirements) => {
+          let attemptId: string | undefined;
+          let dispatched = false;
+          try {
+            const result = await triageSource(this.store, {
+              commandId: request.commandId, sourceId: request.sourceId, expectedRevision: request.expectedRevision, signal, retirements,
+              ...(request.maxChargeCents !== undefined ? { maxChargeCents: request.maxChargeCents } : {}),
+              beforeDispatch: async () => { attemptId = await tagging.budget.reserveAssessment(connectionId, request.commandId); },
+              onDispatch: async () => { if (!attemptId) throw new GatewayError("conflict", "Jev assessment has no monthly reservation"); await tagging.budget.markDispatch(connectionId, attemptId); dispatched = true; },
+            }, assessmentModel);
+            if (attemptId) {
+              const usage = result.assessment.usage;
+              if (usage) await tagging.budget.settle(connectionId, attemptId, { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, estimatedCostCents: usage.estimatedCostCents });
+              else await tagging.budget.reconcileUncertain(connectionId, attemptId);
+            }
+            return result;
+          } catch (error) {
+            if (attemptId && !dispatched) await tagging.budget.releaseUndispatched(connectionId, attemptId);
+            throw error;
+          }
+        }, signal);
       }
       case "knowledge.reflect": {
         const config = await this.store.config();
@@ -894,10 +928,10 @@ export class KnowledgeService {
         const record = result && typeof result === "object" && "record" in result ? (result as { record?: import("./knowledge-contract.js").KnowledgeRecord }).record : undefined;
         return { text: record ? `${record.id} (source): ${recordLabel(record).slice(0, 4_000)}` : "Source capture completed.", details: result };
       }
-      case "triageSource": {
-        if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId) throw new GatewayError("invalid_request", "Source triage requires commandId, sourceId, and revisionId");
-        const result = await this.invoke({ operation: "knowledge.source.triage", request: { commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId } }, signal);
-        return { text: `Source triage completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+      case "assessSource": {
+        if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId || !parameters.assessor) throw new GatewayError("invalid_request", "assessSource requires commandId, sourceId, revisionId and assessor (jev or model)");
+        const result = await this.invoke({ operation: "knowledge.source.assess", request: { commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId, assessor: parameters.assessor, ...(parameters.maxChargeCents !== undefined ? { maxChargeCents: parameters.maxChargeCents } : {}) } }, signal);
+        return { text: `Source assessment completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
       case "restoreSource": {
         if (!parameters.commandId || !parameters.id || !parameters.revisionId) throw new GatewayError("invalid_request", "Source restore requires commandId, id, and revisionId");

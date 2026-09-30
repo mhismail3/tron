@@ -12,6 +12,8 @@ export interface SourceTriageInput {
   signal?: AbortSignal;
   /** Internal owner handoff for provider promises that may outlive the bounded wait. */
   retirements?: Promise<void>[];
+  /** Optional caller cap forwarded to Jev's pre-dispatch price guard. */
+  maxChargeCents?: number;
   /** Paid workflow authority is admitted by the model transport, not here. */
   beforeDispatch?: () => Promise<void>;
   onDispatch?: () => Promise<void> | void;
@@ -43,7 +45,7 @@ export async function triageSource(store: KnowledgeStore, input: SourceTriageInp
     text: source.content.text,
     interests: interests.slice(0, 50).map(value => value.slice(0, 500)),
     source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt },
-  }, signal, ...(input.beforeDispatch || input.onDispatch ? [{ ...(input.beforeDispatch ? { beforeDispatch: input.beforeDispatch } : {}), ...(input.onDispatch ? { onDispatch: input.onDispatch } : {}) }] : [])), signal, () => new Error("Source triage deadline exceeded or was cancelled"));
+  }, signal, ...(input.beforeDispatch || input.onDispatch || input.maxChargeCents !== undefined ? [{ ...(input.maxChargeCents !== undefined ? { maxChargeCents: input.maxChargeCents } : {}), ...(input.beforeDispatch ? { beforeDispatch: input.beforeDispatch } : {}), ...(input.onDispatch ? { onDispatch: input.onDispatch } : {}) }] : [])), signal, () => new Error("Source triage deadline exceeded or was cancelled"));
   input.retirements?.push(assessmentOperation.settled);
   const assessment = await assessmentOperation.wait;
   if (input.signal?.aborted) throw new Error("Source triage was cancelled");

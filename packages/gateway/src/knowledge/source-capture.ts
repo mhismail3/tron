@@ -54,6 +54,8 @@ export interface SourceAssessmentModelInput {
 /** The paid adapter reserves in beforeDispatch and marks dispatch in onDispatch,
  * after validation/credential lookup and immediately before handing off its POST. */
 export interface SourceAssessmentDispatchContext {
+  /** Jev's independently enforced per-request upper bound, in cents. */
+  maxChargeCents?: number;
   beforeDispatch?: () => Promise<void>;
   onDispatch?: () => Promise<void> | void;
 }

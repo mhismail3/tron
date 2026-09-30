@@ -85,9 +85,10 @@ only on the user's word) apply to every task.
 | C18 | Done | Decision authority in the store: connector/system writes never override a user or agent admission or scope | none | knowledge-consolidation session, 2026-09-29 |
 | C19 | Done | Ingest primitive: save one queued provider item with identity, save date, note, collection and payload, undecided and idempotent | C18 | knowledge-consolidation session, 2026-09-29 |
 | C20 | Done | Connector primitives as agent actions: discover, read queue, acknowledge/skip, Raindrop move under write permission | C19 | knowledge-consolidation session, 2026-09-29 |
-| C21 | Claimed | Assessment primitive: assess a source with Jev (one budget) or the Knowledge model; returns a recommendation, decides nothing | C18 | knowledge-consolidation session, 2026-09-29 |
+| C21 | Done | Assessment primitive: assess a source with Jev (one budget) or the Knowledge model; returns a recommendation, decides nothing | C18 | knowledge-consolidation session, 2026-09-29 |
 | C22 | Claimed | Ingestion routine as an editable agent skill, plus owning docs | C19, C20, C21 | knowledge-consolidation session, 2026-09-29 |
 | C23 | Blocked | Dry-run parity with Raindrop intake on live data, then delete the intake pipeline and its batch machinery | C22, user Gateway update | — |
+| C24 | Ready | Migrate iOS manual source assessment from `knowledge.source.triage` to `knowledge.source.assess` with `assessor: model` | C21 | — |
 
 ## Task details
 
@@ -407,3 +408,13 @@ deletes it only after a dry-run of the routine matches it on live data.
 - Kept on purpose: `knowledge.raindrop.intake` remains until C23 and uses the shared discovery, ingestion, move, and acknowledgment paths; X retains the paid attempt budget and automation recurrence gate.
 - Deviations: none.
 - For the next agent: C21 owns the assessment primitive; C23 still requires the user-approved live dry-run and Gateway update before deleting legacy intake.
+
+### C21 · Done · 2026-09-29 · luna-worker
+
+- Result: Added `knowledge.source.assess` and agent `assessSource` for one exact source revision, selecting either the configured Knowledge model or Jev. Both persist only a revisioned assessment and return recommendation, confidence, and classification without changing admission. Jev uses persisted interests and reserves/marks/settles against C5's shared monthly ledger.
+- Evidence: `PATH=/opt/homebrew/bin:$PATH npm run build` passed; final `PATH=/opt/homebrew/bin:$PATH npx vitest run src/knowledge` passed (28 files, 382 tests); documentation policy passed (48 authored files); personal-info guard passed. One earlier full-suite run hit transient `ENOTEMPTY` cleanup in the existing intake-enrichment fixture; its isolated rerun and the subsequent full-suite rerun passed. Revert proof: removing the assessment RPC dispatch made all four new source-assessment regressions fail; restoring it made them pass, including monthly settlement, pre-dispatch budget refusal, paid-access refusal, and model configured/unset behavior.
+- Changes: this commit
+- Tasks added: C24, to migrate the existing iOS manual-assessment caller and owning docs to the new RPC; the user explicitly directed that iOS work be planned separately.
+- Kept on purpose: legacy `knowledge.raindrop.intake` remains through C23 and continues its bounded batch approval and admission/move workflow; the standalone primitive does not consume that cohort authority and never writes admission.
+- Deviations: the Gateway RPC replaces `knowledge.source.triage`; the existing iOS caller remains on the old operation until C24 and therefore requires that task before use with this Gateway contract.
+- For the next agent: C22 can build the editable ingestion routine against discover, queue, ingest, acknowledge, move, and single-source assessment; C24 migrates iOS; no Gateway lifecycle action was performed.

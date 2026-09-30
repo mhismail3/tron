@@ -346,15 +346,16 @@ const knowledgeStore = new KnowledgeStore(
 );
 let queueKnowledgeSummary: (source: KnowledgeRecord & { kind: "source" }) => void = () => {};
 const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, connections, knowledgeCredentials);
+const jevSourceAssessment = new JevSourceAssessmentModel(knowledgeCredentials);
 const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   credentials: knowledgeCredentials,
   queueSummary: source => queueKnowledgeSummary(source),
-  assessment: new JevSourceAssessmentModel(knowledgeCredentials),
+  assessment: jevSourceAssessment,
   jevBudget: knowledgeTaggingBudget,
   ...(xPricing ? { xPricing } : {}),
   connections,
 });
-const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(knowledgeCredentials), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections };
+const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(knowledgeCredentials), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections, assessment: jevSourceAssessment };
 const knowledge = new KnowledgeService(
   knowledgeStore,
   new KnowledgeObservationService(

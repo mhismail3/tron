@@ -715,10 +715,13 @@ export interface KnowledgeSourceSummaryRequest {
   expectedRevision: string;
 }
 
-export interface KnowledgeTriageRequest {
+export interface KnowledgeSourceAssessmentRequest {
   commandId: string;
   sourceId: string;
   expectedRevision: string;
+  assessor: "jev" | "model";
+  /** Optional stricter cap than Jev's conservative monthly reservation. */
+  maxChargeCents?: number;
 }
 
 export interface KnowledgeSourceAdmissionRequest {
@@ -1071,7 +1074,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.note.create"; request: KnowledgeNoteMutationRequest & { recordId?: never } }
   | { operation: "knowledge.note.update"; request: KnowledgeNoteMutationRequest & { recordId: string } }
   | { operation: "knowledge.reflect"; request: KnowledgeReflectRequest }
-  | { operation: "knowledge.source.triage"; request: KnowledgeTriageRequest }
+  | { operation: "knowledge.source.assess"; request: KnowledgeSourceAssessmentRequest }
   | { operation: "knowledge.source.summarize"; request: KnowledgeSourceSummaryRequest }
   | { operation: "knowledge.source.reextract"; request: KnowledgeSourceReextractRequest }
   | { operation: "knowledge.source.admission"; request: KnowledgeSourceAdmissionRequest }

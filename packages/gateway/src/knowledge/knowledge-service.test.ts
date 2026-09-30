@@ -16,7 +16,7 @@ function model(): KnowledgeGenerationModel {
     async reflect() { return "generated handoff"; },
     async synthesize() { return "generated synthesis"; },
     async summarizeSource() { return { text: "A substantive source summary." }; },
-    async assess() { return { summary: "Useful source", evidenceQuality: "high", freshness: "current" }; },
+    async assess() { return { summary: "Useful source", evidenceQuality: "high", freshness: "current", recommendation: "retained" as const, confidence: 0.8, classification: "research" }; },
   };
 }
 
@@ -162,7 +162,7 @@ describe("KnowledgeService integration", () => {
     const triageConfig = await store.config();
     await store.configure("service-triage-config", { ...triageConfig, knowledgeModel: { model: "fixture/knowledge", maxInputChars: 48_000, maxOutputChars: 8_000 } });
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => model());
-    const result = await service.invoke({ operation: "knowledge.source.triage", request: { commandId: "service-triage", sourceId: source.record.id, expectedRevision: source.record.revisionId } });
+    const result = await service.invoke({ operation: "knowledge.source.assess", request: { commandId: "service-triage", sourceId: source.record.id, expectedRevision: source.record.revisionId, assessor: "model" } });
     // Shared with the Swift wire regression: slash escaping must match JSON.stringify.
     const evidenceDigest = "5a5ffb2316ae0f7bdccef02cf63fc10121160fecb8f84af6323568aa4f152fd0";
     expect(result).toMatchObject({ assessment: { summary: "Useful source", evidenceQuality: "high", evidenceDigest } });
@@ -356,8 +356,8 @@ describe("KnowledgeService integration", () => {
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({
       ...model(), assess: async () => { entered.resolve(); return assessment.promise; },
     }), work);
-    const triage = service.invoke({ operation: "knowledge.source.triage", request: {
-      commandId: "late-retirement-triage", sourceId: source.record.id, expectedRevision: source.record.revisionId,
+    const triage = service.invoke({ operation: "knowledge.source.assess", request: {
+      commandId: "late-retirement-triage", sourceId: source.record.id, expectedRevision: source.record.revisionId, assessor: "model",
     } }, controller.signal);
     const cancelled = expect(triage).rejects.toMatchObject({ details: { outcomeUnknown: true } });
     await entered.promise;

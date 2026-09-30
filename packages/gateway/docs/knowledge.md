@@ -586,23 +586,31 @@ payload may supply those bytes, which are accepted only when they hash to the
 representation that revision lists. Callers exposing this to an agent must
 translate `conflict` into a typed conflict.
 
-`knowledge.source.triage` reads persisted current interests and publishes a
-separate source derivative only after the retained source is available.
-Generated `summary` text, the `tags` selection and the `verdict` are
-interpretations written through the curation operations above; each carries the
-producer that claimed it and the revision it was bound to, and none of them is
-evidence.
+`knowledge.source.assess` / agent action `assessSource` assesses one exact source
+revision with `assessor: "model"` (the explicitly configured Knowledge model)
+or `assessor: "jev"` (the bounded Jev intake rubric/profile and persisted current
+interests). Both record a revisioned assessment derivative and return its
+recommendation, confidence, and classification; assessment never changes source
+admission. Jev reserves against the same monthly Jev ledger as tagging and legacy
+intake immediately before dispatch, marks the reservation dispatched at the HTTP
+boundary, then settles provider usage or leaves an uncertain dispatch reserved.
+An optional `maxChargeCents` is checked against Jev's conservative per-request
+ceiling; a value below that supported bound is refused before reservation or
+dispatch. Assessing one source does not require Raindrop's legacy batch pilot
+approval. Generated
+`summary` text, `tags` selection, `verdict`, and assessment are interpretations,
+not evidence.
 
 `NoteContent` supports structured field values with exact evidence revisions,
 validity, explicit confirmation, privacy scope, freshness, corrections,
 supersession, and preserved contrary evidence. Personal/research scope remains
 the sharing authority; `privacyScope` is descriptive metadata, not a second
-sharing system. Assessment/triage is an optional derivative against persisted
-editable `KnowledgeConfig.currentInterests` and uses an injected adapter owned
-by the existing model boundary. The `knowledge.source.triage` action names an
-exact source revision; it does not accept an unpersisted interest list. Capture
-is durable even when that adapter fails. Exact source-object reads resolve a
-source record and revision before reading its object; orphan and suppressed
+sharing system. Source assessment uses persisted editable
+`KnowledgeConfig.currentInterests`; neither assessor accepts an unpersisted
+interest list. The assessed source's evidence and configuration are revalidated
+before its derivative is committed. Capture is durable even when an adapter
+fails. Exact source-object reads resolve a source record and revision before
+reading its object; orphan and suppressed
 object hashes are not an object browsing API. Object reads return typed,
 512,000-byte base64 chunks directly through the Gateway boundary rather than
 the ordinary 100,000-character presentation sanitizer; callers must use the
@@ -867,10 +875,11 @@ It consumes the shared typed `JevDecisionClient`, also exposed as the first-part
 `jev` tool for caller-supplied `choice`, `noul`, and `score` questions. This is not
 chat completion. Credentials remain in the Keychain-backed
 `connector:jev:personal` reference and are read only on explicit calls; core
-Knowledge capture/retrieval does not require Jev. Tagging and Raindrop intake
-assessment reserve and settle against the same monthly Knowledge ledger owned by
-the `knowledge.jev` connection's `paidBudgetCents`. Paid access disabled there
-blocks both workflows before provider dispatch. Raindrop cohort approvals remain
+Knowledge capture/retrieval does not require Jev. Tagging, standalone Jev source
+assessment, and Raindrop intake assessment reserve and settle against the same
+monthly Knowledge ledger owned by the `knowledge.jev` connection's
+`paidBudgetCents`. Paid access disabled there blocks paid work before provider
+dispatch. Raindrop cohort approvals remain
 additional per-run item/cent caps and cannot enlarge the monthly budget; the
 generic Jev tool cannot inherit that cohort allowance.
 

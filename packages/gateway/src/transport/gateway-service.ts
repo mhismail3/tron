@@ -488,7 +488,7 @@ export class GatewayService {
       case "knowledge.observation.dismiss":
       case "knowledge.source.capture":
       case "knowledge.source.preview.refresh":
-      case "knowledge.source.triage":
+      case "knowledge.source.assess":
       case "knowledge.source.summarize":
       case "knowledge.source.reextract":
       case "knowledge.source.tag":
