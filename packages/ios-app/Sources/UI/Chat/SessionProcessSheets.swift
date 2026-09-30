@@ -641,6 +641,7 @@ struct ReadOnlySubagentSessionSheet: View {
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
+        .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.hidden)
         .tronPresentation()
         .accessibilityIdentifier("read-only-subagent-session-sheet")

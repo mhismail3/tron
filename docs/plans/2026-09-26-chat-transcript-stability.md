@@ -3952,3 +3952,10 @@ Claimed on `ct-23-sheet-scroll`, 2026-09-30. Failure modes before code:
 User accepted the flipped path's navigation-bar top-edge appearance on device,
 2026-09-30: the navigation-bar fade item is closed. This does not close other
 previously recorded device-only or detent-animation limitations.
+
+Pre-fix physical-gesture negative control at clean `92db9ec0f`, retained run
+`20260930T084107Z-run.Qtb8px`: origin content drag toward older history moves
+header minY **430.39→78 pt** (medium→large); today's repeated older-edge drag
+removes the sheet scroll view (dismissal). Fixture setup corrections preceded
+this run and are not counted as negative controls. First product experiment is
+only the public `.presentationContentInteraction(.scrolls)` on the child sheet.
