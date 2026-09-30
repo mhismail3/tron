@@ -494,6 +494,8 @@ export interface KnowledgeListRequest {
   includeArchived?: boolean;
   /** Explicit intake/audit visibility for connector sources awaiting admission. */
   includePending?: boolean;
+  /** Agent retrieval may hide personal sources without hiding personal notes or observations. */
+  excludePersonalSources?: boolean;
   /** Optional server-side partition for source catalogue projections. */
   sourceAdmission?: SourceAdmission;
   cursor?: string;

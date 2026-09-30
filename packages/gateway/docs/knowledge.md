@@ -458,8 +458,11 @@ observation under the captured setup revision rather than leaving a stale ready 
 independent controls and default to false. The Gateway registers `knowledge.v1` typed RPC
 handlers and a bounded first-party `knowledge` retrieval tool. The tool performs explicit
 search/recall/read/list plus typed `connectorSweep` and `synthesis` actions for existing
-Automations; it does not create a scheduler or run journal. Retrieved text is evidence, not
-authorization. A prospective
+Automations; it does not create a scheduler or run journal. Search, recall, and list hide
+personal-scope sources unless the caller explicitly requests a scope; personal notes and
+observations are unaffected. Search/recall age, freshness, verdict, save-time, and take
+metadata are projected from the returned source record, including archived or pending hits.
+Retrieved text is evidence, not authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
 pinned `ModelRuntime` adapter (the configured model is an explicit

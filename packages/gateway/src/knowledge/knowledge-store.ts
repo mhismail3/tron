@@ -292,8 +292,8 @@ function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: 
 }
 /** Cursor identity for one page of Library rows. Every input that changes which
  * rows a page contains belongs to it. */
-function sourceRowScope(request: Pick<KnowledgeListRequest, "scope" | "includeArchived" | "includePending" | "sourceAdmission">): string {
-  return JSON.stringify(["sourceRow", request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
+function sourceRowScope(request: Pick<KnowledgeListRequest, "scope" | "includeArchived" | "includePending" | "sourceAdmission" | "excludePersonalSources">): string {
+  return JSON.stringify(["sourceRow", request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null, request.excludePersonalSources === true]);
 }
 type SearchPosition = { score: number; freshnessRank: number; sortAt: number; id: string; freshnessNowMs: number };
 function searchScope(request: KnowledgeSearchRequest): string {
@@ -974,6 +974,14 @@ export class KnowledgeStore {
     }
   }
   async config(): Promise<KnowledgeConfig> { return this.readState(state => state.config); }
+  /** Derive tool metadata from the exact record retrieval already returned, not
+   * from a second row query whose admission filter could omit that record. */
+  async sourceRowForRecord(record: KnowledgeRecord): Promise<KnowledgeSourceRow | undefined> {
+    if (record.kind !== "source") return undefined;
+    const config = await this.config();
+    const head = headFor(record, [record.revisionId], [], config);
+    return sourceRow(record.id, head as RecordHead & { sourceRow: SourceRowFields });
+  }
   async configureTags(request: KnowledgeTagEditRequest): Promise<KnowledgeConfig> {
     return this.mutate("knowledge.tags.configure", request.commandId, request, async state => {
       if (!Number.isSafeInteger(request.expectedConfigRevision) || request.expectedConfigRevision !== state.config.revision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
@@ -1165,7 +1173,7 @@ export class KnowledgeStore {
       // retained view must never be replayed against pending or archived
       // projection state, where skipped rows can otherwise make pagination
       // appear stalled or omit the first admitted row.
-      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
+      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null, request.excludePersonalSources === true]);
       const filter = this.pageFilter(request);
       if (request.cursor) {
         const cursor = readListCursor(request.cursor, scope);
@@ -1264,7 +1272,7 @@ export class KnowledgeStore {
   /** The page's kind/scope/admission partition. Admission lives in the head, so
    * this is the same predicate the body checks apply, evaluated before a body is
    * read; the body remains the authority for the rows it admits. */
-  private pageFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission"> & { excludePersonalSources?: boolean }): { clauses: string[]; parameters: SQLInputValue[] } {
+  private pageFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission" | "excludePersonalSources">): { clauses: string[]; parameters: SQLInputValue[] } {
     const base = this.catalogFilter(request); const admission = admissionFilter(request);
     const privacy = request.excludePersonalSources ? ["NOT (json_extract(value, '$.kind') = 'source' AND json_extract(value, '$.scope') = 'personal')"] : [];
     return { clauses: [...base.clauses, ...admission.clauses, ...privacy], parameters: [...base.parameters, ...admission.parameters] };

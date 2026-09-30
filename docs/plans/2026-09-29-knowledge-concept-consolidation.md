@@ -70,7 +70,7 @@ only on the user's word) apply to every task.
 | C3 | Done | Intake never overrides a decided scope or admission; decided-but-unmoved bookmarks leave the queue | none | knowledge-consolidation session, 2026-09-29 |
 | C4 | Done | Sweep is discovery-only; intake is the only capture-and-decide path | C3 | knowledge-consolidation session, 2026-09-29 |
 | C5 | Done | One monthly Jev budget for intake assessment and tagging | none | knowledge-consolidation session, 2026-09-29 |
-| C6 | Claimed | Agent tool: `list` hides personal sources by default; search/recall metadata comes from the read record | none | knowledge-consolidation session, 2026-09-29 |
+| C6 | Done | Agent tool: `list` hides personal sources by default; search/recall metadata comes from the read record | none | knowledge-consolidation session, 2026-09-29 |
 | C7 | Claimed | iOS: curation conflict outcomes surface and reload; linked entries open regardless of admission | C1 | knowledge-consolidation session, 2026-09-29 |
 | C8 | Needs scoping | Library order: save date by default, "Recent activity" option in the filter sheet | none | — |
 | C9 | Needs scoping | One re-tag predicate; enrichment only for retained entries; verdict no longer a tag input | C1 | — |
@@ -253,6 +253,16 @@ save time and recovered save time; unreachable iOS `.sources` branch in
 - Kept on purpose: uncertain Jev dispatches keep their shared reservation and block further paid Jev work until explicit reconciliation; Raindrop's per-cohort item/cent bounds remain in addition to, never instead of, the Knowledge monthly cap.
 - Deviations: the multipage intake fixture's expected moved count is corrected to its actual eight eligible items after the resumed run reports one item already processed and one incomplete; the enrichment rerun expects zero new captures for its completed cohort.
 - For the next agent: the running Gateway remains untouched; install/rebuild remains a maintainer action after the planned changes.
+
+### C6 · Done · 2026-09-29 · luna-worker
+
+- Result: Agent list excludes personal sources unless scope is explicit, enforced by the store filter. Search/recall derive source-row metadata from the returned record so archived and pending matches retain save date, age, freshness, verdict, and take.
+- Evidence: `cd packages/gateway && npm run build` (passed); `npx vitest run src/knowledge/knowledge-take-freshness.test.ts src/knowledge/knowledge-service.test.ts` (32 passed); `python3 scripts/check-documentation-policy.py` (passed); `scripts/personal-info-guard.sh` (passed).
+- Changes: this commit
+- Tasks added: none
+- Kept on purpose: personal notes and observations remain available; explicit scope personal permits source access.
+- Deviations: updated one pre-existing freshness test to archive via admission rather than the superseded archive verdict path.
+- For the next agent: C7 remains independent; Gateway runtime changes still require a maintainer update and were not applied here.
 
 ### C1 · Done · 2026-09-29 · luna-worker
 

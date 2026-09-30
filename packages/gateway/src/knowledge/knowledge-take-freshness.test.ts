@@ -29,6 +29,31 @@ async function fixture(decayClass: "ages" | "stable" = "ages") {
  * - user takes must enqueue current-edition tags whose input digest is stale.
  */
 describe("Your take and freshness-aware source retrieval", () => {
+  /** Failure modes for C6, identified before implementation:
+   * - agent list without scope leaks personal sources while search/recall do not;
+   * - listing with explicit personal scope cannot inspect those same sources;
+   * - an archived search hit is returned but its row-only metadata disappears because a second filtered query omits it.
+   */
+  it("hides personal sources from agent list by default and exposes them for explicit personal scope", async () => {
+    const { store, service, record } = await fixture();
+    const personal = await store.curateSource({ commandId: "k6-list-personal-place", operation: "placement", producer: { actor: "user" }, item: { recordId: record.id, expectedRevision: record.revisionId, placement: { scope: "personal" } } });
+    const hidden = await service.tool({ action: "list", kind: "source" });
+    expect((hidden.details as {records: Array<{id: string}>}).records.map(item => item.id)).not.toContain(personal.record.id);
+    const explicit = await service.tool({ action: "list", kind: "source", scope: "personal" });
+    expect((explicit.details as {records: Array<{id: string}>}).records.map(item => item.id)).toContain(personal.record.id);
+  });
+
+  it("projects search metadata from an archived result record", async () => {
+    const { store, service, record } = await fixture();
+    const tagged = await store.curateSource({ commandId: "k6-search-archive-tag", operation: "tags", producer: { actor: "agent" }, item: { recordId: record.id, expectedRevision: record.revisionId, tagIds: ["tool"] } });
+    const taken = await store.setSourceTake({ commandId: "k6-search-archive-take", recordId: record.id, expectedRevision: tagged.record.revisionId, text: "Useful take for archived evidence." });
+    const archived = await store.setSourceAdmission({ commandId: "k6-search-archive", recordId: record.id, expectedRevision: taken.record.revisionId, status: "archived" });
+    const result = await service.tool({ action: "search", query: "useful tool", kind: "source", includeArchived: true });
+    const hit = (result.details as {hits: Array<{id: string; sourceSavedAt?: string; ageBasis?: string; ageDays?: number; freshness?: string; verdict?: string | null; take?: string | null}>}).hits.find(item => item.id === archived.record.id);
+    expect(hit).toMatchObject({ sourceSavedAt: "2024-01-01T00:00:00.000Z", ageBasis: "sourceSavedAt", freshness: "stale", verdict: null, take: "Useful take for archived evidence." });
+    expect(hit?.ageDays).toBeGreaterThan(0);
+  });
+
   it("returns the current take in a typed stale-revision conflict so the caller can retain its draft", async () => {
     const { store, service, record } = await fixture();
     const request = { commandId: "k6-take-first", recordId: record.id, expectedRevision: record.revisionId, text: "Keep APIs boring." };
@@ -94,7 +119,7 @@ describe("Your take and freshness-aware source retrieval", () => {
     expect(freshTagged.record.revisionId).not.toBe(superseded.record.revisionId);
     const rows = await store.listSourceRows({ kind: "source", ids: [oldSource.id] });
     expect(rows.rows[0]).toMatchObject({ ageBasis: "sourceSavedAt", freshness: "stale", verdict: "superseded", supersededBy: fresh.record.id });
-    const archived = await store.curateSource({ commandId: "k6-archive-verdict", operation: "verdict", producer: { actor: "user" }, item: { recordId: fresh.record.id, expectedRevision: freshTagged.record.revisionId, verdict: { verdict: "archive" } } });
+    const archived = await store.setSourceAdmission({ commandId: "k6-archive-verdict", recordId: fresh.record.id, expectedRevision: freshTagged.record.revisionId, status: "archived" });
     const hiddenArchive = await store.search({ query: "useful", kind: "source" });
     expect(hiddenArchive.hits.some(hit => hit.record.id === archived.record.id)).toBe(false);
     const includedArchive = await store.search({ query: "useful", kind: "source", includeArchived: true });
