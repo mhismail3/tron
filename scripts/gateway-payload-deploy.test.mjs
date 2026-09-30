@@ -3,6 +3,7 @@ import { watch } from "node:fs";
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -728,6 +729,65 @@ test("source builds compile privately and leave the trusted source tree unchange
       join(store.versionsRoot, "candidate", "runtime", "xcodegen"),
       join(store.versionsRoot, "candidate", "runtime"),
     ]) await chmod(directory, 0o755);
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+// macOS 15 refuses rename(2) of a directory its non-root owner cannot write
+// (EACCES); macOS 26 permits it, so a plain run on a newer host cannot see the
+// kernel check. Enforce that rule on every directory rename the deploy module
+// makes for the duration of one operation.
+async function withMacOS15DirectoryRename(operation) {
+  const fsPromises = createRequire(import.meta.url)("node:fs/promises");
+  const permissiveRename = fsPromises.rename;
+  fsPromises.rename = async (from, to) => {
+    const info = await lstat(from).catch(() => undefined);
+    if (info?.isDirectory() && (info.mode & 0o200) === 0) {
+      throw Object.assign(new Error(`EACCES: permission denied, rename '${from}' -> '${to}'`), { code: "EACCES", syscall: "rename" });
+    }
+    return permissiveRename(from, to);
+  };
+  syncBuiltinESMExports();
+  try { return await operation(); } finally {
+    fsPromises.rename = permissiveRename;
+    syncBuiltinESMExports();
+  }
+}
+
+async function assertSealedPayload(root) {
+  const info = await lstat(root);
+  if (info.isSymbolicLink()) return;
+  if (info.isDirectory()) {
+    assert.equal(info.mode & 0o777, 0o555, `${root} must be a sealed directory`);
+    for (const entry of await readdir(root)) await assertSealedPayload(join(root, entry));
+  } else assert.ok([0o444, 0o555].includes(info.mode & 0o777), `${root} must be a sealed file`);
+}
+
+// Failure modes (#116), each observed through the real publication paths:
+// 1. stagePayload freezes its staging root before renaming it into versions/,
+//    so macOS 15 refuses the rename and dev/Stable staging cannot publish.
+// 2. buildSourcePayload regresses to the same freeze-then-rename order.
+// 3. keeping the root writable across the rename but not sealing it afterwards
+//    publishes a version whose root stays writable.
+// 4. any nested directory or file stays writable after publication.
+test("payload publication renames a writable staging root and seals the published version", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-payload-macos15-rename-")));
+  try {
+    const payload = await makePreflightFixture(join(root, "payload"));
+    const staged = await withMacOS15DirectoryRename(() => stagePayload({
+      home: join(root, "stage-home"), channel: "dev", source: payload, version: "staged",
+    }));
+    await assertSealedPayload(staged.root);
+
+    const { store, sourceRoot } = await makeSourceBuildFixture(join(root, "source-build"));
+    const built = await withMacOS15DirectoryRename(() => buildSourcePayload({
+      paths: store, config: { sourceRoot }, candidateVersion: "built",
+      runCommand: async (tool, args) => {
+        if (tool !== process.execPath || !args[0].endsWith("/tsc")) throw new Error("source build invoked an unexpected external command");
+        await mkdir(args.at(-1), { recursive: true });
+        await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
+      },
+    }));
+    await assertSealedPayload(built.root);
   } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 
