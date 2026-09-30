@@ -213,16 +213,13 @@ recover_orphan_child() {
 }
 
 build_candidate() {
+  local revision="$1" version="$2" result
   (cd "$ROOT/packages/gateway" && "$NPM_BIN" run build) >&2
   if [[ -x "$ROOT/packages/mac-app/Sources/Resources/Gateway/runtime/node-arm64" && -x "$ROOT/packages/mac-app/Sources/Resources/Gateway/runtime/node-x64" ]]; then
     TRON_NODE_BIN="$NODE_BIN" "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" --skip-install --skip-download >&2
   else
     TRON_NODE_BIN="$NODE_BIN" "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" --skip-install >&2
   fi
-  local revision version result
-  revision="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-  [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null || true)" ]] || revision="${revision}-dirty"
-  version="debug-${revision}-$(date -u +%Y%m%d%H%M%S)"
   result="$("$NODE_BIN" "$DEPLOY" stage --channel dev --home "$HOME/.tron-dev" --source "$ROOT/packages/mac-app/Sources/Resources/Gateway" --version "$version" --source-revision "$revision")"
   printf '%s' "$result" | "$NODE_BIN" -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const x=JSON.parse(b);console.log(`${x.manifest.version} ${x.manifest.payloadFingerprint} ${x.manifest.runtimeEpoch}`)})'
 }
@@ -248,10 +245,14 @@ case "$command" in
     "$NODE_BIN" "$DEPLOY" handoff-debug --host "$HOST" --dev-home "$HOME/.tron-dev" --stable-home "$HOME/.tron" --stable-bundled-root /Applications/Tron.app/Contents/Resources/Gateway
     ;;
   start|restart)
-    identity_line="$(build_candidate)"
+    # Measure the source before building; a dirty tree still stages its full
+    # HEAD and records dirtiness against the candidate's epoch.
+    candidate_source="$("$NODE_BIN" "$STATE_HELPER" candidate-source "$ROOT")" || { echo "Debug candidate source revision is unavailable" >&2; exit 78; }
+    read -r source_revision source_dirty candidate_version <<<"$candidate_source"
+    identity_line="$(build_candidate "$source_revision" "$candidate_version")"
     identity_line="$("$NODE_BIN" "$STATE_HELPER" validate-build-identity "$identity_line")" || exit 78
     read -r version payload_fingerprint candidate_epoch <<<"$identity_line"
-    "$NODE_BIN" "$STATE_HELPER" record-source "$STATE_FILE" "$candidate_epoch" "$ROOT"
+    "$NODE_BIN" "$STATE_HELPER" record-source "$STATE_FILE" "$candidate_epoch" "$ROOT" "$source_dirty"
     if supervisor_live; then
       token_args=(--channel dev --home "$HOME/.tron-dev" --version "$version" --fingerprint "$payload_fingerprint" --host "$HOST" --port 9848 --command-id "debug-update-$(date +%s)-$$")
       TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 "$NODE_BIN" "$DEPLOY" promote "${token_args[@]}" >&2

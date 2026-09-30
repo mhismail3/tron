@@ -1067,6 +1067,45 @@ test("dev empty push configuration cannot be promoted into Stable", async () => 
   }
 });
 
+// Failure mode (#107): `scripts/tron dev` computes the stage arguments in
+// tron-dev-state.mjs `candidate-source` while this module owns the manifest
+// validator; when the two drift (a short or `-dirty` revision), start/restart
+// cannot stage any candidate. Run the real stage CLI with exactly what
+// tron-dev passes, from a dirty and a clean checkout.
+test("tron-dev candidate source stages through the real payload manifest validator", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-dev-candidate-stage-"));
+  try {
+    const payload = await makePreflightFixture(join(root, "source"));
+    const manifestPath = join(payload, "manifest.json");
+    await writeFile(manifestPath, JSON.stringify({ ...JSON.parse(await readFile(manifestPath, "utf8")), channel: "dev" }));
+    const checkout = join(root, "checkout");
+    await mkdir(checkout);
+    await writeFile(join(checkout, "tracked.ts"), "export {};\n");
+    await execFileAsync("git", ["init", "-q"], { cwd: checkout });
+    await execFileAsync("git", ["add", "."], { cwd: checkout });
+    await execFileAsync("git", ["-c", "user.email=fixture@example.test", "-c", "user.name=Fixture", "commit", "-q", "-m", "fixture"], { cwd: checkout });
+    const head = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: checkout })).stdout.trim();
+    const helper = new URL("./tron-dev-state.mjs", import.meta.url).pathname;
+    const deploy = new URL("./gateway-payload-deploy.mjs", import.meta.url).pathname;
+    const home = join(root, "dev-home");
+    await writeFile(join(checkout, "tracked.ts"), "export const edited = true;\n");
+    for (const expectedDirty of ["true", "false"]) {
+      if (expectedDirty === "false") await execFileAsync("git", ["checkout", "-q", "--", "tracked.ts"], { cwd: checkout });
+      const [revision, dirty, version] = (await execFileAsync(process.execPath, [helper, "candidate-source", checkout])).stdout.trim().split(" ");
+      assert.equal(dirty, expectedDirty);
+      const { stdout } = await execFileAsync(process.execPath, [
+        deploy, "stage", "--channel", "dev", "--home", home, "--source", payload, "--version", version, "--source-revision", revision,
+      ]);
+      const staged = JSON.parse(stdout).manifest;
+      assert.equal(staged.sourceRevision, head);
+      assert.equal(staged.version, version);
+    }
+  } finally {
+    await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 5_000, maxOutputBytes: 8_192 }).catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("preflight imports candidate protocol values and rejects incompatible ranges", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-preflight-protocol-"));
   try {
