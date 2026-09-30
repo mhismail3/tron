@@ -1,6 +1,7 @@
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
@@ -9644,6 +9645,287 @@ export default function (pi) {
     const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-nested-calls.json");
     await mkdir(dirname(artifactPath), { recursive: true });
     await writeFile(artifactPath, `${JSON.stringify({ live: liveSnapshot, reloaded: reloadedParent }, null, 2)}\n`);
+  });
+
+  it("connects Pi MCP stdio and streamable HTTP fixtures and exposes resources through composed built-ins", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-pi-mcp-fixture-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
+    const stdioState = join(root, "stdio-state.json");
+    const stdioPidFile = join(root, "stdio.pid");
+    const stdioChildPidFile = join(root, "stdio-child.pid");
+    const httpState = join(root, "http-state.json");
+    const httpPortFile = join(root, "http.port");
+    const codeState = join(root, "code-state.json");
+    const deferredState = join(root, "deferred-state.json");
+    const codePidFile = join(root, "code.pid");
+    const deferredPidFile = join(root, "deferred.pid");
+    const tools = [{ name: "echo", description: "Echo searchable fixture input", inputSchema: { type: "object", properties: { value: { type: "string" } } } }];
+    await Promise.all([writeFile(stdioState, JSON.stringify({ tools })), writeFile(httpState, JSON.stringify({ tools })), writeFile(codeState, JSON.stringify({ tools })), writeFile(deferredState, JSON.stringify({ tools }))]);
+    const httpProcess = spawn(process.execPath, [fixtureScript, "http", httpState, httpPortFile], { stdio: "ignore" });
+    const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+      await waitUntil(() => existsSync(httpPortFile));
+      const port = Number(await readFile(httpPortFile, "utf8"));
+      await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
+        stdio: { command: process.execPath, args: [fixtureScript, "stdio", stdioState, stdioPidFile, stdioChildPidFile], exposure: "direct" },
+        http: { url: `http://127.0.0.1:${port}/mcp`, headers: { Authorization: "Bearer fixture" }, exposure: "direct" },
+        code: { command: process.execPath, args: [fixtureScript, "stdio", codeState, codePidFile], exposure: "codemode" },
+        search: { command: process.execPath, args: [fixtureScript, "stdio", deferredState, deferredPidFile], exposure: "deferred" },
+      } }));
+      process.env.PI_CODING_AGENT_DIR = agentDir;
+      const faux = fauxProvider({ provider: "tron-pi-mcp-fixture", tokensPerSecond: 10_000 });
+      faux.setResponses([
+        fauxAssistantMessage([
+          fauxToolCall("mcp__stdio__echo", { value: "stdio" }, { id: "mcp-stdio-call" }),
+          fauxToolCall("mcp__http__echo", { value: "http" }, { id: "mcp-http-call" }),
+          fauxToolCall("list_mcp_resources", { server: "stdio" }, { id: "mcp-resource-list" }),
+          fauxToolCall("read_mcp_resource", { server: "stdio", uri: "fixture://one" }, { id: "mcp-resource-read" }),
+          fauxToolCall("codemode", { code: 'return text(await tools.mcp__code__echo({ value: "codemode" }));' }, { id: "mcp-codemode-call" }),
+        ], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("tool_search", { query: "searchable fixture input" }, { id: "mcp-tool-search" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("mcp__search__echo", { value: "deferred" }, { id: "mcp-deferred-call" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("fixture MCP tools completed"),
+        fauxAssistantMessage([fauxToolCall("mcp__stdio__added", { value: "changed" }, { id: "mcp-list-changed-call" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("fixture MCP list changed"),
+        fauxAssistantMessage([fauxToolCall("mcp__stdio__added", { value: "reconnected" }, { id: "mcp-lazy-reconnect-call" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("fixture MCP reconnected"),
+      ]);
+      const modelRuntimeFactory = async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      };
+      const registry = new RuntimeRegistry({
+        agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory,
+        trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      });
+      registries.push(registry);
+      await initializeRegistry(registry);
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      await slot.prompt("call MCP fixtures and resource tools");
+      await waitUntil(() => !slot.isBusy);
+      const transcript = slot.snapshot().transcript;
+      for (const [id, text] of [
+        ["mcp-stdio-call", "fixture:echo:{\"value\":\"stdio\"}"],
+        ["mcp-http-call", "fixture:echo:{\"value\":\"http\"}"],
+        ["mcp-resource-list", "fixture://one"],
+        ["mcp-resource-read", "fixture resource body"],
+        ["mcp-codemode-call", "fixture:echo:"],
+        ["mcp-deferred-call", "fixture:echo:{\"value\":\"deferred\"}"],
+      ]) {
+        const result = transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === id);
+        expect(result?.content?.map((block) => block.type === "text" ? block.text : "").join("\\n")).toContain(text);
+      }
+      const stdioPid = Number(await readFile(stdioPidFile, "utf8"));
+      const stdioChildPid = Number(await readFile(stdioChildPidFile, "utf8"));
+      await writeFile(stdioState, JSON.stringify({ tools: [{ ...tools[0], name: "added", description: "Changed fixture tool" }] }));
+      await waitUntil(() => {
+        const tools = (slot as any).runtime.session.getAllTools() as Array<{ name: string; exposure?: string }>;
+        return tools.some((tool) => tool.name === "mcp__stdio__added" && tool.exposure === "direct")
+          && tools.some((tool) => tool.name === "mcp__stdio__echo" && tool.exposure === "hidden");
+      });
+      await slot.prompt("call the newly listed MCP tool");
+      await waitUntil(() => !slot.isBusy);
+      const addedResult = slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "mcp-list-changed-call");
+      expect(addedResult?.content?.map((block) => block.type === "text" ? block.text : "").join("\\n")).toContain("fixture:added");
+      process.kill(-stdioPid, "SIGKILL");
+      await waitUntil(() => {
+        try { process.kill(stdioPid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      });
+      await slot.prompt("retry after the MCP server crash");
+      await waitUntil(() => !slot.isBusy);
+      const reconnectedPid = Number(await readFile(stdioPidFile, "utf8"));
+      const reconnectedChildPid = Number(await readFile(stdioChildPidFile, "utf8"));
+      expect(reconnectedPid).not.toBe(stdioPid);
+      const codePid = Number(await readFile(codePidFile, "utf8"));
+      const deferredPid = Number(await readFile(deferredPidFile, "utf8"));
+      const allResults = slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "toolResult");
+      expect([stdioPid, codePid, deferredPid, stdioChildPid, reconnectedPid, reconnectedChildPid].every(Number.isInteger)).toBe(true);
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      await waitUntil(() => [stdioPid, codePid, deferredPid, stdioChildPid, reconnectedPid, reconnectedChildPid].every((pid) => {
+        try { process.kill(pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      }));
+      const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-mcp-fixtures.json");
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, `${JSON.stringify({ transport: ["stdio", "streamable-http"], exposure: ["direct", "codemode", "deferred"], transcript: allResults }, null, 2)}\n`);
+    } finally {
+      if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+      httpProcess.kill("SIGTERM");
+      await new Promise<void>((resolve) => httpProcess.once("exit", () => resolve()));
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loads project MCP config only after TrustService authorizes the workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-pi-mcp-project-trust-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(agentDir, "sessions", "workspace");
+    const cwd = join(root, "workspace");
+    const projectConfigDir = join(cwd, ".pi");
+    const pidFile = join(root, "project-server.pid");
+    const childPidFile = join(root, "project-server-child.pid");
+    const statePath = join(root, "project-state.json");
+    const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(projectConfigDir, { recursive: true }), writeFile(statePath, JSON.stringify({ tools: [{ name: "project_echo", description: "Trusted project fixture", inputSchema: { type: "object", properties: {} } }] }))]);
+    await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {} }));
+    await writeFile(join(projectConfigDir, "mcp.json"), JSON.stringify({ mcpServers: {
+      project_fixture: { command: process.execPath, args: [fixtureScript, "stdio", statePath, pidFile, childPidFile], exposure: "direct" },
+    } }));
+    const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, false);
+    const faux = fauxProvider({ provider: "tron-pi-mcp-project-trust", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage("untrusted project ignored"),
+      fauxAssistantMessage([fauxToolCall("mcp__project_fixture__project_echo", {}, { id: "trusted-project-call" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("trusted project tool completed"),
+    ]);
+    const modelRuntimeFactory = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const makeRegistry = () => new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, maximumLiveRuntimes: 1,
+      modelRuntimeFactory, trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    let registry = makeRegistry();
+    registries.push(registry);
+    try {
+      await initializeRegistry(registry);
+      let slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      await slot.prompt("load an untrusted project");
+      await waitUntil(() => !slot.isBusy);
+      expect(existsSync(pidFile)).toBe(false);
+      expect((slot as any).runtime.session.getAllTools().some((tool: { name: string }) => tool.name === "mcp__project_fixture__project_echo")).toBe(false);
+      const sessionId = slot.id;
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      await trust.set(cwd, true);
+      registry = makeRegistry();
+      registries.push(registry);
+      await initializeRegistry(registry);
+      slot = await registry.acquire(sessionId);
+      await slot.setModel(model.provider, model.id);
+      await slot.prompt("load trusted project MCP");
+      await waitUntil(() => !slot.isBusy && existsSync(pidFile));
+      const trustedResult = slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "trusted-project-call");
+      expect(trustedResult?.content?.map((block) => block.type === "text" ? block.text : "").join("\\n")).toContain("fixture:project_echo");
+      const processId = Number(await readFile(pidFile, "utf8"));
+      const childProcessId = Number(await readFile(childPidFile, "utf8"));
+      const secondCwd = join(root, "second-workspace");
+      await mkdir(secondCwd, { recursive: true });
+      await registry.create(secondCwd);
+      await waitUntil(() => {
+        try { process.kill(processId, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      });
+      await waitUntil(() => {
+        try { process.kill(childProcessId, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      });
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      await waitUntil(() => {
+        try { process.kill(processId, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      });
+      const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-mcp-project-trust.json");
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, `${JSON.stringify({ untrustedProjectServerStarted: false, trustedProjectServerCalled: true, capacityEvictedProcessGroupTerminated: true }, null, 2)}\n`);
+    } finally {
+      await registry.dispose().catch(() => {});
+      const index = registries.indexOf(registry);
+      if (index >= 0) registries.splice(index, 1);
+      if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stops sleeping and tool-looping codemode scripts and drains active codemode work", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-pi-codemode-stop-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(extensionDir, { recursive: true })]);
+    const holdExtension = `export default function (pi) {
+      pi.registerTool({ name: "hold", label: "Hold", description: "Wait until cancelled or its deadline", parameters: { type: "object", properties: { ms: { type: "number" } }, required: ["ms"] }, execute: async (_id, args) => {
+        await new Promise((resolve) => setTimeout(resolve, args.ms));
+        return { content: [{ type: "text", text: "released" }] };
+      } });
+    }`;
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await Promise.all([
+      writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+codemode"] })),
+      writeFile(join(extensionDir, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
+      writeFile(join(extensionDir, "hold.ts"), `${holdExtension}\n`),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-pi-codemode-stop", tokensPerSecond: 10_000 });
+    const call = (id: string, code: string) => fauxAssistantMessage([fauxToolCall("codemode", { code }, { id })], { stopReason: "toolUse" });
+    faux.setResponses([
+      call("codemode-sleep", 'await new Promise(resolve => setTimeout(resolve, 30_000)); return "late";'),
+      call("codemode-loop", 'while (true) await tools.hold({ ms: 250 });'),
+      call("codemode-drain", 'await tools.hold({ ms: 400 }); return "drained";'),
+      fauxAssistantMessage("drain completed"),
+    ]);
+    const modelRuntimeFactory = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    try {
+      await initializeRegistry(registry);
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      const sleepPrompt = slot.prompt("run sleeping codemode script");
+      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-sleep"));
+      await slot.abort("agent");
+      await sleepPrompt;
+      await waitUntil(() => !slot.isBusy);
+      expect(slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-sleep")).toMatchObject({ isError: true });
+      const loopPrompt = slot.prompt("run tool-looping codemode script");
+      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-loop" && (tool.nestedCalls?.calls.length ?? 0) > 0)).catch(() => { throw new Error(`codemode loop did not call tools: ${JSON.stringify(slot.snapshot().transcript.slice(-6))}`); });
+      await slot.abort("agent");
+      await loopPrompt;
+      await waitUntil(() => !slot.isBusy);
+      const stoppedLoop = slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-loop");
+      expect(stoppedLoop).toMatchObject({ isError: true, nestedCalls: { calls: [expect.objectContaining({ toolName: "hold" })] } });
+      const drainPrompt = slot.prompt("run codemode under administrative drain");
+      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-drain"));
+      let drained = false;
+      const drain = registry.waitUntilIdle().then(() => { drained = true; });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(drained).toBe(false);
+      await drainPrompt;
+      await drain;
+      expect(drained).toBe(true);
+      expect(faux.state.callCount).toBeGreaterThanOrEqual(3);
+      const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-codemode-stop-drain.json");
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, `${JSON.stringify({ stopped: ["sleeping-script", "tool-loop"], drainWaitedFor: true, settled: slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "toolResult" && item.toolName === "codemode").map((item) => ({ toolCallId: item.toolCallId, isError: item.isError })) }, null, 2)}\n`);
+    } finally {
+      await registry.dispose();
+      const index = registries.indexOf(registry);
+      if (index >= 0) registries.splice(index, 1);
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("keeps one tool display segment across tool-only agent continuations", async () => {
