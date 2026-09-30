@@ -121,6 +121,12 @@ const INBOUND_SILENCE_WARNING_MS = 12_000;
 /** A heartbeat this late means the event loop stalled long enough for clients
  * to notice; shorter timer jitter is normal and not recorded. */
 const EVENT_LOOP_DELAY_WARNING_MS = 1_000;
+/** Delivery windows slow-start and then track one second of acknowledged throughput. */
+const INITIAL_DELIVERY_WINDOW_BYTES = 64 * 1_024;
+const MINIMUM_DELIVERY_WINDOW_BYTES = 32 * 1_024;
+const MAXIMUM_DELIVERY_WINDOW_BYTES = 4 * 1_048_576;
+/** A round trip growing more than 50% over the best observed sample ends slow start. */
+const DELIVERY_SLOW_START_RTT_GROWTH = 1.5;
 
 function diagnosticErrorCode(error: unknown): string {
   if (error instanceof GatewayError) return error.code;
@@ -383,6 +389,8 @@ export interface OutboundFrame {
   readonly encoded: string;
   readonly bytes: number;
   readonly topic: string;
+  /** Control-plane responses can bypass queued, unacknowledged state frames. */
+  readonly priority?: boolean;
   /** Whole state a newer frame of the same kind replaces without covering a
    * sequence: only a `session.summary`, which states its own revision. */
   readonly key?: string;
@@ -409,9 +417,11 @@ interface QueuedOutboundFrame {
   sessionId?: string;
   sequence?: number;
   runtimeGeneration?: string;
+  priority?: boolean;
 }
 
-type OutboundWrite = (encoded: string, completion: (error?: Error) => void) => void;
+type OutboundWrite = (encoded: string, completion: (error?: Error) => void, bytes?: number, priority?: boolean) => void;
+type OutboundCanWrite = (frame: QueuedOutboundFrame) => boolean;
 
 const UNKNOWN_OUTBOUND_TOPIC = "other";
 
@@ -447,8 +457,8 @@ function snapshotRestates(queued: QueuedOutboundFrame, frame: OutboundFrame): bo
 
 /**
  * A connection-local ordered writer. Encoded frames remain bounded in
- * application memory and exactly one frame is handed to ws at a time, so a
- * legitimate same-turn synchronization burst cannot fill ws.bufferedAmount.
+ * application memory; the caller's delivery window separately bounds bytes
+ * handed to ws but not yet acknowledged by the peer.
  *
  * A frame whose state a newer frame replaces queues once: the superseded frame
  * is dropped unsent and the newer one keeps its own place in the queue, so a
@@ -481,6 +491,7 @@ export class OrderedOutboundQueue {
     /** One superseded frame, reported where it is dropped. */
     private readonly replaced: (bytes: number) => void = () => {},
     private readonly maximumFrames = 4_096,
+    private readonly canWrite: OutboundCanWrite = () => true,
   ) {}
 
   enqueue(frame: OutboundFrame): boolean {
@@ -531,7 +542,16 @@ export class OrderedOutboundQueue {
       ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
       ...(entry.sequence === undefined ? {} : { sequence: entry.sequence }),
       ...(entry.runtimeGeneration === undefined ? {} : { runtimeGeneration: entry.runtimeGeneration }),
+      ...(entry.priority === undefined ? {} : { priority: entry.priority }),
     });
+    if (entry.priority) {
+      // A control-plane response may pass state held for delivery acknowledgement;
+      // it may not interrupt the one data frame already handed to ws.
+      let index = this.writeActive ? this.head + 1 : this.head;
+      while (index < this.frames.length && this.frames[index]?.priority) index += 1;
+      const queued = this.frames.pop()!;
+      this.frames.splice(index, 0, queued);
+    }
     this.queuedBytes += entry.bytes;
     this.acceptedFrames += 1;
     this.accepted(entry.bytes);
@@ -611,10 +631,13 @@ export class OrderedOutboundQueue {
     this.finishIdleWaiters();
   }
 
+  /** Resume after an acknowledged delivery window opens. */
+  resume(): void { this.drain(); }
+
   private drain(): void {
     if (this.retired || this.writeActive) return;
     const frame = this.frames[this.head];
-    if (!frame) return;
+    if (!frame || !this.canWrite(frame)) return;
     this.writeActive = true;
     let completed = false;
     const completion = (error?: Error): void => {
@@ -647,7 +670,7 @@ export class OrderedOutboundQueue {
       if (!this.writeActive && this.head === this.frames.length) this.finishIdleWaiters();
     };
     try {
-      this.write(frame.encoded, completion);
+      this.write(frame.encoded, completion, frame.bytes, frame.priority === true);
     } catch (error) {
       completion(error instanceof Error ? error : new Error(String(error)));
     }
@@ -781,6 +804,14 @@ interface Connection {
   // for a client that had just spoken, so only this field says a ping is
   // actually outstanding; the silent record reports how long it has waited.
   pingOutstandingSince: number | null;
+  /** Bytes handed to ws since the peer last acknowledged their window ping. */
+  deliveryUnacknowledgedBytes: number;
+  deliveryWindowBytes: number;
+  deliveryMinimumRttMs: number;
+  deliverySlowStart: boolean;
+  deliveryPingSequence: number;
+  deliveryPingBytes: number;
+  deliveryPingSentAt: number | null;
   ready: boolean;
   presentationOnly: boolean;
   terminals: Set<string>;
@@ -1159,8 +1190,9 @@ export class GatewayServer {
         // and pong-only clients are still pinged on every tick.
         connection.unansweredHeartbeats += 1;
         const clientInitiatedAt = connection.lastClientInitiatedInboundAt;
-        if (clientInitiatedAt === null
-          || heartbeatAt - clientInitiatedAt >= GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs) {
+        if (connection.deliveryPingSentAt === null
+          && (clientInitiatedAt === null
+            || heartbeatAt - clientInitiatedAt >= GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs)) {
           connection.pingOutstandingSince = heartbeatAt;
           connection.socket.ping();
         }
@@ -2069,13 +2101,30 @@ export class GatewayServer {
 
   private admit(socket: WebSocket, identity: string, isLocal: boolean, remoteAddress: string, upgrade: UpgradeTrace): void {
     let connection: Connection;
-    const maximumOutboundBytes = this.options.maximumOutboundBytes ?? 8 * 1_048_576;
+    const sendDeliveryPing = (): void => {
+      if (connection.deliveryPingSentAt !== null || connection.deliveryUnacknowledgedBytes === 0) return;
+      connection.deliveryPingSequence = (connection.deliveryPingSequence + 1) >>> 0;
+      const payload = Buffer.allocUnsafe(4);
+      payload.writeUInt32BE(connection.deliveryPingSequence);
+      connection.deliveryPingBytes = connection.deliveryUnacknowledgedBytes;
+      connection.deliveryPingSentAt = performance.now();
+      connection.pingOutstandingSince = connection.deliveryPingSentAt;
+      socket.ping(payload);
+    };
     const outbound = new OrderedOutboundQueue(
-      maximumOutboundBytes,
-      (encoded, completion) => socket.send(encoded, (error) => {
-        if (!error) connection.lastWriteProgressAt = performance.now();
-        completion(error);
-      }),
+      this.options.maximumOutboundBytes ?? 8 * 1_048_576,
+      (encoded, completion, frameBytes = 0, priority = false) => {
+        connection.deliveryUnacknowledgedBytes += frameBytes;
+        socket.send(encoded, (error) => {
+          if (!error) connection.lastWriteProgressAt = performance.now();
+          completion(error);
+        });
+        if (!priority && connection.deliveryUnacknowledgedBytes >= Math.max(1, connection.deliveryWindowBytes / 2)) {
+          // Ack halfway through the window so the next half can be delivered while
+          // the pong returns, rather than draining the entire window before sampling.
+          sendDeliveryPing();
+        }
+      },
       (snapshot, nextBytes, nextTopic) => {
         if (connection.closeInitiated) return;
         this.options.logger.log(
@@ -2098,6 +2147,14 @@ export class GatewayServer {
       },
       (bytes) => this.resourceSampler.recordOutboundBytes(bytes),
       (bytes) => this.resourceSampler.recordOutboundCoalesced(bytes),
+      4_096,
+      (frame) => {
+        if (frame.priority) return true;
+        if (connection.deliveryUnacknowledgedBytes === 0) return true;
+        if (connection.deliveryUnacknowledgedBytes + frame.bytes <= connection.deliveryWindowBytes) return true;
+        sendDeliveryPing();
+        return false;
+      },
     );
     connection = {
       id: randomUUID(),
@@ -2130,6 +2187,13 @@ export class GatewayServer {
       lastClientPingAt: null,
       lastWriteProgressAt: null,
       pingOutstandingSince: null,
+      deliveryUnacknowledgedBytes: 0,
+      deliveryWindowBytes: INITIAL_DELIVERY_WINDOW_BYTES,
+      deliveryMinimumRttMs: Number.POSITIVE_INFINITY,
+      deliverySlowStart: true,
+      deliveryPingSequence: 0,
+      deliveryPingBytes: 0,
+      deliveryPingSentAt: null,
       helloTimer: setTimeout(() => {
         // The Gateway's own deadline ended this attempt, so the record must not
         // name the peer as the cause.
@@ -2147,7 +2211,31 @@ export class GatewayServer {
       this.noteInbound(connection, true);
       connection.lastClientPingAt = performance.now();
     });
-    socket.on("pong", () => this.noteInbound(connection, false));
+    socket.on("pong", (payload) => {
+      const sequence = payload.length === 4 ? payload.readUInt32BE() : -1;
+      if (connection.deliveryPingSentAt !== null && sequence === connection.deliveryPingSequence) {
+        const now = performance.now();
+        const elapsedMs = Math.max(1, now - connection.deliveryPingSentAt);
+        const acknowledgedBytes = connection.deliveryPingBytes;
+        const measuredBytesPerSecond = acknowledgedBytes * 1_000 / elapsedMs;
+        connection.deliveryMinimumRttMs = Math.min(connection.deliveryMinimumRttMs, elapsedMs);
+        if (connection.deliverySlowStart
+          && elapsedMs <= connection.deliveryMinimumRttMs * DELIVERY_SLOW_START_RTT_GROWTH) {
+          connection.deliveryWindowBytes = Math.min(MAXIMUM_DELIVERY_WINDOW_BYTES, connection.deliveryWindowBytes * 2);
+          if (connection.deliveryWindowBytes === MAXIMUM_DELIVERY_WINDOW_BYTES) connection.deliverySlowStart = false;
+        } else {
+          connection.deliverySlowStart = false;
+          connection.deliveryWindowBytes = Math.max(MINIMUM_DELIVERY_WINDOW_BYTES,
+            Math.min(MAXIMUM_DELIVERY_WINDOW_BYTES, Math.round(measuredBytesPerSecond)));
+        }
+        connection.deliveryUnacknowledgedBytes = Math.max(0,
+          connection.deliveryUnacknowledgedBytes - acknowledgedBytes);
+        connection.deliveryPingBytes = 0;
+        connection.deliveryPingSentAt = null;
+        connection.outbound.resume();
+      }
+      this.noteInbound(connection, false);
+    });
     socket.on("close", (code, reason) => {
       const suffix = reason.length > 0 ? `: ${reason.toString("utf8")}` : "";
       this.disconnect(connection, `WebSocket close ${code}${suffix}`);
@@ -3099,9 +3187,14 @@ export class GatewayServer {
       // writer hands exactly one encoded frame to ws at a time, preserving a
       // response before its synchronization suffix without manufacturing
       // transport pressure from concurrent bounded RPC completions.
+      const outboundValue = value as { type?: unknown; topic?: unknown };
+      const priority = outboundValue.type === "response"
+        || outboundValue.topic === "transport.resyncRequired"
+        || outboundValue.topic === "system.stopping";
       if (!connection.outbound.enqueue({
         encoded: frame.output, bytes: frame.outputBytes,
         ...outboundFrameIdentity(connection, value, frame, this.options.maxFrameBytes),
+        ...(priority ? { priority: true } : {}),
       })) return "failed";
       // The queue reported the bytes it accepted: a frame it replaced with a
       // coalescing `session.rebaseline` is counted as that replacement.

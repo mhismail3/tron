@@ -7,8 +7,24 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 ## Failure boundaries
 
 - **Gateway outbound queue:** at most 8 MiB and 4,096 encoded frames per connection,
-  including the active write. Exactly one frame enters `ws` at a time. Completion
-  releases both its payload reference and byte reservation. A newer session
+  including the active write. Exactly one frame enters `ws` at a time, and the
+  Gateway pauses ordinary state frames when the bytes handed to `ws` but not yet
+  delivery-acknowledged reach an adaptive per-connection window (slow-starts at
+  64 KiB, doubles on acknowledgements whose round trip stays near the best
+  observed, and settles at about one second of acknowledged throughput, clamped
+  to 32 KiB–4 MiB).
+  A sequenced WebSocket ping acknowledges every byte handed before it; WebSocket
+  clients answer control pings automatically, including `ws` and the iOS
+  `URLSessionWebSocketTask` client exercised by `scripts/ios-gateway-e2e-test all`.
+  A matching pong is also liveness evidence and suppresses a duplicate heartbeat
+  ping. Responses and the stopping/resync control events can pass queued state,
+  while the frame already handed to `ws` cannot be recalled. The window is
+  frame-atomic: one frame larger than the window is handed whole when the window
+  is empty. The current largest observed `session.snapshot` is 590 KiB, versus
+  about 80 KiB deliverable within the 8 s liveness deadline at 0.08 Mbit/s; that
+  single frame can therefore still delay an application-level liveness pong
+  (F-8). Completion releases its payload reference and queue byte reservation.
+  A newer session
   summary replaces the unsent summary of that session, and a newer session
   snapshot supersedes the unsent sequenced state of its own runtime generation
   that it fully re-states, up to its own `eventSequence`, so a slow link carries

@@ -2777,18 +2777,22 @@ cannot hold the catalog, and it takes the same per-host profile lock.
     zero closes are read as "this cap never reached them", not as a pass. The
     case that can reach them is `bandwidth-stream` below. Note what a pong waits
     behind when they are reached: the queue's bytes compress on the wire (about
-    25-30× for this fixture's generated transcripts), and the Gateway's own
-    `autoPong` answer is not queued in its application queue at all, so what
-    delays a pong is the socket's own buffered bytes.
+    25-30× for this fixture's generated transcripts), and an automatic WebSocket
+    pong is not queued in the Gateway's application queue. The Gateway limits
+    bytes handed to `ws` but not acknowledged by a sequenced control ping to an
+    adaptive delivery window (64 KiB slow start, then roughly one second of
+    measured throughput, clamped to 32 KiB–4 MiB); application responses can pass
+    state held behind that window, where G-4 can still coalesce it.
   - **bandwidth-stream** (`--bandwidth-stream-mbps`, default 0.08, for
     `--bandwidth-stream-seconds`, default 30): the mobile mounts several chats on
     the phase's running sessions (up to `bandwidthStreamSessions`), which stream
     superseding snapshots and keyed events, and the path is then capped *below
     what they produce* — the measured seven streams of this fixture produced
     295,621 B/s of decoded state and 11,901 B/s of wire, so the cap's 10,000 B/s
-    is below the workload and the relay, not the workload, bounds the leg — so
-    the Gateway's queue holds replaced state — the state G-4 coalesces — and
-    whatever waits behind it. This is the case that can show what the page leg's
+    is below the workload and the relay, not the workload, bounds the leg. The
+    Gateway's outbound queue holds state while the delivery window is
+    unacknowledged; G-4 coalesces superseded frames there and control responses
+    can pass them. This is the case that can show what the page leg's
     default cap cannot: on code without G-4 the queue reaches its 8 MiB backstop
     and the socket closes for capacity, and on code without C-4 the phone tears
     down a link over a pong a busy path delayed. It reports the streams it held,
@@ -2801,7 +2805,11 @@ cannot hold the catalog, and it takes the same per-host profile lock.
     backlog: its own round trip longer than the *same run's* uncapped round trip,
     a missed deadline, or a close. The round trip is the leg's own window (the
     client's lifetime maximum is not the leg's) and each pong is charged to the
-    ping it answers.
+    ping it answers. Delivery acknowledgement bounds queued stream bytes but does
+    not split one WebSocket message: the current largest `session.snapshot` is
+    590 KiB, above the ~80 KiB an 8 s deadline permits at this cap. The measured
+    stream case still had one pong miss and a 17.0 s maximum; F-8 owns the
+    single-frame liveness budget.
   - **restart:** the driver asks the profiler — its parent, which owns the
     fixture process — for a Gateway restart while every connected client is
     live. The profiler stops the child and starts a fresh one on the same port,

@@ -664,7 +664,8 @@ rows are in priority order.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | R-1 | Done | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | orchestrator, 2026-09-29: merged to `main` with four known misses the user accepted in writing (see handoff); F-4..F-7 own them |
-| F-4 | Blocked | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-4), 2026-09-30; `ws.bufferedAmount` cannot bound bytes already accepted into kernel/path buffers, so the required mechanism and qualification remain outstanding (see handoff) |
+| F-4 | Done | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); bound delivery-acknowledged bytes and prioritize control replies | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-4), 2026-09-30 (second pass): per-connection slow-start delivery window, queue coalescing and priority responses; same-load 2 Mbit/s link_use .993 off/on; 32 KiB throttled real-socket ping/response/rebaseline checks pass. Residual large-frame delay is F-8 (see handoff) |
+| F-8 | Ready | No single frame exceeds a slow link's liveness budget: bound `session.snapshot` frame size (page or split the restated state), or move phone liveness to control-frame pings over fragmented data (design decision); current largest frame is 590 KiB vs ~80 KiB at the 0.08 Mbit/s cap and 8 s deadline | F-4 | |
 | F-5 | Blocked | Prompt admission p99 ~610 ms against 250 ms in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567, with F-6 and F-7), 2026-09-30; full-size profile failed in prime before mixed-window evidence (see handoff) |
 | F-6 | Blocked | Event loop p99 ~38 ms against 20 ms, max up to 1.4 s under load; attribute with a CPU profile | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30; host too loaded for qualifying attribution and full-size profile failed in prime (see handoff) |
 | F-7 | Blocked | Warm `session.open` p99 ~335 ms against 300 ms | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30; full-size profile failed in prime before measured windows (see handoff) |
@@ -10733,6 +10734,58 @@ recovery gaps; all three were fixed on the same branch.
 - For the next agent: re-run the prescribed before/after qualification on a
   quiet host. Do not mark Done unless `bandwidth-stream` has zero deadline
   misses and ping-to-pong well under 8 s without regressing the `bandwidth` leg.
+
+F-4 integration failure modes (written before test/code): (1) a large frame accepted by `ws` fills path buffers and delays the peer's automatic pong; (2) stream frames held behind an unacknowledged window fail to coalesce to the latest state; (3) priority control replies remain behind those held frames; (4) acknowledgment gating lowers throughput on a fast path; (5) a delivery-window pong does not preserve heartbeat liveness accounting.
+
+#### F-4 second pass · 2026-09-30 · orchestrator-dispatched deepseek-worker
+
+- Result: Gateway measures bytes handed to `ws` until an acknowledgement pong,
+  pauses ordinary queued state at an adaptive window, and puts RPC responses
+  plus shutdown/resync notices ahead of held frames. Slow start begins at 64 KiB,
+  doubles on acknowledgements whose RTT stays within 1.5× the best sample, then
+  settles at one measured second of delivery, clamped to 32 KiB–4 MiB. A
+  sequenced WebSocket ping's pong acknowledges the bytes handed before it; its
+  pong also counts as heartbeat liveness. Pings begin at half-window so
+  acknowledgement overlaps delivery of the second half. The orchestrator
+  revised the original max-start design to slow start and declined fragmentation
+  in this task.
+- Evidence: `npm run build`; `npx vitest run
+  src/transport/server-capacity.integration.test.ts` 37/37, including a real
+  socket with a reader throttled to 15 ms per 100 ms (control ping/pong and
+  priority response arrive within 1 s, held snapshot state coalesces to sequence
+  12, response precedes its rebaseline) and an unthrottled gate-on/off comparison
+  (at least 80% of bytes delivered in both the first 2 s and full 4 s). Merge
+  gate on the current integration base: 6 transport files 137/137, runtime
+  registry 245/245, `npx tsc --noEmit -p .` clean. Documentation and personal
+  information checks pass.
+- Same-load `bandwidth` qualification (commands
+  `scripts/tron-profile gateway --scenario multi-session --no-build --iterations
+  1 --cases bandwidth`, no simulators booted): gate off run
+  `20260930T005432Z-multi-session-b77ed1`, link_use .993, delivered 248,309 B/s,
+  max ping/pong 1,837 ms, zero misses; gate on run
+  `20260930T010154Z-multi-session-af880d`, link_use .993, delivered 248,191
+  B/s, max 1,755 ms, zero misses. Prescribed stream+bandwidth run
+  `20260930T010914Z-multi-session-9c38d0` had bandwidth link_use .982 and zero
+  misses, but bandwidth-stream max ping/pong 17,020 ms and one miss. Its largest
+  mobile frame was `session.snapshot`, 590.04 KiB. A frame larger than the
+  window is atomic and may be handed whole when the window is empty, so F-4
+  cannot constrain that frame's delivery time; this remaining liveness-budget
+  limit is assigned to F-8. An earlier run at host load 98 reported .838
+  bandwidth link_use and 8,589 ms/zero stream misses; the controlled same-load
+  comparison resolved the throughput concern, but the stream outcome remains
+  blocked on F-8's design and fix.
+- iOS E2E evidence: `scripts/ios-gateway-e2e-test all` passed, 1/1
+  `RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools`,
+  154.6 s; retained at
+  `${TMPDIR}/tron-ios-gateway-e2e-501/results/20260930T012149Z-run.pm6MdD/FocusedE2E.xcresult`.
+  The first attempt earlier in the session returned exit 73 while `tron-ms-3`
+  held the default simulator lease; the retry passed after that lease freed.
+  `scripts/ios-gateway-e2e-test stop` cleaned the fixture and fault proxy.
+- For the next agent (F-8): the queue remains frame-atomic by design. At
+  0.08 Mbit/s, the 8 s deadline carries about 80 KB, while the largest observed
+  `session.snapshot` is 590 KiB; the phone's app-level liveness pong cannot pass
+  that whole message. Scope and fix the bound at the snapshot owner or take the
+  explicitly named liveness protocol decision.
 
 #### F-3 review round 1 · 2026-09-29
 

@@ -1131,6 +1131,165 @@ describe("WebSocket connection and outbound capacity", () => {
     return { gateway, socket, connection, held, release, sampler };
   };
 
+  it("bounds unacknowledged stream bytes and delivers control responses ahead of coalesced state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-delivery-window-"));
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    const gateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 512 * 1_024, maximumOutboundBytes: 2 * 1_048_576,
+      devices, uploads: {} as never, sessions: { unsubscribeClient: vi.fn() } as never,
+      auth: { detachClient: vi.fn() } as never, service: {
+        info: () => ({ protocolVersion: 6 }), releaseClient: vi.fn(),
+        terminalBelongsToSession: () => false, invoke: async () => ({ pong: true }),
+      } as never,
+      logger: logger as never,
+    });
+    await gateway.listen();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    type WireFrame = { type?: string; id?: string; topic?: string; payload?: { snapshot?: { eventSequence?: number } } };
+    const received: WireFrame[] = [];
+    let deliveryPings = 0;
+    let applicationPongAt: number | null = null;
+    socket.on("message", (raw) => received.push(JSON.parse(raw.toString())));
+    socket.on("ping", () => { deliveryPings += 1; });
+    socket.on("pong", (payload) => {
+      if (payload.toString() === "application-ping") applicationPongAt = Date.now();
+    });
+    socket.on("error", () => {});
+    cleanups.push(async () => {
+      if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      await bounded(gateway.close(), "delivery-window fixture close");
+      await rm(root, { recursive: true, force: true });
+    });
+    await bounded(new Promise<void>((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    }), "delivery-window socket open");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    await bounded(waitUntil(() => received.some((frame) => frame.type === "hello")), "delivery-window hello");
+
+    const connection = connections(gateway)[0]! as StalledConnection & {
+      deliveryWindowBytes: number;
+      deliveryUnacknowledgedBytes: number;
+      deliveryPingSentAt: number | null;
+      outbound: OrderedOutboundQueue & { resume(): void };
+    };
+    connection.deliveryWindowBytes = 32 * 1_024;
+    const reader = (socket as unknown as { _socket: import("node:net").Socket })._socket;
+    reader.pause();
+    const drainTimer = setInterval(() => {
+      reader.resume();
+      setTimeout(() => reader.pause(), 15);
+    }, 100);
+    cleanups.push(async () => clearInterval(drainTimer));
+
+    connection.subscriptionTokens.set("stream-session", "token");
+    const snapshot = (eventSequence: number) => ({
+      runtimeGeneration: "generation", eventSequence, revision: eventSequence, data: "s".repeat(24 * 1_024),
+    });
+    gateway.broadcastSession("stream-session", "session.snapshot", snapshot(1));
+    for (let sequence = 2; sequence <= 12; sequence += 1) {
+      gateway.broadcastSession("stream-session", "session.snapshot", snapshot(sequence));
+    }
+    await waitUntil(() => connection.deliveryPingSentAt !== null
+      && connection.deliveryPingSentAt !== undefined);
+    expect(connection.deliveryUnacknowledgedBytes).toBeLessThanOrEqual(connection.deliveryWindowBytes + 24 * 1_024 + 512);
+    expect(connection.outbound.snapshot().queuedFrames).toBeGreaterThan(0);
+    const sentAt = Date.now();
+    socket.ping(Buffer.from("application-ping"));
+    socket.send(JSON.stringify({ type: "request", id: "priority-pong", method: "test.ping", params: {} }));
+    await bounded(waitUntil(() => applicationPongAt !== null), "application ping response behind stream");
+    expect(applicationPongAt! - sentAt).toBeLessThan(1_000);
+    await bounded(waitUntil(() => received.some((frame) => frame.type === "response" && frame.id === "priority-pong")), "priority response behind stream");
+    expect(Date.now() - sentAt).toBeLessThan(1_000);
+    await bounded(waitUntil(() => received.some((frame) => frame.topic === "session.rebaseline")), "coalesced stream rebaseline");
+    expect(Date.now() - sentAt).toBeLessThan(1_000);
+    const survivor = received.find((frame) => frame.topic === "session.rebaseline");
+    expect(survivor?.payload?.snapshot?.eventSequence).toBe(12);
+    expect(received.findIndex((frame) => frame.type === "response" && frame.id === "priority-pong"))
+      .toBeLessThan(received.findIndex((frame) => frame.topic === "session.rebaseline"));
+    expect(deliveryPings).toBeGreaterThan(0);
+    expect(connection.deliveryWindowBytes).toBeGreaterThanOrEqual(32 * 1_024);
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it("keeps unthrottled delivery throughput close to the window gate being disabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-window-throughput-"));
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const port = await unusedPort();
+    const gateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 512 * 1_024,
+      devices, uploads: {} as never, sessions: { unsubscribeClient: vi.fn() } as never,
+      auth: { detachClient: vi.fn() } as never, service: {
+        info: () => ({ protocolVersion: 6 }), releaseClient: vi.fn(),
+        terminalBelongsToSession: () => false, invoke: async () => ({ ok: true }),
+      } as never,
+      logger: { log: vi.fn() } as never,
+    });
+    await gateway.listen();
+    const open = async () => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+      let bytes = 0;
+      let hello = false;
+      socket.on("message", (raw) => {
+        bytes += Buffer.byteLength(raw.toString());
+        if (JSON.parse(raw.toString()).type === "hello") hello = true;
+      });
+      socket.on("error", () => {});
+      await bounded(new Promise<void>((resolve, reject) => {
+        socket.once("open", resolve);
+        socket.once("error", reject);
+      }), "throughput socket open");
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+      await bounded(waitUntil(() => socket.readyState === WebSocket.OPEN
+        && connections(gateway).length >= 1), "throughput connection admission");
+      return { socket, get bytes() { return bytes; }, get hello() { return hello; } };
+    };
+    const gated = await open();
+    const ungated = await open();
+    cleanups.push(async () => {
+      for (const socket of [gated.socket, ungated.socket]) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      await bounded(gateway.close(), "throughput fixture close");
+      await rm(root, { recursive: true, force: true });
+    });
+    await bounded(waitUntil(() => connections(gateway).length === 2 && gated.hello && ungated.hello), "throughput hello frames");
+    const live = connections(gateway);
+    const [gatedConnection, ungatedConnection] = live as Array<StalledConnection & {
+      deliveryWindowBytes: number;
+      deliverySlowStart: boolean;
+    }>;
+    ungatedConnection.deliveryWindowBytes = Number.MAX_SAFE_INTEGER;
+    ungatedConnection.deliverySlowStart = false;
+    gatedConnection.subscriptionTokens.set("throughput-gated", "token");
+    ungatedConnection.subscriptionTokens.set("throughput-ungated", "token");
+    let sequence = 0;
+    const ticker = setInterval(() => {
+      for (const sessionId of ["throughput-gated", "throughput-ungated"]) {
+        sequence += 1;
+        gateway.broadcastSession(sessionId, "session.progress", {
+          runtimeGeneration: "generation", eventSequence: sequence, revision: sequence, data: "x".repeat(1_024),
+        });
+      }
+    }, 10);
+    cleanups.push(async () => clearInterval(ticker));
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    const firstTwoSeconds = { gated: gated.bytes, ungated: ungated.bytes };
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    clearInterval(ticker);
+    await bounded(waitUntil(() => gatedConnection.outbound.snapshot().queuedFrames === 0
+      && ungatedConnection.outbound.snapshot().queuedFrames === 0), "throughput queues drain");
+    const total = { gated: gated.bytes, ungated: ungated.bytes };
+    expect(firstTwoSeconds.ungated).toBeGreaterThan(0);
+    expect(total.ungated).toBeGreaterThan(firstTwoSeconds.ungated);
+    expect(firstTwoSeconds.gated).toBeGreaterThanOrEqual(firstTwoSeconds.ungated * 0.8);
+    expect(total.gated).toBeGreaterThanOrEqual(total.ungated * 0.8);
+  });
+
   it("replaces superseded session state with one rebaseline the client can admit", async () => {
     const logger = { log: vi.fn() };
     const maximumOutboundBytes = 64 * 1_024;
