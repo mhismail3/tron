@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, W-3 claimed
+- **Last updated:** 2026-09-30, W-3 Done
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -198,7 +198,7 @@ Dated 2026-09-30:
 | --- | --- | --- | --- | --- |
 | W-1 | Done | User setup: `gh` re-authenticated, repository settings applied (squash-only), private evidence repository created, D-1–D-5 settled | none | User, 2026-09-30 |
 | W-2 | Done | GitHub bootstrap: labels, Project and fields, Epic/Task issue forms, ruleset spec; the user applies the settings and ruleset changes | W-1 | session 01a0f183, 2026-09-30 |
-| W-3 | Claimed | Shared-resource isolation audit so any two worktrees can validate concurrently; each fix becomes a sub-issue | none | session 01a0f183, 2026-09-30 |
+| W-3 | Done | Shared-resource isolation audit so any two worktrees can validate concurrently; each fix becomes a sub-issue | none | session 01a0f183, 2026-09-30 |
 | W-4 | Ready | Core: `start`/claim, naming, soft cap (the config file and `gh` resolution exist since W-2) | W-2 | Unassigned |
 | W-5 | Ready | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | Unassigned |
 | W-6 | Ready | Core: `finish` and `land` (PR with `Closes`, evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff) and a recurring steward for orphaned PRs | W-5 | Unassigned |
@@ -211,6 +211,12 @@ Dated 2026-09-30:
 | W-13 | Ready | Dependabot intake: each PR becomes an agent-owned `deps` task; the Pi SDK family and Node follow their runbooks | W-6 | Unassigned |
 | W-14 | Ready | One audited legacy sweep of the existing worktrees and branches, with the user approving the exact list | W-7 | Unassigned |
 | W-15 | Needs scoping | Migrate each remaining plan at its boundary; retire `docs/plans/` and `docs/plans/HISTORY.md` once empty | W-11 | Unassigned |
+| W-16 | Ready | #98 iOS Gateway E2E fixture and DerivedData keyed by worktree, with a build-identity check (P1) | W-3 | Unassigned |
+| W-17 | Ready | #99 Default iOS test lane per worktree; E2E and profiler accept lanes; concurrent two-worktree iOS proof (P1) | W-3 | Unassigned |
+| W-18 | Ready | #100 Lease the Development simulator and the physical iPhone (P2) | W-3 | Unassigned |
+| W-19 | Ready | #102 Worktree-relative Mac Release DerivedData; hook installer works from linked worktrees (P2) | W-3 | Unassigned |
+| W-20 | Ready | #103 Dev Gateway status names the worktree and branch it runs (P2) | W-3 | Unassigned |
+| W-21 | Ready | #101 Scope retained test/profile artifacts and `latest` pointers to the worktree (P3) | W-3 | Unassigned |
 
 ## Task details
 
@@ -279,6 +285,25 @@ Dated 2026-09-30:
     worktree;
   - open `regression` issues.
 - It is read-only and fetched live, in a bounded number of API calls.
+
+## Findings
+
+### W-3 findings
+
+Resources two worktrees can share, classified as isolated (A), leased (B),
+exclusive without a lease (C), or accidental collision (D). Evidence is
+file-level. Everything else inspected is A.
+
+| Resource | Class | Tracking |
+| --- | --- | --- |
+| Gateway test listeners (port 0), `mkdtemp` roots, `.ci-tools`, Mac Debug DerivedData, XcodeGen output, bundle staging, `tron-ios-test` DerivedData and run directories, profiler DerivedData, npm cache | A | none |
+| Default iOS simulator lane and its lease; simulator boot admission; lane sweep; Instruments trace lock | B | #99 (lane per worktree) |
+| iOS Gateway E2E fixture root and DerivedData (per user, not per worktree) | D | #98 |
+| Development simulator and the physical iPhone | C | #100 |
+| Mac Release DerivedData `/tmp/tron-mac-release`; `scripts/install-hooks.sh` in linked worktrees | D | #102 |
+| Dev Gateway on 9848: locked, but which worktree it runs is not recorded | C | #103 |
+| Search-stall report path; `latest` result pointers | D | #101 |
+| `npm start`/`npm run chat` defaults (`~/.tron`, 9847/9848); push-relay `wrangler dev` on 8787 | C | Policy only: agents never start Gateways (AGENTS rule 8), and `wrangler dev` is a manual command |
 
 ## Handoff log
 
@@ -353,3 +378,42 @@ Dated 2026-09-30:
 - For the next agent:
   - W-4 builds `start` and claiming on `tools/work/gh.py` and `.github/work.json`.
   - Keep the rule that nothing in `tools/work/` names this repository.
+
+### W-3 · Done · 2026-09-30 · session 01a0f183
+
+- Result:
+  - Inventoried the resources two worktrees can share: Gateway,
+    push-relay, iOS tooling, Mac app and repository scripts. Three read-only
+    scouts did the inventory, and every C/D claim was re-checked by hand.
+  - Filed each fix as a GitHub issue (#98–#103) on the Project, Ready with a
+    priority, and added rows W-16 to W-21. W-12 parents them under the epic.
+- Evidence:
+  - Two worktrees at the same commit ran `npm ci` concurrently against the
+    shared npm cache, and both passed.
+  - They then ran six port- and temp-heavy Gateway Vitest files concurrently
+    for three rounds: 268/268 passed in each worktree every round, about 70 s
+    per round.
+  - Vitest JSON reports and the summary are in the Tron internal workspace
+    under `files/w-3-isolation/`.
+  - Mac tests: no `UserDefaults.standard`, Keychain or Application Support
+    use in `packages/mac-app/Tests`, so the shared test bundle IDs carry no
+    state.
+- Changes: this plan only. The fixes are the new tasks.
+- Tasks added: W-16 to W-21 (#98–#103).
+- Kept on purpose:
+  - Gateway tests that probe port 0 and then rebind have a theoretical race;
+    it was not observed in 6 concurrent runs.
+  - `npm start` defaults stay, because rule 8 already governs them.
+- Deviations:
+  - The concurrent iOS proof moved into #99's acceptance criteria. Today it
+    would only show the designed lease contention (exit 73).
+  - A concurrent Mac run was not performed. Mac Debug builds use
+    worktree-relative DerivedData and no shared test state was found; #102
+    covers the one Mac collision.
+  - Issue text was checked against the privacy guard's needles by hand. W-5
+    owns the automated check before posting.
+- For the next agent:
+  - #98 and #99 are the P1 blockers for parallel iOS validation. Take them
+    before W-5 relies on concurrent iOS checks.
+  - An agent's shell needs nvm's pinned Node on PATH, not the Gateway
+    payload runtime (Node plan N-1).
