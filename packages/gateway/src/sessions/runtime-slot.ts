@@ -521,8 +521,6 @@ export class RuntimeSlot {
   private readonly runtimeGeneration = randomUUID();
   /** Stable runtime-only catalog identity for a new session before Pi creates JSONL. */
   private readonly createdAt = new Date().toISOString();
-  /** Canonical parent identity retained while a fresh fork has no JSONL yet. */
-  private liveForkParentSessionId: string | undefined;
   /** Disposable derived annotation; canonical JSONL remains the authority. */
   private forkBoundary: ForkBoundaryAnchor | undefined;
   private revision = 0;
@@ -1437,11 +1435,8 @@ export class RuntimeSlot {
     return this.runtime.session.sessionFile;
   }
 
-  /** Canonical parent identity retained while Pi has only reserved the fork path. */
-  get catalogParentSessionId(): string | undefined { return this.liveForkParentSessionId; }
-
-  /** Pi may reserve a future JSONL path before writing its first canonical
-   * entry. Catalog membership treats only an existing file as persisted. */
+  /** Pi may reserve a future JSONL path before writing its first user or
+   * assistant message. Catalog membership treats only an existing file as persisted. */
   get persistedSessionFile(): string | undefined {
     const path = this.runtime.session.sessionFile;
     return path && existsSync(path) ? path : undefined;
@@ -2806,13 +2801,10 @@ export class RuntimeSlot {
     return owner.waiter;
   }
 
-  // The pinned Pi SessionManager keeps a brand-new session in memory until its
-  // first assistant entry. appendCustomEntry therefore has no public pre-assistant
-  // flush/durability acknowledgement to await here. Do not poll the JSONL (the
-  // assistant cannot run while this owner is blocked), write Pi's file directly,
-  // or add a second receipt journal. Once Pi exposes an owner-safe eager flush,
-  // require it here before provider or extension execution and add a crash/reopen
-  // integration test for the first invocation in a new session.
+  // Pi materializes a brand-new session when its first user or assistant message
+  // is appended. Receipts written before that boundary become durable with the
+  // message; receipts written before any message remain memory-only. Never write
+  // Pi's JSONL directly or add a second receipt journal to bypass that boundary.
   /** Pi stages before appending. If a failed append left an entry in memory,
    * the enclosing durable-write owner fences the runtime; neither replay nor
    * memory-only presence can replace the missing canonical persistence proof. */
@@ -7865,7 +7857,6 @@ export class RuntimeSlot {
       const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
       const next = this.id;
-      this.liveForkParentSessionId = parentSessionId;
       this.summaryContentDirty = true;
       this.revision += 1;
       this.emit("session.structureChanged", { branchChanged: true });

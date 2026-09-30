@@ -284,6 +284,16 @@ function assertProcessSessionRef(value: string): void {
   }
 }
 
+/** Pi stores the spelling of a parent path; macOS may surface the same path
+ * through its `/var` and `/private/var` aliases. Normalize lexically so catalog
+ * assembly does not add synchronous filesystem work per session. */
+function sessionCatalogPathKey(path: string): string {
+  const absolute = resolve(path);
+  return process.platform === "darwin" && absolute.startsWith("/private/var/")
+    ? absolute.slice("/private".length)
+    : absolute;
+}
+
 interface DashboardOrderableSession {
   id: string;
   phase: SessionSummary["phase"];
@@ -520,7 +530,7 @@ class RequestSpanLane extends AsyncMutex {
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
   /** Live-only generated sessions are bound to the exact Automation operation
-   * until Pi persists their first assistant entry. Weak ownership cannot outlive
+   * until Pi persists their first user or assistant message. Weak ownership cannot outlive
    * the RuntimeSlot and is never a second session catalog. */
   private readonly automationSessionOwners = new WeakMap<RuntimeSlot, {
     operationId: string;
@@ -2367,8 +2377,7 @@ export class RuntimeRegistry {
     scope: "user" | "all",
     ambiguousIDs: ReadonlySet<string>,
   ): CatalogPageSeed[] {
-    const pathToId = new Map(sessions.map((session) => [resolve(session.path), session.id]));
-    const pathById = new Map(sessions.map((session) => [session.id, session.path]));
+    const pathToId = new Map(sessions.map((session) => [sessionCatalogPathKey(session.path), session.id]));
     const delegated = this.delegatedSessionTopologies(sessions);
     const persistedIDs = new Set(sessions.map((session) => session.id));
     const seeds: CatalogPageSeed[] = [];
@@ -2377,24 +2386,11 @@ export class RuntimeRegistry {
       if (topology?.contradictoryHeader) continue;
       const kind: SessionSummary["kind"] = topology ? "subagent" : "user";
       if (scope === "user" && kind === "subagent") continue;
-      const headerParentSessionId = session.parentSessionPath ? pathToId.get(resolve(session.parentSessionPath)) : undefined;
-      const slot = this.slots.get(session.id);
-      // During the exact live→persisted boundary, a warmed structural index can
-      // observe the new child file before its canonical parent header alias has
-      // joined the same normalized cut. The mutation-owned parent ID is the same
-      // canonical relationship and closes that one-cut gap; cold catalogs still
-      // derive it exclusively from JSONL topology/header evidence.
-      const liveParentSessionId = slot?.catalogParentSessionId;
-      const liveParentPath = liveParentSessionId ? pathById.get(liveParentSessionId) : undefined;
-      const headerMatchesLiveParent = session.parentSessionPath === undefined
-        || (liveParentPath !== undefined
-          && basename(session.parentSessionPath) === basename(liveParentPath));
-      const liveTransitionParentSessionId = headerMatchesLiveParent
-        ? liveParentSessionId
+      const headerParentSessionId = session.parentSessionPath
+        ? pathToId.get(sessionCatalogPathKey(session.parentSessionPath))
         : undefined;
-      const parentSessionId = topology?.parentSessionId
-        ?? headerParentSessionId
-        ?? liveTransitionParentSessionId;
+      const slot = this.slots.get(session.id);
+      const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
       const latest = this.latestSummaries.get(session.id);
       const name = latest?.name ?? session.name;
       const archivedAt = this.archivedAt(session.id);
@@ -2429,7 +2425,6 @@ export class RuntimeRegistry {
       for (const [id, slot] of this.slots) {
         if (slot.isDisposed || persistedIDs.has(id) || ambiguousIDs.has(id)) continue;
         const latest = this.latestSummaries.get(id);
-        const parentSessionId = slot.catalogParentSessionId;
         const automationOwner = this.automationSessionOwners.get(slot);
         const archivedAt = this.archivedAt(id);
         seeds.push({
@@ -2437,7 +2432,6 @@ export class RuntimeRegistry {
           ...(latest?.name ? { name: latest.name } : {}),
           cwd: slot.cwd,
           kind: "user",
-          ...(parentSessionId ? { parentSessionId } : {}),
           ...(automationOwner ? {
             creationOrigin: { kind: "automation", automationId: automationOwner.automationId },
           } as const : {}),

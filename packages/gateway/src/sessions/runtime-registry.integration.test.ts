@@ -10750,6 +10750,75 @@ export default function (pi) {
     expect(typeof resources.subagentDiagnostics).toBe("string");
   });
 
+  it("persists the first invocation receipt with the first user message across runtime teardown", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-first-message-receipt-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-first-message-receipt", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("first response")]);
+    const createRuntime = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const createRegistry = async () => {
+      const registry = new RuntimeRegistry({
+        agentDir,
+        tronHome: join(root, "tron"),
+        idleRuntimeMs: 60_000,
+        modelRuntimeFactory: createRuntime,
+        trust,
+        broadcast: () => {},
+        sessionSummaryChanged: () => {},
+        sessionListChanged: () => {},
+      });
+      registries.push(registry);
+      await initializeRegistry(registry);
+      return registry;
+    };
+    let registry: RuntimeRegistry | undefined;
+    try {
+      registry = await createRegistry();
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      const admitted = await slot.prompt("persist the first turn");
+      await waitUntil(() => !slot.isBusy);
+      const sessionFile = slot.sessionFile!;
+      const entries = (await readFile(sessionFile, "utf8"))
+        .trimEnd().split("\n").map(line => JSON.parse(line) as Record<string, any>);
+      expect(entries.some(entry => entry.type === "message" && entry.message?.role === "user"
+        && entry.message.content?.some((part: { text?: string }) => part.text === "persist the first turn"))).toBe(true);
+      const firstReceipt = entries.find(entry => entry.type === "custom"
+        && entry.customType === INVOCATION_RECEIPT_TYPE
+        && entry.data?.operationId === admitted.operationId
+        && entry.data?.receiptKind === "start");
+      expect(firstReceipt).toBeDefined();
+
+      // Runtime teardown/reopen exercises the canonical persistence boundary,
+      // not just the old slot's in-memory SessionManager branch.
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      registry = await createRegistry();
+      expect((await registry.list()).map(session => session.id)).toContain(slot.id);
+      const reopened = await registry.acquire(slot.id);
+      const reopenedEntries = (await readFile(reopened.sessionFile!, "utf8"))
+        .trimEnd().split("\n").map(line => JSON.parse(line) as Record<string, any>);
+      expect(reopenedEntries).toContainEqual(firstReceipt);
+      expect(reopened.snapshot().transcript.some(item => item.role === "user"
+        && JSON.stringify(item).includes("persist the first turn"))).toBe(true);
+    } finally {
+      if (registry) {
+        await registry.dispose();
+        registries.splice(registries.indexOf(registry), 1);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rekeys the owning slot when a completed session is forked", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-runtime-fork-"));
     const agentDir = join(root, "agent");
@@ -10835,11 +10904,13 @@ export default function (pi) {
     });
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
 
-    // This fork retains only the user entry, so Pi has reserved but not yet
-    // materialized its JSONL. The live canonical mutation owner must still
-    // project the parent identity; otherwise iOS cannot distinguish the fork
-    // until after its first assistant response.
-    expect(slot.persistedSessionFile).toBeUndefined();
+    // Pi 0.99 materializes a fork as soon as its retained first user entry is
+    // appended, so catalog identity now comes from the canonical file.
+    expect(slot.persistedSessionFile).toBeDefined();
+    const forkHeader = JSON.parse((await readFile(slot.persistedSessionFile!, "utf8")).split("\n", 1)[0]!) as {
+      parentSession?: string;
+    };
+    expect(forkHeader.parentSession).toBe(parentPath);
     expect(slot.snapshot().transcript.filter((item) => item.role === "user")).toEqual([
       expect.objectContaining({
         kind: "message",
@@ -10851,13 +10922,12 @@ export default function (pi) {
     expect(catalog.find((session) => session.id === original)).toMatchObject({ kind: "user" });
     expect(catalog.find((session) => session.id === fork.sessionId)).toMatchObject({
       kind: "user",
-      parentSessionId: original,
       firstMessage: "fork this",
       messageCount: 1,
     });
 
     // The retained prompt-only fork must carry one boundary through both
-    // snapshot/page seams before Pi materializes the first child response.
+    // snapshot/page seams after Pi materializes its first user entry.
     const prePromptBoundary = slot.snapshot().forkBoundary;
     expect(prePromptBoundary).toMatchObject({
       kind: "sessionFork", inheritedAnchorId: userEntry!.id, gapOrdinal: expect.any(Number),
@@ -10887,6 +10957,13 @@ export default function (pi) {
     });
     await slot.dispose();
     expect((await registry.list()).find((session) => session.id === fork.sessionId)).toMatchObject({
+      kind: "user",
+      parentSessionId: original,
+      firstMessage: "fork this",
+      messageCount: 3,
+    });
+    const reopenedCatalog = await registry.list();
+    expect(reopenedCatalog.find((session) => session.id === fork.sessionId)).toMatchObject({
       kind: "user",
       parentSessionId: original,
       firstMessage: "fork this",

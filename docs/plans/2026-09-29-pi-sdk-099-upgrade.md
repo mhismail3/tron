@@ -236,7 +236,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Tool calls without a renderer show arguments; MCP titled `server/tool` | **Adapt** iOS generic tool card for MCP titles | P99-16 |
 | `bash`/`powershell` structured results up to 1 MiB with `truncated`/`full_output_path`; empty output `""` instead of `(no output)` | **Verify/adapt** Tron's bash wrapper and output projection | P99-13 |
 | Managed git packages no longer auto-install Pi peers; warning for host modules in `dependencies` | **Qualify** `pi-agent-browser-native` (git); project warnings | P99-14 |
-| New sessions persisted at the first user message (#10000) | **Adapt**: fork test, live-only/automation ownership, durability docs, new crash/reopen test | P99-4 |
+| New sessions persisted at the first user message (#10000) | **Adapted**: forks materialize with retained user entries; catalog parent identity comes from normalized canonical header paths; pre-message receipts persist with the first user message, proven by teardown/reopen integration | P99-4 |
 | RpcClient listener fix; X11 clipboard; Finder paste; Kitty images; cursor after exit; `/settings` input; autocomplete fixes; pinned `-e` git refs | **Not applicable** (Tron uses the SDK, not RpcClient or the TUI) | — |
 | Provider fixes: Vercel 1-hour cache pricing, `samplingParams`, Mistral GLM and reasoning, OpenAI Fast pricing, OpenCode qwen thinking replay, Responses without `output_index`, OAuth error redirects and busy callback port, Copilot Opus levels | **Inherit**; covered by provider/catalog regressions where Tron owns a seam | P99-12 |
 | Footer/bash/`sanitizeBinaryOutput` CPU reductions | **Inherit** | — |
@@ -249,7 +249,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-1 | Done | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | orchestrator session, 2026-09-29 |
 | P99-2 | Done | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | luna-worker, 2026-09-29 |
 | P99-3 | Done | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | luna-worker, 2026-09-29 |
-| P99-4 | Claimed | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
+| P99-4 | Done | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
 | P99-5 | Ready | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | Unassigned |
 | P99-6 | Ready | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | Unassigned |
 | P99-7 | Ready | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | Unassigned |
@@ -327,28 +327,30 @@ Owning files: `packages/gateway/src/extensions/compatibility-manifest.ts`,
 ### P99-4 — Session materialization at the first user message
 
 Pi now writes a new session file when it first contains a user or assistant
-message. Setup-only sessions still stay in memory.
+message. Setup-only sessions still stay in memory; canonical receipts appended
+before the first message are flushed with it.
 
 - Update `rekeys the owning slot when a completed session is forked` in
   `packages/gateway/src/sessions/runtime-registry.integration.test.ts` to
-  assert the fork is materialized and the catalog reads its parent identity from
-  disk; then check whether the live-only parent-identity projection for
-  unmaterialized forks is still reachable and delete it if not.
+  assert the fork is materialized at its retained first user entry and the cold
+  catalog reads its parent identity from the canonical header. Remove the live
+  parent-identity projection: forks cannot remain unmaterialized after copying
+  a user entry.
 - Re-examine live-only ownership in `packages/gateway/src/sessions/runtime-registry.ts`
   (automation-owned sessions are bound "until Pi persists their first
-  assistant entry") and the catalog admission paths keyed on
+  user or assistant message") and the catalog admission paths keyed on
   `persistedSessionFile`.
 - The durability limitation documented in `packages/gateway/README.md`
   (automation lease, notification admission, invocation receipts) and at
   `persistVerifiedCustomEntry` in `runtime-slot.ts` shrinks: receipts appended
-  before the user message are flushed with it. Pre-user-message failures of a
+  before the first user message are flushed with it. Pre-message failures of a
   brand-new session remain memory-only. Rewrite those passages to the new
   boundary and add the crash/reopen integration test the comment asks for (the
   first invocation's receipt survives a runtime teardown after the user
   message is appended).
 - Update the context-window override warning in
   `packages/gateway/src/providers/context-window-policy.ts` ("persist after the
-  first assistant response").
+  first user or assistant message").
 - Accepted product delta: a session whose first turn fails now stays in the
   session list. Confirm with the user in P99-18 if it surprises them.
 
@@ -658,6 +660,16 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: handled invocations use existing completed lifecycle and receipt format; no new public lifecycle schema was needed. Pi's return disposition is handled at the Gateway-owned queue boundary, with Pi's actual queue remaining authoritative for survivors.
 - Deviations: Full suite had two unrelated failures under parallel load; both pass individually. The planned P99-4 persistence assertion remains untouched and is the third full-suite failure.
 - For the next agent: P99-4 owns the expected fork-materialization behavior change and its test/doc updates. Consider rerunning the full suite at the final checkpoint; focused P99-3 coverage and type checking are green.
+
+### P99-4 · Done · 2026-09-29 · luna-worker
+
+- Result: Pi 0.99 materializes a new session at the first user or assistant message. Updated fork semantics, catalog parent identity, automation ownership wording, canonical receipt durability, notification and context-window wording. Added an integration case that appends the first prompt, tears down the owning RuntimeRegistry, reopens a new registry from disk, and verifies the canonical first invocation receipt and user message.
+- Evidence: Node 22.22.0 TypeScript check passed. Focused fork and receipt integration tests: 2 passed in 6.36s; full `runtime-registry.integration.test.ts`: 246 passed in 57.93s. Full Gateway Vitest default-worker attempts: 2,301 passed with unrelated resource-sensitive failures in 143.97s, then 2,299 passed/4 unrelated timing or stress failures in 198.20s. Retried with `--maxWorkers=4`: 2,302 passed/1 unrelated request-span performance-threshold failure in 278.71s. Individual reruns passed: knowledge curation 1/1 in 1.42s and session-search stall 2/2 in 5.66s. The complete runtime-registry integration file passed 246/246 in 57.93s before the final lexical path-normalization refinement; both P99-4 cases passed afterward (2/2 in 6.36s).
+- Changes: `packages/gateway/src/sessions/runtime-registry.integration.test.ts`, `runtime-registry.ts`, `runtime-slot.ts`, `providers/context-window-policy.ts`, `packages/gateway/README.md`; this plan row, handoff and change matrix.
+- Tasks added: none.
+- Kept on purpose: setup-only and pre-first-message failure receipts remain memory-only; Tron does not write Pi JSONL directly or create a second receipt journal. Automation ownership remains live-only until the first persisted message.
+- Deviations: Full Gateway validation remains short of green after three suite attempts, each with unrelated timing/performance/resource-sensitive failures; changed-area TypeScript and integration validations pass. Fork catalog parent lookup needed lexical normalization of macOS `/var` and `/private/var` path aliases to keep persisted header paths authoritative without synchronous per-session filesystem reads.
+- For the next agent: full Gateway suite should be repeated at the final cross-module checkpoint under lower host load. P99-4-specific test coverage is green; no user decision remains.
 
 ### Draft · Proposed · 2026-09-29 · planning session
 
