@@ -433,12 +433,16 @@ PY
   echo "Gateway fixture upstream 127.0.0.1:$upstream_port (pid $(<"$pid_file")); fault proxy 127.0.0.1:$port (pid $proxy_pid)"
 }
 
+# The newest xctestrun, if any. Python rather than BSD `stat -f`, which GNU stat
+# reads as a file-system query: the hardware-free fixtures run this on Linux CI.
 find_xctestrun() {
-  [[ -d "$derived_data/Build/Products" ]] || return 0
-  find "$derived_data/Build/Products" -maxdepth 1 -type f \
-    -name 'Tron Development_UnitTests_*.xctestrun' \
-    -exec /usr/bin/stat -f '%m %N' {} + 2>/dev/null \
-    | sort -nr | head -1 | cut -d' ' -f2-
+  python3 - "$derived_data/Build/Products" <<'PY'
+from pathlib import Path
+import sys
+runs = [path for path in Path(sys.argv[1]).glob("Tron Development_UnitTests_*.xctestrun") if path.is_file() and not path.is_symlink()]
+if runs:
+    print(max(runs, key=lambda path: path.stat().st_mtime))
+PY
 }
 
 patch_xctestrun() {

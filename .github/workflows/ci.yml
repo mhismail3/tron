@@ -173,6 +173,11 @@ jobs:
 
   ios:
     runs-on: macos-26
+    # The memory reserve protects a shared development Mac's Gateway. A hosted
+    # runner is a dedicated VM whose whole memory (7 GB) is below the 8 GB
+    # default, so the default refuses every boot here (#113).
+    env:
+      TRON_IOS_TEST_MEMORY_RESERVE_BYTES: "0"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -216,6 +221,9 @@ jobs:
     # Source-level transport and native changes must exercise this boundary,
     # not only backing-SDK dependency upgrades.
     runs-on: macos-26
+    # Same dedicated-runner reserve as the ios job.
+    env:
+      TRON_IOS_TEST_MEMORY_RESERVE_BYTES: "0"
     steps:
       # The runner context is not available in job-level env, so the E2E
       # state roots are exported from RUNNER_TEMP for every later step.

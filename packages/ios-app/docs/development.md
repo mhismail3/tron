@@ -1203,7 +1203,9 @@ is the whole point of `--keep-booted` - provisioning reads `memory_pressure` and
 refuses the boot with exit 73 and the simulator table (every lane with its
 state, worktree, lease holder, uptime and disk, every booted device no lane
 owns, and `Simulator.app`) when free memory is below 8 GB.
-`TRON_IOS_TEST_MEMORY_RESERVE_BYTES` overrides that default. Swap in use is
+`TRON_IOS_TEST_MEMORY_RESERVE_BYTES` overrides that default; CI sets it to 0
+because a hosted runner is a dedicated VM with less memory than the default.
+Swap in use is
 reported in that table beside the free memory and never refuses a boot: it
 drains slowly, so a reading at a limit would refuse boots persistently. The
 memory refusal is fast - no wait, no retry - because the caller decides whether to wait

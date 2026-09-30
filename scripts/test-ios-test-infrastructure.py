@@ -3199,6 +3199,8 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         before it refuses them.
     11. `stop` or `clean` in one worktree removes another worktree's fixture or
         DerivedData.
+    12. The harness finds its products with a BSD-only tool, so its build fails
+        silently on the Linux CI runner that runs these cases (#113).
     """
 
     def setUp(self) -> None:
