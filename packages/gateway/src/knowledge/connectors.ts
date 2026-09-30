@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { KnowledgeCurationRefusal, type KnowledgeAssessmentApprovalRequest, type KnowledgeConnectorConfigurationRequest, type KnowledgeConnectorDiscoverRequest, type KnowledgeConnectorQueueRequest, type KnowledgeConnectorAckRequest, type KnowledgeRaindropMoveRequest, type KnowledgeConnectorState, type KnowledgeConnectorStatus, type KnowledgeAction, type KnowledgeRecord, type KnowledgeRaindropRequest, type KnowledgeRaindropIntakeRequest, type KnowledgeSourceIngestRequest } from "./knowledge-contract.js";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { KnowledgeCurationRefusal, type KnowledgeAssessmentApprovalRequest, type KnowledgeConnectorConfigurationRequest, type KnowledgeConnectorDiscoverRequest, type KnowledgeConnectorQueueRequest, type KnowledgeConnectorAckRequest, type KnowledgeRaindropMoveRequest, type KnowledgeConnectorState, type KnowledgeConnectorStatus, type KnowledgeAction, type KnowledgeXOAuthStartRequest, type KnowledgeXOAuthCompleteRequest, type KnowledgeRecord, type KnowledgeRaindropRequest, type KnowledgeRaindropIntakeRequest, type KnowledgeSourceIngestRequest } from "./knowledge-contract.js";
 import { captureSource, isVerifiedSourceCapture, recoverProviderSaveTime } from "./source-capture.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
@@ -7,13 +7,13 @@ import { xPostIdentity } from "./x-public-post.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { sourceAdmissionIsDecided, type KnowledgeStore } from "./knowledge-store.js";
-import { CONNECTOR_CREDENTIAL_SERVICE, isConnectorCredentialReference, type ConnectorCredentialStore } from "./connector-credentials.js";
+import { CONNECTOR_CREDENTIAL_SERVICE, isConnectorCredentialReference, type ConnectorCredentialStore, type WritableConnectorCredentialStore } from "./connector-credentials.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
 import { JEV_DEFAULT_MODEL } from "./jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
-import { normalizeProviderDisplayName, type ConnectionInstance, type ProviderAdmissionObservation } from "../integrations/connection-contract.js";
+import { normalizeProviderDisplayName, validateConnectionPolicy, type ConnectionInstance, type ProviderAdmissionObservation } from "../integrations/connection-contract.js";
 import { FixedHostBodyTooLarge, requestFixedHost } from "./fixed-host-transport.js";
 
 function isPublicXPost(url: string): boolean {
@@ -92,9 +92,10 @@ async function defaultHTTP(input: string, init: { method?: "GET" | "PUT" | "POST
   });
 }
 
-async function requestJson(http: ConnectorHTTP, endpoint: string, token: string | (() => Promise<string>), options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
+async function requestJson(http: ConnectorHTTP, endpoint: string, token: string | (() => Promise<string>), options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void>; onUnauthorized?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
   const retrySafe = !options.method || options.method === "GET";
   const maxAttempts = retrySafe ? (options.maxAttempts ?? RETRIES) : 1;
+  let refreshedAfterUnauthorized = false;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     // Resolve the current credential before charging an attempt. A missing or
     // rotated token is an admission failure, not a billable provider try.
@@ -115,6 +116,11 @@ async function requestJson(http: ConnectorHTTP, endpoint: string, token: string 
     if (result.status >= 200 && result.status < 300) {
       if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).result === false) throw new ConnectorAPIError();
       return { status: result.status, value, headers: result.headers };
+    }
+    if (result.status === 401 && options.onUnauthorized && !refreshedAfterUnauthorized && attempt < maxAttempts) {
+      refreshedAfterUnauthorized = true;
+      await options.onUnauthorized();
+      continue;
     }
     if (!retryable(result.status) || attempt === maxAttempts) throw new ConnectorHTTPError(result.status, result.headers.get("retry-after"), result.headers.get("x-ratelimit-reset") ?? result.headers.get("ratelimit-reset"));
     if (options.signal.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Connector request cancelled");
@@ -222,6 +228,7 @@ export class KnowledgeConnectorExtension {
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly now: () => string;
   private readonly lanes = new Map<string, AsyncMutex>();
+  private readonly xOAuthAttempts = new Map<string, { instanceId: string; clientId: string; redirectUri: string; state: string; verifier: string; policy: KnowledgeXOAuthStartRequest["policy"]; createdAt: number }>();
   constructor(private readonly store: KnowledgeStore, private readonly options: KnowledgeConnectorOptions) {
     this.http = options.http ?? defaultHTTP; this.sleep = options.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))); this.now = options.now ?? (() => new Date().toISOString());
   }
@@ -281,6 +288,9 @@ export class KnowledgeConnectorExtension {
     if (action.operation === "knowledge.raindrop.read") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.readRaindrop(action.request, signal)));
     if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.configure(action.request)));
     if (action.operation === "knowledge.connector.assessment.approve") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.approveAssessment(action.request)));
+    if (action.operation === "knowledge.x.oauth.begin") return this.lane("x", action.request.instanceId).run(() => this.beginXOAuth(action.request));
+    if (action.operation === "knowledge.x.oauth.complete") return this.completeXOAuth(action.request, signal);
+    if (action.operation === "knowledge.x.credits") return this.lane("x", action.request.connectionId).run(() => this.readXCredits(action.request.connectionId, signal));
     if (action.operation === "knowledge.connector.status") return this.store.withConnectorContext(request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector, request.connectionId), action.request.connector, await this.connectionFor(request.connectionId, action.request.connector, Boolean(this.options.connections), true)));
     if (action.operation === "knowledge.connector.discover") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.discoverQueue(action.request, signal)));
     if (action.operation === "knowledge.connector.queue") return this.withConnection(action.request.connector, request.connectionId, () => this.queue(action.request));
@@ -289,6 +299,151 @@ export class KnowledgeConnectorExtension {
     if (action.operation === "knowledge.raindrop.intake") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.intake(action.request, signal)));
     if (action.operation === "knowledge.source.ingest") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.ingest(action.request, signal)));
     throw bad("Unsupported knowledge connector operation");
+  }
+
+  private credentialWriter(): WritableConnectorCredentialStore {
+    const writer = this.options.credentials as ConnectorCredentialStore & Partial<WritableConnectorCredentialStore>;
+    if (typeof writer.write !== "function" || typeof writer.delete !== "function") throw new GatewayError("unsupported", "X OAuth requires the Mac Keychain credential writer");
+    return writer as WritableConnectorCredentialStore;
+  }
+
+  private async beginXOAuth(request: KnowledgeXOAuthStartRequest): Promise<Record<string, unknown>> {
+    if (!this.options.connections) throw new GatewayError("unsupported", "X OAuth requires ConnectionOwner");
+    if (!request.commandId || request.commandId.length < 8 || request.commandId.length > 160 || !request.instanceId || request.instanceId.length > 160) throw bad("X OAuth setup identity is invalid");
+    if (typeof request.clientId !== "string" || request.clientId.length < 1 || request.clientId.length > 256 || /[\u0000-\u001f\u007f]/.test(request.clientId)) throw bad("X OAuth client ID is invalid");
+    let redirect: URL;
+    try { redirect = new URL(request.redirectUri); } catch { throw bad("X OAuth redirect URI is invalid"); }
+    if (redirect.protocol !== "https:" || redirect.username || redirect.password || redirect.hash || redirect.search) throw bad("X OAuth redirect URI must be HTTPS without credentials, query, or fragment");
+    try { validateConnectionPolicy(request.policy); } catch { throw bad("X OAuth policy is invalid"); }
+    if ([...this.xOAuthAttempts.values()].some(attempt => attempt.instanceId === request.instanceId && Date.now() - attempt.createdAt < 10 * 60_000)) throw new GatewayError("conflict", "X OAuth setup is already pending for this connection");
+    this.credentialWriter();
+    const operation = await this.options.connections.execute({ kind: "setup.begin", commandId: command(request.commandId, "x-oauth-setup"), instanceId: request.instanceId, definitionId: "knowledge.x", method: "oauth" }) as { operationId: string };
+    const verifier = randomBytes(32).toString("base64url");
+    const state = randomBytes(32).toString("base64url");
+    const challenge = createHash("sha256").update(verifier).digest("base64url");
+    const authorization = new URL("https://twitter.com/i/oauth2/authorize");
+    authorization.search = new URLSearchParams({ response_type: "code", client_id: request.clientId, redirect_uri: request.redirectUri, scope: "tweet.read users.read bookmark.read offline.access", state, code_challenge: challenge, code_challenge_method: "S256" }).toString();
+    this.xOAuthAttempts.set(operation.operationId, { instanceId: request.instanceId, clientId: request.clientId, redirectUri: redirect.toString(), state, verifier, policy: structuredClone(request.policy), createdAt: Date.now() });
+    return { operationId: operation.operationId, instanceId: request.instanceId, authorizationUrl: authorization.toString(), state };
+  }
+
+  private async completeXOAuth(request: KnowledgeXOAuthCompleteRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.options.connections) throw new GatewayError("unsupported", "X OAuth requires ConnectionOwner");
+    if (!request.commandId || request.commandId.length < 8 || request.commandId.length > 160) throw bad("X OAuth completion commandId is invalid");
+    const attempt = this.xOAuthAttempts.get(request.operationId);
+    if (!attempt || Date.now() - attempt.createdAt > 10 * 60_000) throw new GatewayError("conflict", "X OAuth setup expired; start authorization again");
+    let code: string | undefined;
+    if (request.callbackUrl !== undefined) {
+      if (request.code !== undefined || request.state !== undefined) throw bad("Provide either the full X OAuth redirect URL or its code and state");
+      let callback: URL;
+      try { callback = new URL(request.callbackUrl); } catch { throw bad("Paste the complete X OAuth redirect URL"); }
+      const expected = new URL(attempt.redirectUri);
+      const codes = callback.searchParams.getAll("code");
+      const states = callback.searchParams.getAll("state");
+      if (callback.origin !== expected.origin || callback.pathname !== expected.pathname || callback.username || callback.password || callback.hash || states.length !== 1 || states[0] !== attempt.state || callback.searchParams.has("error") || codes.length !== 1) throw new GatewayError("conflict", "X OAuth redirect does not match this authorization state or callback");
+      code = codes[0];
+    } else if (request.code !== undefined && request.state === attempt.state) code = request.code;
+    else throw new GatewayError("conflict", "X OAuth code or redirect does not match this authorization state");
+    if (!code || code.length > 4_096 || /[\u0000-\u001f\u007f]/.test(code)) throw bad("X OAuth authorization code is invalid");
+    const signal = externalSignal ?? new AbortController().signal;
+    const writer = this.credentialWriter();
+    const tokenResponse = await this.xOAuthToken({ client_id: attempt.clientId, grant_type: "authorization_code", code, redirect_uri: attempt.redirectUri, code_verifier: attempt.verifier }, signal);
+    const tokens = this.validXTokenResponse(tokenResponse);
+    const credentialRef = `connector:x:${attempt.instanceId}`;
+    await writer.write(credentialRef, JSON.stringify({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, clientId: attempt.clientId, expiresAt: new Date(Date.now() + tokens.expiresIn * 1_000).toISOString() }));
+    let userId: string;
+    try {
+      const profile = await this.http("https://api.x.com/2/users/me?user.fields=id,username", { headers: { authorization: `Bearer ${tokens.accessToken}`, accept: "application/json" }, signal });
+      const body = this.parseXResponse(profile);
+      if (typeof body?.data?.id !== "string" || !/^\d{1,32}$/.test(body.data.id) || typeof body.data.username !== "string") throw new ConnectorShapeError();
+      userId = body.data.id;
+    } catch {
+      await writer.delete(credentialRef);
+      throw new GatewayError("unsupported", "X OAuth account verification failed; the temporary credential was removed");
+    }
+    let result: unknown;
+    try { result = await this.options.connections.execute({ kind: "setup.complete", commandId: command(request.commandId, "x-oauth-complete"), operationId: request.operationId, instanceId: attempt.instanceId, providerAccountId: userId, scope: userId, credentialRef, policy: attempt.policy }); }
+    catch (error) { await writer.delete(credentialRef); throw error; }
+    this.xOAuthAttempts.delete(request.operationId);
+    const setupRevision = Number((result as Record<string, unknown>).setupRevision);
+    await this.options.connections.recordProviderObservation(attempt.instanceId, setupRevision, { credentialAvailability: "available", providerIdentity: "admitted" });
+    await this.store.updateConnectorState(command(request.commandId, "x-oauth-state"), "x", () => ({ ...initial("x"), connectionId: attempt.instanceId, accountId: userId, scope: userId, credentialRef, enabled: attempt.policy.enabled, allowWrites: attempt.policy.allowWrites, paidAccessApproved: attempt.policy.paidAccessApproved, paidBudgetCents: attempt.policy.paidBudgetCents, recurringApproved: attempt.policy.recurringApproved, health: "ready" }), undefined, attempt.instanceId);
+    return result as Record<string, unknown>;
+  }
+
+  private parseXResponse(response: ConnectorHTTPResponse): any {
+    if (response.status < 200 || response.status >= 300 || Buffer.byteLength(response.body, "utf8") > 64_000) throw new GatewayError("unsupported", "X OAuth request failed");
+    try { return JSON.parse(response.body); } catch { throw new ConnectorShapeError(); }
+  }
+
+  private async xOAuthToken(parameters: Record<string, string>, signal: AbortSignal): Promise<unknown> {
+    let response: ConnectorHTTPResponse;
+    try { response = await this.http("https://api.x.com/2/oauth2/token", { method: "POST", headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(parameters).toString(), signal }); }
+    catch { throw new GatewayError("unsupported", "X OAuth token exchange failed"); }
+    return this.parseXResponse(response);
+  }
+
+  private validXTokenResponse(value: unknown): { accessToken: string; refreshToken: string; expiresIn: number } {
+    const token = value as Record<string, unknown> | null;
+    if (!token || typeof token !== "object" || typeof token.access_token !== "string" || token.access_token.length < 1 || token.access_token.length > 4_096 || typeof token.refresh_token !== "string" || token.refresh_token.length < 1 || token.refresh_token.length > 4_096 || !Number.isSafeInteger(token.expires_in) || (token.expires_in as number) < 60 || (token.expires_in as number) > 31_536_000 || token.token_type !== "bearer") throw new ConnectorShapeError();
+    return { accessToken: token.access_token, refreshToken: token.refresh_token, expiresIn: token.expires_in as number };
+  }
+
+  private async storedXOAuth(reference: string): Promise<{ accessToken: string; refreshToken: string; clientId: string; expiresAt: string }> {
+    const value = await this.options.credentials.read(reference);
+    if (!value) throw missingCredential("x", reference);
+    let parsed: unknown;
+    try { parsed = JSON.parse(value); } catch { throw new GatewayError("unsupported", "X OAuth credential is malformed; reconnect the account"); }
+    const token = parsed as Record<string, unknown> | null;
+    if (!token || typeof token.accessToken !== "string" || typeof token.refreshToken !== "string" || typeof token.clientId !== "string" || typeof token.expiresAt !== "string" || !Number.isFinite(Date.parse(token.expiresAt))) throw new GatewayError("unsupported", "X OAuth credential is malformed; reconnect the account");
+    return token as { accessToken: string; refreshToken: string; clientId: string; expiresAt: string };
+  }
+
+  private async markXAuthorizationError(connectionId: string, setupRevision: number): Promise<void> {
+    try { await this.options.connections?.recordProviderObservation(connectionId, setupRevision, { credentialAvailability: "unavailable", providerIdentity: "unknown" }); } catch { /* A successor setup must not be changed by stale refresh work. */ }
+    await this.store.updateConnectorState(command(connectionId, "x-auth-error"), "x", state => ({ ...(state ?? initial("x")), health: "auth-error", lastError: "X authorization expired; reconnect the account" }), undefined, connectionId);
+  }
+
+  private async refreshXToken(connectionId: string, credentialRef: string, setupRevision: number, signal: AbortSignal): Promise<void> {
+    try {
+      const current = await this.storedXOAuth(credentialRef);
+      const response = await this.xOAuthToken({ client_id: current.clientId, grant_type: "refresh_token", refresh_token: current.refreshToken }, signal);
+      const rotated = this.validXTokenResponse(response);
+      const live = await this.connectionFor(connectionId, "x", true);
+      if (!live || live.setupRevision !== setupRevision || live.credentialRef !== credentialRef || !live.policy.enabled) throw new GatewayError("conflict", "X connection changed during token refresh");
+      // X refresh tokens are single-use: commit rotation before returning the
+      // newly issued access token to any provider request.
+      await this.credentialWriter().write(credentialRef, JSON.stringify({ accessToken: rotated.accessToken, refreshToken: rotated.refreshToken, clientId: current.clientId, expiresAt: new Date(Date.now() + rotated.expiresIn * 1_000).toISOString() }));
+    } catch (error) {
+      await this.markXAuthorizationError(connectionId, setupRevision);
+      if (error instanceof GatewayError && error.code === "conflict") throw error;
+      throw new GatewayError("unsupported", "X authorization refresh failed; reconnect the account");
+    }
+  }
+
+  private async xAccessToken(connectionId: string, credentialRef: string, setupRevision: number, signal: AbortSignal): Promise<string> {
+    const current = await this.storedXOAuth(credentialRef);
+    if (Date.parse(current.expiresAt) <= Date.now() + 60_000) await this.refreshXToken(connectionId, credentialRef, setupRevision, signal);
+    return (await this.storedXOAuth(credentialRef)).accessToken;
+  }
+
+  private async readXCredits(connectionId: string, externalSignal?: AbortSignal): Promise<{ freeBalance: number; prepaidBalance: number; totalBalance: number }> {
+    const authority = await this.connectionFor(connectionId, "x", true);
+    if (!authority?.policy.enabled || !authority.credentialRef || !authority.scope) throw new GatewayError("unsupported", "X credits require an enabled OAuth X connection");
+    const state = await this.store.connectorState("x", connectionId);
+    if (!state?.enabled || state.credentialRef !== authority.credentialRef || state.accountId !== authority.providerAccountId) throw new GatewayError("conflict", "X connector configuration is not admitted by this connection");
+    const controller = new AbortController(); const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
+    const deadline = setTimeout(() => controller.abort(new Error("X credits read deadline exceeded")), RUN_DEADLINE_MS); deadline.unref?.();
+    try {
+      const result = await requestJson(this.http, "https://api.x.com/2/usage/credits", () => this.xAccessToken(connectionId, authority.credentialRef!, authority.setupRevision, signal), { sleep: this.sleep, signal, onUnauthorized: () => this.refreshXToken(connectionId, authority.credentialRef!, authority.setupRevision, signal) });
+      const data = result.value?.data;
+      const free = data?.free_balance; const prepaid = data?.prepaid_balance; const total = data?.total_balance;
+      if (![free, prepaid, total].every(value => typeof value === "number" && Number.isFinite(value)) || free < 0 || total < 0 || total !== Math.max(0, free + prepaid)) throw new ConnectorShapeError();
+      return { freeBalance: free, prepaidBalance: prepaid, totalBalance: total };
+    } catch (error) {
+      if (error instanceof GatewayError) throw error;
+      throw new GatewayError("unsupported", "X credit balance is unavailable");
+    } finally { clearTimeout(deadline); }
   }
 
   private async readRaindrop(request: KnowledgeRaindropRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -938,7 +1093,9 @@ export class KnowledgeConnectorExtension {
       const reconciled = await this.store.connectorState(connector);
       if (reconciled?.pendingRemote) throw new GatewayError("conflict", "Connector has an unresolved remote effect");
     }
-    const token = await this.options.credentials.read(current.credentialRef);
+    const token = connector === "x" && authority && request.connectionId
+      ? await this.xAccessToken(request.connectionId, current.credentialRef, expectedSetupRevision!, externalSignal ?? new AbortController().signal)
+      : await this.options.credentials.read(current.credentialRef);
     if (!token) { await this.recordAdmission(current, "unavailable", "unknown", request.commandId, expectedSetupRevision); await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw missingCredential(connector, current.credentialRef); }
     const assertCurrentAuthority = async (): Promise<void> => {
       const live = await this.store.connectorState(connector);
@@ -952,7 +1109,9 @@ export class KnowledgeConnectorExtension {
     const currentToken = async (): Promise<string> => {
       const live = await this.store.connectorState(connector);
       if (!live?.credentialRef || live.credentialRef !== current.credentialRef) throw new GatewayError("conflict", "Connector credential changed during provider discovery");
-      const fresh = await this.options.credentials.read(live.credentialRef);
+      const fresh = connector === "x" && authority && request.connectionId
+        ? await this.xAccessToken(request.connectionId, live.credentialRef, expectedSetupRevision!, externalSignal ?? new AbortController().signal)
+        : await this.options.credentials.read(live.credentialRef);
       if (!fresh) { credentialUnavailable = true; throw missingCredential(connector, live.credentialRef); }
       return fresh;
     };
@@ -984,7 +1143,7 @@ export class KnowledgeConnectorExtension {
         const profile = await this.verifyRaindropAccount(current, currentToken, signal, beforeProviderAttempt);
         await this.recordAdmission(current, "available", "admitted", request.commandId, expectedSetupRevision, profile);
       }
-      const discovered = await this.discover(request.commandId, connector, selectedCollection ? { ...current, scope: selectedCollection } : current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt);
+      const discovered = await this.discover(request.commandId, connector, selectedCollection ? { ...current, scope: selectedCollection } : current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt, connector === "x" && authority && request.connectionId ? () => this.refreshXToken(request.connectionId!, current.credentialRef!, expectedSetupRevision!, signal) : undefined);
       let state = await this.store.connectorState(connector) ?? current;
       const scopedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
       state = await this.store.updateConnectorState(command(request.commandId, "finish"), connector, value => ({ ...(value ?? state), health: "ready", lastRunAt: this.now(), remaining: value?.pending.length ?? state.pending.length }));
@@ -1001,7 +1160,7 @@ export class KnowledgeConnectorExtension {
     }
   }
 
-  private async discover(commandId: string, connector: Connector, state: KnowledgeConnectorState, token: string | (() => Promise<string>), limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>): Promise<{ discovered: number }> {
+  private async discover(commandId: string, connector: Connector, state: KnowledgeConnectorState, token: string | (() => Promise<string>), limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>, onUnauthorized?: () => Promise<void>): Promise<{ discovered: number }> {
     const checkpointKey = state.scope ?? "default";
     // Raindrop pagination is offset-based: moving an item shrinks earlier
     // pages, so a persisted page number can skip newly exposed items. Restart
@@ -1013,7 +1172,7 @@ export class KnowledgeConnectorExtension {
       ? new Set([...state.pending.filter(item => item.collectionId === state.scope).map(item => item.id), ...state.capturedIds.filter(id => state.capturedCollections?.[id] === state.scope), ...processedIds])
       : new Set([...state.pending.map(item => item.id), ...state.capturedIds, ...processedIds]);
     for (let page = 0; page < 10 && discovered < limit; page += 1) {
-      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal, ...(beforeAttempt === undefined ? {} : { beforeAttempt }) }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(maxAttempts === undefined ? {} : { maxAttempts }), ...(beforeAttempt === undefined ? {} : { beforeAttempt }) });
+      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal, ...(beforeAttempt === undefined ? {} : { beforeAttempt }) }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(maxAttempts === undefined ? {} : { maxAttempts }), ...(beforeAttempt === undefined ? {} : { beforeAttempt }), ...(onUnauthorized === undefined ? {} : { onUnauthorized }) });
       const parsed = connector === "raindrop" ? parseRaindrop(result.value) : parseX(result.value);
       // The requested collection endpoint is authoritative when an item omits
       // its collection field. A contradictory provider field is never routed.

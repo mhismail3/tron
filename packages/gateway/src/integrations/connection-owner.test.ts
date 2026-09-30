@@ -133,7 +133,7 @@ describe("ConnectionOwner", () => {
     const home = await mkdtemp(join(tmpdir(), "tron-connections-"));
     try {
       const owner = new ConnectionOwner(home);
-      const command = { kind: "setup.begin" as const, commandId: "begin-replay-0001", instanceId: "replay", definitionId: "knowledge.x", method: "token" as const };
+      const command = { kind: "setup.begin" as const, commandId: "begin-replay-0001", instanceId: "replay", definitionId: "knowledge.x", method: "oauth" as const };
       const first = await owner.execute(command);
       const stateBefore = JSON.parse(await readFile(join(home, "state/integrations/connections.json"), "utf8"));
       const second = await owner.execute(command);

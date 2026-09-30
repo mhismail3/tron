@@ -823,8 +823,11 @@ export class KnowledgeService {
         return this.store.setScopeExclusion(action.request.commandId, { ...(action.request.sessionId ? { sessionId: action.request.sessionId } : {}), ...(action.request.branchId ? { branchId: action.request.branchId } : {}), ...(action.request.projectId ? { projectId: action.request.projectId } : {}) }, action.request.excluded, action.request.reason);
       case "knowledge.connector.configure":
       case "knowledge.connector.assessment.approve":
+      case "knowledge.x.oauth.begin":
+      case "knowledge.x.oauth.complete":
       case "knowledge.connector.status":
       case "knowledge.raindrop.read":
+      case "knowledge.x.credits":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
         return this.extensions.connector(action, signal);
       case "knowledge.connector.discover":
@@ -834,7 +837,7 @@ export class KnowledgeService {
       case "knowledge.raindrop.intake":
       case "knowledge.source.ingest":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
-        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : action.operation === "knowledge.raindrop.move" ? "Raindrop move" : "Knowledge connector action", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
+        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : action.operation === "knowledge.raindrop.move" ? "Raindrop move" : action.operation.startsWith("knowledge.x.oauth") ? "X OAuth setup" : "Knowledge connector action", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
     }
   }
 

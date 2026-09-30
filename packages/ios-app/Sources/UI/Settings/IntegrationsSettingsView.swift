@@ -360,6 +360,14 @@ private struct IntegrationSetupView: View {
     @State private var accountID = ""
     @State private var scope = ""
     @State private var credentialRef = ""
+    @State private var xClientID = ""
+    @State private var xRedirectURI = ""
+    @State private var xCallbackURL = ""
+    @State private var xAuthorizationCode = ""
+    @State private var xOAuthState: String?
+    @State private var xOAuthOperationID: String?
+    @State private var xAuthorizationURL: URL?
+    @State private var xOAuthCompleted = false
     @State private var endpoint = ""
     @State private var command = ""
     @State private var args = ""
@@ -373,26 +381,47 @@ private struct IntegrationSetupView: View {
     }
 
     var body: some View {
-        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, isWorking: mutation != nil, onAction: complete) {
+        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, actionTitle: usesXOAuth ? (xOAuthOperationID == nil ? "Authorize X" : "Complete setup") : "Save", isWorking: mutation != nil, onAction: complete) {
             if mutation == nil {
-                TronSettingsGroup("Account", accent: .tronBlue) {
-                    TronTextSettingRow(icon: "number", title: "Instance ID", value: $instanceID)
-                    TronSettingsDivider(accent: .tronBlue)
-                    TronTextSettingRow(icon: "person.crop.circle", title: "Account or server", value: $accountID)
-                    TronSettingsDivider(accent: .tronBlue)
-                    TronTextSettingRow(icon: "scope", title: "Scope", detail: "Optional", value: $scope)
-                    if definition.setupMethods.count > 1 {
+                if usesXOAuth {
+                    TronSettingsGroup("X developer app", accent: .tronBlue) {
+                        TronTextSettingRow(icon: "number", title: "Public client ID", value: $xClientID)
                         TronSettingsDivider(accent: .tronBlue)
-                        TronSelectionRow(icon: "slider.horizontal.3", title: "Setup method", value: method) {
-                            ForEach(definition.setupMethods, id: \.self) { value in Button(value) { method = value } }
+                        TronTextSettingRow(icon: "link", title: "Registered callback URL", value: $xRedirectURI)
+                    }
+                    .tronSettingsCaption("Create a public OAuth 2.0 app in the X developer console, enable tweet.read, users.read, bookmark.read, and offline.access, and register this exact HTTPS callback. Tron does not ask for an app secret.")
+                    if let xAuthorizationURL {
+                        TronSettingsGroup("Authorize your X account", accent: .tronPurple) {
+                            Link(destination: xAuthorizationURL) {
+                                Label("Open X consent", systemImage: "arrow.up.right.square")
+                            }
+                            TronSettingsDivider(accent: .tronPurple)
+                            TronTextSettingRow(icon: "doc.on.clipboard", title: "Paste redirected URL", detail: "or enter the code below", value: $xCallbackURL)
+                            TronSettingsDivider(accent: .tronPurple)
+                            TronTextSettingRow(icon: "number", title: "Authorization code", detail: "Optional alternative", value: $xAuthorizationCode)
+                        }
+                        .tronSettingsCaption("After consent, copy the complete redirected URL from your browser or paste its one-time code. The selected Mac verifies the state and exchanges the code; tokens stay in its Keychain.")
+                    }
+                } else {
+                    TronSettingsGroup("Account", accent: .tronBlue) {
+                        TronTextSettingRow(icon: "number", title: "Instance ID", value: $instanceID)
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronTextSettingRow(icon: "person.crop.circle", title: "Account or server", value: $accountID)
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronTextSettingRow(icon: "scope", title: "Scope", detail: "Optional", value: $scope)
+                        if definition.setupMethods.count > 1 {
+                            TronSettingsDivider(accent: .tronBlue)
+                            TronSelectionRow(icon: "slider.horizontal.3", title: "Setup method", value: method) {
+                                ForEach(definition.setupMethods, id: \.self) { value in Button(value) { method = value } }
+                            }
                         }
                     }
+                    if definition.implementation == "mcp" { mcpConfiguration() }
+                    TronSettingsGroup("Credential handoff", accent: .tronPurple) {
+                        TronTextSettingRow(icon: "key", title: "Credential reference", value: $credentialRef)
+                    }
+                    .tronSettingsCaption("Use the credential reference supplied by the paired Mac. The secret stays in its secure credential store and is never sent to or retained by this device.")
                 }
-                if definition.implementation == "mcp" { mcpConfiguration() }
-                TronSettingsGroup("Credential handoff", accent: .tronPurple) {
-                    TronTextSettingRow(icon: "key", title: "Credential reference", value: $credentialRef)
-                }
-                .tronSettingsCaption("Use the credential reference supplied by the paired Mac. The secret stays in its secure credential store and is never sent to or retained by this device.")
                 policySection
             } else {
                 TronSettingsCaption("Completing setup on the selected Mac. Credentials remain in its secure store.")
@@ -401,8 +430,7 @@ private struct IntegrationSetupView: View {
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
         .modifier(IntegrationMutationObserver(mutation: $mutation, error: $error) {
-            onFinished()
-            dismiss()
+            if !usesXOAuth || xOAuthCompleted { onFinished(); dismiss() }
         })
     }
 
@@ -423,12 +451,16 @@ private struct IntegrationSetupView: View {
         }
     }
 
+    private var usesXOAuth: Bool { definition.id == "knowledge.x" && method == "oauth" }
+
     private var policySection: some View {
         TronSettingsGroup("Policy", accent: .tronPurple) {
             TronToggleRow(icon: "power", title: "Enabled", isOn: $policy.enabled)
             TronSettingsDivider(accent: .tronPurple)
-            TronToggleRow(icon: "arrow.right.arrow.left", title: "Allow writes", isOn: $policy.allowWrites)
-            TronSettingsDivider(accent: .tronPurple)
+            if definition.id != "knowledge.x" {
+                TronToggleRow(icon: "arrow.right.arrow.left", title: "Allow writes", isOn: $policy.allowWrites)
+                TronSettingsDivider(accent: .tronPurple)
+            }
             TronToggleRow(icon: "creditcard", title: "Paid access approved", isOn: $policy.paidAccessApproved)
             if policy.paidAccessApproved {
                 TronSettingsDivider(accent: .tronPurple)
@@ -441,6 +473,32 @@ private struct IntegrationSetupView: View {
 
     private func complete() {
         guard mutation == nil, activity.allowsPresentationPublication else { return }
+        if usesXOAuth {
+            if let operationID = xOAuthOperationID {
+                guard !xCallbackURL.isEmpty || (!xAuthorizationCode.isEmpty && xOAuthState != nil) else { error = "Paste the redirected URL or its authorization code after consent."; return }
+                let requestIdentity = model.knowledgePresentationIdentity
+                let operationID = operationID, callbackURL = xCallbackURL.isEmpty ? nil : xCallbackURL
+                let code = xAuthorizationCode.isEmpty ? nil : xAuthorizationCode, state = xOAuthState
+                mutation = IntegrationMutation(identity: requestIdentity, task: Task { @MainActor in
+                    guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
+                    _ = try await model.integrations.completeXOAuth(operationID: operationID, callbackURL: callbackURL, code: code, state: state)
+                    xOAuthCompleted = true
+                })
+            } else {
+                guard !instanceID.isEmpty, !xClientID.isEmpty, !xRedirectURI.isEmpty else { error = "Instance ID, public X client ID, and registered callback URL are required."; return }
+                error = nil
+                let requestIdentity = model.knowledgePresentationIdentity
+                let instanceID = instanceID, clientID = xClientID, redirectURI = xRedirectURI, policy = policy
+                mutation = IntegrationMutation(identity: requestIdentity, task: Task { @MainActor in
+                    guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
+                    let started = try await model.integrations.beginXOAuth(instanceID: instanceID, clientID: clientID, redirectURI: redirectURI, policy: policy)
+                    xOAuthOperationID = started.operationId
+                    xOAuthState = started.state
+                    xAuthorizationURL = URL(string: started.authorizationUrl)
+                })
+            }
+            return
+        }
         guard !instanceID.isEmpty, !accountID.isEmpty, !credentialRef.isEmpty else { error = "Instance ID, account/server identity, and an opaque credential reference are required."; return }
         if definition.implementation == "mcp" && method == "local-command" && command.isEmpty { error = "An executable is required for local-command setup."; return }
         if definition.implementation == "mcp" && method != "local-command" && endpoint.isEmpty { error = "An HTTP endpoint is required for remote setup."; return }

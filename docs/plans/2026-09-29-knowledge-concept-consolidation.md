@@ -91,7 +91,7 @@ only on the user's word) apply to every task.
 | C24 | Done | Migrate iOS manual source assessment from `knowledge.source.triage` to `knowledge.source.assess` with `assessor: model` | C21 | knowledge-consolidation session, 2026-09-29 |
 | C25 | Needs scoping | Expose Jev admission choice, confidence, usefulness score and coverage so the archive threshold can be owned by the editable routine, not the assessment adapter | C21 | — |
 | C26 | Done | Raindrop collection roles: one home per scope, triage inboxes, an archive home; moves must agree with Tron's decision | C20 | knowledge-consolidation session, 2026-09-30 |
-| C27 | Claimed | X bookmarks through the official X API: OAuth 2.0 PKCE connection with refresh, discovery under the paid cap, credit balance | C20 | knowledge-consolidation session, 2026-09-30 |
+| C27 | Done | X bookmarks through the official X API: OAuth 2.0 PKCE connection with refresh, discovery under the paid cap, credit balance | C20 | knowledge-consolidation session, 2026-09-30 |
 
 ## Task details
 
@@ -561,7 +561,11 @@ buy credits) and the consent; agents never do them.
 - Tasks added: none.
 - Deviations: none; iOS has no `raindropCollections` decoder. Routine draft updated in the runtime workspace outside the repository.
 - For the next agent: C27 remains available on this branch under the revised official-X-API OAuth/PKCE design. No live Gateway calls or lifecycle actions were performed.
+
+### C27 · Done · 2026-09-30 · luna-worker
+
+- Result: Added `knowledge.x` public-client OAuth 2.0 PKCE setup with state-bound pasted callback, Mac Keychain access/refresh token ownership, refresh-token rotation and one-time 401 retry; retained paid discovery cap and exposed an exact-connection credit balance read. No bookmark enqueue path or browser automation was added.
+- Evidence: Gateway build passed; focused X OAuth, ConnectionOwner, and Gateway transcript tests passed (3 files, 26 tests); iOS test build and `IntegrationModelsTests` passed (6 tests). Documentation policy and personal-info guard passed. Full `src/knowledge src/integrations src/transport` run: 815/817 passed; the request-span lane timing assertion failed under concurrency and the logger's 40 MB rotation test timed out. The logger file passed alone (16 tests); request-span alone still failed only its cold-open `>100 ms` timing assertion (91 ms). Revert proof: removing refresh-token persistence made the 401-rotation regression fail; restoring persistence returned `x-oauth.test.ts` to 3/3 passing.
 - Changes: this commit.
 - Tasks added: none.
-- Deviations: none; no iOS mapping decoder exists.
-- For the next agent: C27 remains available on this branch; live mapping installation requires the maintainer's Gateway update and is not performed by this task.
+- Deviations: OAuth completion uses a pasted callback URL/code instead of a reachable loopback callback, per plan; no live Gateway calls or lifecycle actions were performed. Updated the editable routine in the runtime workspace; did not edit installed agent skills. iOS result bundle was retained by the repository iOS test tooling.

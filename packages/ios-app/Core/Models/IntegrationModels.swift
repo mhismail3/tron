@@ -131,6 +131,19 @@ package struct IntegrationSetupStarted: Codable, Hashable, Sendable {
     package let status: String
 }
 
+package struct IntegrationXOAuthStarted: Codable, Hashable, Sendable {
+    package let operationId: String
+    package let instanceId: String
+    package let authorizationUrl: String
+    package let state: String
+}
+
+package struct IntegrationXCredits: Codable, Hashable, Sendable {
+    package let freeBalance: Double
+    package let prepaidBalance: Double
+    package let totalBalance: Double
+}
+
 package struct IntegrationSetupCompleted: Codable, Hashable, Sendable {
     package let id: String
     package let definitionId: String

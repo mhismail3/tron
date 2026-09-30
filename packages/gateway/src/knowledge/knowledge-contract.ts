@@ -921,6 +921,9 @@ export interface KnowledgeConnectorConfigurationRequest {
 }
 
 export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; connectionId?: string; }
+export interface KnowledgeXOAuthStartRequest { commandId: string; instanceId: string; clientId: string; redirectUri: string; policy: import("../integrations/connection-contract.js").ConnectionPolicy; }
+export interface KnowledgeXOAuthCompleteRequest { commandId: string; operationId: string; callbackUrl?: string; code?: string; state?: string; }
+export interface KnowledgeXCreditsRequest { connectionId: string; }
 export interface KnowledgeConnectorDiscoverRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; limit?: number; sourceCollection?: string; }
 export interface KnowledgeConnectorQueueRequest { connector: "raindrop" | "x"; connectionId: string; limit?: number; sourceCollection?: string; }
 export interface KnowledgeConnectorAckRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; itemId: string; disposition: "processed" | "skipped"; reason: string; }
@@ -1088,6 +1091,9 @@ export type KnowledgeAction =
   | { operation: "knowledge.connector.configure"; request: KnowledgeConnectorConfigurationRequest }
   | { operation: "knowledge.connector.assessment.approve"; request: KnowledgeAssessmentApprovalRequest }
   | { operation: "knowledge.connector.status"; request: KnowledgeConnectorStatusRequest }
+  | { operation: "knowledge.x.oauth.begin"; request: KnowledgeXOAuthStartRequest }
+  | { operation: "knowledge.x.oauth.complete"; request: KnowledgeXOAuthCompleteRequest }
+  | { operation: "knowledge.x.credits"; request: KnowledgeXCreditsRequest }
   | { operation: "knowledge.connector.discover"; request: KnowledgeConnectorDiscoverRequest }
   | { operation: "knowledge.connector.queue"; request: KnowledgeConnectorQueueRequest }
   | { operation: "knowledge.connector.ack"; request: KnowledgeConnectorAckRequest }

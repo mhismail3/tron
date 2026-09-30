@@ -212,7 +212,7 @@ const restartDrainMethods = new Set([
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
-  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate", "knowledge.tags.retag-needed", "knowledge.connector.status", "knowledge.connector.queue", "knowledge.raindrop.read",
+  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate", "knowledge.tags.retag-needed", "knowledge.connector.status", "knowledge.connector.queue", "knowledge.raindrop.read", "knowledge.x.credits",
   "connections.list",
 ]);
 
@@ -470,7 +470,8 @@ export class GatewayService {
       case "knowledge.tags.estimate":
       case "knowledge.connector.status":
       case "knowledge.connector.queue":
-      case "knowledge.raindrop.read": {
+      case "knowledge.raindrop.read":
+      case "knowledge.x.credits": {
 
         const knowledge = this.requireKnowledge();
         const result = await knowledge.invoke({ operation: method, request: params } as KnowledgeAction);
@@ -506,6 +507,8 @@ export class GatewayService {
       case "knowledge.exclusion":
       case "knowledge.connector.configure":
       case "knowledge.connector.assessment.approve":
+      case "knowledge.x.oauth.begin":
+      case "knowledge.x.oauth.complete":
       case "knowledge.connector.discover":
       case "knowledge.connector.ack":
       case "knowledge.raindrop.move":

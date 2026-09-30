@@ -67,7 +67,7 @@ const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] = [
     id: "knowledge.x",
     implementation: "knowledge-connector",
     displayName: "X bookmarks",
-    setupMethods: ["token"],
+    setupMethods: ["oauth"],
     capabilities: [{ id: "read", displayName: "Read bookmarks", effects: ["read"], supported: true }],
   },
   {

@@ -714,14 +714,12 @@ partial/reference-only (and other transport failures remain failed). Each linked
 Source keeps exact referring POST/REPLY evidence, and synthesis must cite that
 Source separately from X author commentary.
 
-Private bookmark discovery remains separate and supervised through the approved
-`agent_browser` profile. The global `tron-x` skill provides bounded enumeration,
-top-level bookmark membership, page checkpoints, identity/coverage validation,
-and signed-in browser fallback when installed in Tron's user-level skills directory. There is no new
-cookie store, background sync, automatic browser login, or remote mutation.
-Never send known protected content to a public mirror without approval.
-The paid, explicitly invoked X connector-discovery action is not selected by this free reader;
-its existing explicit spending gates are unchanged.
+Private X bookmarks are discovered only through the explicitly invoked,
+paid-gated OAuth X connector. The global `tron-x` skill provides bounded
+newest-first queue discovery, page checkpoints, and identity/coverage
+validation. Browser state is never used to enumerate or sync private bookmarks;
+there is no cookie store, background sync, automatic browser login, or remote
+mutation. Never send known protected content to a public mirror without approval.
 
 Focused regressions: `x-public-post.test.ts` covers identity, URL isolation,
 malformed/mismatched/truncated responses, fallback, partial content, cancellation,
@@ -739,7 +737,7 @@ for sessions whose running tool schema has not yet been updated.
 
 ## Connector boundaries
 
-Raindrop reads the official `/rest/v1/raindrops/{collectionId}` endpoint in bounded pages; X reads
+Raindrop reads the official `/rest/v1/raindrops/{collectionId}` endpoint in bounded pages; OAuth X reads
 `/2/users/{userId}/bookmarks` with the provider pagination token. Discovered provider IDs
 and pending metadata are persisted before checkpoint advancement, preventing loss of
 an already-fetched page. Offset pagination can still shift under concurrent remote edits;
@@ -757,7 +755,7 @@ are shape failures, never empty pages. Credential references are admitted only i
 the exact `connector:<provider>:...` namespace; a legacy mismatch requires
 explicit reconfiguration and is never read as a different provider token. When the
 Keychain item for a connection's credential is missing, the connector failure names
-the Mac Keychain service and the exact account to add, never a token.
+the Mac Keychain service and the exact account to add, never a token. X uses OAuth 2.0 Authorization Code with PKCE as a public client: setup requests `tweet.read users.read bookmark.read offline.access`, accepts the exact HTTPS callback URI and a user-pasted redirect URL or code/state, and verifies one-time state before exchange. The client ID is public; no app secret is accepted. The verifier and state are short-lived in Gateway memory. Access and rotating refresh tokens are stored only in the Mac Keychain; refresh-token rotation is written before its access token is used. X refreshes once when a token is near expiry or an API call returns 401; failed refresh marks the connection `auth-error` and requires reconnection. Every actual X API discovery request, including retry/pagination attempts, debits the existing bounded paid-attempt budget immediately before dispatch. `knowledge.x.credits` is a connection-scoped read routed as a Gateway read and drain-allow-listed; it returns the API's `free_balance`, `prepaid_balance`, and `total_balance` as USD balances. The official API defines `total_balance` as `max(0, prepaid_balance + free_balance)`; this read does not buy credits or authorize additional discovery spend.
 Paid budgets are rejected until a provider operation has an explicit maintained
 price; approval flags never imply unknown spend. X is not contacted unless both explicit paid-access approval and a positive
 bounded budget are present. Paid qualification is host-owned and requires
@@ -802,7 +800,7 @@ header spellings. Redirects are not followed, and provider failures are
 redacted. This is metadata access, not full article capture. `knowledge.connector.discover`
 verifies the provider and discovers bookmarks into the exact connection's queue; it does
 not capture linked pages, create Knowledge sources, decide admission, or move Raindrop
-items. `knowledge.connector.queue` returns at most 25 items with ID, URL, title, collection,
+items. `knowledge.x.credits` reads the OAuth connection's current X developer-platform balance without spending the bookmark-discovery allowance; it returns `freeBalance`, `prepaidBalance`, and `totalBalance` in USD from `GET /2/usage/credits`. `knowledge.connector.queue` returns at most 25 items with ID, URL, title, collection,
 save time, existing-source indicator and admission/scope projection; it never returns
 provider payload. `knowledge.source.ingest` / agent action `ingestItem` saves one explicitly
 scoped queued item as a source, retaining provider identity/payload and Raindrop
