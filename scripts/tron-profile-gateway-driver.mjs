@@ -997,12 +997,21 @@ const MULTI_DEVICES = ["mobile", "dashboard", "dashboard-reconnect", "driver", "
 const BUSY_RETRY_DELAY_MS = 250;
 const BUSY_RETRY_LIMIT = 40;
 
-async function retryingBusy(retries, method, operation) {
+// A fresh fixture refuses reads with `catalog_not_ready` until its catalog
+// owner publishes the first cut: a startup phase, not a measured operation.
+// Over a 3,000-file, 2 GB fixture that phase is ~9 s idle and has taken 14 s
+// on a busy host, past the 40 x 250 ms budget measured retries get, so the
+// prime's first list waits on its own named deadline instead (T-7).
+const CATALOG_READY_DEADLINE_MS = 90_000;
+
+async function retryingBusy(retries, method, operation, deadlineMs = null) {
+  const deadline = deadlineMs === null ? null : now() + deadlineMs;
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await operation();
     } catch (error) {
-      if (error?.gatewayError?.retryable !== true || attempt >= BUSY_RETRY_LIMIT) throw error;
+      const exhausted = deadline === null ? attempt >= BUSY_RETRY_LIMIT : now() >= deadline;
+      if (error?.gatewayError?.retryable !== true || exhausted) throw error;
       retries[method] = (retries[method] ?? 0) + 1;
       await sleep(BUSY_RETRY_DELAY_MS);
     }
@@ -1729,7 +1738,7 @@ async function multi() {
       const listed = await retryingBusy(primeRetries, "session.list", async () => {
         started = now();
         return await dashboard.request("session.list", { limit: 500, scope: "user" }, measured);
-      });
+      }, CATALOG_READY_DEADLINE_MS);
       result.list = { ms: now() - started, rows: listed?.sessions?.length ?? null,
         busyRetries: primeRetries["session.list"] ?? 0 };
       writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);

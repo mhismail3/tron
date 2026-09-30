@@ -668,6 +668,7 @@ rows are in priority order.
 | F-5 | Claimed | Prompt admission p99 ~610 ms against 250 ms in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567, with F-6 and F-7), 2026-09-30 |
 | F-6 | Claimed | Event loop p99 ~38 ms against 20 ms, max up to 1.4 s under load; attribute with a CPU profile | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30 |
 | F-7 | Claimed | Warm `session.open` p99 ~335 ms against 300 ms | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30 |
+| T-7 | Done | The profiler prime's first `session.list` waits on a named catalog-readiness deadline (90 s) instead of the 40 x 250 ms measured-retry budget, which a 3,000-file fixture outlasts on a busy host | F-5, F-6, F-7 | orchestrator, 2026-09-30; `scripts/tron-profile-gateway-driver.mjs`, `test-tron-profile.py` OK |
 | R-2 | Ready | User installs the Mac Release build and the iOS build; agent verifies the deployment | R-1 | E-3d owes one user action: prove the LAN kill switch on the installed release (`launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off`, user restarts the Gateway, `lan.listener state=disabled reason=setting_off` appears) |
 | R-3 | Ready | User runs Tron normally for at least 24 hours, then exports phone logs | R-2 | |
 | R-4 | Ready | Analyse the day with the triage tool; check real-use exit criteria; open Phase 3 rows | R-3 | Read `lan.listener` transitions and `transport=lan` on `http.upgrade` to see whether the lane carried the day (E-3d) |
