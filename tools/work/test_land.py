@@ -468,8 +468,12 @@ class ReceiptTests(LandFixture):
             if not self.sleeps:
                 git(other, "fetch", "-q", REMOTE)
                 git(other, "checkout", "-q", "-B", BRANCH, f"{REMOTE}/{BRANCH}")
-                self.commit(other, "app/other.txt", "x\n")
+                moved = self.commit(other, "app/other.txt", "x\n")
                 git(other, "push", "-q", REMOTE, f"HEAD:{BRANCH}")
+                # Even a head that is green in its own right is not the one land verified.
+                statuses = self.state()["statuses"]
+                statuses[moved] = {"test/verify": "SUCCESS"}
+                self.set_state(statuses=statuses)
             self.sleep(seconds)
 
         self.set_state(pendingViews=1)
@@ -485,7 +489,9 @@ class RequiredCheckTests(LandFixture):
         self.set_state(checks={"policy": "FAILURE", "optional": "SUCCESS"})
         with self.assertRaises(land.LandError) as raised:
             self.land()
-        self.assertIn("policy", str(raised.exception))
+        self.assertIn("a required check failed", str(raised.exception))
+        self.assertIn("policy: failure", str(raised.exception))
+        self.assertEqual(self.sleeps, [])
         self.assertEqual(self.merges(), [])
         self.assertEqual(self.issue()["state"], "OPEN")
 
