@@ -254,6 +254,10 @@ describe("SettingsService", () => {
       { httpProxy: "http://project-proxy.invalid" },
       { cwd, scope: "project", projectTrusted: true },
     );
+    const globalSettingsPath = join(agentDir, "settings.json");
+    const globalSettings = JSON.parse(await readFile(globalSettingsPath, "utf8")) as Record<string, unknown>;
+    globalSettings.deviceId = "provider-device-id";
+    await writeFile(globalSettingsPath, JSON.stringify(globalSettings));
     const fetched = service.get(cwd, true) as {
       effective: Record<string, unknown>;
       documents: { global: Record<string, unknown>; project: Record<string, unknown> };
@@ -263,6 +267,7 @@ describe("SettingsService", () => {
     expect(updated.effective).not.toHaveProperty("httpProxy");
     expect(updated.effective.httpProxyConfigured).toBe(true);
     expect(fetched.documents.global).not.toHaveProperty("httpProxy");
+    expect(fetched.documents.global).not.toHaveProperty("deviceId");
     expect(fetched.documents.project).not.toHaveProperty("httpProxy");
     expect(fetched.effective).not.toHaveProperty("httpProxy");
     expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).toMatchObject({

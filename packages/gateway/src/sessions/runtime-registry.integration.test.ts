@@ -7112,7 +7112,7 @@ export default function (pi) {
     const session = (slot as unknown as {
       runtime: { session: { prompt: (
         text: string,
-        options?: { preflightResult?: (accepted: boolean) => void },
+        options?: { preflightResult?: (disposition: "handled" | "queued" | "started") => void },
       ) => Promise<void> } };
     }).runtime.session;
     let startedResolve!: () => void;
@@ -7120,7 +7120,7 @@ export default function (pi) {
     vi.spyOn(session, "prompt").mockImplementationOnce(async (_text, options) => {
       startedResolve();
       await new Promise((resolve) => setTimeout(resolve, 6_000));
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
     });
 
     vi.useFakeTimers();
@@ -7180,7 +7180,7 @@ export default function (pi) {
         readonly isStreaming: boolean;
         prompt: (text: string, options?: {
           streamingBehavior?: "steer" | "followUp";
-          preflightResult?: (accepted: boolean) => void;
+          preflightResult?: (disposition: "handled" | "queued" | "started") => void;
         }) => Promise<void>;
         getSteeringMessages: () => readonly string[];
       } };
@@ -7205,7 +7205,7 @@ export default function (pi) {
       invoked = true;
       expect(options?.streamingBehavior).toBe("steer");
       queued = true;
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
     });
 
     const prompting = slot.prompt("after compaction", [], "steer");
@@ -7521,7 +7521,7 @@ export default function (pi) {
         readonly isStreaming: boolean;
         prompt: (text: string, options?: {
           streamingBehavior?: "steer" | "followUp";
-          preflightResult?: (accepted: boolean) => void;
+          preflightResult?: (disposition: "handled" | "queued" | "started") => void;
         }) => Promise<void>;
         getSteeringMessages: () => readonly string[];
       } };
@@ -7535,7 +7535,7 @@ export default function (pi) {
     vi.spyOn(internal.runtime.session, "getSteeringMessages").mockReturnValue([]);
     vi.spyOn(internal.runtime.session, "prompt").mockImplementationOnce(async (_text, options) => {
       expect(options?.streamingBehavior).toBe("steer");
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
       throw new Error("queue admission failed");
     });
 
@@ -7566,11 +7566,11 @@ export default function (pi) {
     const session = (slot as unknown as {
       runtime: { session: { prompt: (
         text: string,
-        options?: { preflightResult?: (accepted: boolean) => void },
+        options?: { preflightResult?: (disposition: "handled" | "queued" | "started") => void },
       ) => Promise<void> } };
     }).runtime.session;
     vi.spyOn(session, "prompt").mockImplementationOnce(async (_text, options) => {
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
       throw new Error("accepted prompt failed");
     });
 
@@ -7603,7 +7603,7 @@ export default function (pi) {
       publishSnapshot: () => void;
       runtime: { session: { prompt: (
         text: string,
-        options?: { preflightResult?: (accepted: boolean) => void },
+        options?: { preflightResult?: (disposition: "handled" | "queued" | "started") => void },
       ) => Promise<void> } };
     };
     internal.phase = "running";
@@ -7614,7 +7614,7 @@ export default function (pi) {
     let invoked = false;
     vi.spyOn(internal.runtime.session, "prompt").mockImplementationOnce(async (_text, options) => {
       invoked = true;
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
     });
 
     const prompting = slot.prompt("after settlement");
@@ -8193,7 +8193,11 @@ export default function (pi) {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const skillDir = join(agentDir, "skills", "review");
-    await Promise.all([mkdir(skillDir, { recursive: true }), mkdir(cwd)]);
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(skillDir, { recursive: true }), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "handled-queue.ts"), `export default function (pi) {
+      pi.on("input", (event) => event.text === "handled during rebuild" ? { action: "handled" } : undefined);
+    }\n`);
     await writeFile(
       join(skillDir, "SKILL.md"),
       "---\nname: review\ndescription: Review carefully\n---\nReview the requested change.\n",
@@ -8215,12 +8219,14 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
       modelRuntimeFactory: createModels,
-      trust: new TrustService(agentDir),
+      trust,
       broadcast: () => {},
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
@@ -8312,11 +8318,17 @@ export default function (pi) {
     )).toBe(true);
     await expect(slot.replaceQueue(queued.queueRevision, [])).rejects.toMatchObject({ code: "conflict" });
 
-    const removed = await slot.replaceQueue(replaced.queueRevision, [replaced.items[1]!]);
-    expect(removed.items).toHaveLength(1);
-    expect(removed.items[0]?.id).toBe(followUp!.id);
-    const afterReplaceEntries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
-    expect(afterReplaceEntries.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+    const handledReplacement = await slot.replaceQueue(replaced.queueRevision, [
+      { ...replaced.items[1]!, text: "handled during rebuild" },
+      replaced.items[0]!,
+    ]);
+    expect(handledReplacement.items.map(({ id }) => id)).toEqual([duplicate!.id]);
+    const afterHandledRebuild = (slot as any).runtime.session.sessionManager.getEntries() as any[];
+    expect(afterHandledRebuild.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.operationId === followUp!.id
+      && entry.data?.receiptKind === "terminal"
+      && entry.data?.lifecycle === "completed")).toBe(true);
+    expect(afterHandledRebuild.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
       && entry.data?.operationId === skill!.id
       && entry.data?.receiptKind === "terminal"
       && entry.data?.lifecycle === "interrupted")).toBe(true);
@@ -8325,11 +8337,11 @@ export default function (pi) {
     expect(slot.snapshot().queuedItems).toEqual([]);
     const afterClearEntries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
     expect(afterClearEntries.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
-      && entry.data?.operationId === followUp!.id
+      && entry.data?.operationId === duplicate!.id
       && entry.data?.receiptKind === "terminal"
       && entry.data?.lifecycle === "interrupted"
       && entry.data?.errorCode === "queue-cleared")).toBe(true);
-    await expect(slot.replaceQueue(removed.queueRevision, removed.items))
+    await expect(slot.replaceQueue(handledReplacement.queueRevision, []))
       .rejects.toMatchObject({ code: "conflict" });
 
     releaseResponse();

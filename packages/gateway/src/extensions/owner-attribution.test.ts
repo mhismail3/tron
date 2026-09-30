@@ -105,11 +105,15 @@ describe("extension owner attribution", () => {
       seen.push(currentExtensionOwner());
       return { content: [], details: {} };
     };
+    const prepareLoadout = () => {
+      seen.push(currentExtensionOwner());
+      return undefined;
+    };
     const command = async () => { seen.push(currentExtensionOwner()); };
     const extension = {
       path: "/extensions/subagents.ts", resolvedPath: "/extensions/subagents.ts",
       sourceInfo: { path: "/extensions/subagents.ts", source: "project", scope: "project", origin: "top-level" },
-      handlers: new Map([["session_start", [handler]]]), tools: new Map([["subagent", { definition: { execute } }]]),
+      handlers: new Map([["session_start", [handler]]]), tools: new Map([["subagent", { definition: { execute, prepareLoadout } }]]),
       commands: new Map([["review", { handler: command }]]), shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
     };
     const result = attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any });
@@ -117,8 +121,9 @@ describe("extension owner attribution", () => {
     const attributedTool = result.extensions[0]!.tools.get("subagent")!;
     const attributedCommand = result.extensions[0]!.commands.get("review")!;
     await attributedTool.definition.execute("id", {}, undefined, undefined, {} as any);
+    attributedTool.definition.prepareLoadout!({ tools: [] } as any);
     await attributedCommand.handler("", {} as any);
-    expect(seen).toHaveLength(4);
+    expect(seen).toHaveLength(5);
     expect(seen.every((owner) => (owner as { id: string }).id === (seen[0] as { id: string }).id)).toBe(true);
     expect(seen.every((owner) => (owner as { id: string }).id.startsWith("extension:"))).toBe(true);
     expect(JSON.stringify(seen)).not.toContain("/extensions/subagents.ts");

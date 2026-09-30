@@ -87,6 +87,7 @@ function rawString(value: unknown, name: string, maximum: number): string {
 function redactSettingsDocument(document: Record<string, unknown>): Record<string, unknown> {
   const redacted = structuredClone(document);
   delete redacted.httpProxy;
+  delete redacted.deviceId;
   return redacted;
 }
 

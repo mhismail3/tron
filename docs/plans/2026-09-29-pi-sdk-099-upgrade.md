@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-29, P99-1
+- **Last updated:** 2026-09-29, P99-3
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -211,7 +211,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Upstream delta | Tron disposition | Task |
 | --- | --- | --- |
 | Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Adopt**; delete Tron's adapter and ConnectionOwner MCP generality | P99-6, P99-7, P99-8 |
-| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: manifest entries; nested-call projection; exposure/namespace in tool projections; every tool correct when nested (D-3) | P99-3, P99-5, P99-6 |
+| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; nested-call projection, exposure/namespace projections and nested-tool safety remain | P99-3, P99-5, P99-6 |
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7 | P99-10, P99-15 |
 | Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapt**: pass `getDeviceId` to `ModelRuntime.login`; redact `deviceId` from settings projection; fixed port 1455 shared with Codex legacy | P99-9 |
@@ -219,16 +219,16 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Classifier models (`ModelRuntime.classify`, TypeSafe `jev-latest`, inherited Jev on OpenRouter/Cloudflare/Vercel/OpenCode Zen) | **Adopt**: migrate Tron's Jev to `ModelRuntime.classify()` (D-6); codemode `models.classify` inherited | P99-12, P99-20 |
 | llama.cpp classifier; llama.cpp context-window fix | **Not applicable**: Tron does not load the llama.cpp built-in (factory not root-exported) | — |
 | `fullscreenWheelScrollLines` setting | **Not applicable** (TUI only); not added to the settings projection | — |
-| Per-input disposition for `prompt`/`steer`/`follow_up`; `steer()`/`followUp()` return `"handled" \| "queued"` | **Adapt**: map to invocation lifecycle; queue rebuild must terminalize `handled` items | P99-3 |
+| Per-input disposition for `prompt`/`steer`/`follow_up`; `steer()`/`followUp()` return `"handled" \| "queued"` | **Adapt**: handled prompts settle without an agent turn; SDK rejections settle admission through the thrown error; handled items during queue rebuild get completed receipts and are removed from the queued projection | P99-3 |
 | `ModelRuntime` image generation and typed model accessors; discriminated extension model lists | **Inherit** (chat reads unchanged); image generation deferred to P99-21 | P99-12, P99-21 |
 | pi.dev catalog `types=chat,image,classifier` | **Inherit**; verify refresh and `models-store.json` reload | P99-12 |
-| `provider_stream_event` | **Classify** `pi-runtime`; no Tron consumer | P99-3 |
+| `mcp_servers_change`, `provider_stream_event` | **Classify** `pi-runtime`; no Tron consumer | P99-3 |
 | HTML export show/hide toggle for `display: false` messages | **Inherit** through the out-of-process `--export`; verify artifact | P99-17 |
 | Claude Sonnet 5.5 (0.99.0); GPT-6.1 Sol and Codex default (0.99.1); Kimi K3 defaults for Fireworks/Together/OpenCode Go | **Inherit**; refresh release-date snapshot; context-window regression | P99-12 |
 | Built-in section in `pi config`; `-builtin:<name>` in `extensions`; SDK `builtin: true` | **Adapt**: compose Tron built-ins with `builtin: true`, surface toggles on iOS | P99-6, P99-15 |
 | `defaultTools` `+name`/`-name` entries | **Adapt**: settings projection and patch (D-5) | P99-6 |
 | codemode `models.classify` cost added to tool result usage; `ctx.executeTool` usage added to the calling result | **Verify** session cost totals include tool-result usage | P99-5 |
-| TypeScript 7 / ES2024 build; `tsx` replaced by Node type stripping | **Adapt**: current candidate type check has five expected API integration errors owned by P99-3; Node 22.22.0 is the validation runtime | P99-2, P99-3 |
+| TypeScript 7 / ES2024 build; `tsx` replaced by Node type stripping | **Adapt**: P99-3 resolves its five candidate API integration errors; Node 22.22.0 is the validation runtime | P99-2, P99-3 |
 | Startup header/banner and `[Themes]` changes; light/dark detection order; `TERM=*-direct` | **Not applicable** (TUI only) | — |
 | OpenAI Codex provider renamed "OpenAI Codex (legacy)" | **Inherit**; iOS shows provider names from the Gateway | P99-9 |
 | `builtin:<name>` naming in errors, diagnostics and source info | **Adapt**: agent-instructions and extension diagnostics map `builtin:` sources | P99-6 |
@@ -248,7 +248,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | --- | --- | --- | --- | --- |
 | P99-1 | Done | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | orchestrator session, 2026-09-29 |
 | P99-2 | Done | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | luna-worker, 2026-09-29 |
-| P99-3 | Claimed | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | luna-worker, 2026-09-29 |
+| P99-3 | Done | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | luna-worker, 2026-09-29 |
 | P99-4 | Claimed | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
 | P99-5 | Ready | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | Unassigned |
 | P99-6 | Ready | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | Unassigned |
@@ -639,7 +639,7 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Tasks added: none.
 - Kept on purpose: `pi-client` and `pi-protocol` remain in the checker cohort because 0.99.1 still publishes them, though they are no longer in the resolved lock graph.
 - Deviations: payload staging skipped. Read `bundle-gateway.sh`: even `--skip-install` requires a prebuilt `dist/index.js` (absent); normal operation performs `npm ci` and `npm run build` and publishes into Mac app Resources. This violates the task's instruction not to install or activate via that script. `quickjs.wasm`, codemode worker and pi-mcp payload inclusion remain unverified.
-- For the next agent: P99-3 owns the five tsc errors. Run the bundle/payload verification only at an approved later stage and only under the repo's build safety policy; this task made no deployment or Gateway lifecycle calls.
+- For the next agent: P99-3 resolved the five tsc errors. Run the bundle/payload verification only at an approved later stage and only under the repo's build safety policy; this task made no deployment or Gateway lifecycle calls.
 
 ### P99-1 · Done · 2026-09-29 · orchestrator session
 
@@ -648,6 +648,16 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Changes: plan metadata only.
 - Deviations: Implementation is delegated to `luna-worker` subagents, one task per child, sequential on the single candidate worktree because most tasks share `runtime-slot.ts` and the protocol. Claims are committed on `main` per phase and cherry-picked onto the candidate so the plan copies stay aligned.
 - For the next agent: use Node 22.22.0 from nvm for Vitest; the app-bundled Node cannot load Rolldown's native binding and `npx`/`timeout` are not on the default PATH.
+
+### P99-3 · Done · 2026-09-29 · luna-worker
+
+- Result: Completed P99-3. The manifest now classifies both added events, six extension API members, and six tool fields; subagent stop uses `createToolContext`; handled prompt dispositions settle through the no-agent path; thrown SDK rejections resolve prompt admission as rejected; queue rebuild removes and terminalizes handled items as completed; `prepareLoadout` runs inside extension owner attribution; `deviceId` is omitted from settings document projections.
+- Evidence: Node 22.22.0 `tsc --noEmit` passed. Focused Vitest: 8 passed in 8.26s across owner attribution, settings projection and runtime registry. Full Gateway Vitest: 2,299 passed, 3 failed, 120.24s. Expected P99-4 failure: `rekeys the owning slot when a completed session is forked` now sees a persisted session file after the first user entry. Two unrelated resource-sensitive failures (knowledge tagger job settlement and logger rotation timeout) each passed their focused rerun (1/1, 0.55s and 1.42s). Focused queue-rebuild test passed 1/1 in 4.04s. `git diff --check` passed.
+- Changes: `packages/gateway/src/extensions/compatibility-manifest.ts`, `packages/gateway/src/sessions/runtime-slot.ts`, `packages/gateway/src/extensions/owner-attribution.ts`, `packages/gateway/src/admin/settings-service.ts`, runtime-registry integration, owner-attribution and settings-service tests; this plan row, handoff and matrix.
+- Tasks added: none.
+- Kept on purpose: handled invocations use existing completed lifecycle and receipt format; no new public lifecycle schema was needed. Pi's return disposition is handled at the Gateway-owned queue boundary, with Pi's actual queue remaining authoritative for survivors.
+- Deviations: Full suite had two unrelated failures under parallel load; both pass individually. The planned P99-4 persistence assertion remains untouched and is the third full-suite failure.
+- For the next agent: P99-4 owns the expected fork-materialization behavior change and its test/doc updates. Consider rerunning the full suite at the final checkpoint; focused P99-3 coverage and type checking are green.
 
 ### Draft · Proposed · 2026-09-29 · planning session
 

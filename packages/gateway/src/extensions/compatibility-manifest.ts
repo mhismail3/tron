@@ -68,6 +68,7 @@ export const extensionEventCompatibility = {
   turn_start: entry("pi-runtime", "event.turn-start"), turn_end: entry("pi-runtime", "event.turn-end"),
   message_start: entry("pi-runtime", "event.message-start"), message_update: entry("pi-runtime", "event.message-update"), message_end: entry("pi-runtime", "event.message-end"),
   tool_execution_start: entry("pi-runtime", "event.tool-start"), tool_execution_update: entry("pi-runtime", "event.tool-update"), tool_execution_end: entry("pi-runtime", "event.tool-end"),
+  mcp_servers_change: entry("pi-runtime", "event.mcp-servers-change"), provider_stream_event: entry("pi-runtime", "event.provider-stream-event"),
   model_select: entry("pi-runtime", "event.model-select"), thinking_level_select: entry("pi-runtime", "event.thinking-select"),
   user_bash: entry("pi-runtime", "event.user-bash"), input: entry("pi-runtime", "event.input"), tool_call: entry("pi-runtime", "event.tool-call"), tool_result: entry("pi-runtime", "event.tool-result"),
 } satisfies Record<ExtensionEvent["type"], CompatibilityEntry>;
@@ -96,7 +97,11 @@ export const extensionAPICompatibility = {
   setSessionName: entry("pi-runtime", "control.session-name"), getSessionName: entry("pi-runtime", "control.session-name"), setLabel: entry("pi-runtime", "control.label"),
   exec: entry("pi-runtime", "control.exec"), getActiveTools: entry("pi-runtime", "control.tools"), getAllTools: entry("pi-runtime", "control.tools"), setActiveTools: entry("pi-runtime", "control.tools"),
   getCommands: entry("pi-runtime", "control.commands"), setModel: entry("pi-runtime", "control.model"), getThinkingLevel: entry("pi-runtime", "control.thinking"), setThinkingLevel: entry("pi-runtime", "control.thinking"),
-  registerProvider: entry("pi-runtime", "registration.providers"), unregisterProvider: entry("pi-runtime", "registration.providers"), events: entry("pi-runtime", "registration.event-bus"),
+  registerProvider: entry("pi-runtime", "registration.providers"), unregisterProvider: entry("pi-runtime", "registration.providers"),
+  getSettings: entry("pi-runtime", "control.settings"), registerMcpServer: entry("pi-runtime", "registration.mcp-servers"),
+  unregisterMcpServer: entry("pi-runtime", "registration.mcp-servers"), getMcpServers: entry("pi-runtime", "control.mcp-servers"),
+  registerVirtualModel: entry("pi-runtime", "registration.virtual-models"), unregisterVirtualModel: entry("pi-runtime", "registration.virtual-models"),
+  events: entry("pi-runtime", "registration.event-bus"),
 } satisfies Record<keyof ExtensionAPI, CompatibilityEntry>;
 
 type PublicToolRenderContext = Parameters<NonNullable<ToolDefinition["renderCall"]>>[2];
@@ -105,7 +110,8 @@ export const toolDefinitionCompatibility = {
   name: "pi-runtime", label: "pi-runtime", description: "pi-runtime", promptSnippet: "pi-runtime",
   promptGuidelines: "pi-runtime", parameters: "pi-runtime", constrainedSampling: "pi-runtime",
   renderShell: "renderer", prepareArguments: "pi-runtime", executionMode: "pi-runtime", execute: "pi-runtime",
-  renderCall: "renderer", renderResult: "renderer",
+  renderCall: "renderer", renderResult: "renderer", outputSchema: "pi-runtime", exposure: "pi-runtime",
+  namespace: "pi-runtime", annotations: "pi-runtime", defaultActive: "pi-runtime", prepareLoadout: "pi-runtime",
 } satisfies Record<keyof ToolDefinition, "pi-runtime" | "renderer">;
 
 export const remoteTuiFeasibilityCompatibility = {

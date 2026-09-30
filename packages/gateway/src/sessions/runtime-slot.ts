@@ -6313,12 +6313,14 @@ export class RuntimeSlot {
     }
 
     if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
+    const toolCallId = `tron-stop-${randomUUID()}`;
+    const signal = new AbortController().signal;
     const result = await tool.execute(
-      `tron-stop-${randomUUID()}`,
+      toolCallId,
       { action: "stop", id: route.runId, childId: route.childId },
-      new AbortController().signal,
+      signal,
       undefined,
-      this.runtime.session.extensionRunner.createContext(),
+      this.runtime.session.extensionRunner.createToolContext(toolCallId, signal),
     );
     if ((result as typeof result & { isError?: boolean }).isError === true) {
       const message = result.content.find(content => content.type === "text")?.text;
@@ -6661,6 +6663,7 @@ export class RuntimeSlot {
       const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
       let sdkRun: Promise<void>;
       let preflightFailure: GatewayError | undefined;
+      let handledWithoutAgent = false;
       let queueDisposition: Promise<QueueAdmissionDisposition> | undefined;
       let resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
       let queueDispositionFailure: unknown;
@@ -6777,25 +6780,27 @@ export class RuntimeSlot {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
           source: "rpc",
-          preflightResult: (accepted) => {
+          preflightResult: (disposition) => {
+            // Pi calls back only after it has handled, queued, or started the
+            // prompt. Rejections do not call this hook; the SDK promise's
+            // rejection handler below resolves admission as false.
+            handledWithoutAgent = disposition === "handled";
             // Pi has no active Agent signal during pre-prompt compaction. Stop
             // must also revoke this exact pending prompt at SDK admission; an
             // aborted summary alone does not prevent Agent.prompt() starting.
-            if (accepted) {
-              if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)) {
-                preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
-              } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
-                preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
-              }
-              if (preflightFailure) {
-                acceptedResolve(false);
-                throw preflightFailure;
-              }
-              // agent_start can fire synchronously before this Gateway promise
-              // resumes. Record the SDK's disposition now, not one turn later.
-              this.invocations.set(invocationId, { ...invocation, lifecycle: "accepted" });
+            if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)) {
+              preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
+            } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
+              preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
             }
-            acceptedResolve(accepted);
+            if (preflightFailure) {
+              acceptedResolve(false);
+              throw preflightFailure;
+            }
+            // agent_start can fire synchronously before this Gateway promise
+            // resumes. Record the SDK's disposition now, not one turn later.
+            this.invocations.set(invocationId, { ...invocation, lifecycle: "accepted" });
+            acceptedResolve(true);
           },
         }));
         // Pi awaits an extension command handler before invoking its preflight
@@ -6850,7 +6855,6 @@ export class RuntimeSlot {
       }
       let runSettled = false;
       let commandSettled = false;
-      let handledWithoutAgent = false;
       let terminalReceiptPersisted = false;
       let admissionAccepted = false;
       let finalizeAdmission!: () => void;
@@ -6945,8 +6949,10 @@ export class RuntimeSlot {
         message: error instanceof Error ? error.message : String(error),
       })));
 
-      // Pi's callback is authoritative. A local timeout could reject while the
-      // same uncancelled input handler later accepts canonical work.
+      // Successful Pi dispositions are reported by the callback; rejected
+      // prompts do not call it and are resolved by the SDK promise rejection
+      // handler. A local timeout could reject while an input handler later
+      // accepts canonical work, so admission remains callback/rejection-owned.
       const admitted = await accepted;
       if (queuesIntoActiveRun && admitted) {
         this.reconcileQueuedMessages();
@@ -7060,9 +7066,7 @@ export class RuntimeSlot {
       if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
       else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
       else if (handledWithoutAgent) {
-        await this.terminalizeInvocation(operationId, "completed", undefined, operationWork);
-        this.lifecycle.cancelPreflight(operationId);
-        this.settleOperationWork(operationId);
+        await settleWithoutAgent();
       } else if (!runSettled) {
         operationWork.transition("foreground-agent-operation");
         await this.enqueueMarkerOwnership(operationId);
@@ -7424,13 +7428,15 @@ export class RuntimeSlot {
       }
 
       let rebuildError: unknown;
+      let handledItems = new Set<string>();
       this.suppressQueueEvents = true;
       try {
         session.clearQueue();
-        const queued = next.map((item) => item.behavior === "steer"
+        const dispositions = await Promise.all(next.map((item) => item.behavior === "steer"
           ? session.steer(item.runtimeText, item.images)
-          : session.followUp(item.runtimeText, item.images));
-        await Promise.all(queued);
+          : session.followUp(item.runtimeText, item.images)));
+        handledItems = new Set(next.flatMap((item, index) =>
+          dispositions[index] === "handled" ? [item.id] : []));
       } catch (error) {
         rebuildError = error;
         // Queue replacement is one mutation. Do not retain a partially rebuilt
@@ -7458,7 +7464,7 @@ export class RuntimeSlot {
       };
       const survivors: RuntimeQueuedMessage[] = [];
       for (const behavior of ["steer", "followUp"] as const) {
-        const desired = next.filter((item) => item.behavior === behavior);
+        const desired = next.filter((item) => item.behavior === behavior && !handledItems.has(item.id));
         const texts = actual[behavior];
         const retained = desired.slice(Math.max(0, desired.length - texts.length));
         const aligned = retained.slice(Math.max(0, retained.length - texts.length));
@@ -7525,7 +7531,11 @@ export class RuntimeSlot {
         });
       }
       for (const item of removed) {
-        await this.terminalizeInvocation(item.id, "interrupted", "queue-replaced");
+        await this.terminalizeInvocation(
+          item.id,
+          handledItems.has(item.id) ? "completed" : "interrupted",
+          handledItems.has(item.id) ? undefined : "queue-replaced",
+        );
         this.settleOperationWork(item.id);
       }
       this.queuedMessages = survivors.sort((left, right) => left.behavior === right.behavior

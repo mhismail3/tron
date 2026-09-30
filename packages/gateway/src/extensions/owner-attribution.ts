@@ -234,6 +234,7 @@ function admitTool(state: RegistrationAdmission, name: string, registered: Regis
       ...definition,
       execute,
       ...(definition.prepareArguments ? { prepareArguments: ownCallback(definition.prepareArguments, state.extension) } : {}),
+      ...(definition.prepareLoadout ? { prepareLoadout: ownCallback(definition.prepareLoadout, state.extension) } : {}),
       ...(definition.renderCall ? { renderCall: ownCallback(definition.renderCall, state.extension) } : {}),
       ...(definition.renderResult ? { renderResult: ownCallback(definition.renderResult, state.extension) } : {}),
     } as ToolDefinition,
