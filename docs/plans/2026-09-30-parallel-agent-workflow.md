@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, W-29 (#113) Done: CI policy green on main again
+- **Last updated:** 2026-09-30, wave 2 claimed (W-6, W-7, W-30 to W-35)
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -201,8 +201,8 @@ Dated 2026-09-30:
 | W-3 | Done | Shared-resource isolation audit so any two worktrees can validate concurrently; each fix becomes a sub-issue | none | session 01a0f183, 2026-09-30 |
 | W-4 | Done | Core: `start`/claim, naming, soft cap (the config file and `gh` resolution exist since W-2) | W-2 | session 01a0f183, 2026-09-30 |
 | W-5 | Done | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-6 | Ready | Core: `finish` and `land`: push gates (claim branch, clean tree), a PR only with a passing receipt for the exact head plus `Closes #N` and a Verification section; evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff. A recurring steward automation polls and resumes the owning session. | W-5 | Unassigned |
-| W-7 | Ready | Core: automatic cleanup of provably done resources; update the housekeeping skill to match | W-6 | Unassigned |
+| W-6 | Claimed | Core: `finish` and `land`: push gates (claim branch, clean tree), a PR only with a passing receipt for the exact head plus `Closes #N` and a Verification section; evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff. A recurring steward automation polls and resumes the owning session. | W-5 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-7 | Claimed | Core: automatic cleanup of provably done resources; update the housekeeping skill to match | W-6 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-8 | Done | Dashboard skill and HTML card | W-4 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-9 | Ready | CI: required Linux policy job and `tron/verify` status; path-scoped, non-blocking macOS jobs whose failures reach the dashboard (D-4) | W-5 | Unassigned |
 | W-10 | Ready | Scheduled local heavy run on `main` that files `regression` issues | W-5 | Unassigned |
@@ -225,11 +225,12 @@ Dated 2026-09-30:
 | W-27 | Done | #107 `tron dev start`/`restart` pass a short revision the payload manifest rejects; decision (b): full 40-hex HEAD plus a separate dirty-tree field (P1); merged, maintainer validation pending | W-20 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-28 | Done | #110 CI workflow file was invalid (runner context in job env), so no CI ran from about 2026-09-24 (P0) | none | session 01a0f183, 2026-09-30 |
 | W-29 | Done | #113 CI red on main: failures accumulated while the workflow was invalid (P0) | W-28 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-30 | Ready | #116 payload staging fails on macOS 15: rename of a directory frozen to 0555 (P1) | W-29 | Unassigned |
-| W-31 | Ready | #115 seven iOS tests depend on wall-clock speed and fail on the hosted runner (P2) | W-29 | Unassigned |
-| W-32 | Needs scoping | #124 decision: may a dirty dev candidate hand off to Stable (P2, Needs you) | W-27 | Unassigned |
-| W-33 | Ready | #125 agent scratch files and a shared Vitest artifact path break worktree isolation (P3) | none | Unassigned |
-| W-34 | Ready | #126 E2E harness and profiler refuse an inherited lease for another lane; lane cleanup after `clean` (P3) | W-17 | Unassigned |
+| W-30 | Claimed | #116 payload staging fails on macOS 15: rename of a directory frozen to 0555 (P1) | W-29 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-31 | Claimed | #115 seven iOS tests depend on wall-clock speed and fail on the hosted runner (P1: also fails locally under load and blocks unrelated iOS receipts) | W-29 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-32 | Claimed | #124 `tron dev handoff` refuses a candidate recorded dirty (maintainer decision (a)) (P2) | W-27, W-30 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-33 | Claimed | #125 agent scratch files and a shared Vitest artifact path break worktree isolation (P3) | none | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-34 | Claimed | #126 E2E harness and profiler refuse an inherited lease for another lane; lane cleanup after `clean` (P3) | W-17 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-35 | Claimed | #127 verify's `ios` check derives focused test owners instead of running the full hosted suite (P2) | W-7 | session 01a0f183 (orchestrator), 2026-09-30 |
 
 ## Task details
 
@@ -693,3 +694,20 @@ file-level. Everything else inspected is A.
   - A Project item added in the last few minutes may not appear in the
     Project's item listing (GitHub-side lag observed today), so the dashboard
     can briefly miss new items.
+
+### Wave 2 decisions · 2026-09-30 · maintainer, recorded by the orchestrator
+
+- #124: `tron dev handoff` refuses a dirty candidate (option a).
+- Steward (W-6): a command run on request, with no schedule.
+- The four unpushed C29 commits from the knowledge session were pushed at the
+  maintainer's request, as `494fcd8bf`:
+  - They were rebased onto `origin/main` in an isolated worktree and checked
+    with the new `scripts/tron work verify`, its first real use. Privacy,
+    agent, documentation and whitespace checks passed; the Gateway check
+    passed in 24 s.
+  - `ios` failed only on
+    `ChatViewScrollHarnessTests.displacedRetainedResume` (15 s watchdog). It
+    failed the same way on unmodified `origin/main` in its own lane (control),
+    so W-31 (#115) was raised to P1.
+  - That run also showed the `ios` check executing the full hosted suite
+    (1930 tests, about 12 minutes), which is filed as W-35 (#127).
