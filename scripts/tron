@@ -40,6 +40,9 @@ Commands:
   work verify [--post]              Run the checks the branch diff requires and write
                                     a receipt for the committed head; --post publishes
                                     evidence and the tron/verify commit status
+  work dashboard [--html <path>] [--json <path>]
+                                    Read-only live view of all work: needs-you,
+                                    epics, claims, queue, stale, orphans
 
 There is no deploy command. Production deployment is manual-only.
 EOF

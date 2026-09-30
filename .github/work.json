@@ -506,5 +506,17 @@
         "command": "for f in {paths}; do case \"$f\" in *.py) python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' \"$f\" ;; *.mjs|*.js) node --check \"$f\" ;; *.ts) node --experimental-strip-types --check \"$f\" ;; *) case \"$(head -n 1 \"$f\")\" in *bash*|*/sh) bash -n \"$f\" ;; *python*) python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' \"$f\" ;; *) echo \"no syntax check for $f\" >&2; exit 1 ;; esac ;; esac; done"
       }
     ]
+  },
+  "dashboard": {
+    "needsYouStatus": "Needs you",
+    "blockedStatus": "Blocked",
+    "epicLabel": "epic",
+    "needsYouLabels": [
+      "needs-decision"
+    ],
+    "regressionLabel": "regression",
+    "priorityField": "Priority",
+    "rankField": "Epic rank",
+    "verifyContext": "tron/verify"
   }
 }

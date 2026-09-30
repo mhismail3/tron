@@ -11,6 +11,8 @@ from typing import List, Optional
 ISSUE_TRAILER = "Work-Claim-Issue"
 SESSION_TRAILER = "Work-Claim-Session"
 _MAX_SLUG_WORDS = 5
+# `<type>/<issue>-<slug>`; group 1 is the issue number.
+_CLAIM_BRANCH = re.compile(r"^[a-z0-9._-]+/([0-9]+)-")
 
 
 class ClaimError(RuntimeError):
@@ -30,6 +32,12 @@ def slugify(title: str) -> str:
 
 def branch_name(branch_type: str, number: int, slug: str) -> str:
     return f"{branch_type}/{number}-{slug}"
+
+
+def claimed_issue(branch: str) -> Optional[int]:
+    """The issue a claim-style branch name is for, or None for any other branch."""
+    match = _CLAIM_BRANCH.match(branch)
+    return int(match.group(1)) if match else None
 
 
 def branch_type(labels: List[str], rules: dict) -> str:
@@ -120,15 +128,24 @@ def _claim_session(repo: Path, remote: str, base: str, branch: str, number: int)
     return None
 
 
-def existing_claims(repo: Path, remote: str, base: str, number: int) -> List[Claim]:
-    """Every remote branch for the issue, with its owner, sorted by name."""
-    pattern = re.compile(rf"^[a-z0-9._-]+/{number}-")
-    heads = {b: s for b, s in _remote_heads(repo, remote).items() if pattern.match(b)}
+def _read_claims(repo: Path, remote: str, base: str, heads: dict) -> List[Claim]:
     if not heads:
         return []
     refspecs = [f"+refs/heads/{b}:refs/remotes/{remote}/{b}" for b in heads]
     _git(repo, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}", *refspecs)
-    return [Claim(b, heads[b], _claim_session(repo, remote, base, b, number)) for b in sorted(heads)]
+    return [Claim(b, heads[b], _claim_session(repo, remote, base, b, claimed_issue(b))) for b in sorted(heads)]
+
+
+def existing_claims(repo: Path, remote: str, base: str, number: int) -> List[Claim]:
+    """Every remote branch for the issue, with its owner, sorted by name."""
+    heads = {b: s for b, s in _remote_heads(repo, remote).items() if claimed_issue(b) == number}
+    return _read_claims(repo, remote, base, heads)
+
+
+def all_claims(repo: Path, remote: str, base: str) -> List[Claim]:
+    """Every claim-style remote branch of every issue, with its owner, sorted by name."""
+    heads = {b: s for b, s in _remote_heads(repo, remote).items() if claimed_issue(b) is not None}
+    return _read_claims(repo, remote, base, heads)
 
 
 def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, session: str) -> ClaimResult:

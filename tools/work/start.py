@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import claim as claims
 from gh import Gh
@@ -63,18 +63,22 @@ def primary_checkout(cwd: Path) -> Path:
     return common.parent
 
 
-def _worktree_branch(repo: Path, path: Path) -> Optional[str]:
-    """The branch checked out at a registered worktree path, '' if detached, None if unregistered."""
+def list_worktrees(repo: Path) -> Dict[Path, str]:
+    """Every registered worktree's resolved path and its branch ('' when detached)."""
+    worktrees: Dict[Path, str] = {}
     current: Optional[Path] = None
     for line in _git(repo, "worktree", "list", "--porcelain").splitlines():
         if line.startswith("worktree "):
             current = Path(line[len("worktree "):]).resolve()
-        elif current == path.resolve():
-            if line.startswith("branch refs/heads/"):
-                return line[len("branch refs/heads/"):]
-            if line == "detached":
-                return ""
-    return None
+            worktrees[current] = ""
+        elif current is not None and line.startswith("branch refs/heads/"):
+            worktrees[current] = line[len("branch refs/heads/"):]
+    return worktrees
+
+
+def _worktree_branch(repo: Path, path: Path) -> Optional[str]:
+    """The branch checked out at a registered worktree path, '' if detached, None if unregistered."""
+    return list_worktrees(repo).get(path.resolve())
 
 
 def _session(explicit: Optional[str]) -> str:
