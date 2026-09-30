@@ -305,9 +305,9 @@ other JSON keys and failing closed on malformed or oversized files.
 
 `mcp.token.set` stores bearer credentials through the host Keychain credential
 owner and writes only a `!command` reference in `mcp.json`; token values are
-never returned or logged. OAuth authorization relay is session-bound and uses
-the `AuthBroker` loopback callback validation and relay; clients return the
-callback query to the owning operation, never choose a callback destination.
+never returned or logged. Gateway-mediated OAuth relay is pending: the MCP
+`openUrl` callback currently fails closed instead of opening a browser on the
+Mac, while Pi's pasted-redirect fallback remains available.
 
 ### Agent home
 

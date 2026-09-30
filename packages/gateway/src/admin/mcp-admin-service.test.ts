@@ -18,6 +18,18 @@ describe("McpAdminService", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it("records bounded MCP startup problems without returning command stderr", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-startup-"));
+    const script = join(root, "bad-cli.mjs");
+    const events: string[] = [];
+    try {
+      await writeFile(script, "process.stdout.write('{broken');");
+      const service = new McpAdminService(root, script, undefined, (_level, _message, event) => events.push(event));
+      await expect(service.list({ scope: "global" })).rejects.toThrow(/invalid JSON/u);
+      expect(events).toEqual(["mcp.startup.problem"]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("updates only requested fields, preserves neighboring config and fails closed on malformed files", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-patch-"));
     try {

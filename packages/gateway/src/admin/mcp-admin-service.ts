@@ -65,8 +65,11 @@ function parseConfig(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+export type McpAdminLog = (level: "warning", message: string, event: string, fields: Record<string, string>) => void;
+
 export class McpAdminService {
-  constructor(private readonly agentDir: string, private readonly cliPath: string, private readonly credentials?: McpCredentialOwner) {}
+  constructor(private readonly agentDir: string, private readonly cliPath: string, private readonly credentials?: McpCredentialOwner,
+    private readonly log: McpAdminLog = () => {}) {}
 
   private configPath(scope: McpScope): string {
     return scope.scope === "global" ? join(this.agentDir, "mcp.json") : join(scope.cwd, ".pi", "mcp.json");
@@ -78,8 +81,24 @@ export class McpAdminService {
   }
   async list(scope: McpScope): Promise<unknown> {
     const result = await runProcess(process.execPath, this.cliArgs(scope, ["list", "--json"]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: CLI_TIMEOUT_MS });
-    if (result.code !== 0) throw new GatewayError("conflict", `MCP listing failed: ${result.stderr.slice(0, 2_000)}`);
-    try { return JSON.parse(result.stdout); } catch { throw new GatewayError("conflict", "Bundled MCP CLI returned invalid JSON"); }
+    if (result.code !== 0) {
+      this.log("warning", "Bundled MCP status listing failed", "mcp.startup.problem", { reason: "cli-failure", scope: scope.scope });
+      throw new GatewayError("conflict", "MCP listing failed; inspect the MCP log for server diagnostics");
+    }
+    let parsed: unknown;
+    try { parsed = JSON.parse(result.stdout); } catch {
+      this.log("warning", "Bundled MCP status listing returned invalid JSON", "mcp.startup.problem", { reason: "invalid-output", scope: scope.scope });
+      throw new GatewayError("conflict", "Bundled MCP CLI returned invalid JSON");
+    }
+    if (parsed && typeof parsed === "object" && Array.isArray((parsed as { errors?: unknown }).errors)) {
+      const errors = (parsed as { errors: unknown[] }).errors;
+      for (const error of errors.slice(0, 64)) {
+        const reason = error && typeof error === "object" && "status" in error && typeof error.status === "string"
+          ? error.status.slice(0, 64) : "server-problem";
+        this.log("warning", "MCP server reports a startup problem", "mcp.startup.problem", { reason, scope: scope.scope });
+      }
+    }
+    return parsed;
   }
   async mutate(scope: McpScope, operation: "add" | "remove" | "logout", args: string[], server?: string): Promise<unknown> {
     const result = await runProcess(process.execPath, this.cliArgs(scope, [operation, ...args]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: CLI_TIMEOUT_MS });

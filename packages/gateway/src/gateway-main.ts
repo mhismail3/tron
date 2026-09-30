@@ -634,6 +634,7 @@ const service = new GatewayService({
     config.agentDir,
     join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
     new MacKeychainMcpCredentialOwner(),
+    (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
   ),
   ...(sessionSearch ? { sessionSearch } : {}),
 });

@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-7
+- **Last updated:** 2026-09-30, P99-8 partial implementation
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -224,7 +224,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 
 | Upstream delta | Tron disposition | Task |
 | --- | --- | --- |
-| Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Adopt**; P99-22 part 1 verifies stdio/streamable-HTTP, direct/codemode/deferred exposure, resources, list changes, reconnect, trusted project config, process-group cleanup and Stop/drain lifecycle; P99-7 removes Tron's adapter and P99-8 owns admin/sign-in relay | P99-6, P99-7, P99-8, P99-22 |
+| Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Partial**: P99-22 qualifies runtime transports; P99-7 removes Tron's adapter; P99-8 adds CLI administration and bounded patching, while OAuth sign-in relay through `openUrl` remains unimplemented and must not be claimed as adopted end-to-end | P99-6, P99-7, P99-8, P99-22 |
 | Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 parts 2a/2b verify nested interactive limits, notification and schedule receipts, desktop serialization, native-view session ownership, plus part 2c verifies concurrent Jev pre-dispatch ceilings and nested foreground-subagent Stop/workspace handoff. P99-23 persists bounded Tron presentation descriptors on the parent's canonical result under `details.tronNested`; rollback readers ignore this additive details key. | P99-3, P99-5, P99-6, P99-22, P99-23 |
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7 | P99-10, P99-15 |
@@ -803,3 +803,13 @@ installed. Then close the plan per `docs/plans/README.md`.
   from Needs scoping to Ready). It was subsequently approved and activated; the
   approval and active-work claims are recorded in the P99-1 handoff.
 - Changes: this file only.
+
+### P99-8 · Claimed · 2026-09-30 · luna-worker
+
+- Result: Implemented bounded MCP administration RPCs for explicit CLI status, add/remove/logout, receipt-backed `enabled`/`exposure` patching, and a Keychain credential-owner seam for static bearer tokens. P99-8 remains Claimed: the required session-bound OAuth callback relay through `createMcpExtension({ openUrl })`, end-to-end PKCE/dynamic-registration/refresh fixture, and related wire/event coverage are not implemented.
+- Evidence: Node 22.22.0 TypeScript check passed. Focused `mcp-admin-service.test.ts` passed 4/4 (0.27 s Vitest); it exercised the real bundled `pi mcp list --json`, bounded startup diagnostic, fail-closed config patching/preservation, and injected credential owner. Full Gateway Vitest: 2,301 passed, 3 failed (112.29 s); logger rotation, event-loop histogram and recent-model-usage ordering all passed together on isolated rerun (41/41, 1.42 s). The earlier separate focused run passed 4/4 (0.27 s).
+- Changes: `packages/gateway/src/admin/mcp-admin-service.ts` and test; `gateway-service.ts`; `gateway-main.ts`; Gateway README, MCP guide, observability catalog, and this plan.
+- Tasks added: none.
+- Kept on purpose: `mcp.list` is explicit, bounded to 1 MiB output/30 seconds, and registered as drain-aware RPC work. Mutations use the existing bounded command receipt owner; trusted project scope is canonicalized by TrustService. Token values are excluded from configuration/results/logs, and tests inject the credential owner.
+- Deviations: No Gateway-mediated OAuth sign-in was added; `openUrl` remains fail-closed per P99-6. The D-2 Keychain implementation invokes macOS `security`; this host boundary was not invoked in tests. No sign-in-relay observability row or claim is made. Added wire methods/fields for P99-15: `mcp.list` (`scope`, `cwd`); `mcp.add` (`commandId`, `scope`, `cwd`, `server`, `transport`, `url` or `command`/`args`, optional `exposure`); `mcp.remove` and `mcp.logout` (`commandId`, scope, server); `mcp.update` (`commandId`, scope, server, `enabled` and/or `exposure`); `mcp.token.set` (`commandId`, scope, server, transient `token`). Results include `servers`, `reloadRequired`, and for patching `changed`. No OAuth sign-in wire RPC exists yet.
+- For the next agent: finish relay ownership by binding an `openUrl` request to the selected session and authenticated iOS client, reuse AuthBroker's validated loopback capture/callback relay, preserve Pi's pasted redirect fallback, then add the local OAuth+MCP PKCE/dynamic-registration/token-refresh E2E and relay outcome observability row before setting P99-8 Done. Do not use the Mac browser.
