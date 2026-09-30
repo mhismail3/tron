@@ -81,6 +81,7 @@ only on the user's word) apply to every task.
 | C14 | Needs scoping | Supersession stored once; forget scrubs it | C2 | — |
 | C15 | Ready | Naming and dead code: Saved/Pending/scope labels, duplicate digest, double save-time source, dead iOS predicates | C1–C14 | — |
 | C16 | Needs scoping | Audit live Knowledge data for sources left pending by historical connector sweeps and determine safe intake recovery | C4, user Gateway access | — |
+| C17 | Needs scoping | X intake: capture and decide discovered X bookmarks under the same rules as Raindrop intake (decided entries untouched, one Jev budget) | C3, C4, C5 | — |
 
 ## Task details
 
@@ -214,6 +215,15 @@ user ID); duplicate tag-input digest in the tagger; intake passes both live
 save time and recovered save time; unreachable iOS `.sources` branch in
 `visibleRecords` and test-only helpers.
 
+### C17 — X intake (needs scoping)
+
+Since C4 the X connector sweep only discovers bookmarks, and only Raindrop has
+an intake, so discovered X bookmarks are never captured while discovery still
+spends paid X API attempts. The user chose (2026-09-29) to add an X intake
+rather than remove the sweep. Scoping: whether X discovery keeps its own paid
+attempt budget, how X items map to research/personal, and reuse of the Raindrop
+intake decision path rather than a second one.
+
 ## Handoff log
 
 ### C1, C3–C7, C11 · Claimed · 2026-09-29 · knowledge-consolidation session
@@ -303,3 +313,12 @@ save time and recovered save time; unreachable iOS `.sources` branch in
 - Kept on purpose: legacy stored `archive` values remain readable pending C2's live-data and update gate.
 - Deviations: none.
 - For the next agent: C2 remains gated on explicit live-data cleanup and a maintainer Gateway update; no Gateway lifecycle action was performed.
+
+### C17 added · 2026-09-29 · knowledge-consolidation session
+
+- Result: branch review found X sweeps spend paid attempts after C4 with no
+  intake to consume them; the user chose to add an X intake. Added C17.
+- Evidence: full Knowledge Gateway suite 375/375 on `7b6b7afe1`; full Gateway
+  suite 2306/2308, the two failures (`recent-model-usage.integration`,
+  `session-search-stall`) pass in isolation on both this branch and `main`.
+- Changes: this commit.
