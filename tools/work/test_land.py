@@ -202,6 +202,8 @@ FAKE_GH = textwrap.dedent(
         elif args[1] == "reopen":
             issue["state"] = "OPEN"
         elif args[1] == "comment":
+            if state.get("failIssueComment"):
+                fail("gh: Bad Gateway (HTTP 502)")
             issue["comments"].append(stdin)
         elif args[1] == "edit":
             issue["labels"].append(arg("--add-label"))
@@ -615,6 +617,27 @@ class BranchDeletionTests(LandFixture):
         self.assertEqual(self.land(), 0)
         self.assertEqual(self.remote_head(), other)
 
+    def test_branch_moved_between_the_check_and_the_delete_is_kept(self):
+        other = self.commit(self.seed, "other.txt", "x\n")
+        git(self.seed, "push", "-q", REMOTE, f"{other}:refs/heads/elsewhere")
+        # A receive-pack wrapper moves the branch once the pull request is merged:
+        # after land has read the branch, before the delete push connects.
+        wrapper = self.tmp / "receive-pack"
+        wrapper.write_text(textwrap.dedent(f"""\
+            #!{sys.executable}
+            import json, os, subprocess, sys
+            state = json.load(open(os.environ["FAKE_GH_STATE"]))
+            if state["pulls"] and state["pulls"][0]["state"] == "MERGED":
+                subprocess.run(["git", "--git-dir", {str(self.remote)!r}, "update-ref",
+                                "refs/heads/{BRANCH}", {other!r}], check=True)
+            os.execvp("git", ["git", "receive-pack", *sys.argv[1:]])
+            """))
+        wrapper.chmod(0o755)
+        git(self.repo, "config", f"remote.{REMOTE}.receivepack", str(wrapper))
+        self.assertEqual(self.land(), 0)
+        self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
+        self.assertEqual(self.remote_head(), other)
+
     def test_branch_github_already_deleted_is_fine(self):
         self.set_state(deleteOnMerge=True)
         self.assertEqual(self.land(), 0)
@@ -630,6 +653,19 @@ class HandoffTests(LandFixture):
         self.assertIn(action, issue["comments"][-1])
         self.assertIn("needs-user-validation", issue["labels"])
         self.assertEqual((issue["state"], issue["status"]), ("OPEN", "Needs you"))
+
+    def test_a_failure_after_the_merge_keeps_the_action_text(self):
+        action = "Run `scripts/example restart`, then check that status names this branch."
+        self.set_state(failIssueComment=True)
+        with self.assertRaises(land.LandError) as raised:
+            self.land(validation=action)
+        pull = self.state()["pulls"][0]
+        self.assertEqual(pull["state"], "MERGED")
+        # The pull request body was on GitHub before the merge.
+        self.assertIn(action, pull["body"])
+        self.assertIn(action, str(raised.exception))
+        self.assertIn("#100", str(raised.exception))
+        self.assertFalse(any(action in comment for comment in self.issue()["comments"]))
 
 
 class StewardFixture(LandFixture):
@@ -668,6 +704,7 @@ class StewardTests(StewardFixture):
             "check red": dict(checks={"policy": "FAILURE"}),
             "check pending": dict(pendingViews=10 ** 6),
             "validation handoff": dict(pulls=[dict(state["pulls"][0], body="Refs #7\n")]),
+            "closes another issue": dict(pulls=[dict(state["pulls"][0], body="Closes #70\n")]),
         }
         for name, change in cases.items():
             with self.subTest(case=name):

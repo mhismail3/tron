@@ -408,9 +408,12 @@ work is committed. The `land` section of `.github/work.json` configures it.
      keeps the current summary. The Verification section lists each receipt
      check with its result, wall time and the commit it was carried from.
    - With `--needs-user-validation` the body says `Refs #N` instead, so the
-     merge does not close the issue.
-   - The scrub command checks the title and body right before they are
-     published. The issue's Project Status becomes `land.reviewStatus`.
+     merge does not close the issue. It also ends with a Maintainer validation
+     section holding the text, so the text is on GitHub before the merge.
+   - The body holds only text the scrub command has passed: the title,
+     summary and validation text in step 1, and receipt fields that the
+     receipt comment's scrub passed. The issue's Project Status becomes
+     `land.reviewStatus`.
 5. **Wait.** It polls the pull request every `land.pollSeconds`, for at most
    `land.waitSeconds`. It waits until every check run named in
    `land.requiredChecks` and the `verify.statusContext` status succeed on the
@@ -438,12 +441,17 @@ work is committed. The `land` section of `.github/work.json` configures it.
      pull request and the merge commit. Status becomes `land.doneStatus`.
    - It deletes the remote branch with a lease on the merged head. A branch
      that is already gone (the repository may delete merged branches) is fine;
-     a branch at any other commit is kept and reported.
+     a branch at any other commit, including one pushed to just before the
+     delete, is kept and reported.
    - It prints the commands that remove the local worktree and branch.
      Removing them is the cleanup command's job, not `land`'s.
 
-Running `land` again after a stop resumes: it reuses the open pull request and
-the carried checks.
+Running `land` again after a stop before the merge resumes: it reuses the open
+pull request and the carried checks. A stop after GitHub reports MERGED is not
+resumed, because the claim branch may already be gone. The error names the
+steps left to do by hand (close the issue or hand it off, set Status, delete
+the branch) and, with `--needs-user-validation`, repeats the text, which is
+also in the pull request body.
 
 ## `steward`
 
@@ -468,8 +476,8 @@ branch in this repository, it lists:
 - the head contains the base branch tip;
 - the remote branch is at that head;
 - any local worktree on the branch is clean and at the same commit;
-- the body starts with `Closes #N`. A `Refs #N` body means a validation
-  handoff whose text only the owner has.
+- the body starts with `Closes #N`. A `Refs #N` body is a validation handoff,
+  which only `land` performs.
 
 The steward never runs checks, merges the base branch or pushes commits. That
 work belongs to the owner's worktree. A pull request that needs any of it has to be
@@ -497,21 +505,25 @@ Project state and records every call. The live E2E covers GitHub itself.
     names the new head. A conflict stops `land` with the merge left in
     progress and nothing pushed.
 37. **A pull request body leaks personal data.** The scrub command sees the
-    title, summary and validation text before any GitHub write, and the final
-    body before it is published.
+    title, summary and validation text before any GitHub write. The rest of
+    the body is receipt fields that already passed the scrub of the receipt
+    comment, which is posted first.
 38. **The issue is left open or wrongly closed after the merge.** Without
     validation, an issue GitHub left open is closed. With validation, the body
     says `Refs #N` and a closed issue is reopened.
 39. **The remote branch is deleted before the merge or at a moved head.** The
     branch is deleted only after GitHub reports MERGED, and only with a lease
-    on the merged head.
-40. **The Needs-you handoff loses the action text.** The exact text is
-    commented on the issue with the label and Status, and it is scrubbed before
-    the merge, so the scrub cannot refuse it afterwards.
+    on the merged head, so a push between the check and the delete keeps it.
+40. **The Needs-you handoff loses the action text.** The exact text is in the
+    pull request body before the merge and is commented on the issue with the
+    label and Status. It is scrubbed before the merge, so the scrub cannot
+    refuse it afterwards, and a failure after the merge repeats it in the
+    error.
 41. **The steward lands without a passing receipt.** `steward --land` merges
     only a head with a successful verify status and required checks, that
     contains the base tip, that no local worktree has moved past, and whose
-    body closes the issue. It never runs checks.
+    body closes that issue and not one whose number starts with it. It never
+    runs checks.
 42. **A claimed status is misread.** An In review or Needs you claim is not a
     disagreement, a resumed `start` does not move it back to In progress, and
     `start` and the dashboard count the soft cap alike.
