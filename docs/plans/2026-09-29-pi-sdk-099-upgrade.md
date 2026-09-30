@@ -245,7 +245,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Claude Sonnet 5.5 (0.99.0); GPT-6.1 Sol and Codex default (0.99.1); Kimi K3 defaults for Fireworks/Together/OpenCode Go | **Verified/inherited**: refreshed release-date snapshot; catalog regression pins Sonnet 5.5 at 1,000,000 context / 128,000 output and GPT-6.1 Sol at 272,000 / 128,000. K3's 1,048,576 context/output catalog metadata does not widen Tron's 32,768 TPM reservation cap; payload normalization keeps the provider's `max_tokens` field. | P99-12 |
 | Built-in section in `pi config`; `-builtin:<name>` in `extensions`; SDK `builtin: true` | **Adapted**: compose built-ins in Gateway; Extensions settings patches `-builtin:` switches from the scoped settings projection | P99-6, P99-15 |
 | `defaultTools` `+name`/`-name` entries | **Adapted**: Extensions settings projects and patches default tools, including `+codemode`, `+tool_search`, and `codemode.mode` | P99-6, P99-15 |
-| codemode `models.classify` cost added to tool result usage; `ctx.executeTool` usage added to the calling result | **Verified** Pi's session stats include tool-result usage, exercised with a priced nested fixture result | P99-5 |
+| codemode `models.classify` cost added to tool result usage; `ctx.executeTool` usage added to the calling result | **Verified**: P99-5's priced nested fixture covers `ctx.executeTool`; P99-17 g4 runs a faux-provider session with TypeSafe `jev-latest` and System One usage, and proves classifier usage/cost is carried once in codemode result usage and session totals/projection. The catalog's TypeSafe classifier cost is zero, as specified by its model metadata. | P99-5, P99-17 |
 | TypeScript 7 / ES2024 build; `tsx` replaced by Node type stripping | **Adapt**: P99-3 resolves its five candidate API integration errors; Node 22.22.0 is the validation runtime | P99-2, P99-3 |
 | Startup header/banner and `[Themes]` changes; light/dark detection order; `TERM=*-direct` | **Not applicable** (TUI only) | — |
 | OpenAI Codex provider renamed "OpenAI Codex (legacy)" | **Inherit**; iOS shows provider names from the Gateway | P99-9 |
@@ -1167,4 +1167,12 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Evidence: Focused RuntimeRegistry integration passed 1/1 (401 ms test time, 1.63 s Vitest wall); Node 22.22.0 TypeScript check passed. Retained artifact: `packages/gateway/test-results/pi-sdk-099-virtual-lifecycle.json`, with route state, resumed/forked state, assistant rows, physical model sequence, context usage and compaction outcome.
 - Changes: Added one project-fixture virtual router integration case to `runtime-registry.integration.test.ts` and this handoff entry. No runtime behavior change was needed.
 - Kept on purpose: SDK router state remains canonical branch data; the fixture routes among two faux physical models and uses no network or live runtime.
+- Deviations: None.
+
+### P99-17 g4 · Done · 2026-09-30 · luna-worker
+
+- Result: Verified codemode `models.classify` System One usage/cost propagation through the real RuntimeRegistry session: the parent codemode result carries the classifier usage and call cost, snapshot statistics add its 136 tokens exactly once, and the codemode result's projected cost is available to the iOS card. TypeSafe's pinned `jev-latest` catalog price is zero, so the observed USD cost is zero.
+- Evidence: Focused integration passed 1/1 (238 ms test execution; 1.12 s Vitest wall). Artifact: `packages/gateway/test-results/pi-sdk-099-classify-cost.json` records the fake request, live codemode projection, canonical tool result, and completed snapshot totals; auth is redacted.
+- Changes: Added `packages/gateway/src/sessions/codemode-classify-cost.integration.test.ts`; updated the classifier-cost matrix disposition and this handoff. No runtime change.
+- Kept on purpose: Usage aggregation is compared against the assistant usage baseline plus classifier tokens, proving single-counting without relying on a new cost price or production hook; the fake provider, credential, and fetch stay isolated.
 - Deviations: None.
