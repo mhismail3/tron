@@ -1266,6 +1266,7 @@ export function projectMessage(
         ),
         provider: message.provider,
         modelId: message.model,
+        ...(message.thinkingLevel ? { thinkingLevel: message.thinkingLevel } : {}),
         stopReason: message.stopReason,
         ...(message.errorMessage ? { errorMessage: boundedText(message.errorMessage) } : {}),
         usage: projectJson(message.usage),

@@ -99,6 +99,34 @@ async function settleScheduledWork(): Promise<void> {
 }
 
 describe("global provider resources", () => {
+  it("replays global virtual-model registrations into the administrative catalog", async () => {
+    // Guard the global/session-free boundary: virtual registrations were queued by
+    // extension loading but never replayed, so model.list omitted a selectable router.
+    const f = await fixture();
+    await writeFile(f.extensionPath, `export default (pi) => {
+      pi.registerProvider("virtual-physical", {
+        name: "Virtual fixture", api: "openai-completions", baseUrl: "https://example.invalid/v1",
+        models: [{ id: "physical", name: "Physical", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 1024 }]
+      });
+      pi.registerVirtualModel({ provider: "virtual-physical", id: "router", name: "Router", contextWindow: 4096, route: () => ({ model: pi.modelRegistry.find("virtual-physical", "physical"), thinkingLevel: "off" }) });
+    };`);
+    await configure(f.agentDir, [f.extensionPath]);
+    const resources = await f.createResources();
+    const gateway = new GatewayService({ modelRuntime: f.runtime, globalProviderResources: resources } as unknown as GatewayServiceDependencies);
+    const result = await gateway.invoke(client, "model.list", { limit: 200 }) as { models: Array<Record<string, unknown>>; nextCursor?: string };
+    const models = [...result.models];
+    let cursor = result.nextCursor;
+    while (cursor && !models.some(({ id }) => id === "router")) {
+      const page = await gateway.invoke(client, "model.list", { limit: 200, cursor }) as typeof result;
+      models.push(...page.models);
+      cursor = page.nextCursor;
+    }
+    expect(models.find(({ id }) => id === "router")).toMatchObject({
+      provider: "virtual-physical", virtual: true, contextWindow: 4096,
+    });
+    expect(f.runtime.getModels().some(({ id }) => id === "router")).toBe(true);
+  });
+
   it("loads user extensions for global catalog and OAuth before any session exists", async () => {
     const f = await fixture();
     await writeFile(f.extensionPath, providerExtension("global-fixture"));

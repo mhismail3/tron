@@ -2269,6 +2269,7 @@ export class GatewayService {
           provider: model.provider,
           id: model.id,
           name: model.name,
+          virtual: model.api === "pi-virtual",
           reasoning: model.reasoning,
           input: model.input,
           contextWindow: model.contextWindow,

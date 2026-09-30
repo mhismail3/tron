@@ -166,6 +166,8 @@ export type TranscriptItem =
       content: ContentPart[];
       provider?: string;
       modelId?: string;
+      /** Pi thinking level used for this physical assistant response. */
+      thinkingLevel?: string;
       stopReason?: string;
       errorMessage?: string;
       toolCallId?: string;

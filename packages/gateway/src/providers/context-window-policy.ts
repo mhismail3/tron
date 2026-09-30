@@ -143,12 +143,14 @@ export class SessionContextWindowPolicy {
   }
 
   private resolve(model: RuntimeModel, override = this.overrides.get(contextModelKey(model)) ?? null): ContextWindowPolicy | undefined {
-    const limits = contextWindowLimits(model, this.session.settingsManager.getCompactionSettings());
+    const physical = this.session.routedModel?.model ?? model;
+    const limitsModel = model.api === "pi-virtual" ? physical : model;
+    const limits = contextWindowLimits(limitsModel, this.session.settingsManager.getCompactionSettings());
     if (!limits) return undefined;
     const key = contextModelKey(model);
     const global = this.global[key];
     const project = this.project[key];
-    const configured = project ?? global ?? model.contextWindow;
+    const configured = project ?? global ?? limitsModel.contextWindow;
     const defaultWindow = Math.max(limits.minimum, Math.min(limits.maximum, configured));
     const requested = override ?? configured;
     const effective = Math.max(limits.minimum, Math.min(limits.maximum, requested));
