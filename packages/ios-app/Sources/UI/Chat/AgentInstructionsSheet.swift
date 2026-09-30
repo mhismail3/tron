@@ -140,7 +140,6 @@ enum AgentInstructionsPresentation {
         switch source.kind {
         case "pi": "Pi"
         case "module": "Tron"
-        case "mcp": "MCP"
         case "package": "Package"
         case "local": source.scope == "project" ? "Project" : "User"
         case "file": "File"
@@ -152,7 +151,6 @@ enum AgentInstructionsPresentation {
         switch source.kind {
         case "pi": "Built into Pi"
         case "module": "Tron module \(source.name ?? "")"
-        case "mcp": "Tron MCP connection"
         case "package": "Package \(source.name ?? "")"
         case "local", "file": source.path.map(displayPath) ?? "Local file"
         default: "Unknown source"
@@ -162,7 +160,7 @@ enum AgentInstructionsPresentation {
     static func accent(_ source: AgentInstructionsProjection.Source) -> Color {
         switch source.kind {
         case "pi": .tronBlue
-        case "module", "mcp": .tronSessionTeal
+        case "module": .tronSessionTeal
         case "package": .tronPurple
         case "local", "file": .tronAmber
         default: .tronTextMuted

@@ -37,8 +37,9 @@ struct ProvidersSettingsView: View {
                         TronSettingsCaption("No providers are available from this Gateway.")
                     }
                 } else {
-                    let configured = ProviderUsageOrdering.sorted(providers.filter(\.configured))
-                    let available = ProviderUsageOrdering.sorted(providers.filter { !$0.configured })
+                    let visibleProviders = providers.contains(where: { $0.id == "typesafe" }) ? providers : providers + [classifierOnlyTypeSafeProvider]
+                    let configured = ProviderUsageOrdering.sorted(visibleProviders.filter(\.configured))
+                    let available = ProviderUsageOrdering.sorted(visibleProviders.filter { !$0.configured })
                     if !configured.isEmpty {
                         providerSection("Configured", providers: configured)
                     }
@@ -97,6 +98,14 @@ struct ProvidersSettingsView: View {
                 return
             }
         }
+    }
+
+    /// TypeSafe has classifier models but deliberately no chat models. Keep
+    /// its API-key setup reachable even if a Gateway omits it from chat catalog rows.
+    private var classifierOnlyTypeSafeProvider: ProviderSummary {
+        ProviderSummary(id: "typesafe", name: "TypeSafe (classifier)", configured: false,
+                        usageSupported: false, localOnly: false, authSource: nil,
+                        credentialType: "api-key", authMethods: ["api-key"], modelCount: 0)
     }
 
     private var modelCatalogRow: some View {

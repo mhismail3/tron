@@ -203,18 +203,9 @@ package struct TronModuleSummary: Codable, Hashable, Identifiable, Sendable {
     package var id: String { name }
 }
 
-/// One MCP connection a session would admit tools from. It names the source
-/// only: individual MCP tool names exist inside that session's runtime.
-package struct McpToolSource: Codable, Hashable, Identifiable, Sendable {
-    package let id: String
-    package let definitionId: String
-    package let health: String
-}
-
-/// `modules.list`: the installed Tron modules and the MCP tool sources.
+/// `modules.list`: the installed Tron modules.
 package struct TronModuleList: Codable, Hashable, Sendable {
     package let modules: [TronModuleSummary]
-    package let connections: [McpToolSource]
 }
 
 package struct PackageUpdate: Codable, Hashable, Identifiable, Sendable {
@@ -357,6 +348,18 @@ package struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     package let credentialType: String?
     package let authMethods: [String]
     let modelCount: Int
+
+    package init(id: String, name: String, configured: Bool, usageSupported: Bool?, localOnly: Bool?, authSource: String?, credentialType: String?, authMethods: [String], modelCount: Int) {
+        self.id = id
+        self.name = name
+        self.configured = configured
+        self.usageSupported = usageSupported
+        self.localOnly = localOnly
+        self.authSource = authSource
+        self.credentialType = credentialType
+        self.authMethods = authMethods
+        self.modelCount = modelCount
+    }
 
     package var supportsUsage: Bool { usageSupported == true }
     package var isLocalOnly: Bool { localOnly == true }

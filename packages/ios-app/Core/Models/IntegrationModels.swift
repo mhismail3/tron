@@ -69,7 +69,7 @@ package struct IntegrationInstance: Codable, Hashable, Sendable, Identifiable {
         if let providerDisplayName, !providerDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return providerDisplayName
         }
-        return implementation == "mcp" ? providerAccountId : "Account \(providerAccountId)"
+        return "Account \(providerAccountId)"
     }
 }
 

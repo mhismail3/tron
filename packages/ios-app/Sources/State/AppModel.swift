@@ -4214,6 +4214,19 @@ final class AppModel {
         try await settingsTrust.updateSettings(patch, target: target, sessionID: sessionID)
     }
 
+    func mutateMCPAdmin(_ method: String, parameters: [String: JSONValue]) async throws -> JSONValue {
+        let allowed = ["mcp.add", "mcp.remove", "mcp.update", "mcp.logout", "mcp.token.set", "mcp.auth.start", "mcp.auth.cancel"]
+        guard allowed.contains(method) else {
+            throw GatewayFailure(code: "invalid_request", message: "Unsupported MCP administration operation.", retryable: false, details: nil)
+        }
+        let commandID = UUID().uuidString.lowercased()
+        var request = parameters
+        if method != "mcp.auth.cancel" { request["commandId"] = .string(commandID) }
+        return try await mutationExecutor.performValue(method: method, commandID: commandID) {
+            try await self.client.requestValue(method, JSONValue.object(request))
+        }
+    }
+
     func inspectTrust(target: TrustTarget) async throws -> JSONValue {
         try await settingsTrust.inspectTrust(target: target)
     }

@@ -8,21 +8,9 @@ import TronMobileCore
 struct IntegrationsSettingsView: View {
     enum Surface: Hashable {
         case connectedServices
-        case mcpServers
 
-        var title: String {
-            switch self {
-            case .connectedServices: "Connected Services"
-            case .mcpServers: "MCP Servers"
-            }
-        }
-
-        func includes(_ definition: IntegrationDefinition) -> Bool {
-            switch self {
-            case .connectedServices: definition.implementation != "mcp"
-            case .mcpServers: definition.implementation == "mcp"
-            }
-        }
+        var title: String { "Connected Services" }
+        func includes(_ definition: IntegrationDefinition) -> Bool { definition.implementation != "mcp" }
     }
 
     let surface: Surface
@@ -52,7 +40,7 @@ struct IntegrationsSettingsView: View {
                         TronPlaceholderState(
                             title: "No supported integrations",
                             detail: emptySurfaceDetail,
-                            icon: surface == .mcpServers ? "server.rack" : "link"
+                            icon: "link"
                         )
                     }
                 } else if isLoading {
@@ -118,7 +106,7 @@ struct IntegrationsSettingsView: View {
                 if instance.id != instances.last?.id { TronSettingsDivider(accent: .tronBlue) }
             }
             if !instances.isEmpty { TronSettingsDivider(accent: .tronBlue) }
-            TronSettingsRow(icon: "plus.circle", title: definition.implementation == "mcp" ? "Add server" : "Add account", subtitle: setupSummary(definition)) {
+            TronSettingsRow(icon: "plus.circle", title: "Add account", subtitle: setupSummary(definition)) {
                 Button { setupDefinition = definition } label: { TronInlineActionLabel("Set up") }
                     .buttonStyle(.plain)
             }
@@ -175,16 +163,11 @@ struct IntegrationsSettingsView: View {
     }
 
     private var emptySurfaceDetail: String {
-        switch surface {
-        case .connectedServices: "No supported account-based services are advertised by this Gateway."
-        case .mcpServers: "No tools-only MCP server definitions are advertised by this Gateway. OAuth and non-tool MCP features are not supported."
-        }
+        "No supported account-based services are advertised by this Gateway."
     }
 
     private func setupSummary(_ definition: IntegrationDefinition) -> String {
-        definition.implementation == "mcp"
-            ? "Connect a trusted HTTP endpoint or local command; MCP tools only"
-            : "Connect using credentials stored on your Mac"
+        "Connect using credentials stored on your Mac"
     }
 
     private func capabilityCaption(definition: IntegrationDefinition, snapshot: IntegrationSnapshot) -> String? {
@@ -360,9 +343,6 @@ private struct IntegrationSetupView: View {
     @State private var accountID = ""
     @State private var scope = ""
     @State private var credentialRef = ""
-    @State private var endpoint = ""
-    @State private var command = ""
-    @State private var args = ""
     @State private var policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
     @State private var mutation: IntegrationMutation?
     @State private var error: String?
@@ -388,7 +368,6 @@ private struct IntegrationSetupView: View {
                         }
                     }
                 }
-                if definition.implementation == "mcp" { mcpConfiguration() }
                 TronSettingsGroup("Credential handoff", accent: .tronPurple) {
                     TronTextSettingRow(icon: "key", title: "Credential reference", value: $credentialRef)
                 }
@@ -404,23 +383,6 @@ private struct IntegrationSetupView: View {
             onFinished()
             dismiss()
         })
-    }
-
-    @ViewBuilder
-    private func mcpConfiguration() -> some View {
-        if method == "local-command" {
-            TronSettingsGroup("Trusted local command", accent: .tronAmber) {
-                TronTextSettingRow(icon: "terminal", title: "Executable", value: $command)
-                TronSettingsDivider(accent: .tronAmber)
-                TronTextSettingRow(icon: "list.bullet", title: "Arguments", detail: "Optional", value: $args)
-            }
-            .tronSettingsCaption("The Gateway launches this exact executable without a shell. Local code is trusted separately from provider authentication.")
-        } else {
-            TronSettingsGroup("Remote endpoint", accent: .tronAmber) {
-                TronTextSettingRow(icon: "link", title: "HTTP endpoint", value: $endpoint)
-            }
-            .tronSettingsCaption("Only the configured endpoint is used; redirects and unsupported MCP features remain unavailable.")
-        }
     }
 
     private var policySection: some View {
@@ -442,27 +404,17 @@ private struct IntegrationSetupView: View {
     private func complete() {
         guard mutation == nil, activity.allowsPresentationPublication else { return }
         guard !instanceID.isEmpty, !accountID.isEmpty, !credentialRef.isEmpty else { error = "Instance ID, account/server identity, and an opaque credential reference are required."; return }
-        if definition.implementation == "mcp" && method == "local-command" && command.isEmpty { error = "An executable is required for local-command setup."; return }
-        if definition.implementation == "mcp" && method != "local-command" && endpoint.isEmpty { error = "An HTTP endpoint is required for remote setup."; return }
         error = nil
         let requestIdentity = model.knowledgePresentationIdentity
         let instanceID = instanceID, accountID = accountID, scope = scope, credentialRef = credentialRef
-        let method = method, endpoint = endpoint, command = command, args = args, policy = policy
+        let method = method, policy = policy
         mutation = IntegrationMutation(identity: requestIdentity, task: Task { @MainActor in
                 guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
                 let begun = try await model.integrations.beginSetup(instanceID: instanceID, definitionID: definition.id, method: method)
                 // Begin's receipt remains owned even after dismissal. Completion
                 // is a separate command: never send it to a replacement Gateway.
                 guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
-                let configuration: IntegrationSetupConfiguration? = definition.implementation == "mcp"
-                    ? IntegrationSetupConfiguration(
-                        transport: method == "local-command" ? "stdio" : "http",
-                        endpoint: method == "local-command" ? nil : endpoint,
-                        command: method == "local-command" ? command : nil,
-                        args: method == "local-command" ? args.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init) : nil,
-                        cwd: nil, env: nil
-                    ) : nil
-                _ = try await model.integrations.completeSetup(operationID: begun.operationId, instanceID: instanceID, providerAccountID: accountID, scope: scope.nilIfEmpty, credentialRef: credentialRef, policy: policy, configuration: configuration)
+                _ = try await model.integrations.completeSetup(operationID: begun.operationId, instanceID: instanceID, providerAccountID: accountID, scope: scope.nilIfEmpty, credentialRef: credentialRef, policy: policy, configuration: nil)
         })
     }
 }

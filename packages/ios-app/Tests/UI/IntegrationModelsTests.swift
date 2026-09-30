@@ -76,24 +76,4 @@ final class IntegrationModelsTests: XCTestCase {
         await gateway.close()
     }
 
-    @MainActor
-    func testIntegrationListRejectsNonConnectionCapabilityProvenance() async {
-        let client = IntegrationsRPCClient(request: { _, _ in
-            .object([
-                "definitions": .array([]), "instances": .array([]), "setupOperations": .array([]),
-                "capabilities": .array([.object([
-                    "id": .string("tools"), "availability": .string("available"), "effects": .array([.string("read")]),
-                    "definitionId": .string("mcp.remote-http"), "provenance": .object(["owner": .string("agent"), "definitionId": .string("mcp.remote-http")])
-                ])]), "stateRevision": .number(1)
-            ])
-        })
-        do {
-            _ = try await client.snapshot()
-            XCTFail("Non-owner provenance must not reach native management UI")
-        } catch let failure as GatewayFailure {
-            XCTAssertEqual(failure.code, "invalid_response")
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-    }
 }

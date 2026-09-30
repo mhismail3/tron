@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, resumed after checkpoint
+- **Last updated:** 2026-09-30, P99-15 iOS settings completed
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -243,8 +243,8 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | `mcp_servers_change`, `provider_stream_event` | **Classify** `pi-runtime`; no Tron consumer | P99-3 |
 | HTML export show/hide toggle for `display: false` messages | **Inherit** through the out-of-process `--export`; verify artifact | P99-17 |
 | Claude Sonnet 5.5 (0.99.0); GPT-6.1 Sol and Codex default (0.99.1); Kimi K3 defaults for Fireworks/Together/OpenCode Go | **Verified/inherited**: refreshed release-date snapshot; catalog regression pins Sonnet 5.5 at 1,000,000 context / 128,000 output and GPT-6.1 Sol at 272,000 / 128,000. K3's 1,048,576 context/output catalog metadata does not widen Tron's 32,768 TPM reservation cap; payload normalization keeps the provider's `max_tokens` field. | P99-12 |
-| Built-in section in `pi config`; `-builtin:<name>` in `extensions`; SDK `builtin: true` | **Adapt**: compose Tron built-ins with `builtin: true`, surface toggles on iOS | P99-6, P99-15 |
-| `defaultTools` `+name`/`-name` entries | **Adapt**: settings projection and patch (D-5) | P99-6 |
+| Built-in section in `pi config`; `-builtin:<name>` in `extensions`; SDK `builtin: true` | **Adapted**: compose built-ins in Gateway; Extensions settings patches `-builtin:` switches from the scoped settings projection | P99-6, P99-15 |
+| `defaultTools` `+name`/`-name` entries | **Adapted**: Extensions settings projects and patches default tools, including `+codemode`, `+tool_search`, and `codemode.mode` | P99-6, P99-15 |
 | codemode `models.classify` cost added to tool result usage; `ctx.executeTool` usage added to the calling result | **Verified** Pi's session stats include tool-result usage, exercised with a priced nested fixture result | P99-5 |
 | TypeScript 7 / ES2024 build; `tsx` replaced by Node type stripping | **Adapt**: P99-3 resolves its five candidate API integration errors; Node 22.22.0 is the validation runtime | P99-2, P99-3 |
 | Startup header/banner and `[Themes]` changes; light/dark detection order; `TERM=*-direct` | **Not applicable** (TUI only) | — |
@@ -278,7 +278,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-12 | Done | Catalog, provider and classifier deltas; release dates; K3 policy | P99-2 | luna-worker, 2026-09-29 |
 | P99-13 | Done | `bash` structured output and empty-output change | P99-3 | luna-worker, 2026-09-29 |
 | P99-14 | Done | Qualify installed packages and subagent children against 0.99 | P99-6 | luna-worker, 2026-09-30 |
-| P99-15 | Claimed | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | luna-worker, 2026-09-30 |
+| P99-15 | Done | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | luna-worker, 2026-09-30 |
 | P99-16 | Claimed | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | luna-worker, 2026-09-30 |
 | P99-17 | Ready | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | Unassigned |
 | P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
@@ -650,6 +650,67 @@ Use `.agents/skills/tron-ios/SKILL.md`.
 - Evidence: simulator screenshots of each card live and after reload, retained
   with the test run.
 
+#### Design requirements for P99-15 and P99-16 (user direction, 2026-09-30)
+
+The user asked that the new screens and chat surfaces look and behave like the
+rest of the app. Treat these as acceptance criteria:
+
+- Follow `packages/ios-app/docs/architecture.md` (Tron presentation boundary,
+  settings typography and accent rules, tool chip and tool detail rules) and
+  reuse existing components rather than drawing new ones:
+  `TronPresentation.swift` semantic components, `tronGlassSurface`,
+  `tronSettingsVisualTheme`, `tronManagedSheet`, `tronNavigationTitle`,
+  `tronSettingsCaption`, `tronField`, `TronTypography` (for example
+  `secondaryDescription`), `TronSettingsRow`, the shared `sheetSectionHeader`,
+  and the static scroll surface for long lists.
+- Settings (P99-15): MCP Servers stays in the cyan Tools & Extensions group and
+  inherits that accent as its visual theme through nested sheets. Server rows
+  follow the placement-based typography rule (reading family for left-aligned
+  secondary copy, monospace only for right-aligned values). Settings groups
+  use tinted Liquid Glass; long server/tool lists use the static scroll surface.
+  Add/edit use the standard managed sheet with Tron fields; MCP sign-in reuses
+  the provider OAuth sheet unchanged. Empty, error and loading states use the
+  Tron glass-card placeholder typography, not system `ContentUnavailableView`.
+  Destructive actions stay semantic red.
+- Chat (P99-16): new tool kinds are ordinary tool chips using the existing chip
+  and `ToolDetailSheet`/`ToolDetailPresentation` paths, with an SF Symbol and
+  label per kind like the built-in tools (codemode, MCP `server/tool`,
+  `tool_search`, MCP resources). Nested calls appear only inside the codemode
+  chip's detail (and as a compact count/status on the chip), never as separate
+  transcript rows. Monospace is for code, tool identifiers and durations only.
+  Preserve chip motion, chat identity, scroll continuity and composer behavior.
+- Evidence: hosted simulator captures at standard and an accessibility text
+  size, light and dark, for each new screen and card, retained in the result
+  bundle with paths named in the handoff.
+- Tool chips and detail sheets (user direction, 2026-09-30): keep the existing
+  progressive-disclosure pattern. The chip shows only what matters at a glance
+  (kind icon, human title, one-line key argument or result summary, status,
+  duration). The detail sheet foregrounds the readable semantic content first,
+  exactly as built-in tools do today, and pushes everything else into the
+  existing sub-sheets: the Technical details sub-sheet (execution metadata, then
+  Request JSON and Result JSON opening the shared raw JSON sheet) and further
+  standardized medium-first sub-sheets. Never dump raw JSON, full scripts or
+  long outputs up front.
+- Design it generically, not per server. One MCP presentation handles every MCP
+  server and tool from data alone: title from `server/tool` (human label or MCP
+  title when present), key arguments from the input schema's first required
+  string fields, result from text content first, then images, resource links
+  and `structuredContent` behind disclosure, and `isError` as the failed state.
+  Server-specific or tool-specific branches are not allowed. Codemode is one
+  presentation too: the chip shows the nested-call count and aggregate status;
+  the detail foregrounds the script's output, then a compact list of nested
+  calls (each with the same generic title/status/duration as a top-level chip,
+  tappable into that call's own standard detail sub-sheet), attachments from
+  `tronNested`, and classify cost; the script source sits behind its own
+  sub-sheet. Unknown future tools fall back to the existing extension-tool
+  presentation. Bound every preview (line/char limits with explicit omission
+  markers) and handle missing, partial (`complete: false`) and failed data
+  truthfully.
+- Acceptance: hosted tests drive the generic MCP and codemode presentations
+  from several differently shaped fixtures (text-only, image, structured-only,
+  error, large, nested failure, truncated nested list) rather than one
+  hand-picked server.
+
 ### P99-17 — Docs, observability, validation
 
 - Docs: the SDK boundary map in `packages/gateway/README.md` (built-ins,
@@ -923,3 +984,13 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: request and response bounds, Tron-qualified input pricing (Pi catalog cost is zero and is never trusted for a ceiling), per-call caller-authorized limits, assessment rubric/profile versions, durable monthly tagging reservations, and dispatch certainty. No credential is copied from the old Keychain path. No session-search or assessment UI/wire protocol changed.
 - Deviations: The user changed model choice to `jev-latest`; its behavior and TypeSafe actual pricing may change without a Tron release. No supervisor reply arrived to clarify whether the old per-connection `paidAccessApproved` consent should migrate. The implementation treats a configured TypeSafe provider credential as tagging eligibility, removes that per-connection approval switch, and retains a durable 500-cent default monthly cap; P99-18 should confirm this consent transition. `knowledge.tags.*` keeps its shared `connectionId` envelope field but accepts only provider identity `typesafe`; no new RPC schema was introduced. The tool output itself changes to Pi's bool/score answer shape, as D-6 accepts.
 - For the next agent: P99-15 should verify the TypeSafe provider credential is visible in iOS settings and review Knowledge tag controls against the TypeSafe provider identity; no `knowledge.jev` connection or old Keychain credential should be recreated. P99-17 should rerun the full suite at its final checkpoint, retain the isolated timing rerun results above, and include `pi-sdk-099-jev-classifier-wire.json` in the artifact review.
+
+### P99-15 · Done · 2026-09-30 · luna-worker
+
+- Result: Replaced the connection-backed MCP settings route with Pi MCP administration over the global and trusted-project scopes. The screen lists state/tool counts/exposure/errors, supports stdio and HTTP add, bearer-token entry, update/remove/logout, and starts/cancels session-bound sign-in using the existing provider-auth presentation content. Extensions Settings now exposes scoped `-builtin:` toggles, `defaultTools` modifiers (`+codemode` and `+tool_search`), and codemode mode. Provider Settings keeps classifier-only TypeSafe key entry available even when absent from chat-provider rows. Removed MCP-only projection and drain enum cases, MCP instruction attribution, and the retired setup form.
+- Evidence: `scripts/tron-ios-test build` passed (final pass, 155.9 s wall; separate candidate lane `p9915` because the shared default lane was owned by another worktree). `scripts/tron-ios-test run --only-testing TronMobileTests/ExtensionsCatalogPresentationTests` passed 3/3 (5.6 s); `scripts/tron-ios-test run --only-testing TronMobileTests/IntegrationModelsTests` passed 5/5 (5.7 s); `scripts/tron-ios-test run --only-testing TronMobileTests/SettingsRouteIdentityTests` passed 3/3 (4.5 s before the final UI additions). `git diff --check` passed.
+- Changes: `packages/ios-app/Core/Models/GatewayConnectionModels.swift`, `packages/ios-app/Core/Models/IntegrationModels.swift`, `packages/ios-app/Core/Models/ResourceCatalogModels.swift`, `packages/ios-app/Sources/State/AppModel.swift`, `packages/ios-app/Sources/State/IntegrationsRPCClient.swift`, `packages/ios-app/Sources/UI/Chat/AgentInstructionsSheet.swift`, `packages/ios-app/Sources/UI/Settings/BuiltinExtensionsSettingsSection.swift`, `packages/ios-app/Sources/UI/Settings/ConnectionSettingsView.swift`, `packages/ios-app/Sources/UI/Settings/ExtensionsSettingsView.swift`, `packages/ios-app/Sources/UI/Settings/IntegrationsSettingsView.swift`, `packages/ios-app/Sources/UI/Settings/MCPAuthSheet.swift`, `packages/ios-app/Sources/UI/Settings/MCPServersSettingsView.swift`, `packages/ios-app/Sources/UI/Settings/ProviderSettingsView.swift`, `packages/ios-app/Sources/UI/Settings/SettingsView.swift`, `packages/ios-app/Tests/UI/ExtensionsCatalogPresentationTests.swift`, `packages/ios-app/Tests/UI/IntegrationModelsTests.swift`, `packages/ios-app/Tests/UI/SettingsRouteIdentityTests.swift`, and this plan.
+- Tasks added: none.
+- Kept on purpose: Pi `mcp.json` remains the sole MCP configuration authority; server mutations carry command IDs through the shared mutation executor; bearer values are transient RPC inputs and remain Mac-Keychain-owned.
+- Deviations: Hosted standard/accessibility-size, light/dark simulator screenshots of the MCP and extension screens were not retained in the result bundle; final validation was build plus focused model/presentation suites, not a UI screenshot test. No product Gateway, external MCP server or real credentials were used.
+- For the next agent: review MCP list-field decoding against the live Pi CLI only at user acceptance; P99-17 retains final screenshot/artifact and documentation-policy checkpoints. The approved design note was inserted verbatim after the P99-16 task details.
