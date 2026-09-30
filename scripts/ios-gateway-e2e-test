@@ -2,6 +2,8 @@
 # Focused real-Gateway/iOS integration harness. Gateway build inputs, the owned
 # simulator, DerivedData, and test products persist across invocations; each run
 # renews only its isolated Gateway, enrollment, and canonical session state.
+# The fixture and DerivedData belong to one worktree, never to the user: `run`
+# executes only products stamped with this worktree's current source identity.
 
 set -euo pipefail
 
@@ -13,8 +15,13 @@ source "$repo_root/config/ci-toolchain.env"
 # Keep the caller/setup-node toolchain ahead of Homebrew; .ci-tools contributes
 # repository-pinned helpers such as XcodeGen but never owns Node or npm.
 export PATH="$repo_root/.ci-tools/bin:$PATH:/opt/homebrew/bin"
-run_root="${TRON_IOS_E2E_STATE_DIR:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-$UID}"
-derived_data="${TRON_IOS_E2E_DERIVED_DATA:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-derived-$UID}"
+identity_owner="$repo_root/scripts/ios-test-build-identity.py"
+# Keyed by worktree as scripts/tron-ios-test keys its products, so two worktrees
+# never share a Gateway pid, state.env, npm lock hash, log or test products.
+worktree_key="$(python3 "$identity_owner" worktree-key --worktree "$repo_root")" \
+  || { echo "error: cannot derive this worktree's E2E fixture key" >&2; exit 1; }
+run_root="${TRON_IOS_E2E_STATE_DIR:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-$UID-$worktree_key}"
+derived_data="${TRON_IOS_E2E_DERIVED_DATA:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-derived-$UID-$worktree_key}"
 test_state_root="${TRON_IOS_TEST_STATE_DIR:-$HOME/.tron/internal/ios-test}"
 # The lane root is what scripts/tron-ios-test sweeps and reports, so this
 # harness names, releases and reclaims exactly the lane the runner uses.
@@ -53,12 +60,8 @@ simulator_args=(
 [[ "$run_root" != / && "$run_root" != "$HOME" && "$run_root" != "$repo_root" && ! -L "$run_root" ]] \
   || { echo "error: unsafe E2E fixture directory: $run_root" >&2; exit 1; }
 if [[ -e "$run_root" && ! -f "$run_root/.tron-ios-e2e-owned" ]]; then
-  owner_uid="$(stat -f '%u' "$run_root" 2>/dev/null || true)"
-  if [[ "$owner_uid" != "$UID" || ! -f "$run_root/state.env" || ! -f "$run_root/gateway.log" ]]; then
-    echo "error: refusing pre-existing unowned E2E fixture directory: $run_root" >&2
-    exit 1
-  fi
-  echo "Migrating the exact current-user legacy E2E fixture to an ownership marker." >&2
+  echo "error: refusing pre-existing unowned E2E fixture directory: $run_root" >&2
+  exit 1
 fi
 mkdir -p "$run_root"
 printf 'tron.ios-e2e-state.v1\n' >"$run_root/.tron-ios-e2e-owned"
@@ -91,8 +94,16 @@ Environment:
   TRON_IOS_TEST_DISCOVERY_ROOT  lane root the shared sweep scans (default: the parent of the
                                 state directory)
   TRON_IOS_TEST_DEVICE_NAME     device name of that lane
-  TRON_IOS_E2E_STATE_DIR        persistent fixture directory
-  TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData
+  TRON_IOS_E2E_STATE_DIR        persistent fixture directory (default: this worktree's
+                                $TMPDIR/tron-ios-gateway-e2e-UID-WORKTREE_KEY)
+  TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData (default: this
+                                worktree's $TMPDIR/tron-ios-gateway-e2e-derived-UID-WORKTREE_KEY)
+
+The fixture and DerivedData are this worktree's: stop and clean touch no other
+worktree's fixture or DerivedData (clean still deletes the simulator of the
+lane it holds, which is shared by default). build stamps the products with
+this worktree's source identity (scripts/ios-test-build-identity.py) and run
+refuses products stamped for another worktree or another source state.
 
 The simulator lane is shared with scripts/tron-ios-test: this harness releases
 the lane's simulator when a command ends, sweeps orphaned lanes before it
@@ -406,13 +417,16 @@ patch_xctestrun() {
   local xctestrun="$1"
   python3 "$repo_root/scripts/patch-ios-gateway-e2e-xctestrun.py" \
     "$xctestrun" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN"
-  printf '%s\n' "$xctestrun" >"$run_root/xctestrun-path"
 }
 
 build_tests() {
   command -v xcodegen >/dev/null || die "pinned XcodeGen is missing; run scripts/install-ci-tools.sh xcodegen"
   "$repo_root/scripts/verify-ci-toolchain.sh" ios xcodegen
-  local simulator_id destination attempt attempt_dir
+  local simulator_id destination attempt attempt_dir source_identity
+  # Measured before the build, as scripts/tron-ios-test does: the stamp names
+  # the source state this build started from.
+  source_identity="$(python3 "$identity_owner" show --worktree "$repo_root")" \
+    || die "cannot determine this worktree's source identity"
   simulator_id="$(provision_test_simulator)"
   destination="platform=iOS Simulator,id=$simulator_id"
   mkdir -p "$run_root/attempts"
@@ -434,7 +448,12 @@ build_tests() {
   local xctestrun
   xctestrun="$(find_xctestrun)"
   [[ -n "$xctestrun" ]] || die "focused build did not produce an xctestrun file"
-  printf '%s\n' "$xctestrun" >"$run_root/xctestrun-path"
+  # Stamp only after a successful build, as scripts/tron-ios-test does: products
+  # whose build never succeeded stay unstamped, so run refuses them. A failed
+  # rebuild keeps the earlier stamp in both tools.
+  printf '%s\n' "$source_identity" \
+    | python3 "$identity_owner" write --worktree "$repo_root" --derived-data "$derived_data" \
+    || die "cannot stamp the focused test products with their source identity"
   echo "Focused test products ready: $xctestrun"
 }
 
@@ -442,12 +461,15 @@ run_test() {
   # Pairing invitations are intentionally one-use. Renew the isolated Gateway
   # and canonical session state without reinstalling npm packages, rebuilding
   # the Gateway, regenerating Xcode, or rebuilding test products.
+  # Prove the products before renewing anything: only products this worktree
+  # built from its current source state may run against its Gateway.
+  local xctestrun
+  xctestrun="$(find_xctestrun)"
+  [[ -f "$xctestrun" ]] || die "test products are not built; run '$0 build'"
+  python3 "$identity_owner" verify --worktree "$repo_root" --derived-data "$derived_data" \
+    || die "run '$0 build' in this worktree before running the E2E"
   start_fresh_fixture
   load_state
-  local xctestrun=""
-  [[ -s "$run_root/xctestrun-path" ]] && xctestrun="$(<"$run_root/xctestrun-path")"
-  [[ -f "$xctestrun" ]] || xctestrun="$(find_xctestrun)"
-  [[ -f "$xctestrun" ]] || die "test products are not built; run '$0 build'"
   patch_xctestrun "$xctestrun"
 
   local started=$SECONDS status simulator_id destination attempt_id attempt_dir result_bundle
@@ -511,8 +533,15 @@ show_status() {
   if proxy_running; then echo "Fault proxy: running (pid $(<"$proxy_pid_file"))"; else echo "Fault proxy: stopped"; fi
   [[ -s "$state_file" ]] && { source "$state_file"; echo "Endpoint: 127.0.0.1:$TRON_E2E_PORT"; echo "Workspace: $TRON_E2E_WORKSPACE"; }
   local xctestrun="$(find_xctestrun)"
-  [[ -n "$xctestrun" ]] && echo "Test products: $xctestrun" || echo "Test products: not built"
+  if [[ -z "$xctestrun" ]]; then
+    echo "Test products: not built"
+  elif python3 "$identity_owner" verify --worktree "$repo_root" --derived-data "$derived_data" >/dev/null 2>&1; then
+    echo "Test products: $xctestrun (built from this worktree's current source state)"
+  else
+    echo "Test products: $xctestrun (stale or built from another worktree's source state; run build)"
+  fi
   python3 "$simulator_owner" status "${simulator_args[@]}" || true
+  echo "Fixture: $run_root"
   echo "DerivedData: $derived_data"
 }
 
@@ -565,7 +594,7 @@ case "$command" in
   all) install_gateway_if_needed; build_tests; run_test ;;
   status) show_status ;;
   logs) touch "$log_file"; tail -f "$log_file" ;;
-  stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/home" "$state_file" "$run_root/xctestrun-path" ;;
+  stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/home" "$state_file" ;;
   clean)
     stop_gateway
     python3 "$simulator_owner" delete "${simulator_args[@]}"
