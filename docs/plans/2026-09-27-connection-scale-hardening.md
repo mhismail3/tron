@@ -1928,6 +1928,16 @@ Read the numbers as one sample per case.
 - Changes: catalog owner, focused regression, prompt request-span stages and
   this task status/handoff; no changes to thresholds or deadlines.
 
+### 2026-09-30 — F-5 handoff draft (worker)
+
+- Isolated failure modes to cover before implementation:
+  - process loss after the prompt response but before completed-receipt durability must leave a pending receipt and duplicate command outcomeUnknown without a second operation;
+  - a same-command duplicate arriving while completion persistence is in flight must wait on the lane and receive the persisted original result;
+  - completion write failure after response must preserve accounting cleanup and must not alter the delivered result;
+  - Gateway restart drain must retain an owner until the detached completion write settles;
+  - foreground marker write failure after prompt response must remain tracked/retried, block ownership on unresolved failure and emit the session persistence diagnostic without an unhandled rejection;
+  - settlement and clear operations must still await the marker write.
+
 ### 2026-09-30 — F-567 independent-review fixes (worker)
 
 - Fixed refresh/search deadlock: catalog waiters leave the request-competing
