@@ -414,8 +414,8 @@ PY
   exit 0
 fi
 
-mkdir -p "$STATE_ROOT"
-chmod 700 "$STATE_ROOT"
+# Only the lease holder creates the lane's state directory, so a command refused
+# for the lease it inherited leaves no marker-less directory that no sweep reclaims.
 if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
   # The holder releases this lane's simulator when the command ends, so no
   # simulator outlives the command that booted it.

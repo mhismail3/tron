@@ -330,12 +330,26 @@ def marker_paths(discovery_root: Path) -> list[Path]:
 
 @contextlib.contextmanager
 def lease_hold(path: Path) -> Iterator[bool]:
-    """Hold a lane's lease without waiting; yields whether it was taken."""
+    """Hold a lane's lease without waiting; yields whether it was taken.
+
+    A lock on a lease file another holder unlinked after this one opened it is
+    no lease: a command that recreated the file may hold the lane. That take
+    counts as busy, as in `ios-test-lock.py` (`locked_file_is_named`).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", encoding="utf-8") as handle:
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            yield False
+            return
+        try:
+            named = os.stat(path)
+        except FileNotFoundError:
+            named = None
+        held = os.fstat(handle.fileno())
+        if named is None or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
             yield False
             return
         try:

@@ -592,11 +592,9 @@ case "$command" in
   *) usage >&2; die "unknown command: $command" ;;
 esac
 if [[ "$command" != status && "$command" != logs && "$command" != -h && "$command" != --help && "$command" != help ]]; then
-  # Only a command that leases the lane creates its state directory: a
-  # read-only command must not leave a marker-less lane directory that no
-  # sweep reclaims.
-  mkdir -p "$test_state_root"
-  chmod 700 "$test_state_root"
+  # Only the lease holder creates the lane's state directory: a read-only
+  # command, or one refused for the lease it inherited, must not leave a
+  # marker-less lane directory that no sweep reclaims.
   if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
     # The same lease, and the same release, as scripts/tron-ios-test: when this
     # command ends, on success, failure, deadline or signal, the holder shuts down

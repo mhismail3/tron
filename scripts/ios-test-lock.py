@@ -30,7 +30,9 @@ and one message, rather than run on a lane it does not hold (T-3).
 
 With --remove-empty-lane (`clean`), the holder removes the lane's directory
 when the command ends, if the lease file is all it still holds: only the holder
-can, because it holds the lease until the command tree has ended.
+can, because it holds the lease until the command tree has ended. Since a
+holder can unlink the lease file, a lease counts as taken only when the file
+locked is still the one --lock names; otherwise the take fails as contended.
 """
 
 from __future__ import annotations
@@ -206,6 +208,24 @@ def verify_inherited(lock: Path, lane: str) -> int:
     return INHERITED_LEASE_EXIT
 
 
+def locked_file_is_named(lock: Path, handle: IO[str]) -> bool:
+    """Whether the file this holder locked is still the one `lock` names.
+
+    A holder that removes a lane (`--remove-empty-lane`, `lane-remove`) unlinks
+    the lease file while it holds it. A command that opened the file just
+    before that locks the unlinked file once the remover lets go, while a
+    command that recreated the file holds the lane's real lease: the lock is
+    then no lease at all. `ios-test-simulator.py` checks its own takes the same
+    way.
+    """
+    try:
+        named = os.stat(lock)
+    except FileNotFoundError:
+        return False
+    held = os.fstat(handle.fileno())
+    return (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino)
+
+
 def remove_empty_lane(lock: Path, handle: IO[str]) -> None:
     """Remove the lane directory `clean` emptied, while its lease is still held.
 
@@ -288,6 +308,13 @@ def main() -> int:
                 handle.seek(0)
                 owner = describe_holder(handle.read().strip())
                 print(f"error: {arguments.resource} is already leased ({owner})", file=sys.stderr)
+                return LOCKED_EXIT
+            if not locked_file_is_named(arguments.lock, handle):
+                print(
+                    f"error: {arguments.resource} is already leased (its lease file {arguments.lock} "
+                    "was removed or replaced while this command took it)",
+                    file=sys.stderr,
+                )
                 return LOCKED_EXIT
             held = True
             if interrupted is not None:

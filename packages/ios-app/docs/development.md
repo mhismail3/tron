@@ -1166,7 +1166,8 @@ inherits a lease (`TRON_IOS_TEST_LOCK_HELD`) takes none of its own, so the
 runner, the profiler and the Gateway E2E harness each refuse (74), with one
 message from the lease owner (`scripts/ios-test-lock.py --verify-inherited`),
 when that lease does not cover the lane they name, rather than run on a lane
-they do not hold. A named lane refuses
+they do not hold; only the lease holder creates a lane's directory, so a refused
+command leaves none behind. A named lane refuses
 `TRON_IOS_TEST_STATE_DIR`
 and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
 those two overrides name - and, when set without a lane, select - the default
@@ -1202,7 +1203,11 @@ to the lease file, which the command itself cannot delete while its holder
 holds it; the holder removes the lane directory when the command ends, still
 under the lease, only if that lease file - the one it locked, not one a command
 starting in the lane has since created - is all the directory holds, so a file
-or a lane nested inside it keeps it.
+or a lane nested inside it keeps it. Because `clean` and `lane-remove` unlink a
+lease file they hold, every lease take checks that the file it locked is still
+the one the lane's path names; a command that locked an unlinked lease file
+fails as contended (73) rather than share the lane with the command that
+recreated it.
 
 How many simulators the Mac runs is decided by its memory, not by a fixed count.
 Before `simctl boot` - never for a lane whose simulator is already booted, which

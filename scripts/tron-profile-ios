@@ -1005,9 +1005,8 @@ def main(argv: list[str]) -> int:
         # same process, this run's signal goes to the holder, which forwards it
         # to the command tree and releases the lane's simulator afterwards.
         # The lane travels with the run, as in scripts/tron-ios-test: the run the
-        # holder starts re-derives the lane it leased.
-        lane.state_root.mkdir(parents=True, exist_ok=True)
-        os.chmod(lane.state_root, 0o700)
+        # holder starts re-derives the lane it leased, and the holder alone
+        # creates the lane's state directory.
         try:
             os.execv(sys.executable, [
                 sys.executable, str(LOCKER), "--lock", str(lane.state_root / "lease.lock"),
