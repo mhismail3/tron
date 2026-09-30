@@ -28,7 +28,9 @@ import { PROTOCOL_VERSION } from "../version.js";
 //    address, the address it left stops serving, and the sockets it accepted
 //    retire instead of staying on a listener the host no longer offers.
 // 4. Certificate handling: both files missing are created once at 0600 and
-//    reused across a restart; a half-present, unreadable or mismatched pair
+//    reused across a restart; a key left without its certificate is completed
+//    from that key with the same pin; a certificate without its key, or an
+//    unreadable or mismatched pair,
 //    disables the endpoint and is never overwritten, because a paired phone
 //    pins that public key.
 // 5. A bind failure (an address this host cannot use) is one disable record.
@@ -329,7 +331,7 @@ describe("LAN endpoint", () => {
     const cases = [
       {
         reason: "certificate_incomplete",
-        files: { key: pinned.export({ type: "pkcs8", format: "pem" }).toString() },
+        files: { certificate: selfSignedCertificate(pinned, "fixture") },
       },
       {
         reason: "certificate_unreadable",
@@ -372,6 +374,35 @@ describe("LAN endpoint", () => {
       if (testCase.files.key !== undefined) expect(await readFile(keyPath, "utf8")).toBe(testCase.files.key);
       if (testCase.files.certificate !== undefined) expect(await readFile(certificatePath, "utf8")).toBe(testCase.files.certificate);
     }
+  });
+
+  it("completes a key left without its certificate from that key, keeping the pin", async () => {
+    // Creation writes the key, then the certificate; a crash between them left
+    // a key no phone can have pinned (the pin is only advertised once both load).
+    // The certificate is issued from the stored key, so the pin is the key's.
+    const home = await tempRoot("tron-lan-key-only-");
+    const stored = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey;
+    const storedKey = stored.export({ type: "pkcs8", format: "pem" }).toString();
+    const stateDirectory = join(home, "gateway");
+    await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+    const keyPath = join(stateDirectory, "tls-key.pem");
+    const certificatePath = join(stateDirectory, "tls-certificate.pem");
+    await writeFile(keyPath, storedKey, { mode: 0o600 });
+    const port = await unusedPort();
+    const log = { log: vi.fn() };
+    const endpoint = new LanEndpoint({
+      enabled: true, stateDirectory, port, logger: log as never,
+      listenerLimits: HTTP_LISTENER_LIMITS,
+      ...RESPONDING_HANDLERS,
+      lanAddresses: () => [{ address: "127.0.0.1", family: "IPv4" }],
+    });
+    await endpoint.start();
+    cleanups.push(() => endpoint.stop());
+    await waitForRecord(log.log, "lan.listener", "state", "bound");
+    expect(await readFile(keyPath, "utf8")).toBe(storedKey);
+    const certificate = await readFile(certificatePath, "utf8");
+    expect(lanPin(certificate)).toBe(lanPin(selfSignedCertificate(stored, "fixture")));
+    expect(await tlsReaches("127.0.0.1", port)).toBe(true);
   });
 
   it("binds only the first of two private addresses, moves when it changes, and disables once when none is left", async () => {
