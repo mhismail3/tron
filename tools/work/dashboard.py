@@ -320,7 +320,7 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
 
     in_progress = []
     for issue in open_issues:
-        if issue["status"] != rules["claimedStatus"] or not claimable(issue):
+        if not claims.is_active(issue["state"], issue["labels"], issue["status"], rules):
             continue
         owned = claims_by_issue.get(issue["number"], [])
         winner = owned[0] if owned else None  # smallest ref name wins (claim.resolve_race)
@@ -363,18 +363,19 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         issue = issues.get(number)
         status = issue["status"] if issue else None
         base = _ref(issue) if issue else {"number": number, "title": None, "url": None}
-        if status != rules["claimedStatus"]:
-            disagreements.append({**base, "kind": "claimed-not-in-progress",
+        if status not in rules["claimedStatuses"]:
+            disagreements.append({**base, "kind": "claim-without-claimed-status",
                                   "detail": f"claim branch {owned[0]['branch']}; Status is "
                                             + (status or "unset or not in the Project")})
         if len(owned) > 1:
             disagreements.append({**base, "kind": "multiple-claims",
                                   "detail": "claim branches " + ", ".join(c["branch"] for c in owned)})
+    # Needs you is not active: merged work awaiting validation has no branch.
     for row in in_progress:
         if row["branch"] is None:
             disagreements.append({**{k: row[k] for k in ("number", "title", "url")},
-                                  "kind": "in-progress-without-claim",
-                                  "detail": f"Status is {rules['claimedStatus']} but no claim branch exists"})
+                                  "kind": "active-without-claim",
+                                  "detail": f"Status is {row['status']} but no claim branch exists"})
     disagreements.sort(key=lambda d: (d["number"], d["kind"]))
 
     return {
@@ -427,7 +428,7 @@ def render_text(model: dict) -> str:
     section("Needs you", [f"#{e['number']} {e['title']} [{', '.join(e['reasons'])}]" for e in model["needs_you"]])
     section("Epics", [f"#{e['number']} {e['title']} {e['completed']}/{e['total']}" for e in model["epics"]])
     section(f"In progress, soft cap {cap['cap']}" + (" EXCEEDED" if cap["over"] else ""), [
-        f"#{r['number']} {r['branch'] or '(no claim branch)'} session {r['session'] or '?'} "
+        f"#{r['number']} {r['status']} {r['branch'] or '(no claim branch)'} session {r['session'] or '?'} "
         f"{_idle(r['idle_hours'])}" + (f" PR #{r['pr']['number']} checks {r['pr']['checks'] or '-'} "
                                         f"verify {r['pr']['verify'] or '-'}" if r["pr"] else "")
         + (" STALE" if r["stale"] else "")
@@ -540,6 +541,7 @@ def _rank(rank: Optional[float]) -> str:
 def _in_progress(row: dict) -> str:
     pr = row["pr"]
     claim_line = (
+        _chip(row["status"]),
         _code(row["branch"]) if row["branch"] else _chip("no claim branch", "FAILURE"),
         _code(row["worktree"]),
         "<span>session " + (_code(row["session"]) or "unknown") + "</span>",
