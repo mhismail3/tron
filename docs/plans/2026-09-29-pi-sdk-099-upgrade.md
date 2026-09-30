@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-22 part 2c
+- **Last updated:** 2026-09-30, P99-7
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -224,7 +224,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 
 | Upstream delta | Tron disposition | Task |
 | --- | --- | --- |
-| Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Adopt**; P99-22 part 1 verifies stdio/streamable-HTTP, direct/codemode/deferred exposure, resources, list changes, reconnect, trusted project config, process-group cleanup and Stop/drain lifecycle; adapter/admin migration remains | P99-6, P99-7, P99-8, P99-22 |
+| Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Adopt**; P99-22 part 1 verifies stdio/streamable-HTTP, direct/codemode/deferred exposure, resources, list changes, reconnect, trusted project config, process-group cleanup and Stop/drain lifecycle; P99-7 removes Tron's adapter and P99-8 owns admin/sign-in relay | P99-6, P99-7, P99-8, P99-22 |
 | Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 parts 2a/2b verify nested interactive limits, notification and schedule receipts, desktop serialization, native-view session ownership, plus part 2c verifies concurrent Jev pre-dispatch ceilings and nested foreground-subagent Stop/workspace handoff. P99-23 persists bounded Tron presentation descriptors on the parent's canonical result under `details.tronNested`; rollback readers ignore this additive details key. | P99-3, P99-5, P99-6, P99-22, P99-23 |
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7 | P99-10, P99-15 |
@@ -266,7 +266,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-4 | Done | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
 | P99-5 | Done | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | luna-worker, 2026-09-29 |
 | P99-6 | Done | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
-| P99-7 | Claimed | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
+| P99-7 | Done | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
 | P99-8 | Claimed | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | luna-worker, 2026-09-29 |
 | P99-9 | Ready | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | Unassigned |
 | P99-10 | Ready | Virtual models on the Gateway (D-7) | P99-3 | Unassigned |
@@ -768,6 +768,16 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: all Jev calls retain their independent fixed-price pre-dispatch ceiling; the fixture uses fake HTTP and a fake subagent extension, with owner and child-session binding faked at the boundary. The test performs no external network or real child-process work.
 - Deviations: the full Gateway suite had two timing/resource-sensitive failures; both passed isolated reruns. The production nested-activity fix was needed because nested event handling previously only projected live nested-call summaries and never admitted process ownership for foreground subagents.
 - For the next agent: P99-17 retains final validation, rollback/payload qualification, and the trusted-browser receipt/abort-stash follow-up identified by P99-23. P99-6's codemode reach qualification is unblocked; MCP adapter/admin migration remains P99-7/P99-8.
+
+### P99-7 · Done · 2026-09-30 · luna-worker
+
+- Result: Removed Tron's standalone MCP adapter and its SDK dependency, all ConnectionOwner MCP transport/configuration/runtime-binding generality, MCP module-source and work-kind wire projections, adapter runtime wiring, and MCP instruction attribution. Pi's built-in MCP and `mcp.json` are the sole MCP client/configuration boundary.
+- Evidence: Node 22.22.0 TypeScript check passed; `npm run check:pi-sdk` passed (8 resolved Pi entries). Focused integration validation passed 284/284 tests across 5 files in 63.92 s. Full Gateway Vitest passed 2,297/2,300 tests across 213 files in 141.22 s; the three unrelated failures (recent-model-usage ordering, session-search-stall timing threshold, and the P99-4 fork parent projection) all passed focused reruns, 3/3 in 7.92 s. `git diff --check` and `scripts/personal-info-guard.sh` passed.
+- Changes: removed `packages/gateway/src/integrations/mcp-adapter.ts` and its test; removed the direct `@modelcontextprotocol/sdk` dependency through npm uninstall (the package remains an optional peer in upstream Pi lock metadata); removed MCP types/methods, `modules.list.connections`, `mcp-tool-call`, and `tron-mcp-*` runtime wiring; removed the MCP instruction source; revised connections tool description and MCP/connections docs; removed legacy MCP RPC tests and updated work-kind/module tests. Persisted `implementation: "mcp"` or transport configuration now fails state validation with an instance-naming error directing the operator to Pi `mcp.json`. Updated this plan row, change matrix, and handoff.
+- Tasks added: none.
+- Kept on purpose: Pi's built-in `mcp`, `codemode`, and `tool-search`; Pi's `mcp.json` and OAuth credential authority; the MCP RPC/sign-in relay remains P99-8. No compatibility migration is kept because the inspected live connection store has no MCP instance.
+- Deviations: The loader rejects old MCP instance state rather than migrating it, per the plan's no-compatibility rule. `npm uninstall` keeps the SDK package entry in the lockfile only as an optional peer of Pi, not as a Tron-declared dependency. Full Gateway validation had three unrelated failures; each passed its individual rerun.
+- For the next agent: P99-15 must remove the old iOS MCP connection/source surface and account for these wire removals: `modules.list.connections`, the `mcp-tool-call` work kind, and the MCP instruction source; retain Pi built-in MCP extension settings and MCP tool presentation. P99-8 still owns the Gateway MCP administration and OAuth sign-in relay.
 
 ### Draft · Proposed · 2026-09-29 · planning session
 

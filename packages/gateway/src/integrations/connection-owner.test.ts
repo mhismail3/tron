@@ -60,7 +60,6 @@ describe("ConnectionOwner", () => {
       expect(admitted.capabilities.find(item => item.id === "move" && item.connectionId === "account-one")).toMatchObject({ availability: "unavailable", detail: "Write approval is required for this capability" });
       expect(admitted.capabilities.find(item => item.id === "assess" && item.connectionId === "account-one")).toMatchObject({ availability: "unavailable", detail: "Paid access approval is required for this capability" });
       expect(admitted.capabilities.find(item => item.id === "move" && item.connectionId === "account-two")?.availability).toBe("available");
-      await expect(owner.admitRuntimeBinding({ schemaVersion: 1, integrationId: "knowledge.raindrop", connectionId: "account-one", capabilityId: "move", sessionId: "session-one", runtimeGeneration: 1, provider: { owner: "connection", definitionId: "knowledge.raindrop", connectionId: "account-one" } })).rejects.toThrow("Write approval is required");
       await owner.execute({ kind: "policy.update", commandId: "policy-approve-one-0001", instanceId: "account-one", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: true, paidAccessApproved: true, paidBudgetCents: 25, recurringApproved: false } });
       const latestPolicy = (await owner.resolveInstance("account-one")).policy;
       // A distinct stale command cannot revoke or restore fields from the old

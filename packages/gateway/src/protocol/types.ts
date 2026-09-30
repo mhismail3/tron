@@ -41,8 +41,7 @@ export type AdministrativeDrainBlockerCategory =
   | "automation-dispatch"
   | "automation-terminal-persistence"
   | "knowledge-observation"
-  | "knowledge-curation"
-  | "mcp-tool-call";
+  | "knowledge-curation";
 
 export interface AdministrativeDrainBlockerSummary {
   /** Per-drain opaque identity. It is not a session, run, path, or token ID. */
@@ -995,20 +994,6 @@ export interface TronModuleSummary {
   purpose: string;
   tools: string[];
   commands: string[];
-}
-
-/** One MCP connection a session runtime would admit tools from. It names the
- * source only: individual MCP tool names require that session's runtime. */
-export interface McpToolSource {
-  id: string;
-  definitionId: string;
-  health: string;
-}
-
-/** `modules.list`: the installed Tron modules and the MCP tool sources. */
-export interface TronModuleList {
-  modules: TronModuleSummary[];
-  connections: McpToolSource[];
 }
 
 /** `packages.list`: the names one installed package provides, attributed from

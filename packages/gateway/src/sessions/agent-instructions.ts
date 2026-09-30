@@ -8,7 +8,6 @@ import { basename } from "node:path";
 export type InstructionSource =
   | { kind: "pi" }
   | { kind: "module"; name: string }
-  | { kind: "mcp" }
   | { kind: "package"; name: string }
   | { kind: "local"; scope: string; path: string }
   | { kind: "file"; path: string }
@@ -208,7 +207,7 @@ function ruleEntries(body: string, tools: AgentInstructionsInput["tools"]): Inst
 function sourceOf(info: SourceInfoLike): InstructionSource {
   if (info.source === "builtin" || info.source === "sdk") return { kind: "pi" };
   const inline = /^<inline:(.+)>$/.exec(info.path);
-  if (inline) return inline[1]!.startsWith("tron-mcp-") ? { kind: "mcp" } : { kind: "module", name: inline[1]! };
+  if (inline) return { kind: "module", name: inline[1]! };
   if (info.origin === "package") return { kind: "package", name: packageName(info.source) };
   return { kind: "local", scope: info.scope, path: info.path };
 }

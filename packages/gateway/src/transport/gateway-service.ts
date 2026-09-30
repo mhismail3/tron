@@ -69,7 +69,6 @@ import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_B
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
-import { mcpToolSourceInstances } from "../integrations/mcp-adapter.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
 
@@ -1758,20 +1757,7 @@ export class GatewayService {
         return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
       case "modules.list": {
         rejectUnknownFields(params, [], "Module listing");
-        // Names the installed modules and where MCP tools come from. A source row
-        // never carries transport configuration or credential references, and an
-        // individual MCP tool name is only knowable inside a session runtime.
-        const sources = this.dependencies.connections
-          ? mcpToolSourceInstances(await this.dependencies.connections.snapshot())
-          : [];
-        return safeJson({
-          modules: tronModuleSummaries(),
-          connections: sources.map((instance) => ({
-            id: instance.id,
-            definitionId: instance.definitionId,
-            health: instance.health,
-          })),
-        });
+        return safeJson({ modules: tronModuleSummaries() });
       }
       case "hooks.list":
         rejectUnknownFields(params, ["cwd"], "Hook listing");

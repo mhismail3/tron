@@ -57,7 +57,6 @@ import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./se
 import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import type { KnowledgeRecord } from "./knowledge/knowledge-contract.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
-import { McpAdapter } from "./integrations/mcp-adapter.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./sessions/delegated-root-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
@@ -195,7 +194,6 @@ startupCheckpoint("global-provider-resources");
 const connections = new ConnectionOwner(config.tronHome);
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
 const jevClient = new JevDecisionClient(knowledgeCredentials);
-const mcp = new McpAdapter({ connections, credentials: knowledgeCredentials, workRegistry });
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
 // One sampler for the process: the transport records its own traffic and logs
@@ -273,7 +271,6 @@ const sessions = new RuntimeRegistry({
   browserLiveViews,
   workRegistry,
   connections,
-  mcp,
   jev: jevClient,
   scheduleToolOperations: {
     execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),

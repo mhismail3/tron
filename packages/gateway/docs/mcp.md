@@ -1,75 +1,43 @@
-# MCP integrations
+# MCP servers
 
-## Pi-managed MCP
+## Authority and runtime
 
-The Gateway composes Pi's replaceable `builtin:codemode`, `builtin:tool-search`,
-and `builtin:mcp` extensions for live sessions and session-free hook/package
-resource loads. Pi reads the Gateway agent directory's `mcp.json`; project
-configuration is admitted only when the shared resource-loader trust callback
-accepts Tron's project-trust decision. OAuth state and logs stay under the
-Gateway agent directory. Authorization URLs fail closed until the Gateway
-OAuth relay is available; no Mac browser is opened. MCP exposure controls
-whether Pi exposes tools directly, through codemode, or after tool search, and
-Pi activates codemode/tool-search as needed. Codemode may reach all direct Tron
-tools; the individual Tron tools remain responsible for their existing limits.
+Pi's built-in MCP extension is the sole MCP client and `mcp.json` is the sole
+configuration authority. Global servers are configured in the Gateway's Pi
+agent directory; project-level `.pi/mcp.json` is read only when Tron's project
+trust decision admits it. Session runtimes use Pi's built-in `mcp`,
+`codemode`, and `tool-search` extensions. MCP logs and OAuth credentials remain
+under the Pi agent directory; provider credentials are resolved through Pi's
+credential mechanisms rather than Tron's ConnectionOwner or mobile projection.
 
-The legacy ConnectionOwner adapter below remains a separate owner until P99-7
-removes it. Do not configure the same MCP server through both surfaces.
+MCP setup, sign-in, and server management are not part of Tron's provider
+connection store. Adding a server to the trusted configuration is the user
+approval for its tools. A server configuration change is read on runtime load;
+existing sessions may need reload or a new session to pick it up.
 
-## Legacy ConnectionOwner adapter
+## Accepted boundary changes
 
-Tron owns MCP client connections on the Mac Gateway. The adapter uses the
-pinned `@modelcontextprotocol/sdk` `1.25.2` package and pins negotiation to the `2025-11-25` protocol revision.
-Older revisions are rejected rather than silently changing the feature
-contract. It currently
-exposes **tools only** through the existing Pi runtime extension registration
-boundary. Resources, prompts, elicitation, sampling, tasks, completions, and
-MCP Apps are unsupported and are not advertised or used as an authority.
+Pi MCP replaces Tron's retired adapter. The following differences are
+intentional: stdio servers inherit the Gateway environment; HTTP follows normal
+fetch redirect behavior and may contact OAuth authorization servers; Pi applies
+its message and model-text truncation bounds (with full text in a temporary
+file); tools default to codemode exposure rather than direct declaration; and
+multiple loaded runtimes can each launch their own stdio server. Codemode can
+call every direct Tron tool, including interactive and paid tools; each Tron
+tool owns its existing limits and nested-call behavior.
 
-## Connection and authentication
+Pi supports stdio and streamable HTTP, OAuth/PKCE, dynamic client registration,
+refresh, server instructions, resources, progress, logging, structured results,
+and per-tool exposure. MCP uses Pi's `mcp.json` and `mcp-auth.json`; Tron does
+not maintain a second server schema or MCP credential store.
 
-An MCP connection is a normal ConnectionOwner instance. Setup records intent as
-unavailable until the adapter completes a live handshake and bounded tool
-discovery; only then does the owner project the capability as available. HTTP
-setup stores an explicit endpoint and local stdio setup stores an executable,
-arguments, and optional working directory. Setup completes with an opaque credential
-reference; the credential value is read only by the Mac credential owner. HTTP
-credentials are sent as a bearer header. Stdio credentials are supplied only
-as `TRON_MCP_TOKEN` to the explicitly trusted child. Token refresh and OAuth
-consent are not implemented; setup must not claim OAuth support.
+## Sign-in relay
 
-HTTP endpoints are HTTP(S), contain no embedded credentials or fragments, do
-not follow redirects, and cannot make requests outside the configured endpoint
-origin/path. Response bytes are bounded while the body is consumed, including
-chunked or unknown-length responses; an optional `Content-Length` header is only
-a fast rejection. Stdio uses direct `spawn` arguments (no shell), the SDK's safe
-environment allowlist plus explicitly configured variables, bounded stderr,
-and exact transport shutdown. A trusted executable is not a sandbox.
+Gateway-mediated OAuth sign-in is pending P99-8. Until that work lands, the
+Gateway's MCP `openUrl` callback fails closed rather than opening a browser on
+the Mac. Pi's pasted-redirect fallback remains available where supported.
 
-## Discovery and calls
-
-Tool discovery is bounded to 128 tools. Names are prefixed with the connection
-instance (`mcp_<instance>_<server-tool>`) and collisions fail admission rather
-than replacing provenance. Schemas, descriptions, progress, content, and
-results are bounded and treated as untrusted. Failed discovery, tool validation,
-or later-server admission retires every transport acquired by that admission
-attempt before returning failure; no partial factory set is published. Stdio
-regressions observe process exit for both the failing server and earlier valid
-servers, rather than checking rejection alone. A changed server tool list is
-not silently granted to an already loaded runtime; an explicit runtime reload
-rediscovers and admits the candidate set. Calls re-resolve ConnectionOwner
-admission before dispatch, so disconnect or policy disable fences tools already
-registered. MCP tools use the owning connection's write policy; server
-`readOnlyHint` annotations do not grant write authority, and a connection with
-writes disabled is not admitted. Calls for one connection share a serialized
-lane even when multiple runtimes expose that connection.
-
-Every accepted call is tracked by `GatewayWorkRegistry`, carries the exact
-session/runtime host fence, and passes cancellation/deadline to the SDK.
-Cancellation does not prove rollback. If a non-read-only call can no longer
-prove whether the remote request landed, Tron reports an unknown outcome and
-does not replay it automatically. Resource content is not turned into a
-second read capability.
-
-Tests use isolated HTTP and stdio fixtures. They do not validate a real private
-server, OAuth provider, live credential, or Gateway activation.
+The connection loader rejects a persisted MCP instance with an error naming
+the instance and directing configuration to Pi's `mcp.json`. The current live
+connection store was inspected for this task and contains no MCP instance; no
+compatibility migration or dual authority is retained.

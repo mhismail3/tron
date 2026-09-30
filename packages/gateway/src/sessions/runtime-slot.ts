@@ -135,7 +135,6 @@ import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
-import type { McpAdapter } from "../integrations/mcp-adapter.js";
 import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
@@ -409,7 +408,6 @@ export interface RuntimeSlotDependencies {
   knowledge?: KnowledgeService;
   jev?: JevDecisionClient;
   connections?: ConnectionOwner;
-  mcp?: McpAdapter;
   workspace: TronWorkspace;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
@@ -1523,9 +1521,6 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
-      const mcpFactories = this.dependencies.mcp
-        ? await this.dependencies.mcp.extensionFactories(this.id, this.runtimeGeneration)
-        : [];
       const services = await createAgentSessionServices({
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
@@ -1533,7 +1528,6 @@ export class RuntimeSlot {
         resourceLoaderOptions: {
           extensionFactories: [
             ...piBuiltinExtensions(this.dependencies.agentDir),
-            ...mcpFactories.map((factory, index) => ({ name: `tron-mcp-${index}`, factory })),
             ...tronModuleFactories({
               sessionId: () => this.id,
               cwd: () => this.cwd,

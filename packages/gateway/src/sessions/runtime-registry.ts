@@ -101,7 +101,6 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
-import type { McpAdapter } from "../integrations/mcp-adapter.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
 import { validateSearchBranch } from "./session-search-text.js";
 import { observationEntriesDigest } from "../knowledge/knowledge-observation.js";
@@ -733,7 +732,6 @@ export class RuntimeRegistry {
       scheduleToolOperations?: ScheduleToolOperations;
       jev?: JevDecisionClient;
       connections?: ConnectionOwner;
-      mcp?: McpAdapter;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
@@ -1591,7 +1589,6 @@ export class RuntimeRegistry {
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),
       ...(this.options.connections ? { connections: this.options.connections } : {}),
-      ...(this.options.mcp ? { mcp: this.options.mcp } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.runtimeDisposeTimeout ? { runtimeDisposalTimedOut: this.options.runtimeDisposeTimeout } : {}),
     };

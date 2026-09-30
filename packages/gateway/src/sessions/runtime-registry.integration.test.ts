@@ -773,7 +773,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const deleteRPC = works.begin({
       kind: "rpc-mutation", method: "session.delete", sessionId: session.id, hostEpoch: works.runtimeEpoch,
     });
-    const child = works.begin({ kind: "mcp-tool-call", sessionId: session.id, hostEpoch: works.runtimeEpoch });
+    const child = works.begin({ kind: "foreground-agent-operation", sessionId: session.id, hostEpoch: works.runtimeEpoch });
     try {
       await expect(fixture.registry.delete(session.id, deleteRPC.token)).rejects.toMatchObject({ code: "busy", diagnosticReason: "session_operation_busy" });
     } finally { child.settle(); }
