@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-29, P99-5
+- **Last updated:** 2026-09-29, P99-6
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -251,7 +251,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-3 | Done | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | luna-worker, 2026-09-29 |
 | P99-4 | Done | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
 | P99-5 | Done | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | luna-worker, 2026-09-29 |
-| P99-6 | Claimed | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
+| P99-6 | Blocked | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
 | P99-7 | Claimed | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
 | P99-8 | Claimed | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | luna-worker, 2026-09-29 |
 | P99-9 | Ready | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | Unassigned |
@@ -267,6 +267,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-20 | Ready | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | Unassigned |
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); structured per-session MCP status (user authorizes filing) | P99-8 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
+| P99-22 | Ready | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | Unassigned |
 
 ## Task details
 
@@ -681,6 +682,16 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Deviations: The fake codemode factory is registered only through the test fixture's project extension; production runtime/admin composition remains P99-6. One full-suite logger rotation timeout passed the required focused rerun. No iOS build/test was run; iOS received optional Codable model fields for P99-16 without view behavior.
 - For the next agent: move `pi-codemode` from devDependency to runtime dependency when P99-6 composes the first-party factory. Nested IDs are not canonical independent results: the current workspace `tool_call` hook still applies handoff, but confirm how nested `subagent` stop routing gets the parent call ID. Browser/display receipts currently authorize exact canonical tool IDs, not nested result IDs; P99-6 must keep artifacts attached to the parent codemode card rather than creating orphan rows. Test all-tool nested concurrency and UI/desktop ownership at that phase. P99-16 should decode the new optional child fields and render children under the parent; no RPC or work-kind change was made here.
 
+### P99-6 · Blocked · 2026-09-29 · luna-worker
+
+- Result: Composed Pi's replaceable codemode, tool-search and MCP built-ins in live runtimes and session-free hooks/package discovery. The Gateway agent directory owns MCP logs; Pi's default OAuth credential store resolves through the Gateway-pinned agent-dir environment. MCP authorization URLs fail closed until P99-8 relay support. Tool exposure/namespace/annotations are projected and hidden tools are rejected by `setTools`. `defaultTools` (including `+`/`-` entries) and `codemode.mode`/`inlineBudget` now project and validate through settings. Synchronous nested subagent activity is associated with its codemode parent's running operation so its foreground stop route can find the owner.
+- Evidence: Node 22.22.0 `tsc --noEmit` and `check:pi-sdk` passed. Focused changed-area runs passed 9 tests across four files (including session-free/live hook parity, settings, hook projection, and P99-5 codemode E2E). Isolated resource-sensitive reruns: knowledge tagger 18/18 in 2.23 s; logger rotation 16/16 in 1.31 s; intake enrichment 3/3 in 3.82 s. Final full Gateway run: 2,304 passed, 1 failed (130.37 s); `knowledge-intake-enrichment` failed with transient `ENOTEMPTY` cleanup under host load, then passed individually. `check:pi-sdk` reports coherent 0.99.1; `git diff --check` passed.
+- Changes: `packages/gateway/src/extensions/pi-builtins.ts`, `sessions/runtime-slot.ts`, `admin/session-free-extensions.ts`, `admin/settings-service.ts` and tests, `sessions/hook-projection.ts` and tests, `admin/hook-resources.ts` and tests/integration test, `packages/gateway/docs/mcp.md`. No additional Pi-family dependency is declared. The P99-5 pointer to move `pi-codemode` to a direct runtime dependency is superseded: the pinned `pi-coding-agent` package bundles codemode and root-exports its factory; no extra family package is needed.
+- Tasks added: P99-22 owns the missing broad codemode/MCP E2E qualification.
+- Kept on purpose: the legacy ConnectionOwner MCP adapter and `@modelcontextprotocol/sdk` remain unchanged for P99-7; users must not configure the same server through both surfaces. Pi's built-in `loadConfig` is used rather than duplicating its server schema; the Gateway agent-dir environment and TrustService-owned `resolveProjectTrust` callbacks bind it to the approved authority. Project config remains unread unless that callback accepts trust.
+- Deviations: P99-6 is Blocked because the required acceptance E2Es were not implemented or verified: stdio and streamable-HTTP MCP fixtures, codemode/direct/deferred exposures, resources and `list_changed`, crash/lazy reconnect and process-group cleanup, plus concurrent nested `ask_user`, `notify`, desktop input/capture, `display`/browser receipt attachment, `schedule` receipts, Jev charge ceiling and nested foreground subagent stop routing. The default Pi tool composition is present, but broad all-tool codemode reach must not be considered qualified until these behavioral boundaries pass. No MCP fixture process or Gateway lifecycle action was started. No iOS UI work was done; P99-15/P99-16 own it.
+- For the next agent: complete P99-22 and verify nested child actions/receipts remain attached to the codemode parent card; test runtime Stop/drain aborts the worker. Keep the MCP admin surface/adapter removal to P99-7/P99-8. No `pi-codemode` direct dependency is needed. The full-suite failure reproduced as a focused-pass `ENOTEMPTY` timing/cleanup issue, not a functional assertion.
+
 ### Draft · Proposed · 2026-09-29 · planning session
 
 - Result: Drafted from the 0.99.0/0.99.1 changelogs, a declaration diff of
@@ -702,6 +713,6 @@ installed. Then close the plan per `docs/plans/README.md`.
   `!command`, D-3 allow every tool from codemode, D-4 adding a server approves
   it, D-5 codemode/tool search only when MCP needs them, D-6 migrate Jev to Pi
   now, D-7 support virtual models. The plan was updated to match (P99-20 moved
-  from Needs scoping to Ready) and stays Proposed and uncommitted for the
-  user's review.
+  from Needs scoping to Ready). It was subsequently approved and activated; the
+  approval and active-work claims are recorded in the P99-1 handoff.
 - Changes: this file only.

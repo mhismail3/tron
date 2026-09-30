@@ -1,4 +1,22 @@
-# MCP adapter
+# MCP integrations
+
+## Pi-managed MCP
+
+The Gateway composes Pi's replaceable `builtin:codemode`, `builtin:tool-search`,
+and `builtin:mcp` extensions for live sessions and session-free hook/package
+resource loads. Pi reads the Gateway agent directory's `mcp.json`; project
+configuration is admitted only when the shared resource-loader trust callback
+accepts Tron's project-trust decision. OAuth state and logs stay under the
+Gateway agent directory. Authorization URLs fail closed until the Gateway
+OAuth relay is available; no Mac browser is opened. MCP exposure controls
+whether Pi exposes tools directly, through codemode, or after tool search, and
+Pi activates codemode/tool-search as needed. Codemode may reach all direct Tron
+tools; the individual Tron tools remain responsible for their existing limits.
+
+The legacy ConnectionOwner adapter below remains a separate owner until P99-7
+removes it. Do not configure the same MCP server through both surfaces.
+
+## Legacy ConnectionOwner adapter
 
 Tron owns MCP client connections on the Mac Gateway. The adapter uses the
 pinned `@modelcontextprotocol/sdk` `1.25.2` package and pins negotiation to the `2025-11-25` protocol revision.

@@ -40,14 +40,17 @@ describe.sequential("hook listing against a live session's resources", () => {
     await registry.initialize();
     const slot = await registry.create(cwd);
 
-    const sessionRow = (await slot.resources() as any).extensions.find((extension: any) => extension.name === "project-probe.ts");
+    const liveResources = await slot.resources() as any;
+    const sessionRow = liveResources.extensions.find((extension: any) => extension.name === "project-probe.ts");
     expect(sessionRow).toBeDefined();
 
     const projection = await new HookResources(agentDir, trust).list(cwd);
-    expect(projection.extensions).toHaveLength(1);
-    expect(projection.extensions[0]).toEqual(sessionRow);
+    expect(projection.extensions).toEqual(liveResources.extensions.filter((extension: any) =>
+      extension.source === "builtin" || extension.name === "project-probe.ts"));
     expect(projection.extensionLoadErrors).toEqual([]);
-    expect(projection.hookInventory.extensions).toEqual({ total: 1, retained: 1, omitted: 0 });
-    expect(projection.hookInventory.handlerEvents).toEqual({ total: 2, retained: 2, omitted: 0 });
+    expect(projection.extensionLoadWarnings).toEqual([]);
+    expect(projection.hookInventory.extensions).toEqual({ total: 4, retained: 4, omitted: 0 });
+    expect(projection.hookInventory.handlerEvents.retained).toBe(projection.hookInventory.handlerEvents.total);
+    expect(projection.hookInventory.handlerEvents.omitted).toBe(0);
   });
 });

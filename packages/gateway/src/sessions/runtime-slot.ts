@@ -2206,9 +2206,10 @@ export class RuntimeSlot {
       }
       this.processActivities.set(candidate.processId, admitted.activity);
       const operationId = this.operation?.id;
+      const parentToolCallId = this.nestedToolRoots.get(toolCallId) ?? toolCallId;
       if (admitted.activity.executionMode === "synchronous"
         && isActiveProcessLifecycle(admitted.activity.lifecycle)
-        && this.toolExecutions.get(toolCallId)?.status === "running"
+        && this.toolExecutions.get(parentToolCallId)?.status === "running"
         && operationId) {
         this.processOperationIDs.set(candidate.processId, operationId);
       } else {
