@@ -7966,6 +7966,104 @@ export default function (pi) {
     expect(bytes).toBe(artifact.size);
   }, 30_000);
 
+  it("routes virtual models across resume, fork, retry and compaction in a RuntimeRegistry session", async () => {
+    const fixture = await coldFixture("virtual-model-lifecycle");
+    const provider = "tron-p99-virtual-lifecycle";
+    await mkdir(join(fixture.cwd, ".pi", "extensions"), { recursive: true });
+    await writeFile(join(fixture.cwd, ".pi", "extensions", "virtual-router.ts"), `
+      export default function (pi) {
+        pi.registerVirtualModel({
+          provider: ${JSON.stringify(provider)}, id: "router", name: "Fixture router", contextWindow: 1,
+          route(request, ctx) {
+            const routeCount = request.state?.routeCount ?? 0;
+            const useWide = request.reason === "direct" || Boolean(request.failed) || routeCount % 2 === 1;
+            const physical = ctx.modelRegistry.find(${JSON.stringify(provider)}, useWide ? "wide" : "small");
+            return { model: physical, thinkingLevel: useWide ? "high" : "low",
+              state: { routeCount: routeCount + 1, lastReason: request.reason, lastModel: physical.id, failed: Boolean(request.failed) } };
+          },
+        });
+      }
+    `);
+    await new TrustService(fixture.agentDir).set(fixture.cwd, true);
+    await writeFile(join(fixture.agentDir, "settings.json"), JSON.stringify({ retry: { enabled: true, maxRetries: 2, baseDelayMs: 1 }, compaction: { enabled: false, keepRecentTokens: 1 } }));
+    const faux = fauxProvider({ provider, tokensPerSecond: 10_000, models: [
+      { id: "small", name: "Small physical", reasoning: true, input: ["text"], contextWindow: 4096, maxTokens: 1024, cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
+      { id: "wide", name: "Wide physical", reasoning: true, input: ["text"], contextWindow: 16384, maxTokens: 2048, cost: { input: 3, output: 4, cacheRead: 0, cacheWrite: 0 } },
+    ] });
+    const responseModels: string[] = [];
+    const response = (text: string) => (_context: unknown, _options: unknown, _state: unknown, model: any) => {
+      responseModels.push(model.id);
+      return fauxAssistantMessage(text, { provider: model.provider, model: model.id });
+    };
+    faux.setResponses([
+      fauxAssistantMessage("", { stopReason: "error", errorMessage: "fetch failed" }),
+      response("retried on physical wide"),
+      response("continued on physical small"),
+      response("alternate physical wide"),
+      response("compact summary on physical wide"),
+      response("after compaction on virtual"),
+      ...Array.from({ length: 5 }, (_, index) => response(`post-compaction continuation ${index + 1}`)),
+    ]);
+    const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    modelRuntime.registerNativeProvider(faux.provider);
+    fixture.runtimeFactory.mockResolvedValue(modelRuntime);
+    let slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    await slot.setModel(provider, "router");
+    await slot.prompt("trigger automatic retry");
+    await waitUntil(() => !slot!.isBusy);
+    const retried = slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant");
+    expect(retried.at(-1)).toMatchObject({ provider, modelId: "wide", thinkingLevel: "high" });
+    expect(faux.state.callCount).toBe(2);
+
+    const branchEntries = slot.runtime.session.sessionManager.getBranch();
+    expect(branchEntries.some((entry: any) => entry.type === "custom" && entry.customType === "pi.virtual-model-state")).toBe(true);
+    const userEntry = slot.history(slot.snapshot().runtimeGeneration).nodes.find((node: any) => node.role === "user");
+    expect(userEntry).toBeDefined();
+    await fixture.registry.dispose();
+    registries.splice(registries.indexOf(fixture.registry), 1);
+    const resumedRegistry = new RuntimeRegistry({
+      agentDir: fixture.agentDir, tronHome: join(fixture.root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => { const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }); runtime.registerNativeProvider(faux.provider); return runtime; },
+      trust: new TrustService(fixture.agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(resumedRegistry);
+    await initializeRegistry(resumedRegistry);
+    slot = await resumedRegistry.acquire(fixture.manager.getSessionId());
+    expect(slot.runtime.session.model?.id).toBe("router");
+    expect(slot.snapshot().transcript.some((item) => item.kind === "message" && item.role === "assistant" && item.provider === provider && item.modelId === "wide" && item.thinkingLevel === "high")).toBe(true);
+    expect(slot.runtime.session.sessionManager.getBranch().some((entry: any) => entry.type === "custom" && entry.customType === "pi.virtual-model-state")).toBe(true);
+    const restoredState = slot.runtime.session.sessionManager.getBranch().filter((entry: any) => entry.type === "custom" && entry.customType === "pi.virtual-model-state");
+    expect(restoredState.length).toBeGreaterThan(0);
+    expect(restoredState.at(-1)).toMatchObject({ data: { state: { routeCount: 2, lastReason: "retry", lastModel: "wide", failed: true } } });
+
+    const forkPoint = slot.runtime.session.sessionManager.getLeafId();
+    const fork = await slot.fork(forkPoint!, "at");
+    const forkSlot = await resumedRegistry.acquire(fork.sessionId);
+    const forkRouterState = forkSlot.runtime.session.sessionManager.getBranch().filter((entry: any) => entry.type === "custom" && entry.customType === "pi.virtual-model-state");
+    expect(forkRouterState.at(-1)?.data).toEqual(restoredState.at(-1)?.data);
+    await forkSlot.prompt("fork continues through router");
+    await waitUntil(() => !forkSlot.isBusy);
+    expect(forkSlot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant").at(-1)).toMatchObject({ provider, modelId: "small", thinkingLevel: "low" });
+
+    await slot.setModel(provider, "router");
+    await slot.prompt(`route to the alternate physical model ${"context ".repeat(5000)}`);
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant").at(-1)).toMatchObject({ provider, modelId: "wide", thinkingLevel: "high" });
+    expect(slot.snapshot().contextUsage?.contextWindow).toBe(16384);
+    await slot.compact("keep the router selection");
+    await slot.prompt("after compaction");
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.runtime.session.model?.id).toBe("router");
+    const postCompactionAssistant = slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant").at(-1);
+    expect(postCompactionAssistant).toMatchObject({ provider, modelId: responseModels.at(-1), stopReason: "stop" });
+    expect(responseModels.slice(0, 4)).toEqual(["wide", "small", "wide", "wide"]);
+    expect(responseModels.length).toBeGreaterThan(4);
+    expect(slot.snapshot().contextUsage?.contextWindow).toBe(4096);
+    const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-virtual-lifecycle.json");
+    await mkdir(join(process.cwd(), "test-results"), { recursive: true });
+    await writeFile(artifactPath, `${JSON.stringify({ selectedModel: slot.runtime.session.model?.id, retry: { calls: faux.state.callCount, assistant: retried.at(-1), persistedState: restoredState.at(-1)?.data }, resumed: { model: "router", stateEntries: restoredState.length }, fork: { sessionId: fork.sessionId, routerState: forkRouterState.at(-1)?.data }, responseModels, routedRows: slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant"), contextUsage: slot.snapshot().contextUsage, compacted: slot.snapshot().transcript.some((item) => item.kind === "compaction") }, null, 2)}\n`);
+  }, 60_000);
+
   it("projects resumed retry attempts as running before their assistant response completes", async () => {
     const fixture = await coldFixture("retry-resumption");
     await writeFile(join(fixture.agentDir, "settings.json"), JSON.stringify({

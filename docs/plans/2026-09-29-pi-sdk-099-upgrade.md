@@ -1160,3 +1160,11 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Changes: `packages/gateway/src/sessions/browser-fork-receipts.integration.test.ts`; this handoff only. The test configures the exact trusted `d6cde09af8d7757bbfba5a4ffaf83381bb392683` source and validates the fork's `lifecycle.browserBinding` JSON envelope.
 - Kept on purpose: The actual installed package copy is read-only and disposable; fixture package settings, fake executable, sessions, and receipts are isolated. The P99-17 plan row remains Claimed for its other outstanding checkpoints.
 - Deviations: None.
+
+### P99-17 g3 · Done · 2026-09-30 · luna-worker
+
+- Result: Proved virtual-model routing through the real RuntimeRegistry lifecycle: assistant rows identify the physical model and thinking level; retry receives and persists the failed-response route state; dispose/reopen restores router state; fork copies that state; compaction summarizes through the wide physical model, and the session continues on its virtual selection.
+- Evidence: Focused RuntimeRegistry integration passed 1/1 (401 ms test time, 1.63 s Vitest wall); Node 22.22.0 TypeScript check passed. Retained artifact: `packages/gateway/test-results/pi-sdk-099-virtual-lifecycle.json`, with route state, resumed/forked state, assistant rows, physical model sequence, context usage and compaction outcome.
+- Changes: Added one project-fixture virtual router integration case to `runtime-registry.integration.test.ts` and this handoff entry. No runtime behavior change was needed.
+- Kept on purpose: SDK router state remains canonical branch data; the fixture routes among two faux physical models and uses no network or live runtime.
+- Deviations: None.
