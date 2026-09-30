@@ -449,3 +449,22 @@ deletes it only after a dry-run of the routine matches it on live data.
 - Kept on purpose: the manual assessment uses the Knowledge model, matching its previous intended configuration and keeping paid Jev out of iOS; the result remains a recommendation, not an admission decision.
 - Deviations: none.
 - For the next agent: C23 remains gated on user-approved live dry-run parity and a user Gateway update. No live Gateway access or lifecycle action was performed.
+
+### C20 correction · Done · 2026-09-29 · knowledge-consolidation session
+
+- Corrects: the C20 entry. Its new `knowledge.connector.queue` read was placed
+  inside the Gateway service's mutating Knowledge case group, so every app
+  Knowledge edit (config, take, curate, admission, notes, correction, forget,
+  exclusion and more) bypassed the Gateway command receipt and restart drain.
+- Evidence: `src/transport/gateway-service-transcript.test.ts` "resolves
+  knowledge receipt references…" passed on `main` and failed from C20 onward
+  (bisected across the branch commits). New regression "routes Knowledge edits
+  through the Gateway command receipt" fails with the misplaced label and passes
+  with the fix. Full Gateway suite 2319/2320; the one failure,
+  `session-search-stall`, is the load-sensitive timing test that also passes in
+  isolation on `main`.
+- Changes: this commit.
+- For the next agent: the Gateway service `invoke` switch is the only authority
+  for which Knowledge methods get receipts; new reads go in the read group.
+  Branch workers ran only `src/knowledge`; run the full Gateway suite before
+  handing off a change that touches `gateway-service.ts`.

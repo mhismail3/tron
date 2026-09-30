@@ -469,6 +469,7 @@ export class GatewayService {
       case "knowledge.tags.budget":
       case "knowledge.tags.estimate":
       case "knowledge.connector.status":
+      case "knowledge.connector.queue":
       case "knowledge.raindrop.read": {
 
         const knowledge = this.requireKnowledge();
@@ -503,10 +504,6 @@ export class GatewayService {
       case "knowledge.correction":
       case "knowledge.forget":
       case "knowledge.exclusion":
-      case "knowledge.connector.queue": {
-        const knowledge = this.requireKnowledge();
-        return safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction));
-      }
       case "knowledge.connector.configure":
       case "knowledge.connector.assessment.approve":
       case "knowledge.connector.discover":
