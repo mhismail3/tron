@@ -634,7 +634,7 @@ loading and nothing on failure.
 ### C29 review fixes · Done · 2026-09-30 · luna-worker
 
 - Result: MCP remains addable after setup; X credit reads are controller-owned and identity/generation fenced; setup-sheet handoff is fenced; screenshots and fixture assertions cover the reviewed behavior. Raindrop collection IDs are explicit and opaque account IDs stay out of row titles.
-- Evidence: iOS generation passed; native model tests 7/7; UI validation build passed; integration-sheet UI tests 3/3; documentation policy and personal-info guard passed. Revert checks were not run.
+- Evidence: iOS generation passed; native model tests 7/7; UI validation build passed; integration-sheet UI tests 3/3; documentation policy and personal-info guard passed. Reverting the MCP availability/detail UI caused its focused UI test to fail (1 test, 1 expected failure). Other findings did not receive isolated revert checks.
 - Changes: this commit.
 - Tasks added: none.
 - Deviations: Gateway lifecycle untouched. No live Gateway request was made.
