@@ -177,6 +177,20 @@ until the user approves it.
   confidence and score, which Pi returns.
 - **D-7 Virtual models: support them.** Selectable in the iOS picker, routed
   physical model shown per response, limits and cost from the physical model.
+- **D-8 Nested presentation persistence is parent-owned.** A Tron inline
+  extension observes nested `tool_result` events with `parentToolCallId` for
+  admitted display artifacts and trusted browser live views. It retains only
+  bounded artifact descriptors and a browser receipt resealed for the parent
+  call ID, never payload bytes or secrets. Count/byte overflow sets `complete:
+  false`. On the parent's result it returns `details` equal to original details
+  plus `tronNested: { display, browserLiveViews, complete }`; it does not return
+  `content`, preserving Pi content and `structuredContent`. The per-parent stash
+  clears on parent completion, `agent_end` (including abort), and runtime
+  `session_shutdown`. Pi persists this enrichment on the parent result; Gateway
+  live/cold projection reads that same canonical details key and authorizes
+  browser receipts against the parent's canonical tool-call ID. The accepted
+  wire addition is namespaced `details.tronNested`; older iOS clients ignore it.
+  The 0.87.1 rollback reader must likewise ignore the extra details key.
 
 ### Accepted deltas
 
@@ -211,7 +225,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Upstream delta | Tron disposition | Task |
 | --- | --- | --- |
 | Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Adopt**; P99-22 part 1 verifies stdio/streamable-HTTP, direct/codemode/deferred exposure, resources, list changes, reconnect, trusted project config, process-group cleanup and Stop/drain lifecycle; adapter/admin migration remains | P99-6, P99-7, P99-8, P99-22 |
-| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 part 2a verifies nested concurrent ask_user serialization/Stop cleanup, durable notify quota/session attribution and schedule receipt replay safety; part 2b verifies desktop-action serialization and native-view session ownership. Nested display-artifact/browser-receipt presentation after reload remains unproven because Pi persists only nested call summaries; see P99-23. | P99-3, P99-5, P99-6, P99-22, P99-23 |
+| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 part 2a verifies nested concurrent ask_user serialization/Stop cleanup, durable notify quota/session attribution and schedule receipt replay safety; part 2b verifies desktop-action serialization and native-view session ownership. P99-23 persists bounded Tron presentation descriptors on the parent's canonical result under `details.tronNested`; rollback readers ignore this additive details key. | P99-3, P99-5, P99-6, P99-22, P99-23 |
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7 | P99-10, P99-15 |
 | Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapt**: pass `getDeviceId` to `ModelRuntime.login`; redact `deviceId` from settings projection; fixed port 1455 shared with Codex legacy | P99-9 |
@@ -268,7 +282,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); structured per-session MCP status (user authorizes filing) | P99-8 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
 | P99-22 | Claimed | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | luna-worker, 2026-09-29 |
-| P99-23 | Needs scoping | Resolve and implement parent-owned persistence/projection for nested display artifacts and browser live-view receipts, with no child canonical rows or independent receipts | P99-22 | Unassigned |
+| P99-23 | Claimed | Parent-owned persistence/projection for bounded nested display artifacts and trusted browser live-view receipts, with no child canonical rows or independent receipts | P99-22 | luna-worker, 2026-09-29 |
 
 ## Task details
 
@@ -618,8 +632,10 @@ Use `.agents/skills/tron-ios/SKILL.md`.
   relay outcomes. Each row names its test.
 - Rollback matrix (`npm run test:pi-sdk-rollback`, baseline 0.87.1): sessions
   written by 0.99 containing `codemode-store` entries, virtual-model state and
-  `model_change` to a virtual model, `tool_search` loadout deltas and
-  `nestedCalls` must open under 0.87.1 without data loss; extend
+  `model_change` to a virtual model, `tool_search` loadout deltas,
+  `nestedCalls`, and additive `details.tronNested` parent-result data must open
+  under 0.87.1 without data loss; the rollback reader must ignore the unknown
+  details key while preserving content and structured content. Extend
   `packages/gateway/test-fixtures/pi-sdk` fixtures accordingly.
 - Full Gateway, Mac and iOS validation once; HTML export artifact compared with
   0.87.1 output; payload verifier; personal-info guard; documentation policy.
@@ -692,6 +708,16 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: the legacy ConnectionOwner MCP adapter and `@modelcontextprotocol/sdk` remain unchanged for P99-7; users must not configure the same server through both surfaces. Pi's built-in `loadConfig` is used rather than duplicating its server schema; the Gateway agent-dir environment and TrustService-owned `resolveProjectTrust` callbacks bind it to the approved authority. Project config remains unread unless that callback accepts trust.
 - Deviations: P99-6 is Blocked because the required acceptance E2Es were not implemented or verified: stdio and streamable-HTTP MCP fixtures, codemode/direct/deferred exposures, resources and `list_changed`, crash/lazy reconnect and process-group cleanup, plus concurrent nested `ask_user`, `notify`, desktop input/capture, `display`/browser receipt attachment, `schedule` receipts, Jev charge ceiling and nested foreground subagent stop routing. The default Pi tool composition is present, but broad all-tool codemode reach must not be considered qualified until these behavioral boundaries pass. No MCP fixture process or Gateway lifecycle action was started. No iOS UI work was done; P99-15/P99-16 own it.
 - For the next agent: complete P99-22 and verify nested child actions/receipts remain attached to the codemode parent card; test runtime Stop/drain aborts the worker. Keep the MCP admin surface/adapter removal to P99-7/P99-8. No `pi-codemode` direct dependency is needed. The full-suite failure reproduced as a focused-pass `ENOTEMPTY` timing/cleanup issue, not a functional assertion.
+
+### P99-23 · Done · 2026-09-30 · luna-worker
+
+- Result: Added a Tron inline extension that observes Pi `tool_result` events, collects admitted nested display descriptors by parent call ID, reseals trusted browser receipts for the canonical parent ID, and enriches only the parent result's `details` with the `tronNested` namespace. The stash is bounded to 32 descriptors per parent and 16 KiB total, reports `complete: false` on overflow, and clears on parent completion, agent end/abort and runtime shutdown. Canonical display artifact reconciliation now retains artifact IDs nested under the parent result. No content, structuredContent, child result, child receipt or transcript row is synthesized.
+- Evidence: Node 22.22.0 TypeScript check passed. Focused `codemode-nested-presentation.integration.test.ts`: 1/1 passed (Vitest 0.46 s, command wall 2.61 s) after assertions for the live/cold parent `tronNested.display` descriptor and fail-closed browser data. The test fixture is an untrusted project extension, so its forged browser reference is correctly rejected and `browserLiveViews` remains empty; trusted browser receipt resealing is implemented but not exercised by this fixture. Full Gateway suite and abort/teardown-specific negative assertions remain for final P99-17 validation. `git diff --check` passed.
+- Changes: `packages/gateway/src/display/nested-presentation-extension.ts`, `display/display-contract.ts`, `extensions/pi-builtins.ts`, and `sessions/codemode-nested-presentation.integration.test.ts`; Gateway README; this task row, D-8 decision, matrix and handoff.
+- Tasks added: none.
+- Kept on purpose: receipt validation remains strict and does not trust tool name or project-provided descriptors; Pi owns canonical parent JSONL and its content/structuredContent. Artifact payload bytes remain in the artifact store, not parent details.
+- Deviations: The faux-provider test's project browser fixture is not a trusted `pi-agent-browser-native` owner and cannot produce a valid Gateway-sealed receipt; it verifies fail-closed behavior rather than claiming trusted browser receipt end-to-end coverage. The accepted D-8 seam adds no child rows or independent receipts. No Gateway lifecycle or real browser/network operation was invoked.
+- For the next agent: P99-17 should add/retain a trusted-owner browser fixture if a safe test seam is available and verify parent receipt admission via `admitBrowserToolReference`; also assert aborted/teardown paths cannot enrich a subsequent parent result. The P99-17 rollback matrix must prove 0.87.1 ignores `details.tronNested`.
 
 ### P99-22 · Claimed · 2026-09-29 · luna-worker
 

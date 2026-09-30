@@ -58,7 +58,7 @@ describe("codemode nested presentation tools", () => {
     const browserFixture = `import { sealBrowserToolReference } from ${JSON.stringify(browserReferenceUrl)};
 export default function(pi) { pi.registerTool({ name: "agent_browser", label: "Fixture browser", description: "Returns a sealed live view receipt", parameters: { type: "object", properties: {} }, execute: async (id, _args, _signal, _update, ctx) => {
  const descriptor = { schema: "tron.browser-live-view.v1", viewId: "nested-browser-view", generation: "nested-browser-generation", title: "Fixture browser", fallbackText: "Closed" };
- return { content: [{ type: "text", text: "view ready" }], details: { tronBrowserReference: sealBrowserToolReference(ctx.sessionManager.getSessionId(), id, descriptor, true) } };
+ return { content: [{ type: "text", text: "view ready" }], details: { browserLiveView: descriptor, tronBrowserReference: sealBrowserToolReference(ctx.sessionManager.getSessionId(), id, descriptor, true) } };
 } }); }`;
     await Promise.all([
       writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] })),
@@ -121,7 +121,10 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
     expect(driver.maximumActive).toBe(1);
     expect(driver.calls).toBe(2);
     const parent = settled.transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "presentation-parent");
-    expect(parent).toMatchObject({ role: "toolResult", nestedCalls: { complete: true } });
+    expect(parent).toMatchObject({ role: "toolResult", nestedCalls: { complete: true }, details: {
+      tronNested: { complete: true, display: expect.arrayContaining([expect.objectContaining({ toolName: "display", display: expect.objectContaining({ artifact: expect.objectContaining({ id: expect.any(String) }) }) })]),
+        browserLiveViews: [] },
+    } });
     expect(parent?.nestedCalls?.calls.map((call) => call.toolName)).toEqual(expect.arrayContaining([
       "computer", "display", "agent_browser", "native_capture",
     ]));
@@ -154,7 +157,10 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
     const reloadedParent = reloadedSlot.snapshot().transcript.find((item) =>
       item.kind === "message" && item.role === "toolResult" && item.toolCallId === "presentation-parent");
     expect(reloadedSlot.snapshot().toolExecutions).toEqual([]);
-    expect(reloadedParent).toMatchObject({ role: "toolResult", nestedCalls: { complete: true } });
+    expect(reloadedParent).toMatchObject({ role: "toolResult", nestedCalls: { complete: true }, details: {
+      tronNested: { complete: true, display: expect.arrayContaining([expect.objectContaining({ toolName: "display" })]),
+        browserLiveViews: [] },
+    } });
     expect(reloadedSlot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "toolResult"))
       .toHaveLength(1);
 

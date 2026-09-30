@@ -1396,6 +1396,20 @@ The integration E2E in `runtime-registry.integration.test.ts` exercises a faux-p
 script with parallel `read`, `bash`, and non-throwing failure calls; it retains
 `test-results/pi-sdk-099-nested-calls.json` for live and cold-reload inspection.
 
+Nested `display` artifacts and trusted `agent_browser` live-view receipts have a separate
+presentation seam because Pi's canonical `nestedCalls` summaries intentionally omit tool-result
+payloads. The Tron inline presentation extension observes nested `tool_result` events and retains
+only validated display descriptors plus sealed browser receipt metadata, keyed to the parent call
+ID. It caps the stash at 32 descriptors per parent and 16 KiB, reports `complete: false` when
+bounded data is dropped, and clears it on parent completion, agent end/abort, or runtime shutdown.
+It enriches the parent's Pi-owned tool result through `details.tronNested` only; Pi content and
+`structuredContent` remain unchanged, and neither child rows nor independent child receipts exist.
+Browser receipts are resealed to the parent's canonical tool-call ID, so the ordinary canonical
+admission check remains authoritative. Display artifact bytes remain in the existing artifact
+store. Transcript projection reads the same persisted parent details live and after cold reload;
+`details.tronNested` is an additive Gateway wire field that older iOS decoders ignore.
+The accepted P99-23 seam is exercised by `codemode-nested-presentation.integration.test.ts`.
+
 Active message queues are projected with stable per-entry IDs, delivery behavior,
 display text, total attachment count, optional photo/file counts, optional bounded upload descriptors,
 and a monotonic queue revision. Descriptors contain only upload/blob ID, safe name, MIME type, and size;

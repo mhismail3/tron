@@ -129,6 +129,7 @@ import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { tronContext } from "../workspace/tron-core-extension.js";
 import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
 import { admitToolDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
+import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
@@ -1456,8 +1457,19 @@ export class RuntimeSlot {
       this.browserLiveReferences.clear();
       for (const entry of branch) {
         if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
-        const display = admitToolDisplayProjection(entry.message.toolName, entry.message.details, entry.message.toolCallId, manager.getSessionId());
+        const details = entry.message.details;
+        const display = admitToolDisplayProjection(entry.message.toolName, details, entry.message.toolCallId, manager.getSessionId());
         if (display?.liveView) this.browserLiveReferences.add(`${display.liveView.viewId}\0${display.liveView.generation}`);
+        const nested = details && typeof details === "object" && !Array.isArray(details)
+          ? (details as Record<string, unknown>).tronNested : undefined;
+        const browserLiveViews = nested && typeof nested === "object" && !Array.isArray(nested)
+          ? (nested as Record<string, unknown>).browserLiveViews : undefined;
+        if (Array.isArray(browserLiveViews)) for (const item of browserLiveViews) {
+          if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+          const reference = admitBrowserToolReference("agent_browser", entry.message.toolCallId,
+            { tronBrowserReference: (item as Record<string, unknown>).receipt }, manager.getSessionId());
+          if (reference) this.browserLiveReferences.add(`${reference.descriptor.viewId}\0${reference.descriptor.generation}`);
+        }
       }
       this.displayArtifactReferenceKey = key;
     }
