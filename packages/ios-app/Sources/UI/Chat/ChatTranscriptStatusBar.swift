@@ -61,7 +61,7 @@ struct ChatTranscriptStatusBar: UIViewRepresentable {
             proxy.contentOffset = CGPoint(x: 0, y: 1)
             proxy.delegate = self
             proxy.scrollsToTop = true
-            window.addSubview(proxy)
+            window.rootViewController?.view.addSubview(proxy)
             self.proxy = proxy
             scroll.scrollsToTop = false
         }

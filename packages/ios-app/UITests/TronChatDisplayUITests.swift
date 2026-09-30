@@ -44,7 +44,7 @@ final class TronChatDisplayUITests: XCTestCase {
     }
 
     func testStatusBarTapReachesOldestLoadedHistory() {
-        for orientation in ["origin", "end"] {
+        for orientation in ["end", "origin"] {
           for accessories in [false, true] {
             let app = launch(orientation, accessories: accessories)
             if accessories { XCTAssertTrue(app.buttons["Remove Photo"].waitForExistence(timeout: 5)) }
