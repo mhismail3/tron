@@ -94,6 +94,7 @@ struct HostedKnowledgeDetailFixtureView: View {
             HStack(spacing: 4) {
                 control("Take conflict", id: "fixture.next-take-conflict") { Task { await gateway.setNextTake(.conflict) } }
                 control("Take fail", id: "fixture.next-take-failure") { Task { await gateway.setNextTake(.failure) } }
+                control("Curate conflict", id: "fixture.next-curation-conflict") { Task { await gateway.setNextCurationConflict() } }
                 control("Type", id: "fixture.type-take") { typedChunks += 1; Self.insertIntoTake("chunk\(typedChunks) ") }
             }
         }
@@ -132,6 +133,7 @@ actor HostedKnowledgeGateway {
     private var pendingSummary: String?
     private var pendingTags: String?
     private var nextTake = TakeMode.success
+    private var nextCurationConflict = false
     private var summarizeCount = 0
     private var takeCount = 0
     private var tagCount = 0
@@ -168,6 +170,7 @@ actor HostedKnowledgeGateway {
         for socket in current { await socket.drop() }
     }
     func setNextTake(_ mode: TakeMode) { nextTake = mode }
+    func setNextCurationConflict() { nextCurationConflict = true }
 
     func completeSummary() async {
         guard let command = pendingSummary else { return }
@@ -289,6 +292,25 @@ actor HostedKnowledgeGateway {
             }
         case "knowledge.source.curate":
             let item = params["items"]?.arrayValue?.first?.objectValue ?? [:]
+            if nextCurationConflict {
+                nextCurationConflict = false
+                revision += 1
+                await publishChange()
+                return (.object(["commandId": params["commandId"] ?? .string("curate"),
+                                 "operation": params["operation"] ?? .string("verdict"), "applied": .number(0), "unchanged": .number(0),
+                                 "outcomes": .array([.object(["recordId": .string(Self.sourceID), "status": .string("conflict"),
+                                                               "code": .string("stale-revision"), "reason": .string("Another edit changed this source."),
+                                                               "currentRevision": .string(revisionID)])]),
+                                 "stateRevision": .number(Double(stateRevision))]), nil)
+            }
+            if item["expectedRevision"]?.stringValue != revisionID {
+                return (.object(["commandId": params["commandId"] ?? .string("curate"),
+                                 "operation": params["operation"] ?? .string("verdict"), "applied": .number(0), "unchanged": .number(0),
+                                 "outcomes": .array([.object(["recordId": .string(Self.sourceID), "status": .string("conflict"),
+                                                               "code": .string("stale-revision"), "reason": .string("Source revision is stale."),
+                                                               "currentRevision": .string(revisionID)])]),
+                                 "stateRevision": .number(Double(stateRevision))]), nil)
+            }
             if let value = item["verdict"]?.objectValue {
                 verdict = value["verdict"]?.stringValue
                 supersededBy = value["supersededBy"]?.stringValue

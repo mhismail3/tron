@@ -1721,7 +1721,9 @@ struct KnowledgeDetailView: View {
                 }
                 if source.verdict?.verdict == .superseded, let replacement = supersededReplacementRow {
                     TronSettingsDivider(accent: .tronKnowledge)
-                    Button { openLinkedRecord(id: replacement.id, revisionID: replacement.revisionId) } label: {
+                    Button { openLinkedRecord(id: replacement.id, revisionID: replacement.revisionId,
+                                                 includeArchived: replacement.admission == .archived,
+                                                 includePending: replacement.admission == .pending) } label: {
                         TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", accent: .tronKnowledge) {
                             Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronKnowledge)
                         }
@@ -1976,14 +1978,17 @@ struct KnowledgeDetailView: View {
         }
     }
 
-    private func openLinkedRecord(id: String, revisionID: String?) {
+    private func openLinkedRecord(id: String, revisionID: String?, includeArchived: Bool = false, includePending: Bool = false) {
         guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
         guard !navigationAncestors.contains(id) else { evidenceMessage = "This source is already open. Use Back to return to it."; return }
         guard navigationAncestors.count < 32 else { evidenceMessage = "Return to the library to open another source."; return }
         let requestIdentity = origin
         Task { @MainActor in
             await linkedReader.load(id: id, revisionID: revisionID,
-                request: { id, revision in try await model.knowledge.read(id: id, revisionID: revision) },
+                request: { id, revision in
+                    try await model.knowledge.read(id: id, revisionID: revision,
+                                                   includeArchived: includeArchived, includePending: includePending)
+                },
                 isCurrent: { model.knowledgePresentationIdentity == requestIdentity && activity.allowsPresentationPublication })
         }
     }

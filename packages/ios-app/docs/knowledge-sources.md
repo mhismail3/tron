@@ -112,7 +112,12 @@ instead of a timer-based progress claim. Verdict (including explicit clear),
 placement and admission use receipted `knowledge.source.curate` operations;
 Archive/Unarchive changes admission rather than verdict. Legacy archive verdicts
 decode but are never offered or written. Free-form tags and client-side summary
-writes are not supported. Each async presentation read is fenced by its
+writes are not supported. Every per-entry outcome other than `applied` or
+`unchanged` is shown as a failed edit, releases its saving indicator, and keeps
+retry available. A conflict reloads the exact `currentRevision` with archived
+and pending read authority so the detail reflects the Gateway's current record.
+Opening a "Replaced by" row carries that row's archived/pending authority into
+its exact-revision read. Each async presentation read is fenced by its
 presentation activity and Gateway identity, while accepted mutations remain
 owned by the Gateway receipt/job authority.
 

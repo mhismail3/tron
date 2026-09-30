@@ -71,7 +71,7 @@ only on the user's word) apply to every task.
 | C4 | Done | Sweep is discovery-only; intake is the only capture-and-decide path | C3 | knowledge-consolidation session, 2026-09-29 |
 | C5 | Done | One monthly Jev budget for intake assessment and tagging | none | knowledge-consolidation session, 2026-09-29 |
 | C6 | Done | Agent tool: `list` hides personal sources by default; search/recall metadata comes from the read record | none | knowledge-consolidation session, 2026-09-29 |
-| C7 | Claimed | iOS: curation conflict outcomes surface and reload; linked entries open regardless of admission | C1 | knowledge-consolidation session, 2026-09-29 |
+| C7 | Done | iOS: curation conflict outcomes surface and reload; linked entries open regardless of admission | C1 | knowledge-consolidation session, 2026-09-29 |
 | C8 | Needs scoping | Library order: save date by default, "Recent activity" option in the filter sheet | none | — |
 | C9 | Needs scoping | One re-tag predicate; enrichment only for retained entries; verdict no longer a tag input | C1 | — |
 | C10 | Needs scoping | Your take is the one note: seed from Raindrop note; hide Saved notes and Correct record for sources | C3 | — |
@@ -263,6 +263,16 @@ save time and recovered save time; unreachable iOS `.sources` branch in
 - Kept on purpose: personal notes and observations remain available; explicit scope personal permits source access.
 - Deviations: updated one pre-existing freshness test to archive via admission rather than the superseded archive verdict path.
 - For the next agent: C7 remains independent; Gateway runtime changes still require a maintainer update and were not applied here.
+
+### C7 · Done · 2026-09-29 · luna-worker
+
+- Result: linked replacement reads now carry the exact row's archived/pending authority. The existing per-item curation outcome decoder turns every status except applied/unchanged into an error; the Entry Detail error path releases saving and reloads conflict `currentRevision` with archived and pending access.
+- Evidence: `scripts/tron ios generate` (passed); `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build` (passed); `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run --only-testing TronMobileUITests/TronKnowledgeDetailUITests/testCurationConflictShowsErrorReloadsAndReenablesVerdictControl` (1 passed); `python3 scripts/check-documentation-policy.py` (passed, 48 authored files); `scripts/personal-info-guard.sh` (passed).
+- Changes: this commit
+- Tasks added: none
+- Kept on purpose: per-item conflict/error translation remains in the native RPC client, preserving each Gateway outcome's reason and current revision rather than moving curation outcome policy into the view.
+- Deviations: the first UI run selected stale products and executed no tests; after rebuilding the UI-validation tier, the focused test passed. One intermediate test attempt corrected an accessibility label mismatch before passing.
+- For the next agent: C8 remains ready for scoping; no Gateway runtime transition was performed.
 
 ### C1 · Done · 2026-09-29 · luna-worker
 

@@ -11,7 +11,9 @@ import XCTest
 /// - a job event the app cannot decode silently leaves the sheet stale;
 /// - autosave drops or rewrites the text being typed;
 /// - an edit conflict or save failure discards the draft or offers no retry;
-/// - a failed summary or re-tag clears existing summary/tags or offers no retry.
+/// - a failed summary or re-tag clears existing summary/tags or offers no retry;
+/// - a curation conflict outcome leaves its saving indicator stuck or hides the current revision;
+/// - a linked replacement that is archived or pending is unreadable despite its row authority.
 ///
 /// Take text is entered through the fixture's UIKit text-input control, not the
 /// simulator keyboard, whose inline predictions commit extra words on a tap or
@@ -33,6 +35,27 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         unarchive.tap()
         XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 10), "Restoring changes the row action back to Archive: \(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["Archive"].exists)
+    }
+
+    @MainActor
+    func testCurationConflictShowsErrorReloadsAndReenablesVerdictControl() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        let verdict = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Verdict, not judged")).firstMatch
+        scrollTo(verdict, in: app)
+        XCTAssertTrue(verdict.waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["fixture.next-curation-conflict"].tap()
+        verdict.tap()
+        app.buttons["Dated but useful"].tap()
+
+        let error = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Another edit changed this source.")).firstMatch
+        XCTAssertTrue(error.waitForExistence(timeout: 10), "A rejected curation outcome is visible: \(app.debugDescription)")
+        XCTAssertTrue(verdict.isEnabled, "The conflict clears the saving state so another edit is possible")
+        verdict.tap()
+        XCTAssertTrue(app.buttons["Dated but useful"].waitForExistence(timeout: 5), "The verdict control opens again after conflict")
+        app.buttons["Dated but useful"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Dated")).firstMatch.waitForExistence(timeout: 10))
     }
 
     @MainActor
