@@ -2198,7 +2198,7 @@ export class GatewayService {
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
     } finally {
-      if (!completionOwnsWork) work?.settle();
+      if (!completionOwnsWork && !completionFailed) work?.settle();
     }
   }
 
