@@ -69,7 +69,7 @@ only on the user's word) apply to every task.
 | C2 | Blocked | Remove `archive` from the verdict type after live data holds none | C1, user Gateway update, STORM rewrite | — |
 | C3 | Done | Intake never overrides a decided scope or admission; decided-but-unmoved bookmarks leave the queue | none | knowledge-consolidation session, 2026-09-29 |
 | C4 | Done | Sweep is discovery-only; intake is the only capture-and-decide path | C3 | knowledge-consolidation session, 2026-09-29 |
-| C5 | Claimed | One monthly Jev budget for intake assessment and tagging | none | knowledge-consolidation session, 2026-09-29 |
+| C5 | Done | One monthly Jev budget for intake assessment and tagging | none | knowledge-consolidation session, 2026-09-29 |
 | C6 | Claimed | Agent tool: `list` hides personal sources by default; search/recall metadata comes from the read record | none | knowledge-consolidation session, 2026-09-29 |
 | C7 | Claimed | iOS: curation conflict outcomes surface and reload; linked entries open regardless of admission | C1 | knowledge-consolidation session, 2026-09-29 |
 | C8 | Needs scoping | Library order: save date by default, "Recent activity" option in the filter sheet | none | — |
@@ -243,6 +243,16 @@ save time and recovered save time; unreachable iOS `.sources` branch in
 - Kept on purpose: connector identity and provider metadata remain durably queued and deduplicated; intake continues owning source capture and decisions.
 - Deviations: none.
 - For the next agent: C16 must audit pending records without invoking Gateway mutations until an explicitly approved recovery route is known.
+
+### C5 · Done · 2026-09-29 · luna-worker
+
+- Result: Intake assessment and tagging now reserve and settle against the same monthly Jev ledger and ConnectionOwner paid policy. Raindrop approvals continue to limit an individual cohort but cannot authorize Jev dispatch past the shared cap; missing assessment usage conservatively settles at the reservation ceiling.
+- Evidence: `cd packages/gateway && npm run build` (passed); `npx vitest run src/knowledge/connectors.test.ts src/knowledge/knowledge-tagger.test.ts src/knowledge/raindrop-intake-safety.test.ts src/knowledge/raindrop-intake-multipage.test.ts src/knowledge/knowledge-intake-enrichment.test.ts` (78 passed); `python3 scripts/check-documentation-policy.py` (passed); `scripts/personal-info-guard.sh` (passed).
+- Changes: this commit
+- Tasks added: none.
+- Kept on purpose: uncertain Jev dispatches keep their shared reservation and block further paid Jev work until explicit reconciliation; Raindrop's per-cohort item/cent bounds remain in addition to, never instead of, the Knowledge monthly cap.
+- Deviations: the multipage intake fixture's expected moved count is corrected to its actual eight eligible items after the resumed run reports one item already processed and one incomplete; the enrichment rerun expects zero new captures for its completed cohort.
+- For the next agent: the running Gateway remains untouched; install/rebuild remains a maintainer action after the planned changes.
 
 ### C1 · Done · 2026-09-29 · luna-worker
 

@@ -838,9 +838,12 @@ It consumes the shared typed `JevDecisionClient`, also exposed as the first-part
 `jev` tool for caller-supplied `choice`, `noul`, and `score` questions. This is not
 chat completion. Credentials remain in the Keychain-backed
 `connector:jev:personal` reference and are read only on explicit calls; core
-Knowledge capture/retrieval does not require Jev. Each workflow separately owns
-its disclosure, budget, and admission authority; the generic tool cannot inherit
-the Resources pilot allowance.
+Knowledge capture/retrieval does not require Jev. Tagging and Raindrop intake
+assessment reserve and settle against the same monthly Knowledge ledger owned by
+the `knowledge.jev` connection's `paidBudgetCents`. Paid access disabled there
+blocks both workflows before provider dispatch. Raindrop cohort approvals remain
+additional per-run item/cent caps and cannot enlarge the monthly budget; the
+generic Jev tool cannot inherit that cohort allowance.
 
 The tool requires `maxChargeCents`, checked before credential lookup or HTTP
 against a conservative per-call ceiling of 0.2688 cents: the supported model's
@@ -848,7 +851,7 @@ against a conservative per-call ceiling of 0.2688 cents: the supported model's
 include actual token usage and fractional-cent estimated cost, not rounded-up
 workflow reservations. New Knowledge assessments persist that usage and
 published-price estimate on the immutable assessment derivative and attempt
-receipt. Intake reports the approved ceiling, conservative reserved allowance,
+receipt. Intake reports its per-run approved ceiling and conservative allowance,
 selected cohort cap, settled count, known estimated usage cost, and unknown
 usage separately. These are cohort totals; `captured`, `retained`, `archived`,
 `pending`, and `moved` describe this invocation, while `budget` describes the
@@ -858,7 +861,9 @@ known costs are a subtotal when other attempts remain unknown. Pending identitie
 outside the selected cohort are reported separately, not labeled as assessed or
 necessarily metadata-only. An old assessment without usage remains unknown and is
 never backfilled as zero or claimed as provider billing. This is a local estimate guard, not a provider billing
-cap or a durable workflow allowance. The client snapshots validated input before
+cap. Successful calls without usage remain charged at the reserved ceiling, and
+uncertain dispatches keep their shared monthly reservation until reconciled; no
+workflow can refund or bypass that ledger. The client snapshots validated input before
 awaits, rejects unsupported models, bounds total input and state plus each
 question separately, rechecks cancellation after admission, redacts transport
 failures, and never retries a paid POST. The adapter sends the pinned

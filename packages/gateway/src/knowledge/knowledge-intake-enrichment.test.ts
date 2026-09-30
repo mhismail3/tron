@@ -3,12 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
+import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 
 const roots: string[] = [];
 const command = (value: string) => `k5-intake-${value}`;
@@ -91,8 +93,14 @@ describe("K5 Raindrop intake enrichment", () => {
     let userLookup = false;
     const items = Array.from({ length: 10 }, (_, index) => ({ _id: index + 1, title: `Saved source ${index + 1}`, link: `https://example.test/item-${index + 1}`, created: "2026-09-28T00:00:00Z", collection: { $id: 111 } }));
     const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Jev admission assessment", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 3, estimatedCostCents: 0.00042, pricing: "fixture" } }; } };
+    const owner = new ConnectionOwner(root);
+    const jevSetup = await owner.execute({ kind: "setup.begin", commandId: command("jev-budget-begin"), instanceId: "jev-budget", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
+    await owner.execute({ kind: "setup.complete", commandId: command("jev-budget-complete"), operationId: jevSetup.operationId, instanceId: "jev-budget", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
+    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"], ["connector:jev:personal", "synthetic-jev"]]));
+    const jevBudget = new KnowledgeTaggingBudget(store, owner, credentials);
     const extension = new KnowledgeConnectorExtension(store, {
-      credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]])),
+      credentials,
+      jevBudget,
       resolveHost: async () => ["93.184.216.34"],
       sourceFetch: async url => new Response(`Readable evidence for ${url}. `.repeat(12), { headers: { "content-type": "text/plain" } }),
       http: async url => {
@@ -124,7 +132,7 @@ describe("K5 Raindrop intake enrichment", () => {
     expect(finalJobs.jobs.filter(job => job.operation === "tags" && job.status === "done")).toHaveLength(10);
     const providerCallsBeforeReplay = sequence.length;
     const replay = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("replay"), sourceCollection: "111", dryRun: false, limit: 10, pilot: { id: "fixture-pilot", maxItems: 10, budgetCents: 10 } } }) as { captured: number };
-    expect(replay.captured).toBe(10);
+    expect(replay.captured).toBe(0);
     await new Promise(resolve => setTimeout(resolve, 30));
     expect(sequence).toHaveLength(providerCallsBeforeReplay);
     for (const outcome of intake.outcomes) {

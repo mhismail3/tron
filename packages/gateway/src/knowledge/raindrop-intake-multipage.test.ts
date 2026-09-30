@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse, type KnowledgeConnectorOptions } from "./connectors.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
+import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 
 const roots: string[] = [];
 const workspaces: TronWorkspace[] = [];
@@ -23,6 +25,11 @@ describe("Raindrop intake pagination and cohort accounting", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-intake-multipage-")); roots.push(root);
     let workspace = new TronWorkspace(root); workspaces.push(workspace);
     let store = new KnowledgeStore(workspace);
+    const owner = new ConnectionOwner(root);
+    const setup = await owner.execute({ kind: "setup.begin", commandId: command("jev-begin"), instanceId: "jev", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
+    await owner.execute({ kind: "setup.complete", commandId: command("jev-complete"), operationId: setup.operationId, instanceId: "jev", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
+    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"], ["connector:jev:personal", "synthetic-jev"]]));
+    const budgetFor = (current: KnowledgeStore) => new KnowledgeTaggingBudget(current, owner, credentials);
     const remote = new Map(Array.from({ length: total }, (_, index) => [String(index + 1), "111"]));
     const moved: string[] = []; const requestedPages: number[] = []; let failedMove = false;
     const assessment: SourceAssessmentModel = { async assess(input, _signal, context) {
@@ -31,7 +38,8 @@ describe("Raindrop intake pagination and cohort accounting", () => {
       return { summary: "synthetic assessment", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained" as const, profileVersion: jevProfileVersion(interests), rubricVersion: "tron-source-rubric-v2", inputDigest: jevInputDigest(input, interests) };
     } };
     const options: KnowledgeConnectorOptions = {
-      credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]])),
+      credentials,
+      jevBudget: budgetFor(store),
       assessment,
       resolveHost: async () => ["93.184.216.34"],
       sourceFetch: async url => {
@@ -72,6 +80,7 @@ describe("Raindrop intake pagination and cohort accounting", () => {
         await workspace.dispose();
         workspace = new TronWorkspace(root); workspaces.push(workspace);
         store = new KnowledgeStore(workspace);
+        options.jevBudget = budgetFor(store);
         extension = new KnowledgeConnectorExtension(store, options);
         const resumed = await intake(`${commandId}-resumed`, cohort);
         expect(resumed).toMatchObject({ moved: expectedMoves });
@@ -84,7 +93,7 @@ describe("Raindrop intake pagination and cohort accounting", () => {
       expect(requestedPages).toEqual([0, 0, 0, 0, 0, 0, 1]);
       return;
     }
-    await completeCohort("first", "pilot", Math.max(0, 10 - incomplete));
+    await completeCohort("first", "pilot", Math.max(0, 9 - incomplete));
 
     for (let cohort = 1; cohort <= cohorts; cohort += 1) {
       const id = `cohort-${cohort}`;

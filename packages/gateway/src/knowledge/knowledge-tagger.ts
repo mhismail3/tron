@@ -98,7 +98,7 @@ function rollBudget(state: KnowledgeConnectorState, month: string) {
 }
 
 export class KnowledgeTaggingBudget {
-  constructor(private readonly store: KnowledgeStore, private readonly connections: Pick<ConnectionOwner, "resolveInstance" | "recordProviderObservation">, private readonly credentials: ConnectorCredentialStore) {}
+  constructor(private readonly store: KnowledgeStore, private readonly connections: Pick<ConnectionOwner, "resolveInstance" | "recordProviderObservation" | "snapshot">, private readonly credentials: ConnectorCredentialStore) {}
 
   private async authority(connectionId: string) {
     const instance = await this.connections.resolveInstance(connectionId);
@@ -114,8 +114,8 @@ export class KnowledgeTaggingBudget {
     if (!connectionId) return { ok: false, code: "unavailable", reason: "Jev tagging is not configured; create and enable a knowledge.jev connection" };
     try {
       const status = await this.status(connectionId);
-      if (!status.enabled || !status.paidAccessApproved) return { ok: false, code: "unavailable", reason: "Jev paid tagging is disabled or not approved" };
-      if (status.availableCents + 1e-9 < KNOWLEDGE_TAG_CALL_RESERVATION_CENTS) return { ok: false, code: "budget-exhausted", reason: "Monthly Jev tagging budget is exhausted" };
+      if (!status.enabled || !status.paidAccessApproved) return { ok: false, code: "unavailable", reason: "Jev paid access is disabled or not approved" };
+      if (status.availableCents + 1e-9 < KNOWLEDGE_TAG_CALL_RESERVATION_CENTS) return { ok: false, code: "budget-exhausted", reason: "Monthly Jev budget is exhausted" };
       return { ok: true };
     } catch (error) {
       return { ok: false, code: "unavailable", reason: error instanceof Error ? error.message : "Jev tagging authority is unavailable" };
@@ -136,19 +136,37 @@ export class KnowledgeTaggingBudget {
     };
   }
 
+  async connectionId(): Promise<string | undefined> {
+    const snapshot = await this.connections.snapshot();
+    const enabled = snapshot.instances.filter(instance => instance.definitionId === "knowledge.jev" && instance.policy.enabled && instance.policy.paidAccessApproved && instance.policy.paidBudgetCents > 0);
+    return enabled.length === 1 ? enabled[0]!.id : undefined;
+  }
+
+  async reserveAssessment(connectionId: string, attemptKey: string): Promise<string> {
+    const authority = await this.authority(connectionId);
+    const month = budgetMonth();
+    const id = createHash("sha256").update(JSON.stringify([connectionId, "intake-assessment", attemptKey, month])).digest("hex").slice(0, 48);
+    return this.reserveAuthorized(connectionId, authority, id);
+  }
+
   async reserve(connectionId: string, jobId: string, callIndex: number): Promise<string> {
     const authority = await this.authority(connectionId);
     const month = budgetMonth();
     const id = attemptHash(connectionId, jobId, callIndex, month);
+    return this.reserveAuthorized(connectionId, authority, id);
+  }
+
+  private async reserveAuthorized(connectionId: string, authority: Awaited<ReturnType<KnowledgeTaggingBudget["authority"]>>, id: string): Promise<string> {
+    const month = budgetMonth();
     const existingState = await this.store.connectorState("jev", connectionId);
     if (existingState?.taggingBudget && rollBudget(existingState, month).attempts[id]) throw new GatewayError("conflict", "This Jev attempt already has a reservation; reconcile it instead of retrying");
     await this.store.updateConnectorState(budgetCommand(id, "reserve"), "jev", current => {
       const state = current ?? { ...emptyJevState(connectionId), enabled: authority.policy.enabled, paidAccessApproved: authority.policy.paidAccessApproved, paidBudgetCents: authority.policy.paidBudgetCents, credentialRef: authority.credentialRef };
       if (!state.enabled || !state.paidAccessApproved || state.paidBudgetCents <= 0 || state.paidBudgetCents !== authority.policy.paidBudgetCents) throw new GatewayError("conflict", "Jev tagging paid-access policy changed before reservation");
       const ledger = rollBudget(state, month);
-      if (Object.values(ledger.attempts).some(attempt => attempt.month === month && (attempt.status === "uncertain" || attempt.status === "reserved"))) throw new GatewayError("conflict", "An uncertain Jev dispatch must be reconciled before more paid tagging");
+      if (Object.values(ledger.attempts).some(attempt => attempt.month === month && (attempt.status === "uncertain" || attempt.status === "reserved"))) throw new GatewayError("conflict", "An uncertain Jev dispatch must be reconciled before more paid Jev work");
       if (ledger.attempts[id]) throw new GatewayError("conflict", "This Jev attempt already has a reservation; reconcile it instead of retrying");
-      if (ledger.spentCents + ledger.reservedCents + KNOWLEDGE_TAG_CALL_RESERVATION_CENTS > state.paidBudgetCents + 1e-9) throw new KnowledgeCurationRefusal("budget-exhausted", "Monthly Jev tagging budget is exhausted");
+      if (ledger.spentCents + ledger.reservedCents + KNOWLEDGE_TAG_CALL_RESERVATION_CENTS > state.paidBudgetCents + 1e-9) throw new KnowledgeCurationRefusal("budget-exhausted", "Monthly Jev budget is exhausted");
       ledger.reservedCents += KNOWLEDGE_TAG_CALL_RESERVATION_CENTS;
       ledger.attempts[id] = { month, reservedCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, status: "reserved" };
       return { ...state, taggingBudget: ledger };

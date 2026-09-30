@@ -345,14 +345,15 @@ const knowledgeStore = new KnowledgeStore(
   async (connectionId) => connections.resolveInstance(connectionId).catch(() => undefined),
 );
 let queueKnowledgeSummary: (source: KnowledgeRecord & { kind: "source" }) => void = () => {};
+const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, connections, knowledgeCredentials);
 const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   credentials: knowledgeCredentials,
   queueSummary: source => queueKnowledgeSummary(source),
   assessment: new JevSourceAssessmentModel(knowledgeCredentials),
+  jevBudget: knowledgeTaggingBudget,
   ...(xPricing ? { xPricing } : {}),
   connections,
 });
-const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, connections, knowledgeCredentials);
 const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(knowledgeCredentials), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections };
 const knowledge = new KnowledgeService(
   knowledgeStore,

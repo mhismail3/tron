@@ -12,6 +12,7 @@ import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
 import { JEV_DEFAULT_MODEL } from "./jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
+import type { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 import { normalizeProviderDisplayName, type ConnectionInstance, type ProviderAdmissionObservation } from "../integrations/connection-contract.js";
 import { FixedHostBodyTooLarge, requestFixedHost } from "./fixed-host-transport.js";
 
@@ -47,6 +48,8 @@ export interface KnowledgeConnectorOptions {
   queueSummary?: (source: KnowledgeRecord & { kind: "source" }) => void;
   /** Generic account owner. When present, connector configuration requires a connectionId. */
   connections?: ConnectionOwner;
+  /** Shared Knowledge-owned monthly Jev ledger for both tagging and intake assessment. */
+  jevBudget?: KnowledgeTaggingBudget;
 }
 
 interface PendingItem { id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; savedAt?: string; collectionId?: string; apiPayload?: string }
@@ -452,10 +455,13 @@ export class KnowledgeConnectorExtension {
     return stateStatus(saved, "raindrop");
   }
 
-  private async reserveAssessment(commandId: string, itemId: string, pilot: NonNullable<KnowledgeRaindropIntakeRequest["pilot"]>, sourceCollection: string, cohortId = pilot.id): Promise<void> {
+  private async reserveAssessment(commandId: string, itemId: string, pilot: NonNullable<KnowledgeRaindropIntakeRequest["pilot"]>, sourceCollection: string, jevConnectionId: string, cohortId = pilot.id): Promise<string> {
     const profileVersion = jevProfileVersion((await this.store.config()).currentInterests ?? []);
     // Reservation is a fresh paid-attempt fence on every invocation. Reusing
     // the intake command here would replay an old successful mutation receipt.
+    if (!this.options.jevBudget) throw new GatewayError("unsupported", "Shared Knowledge Jev budget is unavailable");
+    const monthlyAttempt = await this.options.jevBudget.reserveAssessment(jevConnectionId, commandId);
+    try {
     await this.store.updateConnectorState(command(`${commandId}:${randomUUID()}`, "reserve"), "raindrop", current => {
       const state = current ?? initial("raindrop");
       const pilots = state.assessmentPilots ?? {};
@@ -476,9 +482,14 @@ export class KnowledgeConnectorExtension {
         assessmentAttempts: { ...attempts, [attemptKey]: { itemId, cohortId, status: "dispatched" as const, chargeCents: 1 } },
       };
     });
+    return monthlyAttempt;
+    } catch (error) {
+      await this.options.jevBudget.releaseUndispatched(jevConnectionId, monthlyAttempt);
+      throw error;
+    }
   }
 
-  private async settleAssessment(commandId: string, itemId: string, cohortId: string, usage?: { inputTokens: number; outputTokens: number; estimatedCostCents: number }): Promise<void> {
+  private async settleAssessment(commandId: string, itemId: string, cohortId: string, jevConnectionId: string, monthlyAttempt: string, usage?: { inputTokens: number; outputTokens: number; estimatedCostCents: number }): Promise<void> {
     await this.store.updateConnectorState(`${commandId}:settle`, "raindrop", current => {
       const state = current ?? initial("raindrop");
       const mappedEntry = Object.entries(state.assessmentPilots ?? {}).find(([, item]) => item.id === cohortId);
@@ -497,6 +508,8 @@ export class KnowledgeConnectorExtension {
         assessmentAttempts: { ...(state.assessmentAttempts ?? {}), [key]: settled },
       };
     });
+    if (usage) await this.options.jevBudget!.settle(jevConnectionId, monthlyAttempt, usage);
+    else await this.options.jevBudget!.reconcileUncertain(jevConnectionId, monthlyAttempt);
   }
 
   private async recoverSaveTime(source: KnowledgeRecord & { kind: "source" }, commandId: string, evidence?: { objectHash: string; bytes: Uint8Array }): Promise<KnowledgeRecord & { kind: "source" }> {
@@ -549,6 +562,7 @@ export class KnowledgeConnectorExtension {
 
   private async intake(request: KnowledgeRaindropIntakeRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
     const connectionAuthority = await this.connectionFor(request.connectionId, "raindrop", Boolean(this.options.connections));
+    const jevConnectionId = await this.options.jevBudget?.connectionId();
     const state = await this.store.connectorState("raindrop");
     if (!state?.enabled || !state.credentialRef || !state.accountId || (!state.scope && !this.options.connections)) throw new GatewayError("unsupported", "Raindrop connector is not configured");
     const mappings = connectionAuthority?.raindropCollections;
@@ -698,11 +712,17 @@ export class KnowledgeConnectorExtension {
             if (!this.options.assessment) { pending += 1; lastError = "Jev source assessment is not configured"; setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: "not-run", move: "not-attempted" }); continue; }
             let dispatched = false;
             try {
-              const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => { await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, cohortId); dispatched = true; } }, this.options.assessment);
+              if (!jevConnectionId) throw new GatewayError("unsupported", "Jev intake assessment requires exactly one enabled knowledge.jev connection with approved paid access");
+              let monthlyAttempt: string | undefined;
+              const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => {
+                monthlyAttempt = await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, jevConnectionId, cohortId);
+                try { await this.options.jevBudget!.markDispatch(jevConnectionId, monthlyAttempt); dispatched = true; }
+                catch (error) { await this.options.jevBudget!.releaseUndispatched(jevConnectionId, monthlyAttempt); throw error; }
+              } }, this.options.assessment);
               assessment = triaged.assessment; source = triaged.source; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId }; assessmentOutcome = assessment.coverage === "sampled" ? "dispatched-settled-sampled" : "dispatched-settled";
               setOutcome(item, { ...sourceRef, assessment: assessmentOutcome });
               const usage = assessment?.usage ? { inputTokens: assessment.usage.inputTokens, outputTokens: assessment.usage.outputTokens, estimatedCostCents: assessment.usage.estimatedCostCents } : undefined;
-              await this.settleAssessment(command(request.commandId, `assess-${item.id}`), item.id, cohortId, usage);
+              await this.settleAssessment(command(request.commandId, `assess-${item.id}`), item.id, cohortId, jevConnectionId, monthlyAttempt!, usage);
             } catch (error) { assessmentFailed += 1; pending += 1; lastError = dispatched ? "Jev assessment outcome is uncertain; reconcile before retrying" : (error instanceof Error ? error.message : "Jev assessment failed"); setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: dispatched ? "dispatched-uncertain" : "preflight-failed", move: "not-attempted" }); continue; }
           }
           const finalInterests = (await this.store.config()).currentInterests ?? [];
