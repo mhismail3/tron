@@ -1984,8 +1984,10 @@ belong to one worktree: by default they are
 `scripts/ios-test-build-identity.py worktree-key` gives the per-worktree test
 products (`TRON_IOS_E2E_STATE_DIR` and `TRON_IOS_E2E_DERIVED_DATA` override
 them). So `status`, `logs`, `stop` and `clean` see and remove only this
-worktree's Gateway, state, npm lock hash and products; run `clean` in a worktree
-before deleting it, because no sweep reclaims these directories. `build` stamps
+worktree's Gateway, state, npm lock hash and products (`clean` also deletes the
+simulator of the lane it holds, which is shared by default, as
+`scripts/tron-ios-test clean` does); run `clean` in a worktree before deleting
+it, because no sweep reclaims these directories. `build` stamps
 the products with this worktree's source identity, and `run` refuses — before it
 renews the Gateway fixture — products that carry no identity or were built from
 another worktree or another source state; `build` (or `iterate`) again after an

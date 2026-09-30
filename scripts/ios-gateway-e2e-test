@@ -100,9 +100,10 @@ Environment:
                                 worktree's $TMPDIR/tron-ios-gateway-e2e-derived-UID-WORKTREE_KEY)
 
 The fixture and DerivedData are this worktree's: stop and clean touch no other
-worktree's. build stamps the products with this worktree's source identity
-(scripts/ios-test-build-identity.py) and run refuses products stamped for
-another worktree or another source state.
+worktree's fixture or DerivedData (clean still deletes the simulator of the
+lane it holds, which is shared by default). build stamps the products with
+this worktree's source identity (scripts/ios-test-build-identity.py) and run
+refuses products stamped for another worktree or another source state.
 
 The simulator lane is shared with scripts/tron-ios-test: this harness releases
 the lane's simulator when a command ends, sweeps orphaned lanes before it
@@ -447,8 +448,9 @@ build_tests() {
   local xctestrun
   xctestrun="$(find_xctestrun)"
   [[ -n "$xctestrun" ]] || die "focused build did not produce an xctestrun file"
-  # Stamp only after a successful build, so a failed rebuild never leaves
-  # products claiming a source state they were not built from.
+  # Stamp only after a successful build, as scripts/tron-ios-test does: products
+  # whose build never succeeded stay unstamped, so run refuses them. A failed
+  # rebuild keeps the earlier stamp in both tools.
   printf '%s\n' "$source_identity" \
     | python3 "$identity_owner" write --worktree "$repo_root" --derived-data "$derived_data" \
     || die "cannot stamp the focused test products with their source identity"
