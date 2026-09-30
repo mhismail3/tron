@@ -683,7 +683,7 @@ export class KnowledgeConnectorExtension {
         outcomeMap.set(item.id, { ...(previous ?? { itemId: item.id, title: item.title.slice(0, 512) }), ...patch, ...(patch.reason !== undefined ? { reason: patch.reason.slice(0, 2_000) } : {}) } as IntakeOutcome);
       };
       const canonicalFor = (itemId: string): Promise<KnowledgeRecord & { kind: "source" } | undefined> => this.store.sourceByIdentity({ provider: "raindrop", accountId: state.accountId!, itemId });
-      const markDone = async (itemId: string) => this.ack({ commandId: command(request.commandId, `done-${itemId}`), connector: "raindrop", ...(request.connectionId ? { connectionId: request.connectionId } : {}), itemId, disposition: "processed", reason: "Processed by the bounded legacy Raindrop intake" });
+      const markDone = async (itemId: string, disposition: "processed" | "skipped" = "processed", why = "Processed by the bounded legacy Raindrop intake") => this.ack({ commandId: command(request.commandId, `done-${itemId}`), connector: "raindrop", ...(request.connectionId ? { connectionId: request.connectionId } : {}), itemId, disposition, reason: why });
       const approvedItems = cohort.map(itemId => live.pending.find(item => item.id === itemId)).filter((item): item is NonNullable<typeof item> => Boolean(item));
       const approvedSet = new Set(approvedItems.map(item => item.id));
       for (const itemId of cohort) if (!approvedSet.has(itemId)) {
@@ -708,10 +708,12 @@ export class KnowledgeConnectorExtension {
             else if (disposition === "retained") retained += 1;
             else pending += 1;
             setOutcome(item, { ...sourceRef, disposition, assessment: "not-run", move: "not-attempted", reason: "Canonical source admission was already decided by a user or agent" });
-            await markDone(item.id);
+            await markDone(item.id, "skipped", "Admission already decided by a user or agent; intake left it unchanged");
             continue;
           }
-          if (mappedScope === "personal") {
+          // The entry's own scope, not the collection mapping, decides the path:
+          // a source a user or agent placed in personal never reaches Jev.
+          if (source.scope === "personal") {
             if (connectionAuthority && expectedSetupRevision !== (await this.connectionFor(request.connectionId, "raindrop", true))?.setupRevision) throw new GatewayError("conflict", "Raindrop collection mapping changed during intake; retry with the current setup revision");
             const admitted = source.content.admission?.status === "retained" ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-personal-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "retained", producer: { actor: "connector" }, reason: "Personal collection uses Raindrop link, title, preview and saved note as sufficient evidence" })).record as KnowledgeRecord & { kind: "source" };
             source = admitted; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId }; retained += 1;

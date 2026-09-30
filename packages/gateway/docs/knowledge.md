@@ -846,7 +846,9 @@ The store remains authoritative: connector/system writes cannot override a user
 or agent admission or scope decision; connector writer identity is explicit at
 the connector-owned capture call and is never inferred from copied source
 provenance. Mutations remain revision-fenced and receipted; personal sources
-never appear in work retrieval; personal ingestion never calls Jev; provider
+never appear in work retrieval; Jev assessment refuses a source whose current
+scope is personal, before any reservation, and legacy intake routes by the
+source's own scope; provider
 movement requires write permission and an explicit collection destination. The routine's dry run performs no source/admission,
 acknowledgment, remote-move, or paid-assessment effects. It may refresh Raindrop
 queue bookkeeping through free read-only provider discovery, but must not invoke

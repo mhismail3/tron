@@ -468,3 +468,31 @@ deletes it only after a dry-run of the routine matches it on live data.
   for which Knowledge methods get receipts; new reads go in the read group.
   Branch workers ran only `src/knowledge`; run the full Gateway suite before
   handing off a change that touches `gateway-service.ts`.
+
+### C18–C24 final review fixes · Done · 2026-09-29 · knowledge-consolidation session
+
+- Result: fixed the follow-up review's findings. Jev assessment checks the
+  source's current head (scope and revision) inside `beforeDispatch`, after the
+  committed-replay lookup and before any reservation, so an older research
+  revision of a source since moved to personal can no longer reach Jev. Budget
+  reservation conflicts name their real cause (open reservation, paid and
+  settled, or released before dispatch) instead of always claiming "paid and
+  settled". Legacy intake routes by the source's own scope, so an agent-placed
+  personal source is never assessed. Decided items are acknowledged as
+  `skipped`. The restart drain admits the Knowledge reads `tags.retag-needed`,
+  `connector.status`, `connector.queue` and `raindrop.read`.
+- Evidence: new regressions "refuses Jev for an older research revision…",
+  "names an open unrelated dispatch…" and the personal-path assertion
+  (`assessed === 0`) each fail without their fix and pass with it; the
+  agent-archived personal test fails on the `skipped` disposition without the
+  fix. Knowledge + transport suites green; full Gateway suite 2321/2322, the
+  one failure (`session-search-stall`) is the load-sensitive timing test that
+  passes in isolation on `main`.
+- Changes: this commit.
+- Kept on purpose: re-acknowledging an item keeps its first recorded
+  disposition (the connector's processed history is per identity), so a
+  rediscovered item first processed normally stays `processed`.
+- For the next agent: C23 (live dry-run parity, then deleting
+  `knowledge.raindrop.intake`) needs the user's Gateway update. Install the
+  routine skill from `~/.tron/workspace/files/knowledge-ingest/SKILL.md` into
+  the Tron agent skills directory as part of C23, not before.

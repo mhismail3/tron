@@ -46,6 +46,33 @@ describe("source assessment primitive", () => {
     expect(budget.reservedCents).toBe(0);
   });
 
+  // Failure mode: the personal check read the caller's (older) revision, so a
+  // source moved to personal after that revision still had its text sent to Jev.
+  it("refuses Jev for an older research revision of a source since moved to personal", async () => {
+    const f = await fixture();
+    await f.store.curateSource({ commandId: "assessment-move-personal", operation: "placement", producer: { actor: "user" }, item: { recordId: f.source.id, expectedRevision: f.source.revisionId, placement: { scope: "personal" } } });
+    let sent = false;
+    const model: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); sent = true; await context?.onDispatch?.(); return { summary: "must not assess", evidenceQuality: "unknown", freshness: "unknown" }; } };
+    const service = new KnowledgeService(f.store, new KnowledgeObservationService(f.store, undefined), {}, undefined, undefined, undefined, undefined, { budget: f.budget, assessment: model });
+    const before = await f.budget.status("jev");
+    await expect(service.invoke({ operation: "knowledge.source.assess", request: { commandId: "jev-stale-personal", sourceId: f.source.id, expectedRevision: f.source.revisionId, assessor: "jev" } })).rejects.toMatchObject({ code: "unsupported" });
+    expect(sent).toBe(false);
+    expect(await f.budget.status("jev")).toEqual(before);
+  });
+
+  // Failure mode: every reservation conflict was reported as "paid and settled",
+  // including an unrelated open dispatch that cost this command nothing.
+  it("names an open unrelated dispatch instead of claiming this attempt was paid", async () => {
+    const f = await fixture();
+    const connectionId = (await f.budget.connectionId())!;
+    const open = await f.budget.reserve(connectionId, "tagging-job", 0);
+    await f.budget.markDispatch(connectionId, open);
+    const service = new KnowledgeService(f.store, new KnowledgeObservationService(f.store, undefined), {}, undefined, undefined, undefined, undefined, { budget: f.budget, assessment });
+    const refusal = service.invoke({ operation: "knowledge.source.assess", request: { commandId: "jev-open-unrelated", sourceId: f.source.id, expectedRevision: f.source.revisionId, assessor: "jev" } });
+    await expect(refusal).rejects.toMatchObject({ code: "conflict" });
+    await expect(refusal).rejects.not.toThrow(/paid and settled/);
+  });
+
   it("refuses Jev assessment of a personal source before reserving the monthly ledger", async () => {
     const f = await fixture();
     const personal = (await f.store.captureSource({ commandId: "assessment-personal-source", record: { ...f.source, id: undefined, revisionId: undefined, updatedAt: undefined, scope: "personal" } })).record as KnowledgeRecord & { kind: "source" };

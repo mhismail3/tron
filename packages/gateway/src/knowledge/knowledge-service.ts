@@ -316,6 +316,12 @@ export class KnowledgeService {
     private readonly tagging?: KnowledgeTaggingRuntime,
   ) { this.observer = observer; }
 
+  private async assertJevAssessable(sourceId: string, expectedRevision: string): Promise<void> {
+    const current = await this.store.read(sourceId, undefined, false, true, true);
+    if (!current || current.kind !== "source") throw new GatewayError("not_found", "Source is unavailable");
+    if (current.scope === "personal") throw new GatewayError("unsupported", "Jev source assessment is unavailable for personal sources");
+    if (current.revisionId !== expectedRevision) throw new GatewayError("conflict", "Source changed before Jev assessment; re-read the current revision");
+  }
   private async runOwned<T>(operation: string, task: (signal: AbortSignal, retirements: Promise<void>[]) => Promise<T>, parentSignal?: AbortSignal): Promise<T> {
     const controller = new AbortController();
     const relay = () => controller.abort(parentSignal?.reason);
@@ -735,8 +741,6 @@ export class KnowledgeService {
           if (!model) throw new GatewayError("unsupported", "Source assessment requires an explicitly configured Knowledge model");
           return this.runOwned("source assessment", (signal, retirements) => triageSource(this.store, { commandId: request.commandId, sourceId: request.sourceId, expectedRevision: request.expectedRevision, signal, retirements }, model), signal);
         }
-        const assessable = await this.store.read(request.sourceId, request.expectedRevision, false, true, true);
-        if (assessable?.kind === "source" && assessable.scope === "personal") throw new GatewayError("unsupported", "Jev source assessment is unavailable for personal sources");
         const tagging = this.tagging;
         const assessmentModel = tagging?.assessment;
         if (!tagging || !assessmentModel) throw new GatewayError("unsupported", "Jev source assessment is not installed");
@@ -757,11 +761,12 @@ export class KnowledgeService {
               commandId: request.commandId, sourceId: request.sourceId, expectedRevision: request.expectedRevision, signal, retirements,
               ...(request.maxChargeCents !== undefined ? { maxChargeCents: request.maxChargeCents } : {}),
               beforeDispatch: async () => {
-                try { attemptId = await tagging.budget.reserveAssessment(connectionId, request.commandId); }
-                catch (error) {
-                  if (error instanceof GatewayError && error.code === "conflict") throw new GatewayError("conflict", "This Jev assessment was paid and settled but its source revision was not recorded; retry with a new commandId");
-                  throw error;
-                }
+                // Personal text never reaches Jev. Checked here, after the
+                // committed-replay lookup and before any reservation, against
+                // the current head: an older research revision of a source
+                // since moved to personal must not pass.
+                await this.assertJevAssessable(request.sourceId, request.expectedRevision);
+                attemptId = await tagging.budget.reserveAssessment(connectionId, request.commandId);
               },
               onDispatch: async () => { if (!attemptId) throw new GatewayError("conflict", "Jev assessment has no monthly reservation"); await tagging.budget.markDispatch(connectionId, attemptId); dispatched = true; },
             }, trackingAssessment);

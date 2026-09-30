@@ -97,6 +97,15 @@ function rollBudget(state: KnowledgeConnectorState, month: string) {
   return { month, spentCents: 0, reservedCents: 0, attempts };
 }
 
+/** Why one attempt key cannot be reserved again. Only a settled attempt tells
+ * the caller what it cost; an open one must be reconciled, not retried. */
+function attemptReuse(attempt: { status: "reserved" | "settled" | "uncertain"; actualCostCents?: number }): GatewayError {
+  if (attempt.status !== "settled") return new GatewayError("conflict", "This Jev attempt already has an open reservation; reconcile it instead of retrying");
+  return new GatewayError("conflict", (attempt.actualCostCents ?? 0) > 0
+    ? "This Jev attempt was paid and settled but its result was not recorded; retry with a new commandId"
+    : "This Jev attempt was released before dispatch; retry with a new commandId");
+}
+
 export class KnowledgeTaggingBudget {
   constructor(private readonly store: KnowledgeStore, private readonly connections: Pick<ConnectionOwner, "resolveInstance" | "recordProviderObservation" | "snapshot">, private readonly credentials: ConnectorCredentialStore) {}
 
@@ -159,13 +168,13 @@ export class KnowledgeTaggingBudget {
   private async reserveAuthorized(connectionId: string, authority: Awaited<ReturnType<KnowledgeTaggingBudget["authority"]>>, id: string): Promise<string> {
     const month = budgetMonth();
     const existingState = await this.store.connectorState("jev", connectionId);
-    if (existingState?.taggingBudget && rollBudget(existingState, month).attempts[id]) throw new GatewayError("conflict", "This Jev attempt already has a reservation; reconcile it instead of retrying");
+    if (existingState?.taggingBudget) { const prior = rollBudget(existingState, month).attempts[id]; if (prior) throw attemptReuse(prior); }
     await this.store.updateConnectorState(budgetCommand(id, "reserve"), "jev", current => {
       const state = current ?? { ...emptyJevState(connectionId), enabled: authority.policy.enabled, paidAccessApproved: authority.policy.paidAccessApproved, paidBudgetCents: authority.policy.paidBudgetCents, credentialRef: authority.credentialRef };
       if (!state.enabled || !state.paidAccessApproved || state.paidBudgetCents <= 0 || state.paidBudgetCents !== authority.policy.paidBudgetCents) throw new GatewayError("conflict", "Jev tagging paid-access policy changed before reservation");
       const ledger = rollBudget(state, month);
       if (Object.values(ledger.attempts).some(attempt => attempt.month === month && (attempt.status === "uncertain" || attempt.status === "reserved"))) throw new GatewayError("conflict", "An uncertain Jev dispatch must be reconciled before more paid Jev work");
-      if (ledger.attempts[id]) throw new GatewayError("conflict", "This Jev attempt already has a reservation; reconcile it instead of retrying");
+      if (ledger.attempts[id]) throw attemptReuse(ledger.attempts[id]);
       if (ledger.spentCents + ledger.reservedCents + KNOWLEDGE_TAG_CALL_RESERVATION_CENTS > state.paidBudgetCents + 1e-9) throw new KnowledgeCurationRefusal("budget-exhausted", "Monthly Jev budget is exhausted");
       ledger.reservedCents += KNOWLEDGE_TAG_CALL_RESERVATION_CENTS;
       ledger.attempts[id] = { month, reservedCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, status: "reserved" };

@@ -159,12 +159,13 @@ describe("knowledge connectors", () => {
     expect(assessmentCalls).toBe(0);
     const state = await store.connectorState("raindrop", "mapped");
     expect(state?.pending.some(item => item.id === "880")).toBe(false);
-    expect(state?.processedItems?.some(item => item.id === "880")).toBe(true);
+    expect(state?.processedItems?.find(item => item.id === "880")).toMatchObject({ disposition: "skipped" });
     expect((await store.read(archived.record.id, undefined, false, true, true))?.content.admission).toMatchObject({ status: "archived", producer: { actor: "agent" } });
   });
 
-  it("decides a connector-pending admission while preserving an agent scope", async () => {
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+  it("decides a connector-pending admission on the personal path when an agent placed it in personal", async () => {
+    let assessed = 0;
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { assessed += 1; await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
     let captureCount = 0;
     const { store, extension } = await mappedRaindropFixture(async url => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
@@ -183,6 +184,8 @@ describe("knowledge connectors", () => {
     expect(current?.scope).toBe("personal");
     expect(current?.content.admission).toMatchObject({ status: "retained", producer: { actor: "connector" } });
     expect(rerun).toMatchObject({ retained: 1, pending: 0 });
+    // Placed in personal by an agent: retained on the personal path, never sent to Jev.
+    expect(assessed).toBe(0);
   });
 
   it("keeps an intake admission behind a connection-configuration revision race", async () => {
