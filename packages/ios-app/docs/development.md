@@ -349,8 +349,8 @@ The application target `TronMobile` and the framework `TronMobileCore`
 (`Core/`) are separate Swift modules; [Modules](architecture.md#modules) owns
 their ownership and access rules. The framework is built and embedded for
 every configuration, so a configuration needs no framework entry of its own.
-Until MS-5, the share extension still compiles `Core/Support/SharedContent.swift`
-directly, so it shares `SWIFT_PACKAGE_NAME`.
+The share extension links `TronMobileCore` without embedding it; the app's copy
+is the only one in the bundle. No other target lists `Core/` sources.
 
 Where new code goes: a Foundation-only value type, wire model, Gateway client
 facility or logging/timing primitive belongs in `Core/<Layer>/`; anything that

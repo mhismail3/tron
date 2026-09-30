@@ -14,17 +14,17 @@ package enum SharedContentFragment: Equatable {
 }
 
 package enum SharedContentAdmissionPolicy {
-    static let maximumProviderCount = 32
+    package static let maximumProviderCount = 32
     static let maximumFragmentBytes = 64 * 1_024
     static let maximumAggregateBytes = 128 * 1_024
     static let maximumPromptBytes = 192 * 1_024
     static let maximumStoredDocumentBytes = 256 * 1_024
 
-    static func admits(_ fragment: SharedContentFragment) -> Bool {
+    package static func admits(_ fragment: SharedContentFragment) -> Bool {
         fragment.value.utf8.count <= maximumFragmentBytes
     }
 
-    static func admits(_ fragments: [SharedContentFragment]) -> Bool {
+    package static func admits(_ fragments: [SharedContentFragment]) -> Bool {
         guard fragments.count <= maximumProviderCount else { return false }
         var total = 0
         for fragment in fragments {
@@ -61,7 +61,7 @@ private extension SharedContentFragment {
 }
 
 package enum SharedContentReducer {
-    static func content(
+    package static func content(
         from fragments: [SharedContentFragment],
         timestamp: Date
     ) -> SharedContent? {
@@ -95,7 +95,7 @@ extension SharedContent {
     }
 }
 
-protocol PendingShareStoring {
+package protocol PendingShareStoring {
     @discardableResult func save(_ content: SharedContent) -> Bool
     func load() -> SharedContent?
     func clear()
@@ -112,7 +112,7 @@ package struct UserDefaultsPendingShareStore: PendingShareStoring {
     }
 
     @discardableResult
-    func save(_ content: SharedContent) -> Bool {
+    package func save(_ content: SharedContent) -> Bool {
         guard SharedContentAdmissionPolicy.admits(content),
               let defaults,
               let data = try? JSONEncoder().encode(content),

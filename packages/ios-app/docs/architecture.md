@@ -27,9 +27,12 @@ implementation detail; all user-facing language calls the agent Tron.
 
 The app is two Swift modules: the application target `TronMobile` and the
 framework `TronMobileCore`, whose sources live in `Core/` and which the app
-embeds. The split makes the layering a compiler rule instead of a convention: a
-lower module cannot see a higher one, each module declares the surface it
-offers, and code in a module can only use what that module may reach.
+embeds. The share extension links the same framework rather than compiling its
+own copy, and loads it from the app's `Frameworks/` directory; the framework is
+therefore built extension-safe (`APPLICATION_EXTENSION_API_ONLY`). The split
+makes the layering a compiler rule instead of a convention: a lower module
+cannot see a higher one, each module declares the surface it offers, and code in
+a module can only use what that module may reach.
 
 `Core` owns the app's lowest layer: Models, Gateway and Support, each in its own
 directory under `Core/`. It is Foundation-only: it may import Foundation and
@@ -46,8 +49,9 @@ the framework ships its own `Core/PrivacyInfo.xcprivacy`, which
 Access is the module boundary:
 
 - A declaration another module uses is `package`, and only `public` if a
-  consumer outside this package ever needs it. The app target, the framework
-  and the unit-test target all set `SWIFT_PACKAGE_NAME = TronIOSApp` in
+  consumer outside this package ever needs it. The app target, the share
+  extension, the framework and the unit-test target all set
+  `SWIFT_PACKAGE_NAME = TronIOSApp` in
   `packages/ios-app/project.yml`; that shared value is what makes package
   access visible across them.
 - A declaration only the unit tests use stays `internal`; tests import the
