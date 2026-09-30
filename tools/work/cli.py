@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bootstrap  # noqa: E402
 import claim  # noqa: E402
 import dashboard  # noqa: E402
+import land  # noqa: E402
 import start  # noqa: E402
 import verify  # noqa: E402
 from gh import Gh, GhError  # noqa: E402
@@ -40,6 +41,15 @@ def main(argv: list) -> int:
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
+    finish = commands.add_parser("land", help="update, verify, open the pull request, wait for checks, merge")
+    finish.add_argument("--title", help="pull request title (default: '<type>: <issue title>' or the current one)")
+    finish.add_argument("--summary-file", type=Path, help="Markdown for the Summary section (required to open)")
+    finish.add_argument("--needs-user-validation", metavar="TEXT",
+                        help="exact maintainer-only action and check; the issue stays open as Needs you")
+    finish.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    steward = commands.add_parser("steward", help="report open claim pull requests; --land one whose owner is gone")
+    steward.add_argument("--land", type=int, metavar="ISSUE",
+                         help="merge this issue's pull request if its head is verified, green and up to date")
     args = parser.parse_args(argv)
 
     root = repository_root()
@@ -59,8 +69,13 @@ def main(argv: list) -> int:
             return 0 if receipt["passed"] else 1
         if args.command == "dashboard":
             return dashboard.run(Gh(root), Path.cwd(), config, args.html, args.json)
+        if args.command == "land":
+            return land.land(Gh(root), root, config, args.session, args.title, args.summary_file,
+                             args.needs_user_validation)
+        if args.command == "steward":
+            return land.steward(Gh(root), root, config, args.land)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError,
-            FileNotFoundError, json.JSONDecodeError) as error:
+            land.LandError, FileNotFoundError, json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1
     return 64
