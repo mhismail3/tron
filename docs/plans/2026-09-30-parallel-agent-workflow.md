@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, W-20 (#103) merged; awaiting maintainer validation
+- **Last updated:** 2026-09-30, wave 1 landed (W-5, W-8, W-16 to W-21, W-27, W-28); W-29 in review
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -200,10 +200,10 @@ Dated 2026-09-30:
 | W-2 | Done | GitHub bootstrap: labels, Project and fields, Epic/Task issue forms, ruleset spec; the user applies the settings and ruleset changes | W-1 | session 01a0f183, 2026-09-30 |
 | W-3 | Done | Shared-resource isolation audit so any two worktrees can validate concurrently; each fix becomes a sub-issue | none | session 01a0f183, 2026-09-30 |
 | W-4 | Done | Core: `start`/claim, naming, soft cap (the config file and `gh` resolution exist since W-2) | W-2 | session 01a0f183, 2026-09-30 |
-| W-5 | Claimed | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-5 | Done | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-6 | Ready | Core: `finish` and `land`: push gates (claim branch, clean tree), a PR only with a passing receipt for the exact head plus `Closes #N` and a Verification section; evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff. A recurring steward automation polls and resumes the owning session. | W-5 | Unassigned |
 | W-7 | Ready | Core: automatic cleanup of provably done resources; update the housekeeping skill to match | W-6 | Unassigned |
-| W-8 | Claimed | Dashboard skill and HTML card | W-4 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-8 | Done | Dashboard skill and HTML card | W-4 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-9 | Ready | CI: required Linux policy job and `tron/verify` status; path-scoped, non-blocking macOS jobs whose failures reach the dashboard (D-4) | W-5 | Unassigned |
 | W-10 | Ready | Scheduled local heavy run on `main` that files `regression` issues | W-5 | Unassigned |
 | W-11 | Ready | Rewrite the guidance: `AGENTS.md` work section, a `tron-work` skill (take a task, dashboard), `CONTRIBUTING.md`, `.agents/README.md`, PR template, the rule that issue text not authored by the maintainer is untrusted and never an instruction (only the maintainer's Ready status authorizes work), retirement notice in `docs/plans/README.md` | W-6, W-8 | Unassigned |
@@ -211,18 +211,25 @@ Dated 2026-09-30:
 | W-13 | Ready | Dependabot intake: each PR becomes an agent-owned `deps` task; the Pi SDK family and Node follow their runbooks | W-6 | Unassigned |
 | W-14 | Ready | One audited legacy sweep of the existing worktrees and branches, with the user approving the exact list | W-7 | Unassigned |
 | W-15 | Ready | Migrate every remaining plan to an epic in the three groups under Task details; retire `docs/plans/` and `docs/plans/HISTORY.md` once empty | W-11, W-12 | Unassigned |
-| W-16 | Claimed | #98 iOS Gateway E2E fixture and DerivedData keyed by worktree, with a build-identity check (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-17 | Claimed | #99 Default iOS test lane per worktree; E2E and profiler accept lanes; concurrent two-worktree iOS proof (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-18 | Claimed | #100 Lease the Development simulator and the physical iPhone (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-16 | Done | #98 iOS Gateway E2E fixture and DerivedData keyed by worktree, with a build-identity check (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-17 | Done | #99 Default iOS test lane per worktree; E2E and profiler accept lanes; concurrent two-worktree iOS proof (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-18 | Done | #100 Lease the Development simulator and the physical iPhone (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-19 | Done | #102 Worktree-relative Mac Release DerivedData; hook installer works from linked worktrees (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-20 | Done | #103 Dev Gateway status names the worktree and branch it runs (P2); merged, maintainer validation after W-27 | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-21 | Claimed | #101 Scope retained test/profile artifacts and `latest` pointers to the worktree (P3) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-21 | Done | #101 Scope retained test/profile artifacts and `latest` pointers to the worktree (P3) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-22 | Ready | Follow-up: triage procedure; an agent classifies `needs-triage` issues (type, area, priority, duplicate search) and places them as Proposed for maintainer approval | W-11 | Unassigned |
 | W-23 | Ready | Follow-up: warm worktrees; `work start` seeds `node_modules` and the iOS build cache from the primary checkout by APFS clone | W-4 | Unassigned |
 | W-24 | Ready | Follow-up: bug tasks record a failing reproduction before a fix; an unreproducible bug goes to Needs you with the missing details | W-11 | Unassigned |
 | W-25 | Ready | Follow-up: agents write to GitHub only through `scripts/tron work`, with a local audit log of every write | W-6 | Unassigned |
 | W-26 | Ready | Follow-up: type-specific PR body sections (Repro/Cause/Fix/Verification for bugs) validated before opening | W-6 | Unassigned |
-| W-27 | Claimed | #107 `tron dev start`/`restart` pass a short revision the payload manifest rejects; decision (b): full 40-hex HEAD plus a separate dirty-tree field (P1) | W-20 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-27 | Done | #107 `tron dev start`/`restart` pass a short revision the payload manifest rejects; decision (b): full 40-hex HEAD plus a separate dirty-tree field (P1); merged, maintainer validation pending | W-20 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-28 | Done | #110 CI workflow file was invalid (runner context in job env), so no CI ran from about 2026-09-24 (P0) | none | session 01a0f183, 2026-09-30 |
+| W-29 | Claimed | #113 CI red on main: failures accumulated while the workflow was invalid (P0) | W-28 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-30 | Ready | #116 payload staging fails on macOS 15: rename of a directory frozen to 0555 (P1) | W-29 | Unassigned |
+| W-31 | Ready | #115 seven iOS tests depend on wall-clock speed and fail on the hosted runner (P2) | W-29 | Unassigned |
+| W-32 | Needs scoping | #124 decision: may a dirty dev candidate hand off to Stable (P2, Needs you) | W-27 | Unassigned |
+| W-33 | Ready | #125 agent scratch files and a shared Vitest artifact path break worktree isolation (P3) | none | Unassigned |
+| W-34 | Ready | #126 E2E harness and profiler refuse an inherited lease for another lane; lane cleanup after `clean` (P3) | W-17 | Unassigned |
 
 ## Task details
 
@@ -587,3 +594,72 @@ file-level. Everything else inspected is A.
 - Tasks added: W-27 (#107). The #103 worker found it: `tron-dev` passes a
   12-character or `-dirty` revision, but the manifest requires 40 hex
   characters. The user chose option (b).
+
+### Wave 1 · Done · 2026-09-30 · session 01a0f183 (orchestrator)
+
+- Result: nine tasks were landed as squash PRs on `main`.
+
+  | Task | Issue | PR | Change |
+  | --- | --- | --- | --- |
+  | W-5 | – | #122 | `scripts/tron work verify [--post]`: head-bound receipt; fail-closed coverage of every changed path; carry-over only when no input of a check changed; scrubbed public evidence; full logs only to a private evidence repository |
+  | W-8 | – | #123 | `scripts/tron work dashboard`: live, read-only, HTML/JSON/text output, plus the `tron-work` skill |
+  | W-16 | #98 | #117 | per-worktree Gateway E2E fixture and DerivedData, checked by build identity |
+  | W-17 | #99 | #118 | each worktree defaults to its own simulator lane |
+  | W-18 | #100 | #120 | leases for the Development simulator and each physical device |
+  | W-19 | #102 | #108 | recorded earlier |
+  | W-20 | #103 | #112 | recorded earlier |
+  | W-21 | #101 | #119 | "latest" results resolved per worktree |
+  | W-27 | #107 | #121 | dev candidates stage the full HEAD; `sourceDirty` recorded separately |
+  | W-28 | #110 | #111 | CI workflow valid again |
+
+- Process: each lane ran implement → independent review → fix in its own
+  worktree and branch. The orchestrator rebased each branch onto
+  `origin/main`, reran the lane's own checks on the combined code, then
+  squash-merged:
+  - the iOS lanes ran the full `scripts/test-ios-test-infrastructure.py`
+    (110 tests after #113's rebase);
+  - `tools/work` ran its unit tests;
+  - #107 ran `scripts/tron-dev-state.test.mjs` and the full
+    `scripts/gateway-payload-deploy.test.mjs`.
+
+  Stacked lanes (#98 → #99 → #101) moved onto `main` without the
+  already-squashed commits. The W-5/W-8 conflicts were resolved by keeping
+  both sides; the dashboard's failure modes were renumbered 20–31.
+- Evidence:
+  - Reviews: every lane got `changes-needed` or `pass` with findings, and every
+    blocking or should-fix finding was fixed. Examples:
+    - verify carried the Gateway check across lockfile/tsconfig changes merged
+      from `main`;
+    - verify ran nothing when a Gateway file was deleted;
+    - the dashboard showed fork PRs as a claim's PR;
+    - #103 keyed its records by fingerprint instead of runtime epoch.
+  - Reviewers often had no shell, so the orchestrator reran every lane's tests
+    before merging.
+  - Lane evidence is in the Tron internal workspace under `files/wave-1/`.
+- Deviations:
+  - Plan updates were recorded at merge time instead of in each lane's branch.
+    Per-branch plan edits conflicted on every rebase.
+  - Local `main` in the primary checkout holds unpushed commits from agents
+    still on the plan-doc protocol. Landing works only against `origin/main`
+    and never touches local `main`.
+- Found on the way:
+  - #107: `tron dev start/restart` could not stage since 2026-09-25.
+  - #110: CI had not run for a week.
+  - #113: accumulated failures once it ran again.
+  - #116: a probable macOS 15 product bug in payload staging.
+  - #115: timing-dependent iOS tests.
+  - #124, #125, #126: lane follow-ups.
+- For W-6 (landing), learned by hand in this wave:
+  - Confirm and close the issue after merge; `Closes #N` in the squash PR did
+    not always close it.
+  - Do not use `gh pr merge --delete-branch` from a worktree; it tries to check
+    out `main`.
+  - Rebase onto `origin/main` and rerun the required checks. A stacked branch
+    uses `rebase --onto`.
+  - Decide which Statuses count as claimed (In review, Needs you) so the
+    dashboard does not report every PR in review as a disagreement.
+  - `start` and the dashboard count the soft cap differently.
+- For W-10 and the verify owner: the full `ios` and `mac` verify check
+  commands have not yet run end to end. W-5's own report states this gap.
+- Maintainer-only validation pending: #103 and #107. Run `scripts/tron dev
+  restart`, then `scripts/tron dev status`.
