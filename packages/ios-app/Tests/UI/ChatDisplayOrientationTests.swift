@@ -85,6 +85,43 @@ enum ChatDisplayOrientationFixture {
 @MainActor
 @Suite(.serialized, .enabled(if: UIValidationTier.isActive))
 struct ChatDisplayOrientationTests {
+    @Test("display preview lifts the single mounted upright card with an identity window target")
+    func inlineImagePreviewTargetsMountedCard() async throws {
+        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+            let harness = try await ChatDisplayOrientationFixture.harness(orientation: orientation)
+            do {
+                _ = try await ChatDisplayOrientationFixture.waitForLoadedImage(harness)
+                let sources = harness.promptContextMenuSurfaces().filter {
+                    $0.owner.actions.contains { $0.title == "Tool Details" }
+                        && !$0.view.isHidden && $0.view.alpha > 0.01 && $0.view.window != nil
+                }
+                #expect(sources.count == 1, "\(orientation): one actual card source, got \(sources.count)")
+                for source in sources {
+                    let frame = source.view.convert(source.view.bounds, to: nil)
+                    let configuration = try #require(source.owner.contextMenuInteraction(source.interaction,
+                        configurationForMenuAtLocation: CGPoint(x: source.view.bounds.midX, y: source.view.bounds.midY)))
+                    let identifier = configuration.identifier ?? ("card" as NSString)
+                    let highlight = source.owner.contextMenuInteraction(source.interaction, configuration: configuration,
+                        highlightPreviewForItemWithIdentifier: identifier)
+                    let dismissal = source.owner.contextMenuInteraction(source.interaction, configuration: configuration,
+                        dismissalPreviewForItemWithIdentifier: identifier)
+                    for preview in [highlight, dismissal] {
+                        let preview = try #require(preview)
+                        let container = try #require(preview.target.container as? UIView)
+                        let center = container.convert(preview.target.center, to: nil)
+                        #expect(preview.view === source.view, "Lift the real card, not replacement content")
+                        #expect(preview.target.transform == .identity)
+                        #expect(!TranscriptWindowOracle.isFlipped(container))
+                        #expect(!TranscriptWindowOracle.isFlipped(preview.view))
+                        #expect(abs(center.x - frame.midX) <= 0.5 && abs(center.y - frame.midY) <= 0.5)
+                        #expect(preview.view.bounds.width > 50 && preview.view.bounds.height > 50)
+                    }
+                }
+            } catch { await harness.close(); throw error }
+            await harness.close()
+        }
+    }
+
     @Test("loaded inline image renders upright in window pixels in both orientations")
     func inlineImageRendersUpright() async throws {
         for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
