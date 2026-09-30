@@ -280,10 +280,12 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
             reason = "detached HEAD"
         elif number is None:
             reason = "not a claim branch"
-        elif state_of(number) != "OPEN":
-            reason = _absence(number, state_of(number))
+        elif state_of(number) == "OPEN":
+            reason = f"no remote claim branch for #{number}" + _CLEANUP_HINT
+        elif state_of(number) == "CLOSED":
+            reason = _absence(number, "CLOSED") + _CLEANUP_HINT
         else:
-            reason = f"no remote claim branch for #{number}"
+            reason = _absence(number, state_of(number))
         orphan_worktrees.append({"path": relative, "branch": branch, "reason": reason})
 
     orphan_branches = [
@@ -395,6 +397,10 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         "regressions": [_ref(i) for i in open_issues if board["regressionLabel"] in i["labels"]],
         "ignored_items": ignored,
     }
+
+
+# A claim branch's worktree whose pull request merged at its head is provably done (README.md, `cleanup`).
+_CLEANUP_HINT = "; work cleanup --all removes it once its pull request merged at this head"
 
 
 def _absence(number: int, state: str) -> str:

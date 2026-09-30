@@ -328,11 +328,20 @@ class ScopeTests(CleanupFixture):
         git(self.repo, "checkout", "-q", "--track", "-b", branch, f"{REMOTE}/{branch}")
         head = git(self.repo, "rev-parse", "HEAD")
         self.add_pull(branch, head)
-        code, out = self.cleanup(self.repo)
-        self.assertEqual(code, 1, out)
-        self.assertIn("primary checkout", out)
-        self.assertEqual(self.local_branch(branch), head)
-        self.assertEqual(self.released_in(), [])
+        # Also when a mistaken root contains the primary checkout.
+        for root in ("../worktrees", ".."):
+            with self.subTest(root=root):
+                self.config["claim"]["worktreeRoot"] = root
+                for all_worktrees in (False, True):
+                    code, out = self.cleanup(self.repo, all_worktrees=all_worktrees)
+                    self.assertTrue(self.repo.is_dir())
+                    self.assertEqual(self.local_branch(branch), head)
+                    self.assertEqual(self.remote_branch(branch), head)
+                    self.assertEqual(self.released_in(), [])
+                self.assertEqual(code, 0, out)
+                code, out = self.cleanup(self.repo)
+                self.assertEqual(code, 1, out)
+                self.assertIn("primary checkout", out)
 
     def test_all_removes_only_done_worktrees_under_the_root_and_names_every_other(self):
         done, done_branch, _ = self.task(7)
@@ -342,6 +351,7 @@ class ScopeTests(CleanupFixture):
         git(self.repo, "worktree", "add", "-q", "--detach", str(detached), BASE)
         plain = self.root / "plain"
         git(self.repo, "worktree", "add", "-q", "-b", "scratch", str(plain), BASE)
+        self.add_pull("scratch", git(self.repo, "rev-parse", BASE))  # merged, but not a task's claim branch
 
         code, out = self.cleanup(busy, all_worktrees=True)
         self.assertEqual(code, 0, out)
