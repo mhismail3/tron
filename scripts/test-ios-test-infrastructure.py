@@ -3460,6 +3460,14 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
     def lane_marker(self, lane: Path) -> dict[str, object]:
         return json.loads((lane / "simulator.json").read_text())
 
+    def assert_booted_only(self, udid: object) -> None:
+        """Every boot so far targeted `udid`, and nothing is left booted."""
+        boots = {line.split(" ")[1] for line in self.log_path.read_text().splitlines() if line.startswith("boot ")}
+        self.assertEqual(boots, {udid})
+        booted = [device["udid"] for devices in self.inventory()["devices"].values()
+                  for device in devices if device["state"] == "Booted"]
+        self.assertEqual(booted, [])
+
     def assert_default_lane_untouched(self) -> None:
         default = self.lane_root / "ios-test"
         self.assertFalse((default / "simulator.json").exists())
@@ -3528,6 +3536,7 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
         key = self.key(worktree)
         for arguments, label in (((), key), (("--lane", "beta"), "beta")):
             with self.subTest(lane=label):
+                self.log_path.unlink(missing_ok=True)
                 lane = self.lane_root / f"ios-test-{label}"
                 # --no-build refuses (74) once the lane is provisioned: no
                 # profiler products exist, so only the lane path runs.
@@ -3536,16 +3545,18 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
                 marker = self.lane_marker(lane)
                 self.assertEqual(marker["name"], f"Tron iOS Tests ({label})")
                 self.assertEqual(marker["worktree"], os.path.realpath(worktree))
-                self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+                self.assert_booted_only(marker["udid"])
 
+                # The command the lease holder starts boots the leased lane's
+                # simulator, not the one its own default would name.
                 build = self.tool(worktree, "ios-gateway-e2e-test", "build", *arguments)
                 self.assertEqual(build.returncode, 0, build.stderr)
                 self.assertEqual(self.lane_marker(lane)["udid"], marker["udid"])
-                self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+                self.assert_booted_only(marker["udid"])
+                self.assertEqual(self.simctl_commands().count("create"), 1)
                 status = self.tool(worktree, "ios-gateway-e2e-test", "status", *arguments)
                 self.assertEqual(status.returncode, 0, status.stderr)
                 self.assertIn(f"Lane: {label} ({lane})\n", status.stdout)
-        self.assertEqual(self.simctl_commands().count("create"), 2)
         self.assert_default_lane_untouched()
 
     def test_a_worktree_lane_is_attributed_and_expires_when_idle(self) -> None:
