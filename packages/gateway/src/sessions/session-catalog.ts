@@ -221,7 +221,7 @@ export interface SessionCatalogSource {
   scan(): Promise<SessionCatalogScan>;
   /** Canonical metadata for one file, or undefined when it cannot be read as a
    * canonical session right now. */
-  summaryFor(path: string): Promise<CatalogMetadataIndexSummary | undefined>;
+  summaryFor(path: string, yieldToLoop?: () => Promise<void>): Promise<CatalogMetadataIndexSummary | undefined>;
 }
 
 export interface SessionCatalogOptions {
@@ -974,7 +974,7 @@ export class SessionCatalog {
     const reconciled = await this.options.index.reconcile(
       this.options.catalogRoot(),
       scan.candidates,
-      (candidate) => this.options.source.summaryFor(candidate.path),
+      (candidate) => this.options.source.summaryFor(candidate.path, () => this.backgroundWork.yieldToLoop()),
       // Asked between batches and before each parse: shutdown stops the pass
       // there, and that is also where the pass hands the loop back to the
       // scheduler, which pauses it while a request competes for the loop or the
@@ -1046,7 +1046,7 @@ export class SessionCatalog {
         }
       }
     }
-    const summary = await this.options.source.summaryFor(canonicalPath);
+    const summary = await this.options.source.summaryFor(canonicalPath, () => this.backgroundWork.yieldToLoop());
     if (!summary) return false;
     const rebuilt = await this.options.index.entryFromSummary(summary);
     if (!rebuilt) return false;
@@ -1081,7 +1081,7 @@ export class SessionCatalog {
       // next: a first cut that has no durable rows to reuse parses every body at
       // scale, and none of that may hold the loop while a request waits.
       await this.backgroundWork.yieldToLoop();
-      const summary = await this.options.source.summaryFor(candidate.path);
+      const summary = await this.options.source.summaryFor(candidate.path, () => this.backgroundWork.yieldToLoop());
       const row = summary ? await this.options.index.entryFromSummary(summary) : undefined;
       if (!row || row.id !== candidate.id || row.cwd !== candidate.cwd) {
         const key = resolve(candidate.path);

@@ -60,7 +60,7 @@ import type {
   ResourceInvocation,
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { stage } from "../transport/request-span.js";
+import { stage, wait } from "../transport/request-span.js";
 import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
@@ -6539,7 +6539,8 @@ export class RuntimeSlot {
     operationId: string,
     held?: HeldPrompt,
   ): Promise<{ operationId: string }> {
-    return this.lane.run(async () => {
+    return wait("session.prompt.runtime-lane", (acquired) => this.lane.run(async () => {
+      acquired();
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
       try {
@@ -7065,7 +7066,7 @@ export class RuntimeSlot {
         this.settleOperationWork(operationId);
       } else if (!runSettled) {
         operationWork.transition("foreground-agent-operation");
-        await this.enqueueMarkerOwnership(operationId);
+        await stage("session.prompt.marker-persist", () => this.enqueueMarkerOwnership(operationId));
       }
       this.revision += 1;
       this.publishSnapshot();
@@ -7143,7 +7144,7 @@ export class RuntimeSlot {
         await settleWithoutAgent(terminalLifecycle);
       }
       return { operationId };
-    });
+    }));
   }
 
   private promptDisplay(
