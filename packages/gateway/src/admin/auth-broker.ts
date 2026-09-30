@@ -171,10 +171,11 @@ export class AuthBroker {
   private readonly operations = new Map<string, AuthOperation>();
   private readonly retiredOperations = new Map<string, RetiredAuthOperation>();
   private readonly beginReceipts = new Map<string, BeginReceipt>();
-  /** Latest Pi login promise per recovery key whose operation may still be
-   * settling. A successor for the same key starts its provider login only after
-   * this settles, so replacement never races its predecessor's resources. */
+  /** Latest Pi login promise per serialized provider resource. A successor
+   * starts only after its predecessor settles, so shared callback listeners
+   * and replacement operations never race their predecessor's resources. */
   private readonly unsettledLogins = new Map<string, Promise<void>>();
+  private readonly getDeviceId: (() => string) | undefined;
 
   private readonly maximumOperations: number;
   private readonly maximumOperationsPerClient: number;
@@ -196,6 +197,7 @@ export class AuthBroker {
       operationTimeoutMs?: number;
       predecessorSettleTimeoutMs?: number;
       workRegistry?: GatewayWorkRegistry;
+      getDeviceId?: () => string;
       log?: AuthLifecycleLog;
     } = {},
   ) {
@@ -205,6 +207,7 @@ export class AuthBroker {
     this.operationTimeoutMs = options.operationTimeoutMs ?? DEFAULT_AUTH_OPERATION_TIMEOUT_MS;
     this.predecessorSettleTimeoutMs = options.predecessorSettleTimeoutMs ?? DEFAULT_PREDECESSOR_SETTLE_TIMEOUT_MS;
     this.workRegistry = options.workRegistry;
+    this.getDeviceId = options.getDeviceId;
     if (!Number.isSafeInteger(this.maximumOperations) || this.maximumOperations < 1
       || !Number.isSafeInteger(this.maximumOperationsPerClient) || this.maximumOperationsPerClient < 1
       || this.maximumOperationsPerClient > this.maximumOperations
@@ -270,6 +273,12 @@ export class AuthBroker {
     }
 
     const key = recoveryKey(ownerIdentity, providerId, authType, targetKey);
+    // Pi's ChatGPT and Codex legacy OAuth listeners both bind port 1455.
+    // Serialize those provider logins process-wide so the second flow cannot
+    // start in fallback/manual mode while the first owns the callback listener.
+    const loginKey = authType === "oauth" && (providerId === "openai" || providerId === "openai-codex")
+      ? "oauth-callback-port-1455"
+      : key;
     if (replaceOperationId !== undefined) {
       const replaced = this.operations.get(replaceOperationId);
       if (replaced) {
@@ -308,7 +317,7 @@ export class AuthBroker {
       throw new GatewayError("busy", "Concurrent authentication operations reached their bounded capacity", true);
     }
 
-    const predecessor = this.unsettledLogins.get(key);
+    const predecessor = this.unsettledLogins.get(loginKey);
     let operation!: AuthOperation;
     const controller = new AbortController();
     const work = this.workRegistry?.begin({
@@ -371,7 +380,9 @@ export class AuthBroker {
         if (this.operations.get(operation.id) !== operation) {
           throw new GatewayError("cancelled", "Authentication operation ended");
         }
-        return modelRuntime.login(providerId, authType, interaction);
+        return modelRuntime.login(providerId, authType, interaction, {
+          ...(this.getDeviceId ? { getDeviceId: this.getDeviceId } : {}),
+        });
       })
       .then(
         () => this.complete(operation, true),
@@ -379,13 +390,13 @@ export class AuthBroker {
       )
       .finally(() => {
         operation.work?.settle();
-        if (this.unsettledLogins.get(key) === operation.settled) this.unsettledLogins.delete(key);
+        if (this.unsettledLogins.get(loginKey) === operation.settled) this.unsettledLogins.delete(loginKey);
         if (operation.targetKey === "global") {
           this.unsettledGlobalAuthOperations.delete(operation);
           this.drainGlobalProviderRefresh();
         }
       });
-    this.unsettledLogins.set(key, operation.settled);
+    this.unsettledLogins.set(loginKey, operation.settled);
     return { operationId: operation.id, recovered: false };
   }
 

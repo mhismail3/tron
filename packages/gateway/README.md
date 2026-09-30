@@ -355,6 +355,14 @@ negative backoff. Cache and in-flight identity include the effective provider an
 authentication fingerprint, so logout, reauthentication, and account changes cannot
 reuse another account's usage. Raw credentials and response bodies remain local.
 
+`provider.list` exposes OpenAI's API-key and OAuth login methods, and labels the
+separate Codex provider `OpenAI Codex (legacy)`. OpenAI OAuth is not currently
+advertised as usage-supported: the usage adapter covers only the Codex `wham`
+endpoint. Sign in with ChatGPT receives a stable device ID from global Pi
+settings. AuthBroker serializes OpenAI and Codex legacy OAuth operations because
+both SDK flows use callback port 1455; live sign-in remains a manual acceptance
+gate.
+
 A native executor adapter must retain its tool promise through actual native
 cleanup, not reject it when only its client waiter stops. The existing Pi/slot
 operation owner then keeps Stop and drain pending without a second work registry.

@@ -166,6 +166,7 @@ const modelRuntime = installKimiK3Policy(await ModelRuntime.create({
   allowModelNetwork: false,
 }));
 startupCheckpoint("model-runtime");
+const globalSettingsManager = SettingsManager.create(homedir(), config.agentDir, { projectTrusted: false });
 const trust = new TrustService(config.agentDir);
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
@@ -181,7 +182,11 @@ const auth = new AuthBroker(
   modelRuntime,
   (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload),
   (topic, payload) => transport?.broadcast(topic, payload),
-  { workRegistry, log: (level, message, event) => logger.log(level, message, { event, source: "auth" }) },
+  {
+    workRegistry,
+    getDeviceId: () => globalSettingsManager.getOrCreateDeviceId(),
+    log: (level, message, event) => logger.log(level, message, { event, source: "auth" }),
+  },
 );
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),

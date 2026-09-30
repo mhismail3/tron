@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-8 partial implementation
+- **Last updated:** 2026-09-30, P99-9
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -228,7 +228,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 parts 2a/2b verify nested interactive limits, notification and schedule receipts, desktop serialization, native-view session ownership, plus part 2c verifies concurrent Jev pre-dispatch ceilings and nested foreground-subagent Stop/workspace handoff. P99-23 persists bounded Tron presentation descriptors on the parent's canonical result under `details.tronNested`; rollback readers ignore this additive details key. | P99-3, P99-5, P99-6, P99-22, P99-23 |
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7 | P99-10, P99-15 |
-| Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapt**: pass `getDeviceId` to `ModelRuntime.login`; redact `deviceId` from settings projection; fixed port 1455 shared with Codex legacy | P99-9 |
+| Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapted**: AuthBroker passes the global SettingsManager's stable `getDeviceId`; settings projection omits `deviceId`; OpenAI and Codex legacy OAuth are serialized on shared fixed port 1455; provider list exposes both OpenAI methods without claiming OpenAI OAuth usage support. Fake-fetch AuthBroker test captures `urn:uuid` host ID and relays the callback through token exchange. | P99-9 |
 | `system` theme default; `#rgb`/`oklch()`/`okhsl()`; `theme.style()`, `theme.colors`, `theme.appearance`; revised dark/light | **Verify/adapt** Tron's RPC baseline theme and process-global helpers | P99-11 |
 | Classifier models (`ModelRuntime.classify`, TypeSafe `jev-latest`, inherited Jev on OpenRouter/Cloudflare/Vercel/OpenCode Zen) | **Adopt**: migrate Tron's Jev to `ModelRuntime.classify()` (D-6); codemode `models.classify` inherited | P99-12, P99-20 |
 | llama.cpp classifier; llama.cpp context-window fix | **Not applicable**: Tron does not load the llama.cpp built-in (factory not root-exported) | — |
@@ -268,7 +268,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-6 | Done | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
 | P99-7 | Done | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
 | P99-8 | Claimed | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | luna-worker, 2026-09-29 |
-| P99-9 | Claimed | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | luna-worker, 2026-09-29 |
+| P99-9 | Done | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | luna-worker, 2026-09-29 |
 | P99-10 | Claimed | Virtual models on the Gateway (D-7) | P99-3 | luna-worker, 2026-09-29 |
 | P99-11 | Claimed | Theme default and remote extension host rendering | P99-3 | luna-worker, 2026-09-29 |
 | P99-12 | Claimed | Catalog, provider and classifier deltas; release dates; K3 policy | P99-2 | luna-worker, 2026-09-29 |
@@ -823,3 +823,13 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: no token is passed as an argv parameter or environment variable. `security find-generic-password -w` remains the accepted read path. Static bearer access remains behind the injected credential owner.
 - Deviations: This is not P99-8 completion. The session-bound AuthBroker/OAuth relay, pasted-redirect prompt ownership, local OAuth+MCP PKCE/dynamic-registration/token-refresh E2E, and relay-outcome observability are outstanding. The user-approved supervisor direction requires `mcp.auth.start`/`mcp.auth.cancel` and per-RuntimeSlot `openUrl` binding; no substitute OAuth flow was introduced. No full Gateway suite was run because the required OAuth feature and its owning E2E remain unimplemented.
 - For the next agent: continue P99-8 before changing its row to Done; use the approved design in the coordination reply: start/cancel are session-bound, issue Pi's own MCP login command, route `openUrl` only for an active server operation, reuse AuthBroker callback capture/relay and event shapes, and cancel on teardown/eviction. Record wire shape for P99-15.
+
+### P99-9 · Done · 2026-09-30 · luna-worker
+
+- Result: AuthBroker supplies the global SettingsManager's stable device ID to every provider login, and serializes `openai` and `openai-codex` OAuth operations process-wide because both SDK listeners require callback port 1455. The provider catalog exposes OpenAI API key and OAuth methods and labels Codex as `OpenAI Codex (legacy)`; OpenAI OAuth is not usage-supported. The existing settings projection's P99-3 regression confirms `deviceId` remains redacted.
+- Evidence: Node 22.22.0 `tsc -p tsconfig.json --noEmit` passed. Focused Vitest passed 36/36 across `auth-broker.test.ts`, `provider-usage-rpc.test.ts`, and `settings-service.test.ts` in 1.04 s. Final full Gateway run passed 2,306/2,307 in 118.50 s; the timing-sensitive session-search-stall case failed under suite load and passed on isolated rerun, 2/2 in 7.94 s. The AuthBroker integration uses fake fetch for the token exchange, captures the authorization URL's `ext_agent_host_id=urn:uuid:<stable-id>`, relays the provider callback through the broker, and verifies the authorization-code exchange. The serialization test proves Codex login does not enter Pi until the ChatGPT login settles. Existing settings regression asserts projected global settings omit `deviceId`.
+- Changes: `packages/gateway/src/admin/auth-broker.ts`, its test, `gateway-main.ts`, `packages/gateway/src/transport/provider-usage-rpc.test.ts`, Gateway README, and this plan row/matrix/handoff.
+- Tasks added: none.
+- Kept on purpose: provider usage remains supported only for OpenAI Codex's existing `wham` adapter; `openai` OAuth is intentionally not claimed. Provider methods and labels remain sourced from Pi's provider catalog.
+- Deviations: The auth integration uses Pi's actual OpenAI provider login with fake token-fetch responses and the real local callback listener on port 1455; no external network or real credential was used. No wire protocol changed.
+- For the next agent: no P99-15 wire changes arise from P99-9. Live ChatGPT sign-in remains the P99-18 manual gate; provider catalog and usage-support disposition are covered by the focused regression.

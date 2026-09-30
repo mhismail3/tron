@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "../protocol/types.js";
 import { AuthBroker } from "./auth-broker.js";
@@ -456,6 +456,77 @@ describe("AuthBroker", () => {
       expect.objectContaining({ payload: expect.objectContaining({ operationId, success: true }) }),
     ]);
     expect(broker.resume("phone", "phone", operationId)).toMatchObject({ state: "completed", success: true });
+  });
+
+  it("serializes ChatGPT and Codex legacy logins that share callback port 1455", async () => {
+    const events = authEvents();
+    const release = new Map<string, () => void>();
+    const entered = new Set<string>();
+    const runtime = {
+      getProvider: () => ({ auth: { oauth: {} } }),
+      login: (providerId: string) => new Promise<void>((resolve) => {
+        entered.add(providerId);
+        release.set(providerId, resolve);
+        events.notify();
+      }),
+    } as unknown as ModelRuntime;
+    const broker = new AuthBroker(runtime, events.emit);
+    const chatgpt = broker.start("phone", "openai", "oauth").operationId;
+    await events.waitFor(() => entered.has("openai"));
+    const codex = broker.start("phone", "openai-codex", "oauth").operationId;
+    await flushPromises();
+
+    expect(entered).toEqual(new Set(["openai"]));
+    release.get("openai")!();
+    await events.waitFor(() => entered.has("openai-codex"));
+    release.get("openai-codex")!();
+    await events.waitFor(() => events.events.filter((event) => event.topic === "auth.completed").length === 2);
+    expect(chatgpt).not.toBe(codex);
+  });
+
+  it("captures a ChatGPT OAuth URL with the stable device ID and relays its fake token exchange", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-auth-chatgpt-"));
+    const settingsManager = SettingsManager.create(root, root, { projectTrusted: false });
+    const runtime = await ModelRuntime.create({
+      authPath: join(root, "auth.json"),
+      modelsPath: null,
+      refreshOnCreate: false,
+    });
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; body: string }> = [];
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, body: String(init?.body ?? "") });
+      return new Response(JSON.stringify({
+        access_token: "fake-access-token", refresh_token: "fake-refresh-token", expires_in: 3600,
+        id_token: "fake-id-token", scope: "openid chatgpt.tokens.use.direct",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    try {
+      const { events, emit, waitFor } = authEvents();
+      const broker = new AuthBroker(runtime, emit, () => {}, { getDeviceId: () => settingsManager.getOrCreateDeviceId() });
+      const operationId = broker.start("phone", "openai", "oauth").operationId;
+      await waitFor(() => events.some((event) => event.topic === "auth.event" || event.topic === "auth.completed"));
+      const event = events.find((item) => item.topic === "auth.event")?.payload as Record<string, JsonValue> | undefined;
+      expect(event).toBeDefined();
+      const authEvent = event.event as Record<string, JsonValue>;
+      const authorization = new URL(authEvent.url as string);
+      expect(authorization.searchParams.get("ext_agent_host_id")).toBe(`urn:uuid:${settingsManager.getOrCreateDeviceId()}`);
+      expect(settingsManager.getOrCreateDeviceId()).toBe(settingsManager.getOrCreateDeviceId());
+      const capture = event.callbackCapture as Record<string, JsonValue>;
+      await broker.forwardCallback("phone", operationId, capture.id as string,
+        `code=fake-code&state=${authorization.searchParams.get("state")}&client_id=fake-client`);
+      await waitFor(() => events.some((item) => item.topic === "auth.completed"));
+
+      expect(events.find((item) => item.topic === "auth.completed")?.payload).toMatchObject({ success: true });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.url).toBe("https://auth.openai.com/api/accounts/oauth/token");
+      const tokenRequest = new URLSearchParams(requests[0]!.body);
+      expect(tokenRequest.get("grant_type")).toBe("authorization_code");
+      expect(tokenRequest.get("code")).toBe("fake-code");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("withholds a callback capture whose fixed port another active login owns", async () => {
