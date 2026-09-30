@@ -4475,7 +4475,7 @@ struct ChatViewScrollHarnessTests {
                 print("Geometry comparison: native=\(String(describing: harness.recorder.samples.last?.nativeContentHeight)) model=\(harness.probeObservation.geometry)")
                 print("Composer catalog: builds=\(harness.probe.composerCatalogBuildCount) installed=\(harness.probe.composerCatalogCommandNames) canonical=\(harness.canonicalCommandNames) activity=\(harness.chatSurfaceActivity)")
             }
-            if let stall = harness.openingTailStallDescription() {
+            if let stall = harness.openingTailStallDescription() ?? harness.blankTranscriptDescription() {
                 Issue.record(Comment(rawValue: stall))
             }
             await harness.close()
@@ -5569,6 +5569,29 @@ final class ChatViewScrollHarness {
     }
 
     var traceRecords: [GatewayProfileLogRecord] { model.chatInteractionTrace.diagnosticRecords(limit: 256) }
+
+    /// Names the blank transcript #133 tracks: every recorder sample since
+    /// some frame shows no mounted row in the transcript's scroll view, while
+    /// an admitted row entrance has not completed. A test waiting for a
+    /// settled native frame then sees only its watchdog. `nil` while the
+    /// newest sample shows a mounted row.
+    func blankTranscriptDescription() -> String? {
+        guard recorder.samples.last?.nativeRows.isEmpty == true,
+              let firstBlank = recorder.samples.reversed().prefix(while: { $0.nativeRows.isEmpty }).last
+        else { return nil }
+        func observedLayout(_ record: GatewayLogRecord) -> String? {
+            record.message.split(separator: " ").first { $0.hasPrefix("observedLayout=") }
+                .map { String($0.dropFirst("observedLayout=".count)) }
+        }
+        let records = traceRecords.map(\.record)
+        let completed = Set(records.filter { $0.event == "chat.entrance.completed" }.compactMap(observedLayout))
+        let pending = records.filter { $0.event?.hasPrefix("chat.entrance.admitted") == true }
+            .compactMap(observedLayout).filter { !completed.contains($0) }
+        return "Blank transcript (#133): the transcript's scroll view has mounted no row for "
+            + "\(recorder.displayFrameCount - firstBlank.frameIndex) display frames, since frame \(firstBlank.frameIndex) "
+            + "after projection install \(firstBlank.observation.projectionInstallCount); entrances admitted at layout "
+            + "\(pending.reversed()) never completed"
+    }
 
     /// Names the opening stall #130 tracks, from the chat trace: an
     /// opening-tail command applied and positioning never ended, with no
@@ -7056,6 +7079,9 @@ final class PresentedFrameRecorder: NSObject {
         self.orientation = orientation
         self.windowState = windowState
     }
+
+    /// Display frames the recorder has seen, sampled or not.
+    var displayFrameCount: Int { frameIndex }
 
     /// Whether the retained sample window still holds every sample from
     /// `frameIndex` on. A journey that reads native frames over a range the

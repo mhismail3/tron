@@ -848,6 +848,12 @@ past-end net or the pinned re-application (`pastEndRepairReturnsToTail`,
 geometry: a real scroll cannot be dragged past the legal content bottom, and
 their mechanisms retire at CT-19, not here. The finger-driven return and the
 real software keyboard stay device-checklist and XCUITest checks.
+A harness test that fails while waiting for a native frame prints the newest
+recorder sample and, when the chat trace matches one, names a known stall rather
+than leaving only the watchdog: an opening-tail command that applied and then
+received no positioning evidence (`openingTailStallDescription`, #130), or a
+transcript scroll view that mounted no row for every frame since an install
+while an admitted entrance never completed (`blankTranscriptDescription`, #133).
 
 ```bash
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
@@ -1334,7 +1340,18 @@ background/foreground convergence, and responsive-socket preservation. `Dashboar
 cached/stale/live activity, ID-index integrity, and retention of existing dashboard buckets
 when a background transport is retired. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
 waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
-wait or a clock that collapses liveness sleeps into a hot loop. Test-owned unstructured tasks
+wait or a clock that collapses liveness sleeps into a hot loop. The watchdog bounds a hang, never
+the test's own work: a test must not need a fast machine to finish inside it. Walk long backoff
+curves with `ManualClock.advanceToNextDeadline()` (one step per registered timer, as
+`DashboardStateOwnerTests.secondaryReconnectHasNoAttemptBudget` does), prove reuse or skipped work
+from work reports rather than elapsed time (`ChatTranscriptPresentationStoreTests.textStreamingReusesCanonicalProjection`),
+await the exact outcome a race owes instead of ending the test first (`AppModelReconnectTests.falseRestoreRejectsDeadEpochAfterRefresh`
+waits for the replacement attempt its dead epoch starts), sample time-driven presentation on an
+injected clock (`StreamingTextRevealContinuityTests` drives `chatStreamingRevealClock`), and bound
+display-driven settling in display frames (`ChatFloatingDisplayLayoutTests.keyboardAndAccessories`).
+To check a change for speed dependence, run the owning suites while only your lane's test app is
+slowed, for example by duty-cycling that one process with `SIGSTOP`/`SIGCONT`, and continue it
+afterwards. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
 the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
 bytes; they must not implement protocol decoding, session state, receipt policy,

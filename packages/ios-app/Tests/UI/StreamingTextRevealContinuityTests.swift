@@ -1,6 +1,5 @@
 import SwiftUI
 import Testing
-import Synchronization
 import UIKit
 @testable import TronMobile
 @testable import TronMobileCore
@@ -38,13 +37,13 @@ struct StreamingTextRevealContinuityTests {
 
     private static func streamAndSample() async throws {
         let words = Self.words(count: Self.wordsPerFrame * (Self.frameCount + 1))
-        let clock = RevealClock()
+        let clock = ManualClock()
         var admittedWords = Self.wordsPerFrame
         func fixture() -> RevealFixture {
             RevealFixture(
                 source: words.prefix(admittedWords).joined(separator: " "),
                 paneSize: Self.paneSize,
-                clock: clock.monotonicClock
+                clock: clock.clock
             )
         }
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -64,50 +63,59 @@ struct StreamingTextRevealContinuityTests {
         // the first commit; two display frames drain the main queue past it.
         for _ in 0..<2 { try await DisplayFrameScheduler.displayLink.nextFrame() }
 
-        /// Advances reveal time one sample interval. The woken reveal loop is
-        /// enqueued on the main actor before this task yields, so its whole
-        /// tick (ending in its next sleep or its return) runs first.
-        func advanceOneSample() async {
-            clock.advance(by: Self.sampleInterval)
-            await Task.yield()
-        }
-        /// A stream frame restarts the reveal task once SwiftUI commits the new
-        /// source. The restarted loop always has new words to pace, so it is
-        /// handled once it sleeps; only a catch-up (every word shown at once,
-        /// which the render proves) returns instead.
-        func restartHandled(sleepsBefore before: Int) async throws {
-            while !(clock.sleepCount > before && clock.sleeperCount == 1) {
-                if try Self.sample(window).isConverged { return }
+        /// Returns the sample rendered once the reveal loop has handled the
+        /// current reveal time: it is asleep again (a sleep registered after
+        /// `before`, and only one sleeper, so a restarted task's predecessor
+        /// is gone), or it stopped because every admitted word is shown,
+        /// which the render proves. The loop wakes off the test's task, so
+        /// only these observations, not a yield count, order the two. While
+        /// the stream runs, words from the last two frames are still fading,
+        /// so a render within 1% of the source only follows a stopped loop.
+        func sampleAfterRevealTick(sleepsBefore before: Int) async throws -> RevealSample {
+            while true {
+                if clock.recordedSleeps().count > before, clock.activeSleeperCount() == 1 {
+                    return try Self.sample(window)
+                }
+                let sample = try Self.sample(window)
+                if sample.isConverged { return sample }
                 try await DisplayFrameScheduler.displayLink.nextFrame()
             }
+        }
+        /// Advances reveal time one sample interval and samples after the
+        /// loop's tick for that time; a loop that is not paced has none.
+        func advanceOneSample() async throws -> RevealSample {
+            let paced = clock.activeSleeperCount() == 1
+            let sleeps = clock.recordedSleeps().count
+            clock.advance(by: Self.sampleInterval)
+            return paced ? try await sampleAfterRevealTick(sleepsBefore: sleeps) : try Self.sample(window)
         }
 
         var elapsed: Duration = .zero
         var nextFrame = Self.frameInterval
         var samples: [RevealSample] = [try Self.sample(window)]
         while admittedWords < words.count || elapsed < nextFrame {
-            await advanceOneSample()
+            var sample = try await advanceOneSample()
             elapsed += Self.sampleInterval
             if elapsed >= nextFrame, admittedWords < words.count {
-                // The restart must neither grant nor withhold a word.
-                let sleeps = clock.sleepCount
+                // Each stream frame restarts the reveal task; the restart must
+                // neither grant nor withhold a word.
+                let sleeps = clock.recordedSleeps().count
                 admittedWords += Self.wordsPerFrame
                 host.rootView = fixture()
                 nextFrame += Self.frameInterval
-                try await restartHandled(sleepsBefore: sleeps)
+                sample = try await sampleAfterRevealTick(sleepsBefore: sleeps)
             }
-            samples.append(try Self.sample(window))
+            samples.append(sample)
         }
         let streamingSamples = samples
 
         // The loop sleeps until the last fade completes, then returns.
+        var settled = try Self.sample(window)
         var settleElapsed: Duration = .zero
-        while clock.sleeperCount > 0, settleElapsed < Self.settleInterval {
-            await advanceOneSample()
+        while !settled.isConverged, clock.activeSleeperCount() == 1, settleElapsed < Self.settleInterval {
+            settled = try await advanceOneSample()
             settleElapsed += Self.sampleInterval
         }
-        #expect(clock.sleeperCount == 0, "the reveal loop stops once every fade completes")
-        let settled = try Self.sample(window)
 
         let inkPerWord = settled.referenceInk / Double(words.count)
         let jumps = zip(streamingSamples, streamingSamples.dropFirst()).map { ($1.streamingInk - $0.streamingInk) / inkPerWord }
@@ -173,7 +181,7 @@ private struct RevealSample {
     var referenceInk = 0.0
     var fadingPixels = 0
 
-    /// Every admitted word renders at full ink.
+    /// Every admitted word renders at full ink, within 1% of the reference.
     var isConverged: Bool { abs(streamingInk / referenceInk - 1) < 0.01 }
 }
 
@@ -204,72 +212,5 @@ private struct RevealFixture: View {
         .foregroundStyle(.black)
         .frame(width: paneSize.width, height: paneSize.height, alignment: .topLeading)
         .clipped()
-    }
-}
-
-/// The reveal loop's clock. Its sleeps are main-actor isolated, so resuming
-/// one from the test enqueues the woken loop on the main actor ahead of the
-/// test's next yield; `sleepCount` and `sleeperCount` show whether the loop is
-/// paced (asleep) or has stopped.
-@MainActor
-private final class RevealClock {
-    private struct Sleeper {
-        let id: Int
-        let deadline: Duration
-        let continuation: CheckedContinuation<Void, Error>
-    }
-
-    private let origin = ContinuousClock.now
-    private let offset = Mutex<Duration>(.zero)
-    private var sleepers: [Sleeper] = []
-    private var nextID = 0
-    private(set) var sleepCount = 0
-
-    var sleeperCount: Int { sleepers.count }
-
-    nonisolated var monotonicClock: MonotonicClock {
-        MonotonicClock(
-            now: { self.now() },
-            sleep: { duration in try await self.sleep(for: duration) },
-            gridOrigin: origin
-        )
-    }
-
-    nonisolated private func now() -> ContinuousClock.Instant {
-        origin + offset.withLock { $0 }
-    }
-
-    func advance(by duration: Duration) {
-        let now = offset.withLock { value -> Duration in
-            value += duration
-            return value
-        }
-        let due = sleepers.filter { $0.deadline <= now }
-        sleepers.removeAll { $0.deadline <= now }
-        for sleeper in due { sleeper.continuation.resume() }
-    }
-
-    private func sleep(for duration: Duration) async throws {
-        let id = nextID
-        nextID += 1
-        sleepCount += 1
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                if Task.isCancelled {
-                    continuation.resume(throwing: CancellationError())
-                } else {
-                    sleepers.append(Sleeper(
-                        id: id, deadline: offset.withLock { $0 } + duration, continuation: continuation
-                    ))
-                }
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in self?.cancel(id) }
-        }
-    }
-
-    private func cancel(_ id: Int) {
-        guard let index = sleepers.firstIndex(where: { $0.id == id }) else { return }
-        sleepers.remove(at: index).continuation.resume(throwing: CancellationError())
     }
 }
