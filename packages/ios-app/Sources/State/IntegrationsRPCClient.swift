@@ -57,8 +57,7 @@ final class IntegrationsRPCClient {
         struct Params: Encodable { let connectionId: String }
         let value: IntegrationXCredits = try await request("knowledge.x.credits", Params(connectionId: connectionID))
         guard !connectionID.isEmpty, value.freeBalance.isFinite, value.freeBalance >= 0,
-              value.prepaidBalance.isFinite, value.totalBalance.isFinite, value.totalBalance >= 0,
-              value.totalBalance == max(0, value.freeBalance + value.prepaidBalance) else {
+              value.prepaidBalance.isFinite, value.totalBalance.isFinite, value.totalBalance >= 0 else {
             throw invalidResponse()
         }
         return value

@@ -26,22 +26,23 @@ describe("X OAuth connection", () => {
     } as ConnectorCredentialStore & { write(reference: string, value: string): Promise<void>; delete(reference: string): Promise<void> };
     const calls: string[] = [];
     let expectedChallenge = "";
-    const extension = new KnowledgeConnectorExtension(new KnowledgeStore(new TronWorkspace(root)), {
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const extension = new KnowledgeConnectorExtension(store, {
       credentials: credentialStore,
       connections: owner,
-      xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 3 },
+      xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 1 },
       http: async (url, init) => {
         calls.push(url);
         if (url === "https://api.x.com/2/oauth2/token" && init.method === "POST") {
           const form = new URLSearchParams(init.body);
           expect(form.get("client_id")).toBe("public-client-id");
           expect(form.get("grant_type")).toBe("authorization_code");
-          expect(form.get("code")).toBe("one-time-code");
+          expect(["one-time-code", "reconnect-code"]).toContain(form.get("code"));
           expect(createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url")).toBe(expectedChallenge);
           return response({ token_type: "bearer", access_token: "access-1", refresh_token: "refresh-1", expires_in: 7_200 });
         }
         if (url === "https://api.x.com/2/users/me?user.fields=id,username" && init.headers.authorization === "Bearer access-1") return response({ data: { id: "98765", username: "reader" } });
-        if (url === "https://api.x.com/2/usage/credits" && init.headers.authorization === "Bearer access-1") return response({ data: { free_balance: 2.5, prepaid_balance: -0.5, total_balance: 2 } });
+        if (url === "https://api.x.com/2/usage/credits" && init.headers.authorization === "Bearer access-1") return response({ data: { free_balance: 0.2, prepaid_balance: 0.1, total_balance: 0.3 } });
         throw new Error(`Unexpected X OAuth request ${url}`);
       },
     });
@@ -59,8 +60,16 @@ describe("X OAuth connection", () => {
     expect(saved).toMatchObject({ accessToken: "access-1", refreshToken: "refresh-1" });
     expect(JSON.stringify(await owner.snapshot())).not.toContain("access-1");
     const credits = await extension.invoke({ operation: "knowledge.x.credits", request: { connectionId: "x-reader" } } as any) as any;
-    expect(credits).toEqual({ freeBalance: 2.5, prepaidBalance: -0.5, totalBalance: 2 });
+    expect(credits).toEqual({ freeBalance: 0.2, prepaidBalance: 0.1, totalBalance: 0.3 });
     expect(calls).toEqual(["https://api.x.com/2/oauth2/token", "https://api.x.com/2/users/me?user.fields=id,username", "https://api.x.com/2/usage/credits"]);
+    await store.updateConnectorState("reconnect-progress", "x", state => ({ ...state!, pending: [{ id: "pending", title: "Bookmark", url: "https://example.test" }], capturedIds: ["captured"], checkpoints: { "98765": "cursor" }, paidBudgetCents: 17 }), undefined, "x-reader");
+    await owner.execute({ kind: "disconnect", commandId: "oauth-reconnect-disconnect", instanceId: "x-reader" });
+    const reconnect = await extension.invoke({ operation: "knowledge.x.oauth.begin", request: { commandId: "oauth-reconnect-start", instanceId: "x-reader", clientId: "public-client-id", redirectUri: "https://app.example/callback", policy } } as any) as any;
+    expectedChallenge = new URL(reconnect.authorizationUrl).searchParams.get("code_challenge")!;
+    const reconnectCallback = new URL("https://app.example/callback"); reconnectCallback.searchParams.set("code", "reconnect-code"); reconnectCallback.searchParams.set("state", reconnect.state);
+    await extension.invoke({ operation: "knowledge.x.oauth.complete", request: { commandId: "oauth-reconnect-complete", operationId: reconnect.operationId, callbackUrl: reconnectCallback.toString() } } as any);
+    expect(await store.connectorState("x", "x-reader")).toMatchObject({ pending: [{ id: "pending" }], capturedIds: ["captured"], checkpoints: { "98765": "cursor" }, paidBudgetCents: 17 });
+    expect(await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "x", connectionId: "x-reader" } } as any)).toMatchObject({ paidBudgetCents: 17 });
   });
 
   it("refreshes once after X returns 401 and persists the rotated refresh token before retry", async () => {
@@ -71,7 +80,7 @@ describe("X OAuth connection", () => {
     const calls: string[] = [];
     let bookmarkAttempts = 0;
     const extension = new KnowledgeConnectorExtension(new KnowledgeStore(new TronWorkspace(root)), {
-      credentials: credentialStore, connections: owner, xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 3 }, sleep: async () => {},
+      credentials: credentialStore, connections: owner, xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 1 }, sleep: async () => {},
       http: async (url, init) => {
         calls.push(url);
         if (url === "https://api.x.com/2/oauth2/token" && init.method === "POST") {
@@ -97,6 +106,44 @@ describe("X OAuth connection", () => {
     expect(bookmarkAttempts).toBe(2);
     expect(JSON.parse(credentials.get("connector:x:x-reader")!).refreshToken).toBe("refresh-2");
     expect(calls.filter(url => url === "https://api.x.com/2/oauth2/token")).toHaveLength(2);
+  });
+
+  it("persists token rotation but fences the access token when setup changes during refresh", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-x-oauth-race-")); roots.push(root);
+    const owner = new ConnectionOwner(root);
+    const credentials = new Map<string, string>();
+    const credentialStore = { async read(reference: string) { return credentials.get(reference); }, async write(reference: string, value: string) { credentials.set(reference, value); }, async delete(reference: string) { credentials.delete(reference); } } as ConnectorCredentialStore & { write(reference: string, value: string): Promise<void>; delete(reference: string): Promise<void> };
+    let bookmarkCalls = 0;
+    let refreshes = 0;
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const extension = new KnowledgeConnectorExtension(store, {
+      credentials: credentialStore, connections: owner,
+      xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 1 }, sleep: async () => {},
+      http: async (url, init) => {
+        if (url === "https://api.x.com/2/oauth2/token" && init.method === "POST") {
+          const form = new URLSearchParams(init.body);
+          if (form.get("grant_type") === "refresh_token") {
+            refreshes += 1;
+            const live = await owner.resolveInstance("x-reader");
+            await owner.execute({ kind: "policy.update", commandId: "refresh-race-policy-update", instanceId: "x-reader", expectedSetupRevision: live.setupRevision, policy: live.policy });
+            return response({ token_type: "bearer", access_token: "access-rotated", refresh_token: "refresh-rotated", expires_in: 7_200 });
+          }
+          return response({ token_type: "bearer", access_token: "access-initial", refresh_token: "refresh-initial", expires_in: 60 });
+        }
+        if (url.startsWith("https://api.x.com/2/users/me")) return response({ data: { id: "98765", username: "reader" } });
+        if (url.startsWith("https://api.x.com/2/users/98765/bookmarks")) { bookmarkCalls += 1; return response({ data: [], meta: {} }); }
+        throw new Error(`Unexpected X request ${url}`);
+      },
+    });
+    const started = await extension.invoke({ operation: "knowledge.x.oauth.begin", request: { commandId: "refresh-race-start", instanceId: "x-reader", clientId: "client", redirectUri: "https://app.example/callback", policy } } as any) as any;
+    const callback = new URL("https://app.example/callback"); callback.searchParams.set("code", "race-code"); callback.searchParams.set("state", started.state);
+    await extension.invoke({ operation: "knowledge.x.oauth.complete", request: { commandId: "refresh-race-complete", operationId: started.operationId, callbackUrl: callback.toString() } } as any);
+    await expect(extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: "refresh-race-discovery", connector: "x", connectionId: "x-reader", limit: 1 } } as any)).rejects.toThrow(/connection changed during token refresh/);
+    expect(refreshes).toBe(1);
+    expect(bookmarkCalls).toBe(0);
+    expect(JSON.parse(credentials.get("connector:x:x-reader")!).refreshToken).toBe("refresh-rotated");
+    expect((await owner.resolveInstance("x-reader")).health).toBe("setup-required");
+    expect((await store.connectorState("x", "x-reader"))?.health).toBe("ready");
   });
 
   it("rejects a callback from another attempt without exchanging its code", async () => {

@@ -77,6 +77,15 @@ final class IntegrationModelsTests: XCTestCase {
     }
 
     @MainActor
+    func testXCreditsAcceptsProviderRoundedDecimalTotal() async throws {
+        let client = IntegrationsRPCClient(request: { _, _ in
+            try JSONValue.encode(IntegrationXCredits(freeBalance: 0.2, prepaidBalance: 0.1, totalBalance: 0.3))
+        })
+        let credits = try await client.xCredits(connectionID: "x-reader")
+        XCTAssertEqual(credits.totalBalance, 0.3)
+    }
+
+    @MainActor
     func testIntegrationListRejectsNonConnectionCapabilityProvenance() async {
         let client = IntegrationsRPCClient(request: { _, _ in
             .object([

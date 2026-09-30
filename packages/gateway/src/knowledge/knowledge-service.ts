@@ -24,7 +24,7 @@ import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESE
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("assessSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorDiscover"), Type.Literal("connectorQueue"), Type.Literal("connectorAck"), Type.Literal("raindropMove"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("assessSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorDiscover"), Type.Literal("connectorStatus"), Type.Literal("connectorQueue"), Type.Literal("connectorAck"), Type.Literal("raindropMove"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -837,7 +837,7 @@ export class KnowledgeService {
       case "knowledge.raindrop.intake":
       case "knowledge.source.ingest":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
-        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : action.operation === "knowledge.raindrop.move" ? "Raindrop move" : action.operation.startsWith("knowledge.x.oauth") ? "X OAuth setup" : "Knowledge connector action", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
+        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : action.operation === "knowledge.raindrop.move" ? "Raindrop move" : action.operation.startsWith("knowledge.x.oauth") ? "X OAuth" : "Knowledge connector action", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
     }
   }
 
@@ -1004,6 +1004,11 @@ export class KnowledgeService {
         }
         const result = await this.runOwned("connector discovery", ownedSignal => this.extensions.connector!({ operation: "knowledge.connector.discover", request: { commandId: parameters.commandId!, connector: parameters.connector!, connectionId: parameters.connectionId!, ...(parameters.sourceCollectionId ? { sourceCollection: parameters.sourceCollectionId } : {}), ...(parameters.limit ? { limit: parameters.limit } : {}) } }, ownedSignal), signal);
         return { text: `${parameters.connector} discovery finished. Items are queued only; no source was ingested, admitted, or moved. ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+      }
+      case "connectorStatus": {
+        if (!this.extensions.connector || !parameters.connector || !parameters.connectionId) throw new GatewayError("invalid_request", "connectorStatus requires connector and connectionId");
+        const result = await this.invoke({ operation: "knowledge.connector.status", request: { connector: parameters.connector, connectionId: parameters.connectionId } } as KnowledgeAction, signal);
+        return { text: JSON.stringify(result), details: result };
       }
       case "connectorQueue": {
         if (!this.extensions.connector || !parameters.connector || !parameters.connectionId) throw new GatewayError("invalid_request", "connectorQueue requires connector and connectionId");

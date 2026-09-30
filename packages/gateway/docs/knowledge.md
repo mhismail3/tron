@@ -755,7 +755,7 @@ are shape failures, never empty pages. Credential references are admitted only i
 the exact `connector:<provider>:...` namespace; a legacy mismatch requires
 explicit reconfiguration and is never read as a different provider token. When the
 Keychain item for a connection's credential is missing, the connector failure names
-the Mac Keychain service and the exact account to add, never a token. X uses OAuth 2.0 Authorization Code with PKCE as a public client: setup requests `tweet.read users.read bookmark.read offline.access`, accepts the exact HTTPS callback URI and a user-pasted redirect URL or code/state, and verifies one-time state before exchange. The client ID is public; no app secret is accepted. The verifier and state are short-lived in Gateway memory. Access and rotating refresh tokens are stored only in the Mac Keychain; refresh-token rotation is written before its access token is used. X refreshes once when a token is near expiry or an API call returns 401; failed refresh marks the connection `auth-error` and requires reconnection. Every actual X API discovery request, including retry/pagination attempts, debits the existing bounded paid-attempt budget immediately before dispatch. `knowledge.x.credits` is a connection-scoped read routed as a Gateway read and drain-allow-listed; it returns the API's `free_balance`, `prepaid_balance`, and `total_balance` as USD balances. The official API defines `total_balance` as `max(0, prepaid_balance + free_balance)`; this read does not buy credits or authorize additional discovery spend.
+the Mac Keychain service and the exact account to add, never a token. X uses OAuth 2.0 Authorization Code with PKCE as a public client: setup requests `tweet.read users.read bookmark.read offline.access`, accepts the exact HTTPS callback URI and a user-pasted redirect URL or code/state, and verifies one-time state before exchange. The client ID is public; no app secret is accepted. The verifier and state are short-lived in Gateway memory. Access and rotating refresh tokens are stored only in the Mac Keychain; refresh-token rotation is written before its access token is used. A refresh checks current connection authority before spending the single-use refresh token; if setup changes during the provider response, the rotated token is still persisted but its access token is not used. X refreshes once when a token is near expiry or an API call returns 401, even when the discovery transport attempt budget is one; failed refresh marks the connection `auth-error` only if its setup revision is still current and requires reconnection. Every actual X API discovery request, including retry/pagination attempts, debits the existing bounded paid-attempt budget immediately before dispatch. `knowledge.x.credits` is a connection-scoped read routed as a Gateway read and drain-allow-listed; it returns the API's `free_balance`, `prepaid_balance`, and `total_balance` as USD balances. The provider's reported `total_balance` is returned as-is after all three balances are validated as finite numbers and free/total are nonnegative; binary floating-point arithmetic is not used to recompute or compare its total. This read does not buy credits or authorize additional discovery spend.
 Paid budgets are rejected until a provider operation has an explicit maintained
 price; approval flags never imply unknown spend. X is not contacted unless both explicit paid-access approval and a positive
 bounded budget are present. Paid qualification is host-owned and requires
@@ -800,8 +800,12 @@ header spellings. Redirects are not followed, and provider failures are
 redacted. This is metadata access, not full article capture. `knowledge.connector.discover`
 verifies the provider and discovers bookmarks into the exact connection's queue; it does
 not capture linked pages, create Knowledge sources, decide admission, or move Raindrop
-items. `knowledge.x.credits` reads the OAuth connection's current X developer-platform balance without spending the bookmark-discovery allowance; it returns `freeBalance`, `prepaidBalance`, and `totalBalance` in USD from `GET /2/usage/credits`. `knowledge.connector.queue` returns at most 25 items with ID, URL, title, collection,
-save time, existing-source indicator and admission/scope projection; it never returns
+items. `knowledge.x.credits` reads the OAuth connection's current X developer-platform balance without spending the bookmark-discovery allowance; it returns `freeBalance`, `prepaidBalance`, and `totalBalance` in USD from `GET /2/usage/credits`. The agent-visible `connectorStatus` action (`knowledge.connector.status`)
+reports the connector's remaining X `paidBudgetCents`, not the setup-time cap;
+read it before paid discovery. `knowledge.connector.queue` returns at most 25
+items with ID, URL, title, collection, save time, existing-source indicator and
+admission/scope projection, plus exact source and revision IDs when a source
+exists; it never returns
 provider payload. `knowledge.source.ingest` / agent action `ingestItem` saves one explicitly
 scoped queued item as a source, retaining provider identity/payload and Raindrop
 collection/note provenance, recovering Raindrop save time from that payload, and applying
@@ -824,7 +828,9 @@ Knowledge ingestion has four distinct owners:
   queue; queue reads expose bounded identity metadata; acknowledgment removes a
   processed/skipped identity; Raindrop movement is a separate provider effect
   gated by the current connection's write policy and derived from the source's
-  current admission/scope and mapped collection roles. Connectors do not assess
+  current admission/scope and mapped collection roles. The move verifies the
+  provider's live collection and accepts any currently mapped non-destination
+  collection as the starting point; unmapped live collections are refused. Connectors do not assess
   or decide admission/scope.
 - **Ingest:** `knowledge.source.ingest` / `ingestItem` retains one queued identity
   as a canonical source with provider identity and evidence, save-time recovery,

@@ -96,7 +96,11 @@ async function requestJson(http: ConnectorHTTP, endpoint: string, token: string 
   const retrySafe = !options.method || options.method === "GET";
   const maxAttempts = retrySafe ? (options.maxAttempts ?? RETRIES) : 1;
   let refreshedAfterUnauthorized = false;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  let refreshedRetryPending = false;
+  let attempt = 0;
+  while (attempt < maxAttempts || refreshedRetryPending) {
+    if (refreshedRetryPending) refreshedRetryPending = false;
+    else attempt += 1;
     // Resolve the current credential before charging an attempt. A missing or
     // rotated token is an admission failure, not a billable provider try.
     const attemptToken = typeof token === "function" ? await token() : token;
@@ -117,9 +121,10 @@ async function requestJson(http: ConnectorHTTP, endpoint: string, token: string 
       if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).result === false) throw new ConnectorAPIError();
       return { status: result.status, value, headers: result.headers };
     }
-    if (result.status === 401 && options.onUnauthorized && !refreshedAfterUnauthorized && attempt < maxAttempts) {
+    if (result.status === 401 && options.onUnauthorized && !refreshedAfterUnauthorized) {
       refreshedAfterUnauthorized = true;
       await options.onUnauthorized();
+      refreshedRetryPending = true;
       continue;
     }
     if (!retryable(result.status) || attempt === maxAttempts) throw new ConnectorHTTPError(result.status, result.headers.get("retry-after"), result.headers.get("x-ratelimit-reset") ?? result.headers.get("ratelimit-reset"));
@@ -172,7 +177,7 @@ function stateStatus(state: KnowledgeConnectorState | undefined, connector: Conn
   const accountId = authority?.providerAccountId ?? value.accountId;
   const scope = connector === "raindrop" && authority?.raindropCollections ? undefined : authority?.scope ?? value.scope;
   const policy = authority?.policy;
-  return { connector, ...(authority?.id ?? value.connectionId ? { connectionId: authority?.id ?? value.connectionId } : {}), configured, enabled, health, credentialAvailability, providerIdentity, ...(accountId ? { accountId } : {}), ...(scope ? { scope } : {}), ...(authority?.raindropCollections ? { raindropCollections: authority.raindropCollections } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: policy?.paidBudgetCents ?? value.paidBudgetCents, allowWrites: policy?.allowWrites ?? value.allowWrites, recurringApproved: policy?.recurringApproved ?? value.recurringApproved, paidAccessApproved: policy?.paidAccessApproved ?? value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentPilots ? { assessmentPilots: value.assessmentPilots } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
+  return { connector, ...(authority?.id ?? value.connectionId ? { connectionId: authority?.id ?? value.connectionId } : {}), configured, enabled, health, credentialAvailability, providerIdentity, ...(accountId ? { accountId } : {}), ...(scope ? { scope } : {}), ...(authority?.raindropCollections ? { raindropCollections: authority.raindropCollections } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: connector === "x" ? value.paidBudgetCents : policy?.paidBudgetCents ?? value.paidBudgetCents, allowWrites: policy?.allowWrites ?? value.allowWrites, recurringApproved: policy?.recurringApproved ?? value.recurringApproved, paidAccessApproved: policy?.paidAccessApproved ?? value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentPilots ? { assessmentPilots: value.assessmentPilots } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
 }
 function parseCollection(item: RaindropItemDTO): string | undefined {
   if (!item.collection || typeof item.collection !== "object") return undefined;
@@ -289,7 +294,13 @@ export class KnowledgeConnectorExtension {
     if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.configure(action.request)));
     if (action.operation === "knowledge.connector.assessment.approve") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.approveAssessment(action.request)));
     if (action.operation === "knowledge.x.oauth.begin") return this.lane("x", action.request.instanceId).run(() => this.beginXOAuth(action.request));
-    if (action.operation === "knowledge.x.oauth.complete") return this.completeXOAuth(action.request, signal);
+    if (action.operation === "knowledge.x.oauth.complete") return this.lane("x", this.xOAuthAttempts.get(action.request.operationId)?.instanceId ?? action.request.operationId).run(() => {
+      const controller = new AbortController();
+      const deadline = setTimeout(() => controller.abort(new Error("X OAuth setup deadline exceeded")), RUN_DEADLINE_MS);
+      deadline.unref?.();
+      const ownedSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
+      return this.completeXOAuth(action.request, ownedSignal).finally(() => clearTimeout(deadline));
+    });
     if (action.operation === "knowledge.x.credits") return this.lane("x", action.request.connectionId).run(() => this.readXCredits(action.request.connectionId, signal));
     if (action.operation === "knowledge.connector.status") return this.store.withConnectorContext(request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector, request.connectionId), action.request.connector, await this.connectionFor(request.connectionId, action.request.connector, Boolean(this.options.connections), true)));
     if (action.operation === "knowledge.connector.discover") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.discoverQueue(action.request, signal)));
@@ -367,7 +378,10 @@ export class KnowledgeConnectorExtension {
     this.xOAuthAttempts.delete(request.operationId);
     const setupRevision = Number((result as Record<string, unknown>).setupRevision);
     await this.options.connections.recordProviderObservation(attempt.instanceId, setupRevision, { credentialAvailability: "available", providerIdentity: "admitted" });
-    await this.store.updateConnectorState(command(request.commandId, "x-oauth-state"), "x", () => ({ ...initial("x"), connectionId: attempt.instanceId, accountId: userId, scope: userId, credentialRef, enabled: attempt.policy.enabled, allowWrites: attempt.policy.allowWrites, paidAccessApproved: attempt.policy.paidAccessApproved, paidBudgetCents: attempt.policy.paidBudgetCents, recurringApproved: attempt.policy.recurringApproved, health: "ready" }), undefined, attempt.instanceId);
+    await this.store.updateConnectorState(command(request.commandId, "x-oauth-state"), "x", current => {
+      const sameAccount = current?.accountId === userId;
+      return { ...(sameAccount ? current! : initial("x")), connectionId: attempt.instanceId, setupRevision, accountId: userId, scope: userId, credentialRef, enabled: attempt.policy.enabled, allowWrites: attempt.policy.allowWrites, paidAccessApproved: attempt.policy.paidAccessApproved, paidBudgetCents: sameAccount ? current!.paidBudgetCents : attempt.policy.paidBudgetCents, recurringApproved: attempt.policy.recurringApproved, health: "ready" };
+    }, undefined, attempt.instanceId);
     return result as Record<string, unknown>;
   }
 
@@ -400,20 +414,24 @@ export class KnowledgeConnectorExtension {
   }
 
   private async markXAuthorizationError(connectionId: string, setupRevision: number): Promise<void> {
-    try { await this.options.connections?.recordProviderObservation(connectionId, setupRevision, { credentialAvailability: "unavailable", providerIdentity: "unknown" }); } catch { /* A successor setup must not be changed by stale refresh work. */ }
-    await this.store.updateConnectorState(command(connectionId, "x-auth-error"), "x", state => ({ ...(state ?? initial("x")), health: "auth-error", lastError: "X authorization expired; reconnect the account" }), undefined, connectionId);
+    try { await this.options.connections?.recordProviderObservation(connectionId, setupRevision, { credentialAvailability: "unavailable", providerIdentity: "unknown" }); } catch { return; }
+    const live = await this.connectionFor(connectionId, "x", true);
+    if (!live || live.setupRevision !== setupRevision) return;
+    await this.store.updateConnectorState(command(connectionId, "x-auth-error"), "x", state => state?.connectionId === connectionId && state.setupRevision === setupRevision ? { ...state, health: "auth-error", lastError: "X authorization expired; reconnect the account" } : state ?? initial("x"), undefined, connectionId);
   }
 
   private async refreshXToken(connectionId: string, credentialRef: string, setupRevision: number, signal: AbortSignal): Promise<void> {
     try {
+      const live = await this.connectionFor(connectionId, "x", true);
+      if (!live || live.setupRevision !== setupRevision || live.credentialRef !== credentialRef || !live.policy.enabled) throw new GatewayError("conflict", "X connection changed before token refresh");
       const current = await this.storedXOAuth(credentialRef);
       const response = await this.xOAuthToken({ client_id: current.clientId, grant_type: "refresh_token", refresh_token: current.refreshToken }, signal);
       const rotated = this.validXTokenResponse(response);
-      const live = await this.connectionFor(connectionId, "x", true);
-      if (!live || live.setupRevision !== setupRevision || live.credentialRef !== credentialRef || !live.policy.enabled) throw new GatewayError("conflict", "X connection changed during token refresh");
-      // X refresh tokens are single-use: commit rotation before returning the
-      // newly issued access token to any provider request.
+      // Rotation is single-use. Persist its only valid refresh token even if
+      // setup changes while X responds, but never issue the stale access token.
       await this.credentialWriter().write(credentialRef, JSON.stringify({ accessToken: rotated.accessToken, refreshToken: rotated.refreshToken, clientId: current.clientId, expiresAt: new Date(Date.now() + rotated.expiresIn * 1_000).toISOString() }));
+      const afterRotation = await this.connectionFor(connectionId, "x", true);
+      if (!afterRotation || afterRotation.setupRevision !== setupRevision || afterRotation.credentialRef !== credentialRef || !afterRotation.policy.enabled) throw new GatewayError("conflict", "X connection changed during token refresh");
     } catch (error) {
       await this.markXAuthorizationError(connectionId, setupRevision);
       if (error instanceof GatewayError && error.code === "conflict") throw error;
@@ -438,7 +456,7 @@ export class KnowledgeConnectorExtension {
       const result = await requestJson(this.http, "https://api.x.com/2/usage/credits", () => this.xAccessToken(connectionId, authority.credentialRef!, authority.setupRevision, signal), { sleep: this.sleep, signal, onUnauthorized: () => this.refreshXToken(connectionId, authority.credentialRef!, authority.setupRevision, signal) });
       const data = result.value?.data;
       const free = data?.free_balance; const prepaid = data?.prepaid_balance; const total = data?.total_balance;
-      if (![free, prepaid, total].every(value => typeof value === "number" && Number.isFinite(value)) || free < 0 || total < 0 || total !== Math.max(0, free + prepaid)) throw new ConnectorShapeError();
+      if (![free, prepaid, total].every(value => typeof value === "number" && Number.isFinite(value)) || free < 0 || total < 0) throw new ConnectorShapeError();
       return { freeBalance: free, prepaidBalance: prepaid, totalBalance: total };
     } catch (error) {
       if (error instanceof GatewayError) throw error;
@@ -1005,7 +1023,7 @@ export class KnowledgeConnectorExtension {
     const entries = await Promise.all(pending.map(async item => {
       const source = await this.store.sourceByIdentity({ provider: request.connector, accountId: state.accountId!, itemId: item.id });
       const role = request.connector === "raindrop" ? authority?.raindropCollections?.find(mapping => mapping.collectionId === item.collectionId)?.role : undefined;
-      return { id: item.id, url: item.url, title: item.title.slice(0, 512), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(role ? { role } : {}), ...(item.savedAt ? { savedAt: item.savedAt } : {}), sourceExists: Boolean(source), ...(source ? { admission: source.content.admission?.status ?? "pending", scope: source.scope } : {}) };
+      return { id: item.id, url: item.url, title: item.title.slice(0, 512), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(role ? { role } : {}), ...(item.savedAt ? { savedAt: item.savedAt } : {}), sourceExists: Boolean(source), ...(source ? { sourceId: source.id, revisionId: source.revisionId, admission: source.content.admission?.status ?? "pending", scope: source.scope } : {}) };
     }));
     return { connector: request.connector, connectionId: request.connectionId, ...(collectionId ? { sourceCollection: collectionId } : {}), items: entries, remaining: Math.max(0, state.pending.filter(item => request.connector !== "raindrop" || item.collectionId === collectionId).length - entries.length) };
   }
@@ -1047,8 +1065,6 @@ export class KnowledgeConnectorExtension {
     const role = admission === "archived" ? "archive" : source.scope;
     const home = mappings.find(item => item.role === role);
     if (!home) return { status: "unsupported" };
-    const sourceMapping = mappings.find(item => item.collectionId === sourceCollection);
-    if (!sourceMapping) return { status: "unsupported" };
     const identity = source.content.identity;
     const itemId = identity?.provider === "raindrop" ? identity.itemId : source.content.origins?.find(origin => origin.identity?.provider === "raindrop")?.identity?.itemId;
     const accountId = identity?.provider === "raindrop" ? identity.accountId : source.content.origins?.find(origin => origin.identity?.provider === "raindrop")?.identity?.accountId;
@@ -1269,7 +1285,6 @@ export class KnowledgeConnectorExtension {
     const initialAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
     const destination = initialAuthority?.raindropCollections?.find(mapping => mapping.role === targetRole)?.collectionId;
     if (!sourceCollection || !destination) return { status: "unsupported" };
-    if (sourceCollection === destination) return { status: "moved" };
     // The source head's object reference is part of movement authority; a
     // dangling object must never be acknowledged as a successfully captured
     // item merely because readable text remains in the revision.
@@ -1277,9 +1292,8 @@ export class KnowledgeConnectorExtension {
     const moveAuthorityCurrent = async (): Promise<boolean> => {
       if (this.options.connections) {
         const instance = await this.connectionFor(input.connectionId, "raindrop", true);
-        const sourceMapping = instance?.raindropCollections?.find(candidate => candidate.collectionId === sourceCollection);
         const targetMapping = instance?.raindropCollections?.find(candidate => candidate.role === targetRole);
-        return Boolean(instance && instance.setupRevision === input.expectedSetupRevision && instance.policy.enabled && instance.policy.allowWrites && sourceMapping && targetMapping?.collectionId === destination);
+        return Boolean(instance && instance.setupRevision === input.expectedSetupRevision && instance.policy.enabled && instance.policy.allowWrites && targetMapping?.collectionId === destination);
       }
       return false;
     };
@@ -1310,8 +1324,8 @@ export class KnowledgeConnectorExtension {
     // A crash may occur after the provider move and before local completion.
     // Destination is an acknowledged success; never reclassify or issue PUT again.
     if (originalCollectionId === destination) return { status: "moved" };
-    const expectedCollection = sourceCollection;
-    if (originalCollectionId !== expectedCollection) return { status: "conflict" };
+    const liveAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
+    if (!liveAuthority?.raindropCollections?.some(mapping => mapping.collectionId === originalCollectionId)) return { status: "conflict" };
     const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: latestSource.id, basisRevisionId: latestSource.revisionId, provider: input.identity.provider, accountId: input.identity.accountId, originalCollectionId, destination, createdAt: this.now() };
     await this.store.updateConnectorState(input.commandId, "raindrop", current => ({ ...(current ?? latestState), pendingRemote: pending }));
     if (signal.aborted) return { status: "conflict" };
@@ -1319,7 +1333,8 @@ export class KnowledgeConnectorExtension {
     // is revoked after the durable receipt, retain uncertainty for reconcile
     // but never issue the remote PUT.
     const effectState = await this.store.connectorState("raindrop");
-    if (!effectState?.enabled || !effectState.allowWrites || effectState.accountId !== input.identity.accountId || effectState.credentialRef !== latestState.credentialRef || !(await moveAuthorityCurrent()) || effectState.paidBudgetCents > 0) return { status: "conflict" };
+    const effectAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
+    if (!effectState?.enabled || !effectState.allowWrites || effectState.accountId !== input.identity.accountId || effectState.credentialRef !== latestState.credentialRef || !(await moveAuthorityCurrent()) || !effectAuthority?.raindropCollections?.some(mapping => mapping.collectionId === originalCollectionId) || effectState.paidBudgetCents > 0) return { status: "conflict" };
     try {
       await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { method: "PUT", body: { collection: { $id: destination } }, sleep: this.sleep, signal });
       const verified = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal });

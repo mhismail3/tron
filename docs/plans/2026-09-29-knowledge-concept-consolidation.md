@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-29, approved
+- **Last updated:** 2026-09-30, C26–C27 review fixes
 - **Goal:** Every user-visible Knowledge idea (archived, decided, budget, summary, note, freshness, order, replacement) has exactly one owner and one meaning, before the library is seeded.
 
 ## Goal and constraints
@@ -569,3 +569,11 @@ buy credits) and the consent; agents never do them.
 - Changes: this commit.
 - Tasks added: none.
 - Deviations: OAuth completion uses a pasted callback URL/code instead of a reachable loopback callback, per plan; no live Gateway calls or lifecycle actions were performed. Updated the editable routine in the runtime workspace; did not edit installed agent skills. iOS result bundle was retained by the repository iOS test tooling.
+
+### C26–C27 review fixes · Done · 2026-09-30 · luna-worker
+
+- Result: Corrected Keychain stdin confirmation and read-back verification; accepted provider-rounded X balances; preserved same-account X queue/checkpoint/budget state across OAuth reconnect; allowed verified moves from the bookmark's current mapped collection; guaranteed one refresh retry beyond the discovery-attempt allowance; fenced refresh/auth-error work to the observed setup revision; exposed remaining X budget and exact source/revision IDs to the editable ingestion routine; removed stale connector-state destination validation and the unreachable OAuth work label; serialized OAuth completion in the per-connection lane with the normal deadline.
+- Evidence: Gateway build passed. Focused Gateway suites passed before full-scope validation (59 tests across connector credentials, connectors, and X OAuth; one Mac Keychain integration test executed on macOS). iOS generation/build and `IntegrationModelsTests` passed (7 tests). Full requested Gateway suite: 814 passed, 5 failed across 75 files; failures were two Knowledge timing/cleanup cases (`knowledge-intake-enrichment` ENOTEMPTY, Jev tag job timeout), logger 40 MB rotation timeout, and two request-span timing assertions. Similar cleanup/logger/request-span sensitivities were documented in the C26/C27 full-suite reports; the additional tagger timing failure was not compared on main. Each targeted regression was revert-checked: the Keychain integration, JS/iOS rounded-balance cases, 401 retry at maxAttempts=1, same-account reconnect preservation, move after triage unmapping/unmapped live refusal, refresh-rotation/setup fence, and queue source/revision projection all failed with the corresponding fix reverted.
+- Changes: review-fix commits.
+- Tasks added: none.
+- Deviations: No live Gateway interaction, rebuild, or lifecycle transition. The status route is exposed as the explicit agent action `connectorStatus`; the mutable runtime routine remains outside the repository at the specified workspace path.

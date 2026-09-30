@@ -854,6 +854,8 @@ describe("knowledge connectors", () => {
     expect(secondQueue.items.map((item: any) => item.id)).toEqual(["701"]);
     const source = await extension.invoke({ operation: "knowledge.source.ingest", request: { commandId: command("primitive-ingest"), connector: "raindrop", connectionId: "mapped", itemId: "701", scope: "research" } }) as any;
     expect(source.content.admission.status).toBe("pending");
+    const queueWithSource = await extension.invoke({ operation: "knowledge.connector.queue", request: { connector: "raindrop", connectionId: "mapped", sourceCollection: "7", limit: 1 } }) as any;
+    expect(queueWithSource.items[0]).toMatchObject({ sourceExists: true, sourceId: source.id, revisionId: source.revisionId });
     await expect(extension.invoke({ operation: "knowledge.raindrop.move", request: { commandId: command("primitive-move-denied"), connectionId: "mapped", itemId: "701", sourceId: source.id, expectedRevision: source.revisionId, sourceCollection: "7" } })).rejects.toThrow(/does not accept a caller-chosen destination/);
     const ackRequest = { commandId: command("primitive-ack"), connector: "raindrop" as const, connectionId: "mapped", itemId: "701", disposition: "processed" as const, reason: "Ingested into Knowledge" };
     const ack = await extension.invoke({ operation: "knowledge.connector.ack", request: ackRequest });
@@ -865,11 +867,11 @@ describe("knowledge connectors", () => {
   });
 
   it("derives remote destinations from admission/scope and returns already-home without a write", async () => {
-    const remote = new Map<string, string>([["research-item", "10"], ["archived-item", "10"]]);
+    const remote = new Map<string, string>([["research-item", "10"], ["archived-item", "10"], ["after-triage-unmapped", "7"], ["unmapped-live", "999"], ["unmapped-home-item", "999"]]);
     const writes: string[] = [];
     const { store, extension, owner } = await mappedRaindropFixture(async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
-      const itemId = /raindrop\/(research-item|archived-item)/.exec(url)?.[1];
+      const itemId = /raindrop\/(research-item|archived-item|after-triage-unmapped|unmapped-live|unmapped-home-item)/.exec(url)?.[1];
       if (!itemId) throw new Error(`unexpected endpoint ${url}`);
       if (init.method === "PUT") { const destination = String(JSON.parse(init.body ?? "{}").collection.$id); writes.push(destination); remote.set(itemId, destination); }
       return response({ item: { _id: itemId, collection: { $id: Number(remote.get(itemId)) } } });
@@ -886,9 +888,13 @@ describe("knowledge connectors", () => {
     await expect(extension.invoke({ operation: "knowledge.raindrop.move", request: { commandId: command("already-home-move"), connectionId: "mapped", itemId: "home-item", sourceId: home.record.id, expectedRevision: home.record.revisionId } })).resolves.toMatchObject({ status: "already-home" });
     const unmapped = await create("unmapped-home-item", "10", "retained");
     const current = await owner.resolveInstance("mapped");
-    await owner.execute({ kind: "policy.update", commandId: command("remove-research-home"), instanceId: "mapped", expectedSetupRevision: current.setupRevision, policy: current.policy, raindropCollections: [{ collectionId: "8", role: "personal" }, { collectionId: "9", role: "archive" }, { collectionId: "10", role: "triage" }] });
-    await expect(extension.invoke({ operation: "knowledge.raindrop.move", request: { commandId: command("unmapped-home-move"), connectionId: "mapped", itemId: "unmapped-home-item", sourceId: unmapped.record.id, expectedRevision: unmapped.record.revisionId } })).resolves.toMatchObject({ status: "unsupported" });
-    expect(writes).toEqual(["7", "9"]);
+    await owner.execute({ kind: "policy.update", commandId: command("remove-research-home"), instanceId: "mapped", expectedSetupRevision: current.setupRevision, policy: current.policy, raindropCollections: [{ collectionId: "7", role: "research" }, { collectionId: "8", role: "personal" }, { collectionId: "9", role: "archive" }] });
+    await expect(extension.invoke({ operation: "knowledge.raindrop.move", request: { commandId: command("unmapped-home-move"), connectionId: "mapped", itemId: "unmapped-home-item", sourceId: unmapped.record.id, expectedRevision: unmapped.record.revisionId } })).resolves.toMatchObject({ status: "conflict" });
+    const afterUnmapping = await create("after-triage-unmapped", "10", "archived");
+    await expect(extension.invoke({ operation: "knowledge.raindrop.move", request: { commandId: command("move-after-triage-unmapped"), connectionId: "mapped", itemId: "after-triage-unmapped", sourceId: afterUnmapping.record.id, expectedRevision: afterUnmapping.record.revisionId } })).resolves.toMatchObject({ status: "moved" });
+    const unmappedLive = await create("unmapped-live", "10", "archived");
+    await expect(extension.invoke({ operation: "knowledge.raindrop.move", request: { commandId: command("refuse-unmapped-live"), connectionId: "mapped", itemId: "unmapped-live", sourceId: unmappedLive.record.id, expectedRevision: unmappedLive.record.revisionId } })).resolves.toMatchObject({ status: "conflict" });
+    expect(writes).toEqual(["7", "9", "9"]);
   });
 
   it("refuses triage ingestion without caller scope and keeps legacy intake out of triage", async () => {

@@ -48,8 +48,11 @@ export class MacKeychainConnectorCredentialStore implements WritableConnectorCre
       const child = spawn("security", ["add-generic-password", "-U", "-s", this.service, "-a", reference, "-w"], { stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
       child.once("error", () => reject(new Error("Mac Keychain credential could not be stored")));
       child.once("close", code => code === 0 ? resolve() : reject(new Error("Mac Keychain credential could not be stored")));
-      child.stdin.end(`${value}\n`);
+      // `security` reads and confirms two password lines when stdin is not a
+      // TTY. A single line can exit successfully while storing an empty value.
+      child.stdin.end(`${value}\n${value}\n`);
     });
+    if (await this.read(reference) !== value) throw new Error("Mac Keychain credential could not be verified");
   }
 
   async delete(reference: string): Promise<void> {
