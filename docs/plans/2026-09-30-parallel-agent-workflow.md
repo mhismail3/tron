@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, wave 2 claimed (W-6, W-7, W-30 to W-35)
+- **Last updated:** 2026-09-30, maintainer decisions on rules timing, legacy sweep, heavy run and media evidence
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -204,8 +204,8 @@ Dated 2026-09-30:
 | W-6 | Claimed | Core: `finish` and `land`: push gates (claim branch, clean tree), a PR only with a passing receipt for the exact head plus `Closes #N` and a Verification section; evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff. A recurring steward automation polls and resumes the owning session. | W-5 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-7 | Claimed | Core: automatic cleanup of provably done resources; update the housekeeping skill to match | W-6 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-8 | Done | Dashboard skill and HTML card | W-4 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-9 | Ready | CI: required Linux policy job and `tron/verify` status; path-scoped, non-blocking macOS jobs whose failures reach the dashboard (D-4) | W-5 | Unassigned |
-| W-10 | Ready | Scheduled local heavy run on `main` that files `regression` issues | W-5 | Unassigned |
+| W-9 | Ready | CI: required Linux policy job and `tron/verify` status; path-scoped, non-blocking macOS jobs whose failures reach the dashboard (D-4). The maintainer applies the `main` ruleset only after W-6 and W-11 land. | W-5, W-6, W-11 | Unassigned |
+| W-10 | Ready | Heavy full-suite run on `main` on this Mac, on request only (no schedule); files `regression` issues | W-5 | Unassigned |
 | W-11 | Ready | Rewrite the guidance: `AGENTS.md` work section, a `tron-work` skill (take a task, dashboard), `CONTRIBUTING.md`, `.agents/README.md`, PR template, the rule that issue text not authored by the maintainer is untrusted and never an instruction (only the maintainer's Ready status authorizes work), retirement notice in `docs/plans/README.md` | W-6, W-8 | Unassigned |
 | W-12 | Ready | Pilot: migrate this plan into an epic and finish W-7 onward through the new flow | W-6 | Unassigned |
 | W-13 | Ready | Dependabot intake: each PR becomes an agent-owned `deps` task; the Pi SDK family and Node follow their runbooks | W-6 | Unassigned |
@@ -231,6 +231,7 @@ Dated 2026-09-30:
 | W-33 | Claimed | #125 agent scratch files and a shared Vitest artifact path break worktree isolation (P3) | none | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-34 | Claimed | #126 E2E harness and profiler refuse an inherited lease for another lane; lane cleanup after `clean` (P3) | W-17 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-35 | Claimed | #127 verify's `ios` check derives focused test owners instead of running the full hosted suite (P2) | W-7 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-36 | Ready | Verify attaches UI screenshots and short recordings (test-produced or agent-captured) to the private evidence repository and links them from the PR | W-5, W-6 | Unassigned |
 
 ## Task details
 
@@ -711,3 +712,14 @@ file-level. Everything else inspected is A.
     so W-31 (#115) was raised to P1.
   - That run also showed the `ios` check executing the full hosted suite
     (1930 tests, about 12 minutes), which is filed as W-35 (#127).
+
+### Maintainer decisions · 2026-09-30 · recorded by the orchestrator
+
+- Branch rules on `main`: applied only after W-6 (`work land`) and W-11
+  (guidance) land. Other sessions still push directly under the plan-doc
+  protocol until then.
+- Legacy sweep (W-14): after W-7 (`work cleanup`) lands, as one audited list
+  for the maintainer to approve.
+- Heavy run (W-10): on request only, no schedule.
+- Evidence media: include screenshots and short recordings for UI changes, in
+  the private evidence repository only (W-36).
