@@ -2280,8 +2280,17 @@ the large sheet detent as it takes focus, keeping the paged question viewport us
 while the keyboard appears; changing question pages clears focus. The Other button
 and editor have separate hit targets and accessibility values, with glass drawn only
 as their decorative background. A retiring editor cannot write an answer back after
-Other was deselected. Native Ask User UI regressions exercise medium-to-large typing,
-multiline input, both kinds of deselection, close/reopen drafts, and exact submission.
+Other was deselected. The editor (and the primitive input/editor field) is never
+`.disabled`: disabling a focused text view flips its UIKit interaction off inside a
+layout pass, and the re-entrant keyboard resignation fought `FocusState` until the
+main-thread watchdog killed the app when Send was tapped mid-typing. Send, Cancel and
+expiry release focus through `FocusState` first; the binding then refuses edits.
+Native Ask User UI regressions exercise medium-to-large typing, multiline input, both
+kinds of deselection, close/reopen drafts, exact submission, and Send from a focused
+Other editor on the last page of a paged form
+(`testAskUserSendWithFocusedOtherEditorOnLastPageSubmits`). The hang itself reproduced
+only on device; a watchdog `0x8BADF00D` crash report whose main thread sits in
+`setUserInteractionEnabled:` → `resignFirstResponder` is its one-step signal.
 
 Historical onboarding references captured by executing commit `c3f12c17c` live
 under `docs/assets/parity/`. `TronSmokeUITests` keeps matching medium/pairing

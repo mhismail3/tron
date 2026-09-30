@@ -186,7 +186,7 @@ private struct HostedAskUserFixture {
                     id: "timing", question: "When should the change happen?",
                     options: [ExtensionFormOption(id: "now", label: "Now", description: nil),
                               ExtensionFormOption(id: "later", label: "Later", description: nil)],
-                    multiSelect: false, allowOther: false
+                    multiSelect: false, allowOther: true
                 )
             ] : []),
             allowCancel: allowCancel

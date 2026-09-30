@@ -604,6 +604,31 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Mutation count: 0"].waitForExistence(timeout: 3))
     }
 
+    /// Failure mode: Send on a paged single-choice form while the last page's
+    /// Other editor holds the keyboard hangs the app before the answer is sent.
+    @MainActor
+    func testAskUserSendWithFocusedOtherEditorOnLastPageSubmits() {
+        let app = launchAskUser(styled: true, multiple: true)
+        let staging = app.buttons["Staging, A pre-release environment for validation."]
+        XCTAssertTrue(staging.waitForExistence(timeout: 5), app.debugDescription)
+        staging.tap()
+        app.staticTexts["Which environments should receive the change?"].swipeLeft()
+        XCTAssertTrue(app.staticTexts["When should the change happen?"].waitForExistence(timeout: 3), app.debugDescription)
+        let other = app.buttons.matching(NSPredicate(format: "label == %@", "Other"))
+            .allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(other, app.debugDescription)
+        other?.tap()
+        let editor = app.textViews["Other response for When should the change happen?"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
+        editor.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        editor.typeText("After the review")
+        keepScreenshot(named: "ask-user-last-page-other-focused")
+        app.buttons["Submit all answers"].tap()
+        XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 10), app.debugDescription)
+        keepScreenshot(named: "ask-user-last-page-other-submitted")
+    }
+
     @MainActor
     func testAskUserSingleChoiceOtherEditorHidesWhenChoosingAnOption() {
         let app = launchAskUser(styled: true)

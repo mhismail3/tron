@@ -282,7 +282,7 @@ struct AgentInstructionsOverview: View {
             // A dozen rows at most; eager layout keeps every row addressable
             // while the sheet rests at its medium detent.
             VStack(alignment: .leading, spacing: TronSpacing.lg) {
-                TronSettingsCaption("The model reads these sections in this order for every turn. Open one to see where it comes from.")
+                TronSettingsDetailText("The model reads these sections in this order for every turn. Open one to see where it comes from.")
                     .padding(.bottom, TronSpacing.xs)
                 ForEach(Array(projection.sections.enumerated()), id: \.element.id) { index, section in
                     sectionRow(section, number: index + 1)
@@ -412,7 +412,7 @@ private struct AgentInstructionsSectionSheet: View {
         let long = section.text.count > Self.inlineLimit
         return TronSettingsGroup("Content", accent: accent, surfaceStyle: .scrollOptimized) {
             Text(verbatim: long ? String(section.text.prefix(600)) + "…" : section.text)
-                .font(TronTypography.secondaryCodeDescription)
+                .font(TronTypography.codeJSON)
                 .foregroundStyle(Color.tronTextPrimary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
