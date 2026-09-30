@@ -258,28 +258,30 @@ function currentBranch(worktree) {
 }
 
 // Only the command that built a candidate knows its source, and only the
-// supervisor's ready transition knows which fingerprint runs. The builder
-// records source by payload fingerprint; status resolves it from the ready
-// buildFingerprint, so a failed restart never relabels the running Gateway.
-async function recordCandidateSource(path, payloadFingerprint, worktree) {
-  if (typeof payloadFingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(payloadFingerprint)) throw new Error("candidate source requires a payload fingerprint");
+// supervisor's ready transition knows which candidate runs. The builder
+// records source by the staged manifest's runtime epoch (fresh per stage;
+// the payload fingerprint is shared by Gateway-identical checkouts); status
+// resolves it from the ready epoch, so a failed restart never relabels the
+// running Gateway. Trimming keeps the running record.
+async function recordCandidateSource(path, runtimeEpoch, worktree) {
+  if (typeof runtimeEpoch !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(runtimeEpoch)) throw new Error("candidate source requires a runtime epoch");
   const root = text(worktree, "");
   if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
   const branch = currentBranch(root);
   await withStateLock(path, async () => {
     const current = await readState(path);
     const previous = Array.isArray(current.candidateSources) ? current.candidateSources : [];
-    const candidateSources = [
-      ...previous.filter((entry) => entry?.payloadFingerprint !== payloadFingerprint),
-      { payloadFingerprint, worktree: root, branch },
-    ].slice(-MAX_CANDIDATE_SOURCES);
+    const retained = previous.filter((entry) => entry?.runtimeEpoch !== runtimeEpoch);
+    const running = runningCandidateSource({ ...current, candidateSources: retained });
+    const older = retained.filter((entry) => entry !== running).slice(-(MAX_CANDIDATE_SOURCES - (running ? 2 : 1)));
+    const candidateSources = [...(running ? [running] : []), ...older, { runtimeEpoch, worktree: root, branch }];
     await atomicWrite(path, { ...current, candidateSources, updatedAt: new Date().toISOString() });
   });
 }
 
 function runningCandidateSource(state) {
-  if (typeof state.buildFingerprint !== "string" || !Array.isArray(state.candidateSources)) return undefined;
-  return state.candidateSources.find((entry) => entry?.payloadFingerprint === state.buildFingerprint);
+  if (typeof state.epoch !== "string" || !Array.isArray(state.candidateSources)) return undefined;
+  return state.candidateSources.find((entry) => entry?.runtimeEpoch === state.epoch);
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -329,9 +331,9 @@ if (command === "transition") {
   process.stdout.write(`${manifest.runtimeEpoch} ${manifest.sourceRevision} ${manifest.payloadFingerprint}\n`);
 } else if (command === "validate-build-identity") {
   const value = args[0] ?? "";
-  const match = /^([A-Za-z0-9._-]{1,128}) ([a-f0-9]{64})$/u.exec(value);
+  const match = /^([A-Za-z0-9._-]{1,128}) ([a-f0-9]{64}) ([A-Za-z0-9._-]{1,128})$/u.exec(value);
   if (!match) throw new Error("Debug candidate build returned an invalid identity");
-  process.stdout.write(`${match[1]} ${match[2]}\n`);
+  process.stdout.write(`${match[1]} ${match[2]} ${match[3]}\n`);
 } else if (command === "resolve-host-fixture") {
   const fixture = JSON.parse(args[0] ?? "{}");
   process.stdout.write(`${selectTailscaleAddress(fixture) ?? ""}\n`);
