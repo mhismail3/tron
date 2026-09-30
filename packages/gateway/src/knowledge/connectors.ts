@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { KnowledgeCurationRefusal, type KnowledgeAssessmentApprovalRequest, type KnowledgeConnectorConfigurationRequest, type KnowledgeConnectorRunRequest, type KnowledgeConnectorState, type KnowledgeConnectorStatus, type KnowledgeAction, type KnowledgeRecord, type KnowledgeRaindropRequest, type KnowledgeRaindropIntakeRequest, type KnowledgeSourceIngestRequest } from "./knowledge-contract.js";
+import { KnowledgeCurationRefusal, type KnowledgeAssessmentApprovalRequest, type KnowledgeConnectorConfigurationRequest, type KnowledgeConnectorDiscoverRequest, type KnowledgeConnectorQueueRequest, type KnowledgeConnectorAckRequest, type KnowledgeRaindropMoveRequest, type KnowledgeConnectorState, type KnowledgeConnectorStatus, type KnowledgeAction, type KnowledgeRecord, type KnowledgeRaindropRequest, type KnowledgeRaindropIntakeRequest, type KnowledgeSourceIngestRequest } from "./knowledge-contract.js";
 import { captureSource, isVerifiedSourceCapture, recoverProviderSaveTime } from "./source-capture.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
@@ -63,9 +63,6 @@ function bad(message: string): GatewayError { return new GatewayError("invalid_r
  * is an opaque Keychain account name, and no token ever appears here. */
 function missingCredential(connector: Connector, credentialRef: string): GatewayError {
   return new GatewayError("unsupported", `${connector === "raindrop" ? "Raindrop" : "X"} credential is unavailable. Add it to the Mac Keychain: service '${CONNECTOR_CREDENTIAL_SERVICE}', account '${credentialRef}'.`);
-}
-function collectionProgress(current: Record<string, string> | undefined, itemId: string, collectionId: string): Record<string, string> {
-  return Object.fromEntries([...Object.entries(current ?? {}).filter(([id]) => id !== itemId), [itemId, collectionId]].slice(-2_000));
 }
 function command(base: string, suffix: string): string {
   const normalizedBase = base.replace(/[^A-Za-z0-9._:-]/g, "_"); const normalizedSuffix = suffix.replace(/[^A-Za-z0-9._:-]/g, "_");
@@ -285,7 +282,10 @@ export class KnowledgeConnectorExtension {
     if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.configure(action.request)));
     if (action.operation === "knowledge.connector.assessment.approve") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.approveAssessment(action.request)));
     if (action.operation === "knowledge.connector.status") return this.store.withConnectorContext(request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector, request.connectionId), action.request.connector, await this.connectionFor(request.connectionId, action.request.connector, Boolean(this.options.connections), true)));
-    if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.run(action.request, signal)));
+    if (action.operation === "knowledge.connector.discover") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.discoverQueue(action.request, signal)));
+    if (action.operation === "knowledge.connector.queue") return this.withConnection(action.request.connector, request.connectionId, () => this.queue(action.request));
+    if (action.operation === "knowledge.connector.ack") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.ack(action.request)));
+    if (action.operation === "knowledge.raindrop.move") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.moveOne(action.request, signal)));
     if (action.operation === "knowledge.raindrop.intake") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.intake(action.request, signal)));
     if (action.operation === "knowledge.source.ingest") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.ingest(action.request, signal)));
     throw bad("Unsupported knowledge connector operation");
@@ -686,10 +686,7 @@ export class KnowledgeConnectorExtension {
         outcomeMap.set(item.id, { ...(previous ?? { itemId: item.id, title: item.title.slice(0, 512) }), ...patch, ...(patch.reason !== undefined ? { reason: patch.reason.slice(0, 2_000) } : {}) } as IntakeOutcome);
       };
       const canonicalFor = (itemId: string): Promise<KnowledgeRecord & { kind: "source" } | undefined> => this.store.sourceByIdentity({ provider: "raindrop", accountId: state.accountId!, itemId });
-      const markDone = async (itemId: string) => this.store.updateConnectorState(command(request.commandId, `done-${itemId}`), "raindrop", current => {
-        const next = current ?? live;
-        return { ...next, pending: next.pending.filter(candidate => candidate.id !== itemId || candidate.collectionId !== sourceCollection), capturedIds: [...new Set([...next.capturedIds, itemId])].slice(-2_000), capturedCollections: collectionProgress(next.capturedCollections, itemId, sourceCollection), remaining: Math.max(0, next.pending.length - 1) };
-      });
+      const markDone = async (itemId: string) => this.ack({ commandId: command(request.commandId, `done-${itemId}`), connector: "raindrop", ...(request.connectionId ? { connectionId: request.connectionId } : {}), itemId, disposition: "processed", reason: "Processed by the bounded legacy Raindrop intake" });
       const approvedItems = cohort.map(itemId => live.pending.find(item => item.id === itemId)).filter((item): item is NonNullable<typeof item> => Boolean(item));
       const approvedSet = new Set(approvedItems.map(item => item.id));
       for (const itemId of cohort) if (!approvedSet.has(itemId)) {
@@ -814,7 +811,67 @@ export class KnowledgeConnectorExtension {
     } finally { clearTimeout(deadline); }
   }
 
-  private async run(request: KnowledgeConnectorRunRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
+  private async queue(request: KnowledgeConnectorQueueRequest): Promise<Record<string, unknown>> {
+    if (!request.connectionId) throw bad("Connector queue requires a connectionId");
+    const limit = request.limit ?? 25;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) throw bad("Connector queue limit must be 1..25");
+    const state = await this.store.connectorState(request.connector, request.connectionId);
+    if (!state?.enabled) throw new GatewayError("unsupported", "Connector is not configured for this connection");
+    const authority = await this.connectionFor(request.connectionId, request.connector, Boolean(this.options.connections));
+    let collectionId = request.sourceCollection;
+    let scope: "research" | "personal" | undefined;
+    if (request.connector === "raindrop") {
+      const mappings = authority?.raindropCollections;
+      if (this.options.connections && !mappings?.length) throw new GatewayError("unsupported", "Configure Raindrop collection mappings before reading the queue");
+      if (collectionId === undefined && mappings?.length === 1) collectionId = mappings[0]!.collectionId;
+      if (mappings && !collectionId) throw bad("Choose a mapped Raindrop collection");
+      const mapping = mappings?.find(item => item.collectionId === collectionId);
+      if (mappings && !mapping) throw new GatewayError("unsupported", "Raindrop source collection is not mapped to a Knowledge scope");
+      scope = mapping?.scope ?? "research";
+    } else if (request.sourceCollection !== undefined) throw bad("Only Raindrop queues accept sourceCollection");
+    const pending = state.pending.filter(item => request.connector !== "raindrop" || item.collectionId === collectionId).slice(0, limit);
+    const entries = await Promise.all(pending.map(async item => {
+      const source = await this.store.sourceByIdentity({ provider: request.connector, accountId: state.accountId!, itemId: item.id });
+      return { id: item.id, url: item.url, title: item.title.slice(0, 512), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { savedAt: item.savedAt } : {}), sourceExists: Boolean(source), ...(source ? { admission: source.content.admission?.status ?? "pending", scope: source.scope } : scope ? { scope } : {}) };
+    }));
+    return { connector: request.connector, connectionId: request.connectionId, ...(collectionId ? { sourceCollection: collectionId } : {}), items: entries, remaining: Math.max(0, state.pending.filter(item => request.connector !== "raindrop" || item.collectionId === collectionId).length - entries.length) };
+  }
+
+  private async ack(request: KnowledgeConnectorAckRequest): Promise<Record<string, unknown>> {
+    if (!request.commandId || request.commandId.length > 160 || !request.itemId || request.itemId.length > 128 || !request.reason.trim() || request.reason.length > 500) throw bad("Connector acknowledgment requires a bounded itemId and reason");
+    const state = await this.store.connectorState(request.connector, request.connectionId);
+    const item = state?.pending.find(candidate => candidate.id === request.itemId);
+    if (!item) {
+      const prior = state?.processedItems?.find(candidate => candidate.id === request.itemId);
+      if (prior) return { ...prior, idempotent: true };
+      throw new GatewayError("not_found", "Connector item is not in the pending queue");
+    }
+    const authority = await this.connectionFor(request.connectionId, request.connector, Boolean(this.options.connections));
+    if (request.connector === "raindrop" && authority?.raindropCollections?.length && !authority.raindropCollections.some(mapping => mapping.collectionId === item.collectionId)) throw new GatewayError("conflict", "Queued Raindrop item is no longer mapped to this connection");
+    const processedAt = this.now();
+    const processed = { id: item.id, disposition: request.disposition, reason: request.reason.trim(), ...(item.collectionId ? { collectionId: item.collectionId } : {}), processedAt };
+    const updated = await this.store.updateConnectorState(request.commandId, request.connector, current => {
+      const live = current ?? state!;
+      if (live.processedItems?.some(candidate => candidate.id === item.id)) return live;
+      if (!live.pending.some(candidate => candidate.id === item.id)) throw new GatewayError("conflict", "Connector queue item changed before acknowledgment");
+      return { ...live, pending: live.pending.filter(candidate => candidate.id !== item.id), processedItems: [...(live.processedItems ?? []).filter(candidate => candidate.id !== item.id), processed].slice(-2_000), capturedIds: request.disposition === "processed" ? [...new Set([...live.capturedIds, item.id])].slice(-2_000) : live.capturedIds, ...(item.collectionId ? { capturedCollections: { ...(live.capturedCollections ?? {}), [item.id]: item.collectionId } } : {}), remaining: Math.max(0, live.pending.length - 1) };
+    }, undefined, request.connectionId);
+    return updated.processedItems?.find(candidate => candidate.id === item.id) ?? processed;
+  }
+
+  private async moveOne(request: KnowledgeRaindropMoveRequest, signal?: AbortSignal): Promise<{ status: "moved" | "conflict" | "unsupported" }> {
+    if (!request.connectionId || !request.commandId || !request.sourceId || !request.expectedRevision) throw bad("Raindrop move requires an exact source revision and connection");
+    const source = await this.store.read(request.sourceId, request.expectedRevision, false, true, true);
+    if (!source || source.kind !== "source") return { status: "conflict" };
+    const state = await this.store.connectorState("raindrop", request.connectionId);
+    if (!state?.allowWrites) return { status: "unsupported" };
+    const authority = await this.connectionFor(request.connectionId, "raindrop", Boolean(this.options.connections));
+    const mapping = authority?.raindropCollections?.find(item => item.collectionId === request.sourceCollection);
+    if (this.options.connections && (!authority?.policy.allowWrites || !mapping || mapping.destination !== request.destination)) return { status: "unsupported" };
+    return this.moveRaindrop({ commandId: request.commandId, itemId: request.itemId, source, expectedRevision: request.expectedRevision, identity: { provider: "raindrop", accountId: state.accountId!, itemId: request.itemId }, sourceCollection: request.sourceCollection, destination: request.destination, connectionId: request.connectionId, ...(authority?.setupRevision !== undefined ? { expectedSetupRevision: authority.setupRevision } : {}) }, signal);
+  }
+
+  private async discoverQueue(request: KnowledgeConnectorDiscoverRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
     const connector = request.connector; const authority = await this.connectionFor(request.connectionId, connector, Boolean(this.options.connections)); const current = await this.store.connectorState(connector);
     if (!current?.enabled || !current.credentialRef || !current.accountId || (connector === "x" && !current.scope) || (connector === "raindrop" && !current.scope && !authority?.raindropCollections?.length)) throw new GatewayError("unsupported", `Knowledge ${connector} connector is not configured`);
     if (request.sourceCollection !== undefined && !/^-?\d{1,18}$/.test(request.sourceCollection)) throw bad("Connector source collection is invalid");
@@ -899,16 +956,10 @@ export class KnowledgeConnectorExtension {
       }
       const discovered = await this.discover(request.commandId, connector, selectedCollection ? { ...current, scope: selectedCollection } : current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt);
       let state = await this.store.connectorState(connector) ?? current;
-      if (request.dryRun) {
-        const scopedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
-        const result = { connector, dryRun: true, ...(selectedCollection ? { sourceCollection: selectedCollection, scope: mappedScope } : {}), discovered: discovered.discovered, pending: scopedPending.length, remaining: scopedPending.length, health: state.health };
-        await this.store.updateConnectorState(command(request.commandId, "dry"), connector, value => ({ ...(value ?? state), health: "ready", remaining: value?.pending.length ?? state.pending.length }));
-        return result;
-      }
       const scopedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
       state = await this.store.updateConnectorState(command(request.commandId, "finish"), connector, value => ({ ...(value ?? state), health: "ready", lastRunAt: this.now(), remaining: value?.pending.length ?? state.pending.length }));
       clearTimeout(deadline);
-      return { connector, dryRun: false, discovered: discovered.discovered, pending: scopedPending.length, remaining: state.remaining, health: state.health };
+      return { connector, discovered: discovered.discovered, pending: scopedPending.length, remaining: state.remaining, health: state.health };
     } catch (error) {
       const health = credentialUnavailable || error instanceof ConnectorHTTPError && authFailure(error.status) ? "auth-error" : error instanceof ConnectorHTTPError && error.status === 429 ? "rate-limited" : "error";
       const message = error instanceof ConnectorHTTPError ? `Provider request failed (${error.status})` : error instanceof Error ? error.message : "Connector discovery failed";
@@ -927,9 +978,10 @@ export class KnowledgeConnectorExtension {
     // each bounded sweep at page zero; the durable identity fence deduplicates
     // already captured/pending items while later pages remain discoverable.
     let cursor = connector === "raindrop" ? undefined : state.checkpoints?.[checkpointKey]; let discovered = 0;
+    const processedIds = (state.processedItems ?? []).filter(item => connector !== "raindrop" || item.collectionId === state.scope).map(item => item.id);
     const seen = connector === "raindrop"
-      ? new Set([...state.pending.filter(item => item.collectionId === state.scope).map(item => item.id), ...state.capturedIds.filter(id => state.capturedCollections?.[id] === state.scope)])
-      : new Set([...state.pending.map(item => item.id), ...state.capturedIds]);
+      ? new Set([...state.pending.filter(item => item.collectionId === state.scope).map(item => item.id), ...state.capturedIds.filter(id => state.capturedCollections?.[id] === state.scope), ...processedIds])
+      : new Set([...state.pending.map(item => item.id), ...state.capturedIds, ...processedIds]);
     for (let page = 0; page < 10 && discovered < limit; page += 1) {
       const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal, ...(beforeAttempt === undefined ? {} : { beforeAttempt }) }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(maxAttempts === undefined ? {} : { maxAttempts }), ...(beforeAttempt === undefined ? {} : { beforeAttempt }) });
       const parsed = connector === "raindrop" ? parseRaindrop(result.value) : parseX(result.value);

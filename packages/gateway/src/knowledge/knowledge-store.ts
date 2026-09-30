@@ -462,6 +462,13 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x" | "j
     if (!Array.isArray(state.assessmentApprovals) || state.assessmentApprovals.length > 32 || new Set(state.assessmentApprovals.map(item => (item as Record<string, unknown>)?.id)).size !== state.assessmentApprovals.length) throw new KnowledgeStoreError("invalid", "Invalid connector assessment approvals");
     state.assessmentApprovals.forEach(item => validateAssessmentAuthority(item, "assessment approval"));
   }
+  if (state.processedItems !== undefined) {
+    if (!Array.isArray(state.processedItems) || state.processedItems.length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector processed items");
+    for (const item of state.processedItems) {
+      const processed = item as Record<string, unknown>;
+      if (!processed || typeof processed.id !== "string" || processed.id.length < 1 || processed.id.length > 512 || !["processed", "skipped"].includes(processed.disposition as string) || typeof processed.reason !== "string" || processed.reason.length < 1 || processed.reason.length > 500 || typeof processed.processedAt !== "string" || (processed.collectionId !== undefined && (typeof processed.collectionId !== "string" || !/^-?\d{1,18}$/.test(processed.collectionId)))) throw new KnowledgeStoreError("invalid", "Invalid connector processed item");
+    }
+  }
   for (const id of state.capturedIds) if (typeof id !== "string" || id.length > 512) throw new KnowledgeStoreError("invalid", "Invalid connector captured ID");
   if (state.capturedCollections !== undefined) {
     if (!state.capturedCollections || typeof state.capturedCollections !== "object" || Array.isArray(state.capturedCollections) || Object.keys(state.capturedCollections).length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector collection progress");

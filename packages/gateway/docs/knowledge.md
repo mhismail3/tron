@@ -459,9 +459,14 @@ reads or sweeps, including a credential disappearing between attempts, clear the
 observation under the captured setup revision rather than leaving a stale ready label.
 `allowWrites`, `paidAccessApproved`, and `recurringApproved` remain
 independent controls and default to false. The Gateway registers `knowledge.v1` typed RPC
-handlers and a bounded first-party `knowledge` retrieval tool. The tool performs explicit
-search/recall/read/list plus typed `connectorSweep` and `synthesis` actions for existing
-Automations; it does not create a scheduler or run journal. Search, recall, and list hide
+handlers and a bounded first-party `knowledge` tool. Connector actions are primitives:
+`connectorDiscover` discovers into the selected connection queue, `connectorQueue` reads a
+bounded metadata page, `ingestItem` saves one identity as an undecided source,
+`connectorAck` moves it to the processed set with a reason, and `raindropMove` uses the
+write-authorized reconciled move owner. They make no admission or scope decisions.
+Automation discovery preserves the recurring-approved gate; X attempts remain bounded and
+paid-gated. Search/recall/read/list and synthesis are also explicit actions; the tool does
+not create a scheduler or run journal. Search, recall, and list hide
 personal-scope sources unless the caller explicitly requests a scope; personal notes and
 observations are unaffected. Search/recall age, freshness, verdict, save-time, and take
 metadata are projected from the returned source record, including archived or pending hits.
@@ -703,7 +708,7 @@ top-level bookmark membership, page checkpoints, identity/coverage validation,
 and signed-in browser fallback when installed in Tron's user-level skills directory. There is no new
 cookie store, background sync, automatic browser login, or remote mutation.
 Never send known protected content to a public mirror without approval.
-The existing paid `connectorSweep` X path is not selected by this free reader;
+The paid, explicitly invoked X connector-discovery action is not selected by this free reader;
 its existing explicit spending gates are unchanged.
 
 Focused regressions: `x-public-post.test.ts` covers identity, URL isolation,
@@ -782,15 +787,18 @@ Provider JSON is preserved; HTTP/metadata responses over 2,000,000 bytes and
 agent text over 128,000 bytes fail rather than truncating fields. Narrow pages
 or fetch individual items; a single item over the agent bound is unsupported. Retries honor `Retry-After` and both common rate-limit
 header spellings. Redirects are not followed, and provider failures are
-redacted. This is metadata access, not full article capture. `connectorSweep` only
-verifies the provider and discovers bookmarks into the connector queue; it does
-not capture linked pages, create Knowledge sources, decide admission, or move
-Raindrop items. `knowledge.source.ingest` / agent action `ingestItem` saves one
-explicitly scoped queued item as a source, retaining provider identity/payload
-and Raindrop collection/note provenance, recovering Raindrop save time from that
-payload, and applying the linked-capture safety downgrade. It leaves admission
-pending and does not acknowledge the queue item, assess, or decide. Personal
-scope remains excluded from work retrieval. `raindropIntake` still owns its
+redacted. This is metadata access, not full article capture. `knowledge.connector.discover`
+verifies the provider and discovers bookmarks into the exact connection's queue; it does
+not capture linked pages, create Knowledge sources, decide admission, or move Raindrop
+items. `knowledge.connector.queue` returns at most 25 items with ID, URL, title, collection,
+save time, existing-source indicator and admission/scope projection; it never returns
+provider payload. `knowledge.source.ingest` / agent action `ingestItem` saves one explicitly
+scoped queued item as a source, retaining provider identity/payload and Raindrop
+collection/note provenance, recovering Raindrop save time from that payload, and applying
+the linked-capture safety downgrade. It leaves admission pending and does not acknowledge,
+assess, or decide. `knowledge.connector.ack` requires processed/skipped plus a bounded
+reason, removes the item from pending, persists bounded processed history, and is
+idempotent. Personal scope remains excluded from work retrieval. `raindropIntake` still owns its
 legacy decision and move workflow until C23, but uses the same ingest primitive
 for source capture. Agent sweeps use the same accepted-work owner as RPC runs, so
 disconnecting a presentation waiter does not replay or abandon admitted provider
@@ -942,8 +950,11 @@ receives a durable
 are absent from normal retrieval but can be explicitly listed/read/restored
 without using privacy suppression. Connector captures awaiting admission are
 also absent from normal retrieval; inspection requires the separate
-`includePending` audit/intake flag. Generic `connectorSweep` only discovers and
-queues provider identities; it cannot capture or move a source. Only intake,
+`includePending` audit/intake flag. Generic connector discovery only queues provider identities; it cannot capture or move a
+source. The independent `raindropMove` primitive requires current connection write
+permission, a configured source-to-destination mapping, and an exact retained/archived
+captured source revision; it reuses the durable remote-effect receipt and reconciliation
+path. Only intake,
 after the local revision commits and the exact source head, admission, identity,
 retained object, and provider collection are revalidated, can use the existing
 Raindrop preflight/receipt/PUT/read-back path to attempt the configured Agent

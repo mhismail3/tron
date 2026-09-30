@@ -920,7 +920,10 @@ export interface KnowledgeConnectorConfigurationRequest {
 }
 
 export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; connectionId?: string; }
-export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; dryRun: boolean; limit?: number; sourceCollection?: string; }
+export interface KnowledgeConnectorDiscoverRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; limit?: number; sourceCollection?: string; }
+export interface KnowledgeConnectorQueueRequest { connector: "raindrop" | "x"; connectionId: string; limit?: number; sourceCollection?: string; }
+export interface KnowledgeConnectorAckRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; itemId: string; disposition: "processed" | "skipped"; reason: string; }
+export interface KnowledgeRaindropMoveRequest { commandId: string; connectionId: string; itemId: string; sourceId: string; expectedRevision: string; sourceCollection: string; destination: string; }
 
 /** Read-only Raindrop API access. Every request revalidates the authenticated
  * user against the configured accountId; returned provider objects are raw
@@ -963,6 +966,7 @@ export interface KnowledgeConnectorState {
   /** Per-provider-collection pagination checkpoints; never a complete remote snapshot. */
   checkpoints?: Record<string, string>;
   pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; savedAt?: string; collectionId?: string; apiPayload?: string; metadataComplete?: boolean }>;
+  processedItems?: Array<{ id: string; disposition: "processed" | "skipped"; reason: string; collectionId?: string; processedAt: string }>;
   capturedIds: string[];
   /** Last mapped collection observed for processed Raindrop item identities. */
   capturedCollections?: Record<string, string>;
@@ -1085,7 +1089,10 @@ export type KnowledgeAction =
   | { operation: "knowledge.connector.configure"; request: KnowledgeConnectorConfigurationRequest }
   | { operation: "knowledge.connector.assessment.approve"; request: KnowledgeAssessmentApprovalRequest }
   | { operation: "knowledge.connector.status"; request: KnowledgeConnectorStatusRequest }
-  | { operation: "knowledge.connector.run"; request: KnowledgeConnectorRunRequest }
+  | { operation: "knowledge.connector.discover"; request: KnowledgeConnectorDiscoverRequest }
+  | { operation: "knowledge.connector.queue"; request: KnowledgeConnectorQueueRequest }
+  | { operation: "knowledge.connector.ack"; request: KnowledgeConnectorAckRequest }
+  | { operation: "knowledge.raindrop.move"; request: KnowledgeRaindropMoveRequest }
   | { operation: "knowledge.raindrop.intake"; request: KnowledgeRaindropIntakeRequest }
   | { operation: "knowledge.source.ingest"; request: KnowledgeSourceIngestRequest }
   | { operation: "knowledge.raindrop.read"; request: KnowledgeRaindropRequest };

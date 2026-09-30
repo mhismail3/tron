@@ -410,16 +410,16 @@ describe("KnowledgeService integration", () => {
     expect(calls).toBe(0);
   });
 
-  it("exposes typed connector sweeps to existing Automation tool callers", async () => {
+  it("exposes bounded connector discovery as a typed agent action", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
+    let received: unknown;
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {
-      connector: async action => ({ operation: action.operation, accepted: true }),
+      connector: async action => { received = action; return { operation: action.operation, accepted: true }; },
     });
-    const result = await service.tool({ action: "connectorSweep", commandId: "service-sweep", connector: "raindrop", dryRun: true, limit: 1 });
-    expect(result.text).toContain("discovery completed");
-    expect(result.text).toContain("were not captured or decided");
-    expect(result.details).toEqual({ operation: "knowledge.connector.run", accepted: true });
+    const result = await service.tool({ action: "connectorDiscover", commandId: "service-discover", connector: "raindrop", connectionId: "mapped", sourceCollectionId: "7", limit: 1 });
+    expect(result.text).toContain("queued only");
+    expect(received).toEqual({ operation: "knowledge.connector.discover", request: { commandId: "service-discover", connector: "raindrop", connectionId: "mapped", sourceCollection: "7", limit: 1 } });
   });
 
   it("exposes bounded Raindrop reads through the agent knowledge tool", async () => {

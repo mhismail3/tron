@@ -84,7 +84,7 @@ only on the user's word) apply to every task.
 | C17 | Needs scoping | Superseded by C18–C23 (user decision 2026-09-29): X gets connector primitives and the ingestion routine, not its own intake pipeline | C3, C4, C5 | — |
 | C18 | Done | Decision authority in the store: connector/system writes never override a user or agent admission or scope | none | knowledge-consolidation session, 2026-09-29 |
 | C19 | Done | Ingest primitive: save one queued provider item with identity, save date, note, collection and payload, undecided and idempotent | C18 | knowledge-consolidation session, 2026-09-29 |
-| C20 | Claimed | Connector primitives as agent actions: discover, read queue, acknowledge/skip, Raindrop move under write permission | C19 | knowledge-consolidation session, 2026-09-29 |
+| C20 | Done | Connector primitives as agent actions: discover, read queue, acknowledge/skip, Raindrop move under write permission | C19 | knowledge-consolidation session, 2026-09-29 |
 | C21 | Claimed | Assessment primitive: assess a source with Jev (one budget) or the Knowledge model; returns a recommendation, decides nothing | C18 | knowledge-consolidation session, 2026-09-29 |
 | C22 | Claimed | Ingestion routine as an editable agent skill, plus owning docs | C19, C20, C21 | knowledge-consolidation session, 2026-09-29 |
 | C23 | Blocked | Dry-run parity with Raindrop intake on live data, then delete the intake pipeline and its batch machinery | C22, user Gateway update | — |
@@ -397,3 +397,13 @@ deletes it only after a dry-run of the routine matches it on live data.
 - Kept on purpose: `knowledge.raindrop.intake` remains until C23 and continues its current assessment/admission/move workflow; ingestion never acknowledges queued work.
 - Deviations: none.
 - For the next agent: C20 owns queue acknowledgment/skip and other connector primitives; C23 remains gated on user-approved live dry-run and Gateway update.
+
+### C20 · Done · 2026-09-29 · luna-worker
+
+- Result: Replaced connector sweep/run with connection-scoped discover, queue, acknowledgment, and Raindrop move primitives. Queue pages expose bounded identity/metadata and source admission/scope only, never provider payload. Processed/skipped acknowledgments leave the queue, persist a bounded reasoned processed record, and suppress rediscovery. Legacy Raindrop intake now acknowledges through the primitive.
+- Evidence: `npm run build` passed; `npx vitest run src/knowledge` passed (27 files, 378 tests); documentation policy and personal-info guard passed. Revert proof: temporarily removing the `knowledge.connector.discover` dispatch made `connectors.test.ts` fail at discover in the discover→queue→ingest→ack case; restoring it and rerunning the Knowledge suite passed. A preceding full-suite run hit one transient 15-second enrichment-test timeout; its isolated rerun and final full suite passed.
+- Changes: this commit
+- Tasks added: none.
+- Kept on purpose: `knowledge.raindrop.intake` remains until C23 and uses the shared discovery, ingestion, move, and acknowledgment paths; X retains the paid attempt budget and automation recurrence gate.
+- Deviations: none.
+- For the next agent: C21 owns the assessment primitive; C23 still requires the user-approved live dry-run and Gateway update before deleting legacy intake.

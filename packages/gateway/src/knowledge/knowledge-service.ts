@@ -24,7 +24,7 @@ import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESE
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorDiscover"), Type.Literal("connectorQueue"), Type.Literal("connectorAck"), Type.Literal("raindropMove"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -43,6 +43,9 @@ const toolParameters = Type.Object({
   pilotMaxItems: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
   pilotBudgetCents: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
   sourceCollectionId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  disposition: Type.Optional(Type.Union([Type.Literal("processed"), Type.Literal("skipped")])),
+  reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+  destination: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   includeArchived: Type.Optional(Type.Boolean()),
   includePending: Type.Optional(Type.Boolean()),
   sourceRevisionIds: Type.Optional(Type.Array(Type.String({ minLength: 16, maxLength: 80 }), { minItems: 1, maxItems: 32 })),
@@ -771,11 +774,14 @@ export class KnowledgeService {
       case "knowledge.raindrop.read":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
         return this.extensions.connector(action, signal);
-      case "knowledge.connector.run":
+      case "knowledge.connector.discover":
+      case "knowledge.connector.queue":
+      case "knowledge.connector.ack":
+      case "knowledge.raindrop.move":
       case "knowledge.raindrop.intake":
       case "knowledge.source.ingest":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
-        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : "knowledge connector run", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
+        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : action.operation === "knowledge.raindrop.move" ? "Raindrop move" : "Knowledge connector action", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
     }
   }
 
@@ -931,18 +937,34 @@ export class KnowledgeService {
         const result = await this.invoke({ operation: "knowledge.source.ingest", request: { commandId: parameters.commandId, connector: parameters.connector, connectionId: parameters.connectionId, itemId: parameters.itemId, scope: parameters.scope } }, signal);
         return { text: `Queued ${parameters.connector} item ingested as source ${JSON.stringify(result).slice(0, 4_000)}. The queue item remains unacknowledged; admission remains pending.`, details: result };
       }
-      case "connectorSweep": {
+      case "connectorDiscover": {
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
-        if (!parameters.commandId || !parameters.connector) throw new GatewayError("invalid_request", "Connector sweeps require commandId and connector");
-        if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
+        if (!parameters.commandId || !parameters.connector || !parameters.connectionId) throw new GatewayError("invalid_request", "connectorDiscover requires commandId, connector, and connectionId");
+        if (signal?.aborted) throw new GatewayError("busy", "Connector discovery was cancelled", true);
         const invocation = currentInvocationContext();
         if (invocation?.operationId?.startsWith("automation:")) {
           const connectorState = await this.store.connectorState(parameters.connector, parameters.connectionId);
           if (!connectorState?.recurringApproved) throw new GatewayError("unsupported", "Connector recurrence is not approved");
         }
-        const result = await this.runOwned("connector sweep", ownedSignal => this.extensions.connector!({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId!, connector: parameters.connector!, ...(parameters.connectionId ? { connectionId: parameters.connectionId } : {}), dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } }, ownedSignal), signal);
-        if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
-        return { text: `${parameters.connector} discovery completed; bookmarks are queued for intake and were not captured or decided: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+        const result = await this.runOwned("connector discovery", ownedSignal => this.extensions.connector!({ operation: "knowledge.connector.discover", request: { commandId: parameters.commandId!, connector: parameters.connector!, connectionId: parameters.connectionId!, ...(parameters.sourceCollectionId ? { sourceCollection: parameters.sourceCollectionId } : {}), ...(parameters.limit ? { limit: parameters.limit } : {}) } }, ownedSignal), signal);
+        return { text: `${parameters.connector} discovery finished. Items are queued only; no source was ingested, admitted, or moved. ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+      }
+      case "connectorQueue": {
+        if (!this.extensions.connector || !parameters.connector || !parameters.connectionId) throw new GatewayError("invalid_request", "connectorQueue requires connector and connectionId");
+        const result = await this.invoke({ operation: "knowledge.connector.queue", request: { connector: parameters.connector, connectionId: parameters.connectionId, ...(parameters.sourceCollectionId ? { sourceCollection: parameters.sourceCollectionId } : {}), limit: Math.min(parameters.limit ?? 25, 25) } }, signal);
+        const text = JSON.stringify(result);
+        if (Buffer.byteLength(text, "utf8") > 128_000) throw new GatewayError("invalid_request", "Connector queue page exceeds the agent output bound");
+        return { text, details: result };
+      }
+      case "connectorAck": {
+        if (!this.extensions.connector || !parameters.commandId || !parameters.connector || !parameters.connectionId || !parameters.itemId || !parameters.disposition || !parameters.reason) throw new GatewayError("invalid_request", "connectorAck requires commandId, connector, connectionId, itemId, disposition, and reason");
+        const result = await this.invoke({ operation: "knowledge.connector.ack", request: { commandId: parameters.commandId, connector: parameters.connector, connectionId: parameters.connectionId, itemId: parameters.itemId, disposition: parameters.disposition, reason: parameters.reason } }, signal);
+        return { text: `Connector item ${parameters.itemId} ${parameters.disposition}: ${parameters.reason.slice(0, 500)}`, details: result };
+      }
+      case "raindropMove": {
+        if (!this.extensions.connector || !parameters.commandId || !parameters.connectionId || !parameters.itemId || !parameters.sourceId || !parameters.expectedRevision || !parameters.sourceCollectionId || !parameters.destination) throw new GatewayError("invalid_request", "raindropMove requires commandId, connectionId, itemId, sourceId, expectedRevision, sourceCollectionId, and destination");
+        const result = await this.invoke({ operation: "knowledge.raindrop.move", request: { commandId: parameters.commandId, connectionId: parameters.connectionId, itemId: parameters.itemId, sourceId: parameters.sourceId, expectedRevision: parameters.expectedRevision, sourceCollection: parameters.sourceCollectionId, destination: parameters.destination } }, signal) as { status: string };
+        return { text: `Raindrop move ${result.status}; provider writes require current connection write permission and exact captured source authority.`, details: result };
       }
       case "curate": {
         const response = await this.curate(curationToolRequest(parameters));

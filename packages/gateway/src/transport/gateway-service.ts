@@ -503,12 +503,19 @@ export class GatewayService {
       case "knowledge.correction":
       case "knowledge.forget":
       case "knowledge.exclusion":
+      case "knowledge.connector.queue": {
+        const knowledge = this.requireKnowledge();
+        return safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction));
+      }
       case "knowledge.connector.configure":
       case "knowledge.connector.assessment.approve":
-      case "knowledge.connector.run":
+      case "knowledge.connector.discover":
+      case "knowledge.connector.ack":
+      case "knowledge.raindrop.move":
+      case "knowledge.source.ingest":
       case "knowledge.raindrop.intake": {
         const knowledge = this.requireKnowledge();
-        return this.mutation(client, method, params, async () => safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction)));
+        return this.mutation(client, method, params, async () => safeJson(await knowledge.invoke({ operation: method, request: params } as unknown as KnowledgeAction)));
       }
       case "connections.setup.begin":
       case "connections.setup.complete":
