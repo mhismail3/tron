@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 import SwiftUI
 import TronMobileCore
 
@@ -642,7 +641,6 @@ struct ReadOnlySubagentSessionSheet: View {
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
-        .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.hidden)
         .tronPresentation()
         .accessibilityIdentifier("read-only-subagent-session-sheet")
@@ -797,7 +795,6 @@ struct ReadOnlySubagentSessionSheet: View {
                 .padding(.horizontal, 16)
                 .padding(orientation.paddingEdgeSet(.top), 12)
                 .scrollTargetLayout()
-                .background { SubagentSheetScrollBoundary().frame(width: 0, height: 0) }
             }
             .chatTranscriptViewport(orientation, safeAreaInsets: insets)
             .chatTranscriptScrollBehavior(
@@ -920,64 +917,6 @@ private struct ReadOnlySubagentTranscriptRow: View, Equatable {
             message.item.role == .user ? .trailing : .leading
         case .toolRun, .notification:
             .leading
-        }
-    }
-}
-
-/// Select sheet tracking independently of the transcript's reflected content edge.
-private struct SubagentSheetScrollBoundary: UIViewRepresentable {
-    func makeUIView(context: Context) -> Probe { Probe() }
-    func updateUIView(_ view: Probe, context: Context) { view.reconcile() }
-    static func dismantleUIView(_ view: Probe, coordinator: ()) { view.restore() }
-
-    final class Probe: UIView {
-        private weak var owner: UIViewController?
-        private let recipient = UIScrollView()
-        private var previous: [(NSDirectionalRectEdge, UIScrollView?)] = []
-        private var reported = false
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            recipient.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
-            recipient.contentSize = CGSize(width: 1, height: 3)
-            recipient.contentInsetAdjustmentBehavior = .never
-            recipient.contentOffset.y = 1
-            recipient.isScrollEnabled = false
-            recipient.scrollsToTop = false
-            recipient.isUserInteractionEnabled = false
-            recipient.accessibilityElementsHidden = true
-            addSubview(recipient)
-        }
-        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-        override func didMoveToWindow() { super.didMoveToWindow(); reconcile() }
-        override func layoutSubviews() { super.layoutSubviews(); reconcile() }
-        func reconcile() {
-            guard window != nil else { restore(); return }
-            var responder: UIResponder? = self
-            while let current = responder, !(current is UIViewController) { responder = current.next }
-            var controller = responder as? UIViewController
-            while let parent = controller?.parent { controller = parent }
-            guard let controller, controller.sheetPresentationController != nil,
-                  controller.presentingViewController != nil else {
-                restore()
-                if !reported {
-                    reported = true
-                    Logger(subsystem: "com.tron.mobile", category: "ChatTranscriptOrientation")
-                        .error("Child sheet scroll boundary unavailable: no presented sheet controller")
-                }
-                return
-            }
-            guard owner !== controller else { return }
-            restore()
-            owner = controller
-            for edge: NSDirectionalRectEdge in [.top, .bottom] {
-                previous.append((edge, controller.contentScrollView(for: edge)))
-                controller.setContentScrollView(recipient, for: edge)
-            }
-        }
-        func restore() {
-            for (edge, scroll) in previous { owner?.setContentScrollView(scroll, for: edge) }
-            previous.removeAll()
-            owner = nil
         }
     }
 }

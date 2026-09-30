@@ -3966,3 +3966,13 @@ origin's large newest-edge content pull collapses the sheet (header **78→430.3
 and today's oldest-edge pulls still dismiss. Next contained public-API experiment:
 set the child transcript scroll's `transfersVerticalScrollingToParent=false`,
 restoring it on removal; leave the native delegate and header gestures untouched.
+
+Supervisor approved one bounded `setContentScrollView(_:for:)` experiment scoped
+only to the presented child sheet, with no visual changes permitted. It also
+fails functionally (`b7ceadaaa`, `20260930T090548Z-run.QpMIpg`): today's edge still
+dismisses and origin's large newest-edge pull still collapses. Therefore all
+experimental probes/recognizers/recipients are removed, not retained as fallback
+code. Per supervisor direction, record an isolated orientation × detent × drag
+matrix before/after `.scrolls`; retain that modifier only if it strictly improves
+the boundary without a new regression. Full content-only gesture acceptance is
+blocked; no private API, delegate replacement, timer or offset repair will be added.
