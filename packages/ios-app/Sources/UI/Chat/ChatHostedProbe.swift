@@ -23,6 +23,28 @@ final class ChatHostedNativeRowMarker: UIView {
     var hostIdentity = UUID()
 }
 
+@MainActor
+final class ReadOnlySubagentHostedProbe {
+    weak var store: ReadOnlySubagentSessionStore?
+}
+
+extension EnvironmentValues {
+    @Entry var readOnlySubagentHostedProbe: ReadOnlySubagentHostedProbe? = nil
+}
+
+/// Sheet rows do not otherwise own a hosted lifetime token. The native marker's
+/// identity is created once per mount, never rewritten by a value update.
+struct ChatHostedStableRowProbe: UIViewRepresentable {
+    let id: String
+    func makeUIView(context: Context) -> ChatHostedNativeRowMarker { ChatHostedNativeRowMarker() }
+    func updateUIView(_ view: ChatHostedNativeRowMarker, context: Context) {
+        view.physicalID = id
+        view.semanticID = id
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+    }
+}
+
 struct ChatHostedObstructionProbe: UIViewRepresentable {
     func makeUIView(context: Context) -> ChatHostedObstructionMarker { ChatHostedObstructionMarker() }
     func updateUIView(_ uiView: ChatHostedObstructionMarker, context: Context) {}

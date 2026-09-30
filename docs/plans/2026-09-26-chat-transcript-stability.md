@@ -3571,3 +3571,34 @@ and documentation cleanup are still in progress. Sheet task starts after follow 
   Native geometry is stored in a plain non-observable owner, not view state.
   Pre-existing initial geometry-cycle and UIKit editor state-update warnings also
   occur on today's baseline; they are not silently represented as a clean log.
+
+### CT-23 subagent session sheet · worker lane ct23c
+
+Claimed after the follow checkpoint. Failure modes before implementation:
+
+- The child sheet's estimated-end pin can land in a blank after tall-row
+  preparation, canonical appends or a detent animation. Record every display
+  frame against sheet-window coordinates, not contentSize-based pin assertions.
+- Reversing the child timeline must preserve semantic and physical row identity,
+  upright row-local content, earlier-message control at visual top, and the
+  footer/placeholder/retry/reconnecting order and environments.
+- Appends/refreshes while detached must retain the same row at <0.5 pt; loading
+  earlier must not move it. The origin path must not issue growth scroll commands
+  or maintain a second estimated-tail owner.
+- The real sheet's detent animation must carry its full viewport and clearance
+  with one orientation owner. Both paths use the same launch selection; today's
+  path keeps its existing underflow and estimated-end behavior.
+
+CT-23 child-sheet additional approved failure modes: canonical live append must
+not change a detached installed projection; explicit earlier pages must extend
+that frozen projection without admitting the pending live tail; returning by
+scrolling to newest must install the current canonical projection without a
+blank frame. Reuse the main viewport mode's intake policy. No unread UI is added.
+This freeze is a sheet behaviour change requiring device confirmation. Supervisor
+accepted the shared UIKit detent endpoint-layout limitation for this task after
+measuring origin expansion/collapse at 0/13 blank frames versus today's 7/29;
+gap errors were 318/340 pt versus 3,135/19,916 pt. Detents remain measurement-only
+with per-frame artifacts; every non-detent pinned phase retains the strict gap
+and no-blank gate. No compensation was added. Device checklist: confirm frozen
+history/catch-up behaviour and inspect the still-visible collapse band (13 blank
+frames in that run), because hosted improvement is not device acceptance.

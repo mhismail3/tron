@@ -278,6 +278,32 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     }
 }
 
+/// A zero-copy spine over the same canonical items, carrying stable item IDs and
+/// their layout positions for the owner's accessibility ordering.
+struct ChatTranscriptOrderedElements<Base: RandomAccessCollection>: RandomAccessCollection
+where Base.Element: Identifiable {
+    struct Element: Identifiable {
+        let item: Base.Element
+        let spinePosition: Int
+        var id: Base.Element.ID { item.id }
+    }
+    let base: Base
+    let orientation: ChatTranscriptOrientation
+    var startIndex: Int { 0 }
+    var endIndex: Int { base.count }
+    subscript(position: Int) -> Element {
+        let source = orientation.visualPosition(ofSpinePosition: position, count: base.count)
+        return Element(item: base[base.index(base.startIndex, offsetBy: source)], spinePosition: position)
+    }
+}
+
+extension ChatTranscriptOrientation {
+    func ordered<Base: RandomAccessCollection>(_ items: Base) -> ChatTranscriptOrderedElements<Base>
+    where Base.Element: Identifiable {
+        ChatTranscriptOrderedElements(base: items, orientation: self)
+    }
+}
+
 /// Read obstructions in the unflipped space, but propose the entire viewport to
 /// the transformed scroll view. Merely ignoring safe areas on the flip can still
 /// shrink its native clip when keyboard + accessories cross the viewport center.
@@ -395,6 +421,21 @@ private struct ChatTranscriptOrientationModifier: ViewModifier {
 }
 
 extension View {
+    /// Native anchoring and edge effects are shared by main and child transcripts.
+    /// The sheet retains its visual-top underflow alignment; chat uses newest.
+    func chatTranscriptScrollBehavior(
+        _ orientation: ChatTranscriptOrientation,
+        sizeChangesPinned: Bool,
+        position: Binding<ScrollPosition>,
+        underflowAt edge: Edge = .bottom
+    ) -> some View {
+        defaultScrollAnchor(orientation.newestEndAnchor, for: .initialOffset)
+            .defaultScrollAnchor(edge == .bottom ? orientation.newestEndAnchor : orientation.oldestEndAnchor, for: .alignment)
+            .defaultScrollAnchor(sizeChangesPinned ? orientation.newestEndAnchor : orientation.oldestEndAnchor, for: .sizeChanges)
+            .scrollPosition(position)
+            .scrollEdgeEffectHidden(orientation.suppressesPinnedEndScrollEdgeEffect, for: Edge.Set(orientation.newestEdge))
+    }
+
     /// Renders this view in the transcript's orientation. The transcript applies
     /// it to its scroll view and each row applies it to its own element.
     func chatTranscriptOrientation(_ orientation: ChatTranscriptOrientation) -> some View {

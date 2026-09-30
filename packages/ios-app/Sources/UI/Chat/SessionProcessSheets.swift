@@ -549,6 +549,9 @@ private struct ReadOnlySubagentOpenIdentity: Hashable {
 }
 
 struct ReadOnlySubagentSessionSheet: View {
+    #if HOSTED_TEST
+    @Environment(\.readOnlySubagentHostedProbe) private var hostedProbe
+    #endif
     let parentSessionID: String
     let process: SessionProcessActivity
 
@@ -567,6 +570,7 @@ struct ReadOnlySubagentSessionSheet: View {
     @State private var sheetRoutes = ChatTranscriptSheetRouteOwner()
 
     private let tailID = "read-only-subagent-tail"
+    private let orientation = ChatTranscriptOrientation.selected
 
     var body: some View {
         NavigationStack {
@@ -609,6 +613,9 @@ struct ReadOnlySubagentSessionSheet: View {
                   let target = model.presentationTarget(for: parentSessionID),
                   let subscriptionToken = model.presentationSubscriptionToken(for: parentSessionID) else { return }
             if store == nil { store = ReadOnlySubagentSessionStore(client: model.client) }
+            #if HOSTED_TEST
+            hostedProbe?.store = store
+            #endif
             if invalidationSinkID == nil, let mountedStore = store {
                 invalidationSinkID = model.registerProcessTranscriptInvalidationSink { [weak mountedStore] change in
                     mountedStore?.invalidate(change)
@@ -697,7 +704,7 @@ struct ReadOnlySubagentSessionSheet: View {
 
     @ViewBuilder
     private func content(_ store: ReadOnlySubagentSessionStore) -> some View {
-        if !store.items.isEmpty {
+        if !store.items.isEmpty || !store.presentation.timeline.items.isEmpty {
             transcript(store)
         } else {
             switch store.status {
@@ -735,89 +742,132 @@ struct ReadOnlySubagentSessionSheet: View {
     }
 
     private func transcript(_ store: ReadOnlySubagentSessionStore) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if store.transcriptStart > 0 {
-                    TronPaginationButton(label: "Load earlier messages", loadingLabel: "Loading earlier…", icon: "arrow.up", isLoading: store.status == .loadingEarlier, isEnabled: store.canLoadEarlier, accent: ChatNotificationTone.subagent.primaryColor) {
-                        store.loadEarlier()
+        ChatTranscriptViewport(orientation: orientation) { insets in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if orientation.presentsNewestRowFirst {
+                        ChatTranscriptOriginClearance(height: orientation.layoutClearance(for: insets).top)
+                            .id("read-only-subagent-obstruction")
+                        tail
+                        transcriptStatus(store).chatTranscriptOrientation(orientation)
+                    } else {
+                        earlierMessages(store)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
-                }
-                if store.presentation.timeline.items.isEmpty {
-                    let isActive = store.liveActivity?.lifecycle.isActiveWork == true
-                    SessionProcessPlaceholder(
-                        title: isActive ? "Transcript starting" : "No transcript recorded",
-                        detail: isActive
-                            ? "Canonical messages will appear here as this subagent works."
-                            : "This completed subagent session contains no presentable messages.",
-                        icon: isActive ? "ellipsis.message" : "doc.text.magnifyingglass"
-                    )
-                    .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
-                } else {
-                    ForEach(store.presentation.timeline.items) { item in
-                        ReadOnlySubagentTranscriptRow(
-                            item: item,
-                            preparedText: store.preparedText.slice(for: item),
-                            toolPayloads: store.presentation.toolPayloads
+                    if store.presentation.timeline.items.isEmpty {
+                        let isActive = store.liveActivity?.lifecycle.isActiveWork == true
+                        SessionProcessPlaceholder(
+                            title: isActive ? "Transcript starting" : "No transcript recorded",
+                            detail: isActive
+                                ? "Canonical messages will appear here as this subagent works."
+                                : "This completed subagent session contains no presentable messages.",
+                            icon: isActive ? "ellipsis.message" : "doc.text.magnifyingglass"
                         )
-                        .environment(\.chatTranscriptSheetRoutes, sheetRoutes)
-                        // Transcript/tool semantics are not navigation chrome.
-                        .environment(\.tronSettingsVisualTheme, nil)
                         .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
-                        .id(item.id)
+                        .chatTranscriptOrientation(orientation)
+                    } else {
+                        ForEach(orientation.ordered(store.presentation.timeline.items)) { entry in
+                            ReadOnlySubagentTranscriptRow(
+                                item: entry.item,
+                                preparedText: store.preparedText.slice(for: entry.item),
+                                toolPayloads: store.presentation.toolPayloads
+                            )
+                            .environment(\.chatTranscriptSheetRoutes, sheetRoutes)
+                            // Transcript/tool semantics are not navigation chrome.
+                            .environment(\.tronSettingsVisualTheme, nil)
+                            .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                            #if HOSTED_TEST
+                            .background { ChatHostedStableRowProbe(id: entry.item.id) }
+                            #endif
+                            .chatTranscriptOrientation(orientation)
+                            .chatTranscriptVoiceOverOrder(orientation, spinePosition: entry.spinePosition)
+                            .id(entry.item.id)
+                        }
+                    }
+                    if orientation.presentsNewestRowFirst {
+                        earlierMessages(store).chatTranscriptOrientation(orientation)
+                    } else {
+                        transcriptStatus(store)
+                        tail
                     }
                 }
-                if case .failed(let message) = store.status {
-                    Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
-                    Button("Retry", action: store.retry)
-                        .accessibilityIdentifier("retry-subagent-session-button")
-                }
-                if store.status == .reconnecting {
-                    TronLoadingState(label: "Updating canonical session…")
-                        .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
-                }
-                Color.clear
-                    .frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)
-                    .id(tailID)
-                    .accessibilityHidden(true)
+                .padding(.horizontal, 16)
+                .padding(orientation.paddingEdgeSet(.top), 12)
+                .scrollTargetLayout()
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .scrollTargetLayout()
+            .chatTranscriptViewport(orientation, safeAreaInsets: insets)
+            .chatTranscriptScrollBehavior(
+                orientation,
+                sizeChangesPinned: !orientation.pinsToEstimatedOrigin || isNearTail,
+                position: $scrollPosition,
+                underflowAt: .top
+            )
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                if orientation.pinsToEstimatedOrigin {
+                    // Today's evaluation path retains its original behavior.
+                    return geometry.contentOffset.y + geometry.containerSize.height
+                        >= geometry.contentSize.height - 72
+                }
+                return orientation.coordinatorGeometry(geometry).distanceFromBottom <= 72
+            } action: { _, nearTail in
+                if orientation.pinsToEstimatedOrigin {
+                    if isNearTail != nearTail { isNearTail = nearTail }
+                } else {
+                    store.updateViewportMode(nearTail ? .pinned : .anchored)
+                }
+            }
+            .onChange(of: store.transcriptTotal) { previous, current in
+                guard orientation.pinsToEstimatedOrigin, current > previous, isNearTail else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    scrollPosition.scrollTo(id: tailID, anchor: orientation.newestEndAnchor)
+                }
+            }
+            .tronScrollEdgeChrome()
         }
-        // A child transcript's tool runs render as ordinary cards, so this host
-        // never resolves a tool-run route; it presents the thinking and event
-        // detail routes their rows ask for, resolved from this transcript's own
-        // projection.
+        // Thinking/event routes remain outside the lazy spine and render flip.
         .modifier(ChatTranscriptSheetHost(
             routes: sheetRoutes,
             resolveThinkingTrace: { store.resolveThinkingTrace($0) },
             resolveNotificationDetail: { store.resolveNotificationDetail($0) }
         ))
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(.top, for: .alignment)
-        // Native tail anchoring must track lazy Markdown measurement and sheet
-        // resizing. A top-owned size change can strand the opening offset below
-        // the actual content, leaving a blank viewport until the user drags it.
-        .defaultScrollAnchor(isNearTail ? .bottom : .top, for: .sizeChanges)
-        .scrollPosition($scrollPosition)
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentOffset.y + geometry.containerSize.height
-                >= geometry.contentSize.height - 72
-        } action: { _, nearTail in
-            isNearTail = nearTail
-        }
         .environment(\.canonicalResourceSessionID, store.childSessionRef)
-        .onChange(of: store.transcriptTotal) { previous, current in
-            guard current > previous, isNearTail else { return }
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                scrollPosition.scrollTo(id: tailID, anchor: .bottom)
+    }
+
+    private var tail: some View {
+        Color.clear
+            .frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)
+            .id(tailID)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func earlierMessages(_ store: ReadOnlySubagentSessionStore) -> some View {
+        if store.transcriptStart > 0 {
+            TronPaginationButton(label: "Load earlier messages", loadingLabel: "Loading earlier…", icon: "arrow.up", isLoading: store.status == .loadingEarlier, isEnabled: store.canLoadEarlier, accent: ChatNotificationTone.subagent.primaryColor) {
+                store.loadEarlier()
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+        }
+    }
+
+    @ViewBuilder
+    private func transcriptStatus(_ store: ReadOnlySubagentSessionStore) -> some View {
+        VStack(spacing: 0) {
+            if case .failed(let message) = store.status {
+                Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
+                Button("Retry", action: store.retry)
+                    .accessibilityIdentifier("retry-subagent-session-button")
+            }
+            if store.status == .reconnecting {
+                TronLoadingState(label: "Updating canonical session…")
+                    .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             }
         }
-        .tronScrollEdgeChrome()
+        #if HOSTED_TEST
+        .background { ChatHostedStableRowProbe(id: "read-only-subagent-status") }
+        #endif
     }
 
 }
