@@ -166,6 +166,7 @@ export class ConnectionOwner {
     try { validateCommand(command); } catch (error) { if (error instanceof GatewayError) throw error; throw invalid(error instanceof Error ? error.message : "Connection command is invalid"); }
     return this.mutex.run(async () => {
       const state = await this.load(true);
+      this.rejectLegacyJevInstance(command.instanceId);
       const operation = command.kind;
       const hash = connectionRequestHash(operation, command);
       const prior = state.receipts[command.commandId];
@@ -232,9 +233,7 @@ export class ConnectionOwner {
       const state = await this.load(false);
       const instance = state.instances[instanceId];
       if (!instance) {
-        if (this.rejectedLegacyJevIds.has(instanceId)) {
-          throw conflict(`Persisted knowledge.jev connection '${instanceId}' is no longer supported; configure the typesafe provider credential instead`);
-        }
+        this.rejectLegacyJevInstance(instanceId);
         throw conflict("Connection instance is unknown");
       }
       return copy(instance);
@@ -326,6 +325,12 @@ export class ConnectionOwner {
       validateConnectionState(readable);
       return readable;
     } catch (error) { throw new GatewayError("conflict", error instanceof Error ? `Connection state is unavailable: ${error.message}` : "Connection state is unavailable"); }
+  }
+
+  private rejectLegacyJevInstance(instanceId: string): void {
+    if (this.rejectedLegacyJevIds.has(instanceId)) {
+      throw conflict(`Persisted knowledge.jev connection '${instanceId}' is no longer supported; configure the typesafe provider credential instead`);
+    }
   }
 
   private async save(state: ConnectionOwnerState): Promise<void> {

@@ -19,6 +19,8 @@ describe("ConnectionOwner", () => {
       const snapshot = await owner.snapshot();
       expect(snapshot.instances.map((instance) => instance.id)).toEqual(["healthy"]);
       await expect(owner.resolveInstance("legacy")).rejects.toThrow(/knowledge\.jev connection 'legacy'.*configure the typesafe provider credential/);
+      await expect(owner.execute({ kind: "disconnect", commandId: "legacy-disconnect-001", instanceId: "legacy" }))
+        .rejects.toThrow(/knowledge\.jev connection 'legacy'.*configure the typesafe provider credential/);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   it("validates and revision-fences Raindrop collection-to-scope mappings in connection configuration", async () => {
