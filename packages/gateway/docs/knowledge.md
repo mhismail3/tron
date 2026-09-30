@@ -814,6 +814,41 @@ work. Connector identity reuse
 resolves through a canonical Knowledge catalog index keyed by
 provider/account/item rather than scanning source pages.
 
+## Ingestion layers and agent routine
+
+Knowledge ingestion has four distinct owners:
+
+- **Connector:** authenticated, bounded provider discovery populates a connection's
+  queue; queue reads expose bounded identity metadata; acknowledgment removes a
+  processed/skipped identity; Raindrop movement is a separate provider effect
+  gated by the current connection's write policy and that source collection's
+  configured destination. Connectors do not assess or decide admission/scope.
+- **Ingest:** `knowledge.source.ingest` / `ingestItem` retains one queued identity
+  as a canonical source with provider identity and evidence, save-time recovery,
+  and unsafe-link handling. It is idempotent and leaves admission pending; it
+  neither acknowledges nor decides.
+- **Assessment:** `knowledge.source.assess` / `assessSource` evaluates one exact
+  source revision with Jev or the explicitly configured Knowledge model. It
+  stores a revisioned recommendation, confidence and classification only; it
+  never decides admission. Jev uses the single shared monthly ledger.
+- **Routine:** the editable Tron agent skill `tron-knowledge-ingest` orders
+  discovery, queue inspection, ingest, optional assessment, `curate` admission,
+  authorized Raindrop movement, acknowledgment and reporting. Its collection
+  scope map and workflow are routine configuration, not connector policy or a
+  second ingestion pipeline. It is bounded and manually invoked; it creates no
+  scheduler or run journal.
+
+The store remains authoritative: connector/system writes cannot override a user
+or agent admission or scope decision; mutations remain revision-fenced and
+receipted; personal sources never appear in work retrieval; personal ingestion
+never calls Jev; provider movement requires write permission and an explicit
+collection destination. The routine's dry run performs no source/admission,
+acknowledgment, remote-move, or paid-assessment effects. It may refresh Raindrop
+queue bookkeeping through free read-only provider discovery, but must not invoke
+paid X discovery; it reports X from its existing queue. Until C23, the legacy
+`knowledge.raindrop.intake` operation remains available and continues using the
+same ingestion primitive.
+
 ## Bounded Raindrop intake
 
 `knowledge.raindrop.intake` is the explicit manual source-owner operation for a

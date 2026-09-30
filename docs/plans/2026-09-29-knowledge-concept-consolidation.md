@@ -86,9 +86,10 @@ only on the user's word) apply to every task.
 | C19 | Done | Ingest primitive: save one queued provider item with identity, save date, note, collection and payload, undecided and idempotent | C18 | knowledge-consolidation session, 2026-09-29 |
 | C20 | Done | Connector primitives as agent actions: discover, read queue, acknowledge/skip, Raindrop move under write permission | C19 | knowledge-consolidation session, 2026-09-29 |
 | C21 | Done | Assessment primitive: assess a source with Jev (one budget) or the Knowledge model; returns a recommendation, decides nothing | C18 | knowledge-consolidation session, 2026-09-29 |
-| C22 | Claimed | Ingestion routine as an editable agent skill, plus owning docs | C19, C20, C21 | knowledge-consolidation session, 2026-09-29 |
+| C22 | Done | Ingestion routine as an editable agent skill, plus owning docs | C19, C20, C21 | knowledge-consolidation session, 2026-09-29 |
 | C23 | Blocked | Dry-run parity with Raindrop intake on live data, then delete the intake pipeline and its batch machinery | C22, user Gateway update | — |
 | C24 | Ready | Migrate iOS manual source assessment from `knowledge.source.triage` to `knowledge.source.assess` with `assessor: model` | C21 | — |
+| C25 | Needs scoping | Expose Jev admission choice, confidence, usefulness score and coverage so the archive threshold can be owned by the editable routine, not the assessment adapter | C21 | — |
 
 ## Task details
 
@@ -418,3 +419,13 @@ deletes it only after a dry-run of the routine matches it on live data.
 - Kept on purpose: legacy `knowledge.raindrop.intake` remains through C23 and continues its bounded batch approval and admission/move workflow; the standalone primitive does not consume that cohort authority and never writes admission.
 - Deviations: the Gateway RPC replaces `knowledge.source.triage`; the existing iOS caller remains on the old operation until C24 and therefore requires that task before use with this Gateway contract.
 - For the next agent: C22 can build the editable ingestion routine against discover, queue, ingest, acknowledge, move, and single-source assessment; C24 migrates iOS; no Gateway lifecycle action was performed.
+
+### C22 · Done · 2026-09-29 · luna-worker
+
+- Result: Wrote the editable `tron-knowledge-ingest` routine at `/Users/<USER>/.tron/workspace/files/knowledge-ingest/SKILL.md` and documented the connector/ingest/assessment/routine layering and invariants in `packages/gateway/docs/knowledge.md`.
+- Evidence: `npm run build` passed; `npx vitest run src/knowledge` passed (28 files, 382 tests); `python3 scripts/check-documentation-policy.py` passed (48 authored files); `scripts/personal-info-guard.sh` passed; `git diff --check` passed. Revert proof: this task changes only the editable Markdown routine and owning documentation, not executable behavior; no automated behavior test owns routine prose, and a source-text assertion would violate the testing policy, so no tests were added. The existing Knowledge suite validates the primitives used by the routine, not its natural-language workflow.
+- Changes: this commit
+- Tasks added: C25 — expose Jev admission choice, confidence, usefulness score and coverage so the archive threshold can be owned by the editable routine rather than the assessment adapter (depends on C21).
+- Kept on purpose: `knowledge.raindrop.intake` remains until C23 after live dry-run parity and a user Gateway update; the routine introduces no parallel queue, scheduler, or run journal.
+- Deviations: dry-run may perform bounded free Raindrop discovery/queue bookkeeping but does not ingest, assess, curate, acknowledge, move, or spend; it must not discover X because X discovery may be paid. Per supervisor direction, the routine applies the assessment's returned recommendation without adding a numeric confidence threshold; C25 captures the raw-signal ownership gap.
+- For the next agent: C23 remains gated on user-approved live dry-run parity and a user Gateway update before deleting the legacy intake pipeline; C24 separately migrates the iOS manual-assessment caller. No Gateway lifecycle action or live Gateway access was performed.
