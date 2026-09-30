@@ -29,8 +29,8 @@ the profiler and the Gateway E2E harness - refuses here, with one exit status
 and one message, rather than run on a lane it does not hold (T-3).
 
 With --remove-empty-lane (`clean`), the holder removes the lane's directory
-once the command has succeeded, if the lease file is all it still holds: only
-the holder can, because it holds the lease until the command tree has ended.
+when the command ends, if the lease file is all it still holds: only the holder
+can, because it holds the lease until the command tree has ended.
 """
 
 from __future__ import annotations
@@ -240,7 +240,7 @@ def main() -> int:
     parser.add_argument("--resource", default="iOS test simulator", help="what the lease protects, named when it is contended")
     parser.add_argument("--worktree", help="the worktree whose command holds the lease, named when it is contended")
     parser.add_argument("--remove-empty-lane", action="store_true",
-                        help="after the command succeeds, remove the lane directory if the lease file is all it holds")
+                        help="when the command ends, remove the lane directory if the lease file is all it holds")
     parser.add_argument("--verify-inherited", metavar="LANE",
                         help="take no lease: exit 0 if the inherited lease is --lock, else refuse (74) naming LANE")
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -262,7 +262,6 @@ def main() -> int:
         process: subprocess.Popen[bytes] | None = None
         interrupted: int | None = None
         held = False
-        command_succeeded = False
 
         def forward(signum: int, _frame: object) -> None:
             nonlocal interrupted
@@ -345,7 +344,6 @@ def main() -> int:
                 forward(interrupted, None)
             return_code = process.wait()
             status = 128 + interrupted if interrupted is not None else return_code
-            command_succeeded = interrupted is None and return_code == 0
             if interrupted is not None and not wait_for_command_tree(process.pid):
                 print(
                     f"warning: the command tree of this lease was still running "
@@ -365,7 +363,7 @@ def main() -> int:
                     release_simulator(arguments.marker, arguments.development_state)
                 handle.seek(0)
                 handle.truncate()
-                if command_succeeded and arguments.remove_empty_lane:
+                if arguments.remove_empty_lane:
                     remove_empty_lane(arguments.lock, handle)
 
 

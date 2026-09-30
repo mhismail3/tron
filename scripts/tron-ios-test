@@ -61,7 +61,8 @@ Commands:
                        worktrees that no longer exist. Touches no simulator, so it takes
                        no lease. Every sweep prunes too.
   clean                Delete this lane's owned test simulator and runs, and this
-                       worktree's test products. The shared results root is never removed.
+                       worktree's test products, then the lane directory once only its
+                       lease file is left. The shared results root is never removed.
 
 Selectors:
   --only-testing OWNER  Repeat without shell-generated command fragments, for example:

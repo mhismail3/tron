@@ -937,7 +937,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
             "--lane (or TRON_IOS_TEST_LANE) selects the lane exactly as the runner does - without one, a linked\n"
             "worktree uses its own lane and the primary checkout the default lane, which the pre-lane\n"
             "TRON_IOS_TEST_STATE_DIR and TRON_IOS_TEST_DEVICE_NAME also select - the scenario run releases the\n"
-            "simulator it booted, and it refuses (73) rather than boot when the Mac is short of memory.\n"
+            "simulator it booted, it refuses (73) rather than boot when the Mac is short of memory, and it\n"
+            "refuses (74) as the runner does when it inherits an iOS test lease that does not cover its lane.\n"
             "TRON_PROFILE_RESULTS_DIR and TRON_PROFILE_IOS_DERIVED_DATA own its own reports and products."
         ),
     )

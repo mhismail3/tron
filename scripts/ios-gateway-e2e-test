@@ -131,14 +131,16 @@ Environment:
 
 The fixture and DerivedData are this worktree's: stop and clean touch no other
 worktree's fixture or DerivedData (clean also deletes the simulator of the
-lane it holds: this worktree's own lane unless one is selected). build stamps the products with
+lane it holds - this worktree's own lane unless one is selected - and then that
+lane's directory once only its lease file is left). build stamps the products with
 this worktree's source identity (scripts/ios-test-build-identity.py) and run
 refuses products stamped for another worktree or another source state.
 
 The simulator lane is shared with scripts/tron-ios-test: this harness releases
 the lane's simulator when a command ends, sweeps orphaned lanes before it
-provisions, and keeps exit 73 when the shared provisioner refuses the boot
-because the Mac is short of memory.
+provisions, keeps exit 73 when the shared provisioner refuses the boot
+because the Mac is short of memory, and refuses (74) exactly as the runner does
+when it inherits an iOS test lease that does not cover its lane.
 USAGE
 }
 
