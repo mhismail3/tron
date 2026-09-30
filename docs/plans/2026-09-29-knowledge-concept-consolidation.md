@@ -90,6 +90,8 @@ only on the user's word) apply to every task.
 | C23 | Blocked | Dry-run parity with Raindrop intake on live data, then delete the intake pipeline and its batch machinery | C22, user Gateway update | — |
 | C24 | Done | Migrate iOS manual source assessment from `knowledge.source.triage` to `knowledge.source.assess` with `assessor: model` | C21 | knowledge-consolidation session, 2026-09-29 |
 | C25 | Needs scoping | Expose Jev admission choice, confidence, usefulness score and coverage so the archive threshold can be owned by the editable routine, not the assessment adapter | C21 | — |
+| C26 | Claimed | Raindrop collection roles: one home per scope, triage inboxes, an archive home; moves must agree with Tron's decision | C20 | knowledge-consolidation session, 2026-09-30 |
+| C27 | Claimed | Free X bookmarks: browser-discovered items enter the X queue through a connector primitive; no paid API needed | C20 | knowledge-consolidation session, 2026-09-30 |
 
 ## Task details
 
@@ -266,6 +268,39 @@ every write is a revision with a receipt.
 
 Until C23, `knowledge.raindrop.intake` stays as it is so there is no gap; C23
 deletes it only after a dry-run of the routine matches it on live data.
+
+### C26 — Raindrop collection roles
+
+User decisions (2026-09-30): Moose's Corner stays where it is and anything new
+there is ingested as personal; Resources stays and is research; Unsorted is the
+triage inbox; after triage a bookmark moves to its home (research → Resources,
+personal → Moose's Corner, archived → an Archived collection); Agent Sorted is
+merged into Resources; Shopping is ignored. Raindrop writes are allowed.
+
+Today a mapping is `{collectionId, scope, destination?}`, which cannot express a
+triage inbox whose scope is decided per bookmark. Replace it (no dual schema)
+with a role per mapped collection: `research` or `personal` (a home; at most one
+per scope), `archive` (at most one), or `triage` (ingested, scope decided by the
+routine). Unmapped collections are never read. `raindropMove` no longer takes an
+arbitrary mapped destination: the destination is derived from Tron's current
+decision for that source (archived → archive home, otherwise the home of its
+scope), so a move can never disagree with Tron. Items already in their home are
+not moved. Agent Sorted is mapped as `triage` until it is empty, which merges
+it into Resources through the same decided-item path without new assessment.
+The live connection's current mapping (`scope` 63441068, destination 75296735)
+is replaced by the user's mapping after the Gateway update.
+
+### C27 — Free X bookmarks
+
+X lists bookmarks only through its paid API. The user wants a free path: an
+agent reads the bookmarks page in the user's signed-in browser and hands the
+posts to Tron. Add a `browser` setup method for `knowledge.x` (no API
+credential; the account is the X handle) and a connector primitive that
+enqueues browser-discovered X post permalinks into that connection's queue,
+deduplicated by post ID and bounded per call. Bookmark save time is unknown on
+this path, so age falls back to capture time. From the queue the normal ingest,
+assess and routine path applies. The paid API discovery stays for a token
+connection.
 
 ## Handoff log
 
@@ -496,3 +531,10 @@ deletes it only after a dry-run of the routine matches it on live data.
   `knowledge.raindrop.intake`) needs the user's Gateway update. Install the
   routine skill from `~/.tron/workspace/files/knowledge-ingest/SKILL.md` into
   the Tron agent skills directory as part of C23, not before.
+
+### C26–C27 · Claimed · 2026-09-30 · knowledge-consolidation session
+
+- Result: user collection and X decisions (see C26, C27 details). The Jev
+  connection `jev` was set up live with a 500¢ monthly cap and paid access
+  approved; STORM's retired archive verdict was cleared (C2 data step for the
+  only affected record). Work on branch `knowledge/collection-roles`.
