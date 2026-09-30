@@ -3768,3 +3768,12 @@ pixels and single-recipient ownership. The existing PDF subtree edge policy and
 owned text view now exclude their own scrolls only inside chat content; standalone
 sheet environments keep native defaults. VideoPlayer still needs device compositor
 review; no speculative renderer flip is introduced.
+
+Cross-owner checkpoint at `089f211c6`: origin passes bottom, follow, detached,
+row-stability and sheets; parity 10/11 (existing opened-history 0.02792). Today
+parity 11/11, but prepared Markdown card height changes 242→216 after return,
+reproducing focused. Root cause: the newly nested hosting controller did not
+propagate intrinsic-size invalidation when its internal asynchronous load changed
+content without a representable update. Enable UIHostingController's native
+intrinsic-content sizing, rather than adding measurement state or waits. Today's
+known top-matrix `first=nil` boundary also repeats; attribution remains pending.

@@ -40,6 +40,9 @@ private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRep
     func makeUIViewController(context: Context) -> UIHostingController<ChatMessageNativeContent<Content>> {
         let host = UIHostingController(rootView: ChatMessageNativeContent(content: content, values: context.environment))
         host.safeAreaRegions = []
+        // Loaded media changes inside this nested host without a representable
+        // update. Propagate its new ideal size to the outer SwiftUI row too.
+        host.sizingOptions = .intrinsicContentSize
         host.view.backgroundColor = .clear
         context.coordinator.attach(to: host.view)
         return host
