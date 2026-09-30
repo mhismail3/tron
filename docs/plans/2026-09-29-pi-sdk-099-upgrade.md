@@ -267,7 +267,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-20 | Ready | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | Unassigned |
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); structured per-session MCP status (user authorizes filing) | P99-8 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
-| P99-22 | Ready | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | Unassigned |
+| P99-22 | Claimed | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | luna-worker, 2026-09-29 |
 
 ## Task details
 
