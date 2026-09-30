@@ -163,14 +163,24 @@ Xcode 26.6: both variants skipped, the prefixed form ran).
 TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1 scripts/tron-ios-test run \
   --only-testing TronMobileTests/ChatPerformanceBaselineTests
 
-# Provisioned pinned device, optimized DevicePerformance build
-TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1 xcodebuild test-without-building \
+# Provisioned pinned device, optimized DevicePerformance build, under the
+# device's host-wide lease (run from packages/ios-app).
+DEVICE_ID=<pinned-device-coredevice-id>
+TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1 python3 ../../scripts/ios-test-lock.py \
+  --lock "$HOME/.tron/internal/run/ios-device-$DEVICE_ID.lease.lock" \
+  --resource "physical iOS device $DEVICE_ID" --worktree "$(git rev-parse --show-toplevel)" -- \
+  xcodebuild test-without-building \
   -project TronMobile.xcodeproj -scheme 'Tron Device Performance' \
-  -configuration DevicePerformance -destination 'platform=iOS,id=<pinned-device-udid>' \
+  -configuration DevicePerformance -destination "platform=iOS,id=$DEVICE_ID" \
   -derivedDataPath /tmp/tron-perf-device-derived \
   -only-testing:TronMobileTests/ChatPerformanceBaselineTests \
   -resultBundlePath /tmp/tron-perf-device.xcresult
 ```
+
+`DEVICE_ID` is the upper-case CoreDevice identifier `xcrun devicectl list
+devices` shows, the same one `scripts/tron-ios-device` and the Gateway's install
+lease, so this run and an install never reach the phone at once. Exit 73 names
+the lease holder's worktree, PID and start time; wait for it to finish.
 
 Do not add device identifiers, profile data, fixture content, or other personal
 values to this report or performance signposts.
