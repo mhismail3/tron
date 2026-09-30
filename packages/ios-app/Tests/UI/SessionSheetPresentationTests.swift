@@ -750,6 +750,11 @@ final class SessionSheetPresentationTests: XCTestCase {
                     try await self.waitForRouting { probe.store?.status == .open && !self.views(of: UIScrollView.self, in: controller.view).isEmpty }
                     let store = try XCTUnwrap(probe.store)
                     let scroll = try XCTUnwrap(TranscriptWindowOracle.transcriptScrollView(in: controller.view))
+                    var ancestor: UIView? = scroll
+                    while let view = ancestor {
+                        print("CT23-PAN-ANCESTRY \(type(of: view)) gestures=\(view.gestureRecognizers ?? [])")
+                        ancestor = view.superview
+                    }
                     let recorder = SubagentPresentedFrameRecorder(controller: controller)
                     recorder.start()
                     defer { recorder.stop() }
