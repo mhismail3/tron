@@ -9,6 +9,22 @@ import { GatewayError } from "../errors.js";
 const MAX_CONFIG_BYTES = 256 * 1_024;
 const MAX_OUTPUT_BYTES = 1_048_576;
 const CLI_TIMEOUT_MS = 30_000;
+// `security add-generic-password -w` has no stdin mode: its documented `-w`
+// option is an argv value (or interactive prompt). Keep secrets off argv/env by
+// sending stdin directly to a short-lived Security.framework writer instead.
+const KEYCHAIN_WRITE_SCRIPT = `import Foundation
+import Security
+let args = CommandLine.arguments
+let service = args[args.count - 2]
+let account = args[args.count - 1]
+let secret = FileHandle.standardInput.readDataToEndOfFile()
+guard !secret.isEmpty else { exit(2) }
+let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+let update = SecItemUpdate(query as CFDictionary, [kSecValueData as String: secret] as CFDictionary)
+if update == errSecItemNotFound {
+  let status = SecItemAdd(query.merging([kSecValueData as String: secret]) { _, value in value } as CFDictionary, nil)
+  if status != errSecSuccess { exit(3) }
+} else if update != errSecSuccess { exit(4) }`;
 const EXPOSURES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const;
 export type McpExposure = typeof EXPOSURES[number];
 export type McpScope = { scope: "global" } | { scope: "project"; cwd: string; trusted: true };
@@ -25,7 +41,7 @@ export class MacKeychainMcpCredentialOwner implements McpCredentialOwner {
       throw new GatewayError("invalid_request", "MCP server or bearer token is invalid");
     }
     const account = `tron-mcp-${server}`;
-    const result = await runProcess("/usr/bin/security", ["add-generic-password", "-U", "-s", "tron.mcp", "-a", account, "-w", token], { cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS });
+    const result = await runProcess("/usr/bin/swift", ["-e", KEYCHAIN_WRITE_SCRIPT, "--", "tron.mcp", account], { cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS, input: token });
     if (result.code !== 0) throw new GatewayError("internal", "Could not store the MCP bearer token in Keychain");
     return account;
   }
@@ -36,17 +52,18 @@ export class MacKeychainMcpCredentialOwner implements McpCredentialOwner {
 }
 
 interface ProcessResult { code: number; stdout: string; stderr: string }
-async function runProcess(command: string, args: string[], options: { cwd: string; timeoutMs: number; allowFailure?: boolean }): Promise<ProcessResult> {
+async function runProcess(command: string, args: string[], options: { cwd: string; timeoutMs: number; allowFailure?: boolean; input?: string }): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd: options.cwd, env: process.env, stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+    if (options.input !== undefined) child.stdin?.end(options.input);
     let stdout = Buffer.alloc(0); let stderr = Buffer.alloc(0); let oversized = false;
     const collect = (which: "stdout" | "stderr", chunk: Buffer) => {
       const prior = which === "stdout" ? stdout : stderr;
       if (prior.length + chunk.length > MAX_OUTPUT_BYTES) { oversized = true; child.kill("SIGKILL"); return; }
       if (which === "stdout") stdout = Buffer.concat([stdout, chunk]); else stderr = Buffer.concat([stderr, chunk]);
     };
-    child.stdout.on("data", (chunk: Buffer) => collect("stdout", chunk));
-    child.stderr.on("data", (chunk: Buffer) => collect("stderr", chunk));
+    child.stdout?.on("data", (chunk: Buffer) => collect("stdout", chunk));
+    child.stderr?.on("data", (chunk: Buffer) => collect("stderr", chunk));
     const timer = setTimeout(() => child.kill("SIGKILL"), options.timeoutMs); timer.unref();
     child.once("error", error => { clearTimeout(timer); reject(error); });
     child.once("close", code => {
