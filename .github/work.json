@@ -161,5 +161,40 @@
   },
   "rulesets": [
     ".github/rulesets/main.json"
-  ]
+  ],
+  "claim": {
+    "remote": "origin",
+    "baseBranch": "main",
+    "worktreeRoot": "../tron-worktrees",
+    "readyStatus": "Ready",
+    "claimedStatus": "In progress",
+    "statusField": "Status",
+    "excludeLabels": [
+      "epic"
+    ],
+    "softCap": 6,
+    "branchTypes": [
+      {
+        "label": "bug",
+        "type": "fix"
+      },
+      {
+        "label": "regression",
+        "type": "fix"
+      },
+      {
+        "label": "dependencies",
+        "type": "deps"
+      },
+      {
+        "label": "chore",
+        "type": "chore"
+      },
+      {
+        "label": "area:docs",
+        "type": "docs"
+      }
+    ],
+    "defaultBranchType": "feat"
+  }
 }

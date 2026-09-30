@@ -69,3 +69,60 @@ GitHub run covers the rest.
    value in it.
 5. **Two Projects share the declared title.** Bootstrap refuses rather than
    choosing one.
+
+## `start`
+
+`scripts/tron work start <issue>` claims one issue and prepares its isolated
+workspace:
+
+1. **Eligibility.** The issue is open, is not an epic, has Status Ready in the
+   Project, and every issue it is blocked by is closed.
+2. **Claim.** The claim is the creation of the remote branch
+   `<type>/<issue>-<slug>`, whose first commit is an empty claim commit carrying
+   `Work-Claim-Issue` and `Work-Claim-Session` trailers.
+   - The commit is based on the freshly fetched remote base branch, never on
+     local `main`.
+   - The push only creates the ref (`--force-with-lease=<ref>:`), so the remote
+     accepts exactly one claimant.
+   - Squash merges drop the empty commit.
+3. **Tracking.** `start` sets the issue's Project Status to In progress. It then
+   posts a claim comment giving the session, the branch, and the worktree path
+   relative to the checkout's parent directory, never an absolute path.
+4. **Worktree.** `start` creates `<worktreeRoot>/<issue>-<slug>` on the branch.
+
+The session is `--session`, then `WORK_SESSION_ID`, then `PI_SESSION_ID`.
+
+The branch type comes from the first matching label in `claim.branchTypes`,
+otherwise from `defaultBranchType`. After claiming, `start` warns when the number of
+In-progress items exceeds `claim.softCap`; the claim still proceeds.
+
+Re-running `start` in the same session resumes a claim that is already made.
+It fills in whatever is missing (Status, comment, worktree) and never makes a
+second claim. A different session is refused, and the refusal names the owner.
+
+The remote branch is the authority for who owns an issue. Project Status and
+comments are projections of it, and the dashboard reports any disagreement
+between them.
+
+### Failure modes
+
+`test_claim.py` checks these against a local bare remote. The live E2E covers
+the GitHub side.
+
+6. **Two agents claim the same issue at the same time and both succeed.** If
+   they compute the same branch name, the create-only push admits one. If the
+   issue title changed between their reads, the branch names differ. The rule
+   is that the smallest ref name for the issue wins, and the loser deletes
+   only its own ref.
+7. **The claim is based on stale local `main`.** The work would start behind
+   and the landing update would pull in unrelated changes. The claim commit's
+   parent must be the freshly fetched remote tip.
+8. **A resumed or repeated `start` claims twice, or takes over another
+   session's claim.** The owner is read from the claim commit's trailers.
+9. **An ineligible issue is claimed.** This covers an issue that is closed, an
+   epic, Proposed, In progress, Done, not in the Project, or has an open
+   blocker.
+10. **A name is an invalid ref or an unsafe path.** Slugs come from arbitrary
+    titles.
+11. **Public claim text leaks a local absolute path.** The repository may be
+    public.

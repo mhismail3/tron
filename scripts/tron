@@ -34,6 +34,9 @@ Commands:
   work bootstrap [--apply] [--report <path>]
                                     Plan or converge GitHub labels and the tracking
                                     Project to .github/work.json (tools/work)
+  work start <issue> [--session <id>]
+                                    Claim a Ready issue: remote branch, Project
+                                    status, claim comment, and its worktree
 
 There is no deploy command. Production deployment is manual-only.
 EOF

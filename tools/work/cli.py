@@ -11,6 +11,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bootstrap  # noqa: E402
+import claim  # noqa: E402
+import start  # noqa: E402
 from gh import Gh, GhError  # noqa: E402
 
 
@@ -27,6 +29,9 @@ def main(argv: list) -> int:
     boot = commands.add_parser("bootstrap", help="plan or apply labels and the tracking Project")
     boot.add_argument("--apply", action="store_true", help="converge GitHub to .github/work.json")
     boot.add_argument("--report", type=Path, help="write the result as JSON to this path")
+    begin = commands.add_parser("start", help="claim an issue and create its branch and worktree")
+    begin.add_argument("issue", type=int, help="issue number")
+    begin.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
     args = parser.parse_args(argv)
 
     root = repository_root()
@@ -35,7 +40,9 @@ def main(argv: list) -> int:
         config = json.loads(config_path.read_text())
         if args.command == "bootstrap":
             return bootstrap.run(Gh(root), root, config, args.apply, args.report)
-    except (GhError, bootstrap.BootstrapError, FileNotFoundError, json.JSONDecodeError) as error:
+        if args.command == "start":
+            return start.run(Gh(root), Path.cwd(), config, args.issue, args.session)
+    except (GhError, bootstrap.BootstrapError, claim.ClaimError, FileNotFoundError, json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1
     return 64

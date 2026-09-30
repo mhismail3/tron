@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, W-4 claimed
+- **Last updated:** 2026-09-30, W-4 Done
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -199,7 +199,7 @@ Dated 2026-09-30:
 | W-1 | Done | User setup: `gh` re-authenticated, repository settings applied (squash-only), private evidence repository created, D-1–D-5 settled | none | User, 2026-09-30 |
 | W-2 | Done | GitHub bootstrap: labels, Project and fields, Epic/Task issue forms, ruleset spec; the user applies the settings and ruleset changes | W-1 | session 01a0f183, 2026-09-30 |
 | W-3 | Done | Shared-resource isolation audit so any two worktrees can validate concurrently; each fix becomes a sub-issue | none | session 01a0f183, 2026-09-30 |
-| W-4 | Claimed | Core: `start`/claim, naming, soft cap (the config file and `gh` resolution exist since W-2) | W-2 | session 01a0f183, 2026-09-30 |
+| W-4 | Done | Core: `start`/claim, naming, soft cap (the config file and `gh` resolution exist since W-2) | W-2 | session 01a0f183, 2026-09-30 |
 | W-5 | Ready | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | Unassigned |
 | W-6 | Ready | Core: `finish` and `land` (PR with `Closes`, evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff) and a recurring steward for orphaned PRs | W-5 | Unassigned |
 | W-7 | Ready | Core: automatic cleanup of provably done resources; update the housekeeping skill to match | W-6 | Unassigned |
@@ -453,3 +453,57 @@ file-level. Everything else inspected is A.
     before W-5 relies on concurrent iOS checks.
   - An agent's shell needs nvm's pinned Node on PATH, not the Gateway
     payload runtime (Node plan N-1).
+
+### W-4 · Done · 2026-09-30 · session 01a0f183
+
+- Result:
+  - `scripts/tron work start <issue>` checks that the issue is eligible: open,
+    not an epic, Status Ready, and no open blockers.
+  - It claims the issue by creating the remote branch `<type>/<issue>-<slug>`
+    with a create-only push. The branch's first commit is an empty claim
+    commit whose trailers carry the issue and the session.
+  - It resolves a race between claims under different names by keeping the
+    smallest ref name.
+  - It sets Status to In progress, posts a claim comment giving a relative
+    worktree path, and creates the worktree under `claim.worktreeRoot`.
+  - Re-running `start` in the same session resumes the claim; a different
+    session is refused, and the refusal names the owner. After claiming, it
+    warns when In-progress items exceed the soft cap.
+  - Configuration lives in the `claim` section of `.github/work.json`. The
+    failure modes are listed in `tools/work/README.md`.
+- Evidence:
+  - `python3 -m unittest discover -s tools/work` gives 17 passed, about 4 s,
+    against real local bare remotes.
+  - Five negative controls each fail a test: a forced push instead of the
+    create-only push, local `main` as the claim base, the race always won,
+    blockers ignored, and no absolute-path guard.
+  - The live E2E used three temporary issues:
+    1. Claim: Status In progress, 1 comment, a worktree tracking its remote
+       branch, and a claim commit whose parent was the fresh `origin/main` tip.
+    2. Resume by the same session: nothing duplicated.
+    3. Another session: refused, naming the owner.
+    4. A Proposed issue: refused.
+    5. Two sessions racing concurrently: exactly one claimed, and the loser
+       was refused naming the winner.
+  - `gh` still resolved with PATH set to `/usr/bin:/bin`.
+  - The E2E log is in the Tron internal workspace under `files/w-4-start/`.
+- Changes: this commit.
+- Kept on purpose:
+  - Nobody is assigned on GitHub, because every agent uses one account. The
+    session in the claim commit is the owner.
+  - There is no release or unclaim command. Abandoning a claim is part of
+    cleanup (W-7).
+- Deviations:
+  - E2E cleanup: deleting an issue before removing its Project item leaves an
+    item with no content that the Project API refuses to delete or archive.
+    Three such items remain; GitHub may remove them on its own. Future E2E runs
+    remove the item first. The dashboard (W-8) must ignore items without
+    content.
+  - Slugs keep the first five words of the title, so a slug can end on a
+    stopword (for example `claim-and`). This is cosmetic and was left alone.
+- For the next agent:
+  - W-5 (verify) and W-8 (dashboard) can build on `tools/work/claim.py`. The
+    claim trailers and the `<!-- work:claim ... -->` comment marker are what
+    to parse.
+  - W-5 still needs W-3's P1 issues (#98, #99) before concurrent iOS checks
+    can be relied on.
