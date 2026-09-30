@@ -1,8 +1,8 @@
 # Pi SDK 0.99 integration and built-in MCP adoption
 
 - **Started:** 2026-09-29
-- **Status:** Active
-- **Last updated:** 2026-09-30, P99-20
+- **Status:** Paused (user requested a pause after P99-20; resume on the user's instruction)
+- **Last updated:** 2026-09-30, checkpoint after P99-20
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -271,13 +271,13 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-5 | Done | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | luna-worker, 2026-09-29 |
 | P99-6 | Done | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
 | P99-7 | Done | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
-| P99-8 | Claimed | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | luna-worker, 2026-09-29 |
+| P99-8 | Ready | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | Unassigned |
 | P99-9 | Done | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | luna-worker, 2026-09-29 |
 | P99-10 | Done | Virtual models on the Gateway (D-7) | P99-3 | luna-worker, 2026-09-29 |
 | P99-11 | Done | Theme default and remote extension host rendering | P99-3 | luna-worker, 2026-09-29 |
 | P99-12 | Done | Catalog, provider and classifier deltas; release dates; K3 policy | P99-2 | luna-worker, 2026-09-29 |
 | P99-13 | Done | `bash` structured output and empty-output change | P99-3 | luna-worker, 2026-09-29 |
-| P99-14 | Claimed | Qualify installed packages and subagent children against 0.99 | P99-6 | luna-worker, 2026-09-29 |
+| P99-14 | Ready | Qualify installed packages and subagent children against 0.99 | P99-6 | Unassigned |
 | P99-15 | Ready | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | Unassigned |
 | P99-16 | Ready | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | Unassigned |
 | P99-17 | Ready | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | Unassigned |
@@ -679,6 +679,16 @@ from a session; Sign in with ChatGPT; select a virtual model if one is
 installed. Then close the plan per `docs/plans/README.md`.
 
 ## Handoff log
+
+### Checkpoint · Paused · 2026-09-30 · orchestrator session
+
+- Result: The user asked to pause after P99-20. Done on the candidate: P99-1 to P99-7, P99-9 to P99-13, P99-20, P99-22, P99-23 (37 commits on `feat/pi-sdk-099-upgrade`). P99-8 is partial: MCP admin RPCs (`mcp.list/add/remove/logout/update`, `mcp.token.set`) and the argv-free Keychain writer (`/usr/bin/security -i`) are committed; the session-bound MCP OAuth sign-in relay and its PKCE/dynamic-registration/refresh E2E are not. P99-8 and P99-14 claims are released to Ready; P99-14 was never started.
+- Evidence: checkpoint on the candidate HEAD under Node 22.22.0: `tsc --noEmit` clean; `check:pi-sdk` coherent at 0.99.1; full Gateway Vitest 2,308/2,311 (214 files, 111 s wall), the three failures (intake enrichment, session-search stall, logger rotation) are the known load-sensitive tests and passed 21/21 when rerun together in isolation. No iOS build or test has run on this branch yet.
+- Decisions recorded during the run: D-8 parent-result enrichment for nested display/browser data (orchestrator, within plan ownership rules); user confirmed the global-helper dark palette (P99-11); user chose `jev-latest` for Jev with Tron's own price for the ceiling (D-6 addendum). Supervisor rules given to workers for P99-8: MCP sign-in via `mcp.auth.start/cancel` reusing AuthBroker operations with a `{kind:"mcp", sessionId, server}` target, openUrl fail-closed without a Tron-started operation, pasted-redirect prompt routed to the same operation, cancellation on session teardown.
+- Open questions for the user before P99-18: Jev paid-tagging consent. Removing the `knowledge.jev` connection removed its explicit `paidAccessApproved` switch and configurable monthly budget; P99-20 now treats a configured TypeSafe provider credential as consent and keeps a fixed 500-cent monthly cap. Confirm or ask for a separate opt-in and configurable cap.
+- Evidence gaps carried to P99-17: trusted agent-browser receipt success for nested calls (P99-23); virtual-model resume/fork/retry/compaction lifecycle E2E (P99-10); codemode `models.classify` cost capture (P99-12); Mac payload staging and verification (P99-2).
+- Remaining when resumed: finish P99-8 (OAuth relay + E2E + relay observability), P99-14, P99-15, P99-16, P99-17, P99-18.
+- Process notes: workers run as `luna-worker` with fresh context, 3-hour child timeout, one task per child, sequentially on the single candidate worktree. Supervisor questions arrive while the orchestrator waits; answer them promptly or they time out.
 
 ### P99-2 · Done · 2026-09-29 · luna-worker
 
