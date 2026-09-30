@@ -932,7 +932,7 @@ private struct SubagentSheetScrollBoundary: UIViewRepresentable {
 
     final class Probe: UIView {
         private weak var scroll: UIScrollView?
-        private var previous = true
+        private let boundary = ContentPanBoundary()
         override func didMoveToWindow() { super.didMoveToWindow(); reconcile() }
         override func layoutSubviews() { super.layoutSubviews(); reconcile() }
         func reconcile() {
@@ -943,12 +943,33 @@ private struct SubagentSheetScrollBoundary: UIViewRepresentable {
             guard owner !== scroll else { return }
             restore()
             scroll = owner
-            previous = owner.transfersVerticalScrollingToParent
-            owner.transfersVerticalScrollingToParent = false
+            owner.addGestureRecognizer(boundary)
         }
         func restore() {
-            if let scroll { scroll.transfersVerticalScrollingToParent = previous }
+            scroll?.removeGestureRecognizer(boundary)
             scroll = nil
         }
+    }
+
+    /// A content-only pan participates beside the native scroll pan. Ancestor
+    /// pans must wait for it to fail; because toolbar touches are outside this
+    /// scroll subtree, their sheet pan never waits. No UIKit delegate is replaced.
+    final class ContentPanBoundary: UIPanGestureRecognizer {
+        init() {
+            super.init(target: nil, action: nil)
+            cancelsTouchesInView = false
+        }
+        private func isAncestorPan(_ other: UIGestureRecognizer) -> Bool {
+            guard other is UIPanGestureRecognizer, let ancestor = other.view,
+                  let view, ancestor !== view else { return false }
+            return view.isDescendant(of: ancestor)
+        }
+        override func shouldBeRequiredToFail(by otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            isAncestorPan(otherGestureRecognizer)
+        }
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
+            isAncestorPan(preventedGestureRecognizer)
+        }
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
     }
 }
