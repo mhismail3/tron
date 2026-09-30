@@ -9,21 +9,6 @@ import { GatewayError } from "../errors.js";
 const MAX_CONFIG_BYTES = 256 * 1_024;
 const MAX_OUTPUT_BYTES = 1_048_576;
 const CLI_TIMEOUT_MS = 30_000;
-// `security add-generic-password -w` has no stdin mode: its documented `-w`
-// option is an argv value (or interactive prompt). Keep secrets off argv/env by
-// sending stdin directly to a short-lived Security.framework writer instead.
-const KEYCHAIN_WRITE_SCRIPT = `import Foundation
-import Security
-let service = __SERVICE__
-let account = __ACCOUNT__
-let secret = FileHandle.standardInput.readDataToEndOfFile()
-guard !secret.isEmpty else { exit(2) }
-let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
-let update = SecItemUpdate(query as CFDictionary, [kSecValueData as String: secret] as CFDictionary)
-if update == errSecItemNotFound {
-  let status = SecItemAdd(query.merging([kSecValueData as String: secret]) { _, value in value } as CFDictionary, nil)
-  if status != errSecSuccess { exit(3) }
-} else if update != errSecSuccess { exit(4) }`;
 const EXPOSURES = ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const;
 export type McpExposure = typeof EXPOSURES[number];
 export type McpScope = { scope: "global" } | { scope: "project"; cwd: string; trusted: true };
@@ -34,16 +19,23 @@ export interface McpCredentialOwner {
   remove(server: string): Promise<void>;
 }
 
+function quoteSecurityArgument(value: string): string {
+  return `"${value.replace(/["\\]/gu, "\\$&")}"`;
+}
+
 export class MacKeychainMcpCredentialOwner implements McpCredentialOwner {
+  constructor(private readonly run: typeof runProcess = runProcess) {}
+
   async store(server: string, token: string): Promise<string> {
-    if (!/^[A-Za-z0-9._-]{1,128}$/.test(server) || !token || Buffer.byteLength(token) > 16_384 || /[\r\n]/u.test(token)) {
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(server) || !token || Buffer.byteLength(token) > 16_384 || /[\r\n\0]/u.test(token)) {
       throw new GatewayError("invalid_request", "MCP server or bearer token is invalid");
     }
     const account = `tron-mcp-${server}`;
-    const script = KEYCHAIN_WRITE_SCRIPT
-      .replace("__SERVICE__", JSON.stringify("tron.mcp"))
-      .replace("__ACCOUNT__", JSON.stringify(account));
-    const result = await runProcess("/usr/bin/swift", ["-e", script], { cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS, input: token });
+    const command = ["add-generic-password", "-U", "-s", "tron.mcp", "-a", account, "-w", token]
+      .map(quoteSecurityArgument).join(" ");
+    const result = await this.run("/usr/bin/security", ["-i"], {
+      cwd: process.cwd(), timeoutMs: CLI_TIMEOUT_MS, input: `${command}\n`,
+    });
     if (result.code !== 0) throw new GatewayError("internal", "Could not store the MCP bearer token in Keychain");
     return account;
   }

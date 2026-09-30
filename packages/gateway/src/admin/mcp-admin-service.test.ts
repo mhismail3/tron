@@ -3,11 +3,28 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
+import { MacKeychainMcpCredentialOwner, McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
 
 const cliPath = join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js");
 
 describe("McpAdminService", () => {
+  it("quotes interactive Keychain commands and rejects line-breaking secrets without exposing argv", async () => {
+    let invocation: { command: string; args: string[]; input?: string } | undefined;
+    const owner = new MacKeychainMcpCredentialOwner(async (command, args, options) => {
+      invocation = { command, args, input: options.input };
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    const token = 'space "quote" \\ slash';
+    await owner.store("fixture", token);
+    expect(invocation).toEqual({
+      command: "/usr/bin/security",
+      args: ["-i"],
+      input: '"add-generic-password" "-U" "-s" "tron.mcp" "-a" "tron-mcp-fixture" "-w" "space \\"quote\\" \\\\ slash"\n',
+    });
+    expect(JSON.stringify(invocation)).not.toContain(token);
+    await expect(owner.store("fixture", "line\nbreak")).rejects.toThrow(/invalid/u);
+    await expect(owner.store("fixture", "nul\0byte")).rejects.toThrow(/invalid/u);
+  });
   it("uses the bundled CLI for explicit status reads and bounds the result to valid JSON", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-admin-"));
     try {
