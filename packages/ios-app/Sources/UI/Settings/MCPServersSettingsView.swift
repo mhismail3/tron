@@ -42,6 +42,9 @@ struct MCPServersSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     let projectCWD: String?
+    /// The session Settings was opened from. MCP OAuth runs inside a live
+    /// session's Pi MCP extension, so sign-in needs one.
+    let sessionID: String?
     @State private var servers: [MCPServerList.Server] = []
     @State private var serverErrorCount = 0
     @State private var selectedScope = "global"
@@ -59,8 +62,9 @@ struct MCPServersSettingsView: View {
     @State private var working = false
     @State private var authOperationID: String?
 
-    init(projectCWD: String?, initialScope: String = "global") {
+    init(projectCWD: String?, sessionID: String? = nil, initialScope: String = "global") {
         self.projectCWD = projectCWD
+        self.sessionID = sessionID
         _selectedScope = State(initialValue: initialScope)
     }
 
@@ -233,7 +237,7 @@ struct MCPServersSettingsView: View {
         do {
             // MCP OAuth is owned by a live Pi session; this screen deliberately
             // reports the missing session rather than inventing a parallel flow.
-            guard let session = model.selectedSessionID else { throw GatewayFailure(code: "needs_session", message: "Open the session that uses this MCP server to sign in.", retryable: false, details: nil) }
+            guard let session = sessionID else { throw GatewayFailure(code: "needs_session", message: "Open the session that uses this MCP server to sign in.", retryable: false, details: nil) }
             let admission = model.beginMCPAuthAdmission()
             do {
                 let response = try await model.mutateMCPAdmin("mcp.auth.start", parameters: ["sessionId": .string(session), "server": .string(server)])

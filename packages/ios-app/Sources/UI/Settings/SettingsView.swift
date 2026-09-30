@@ -90,7 +90,7 @@ struct SettingsView: View {
                         }
                         settingsDivider(accent: .tronCyan)
                         settingsLink("MCP Servers", summary: "Global and trusted-project MCP servers", icon: "server.rack", accent: .tronCyan) {
-                            MCPServersSettingsView(projectCWD: projectCWD)
+                            MCPServersSettingsView(projectCWD: projectCWD, sessionID: projectSessionID)
                         }
                         settingsDivider(accent: .tronCyan)
                         settingsLink("Connected Services", summary: "Accounts and service capabilities", icon: "link", accent: .tronCyan) {

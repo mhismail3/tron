@@ -746,6 +746,13 @@ installed. Then close the plan per `docs/plans/README.md`.
 
 ## Handoff log
 
+### P99-18 device build fix · 2026-09-30 · orchestrator session
+
+- Result: The first physical-device install failed to compile: `MCPServersSettingsView` read `AppModel.selectedSessionID`, which exists only under `HOSTED_TEST`. Every iOS check in this plan ran the Test configuration, so the production configuration was never compiled. The view now receives the session from Settings (`projectSessionID`, the same input Providers, Agent Defaults and Compaction use); without a session, sign-in reports that a session is needed.
+- Evidence: `xcodebuild build` of scheme `Tron Device`, configuration `LocalDevice`, `generic/platform=iOS`, signing disabled: succeeded (142 s). No device was contacted.
+- For the next agent: compile the production iOS configuration, not only the Test configuration, before calling an iOS change done.
+- Gateway adoption: installing the new app does not switch the Gateway, because an external Stable payload with the same protocol stays selected and source rebuilds refuse the changed dependency lock. The user stages and promotes the new app's bundled payload with `scripts/gateway-payload-deploy.mjs` (development guide, Gateway payload promotion).
+
 ### P99-18 merge · Integrated · 2026-09-30 · orchestrator session
 
 - Result: The user approved the merge and kept Jev consent as "a configured TypeSafe key is consent, fixed $5 monthly cap". `main` had advanced 145 commits, including two active Knowledge plans that built a shared monthly Jev ledger and paid intake/standalone assessment around the `knowledge.jev` connection. At the user's direction the Jev move was redone on that new code instead of dropped: `KnowledgeTaggingBudget` keeps main's `reserveAssessment`, `reserveAuthorized` and `attemptReuse` and resolves its authority to the `typesafe` provider identity; intake and standalone assessment run through Pi's classifier with Tron's price and an optional caller `maxChargeCents`; the `knowledge.jev` definition stays removed. Connected Services keeps main's reworked layout and X OAuth without the MCP surface; its hosted fixture and UI test no longer advertise Jev or MCP connections.
