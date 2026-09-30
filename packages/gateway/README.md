@@ -367,7 +367,11 @@ instead of failing the read.
 `mcp.list` is an explicit request (never a poll) that runs the bundled `pi mcp
 list --json` CLI out of process. `scope` is `global` or `project`; project scope
 requires a canonical trusted `cwd`. Output is bounded to 1 MiB and the process
-timeout is 30 seconds. `mcp.add`, `mcp.remove`, `mcp.logout`, `mcp.update` and
+timeout is 30 seconds. The CLI exits 1 while any server is unhealthy; its JSON
+is still projected. Each row is `{ name, state, scope, enabled, exposure,
+transport, tools, error? }` with Pi's `state` values (`connected`, `needs-auth`,
+`failed`, `disabled`, …); Pi's `source` path stays on the Mac and `error` is
+bounded to 2 KiB. `mcp.add`, `mcp.remove`, `mcp.logout`, `mcp.update` and
 `mcp.token.set` require a `commandId` and use the bounded command receipt store.
 Add/remove report the affected server and require `/reload` or a new session for
 configuration changes; sign-out and new credentials are observed by running

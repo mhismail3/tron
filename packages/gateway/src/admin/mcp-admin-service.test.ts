@@ -55,8 +55,8 @@ describe("McpAdminService", () => {
       const service = new McpAdminService(root, script);
       expect(await service.list({ scope: "global" })).toEqual({
         servers: [
-          { name: "unreachable", state: "failed", scope: "global", enabled: true, transport: "http://127.0.0.1:1/mcp", tools: [] },
-          { name: "disabled", state: "disabled", scope: "global", enabled: false, transport: "http://127.0.0.1:1/mcp", tools: [] },
+          { name: "unreachable", state: "failed", scope: "global", enabled: true, exposure: "codemode", transport: "http://127.0.0.1:1/mcp", tools: [], error: "fetch failed" },
+          { name: "disabled", state: "disabled", scope: "global", enabled: false, exposure: "codemode", transport: "http://127.0.0.1:1/mcp", tools: [] },
         ], errors: 0,
       });
     } finally { await rm(root, { recursive: true, force: true }); }

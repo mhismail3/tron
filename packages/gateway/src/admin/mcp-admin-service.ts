@@ -168,7 +168,12 @@ export class McpAdminService {
       const row = item as Record<string, unknown>;
       if (typeof row.name !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(row.name)) return [];
       const strings = (value: unknown, limit: number): string[] => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string").slice(0, limit).map(entry => entry.slice(0, 256)) : [];
-      return [{ name: row.name, state: typeof row.state === "string" ? row.state.slice(0, 64) : "unknown", scope: row.scope === "project" ? "project" : "global", enabled: row.enabled !== false, transport: typeof row.transport === "string" ? row.transport.slice(0, 256) : "unknown", tools: strings(row.tools, 128) }];
+      // `source` is a filesystem path and stays on the Mac. `error` can carry a
+      // stdio server's stderr tail, so it is bounded and stripped of control bytes.
+      const exposure = (EXPOSURES as readonly string[]).includes(row.exposure as string) ? row.exposure as string : "codemode";
+      const error = typeof row.error === "string" && row.error.length > 0
+        ? row.error.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").slice(0, 2_048) : undefined;
+      return [{ name: row.name, state: typeof row.state === "string" ? row.state.slice(0, 64) : "unknown", scope: row.scope === "project" ? "project" : "global", enabled: row.enabled !== false, exposure, transport: typeof row.transport === "string" ? row.transport.slice(0, 256) : "unknown", tools: strings(row.tools, 128), ...(error ? { error } : {}) }];
     }) : [];
     const errors = Array.isArray(raw.errors) ? raw.errors.length : 0;
     return { servers, errors };
