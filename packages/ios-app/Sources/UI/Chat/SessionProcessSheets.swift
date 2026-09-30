@@ -969,7 +969,7 @@ private struct SubagentSheetScrollBoundary: UIViewRepresentable {
             guard owner !== controller else { return }
             restore()
             owner = controller
-            for edge: NSDirectionalRectEdge in [.top, .bottom, .leading, .trailing] {
+            for edge: NSDirectionalRectEdge in [.top, .bottom] {
                 previous.append((edge, controller.contentScrollView(for: edge)))
                 controller.setContentScrollView(recipient, for: edge)
             }
