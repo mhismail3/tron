@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, W-3 Done
+- **Last updated:** 2026-09-30, migration schedule set (W-11, W-15)
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -206,11 +206,11 @@ Dated 2026-09-30:
 | W-8 | Ready | Dashboard skill and HTML card | W-4 | Unassigned |
 | W-9 | Ready | CI: required Linux policy job and `tron/verify` status; path-scoped, non-blocking macOS jobs whose failures reach the dashboard (D-4) | W-5 | Unassigned |
 | W-10 | Ready | Scheduled local heavy run on `main` that files `regression` issues | W-5 | Unassigned |
-| W-11 | Ready | Rewrite the guidance: `AGENTS.md` work section, `CONTRIBUTING.md`, `.agents/README.md`, PR template, retirement notice in `docs/plans/README.md` | W-6, W-8 | Unassigned |
+| W-11 | Ready | Rewrite the guidance: `AGENTS.md` work section, a `tron-work` skill (take a task, dashboard), `CONTRIBUTING.md`, `.agents/README.md`, PR template, retirement notice in `docs/plans/README.md` | W-6, W-8 | Unassigned |
 | W-12 | Ready | Pilot: migrate this plan into an epic and finish W-7 onward through the new flow | W-6 | Unassigned |
 | W-13 | Ready | Dependabot intake: each PR becomes an agent-owned `deps` task; the Pi SDK family and Node follow their runbooks | W-6 | Unassigned |
 | W-14 | Ready | One audited legacy sweep of the existing worktrees and branches, with the user approving the exact list | W-7 | Unassigned |
-| W-15 | Needs scoping | Migrate each remaining plan at its boundary; retire `docs/plans/` and `docs/plans/HISTORY.md` once empty | W-11 | Unassigned |
+| W-15 | Ready | Migrate every remaining plan to an epic in the three groups under Task details; retire `docs/plans/` and `docs/plans/HISTORY.md` once empty | W-11, W-12 | Unassigned |
 | W-16 | Ready | #98 iOS Gateway E2E fixture and DerivedData keyed by worktree, with a build-identity check (P1) | W-3 | Unassigned |
 | W-17 | Ready | #99 Default iOS test lane per worktree; E2E and profiler accept lanes; concurrent two-worktree iOS proof (P1) | W-3 | Unassigned |
 | W-18 | Ready | #100 Lease the Development simulator and the physical iPhone (P2) | W-3 | Unassigned |
@@ -285,6 +285,42 @@ Dated 2026-09-30:
     worktree;
   - open `regression` issues.
 - It is read-only and fetched live, in a bounded number of API calls.
+
+### W-11 and W-15 — Guidance, then migration (order set by the user on 2026-09-30)
+
+The user kept the original order: tools first (W-4 to W-8), then guidance
+(W-11), then migration (W-15). The migration is still required. Until it is
+done:
+
+- `docs/plans/` stays the protocol agents follow.
+- Every GitHub issue filed for this plan is mirrored as a row here (for
+  example W-16 to W-21), so there is never work that only one of the two
+  records shows.
+
+W-15 steps for each plan:
+
+1. Create an epic issue holding the plan's goal, constraints, decisions and
+   rules.
+2. Create one sub-issue per open task, with blocked-by links matching its
+   dependencies. Do not recreate Done rows.
+3. The epic links the commit that deletes the plan, so the full handoff
+   history remains in git.
+4. Compare the epic and sub-issues against the plan.
+5. Delete the plan file and add its `docs/plans/HISTORY.md` entry, in one
+   commit.
+
+Migration groups:
+
+1. **Immediately after W-11:** plans with no claimed task, the two paused
+   plans (as Blocked with their pause reason), and the Node runtime plan (as a
+   Proposed epic). This plan itself migrates in W-12.
+2. **When their claimed task finishes:** chat transcript stability and
+   knowledge concept consolidation.
+3. **At their phase boundary:** the Pi SDK 0.99 upgrade, and connection-scale
+   hardening (at its integration-branch release).
+
+W-15 is done when `docs/plans/` holds only its README, which then points to
+GitHub, or is deleted with its references.
 
 ## Findings
 
