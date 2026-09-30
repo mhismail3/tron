@@ -1262,8 +1262,10 @@ struct ChatTranscriptPresentationStoreTests {
     /// Failure mode: a streaming update rebuilds the maximum canonical page
     /// (10,000 entries) instead of appending its live suffix to the installed
     /// projection, making every token cost a cold projection. The work reports
-    /// prove the reuse by count; the watchdog only bounds a hang, and the
-    /// fixture and the cold reference projection are built outside it.
+    /// prove the reuse by count. The watchdog only bounds a hang: it sits well
+    /// above the one cold projection and 31 installs it covers (about 5 s on a
+    /// development Mac, twice that on a hosted runner), and the fixture and the
+    /// cold reference projection are built outside it.
     @Test("text streaming reuses one maximum-page canonical projection")
     func textStreamingReusesCanonicalProjection() async throws {
         let builder = SessionScenarioBuilder(seed: 1_209)
@@ -1277,7 +1279,7 @@ struct ChatTranscriptPresentationStoreTests {
         fixture.transcriptTotal = totalEntries
         let canonical = fixture
         let reports = StoreProjectionWorkRecorder()
-        let (installed, snapshot) = try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
+        let (installed, snapshot) = try await withTestWatchdog(timeout: .seconds(60)) { @MainActor in
             var snapshot = canonical
             let signposts = RecordingPerformanceSignposts()
             let store = ChatTranscriptPresentationStore(

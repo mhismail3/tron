@@ -72,13 +72,19 @@ struct StreamingTextRevealContinuityTests {
         /// the stream runs, words from the last two frames are still fading,
         /// so a render within 1% of the source only follows a stopped loop.
         func sampleAfterRevealTick(sleepsBefore before: Int) async throws -> RevealSample {
+            func asleepAgain() -> Bool {
+                clock.recordedSleeps().count > before && clock.activeSleeperCount() == 1
+            }
             while true {
-                if clock.recordedSleeps().count > before, clock.activeSleeperCount() == 1 {
-                    return try Self.sample(window)
-                }
+                // The wake is a few executor hops; yielding first spares a
+                // rendered sample per check. A display frame lets SwiftUI
+                // commit a restart before the render is consulted.
+                for _ in 0..<32 where !asleepAgain() { await Task.yield() }
+                if asleepAgain() { return try Self.sample(window) }
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+                if asleepAgain() { return try Self.sample(window) }
                 let sample = try Self.sample(window)
                 if sample.isConverged { return sample }
-                try await DisplayFrameScheduler.displayLink.nextFrame()
             }
         }
         /// Advances reveal time one sample interval and samples after the
