@@ -7,6 +7,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess as _subprocess
@@ -26,6 +27,9 @@ RUNNER = ROOT / "scripts/tron-ios-test"
 PROFILER = ROOT / "scripts/tron-profile-ios"
 E2E = ROOT / "scripts/ios-gateway-e2e-test"
 DEVELOPMENT = ROOT / "scripts/tron-ios-simulator"
+XCODEGEN_VERSION = re.search(
+    r"^TRON_CI_XCODEGEN_VERSION=(\S+)$", (ROOT / "config/ci-toolchain.env").read_text(), re.M,
+).group(1)
 RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-26-2"
 TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
 # The runner fixture's synthetic Mac pins its own runtime/device type.
@@ -306,6 +310,47 @@ class ContainedFixture:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("#!/usr/bin/env python3\n" + CONTAINMENT_GUARD + body)
         path.chmod(0o755)
+
+    def install_synthetic_xcodegen(self, root: Path) -> dict[str, str]:
+        """A pinned-tool cache in the layout `scripts/install-ci-tools.sh` makes.
+
+        Failure modes this closes (#113):
+
+        1. The synthetic XcodeGen's setting presets sit where the toolchain
+           verifier does not look (it reads `<cache>/bin/../share/xcodegen`), so
+           every build-path case fails on a host with no XcodeGen of its own -
+           the Linux CI runner.
+        2. The fixture does not name its cache, so the project generator runs
+           the host's real XcodeGen (the checkout's `.ci-tools` or Homebrew)
+           and writes the checkout's real Xcode project.
+        3. A runner resolves the host's XcodeGen ahead of the named cache for its
+           own toolchain check, so on a developer Mac that check passes against
+           the real tool and hides failure mode 1.
+        4. A fixture whose command builds provides no XcodeGen at all, so it
+           passes only where the host has one.
+
+        Returns the environment that names this cache to the runners; every call
+        the synthetic tool serves is recorded for `xcodegen_calls`.
+        """
+        cache = root / "ci-tools"
+        self.synthetic_stub(cache / "bin/xcodegen", f"""from pathlib import Path
+with open(Path(__file__).resolve().parents[1] / 'calls', 'a', encoding='utf-8') as handle:
+    handle.write(' '.join(sys.argv[1:]) + '\\n')
+if sys.argv[1:] == ['--version']:
+    print('Version: {XCODEGEN_VERSION}')
+""")
+        presets = cache / "share/xcodegen/SettingPresets"
+        (presets / "Platforms").mkdir(parents=True)
+        for name in ("base.yml", "Platforms/iOS.yml", "Platforms/macOS.yml"):
+            (presets / name).write_text("synthetic\n")
+        return {"TRON_CI_TOOLS_DIR": str(cache)}
+
+    def xcodegen_calls(self, root: Path) -> list[str]:
+        """The arguments of every call the fixture's synthetic XcodeGen served."""
+        try:
+            return (root / "ci-tools/calls").read_text().splitlines()
+        except FileNotFoundError:
+            return []
 
     def close_pipes(self, process: subprocess.Popen[str]) -> None:
         """Close a killed helper's pipes so the fixture can be cleaned up."""
@@ -891,14 +936,7 @@ fi
 exit 0
 """)
         xcodebuild.chmod(0o755)
-        xcodegen = self.bin / "xcodegen"
-        xcodegen.write_text("#!/usr/bin/env bash\necho 2.45.3\n")
-        xcodegen.chmod(0o755)
-        presets = self.bin / "share/xcodegen/SettingPresets/Platforms"
-        presets.mkdir(parents=True)
-        (self.bin / "share/xcodegen/SettingPresets/base.yml").write_text("base\n")
-        (presets / "iOS.yml").write_text("ios\n")
-        (presets / "macOS.yml").write_text("mac\n")
+        self.tools_environment = self.install_synthetic_xcodegen(self.root)
         self.derived = self.root / "derived"
         self.results = self.root / "results"
         self.state = self.root / "state"
@@ -941,6 +979,7 @@ exit 0
         environment.update(self.reader_environment())
         environment.update({
             "PATH": f"{self.bin}:{environment['PATH']}",
+            **self.tools_environment,
             "TRON_IOS_XCRUN": str(self.xcrun),
             "FAKE_SIMULATOR_INVENTORY": str(self.simulator_inventory),
             "FAKE_SIMCTL_LOG": str(self.simctl_log),
@@ -1053,6 +1092,7 @@ exit 0
         environment.update(self.reader_environment())
         environment.update({
             "PATH": f"{self.bin}:{environment['PATH']}",
+            **self.tools_environment,
             "TRON_IOS_XCRUN": str(self.xcrun),
             "FAKE_SIMULATOR_INVENTORY": str(self.simulator_inventory),
             "TRON_IOS_SIMULATOR_STATE_DIR": str(self.root / "development-state"),
@@ -1148,6 +1188,13 @@ exit 0
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip())
         self.assertIsInstance(metadata["source"]["dirty"], bool)
+
+    def test_build_generates_with_the_xcodegen_the_tools_cache_names(self) -> None:
+        """#113 failure modes 2 and 3: every XcodeGen the build resolves is the fixture's."""
+        result = self.invoke(command="build")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The runner's own toolchain check, then the generator's check and run.
+        self.assertEqual(self.xcodegen_calls(self.root), ["--version", "--version", "generate"])
 
     def test_run_records_the_source_it_verified(self) -> None:
         result = self.invoke()
@@ -3153,6 +3200,8 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         before it refuses them.
     11. `stop` or `clean` in one worktree removes another worktree's fixture or
         DerivedData.
+    12. The harness finds its products with a BSD-only tool, so its build fails
+        silently on the Linux CI runner that runs these cases (#113).
     """
 
     def setUp(self) -> None:
@@ -3160,6 +3209,7 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         self.install_fake_xcodebuild()
         self.environment = {
             **self.environment,
+            **self.install_synthetic_xcodegen(self.root),
             "TRON_IOS_E2E_STATE_DIR": str(self.root / "e2e-state"),
             "TRON_IOS_E2E_DERIVED_DATA": str(self.root / "e2e-derived"),
         }
@@ -3343,6 +3393,13 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         self.assertTrue((self.state / "simulator.json").exists())
         self.assertTrue(self.present(marker["udid"]))
         self.assertEqual(self.simctl_commands().count("delete"), 0)
+
+    def test_an_e2e_build_generates_with_the_xcodegen_the_tools_cache_names(self) -> None:
+        """#113 failure modes 3 and 4: every XcodeGen the build resolves is the fixture's."""
+        result = self.e2e("build")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The harness's own toolchain check, then the generator's check and run.
+        self.assertEqual(self.xcodegen_calls(self.root), ["--version", "--version", "generate"])
 
     def test_an_e2e_build_the_mac_refuses_keeps_the_shared_exit(self) -> None:
         """Failure mode 4: the refusal stays 73 and nothing is booted or built."""

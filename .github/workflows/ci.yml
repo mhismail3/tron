@@ -83,7 +83,6 @@ jobs:
           python3 scripts/test-ios-test-infrastructure.py
       - name: Test profiler report and comparison policy
         run: |
-          python3 scripts/test-tron-profile.py
           python3 scripts/test-tron-profile-ios.py
           python3 scripts/test-tron-profile-attribution.py
       - name: Test the incident triage tool
@@ -142,6 +141,11 @@ jobs:
         working-directory: packages/gateway
       - name: Test macOS development lifecycle state tooling
         run: node --test scripts/tron-dev-state.test.mjs
+      # The Gateway profiler samples the Gateway through macOS libproc, and its
+      # stub Gateway loads the Gateway's own `ws` dependency, so its fixtures
+      # run here rather than on the Linux policy runner (#113).
+      - name: Test the Gateway profiler
+        run: python3 scripts/test-tron-profile.py
       - run: node --test scripts/gateway-payload-deploy.test.mjs
       - run: npm test
         working-directory: packages/gateway
@@ -173,6 +177,11 @@ jobs:
 
   ios:
     runs-on: macos-26
+    # The memory reserve protects a shared development Mac's Gateway. A hosted
+    # runner is a dedicated VM whose whole memory (7 GB) is below the 8 GB
+    # default, so the default refuses every boot here (#113).
+    env:
+      TRON_IOS_TEST_MEMORY_RESERVE_BYTES: "0"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -216,6 +225,9 @@ jobs:
     # Source-level transport and native changes must exercise this boundary,
     # not only backing-SDK dependency upgrades.
     runs-on: macos-26
+    # Same dedicated-runner reserve as the ios job.
+    env:
+      TRON_IOS_TEST_MEMORY_RESERVE_BYTES: "0"
     steps:
       # The runner context is not available in job-level env, so the E2E
       # state roots are exported from RUNNER_TEMP for every later step.
@@ -312,17 +324,13 @@ jobs:
       - run: packages/mac-app/scripts/test-update-payload-fingerprint.sh
       - run: packages/mac-app/scripts/test-push-product-config.sh
       - run: scripts/tron mac generate
-      - name: Build Mac test products
+      # Compile only. The app-hosted TronMacTests and the signed-payload smoke
+      # need the team's Mac Development certificate, which CI does not hold, and
+      # an ad-hoc signature makes macOS reject the hosted test bundle. They run
+      # locally (packages/mac-app/docs/development.md#efficient-focused-tests).
+      - name: Compile Mac app and test sources unsigned
         working-directory: packages/mac-app
         run: |
           xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
             -destination 'platform=macOS,arch=arm64' -configuration Debug \
-            -derivedDataPath build/ci-derived-data
-      - name: Smoke test signed staged Pi payload
-        run: packages/mac-app/scripts/test-signed-pi-payload-smoke.sh packages/mac-app/build/ci-derived-data/Build/Products/Debug/TronMac.app
-      - name: Run Mac tests without rebuilding
-        working-directory: packages/mac-app
-        run: |
-          xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
-            -destination 'platform=macOS,arch=arm64' -configuration Debug \
-            -derivedDataPath build/ci-derived-data -collect-test-diagnostics never
+            -derivedDataPath build/ci-derived-data CODE_SIGNING_ALLOWED=NO

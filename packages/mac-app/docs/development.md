@@ -704,6 +704,13 @@ repeatedly paying for unrelated suites. `TronMacTests` is hosted by the app and
 must inherit the app's signing team; forcing the bundle to an ad-hoc identity
 causes macOS to reject it before tests bootstrap.
 
+CI holds no signing certificate, so its Mac job builds the same
+`build-for-testing` products with `CODE_SIGNING_ALLOWED=NO`. That catches compile
+and link breaks in the app, its helpers and `TronMacTests`, but runs nothing. On
+a Mac that has the team's Mac Development certificate, run the hosted tests
+above. Then run `packages/mac-app/scripts/test-signed-pi-payload-smoke.sh` on
+the built `TronMac.app`.
+
 ## Pairing checks
 
 Pairing requires:

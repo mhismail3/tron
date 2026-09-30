@@ -13,8 +13,9 @@ ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
 # Keep the caller/setup-node toolchain ahead of Homebrew; .ci-tools contributes
-# repository-pinned helpers such as XcodeGen but never owns Node or npm.
-export PATH="$repo_root/.ci-tools/bin:$PATH:/opt/homebrew/bin"
+# repository-pinned helpers such as XcodeGen but never owns Node or npm. The
+# cache is wherever scripts/install-ci-tools.sh put it (TRON_CI_TOOLS_DIR).
+export PATH="${TRON_CI_TOOLS_DIR:-$repo_root/.ci-tools}/bin:$PATH:/opt/homebrew/bin"
 identity_owner="$repo_root/scripts/ios-test-build-identity.py"
 # Keyed by worktree as scripts/tron-ios-test keys its products, so two worktrees
 # never share a Gateway pid, state.env, npm lock hash, log or test products.
@@ -432,12 +433,16 @@ PY
   echo "Gateway fixture upstream 127.0.0.1:$upstream_port (pid $(<"$pid_file")); fault proxy 127.0.0.1:$port (pid $proxy_pid)"
 }
 
+# The newest xctestrun, if any. Python rather than BSD `stat -f`, which GNU stat
+# reads as a file-system query: the hardware-free fixtures run this on Linux CI.
 find_xctestrun() {
-  [[ -d "$derived_data/Build/Products" ]] || return 0
-  find "$derived_data/Build/Products" -maxdepth 1 -type f \
-    -name 'Tron Development_UnitTests_*.xctestrun' \
-    -exec /usr/bin/stat -f '%m %N' {} + 2>/dev/null \
-    | sort -nr | head -1 | cut -d' ' -f2-
+  python3 - "$derived_data/Build/Products" <<'PY'
+from pathlib import Path
+import sys
+runs = [path for path in Path(sys.argv[1]).glob("Tron Development_UnitTests_*.xctestrun") if path.is_file() and not path.is_symlink()]
+if runs:
+    print(max(runs, key=lambda path: path.stat().st_mtime))
+PY
 }
 
 patch_xctestrun() {

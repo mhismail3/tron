@@ -7,7 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IOS="$ROOT/packages/ios-app"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"
-export PATH="$ROOT/.ci-tools/bin:/opt/homebrew/bin:$PATH"
+# The pinned-tool cache is wherever scripts/install-ci-tools.sh put it.
+export PATH="${TRON_CI_TOOLS_DIR:-$ROOT/.ci-tools}/bin:/opt/homebrew/bin:$PATH"
 
 DEVELOPMENT_STATE="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
 IOS_BUILD_ROOT="$HOME/Library/Developer/Tron/ios"

@@ -7,6 +7,9 @@ verifier="$script_dir/verify-archive-privacy.sh"
 manifest="$package_root/Sources/PrivacyInfo.xcprivacy"
 root="$(mktemp -d "${TMPDIR:-/tmp}/tron-privacy-archive.XXXXXX")"
 trap 'rm -rf "$root"' EXIT
+# The fixture app declares the canonical protocol; a literal went stale at each
+# lockstep bump (#113) and failed the valid archive.
+protocol="$(PYTHONPATH="$package_root/../../scripts" python3 -c 'from gateway_protocol_contract import load_contract; print(load_contract().protocol_version)')"
 
 fakebin="$root/bin"
 mkdir -p "$fakebin"
@@ -64,15 +67,15 @@ fixture() {
   cp "$manifest" "$extension/PrivacyInfo.xcprivacy"
   touch "$app/_CodeSignature/CodeResources" "$extension/_CodeSignature/CodeResources"
   touch "$app/embedded.mobileprovision" "$extension/embedded.mobileprovision"
-  cat >"$app/Info.plist" <<'PLIST'
+  cat >"$app/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>com.tron.mobile</string>
 <key>TRONBuildRole</key><string>release</string>
 <key>TRONConfiguration</key><string>Release</string>
 <key>TRONPushRoute</key><string>production</string>
 <key>TRONAPNsEnvironment</key><string>production</string>
-<key>TRONGatewayProtocolVersion</key><string>4</string>
-<key>TRONGatewayMinProtocolVersion</key><string>4</string>
+<key>TRONGatewayProtocolVersion</key><string>$protocol</string>
+<key>TRONGatewayMinProtocolVersion</key><string>$protocol</string>
 <key>TRONAppAttestEnvironment</key><string>production</string>
 <key>TRONPrivateBlurEnabled</key><string>NO</string>
 </dict></plist>

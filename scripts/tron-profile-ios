@@ -678,7 +678,7 @@ class Profiler:
     def build(self) -> None:
         self.owned_directory(self.derived_data)
         if run([str(ROOT / "scripts/verify-ci-toolchain.sh"), "ios", "xcodegen"],
-               env={**os.environ, "PATH": f"{ROOT / '.ci-tools/bin'}:/opt/homebrew/bin:{os.environ.get('PATH', '')}"}).returncode:
+               env={**os.environ, "PATH": f"{Path(os.environ.get('TRON_CI_TOOLS_DIR') or ROOT / '.ci-tools') / 'bin'}:/opt/homebrew/bin:{os.environ.get('PATH', '')}"}).returncode:
             raise ProfileError("the Apple toolchain does not match the repository pins", EXIT_BUILD_FAILURE)
         identity = run([sys.executable, str(IDENTITY), "show", "--worktree", str(ROOT)],
                        capture_output=True, check=True).stdout
