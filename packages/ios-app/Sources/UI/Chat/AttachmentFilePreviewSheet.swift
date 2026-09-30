@@ -421,6 +421,6 @@ struct AttachmentPDFView: UIViewRepresentable {
             scrollView.leftEdgeEffect.style = .soft
             scrollView.rightEdgeEffect.style = .soft
         }
-        view.subviews.forEach { softenScrollEdges(in: $0) }
+        view.subviews.forEach { softenScrollEdges(in: $0, secondaryToChat: secondaryToChat) }
     }
 }
