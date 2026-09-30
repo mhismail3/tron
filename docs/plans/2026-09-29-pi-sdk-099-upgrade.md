@@ -1152,3 +1152,11 @@ installed. Then close the plan per `docs/plans/README.md`.
 - `packages/ios-app/build/p99-captures/routed-physical-model-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
 - `packages/ios-app/build/p99-captures/routed-physical-model-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
 - `packages/ios-app/build/p99-captures/routed-physical-model-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+
+### P99-17 g2 · Done · 2026-09-30 · luna-worker
+
+- Result: Exercised the read-only copy of the installed `pi-agent-browser-native@0.4.1` through a real `RuntimeRegistry` session and fake `agent-browser` executable. Direct browser results register a session-owned live view and admit their receipt; nested codemode browser results reseal the receipt for the canonical parent call, survive cold reload, and do not leak after parent abort and runtime teardown.
+- Evidence: Focused RuntimeRegistry integration passed 1/1 test (1.54 s test time; 2.33 s Vitest wall time). Retained artifact: `packages/gateway/test-results/pi-sdk-099-browser-fork.json`. No real browser or network was used.
+- Changes: `packages/gateway/src/sessions/browser-fork-receipts.integration.test.ts`; this handoff only. The test configures the exact trusted `d6cde09af8d7757bbfba5a4ffaf83381bb392683` source and validates the fork's `lifecycle.browserBinding` JSON envelope.
+- Kept on purpose: The actual installed package copy is read-only and disposable; fixture package settings, fake executable, sessions, and receipts are isolated. The P99-17 plan row remains Claimed for its other outstanding checkpoints.
+- Deviations: None.
