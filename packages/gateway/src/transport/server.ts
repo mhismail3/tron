@@ -29,8 +29,6 @@ import { isTailscaleAddress } from "../config.js";
 // IDs are stale control paths and may safely require a fresh session.open.
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
 export const MAXIMUM_UNANSWERED_HEARTBEATS = GATEWAY_CONNECTION_POLICY.missedHeartbeatLimit;
-/** Bound bytes retained by ws and Node so bulk state cannot grow unbounded ahead of control frames. */
-const MAXIMUM_SOCKET_BUFFERED_BYTES = 64 * 1_024;
 /** Application-defined close code for a socket replaced by its own identity. */
 export const SUPERSEDED_CLOSE_CODE = 4000;
 
@@ -482,14 +480,8 @@ export class OrderedOutboundQueue {
     private readonly accepted: (bytes: number) => void = () => {},
     /** One superseded frame, reported where it is dropped. */
     private readonly replaced: (bytes: number) => void = () => {},
-    private readonly canWrite: () => boolean = () => true,
     private readonly maximumFrames = 4_096,
   ) {}
-
-  /** Resume after the underlying transport reports that its write buffer drained. */
-  resume(): void {
-    this.drain();
-  }
 
   enqueue(frame: OutboundFrame): boolean {
     if (this.retired) return false;
@@ -620,7 +612,7 @@ export class OrderedOutboundQueue {
   }
 
   private drain(): void {
-    if (this.retired || this.writeActive || !this.canWrite()) return;
+    if (this.retired || this.writeActive) return;
     const frame = this.frames[this.head];
     if (!frame) return;
     this.writeActive = true;
@@ -2106,11 +2098,7 @@ export class GatewayServer {
       },
       (bytes) => this.resourceSampler.recordOutboundBytes(bytes),
       (bytes) => this.resourceSampler.recordOutboundCoalesced(bytes),
-      () => socket.bufferedAmount <= MAXIMUM_SOCKET_BUFFERED_BYTES,
     );
-    // ws exposes bufferedAmount but not the underlying writable socket's drain event.
-    const transportSocket = (socket as WebSocket & { _socket: Duplex })._socket;
-    transportSocket.on("drain", () => outbound.resume());
     connection = {
       id: randomUUID(),
       identity,

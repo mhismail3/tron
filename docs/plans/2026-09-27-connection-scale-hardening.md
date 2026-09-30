@@ -664,7 +664,7 @@ rows are in priority order.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | R-1 | Done | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | orchestrator, 2026-09-29: merged to `main` with four known misses the user accepted in writing (see handoff); F-4..F-7 own them |
-| F-4 | Blocked | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-4), 2026-09-30; outbound writes now pause at the socket-buffer boundary, but the quiet-host `bandwidth-stream` acceptance run could not be completed (see handoff) |
+| F-4 | Blocked | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-4), 2026-09-30; `ws.bufferedAmount` cannot bound bytes already accepted into kernel/path buffers, so the required mechanism and qualification remain outstanding (see handoff) |
 | F-5 | Claimed | Prompt admission p99 ~610 ms against 250 ms in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567, with F-6 and F-7), 2026-09-30 |
 | F-6 | Claimed | Event loop p99 ~38 ms against 20 ms, max up to 1.4 s under load; attribute with a CPU profile | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30 |
 | F-7 | Claimed | Warm `session.open` p99 ~335 ms against 300 ms | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30 |
@@ -10681,19 +10681,14 @@ recovery gaps; all three were fixed on the same branch.
 
 #### F-4 · Blocked · 2026-09-30 · orchestrator-dispatched deepseek-worker (branch `hardening/f-4`)
 
-- Result: added a queue write gate at 64 KiB `ws.bufferedAmount`, resumed by the
-  underlying socket's `drain` event; unsent superseded state continues to
-  coalesce while the transport is backpressured. Added a focused regression for
-  pause → coalesce → resume and updated the connection-resilience contract.
-- Failure modes written before implementation: (1) send callbacks can keep
-  feeding `ws` while its writable buffer is pressured; (2) pausing must retain
-  G-4 sequence/rebaseline coverage and enqueue order; (3) fast sockets must not
-  wait and the distinct 2 Mbit page case must retain its link use.
-- Evidence: `npx vitest run src/transport/server-capacity.integration.test.ts`
-  **36/36**, `npx vitest run src/transport/server-heartbeat.integration.test.ts`
-  **10/10**, and `npm run build` pass. The new test failed before the queue gate
-  (it wrote `summary-1` while the modeled transport was blocked) and passes with
-  the gate.
+- Result: removed the ineffective `ws.bufferedAmount` gate and its private
+  `_socket`/`drain` hook, and deleted the test that modeled an unreachable
+  production state. One-frame-at-a-time `ws` sends do not bound bytes accepted
+  into kernel/path buffers; F-4 remains blocked pending a mechanism that does.
+- Evidence: reviewer's real-`ws` probe observed 1,114,112 bytes written with a
+  paused reader, zero gate closures and zero `drain` events; this disproves the
+  gate rather than qualifying F-4. After removal, focused merge-gate checks
+  passed (6 files/135 tests; registry 245 tests) and `tsc --noEmit` passed.
 - Qualification blocked: both before-change profile attempts using
   `scripts/tron-profile gateway --scenario multi-session --no-build --iterations
   1 --cases bandwidth-stream,bandwidth` stopped in `prime` because
