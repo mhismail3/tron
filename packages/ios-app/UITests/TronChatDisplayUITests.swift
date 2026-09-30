@@ -43,6 +43,19 @@ final class TronChatDisplayUITests: XCTestCase {
         }
     }
 
+    func testSystemStatusBarControl() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-chat-display-fixture", "-fixture-status-control"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Control row 99"].waitForExistence(timeout: 10))
+        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        system.statusBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
+        let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"),
+            object: app.staticTexts["Oldest loaded history"])
+        XCTAssertEqual(XCTWaiter.wait(for: [reached], timeout: 8), .completed, app.debugDescription)
+        app.terminate()
+    }
+
     func testStatusBarTapReachesOldestLoadedHistory() {
         for orientation in ["end", "origin"] {
           for accessories in [false, true] {

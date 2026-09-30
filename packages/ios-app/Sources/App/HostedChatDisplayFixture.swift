@@ -81,7 +81,12 @@ struct HostedChatDisplayFixture: View {
 
     var body: some View {
         NavigationStack {
-            if ready {
+            if ProcessInfo.processInfo.arguments.contains("-fixture-status-control") {
+                ScrollView { VStack {
+                    Text("Oldest loaded history")
+                    ForEach(0..<100) { Text("Control row \($0)").frame(height: 44) }
+                } }.defaultScrollAnchor(.bottom)
+            } else if ready {
                 ChatView(sessionID: snapshot.sessionId, hostedProbe: probe)
                     .toolbar { Button("Inspect recipients") { inspectRecipients() } }
                     .overlay(alignment: .top) { Text(diagnostic).font(.system(size: 1)).accessibilityIdentifier("fixture-scroll-owners") }
