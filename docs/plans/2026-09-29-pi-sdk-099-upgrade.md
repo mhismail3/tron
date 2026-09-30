@@ -1080,67 +1080,67 @@ installed. Then close the plan per `docs/plans/README.md`.
 - For the next agent: complete true add-sheet/detail capture through production UI (introduce a real detail surface only if separately approved), review all accessibility captures against the plan, and retain the final capture artifact. Rerun focused settings and full suite after those changes; do not count this handoff as P99-17 completion.
 
 #### Capture review ledger
-- `packages/ios-app/build/p99-captures/mcp-servers-global-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/mcp-servers-global-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/mcp-servers-global-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/mcp-servers-global-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/mcp-servers-project-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/mcp-servers-project-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/mcp-servers-project-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/mcp-servers-project-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/extensions-codemode-tools-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/extensions-codemode-tools-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/extensions-codemode-tools-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/extensions-codemode-tools-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/provider-typesafe-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/provider-typesafe-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/provider-typesafe-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/provider-typesafe-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-codemode-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-codemode-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-codemode-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-codemode-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-codemode-continuation-light-std.png` — Pass: production ToolDetailSheet shows semantic output, nested-call icon/title/disclosure, plain omission note, attachments and cost.
-- `packages/ios-app/build/p99-captures/tool-codemode-continuation-light-ax.png` — Pass: production ToolDetailSheet shows semantic output, nested-call icon/title/disclosure, plain omission note, attachments and cost.
-- `packages/ios-app/build/p99-captures/tool-codemode-continuation-dark-std.png` — Pass: production ToolDetailSheet shows semantic output, nested-call icon/title/disclosure, plain omission note, attachments and cost.
-- `packages/ios-app/build/p99-captures/tool-codemode-continuation-dark-ax.png` — Pass: production ToolDetailSheet shows semantic output, nested-call icon/title/disclosure, plain omission note, attachments and cost.
-- `packages/ios-app/build/p99-captures/tool-mcp-text-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-text-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-text-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-text-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-image-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-image-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-image-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-image-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-structured-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-structured-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-structured-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-structured-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-error-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-error-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-error-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-mcp-error-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-search-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-search-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-search-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-search-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-technical-details-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-technical-details-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-technical-details-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-technical-details-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-picker-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-picker-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-picker-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-picker-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-chips-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-chips-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-chips-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/tool-chips-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/routed-physical-model-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/routed-physical-model-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/routed-physical-model-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
-- `packages/ios-app/build/p99-captures/routed-physical-model-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/mcp-servers-global-light-std.png` — Pass: real MCP screen; connection green, sign-in amber, failure red, hierarchy clear.
+- `packages/ios-app/build/p99-captures/mcp-servers-global-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/mcp-servers-global-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/mcp-servers-global-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/mcp-servers-project-light-std.png` — Pass: real project MCP screen; project scope selector and server states are legible.
+- `packages/ios-app/build/p99-captures/mcp-servers-project-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/mcp-servers-project-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/mcp-servers-project-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/extensions-codemode-tools-light-std.png` — Pass: real Extensions screen; built-in/default-tool controls are visible; list continues by scrolling.
+- `packages/ios-app/build/p99-captures/extensions-codemode-tools-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/extensions-codemode-tools-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/extensions-codemode-tools-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/provider-typesafe-light-std.png` — Pass: real Providers screen exposes the classifier-only TypeSafe entry; 0 chat models is explicit.
+- `packages/ios-app/build/p99-captures/provider-typesafe-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/provider-typesafe-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/provider-typesafe-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-codemode-light-std.png` — Pass: semantic codemode result, per-kind nested icons, titles, chevrons, readable note, attachments and cost.
+- `packages/ios-app/build/p99-captures/tool-codemode-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-codemode-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-codemode-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-codemode-continuation-light-std.png` — Pass: continuation detail keeps semantic output before supporting sections.
+- `packages/ios-app/build/p99-captures/tool-codemode-continuation-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-codemode-continuation-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-codemode-continuation-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-text-light-std.png` — Pass: query, result and detail summary are readable.
+- `packages/ios-app/build/p99-captures/tool-mcp-text-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-text-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-text-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-image-light-std.png` — Pass: bounded image-result summary and item details are legible.
+- `packages/ios-app/build/p99-captures/tool-mcp-image-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-image-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-image-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-structured-light-std.png` — Pass: structured result summary is legible without raw JSON dump.
+- `packages/ios-app/build/p99-captures/tool-mcp-structured-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-structured-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-structured-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-error-light-std.png` — Pass: failed status and permission error use clear error hierarchy.
+- `packages/ios-app/build/p99-captures/tool-mcp-error-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-error-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-mcp-error-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-search-light-std.png` — Pass: query and loaded-tools result wrap without horizontal clipping.
+- `packages/ios-app/build/p99-captures/tool-search-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-search-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-search-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-light-std.png` — Pass: resource URI, result and content count are legible.
+- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-technical-details-light-std.png` — Pass: execution metadata and separate Request/Result JSON disclosure hierarchy.
+- `packages/ios-app/build/p99-captures/tool-technical-details-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-technical-details-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-technical-details-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-picker-light-std.png` — Reviewed: existing picker fixture is outside the requested replica replacements; not claimed as a real picker screen.
+- `packages/ios-app/build/p99-captures/tool-picker-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-picker-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-picker-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-chips-light-std.png` — Pass: production ToolCard rows show kind icons, titles and capitalized Completed status.
+- `packages/ios-app/build/p99-captures/tool-chips-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-chips-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/tool-chips-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/routed-physical-model-light-std.png` — Pass: standard/light reviewed; text and hierarchy remain readable.
+- `packages/ios-app/build/p99-captures/routed-physical-model-light-ax.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/routed-physical-model-dark-std.png` — Review pending: capture exists; this variant was not visually inspected.
+- `packages/ios-app/build/p99-captures/routed-physical-model-dark-ax.png` — Review pending: capture exists; this variant was not visually inspected.
