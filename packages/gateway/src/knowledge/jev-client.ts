@@ -126,9 +126,21 @@ export class JevDecisionClient {
       const upstreamFetch = this.fetchImpl ?? globalThis.fetch;
       const boundedFetch: typeof fetch = async (input, init) => {
         const response = await upstreamFetch(input, init);
-        const body = await response.text();
-        if (Buffer.byteLength(body, "utf8") > JEV_MAX_RESPONSE_BYTES) throw new Error("Jev classifier response exceeded its explicit bound");
-        return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+        const declaredLength = Number(response.headers.get("content-length"));
+        if (Number.isFinite(declaredLength) && declaredLength > JEV_MAX_RESPONSE_BYTES) throw new Error("Jev classifier response exceeded its explicit bound");
+        const reader = response.body?.getReader();
+        if (!reader) return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
+        const chunks: Uint8Array[] = []; let total = 0;
+        try {
+          while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            total += next.value.byteLength;
+            if (total > JEV_MAX_RESPONSE_BYTES) { await reader.cancel(); throw new Error("Jev classifier response exceeded its explicit bound"); }
+            chunks.push(next.value);
+          }
+        } finally { reader.releaseLock(); }
+        return new Response(Buffer.concat(chunks, total), { status: response.status, statusText: response.statusText, headers: response.headers });
       };
       const result = await this.runtime.classify(model, classifierContext, { signal, fetch: boundedFetch });
       if (signal.aborted) throw new Error("Jev evaluation cancelled after dispatch");

@@ -43,6 +43,12 @@ describe("Pi-backed Jev classifier", () => {
     expect(calls).toBe(0);
   });
 
+  it("rejects an oversized classifier response as an uncertain dispatch", async () => {
+    const value = await runtime();
+    const client = new JevDecisionClient(value, async () => new Response("x".repeat(512_001), { status: 200, headers: { "content-type": "application/json" } }));
+    await expect(client.evaluate(request, new AbortController().signal)).rejects.toMatchObject({ certainty: "uncertain" });
+  });
+
   it("rejects a ceiling below the qualified catalog-price estimate before Pi dispatch", async () => {
     const value = await runtime(); let calls = 0;
     const client = new JevDecisionClient(value, async () => { calls += 1; return new Response("{}", { status: 200 }); });
