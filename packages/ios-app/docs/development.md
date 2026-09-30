@@ -2522,3 +2522,13 @@ remove the proxy and restore the native setting. **Device check still required:*
 tap the real status bar with empty composer and with attachments/chips/catalog in
 both orientations. Upright-at-rest device inversion remains open: hosted and
 XCUITest pixels do not reproduce the user's intermittent image/badge flip.
+
+The CT-23 child-sheet gesture boundary is exercised by
+`TronSubagentSheetScrollUITests` in the UI-validation tier. Its hosted launch
+fixture (`-tron-subagent-sheet-fixture`) opens the real managed read-only sheet
+through the normal canonical transcript lease. Both orientations receive physical
+window-coordinate content and header drags; retained screenshots accompany sheet
+frame, row movement, edge rubber-band, header resize/dismiss and check-button
+assertions. Run with `scripts/tron-ios-test run --only-testing
+TronMobileUITests/TronSubagentSheetScrollUITests` after a build, with
+`TRON_IOS_TEST_TIER=ui-validation`.
