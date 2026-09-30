@@ -68,7 +68,9 @@
   image does not prove animation, interaction, or device validation.
 - **Keep the tree owned.** Whoever adds, moves, renames or deletes a file
   updates every reference to it and its owning doc in the same change, and
-  commits no temporary files, scratch fixtures or one-off reports.
+  commits no temporary files, scratch fixtures or one-off reports. Agent
+  progress notes (`progress.md`) are local-only and gitignored, so they never
+  mark a checkout dirty for `scripts/tron work verify` or a dev candidate.
 - **Leave useful breadcrumbs.** Add concise comments where ownership, an
   invariant, ordering, or a non-obvious tradeoff would otherwise be easy to break.
   Explain why; link the owning contract or focused regression when useful. Do not

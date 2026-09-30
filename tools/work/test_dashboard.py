@@ -1,4 +1,4 @@
-"""Isolated checks for dashboard failure modes 20-31 in README.md.
+"""Isolated checks for dashboard failure modes 20-31 and 42 in README.md.
 
 Inputs are GitHub-shaped responses in the form the dashboard's queries return
 them (recorded from the live API, including a deleted-content Project item and
@@ -50,6 +50,7 @@ CONFIG = {
     "claim": {
         "remote": "origin", "baseBranch": "main", "worktreeRoot": "../repo-worktrees",
         "readyStatus": "Ready", "claimedStatus": "In progress", "statusField": "Status",
+        "claimedStatuses": ["In progress", "In review", "Needs you"], "activeStatuses": ["In progress", "In review"],
         "excludeLabels": ["epic"], "softCap": 2,
     },
     "dashboard": {
@@ -218,7 +219,7 @@ class ForkPullTests(unittest.TestCase):
 
 
 class DisagreementTests(unittest.TestCase):
-    # Failure mode 23.
+    # Failure modes 23 and 42.
     def test_each_kind_is_reported(self):
         model = model_of(
             items=[
@@ -226,17 +227,24 @@ class DisagreementTests(unittest.TestCase):
                 item(issue(2), status="In progress"),   # In progress without a claim
                 item(issue(3), status="In progress"),   # two claim branches
                 item(issue(4), status="In progress"),   # consistent
+                item(issue(5), status="In review"),     # consistent: landing
+                item(issue(6), status="Needs you"),     # consistent: waiting on the maintainer mid-claim
+                item(issue(7), status="Needs you"),     # consistent: merged, branch deleted, awaiting validation
+                item(issue(8), status="In review"),     # In review without a claim
             ],
-            claims=[claim("feat/1-a"), claim("feat/3-b"), claim("fix/3-a", session="session-b"), claim("feat/4-d")],
+            claims=[claim("feat/1-a"), claim("feat/3-b"), claim("fix/3-a", session="session-b"), claim("feat/4-d"),
+                    claim("feat/5-e"), claim("feat/6-f")],
         )
         kinds = sorted((d["number"], d["kind"]) for d in model["disagreements"])
-        self.assertEqual(kinds, [(1, "claimed-not-in-progress"), (2, "in-progress-without-claim"),
-                                 (3, "multiple-claims")])
+        self.assertEqual(kinds, [(1, "claim-without-claimed-status"), (2, "active-without-claim"),
+                                 (3, "multiple-claims"), (8, "active-without-claim")])
+        self.assertEqual([row["number"] for row in model["in_progress"]], [2, 3, 4, 5, 8])
+        self.assertEqual(model["soft_cap"]["in_progress"], 5)
 
     def test_claim_of_issue_outside_the_project_disagrees(self):
         model = model_of(claims=[claim("feat/5-e")], states={5: "OPEN"})
         self.assertEqual([(d["number"], d["kind"]) for d in model["disagreements"]],
-                         [(5, "claimed-not-in-progress")])
+                         [(5, "claim-without-claimed-status")])
 
     def test_in_progress_row_uses_the_winning_claim(self):
         model = model_of(items=[item(issue(3), status="In progress")],

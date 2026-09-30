@@ -276,6 +276,98 @@ test("Debug status reports the dirtiness recorded for the running candidate", ()
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// Handoff source admission failure modes (#124: Stable is always a known commit):
+// 13. A candidate recorded as built from a dirty tree is copied into Stable.
+// 14. A candidate whose dirtiness is unknown - no record for its epoch
+//     (evicted or never recorded) or a record written before dirtiness was
+//     recorded - is treated as clean instead of refused.
+// 15. The decision reads another candidate's record than the payload handoff
+//     copies (the latest build, or a clean build sharing its fingerprint), so
+//     a dirty selected candidate passes or a clean one is refused.
+// 16. A refusal does not tell the maintainer how to produce an admissible
+//     candidate (commit, then restart).
+// 17. Admission does not hand `handoff-debug` the exact identity it admitted,
+//     so the copy cannot pin that candidate against a later selection change
+//     (gateway-payload-deploy.test.mjs covers the pinned copy).
+const selectDevPayload = (home, epoch) => {
+  const version = `debug-${epoch.slice(-12)}`;
+  const root = join(home, "gateway", "payloads", "dev");
+  mkdirSync(join(root, "versions", version), { recursive: true });
+  writeFileSync(join(root, "current.json"), `${JSON.stringify({ schema: 1, kind: "tron-gateway-selection", channel: "dev", version, payloadFingerprint: sharedFingerprint })}\n`);
+  writeFileSync(join(root, "versions", version, "manifest.json"), `${JSON.stringify({
+    schema: 1, kind: "tron-gateway-payload", channel: "dev", version, payloadFingerprint: sharedFingerprint,
+    runtimeEpoch: epoch, sourceRevision: "a".repeat(40),
+  })}\n`);
+  return version;
+};
+const handoffAdmission = (state, home) => {
+  try {
+    const stdout = execFileSync(process.execPath, [helper, "handoff-admission", state, home], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return { admitted: true, stdout, stderr: "" };
+  } catch (error) {
+    return { admitted: false, stdout: String(error.stdout ?? ""), stderr: String(error.stderr ?? "") };
+  }
+};
+
+test("Debug handoff admits only a selected candidate recorded as built from a clean tree", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-handoff-"));
+  try {
+    const state = join(root, "lifecycle.json");
+    const home = join(root, "home");
+    const worktree = sourceFixture(root, "source", "feat/source");
+    run(state, "record-source", epochFor(1), worktree, "false");
+    run(state, "record-source", epochFor(2), worktree, "true");
+    run(state, "record-source", epochFor(3), worktree, "false");
+
+    const cleanVersion = selectDevPayload(home, epochFor(1));
+    // Failure mode 17: stdout is exactly the admitted version and fingerprint.
+    assert.deepEqual(handoffAdmission(state, home), { admitted: true, stdout: `${cleanVersion} ${sharedFingerprint}\n`, stderr: "" });
+
+    // Failure modes 13 and 15: the selected candidate is dirty although the
+    // latest record (epoch 3) and the running epoch are clean builds with the
+    // same payload fingerprint.
+    const dirtyVersion = selectDevPayload(home, epochFor(2));
+    markRunning(state, epochFor(3));
+    const dirty = handoffAdmission(state, home);
+    assert.equal(dirty.admitted, false);
+    assert.equal(dirty.stdout, "");
+    assert.match(dirty.stderr, new RegExp(dirtyVersion, "u"));
+    // Failure mode 16: the refusal names the way to an admissible candidate.
+    assert.match(dirty.stderr, /commit/u);
+    assert.match(dirty.stderr, /scripts\/tron dev restart/u);
+
+    // Failure mode 15: a clean selected candidate is not refused because a
+    // later build (epoch 2 re-selected away from) was dirty.
+    selectDevPayload(home, epochFor(1));
+    markRunning(state, epochFor(2));
+    assert.equal(handoffAdmission(state, home).admitted, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Debug handoff refuses a candidate whose source dirtiness is unknown", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-handoff-"));
+  try {
+    const state = join(root, "lifecycle.json");
+    const home = join(root, "home");
+    const worktree = sourceFixture(root, "source", "feat/source");
+    // Failure mode 14: no lifecycle state at all.
+    selectDevPayload(home, epochFor(1));
+    const missingState = handoffAdmission(state, home);
+    assert.equal(missingState.admitted, false);
+    assert.match(missingState.stderr, /scripts\/tron dev restart/u);
+    // Failure mode 14: other epochs are recorded clean, the selected one is not.
+    run(state, "record-source", epochFor(2), worktree, "false");
+    markRunning(state, epochFor(1));
+    assert.equal(handoffAdmission(state, home).admitted, false);
+    // Failure mode 14: a record written before dirtiness was recorded.
+    const value = JSON.parse(run(state, "read"));
+    writeFileSync(state, `${JSON.stringify({ ...value, candidateSources: [{ runtimeEpoch: epochFor(1), worktree, branch: "feat/source" }] })}\n`);
+    const unrecorded = handoffAdmission(state, home);
+    assert.equal(unrecorded.admitted, false);
+    assert.match(unrecorded.stderr, /commit/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 const stopFixture = ({ child, identity, childIsOwned }) => {
   const root = mkdtempSync(join(tmpdir(), "tron-dev-stop-"));
   const home = join(root, "home");

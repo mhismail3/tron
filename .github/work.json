@@ -168,6 +168,15 @@
     "worktreeRoot": "../tron-worktrees",
     "readyStatus": "Ready",
     "claimedStatus": "In progress",
+    "claimedStatuses": [
+      "In progress",
+      "In review",
+      "Needs you"
+    ],
+    "activeStatuses": [
+      "In progress",
+      "In review"
+    ],
     "statusField": "Status",
     "excludeLabels": [
       "epic"
@@ -507,12 +516,24 @@
       }
     ]
   },
+  "land": {
+    "requiredChecks": [
+      "policy"
+    ],
+    "reviewStatus": "In review",
+    "doneStatus": "Done",
+    "userValidationLabel": "needs-user-validation",
+    "waitSeconds": 1800,
+    "pollSeconds": 20,
+    "maxRounds": 3
+  },
   "dashboard": {
     "needsYouStatus": "Needs you",
     "blockedStatus": "Blocked",
     "epicLabel": "epic",
     "needsYouLabels": [
-      "needs-decision"
+      "needs-decision",
+      "needs-user-validation"
     ],
     "regressionLabel": "regression",
     "priorityField": "Priority",

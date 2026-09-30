@@ -1084,7 +1084,10 @@ and its retention scan. Full payload copies use `/bin/cp -c -R` to request APFS
 clone-on-write; macOS `cp` falls back to a byte copy when cloning is unavailable.
 Post-copy fingerprints remain the integrity check. A per-channel source-build lock keeps cleanup of crash-left
 staging directories from touching a live build; validated staging is atomically
-renamed into `versions/` inside the store-locked publication transaction. The trusted
+renamed into `versions/` inside the store-locked publication transaction. Every
+publication seals the staged tree but keeps its root writable across that rename,
+because macOS 15 refuses to rename a directory its owner cannot write; the root is
+sealed in `versions/` before any candidate state names the version. The trusted
 source checkout must already have its lockfile-pinned Gateway development dependencies
 installed (prepare them with `cd packages/gateway && npm ci`
 before requesting a source rebuild); the helper never installs dependencies or contacts the
@@ -2371,7 +2374,9 @@ terminal admission atomically only after proving no PTY is live, so an already-d
 The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
 separate Debug lifecycle on 9848 through the same immutable payload store and launcher.
 Its loopback-by-default handoff copies only an authenticated, selected Debug
-artifact into Stable as an inactive candidate after proving the same exact Debug
+artifact whose version and fingerprint match the clean candidate `scripts/tron dev`
+admitted (re-checked under the Debug payload lock)
+into Stable as an inactive candidate after proving the same exact Debug
 identity before and after the copy; it never selects or restarts Stable. Compatibility
 is checked against the actual installed/active Stable runtime, and Node/helper drift
 requires a manual Mac app replacement. Promotion pins version and fingerprint,
