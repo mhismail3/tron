@@ -33,12 +33,15 @@ struct Pi099VisualEvidenceTests {
                 for size in [DynamicTypeSize.large, .accessibility3] {
                     let suffix = size == .large ? "std" : "ax"
                     let name = "\(scene.id)-\(scheme == .light ? "light" : "dark")-\(suffix)"
+                    let captureSize = scene.id.hasPrefix("mcp-add-server") && size == .accessibility3
+                        ? CGSize(width: 390, height: 1_500)
+                        : CGSize(width: 390, height: 844)
                     let view = scene.content
-                        .frame(width: 390, height: 844, alignment: .top)
+                        .frame(width: captureSize.width, height: captureSize.height, alignment: .top)
                         .background(Color.tronBackground)
                         .environment(\.colorScheme, scheme)
                         .environment(\.dynamicTypeSize, size)
-                    let image = try await renderHosted(view, size: CGSize(width: 390, height: 844), dynamicTypeSize: size, scrollToBottom: scene.id == "tool-codemode-continuation")
+                    let image = try await renderHosted(view, size: captureSize, dynamicTypeSize: size, scrollToBottom: scene.id == "tool-codemode-continuation")
                     let data = try #require(image.pngData())
                     let url = Self.captureDirectory.appendingPathComponent("\(name).png")
                     try data.write(to: url, options: .atomic)
@@ -50,7 +53,8 @@ struct Pi099VisualEvidenceTests {
         try index.write(to: Self.captureDirectory.appendingPathComponent("index.json"), options: .atomic)
         #expect(artifacts.count == scenes.count * 4)
         #expect(scenes.map(\.id).contains("mcp-servers-global"))
-        #expect(scenes.map(\.id).contains("mcp-add-server"))
+        #expect(scenes.map(\.id).contains("mcp-add-server-http"))
+        #expect(scenes.map(\.id).contains("mcp-add-server-stdio"))
         #expect(scenes.map(\.id).contains("tool-codemode"))
     }
 
@@ -101,7 +105,8 @@ struct Pi099VisualEvidenceTests {
         let views: [Scene] = [
             scene("mcp-servers-global", MCPServersSettingsView(projectCWD: nil).environment(model)),
             scene("mcp-servers-project", MCPServersSettingsView(projectCWD: "/fixture/trusted-project").environment(model)),
-            scene("mcp-add-server", MCPAddServerPresentationEvidence()),
+            scene("mcp-add-server-http", MCPAddServerPresentationEvidence(transport: "http", url: "https://mcp.example.test", command: "", validationMessage: nil)),
+            scene("mcp-add-server-stdio", MCPAddServerPresentationEvidence(transport: "stdio", url: "", command: "", validationMessage: nil)),
             scene("extensions-codemode-tools", ExtensionsSettingsView(projectCWD: nil).environment(model)),
             scene("provider-typesafe", ProvidersSettingsView(sessionID: nil).environment(model)),
             scene("tool-codemode", ToolDetailSheet(tool: codemode, density: .expanded)),
@@ -197,27 +202,36 @@ struct Pi099VisualEvidenceTests {
 @MainActor
 private struct MCPAddServerPresentationEvidence: View {
     @Environment(\.colorScheme) private var colorScheme
-    @State private var isPresented = true
     @State private var serverName = "calendar"
-    @State private var transport = "http"
-    @State private var url = "https://mcp.example.test"
-    @State private var command = ""
-    @State private var args = ""
+    @State private var transport: String
+    @State private var url: String
+    @State private var command: String
+    @State private var args = "--read-only"
+    @State private var bearerToken = "fixture-bearer-token"
+
+    init(transport: String, url: String, command: String, validationMessage: String?) {
+        _transport = State(initialValue: transport)
+        _url = State(initialValue: url)
+        _command = State(initialValue: command)
+        self.validationMessage = validationMessage
+    }
+
+    private let validationMessage: String?
 
     var body: some View {
-        Color.tronBackground
-            .preferredColorScheme(colorScheme)
-            .sheet(isPresented: $isPresented) {
-                MCPAddServerForm(
-                    serverName: $serverName,
-                    transport: $transport,
-                    url: $url,
-                    command: $command,
-                    args: $args,
-                    working: false,
-                    onAdd: { }
-                )
-                .presentationDetents([.large])
-            }
+        MCPAddServerForm(
+            serverName: $serverName,
+            transport: $transport,
+            url: $url,
+            command: $command,
+            args: $args,
+            bearerToken: $bearerToken,
+            error: validationMessage,
+            working: false,
+            onAdd: { }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.tronBackground)
+        .environment(\.colorScheme, colorScheme)
     }
 }

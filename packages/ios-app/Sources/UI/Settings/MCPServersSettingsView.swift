@@ -87,6 +87,8 @@ struct MCPServersSettingsView: View {
                 url: $url,
                 command: $command,
                 args: $args,
+                bearerToken: $token,
+                error: error,
                 working: working,
                 onAdd: { Task { await addServer() } }
             )
@@ -177,7 +179,7 @@ struct MCPServersSettingsView: View {
         !Task.isCancelled && activity.allowsPresentationPublication && generation == ticket && identity == model.knowledgePresentationIdentity
     }
     private func mutate(_ method: String, _ fields: [String: JSONValue]) async {
-        guard !working else { return }; working = true; defer { working = false }
+        guard !working else { return }; working = true; error = nil; defer { working = false }
         do {
             var params = fields
             if method != "mcp.auth.start" {
@@ -194,11 +196,17 @@ struct MCPServersSettingsView: View {
         await mutate("mcp.update", fields)
     }
     private func addServer() async {
-        var fields: [String: JSONValue] = ["server": .string(serverName), "transport": .string(transport)]
-        if transport == "http" { fields["url"] = .string(url) }
-        else { fields["command"] = .string(command); fields["args"] = .array(args.split(whereSeparator: \.isWhitespace).map { .string(String($0)) }) }
+        var fields: [String: JSONValue] = ["server": .string(serverName.trimmingCharacters(in: .whitespacesAndNewlines)), "transport": .string(transport)]
+        if transport == "http" { fields["url"] = .string(url.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        else { fields["command"] = .string(command.trimmingCharacters(in: .whitespacesAndNewlines)); fields["args"] = .array(args.split(whereSeparator: \.isWhitespace).map { .string(String($0)) }) }
         await mutate("mcp.add", fields)
-        if error == nil { serverName = ""; url = ""; command = ""; args = ""; showingAdd = false }
+        guard error == nil else { return }
+        let name = serverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !token.isEmpty {
+            await mutate("mcp.token.set", ["server": .string(name), "token": .string(token)])
+            guard error == nil else { return }
+        }
+        serverName = ""; url = ""; command = ""; args = ""; token = ""; showingAdd = false
     }
     private func setToken() async {
         guard let name = tokenServer else { return }
@@ -226,31 +234,60 @@ struct MCPAddServerForm: View {
     @Binding var url: String
     @Binding var command: String
     @Binding var args: String
+    @Binding var bearerToken: String
+    let error: String?
     let working: Bool
     let onAdd: () -> Void
+
+    private var hasServerName: Bool {
+        !serverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var validationError: String? {
+        guard hasServerName else { return nil }
+        if transport == "http" {
+            guard let endpoint = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  ["http", "https"].contains(endpoint.scheme?.lowercased() ?? ""),
+                  endpoint.host?.isEmpty == false else { return "Enter a valid HTTP or HTTPS address." }
+        } else if command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Enter the command that starts this server."
+        }
+        return nil
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    TronSettingsGroup("Server", accent: .tronCyan) {
-                        TextField("Server name", text: $serverName).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
-                        Picker("Transport", selection: $transport) { Text("HTTP").tag("http"); Text("stdio").tag("stdio") }.padding(12)
+                    TronSettingsGroup("Server name", accent: .tronCyan) {
+                        TextField("For example, calendar", text: $serverName).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
                     }
-                    TronSettingsGroup(transport == "http" ? "HTTP Endpoint" : "Local Process", accent: .tronCyan) {
-                        if transport == "http" { TextField("https://…", text: $url).textInputAutocapitalization(.never).keyboardType(.URL).padding(12) }
-                        else {
-                            TextField("Command", text: $command).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
-                            TextField("Arguments (space separated)", text: $args).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
+                    TronSettingsGroup("Transport", accent: .tronCyan) {
+                        TronSegmentedControl(options: [("HTTP", "http"), ("stdio", "stdio")], selection: $transport, accent: .tronCyan).padding(12)
+                    }
+                    TronSettingsGroup(transport == "http" ? "Server address" : "Local command", accent: .tronCyan) {
+                        if transport == "http" {
+                            TextField("https://server.example", text: $url).textInputAutocapitalization(.never).keyboardType(.URL).autocorrectionDisabled().padding(12)
+                            Text("Enter the address provided by your server host.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).padding(.horizontal, 12).padding(.bottom, 10)
+                        } else {
+                            TextField("Command that starts the server", text: $command).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
+                            TextField("Arguments, separated by spaces (optional)", text: $args).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
                         }
                     }
-                    Button("Add Server", action: onAdd).buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || serverName.isEmpty)
+                    TronSettingsGroup("Bearer token (optional)", accent: .tronCyan) {
+                        SecureField("Paste token", text: $bearerToken).textContentType(.password).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
+                        Text("Stored securely in your Mac’s Keychain.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).padding(.horizontal, 12).padding(.bottom, 10)
+                    }
+                    if let message = error ?? validationError {
+                        Text(message).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError).fixedSize(horizontal: false, vertical: true).padding(.horizontal, 4).accessibilityIdentifier("mcp-add-validation-error")
+                    }
+                    Button("Add Server", action: onAdd).buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || !hasServerName || validationError != nil)
                 }.padding(18)
             }
             .tronScrollEdgeChrome()
             .tronNavigationTitle("Add MCP Server")
             .tronPresentation()
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.hidden)
         }
         .tronSettingsVisualTheme(accent: .tronCyan)
