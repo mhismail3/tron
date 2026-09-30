@@ -382,14 +382,16 @@ report `.notFound`; successful uninstall/refresh for that first-install case is
 an open availability gate, not evidence that native work has retired. Do not
 register a helper or infer absence just to bypass the refusal.
 
-Prepare a Release app with an explicit derived-data directory:
+Prepare a Release app with an explicit derived-data directory inside the
+worktree, so concurrent worktrees never share a build database or hand over each
+other's `.app`, and macOS temporary-directory cleanup cannot remove it:
 
 ```bash
 scripts/tron mac generate
 cd packages/mac-app
 xcodebuild -project TronMac.xcodeproj -scheme TronMac \
   -configuration Release -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath /tmp/tron-mac-release build
+  -derivedDataPath build/DerivedData-Release build
 ```
 
 `TRON_CI_XCODE_VERSION` remains the deterministic CI reference, not an upper
@@ -480,10 +482,11 @@ Keep retired payloads through the observation window and any version-specific
 rollback review. This command is not a replacement for native retirement or
 for the pre-migration protected backup.
 
-After preparing the signed Release artifact above, the user/maintainer can use:
+After preparing the signed Release artifact above, the user/maintainer can use,
+from the root of the same worktree:
 
 ```bash
-scripts/tron mac reinstall --app /tmp/tron-mac-release/Build/Products/Release/Tron.app
+scripts/tron mac reinstall --app packages/mac-app/build/DerivedData-Release/Build/Products/Release/Tron.app
 # After successful old-helper retirement, Pause/quit, and stopping all writers:
 scripts/tron mac reinstall --confirm-offline
 # After the user replaces the app in Finder, launches it and chooses Resume:

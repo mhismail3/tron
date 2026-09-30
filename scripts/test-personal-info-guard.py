@@ -137,5 +137,82 @@ class PersonalInfoGuardTests(unittest.TestCase):
                 self.assertIn("failed", output)
 
 
+class PreCommitHookInstallTests(unittest.TestCase):
+    """scripts/install-hooks.sh must arm the one shared pre-commit hook from any worktree.
+
+    Failure modes:
+    1. Run from a linked worktree, where `.git` is a file, the installer fails or
+       writes hooks Git never reads, so that worktree commits unguarded.
+    2. The hook lands in a per-worktree location, so the main checkout and other
+       linked worktrees commit unguarded.
+    3. A relative hooks path resolves against the caller's directory instead of
+       the repository, so running the installer from elsewhere misplaces the hook.
+    4. `core.hooksPath` redirects Git's hooks, possibly to a directory that does
+       not exist yet, and the installer fails or writes where Git never looks.
+    """
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="tron-hook-install-")
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name).resolve()
+        self.main = self.base / "main"
+        self.linked = self.base / "linked"
+        self.git = shutil.which("git")
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        self.env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+                        GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
+                        GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
+        (self.main / "scripts").mkdir(parents=True)
+        for script in ("install-hooks.sh", "personal-info-guard.sh"):
+            shutil.copy2(ROOT / "scripts" / script, self.main / "scripts" / script)
+        self.run_git(self.main, "init", "--quiet")
+        self.run_git(self.main, "add", "scripts")
+        self.run_git(self.main, "commit", "--quiet", "--no-verify", "-m", "fixture")
+        self.run_git(self.main, "worktree", "add", "--quiet", "-b", "linked", str(self.linked))
+
+    def run_git(self, cwd, *args, check=True):
+        return subprocess.run([self.git, *args], cwd=cwd, env=self.env, check=check,
+                              capture_output=True, text=True, timeout=30)
+
+    def install_from(self, checkout, cwd):
+        result = subprocess.run(["bash", str(checkout / "scripts/install-hooks.sh")], cwd=cwd,
+                                env=self.env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def assert_commit_guarded(self, checkout, name):
+        head = self.run_git(checkout, "rev-parse", "HEAD").stdout
+        (checkout / f"{name}.txt").write_text(NEEDLE)
+        self.run_git(checkout, "add", "--", f"{name}.txt")
+        rejected = self.run_git(checkout, "commit", "-m", "leak", check=False)
+        self.assertNotEqual(rejected.returncode, 0, rejected.stdout + rejected.stderr)
+        self.assertIn("personal-info offender", rejected.stdout + rejected.stderr)
+        self.assertEqual(self.run_git(checkout, "rev-parse", "HEAD").stdout, head)
+        (checkout / f"{name}.txt").write_text("generic")
+        self.run_git(checkout, "add", "--", f"{name}.txt")
+        accepted = self.run_git(checkout, "commit", "-m", "clean", check=False)
+        self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+        self.assertIn("✅ OK", accepted.stdout + accepted.stderr)
+
+    def test_linked_worktree_install_guards_every_worktree(self):
+        self.install_from(self.linked, self.linked)
+        self.assert_commit_guarded(self.linked, "linked")
+        self.assert_commit_guarded(self.main, "main")
+
+    def test_install_from_outside_the_repository_targets_the_repository(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        self.install_from(self.main, outside)
+        self.assertFalse((outside / ".git").exists())
+        self.assert_commit_guarded(self.main, "main")
+        self.assert_commit_guarded(self.linked, "linked")
+
+    def test_configured_hooks_path_receives_the_hook(self):
+        hooks = self.base / "configured-hooks"
+        self.run_git(self.main, "config", "core.hooksPath", str(hooks))
+        self.install_from(self.linked, self.linked)
+        self.assertTrue((hooks / "pre-commit").is_file())
+        self.assert_commit_guarded(self.main, "main")
+
+
 if __name__ == "__main__":
     unittest.main()
