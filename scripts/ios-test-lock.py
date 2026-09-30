@@ -21,6 +21,18 @@ own descriptor, so the lease and the simulator live exactly as long as the
 command tree: a signal reaches the whole tree, the release waits for it to end,
 and a holder killed outright leaves an orphan the sweep cannot mistake for an
 idle lane.
+
+A command that inherits a lease (`TRON_IOS_TEST_LOCK_HELD`) takes none of its
+own, so it proves with --verify-inherited that the inherited lease is the one
+of the lane it names before it touches that lane; every lane tool - the runner,
+the profiler and the Gateway E2E harness - refuses here, with one exit status
+and one message, rather than run on a lane it does not hold (T-3).
+
+With --remove-empty-lane (`clean`), the holder removes the lane's directory
+when the command ends, if the lease file is all it still holds: only the holder
+can, because it holds the lease until the command tree has ended. Since a
+holder can unlink the lease file, a lease counts as taken only when the file
+locked is still the one --lock names; otherwise the take fails as contended.
 """
 
 from __future__ import annotations
@@ -37,6 +49,9 @@ import time
 from typing import IO
 
 LOCKED_EXIT = 73
+# The runner's own failure status: a command refused for the lease it inherited
+# fails as the runner does, whichever lane tool it is.
+INHERITED_LEASE_EXIT = 74
 # Reading the lane's state and releasing it are bounded, so a wedged simulator
 # can never keep the holder - and the lease - alive.
 SIMULATOR_TIMEOUT_SECONDS = 120.0
@@ -172,6 +187,69 @@ def release_simulator(marker: Path, development_state: Path) -> None:
         print(f"warning: could not release the iOS test simulator: {detail}", file=sys.stderr)
 
 
+def verify_inherited(lock: Path, lane: str) -> int:
+    """Exit 0 if the lease this process inherited is `lock`, the lease of `lane`.
+
+    Compared as files, not as spellings: a lock reached through a trailing
+    slash, `./`, `//` or a symlink is still the lease that covers this lane.
+    """
+    inherited = os.environ.get("TRON_IOS_TEST_LEASE_LOCK") or ""
+    try:
+        covered = bool(inherited) and os.path.samefile(inherited, lock)
+    except OSError:
+        covered = False
+    if covered:
+        return 0
+    print(
+        f"error: this command names lane {lane}, whose lease is {lock}, but the inherited iOS test lease "
+        f"covers {inherited or 'no lane'}; refusing to run on a lane this process does not hold",
+        file=sys.stderr,
+    )
+    return INHERITED_LEASE_EXIT
+
+
+def locked_file_is_named(lock: Path, handle: IO[str]) -> bool:
+    """Whether the file this holder locked is still the one `lock` names.
+
+    A holder that removes a lane (`--remove-empty-lane`, `lane-remove`) unlinks
+    the lease file while it holds it. A command that opened the file just
+    before that locks the unlinked file once the remover lets go, while a
+    command that recreated the file holds the lane's real lease: the lock is
+    then no lease at all. `ios-test-simulator.py` checks its own takes the same
+    way.
+    """
+    try:
+        named = os.stat(lock)
+    except FileNotFoundError:
+        return False
+    held = os.fstat(handle.fileno())
+    return (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino)
+
+
+def remove_empty_lane(lock: Path, handle: IO[str]) -> None:
+    """Remove the lane directory `clean` emptied, while its lease is still held.
+
+    Only a directory whose one entry is this holder's own lease file goes: any
+    other file, or a lane nested inside it, keeps it. The lease file is unlinked
+    only while it is still the file this holder locked - a lease file a command
+    starting in the lane created in its place is that command's - and a command
+    that creates a new one between the unlink and the rmdir keeps the directory,
+    because the rmdir then fails on a directory that is no longer empty.
+    """
+    directory = lock.parent
+    try:
+        if os.listdir(directory) != [lock.name]:
+            return
+        held, named = os.fstat(handle.fileno()), os.lstat(lock)
+        if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+            return
+        lock.unlink()
+        directory.rmdir()
+    except OSError:
+        # Raced by a command starting in this lane: the lane is its now.
+        return
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lock", required=True, type=Path)
@@ -180,12 +258,20 @@ def main() -> int:
     parser.add_argument("--keep-booted", action="store_true")
     parser.add_argument("--resource", default="iOS test simulator", help="what the lease protects, named when it is contended")
     parser.add_argument("--worktree", help="the worktree whose command holds the lease, named when it is contended")
+    parser.add_argument("--remove-empty-lane", action="store_true",
+                        help="when the command ends, remove the lane directory if the lease file is all it holds")
+    parser.add_argument("--verify-inherited", metavar="LANE",
+                        help="take no lease: exit 0 if the inherited lease is --lock, else refuse (74) naming LANE")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args()
-    if arguments.marker is not None and arguments.development_state is None:
-        parser.error("--development-state is required with --marker")
     if arguments.command[:1] == ["--"]:
         arguments.command = arguments.command[1:]
+    if arguments.verify_inherited is not None:
+        if arguments.command:
+            parser.error("--verify-inherited takes no command")
+        return verify_inherited(arguments.lock, arguments.verify_inherited)
+    if arguments.marker is not None and arguments.development_state is None:
+        parser.error("--development-state is required with --marker")
     if not arguments.command:
         parser.error("a command is required after --")
 
@@ -222,6 +308,13 @@ def main() -> int:
                 handle.seek(0)
                 owner = describe_holder(handle.read().strip())
                 print(f"error: {arguments.resource} is already leased ({owner})", file=sys.stderr)
+                return LOCKED_EXIT
+            if not locked_file_is_named(arguments.lock, handle):
+                print(
+                    f"error: {arguments.resource} is already leased (its lease file {arguments.lock} "
+                    "was removed or replaced while this command took it)",
+                    file=sys.stderr,
+                )
                 return LOCKED_EXIT
             held = True
             if interrupted is not None:
@@ -296,6 +389,8 @@ def main() -> int:
                     release_simulator(arguments.marker, arguments.development_state)
                 handle.seek(0)
                 handle.truncate()
+                if arguments.remove_empty_lane:
+                    remove_empty_lane(arguments.lock, handle)
 
 
 if __name__ == "__main__":

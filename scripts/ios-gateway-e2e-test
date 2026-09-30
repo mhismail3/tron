@@ -131,14 +131,16 @@ Environment:
 
 The fixture and DerivedData are this worktree's: stop and clean touch no other
 worktree's fixture or DerivedData (clean also deletes the simulator of the
-lane it holds: this worktree's own lane unless one is selected). build stamps the products with
+lane it holds - this worktree's own lane unless one is selected - and then that
+lane's directory once only its lease file is left). build stamps the products with
 this worktree's source identity (scripts/ios-test-build-identity.py) and run
 refuses products stamped for another worktree or another source state.
 
 The simulator lane is shared with scripts/tron-ios-test: this harness releases
 the lane's simulator when a command ends, sweeps orphaned lanes before it
-provisions, and keeps exit 73 when the shared provisioner refuses the boot
-because the Mac is short of memory.
+provisions, keeps exit 73 when the shared provisioner refuses the boot
+because the Mac is short of memory, and refuses (74) exactly as the runner does
+when it inherits an iOS test lease that does not cover its lane.
 USAGE
 }
 
@@ -590,20 +592,24 @@ case "$command" in
   *) usage >&2; die "unknown command: $command" ;;
 esac
 if [[ "$command" != status && "$command" != logs && "$command" != -h && "$command" != --help && "$command" != help ]]; then
-  # Only a command that leases the lane creates its state directory: a
-  # read-only command must not leave a marker-less lane directory that no
-  # sweep reclaims.
-  mkdir -p "$test_state_root"
-  chmod 700 "$test_state_root"
+  # Only the lease holder creates the lane's state directory: a read-only
+  # command, or one refused for the lease it inherited, must not leave a
+  # marker-less lane directory that no sweep reclaims.
   if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
     # The same lease, and the same release, as scripts/tron-ios-test: when this
     # command ends, on success, failure, deadline or signal, the holder shuts down
     # the lane's simulator - and never the remembered Development simulator.
     # The lane travels with the command, as in scripts/tron-ios-test: the command
     # the holder starts re-derives every lane path from the lane it leased.
-    exec python3 "$lock_owner" --lock "$test_lock" --marker "$simulator_marker" \
-      --development-state "$development_state" -- "$0" "$command" --lane "$test_lane"
+    lock_arguments=(--lock "$test_lock" --marker "$simulator_marker" --development-state "$development_state")
+    # As in scripts/tron-ios-test: only the holder can remove the lane
+    # directory `clean` empties down to its lease file.
+    [[ "$command" == clean ]] && lock_arguments+=(--remove-empty-lane)
+    exec python3 "$lock_owner" "${lock_arguments[@]}" -- "$0" "$command" --lane "$test_lane"
   fi
+  # The runner's refusal (74), from the same owner: an inherited lease that does
+  # not cover this lane would leave this command running on it unleased.
+  python3 "$lock_owner" --lock "$test_lock" --verify-inherited "$test_lane" || exit $?
 fi
 case "$command" in
   prepare|build|run|run-lan|iterate|all|stop|clean)
