@@ -1142,6 +1142,37 @@ describe("transcript projection", () => {
     expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThanOrEqual(24_000);
   });
 
+  it("omits opaque structured tool payloads and bounds nested result summaries", () => {
+    const result = projectToolResult({
+      content: [{ type: "text", text: "ok" }],
+      structuredContent: { secretLikePayload: "x".repeat(100_000) },
+    });
+    expect(result).not.toHaveProperty("structuredContent");
+    const nested = projectMessage(
+      "nested-result", "assistant", "2026-01-01T00:00:00Z",
+      {
+        role: "toolResult", toolCallId: "outer", toolName: "codemode", isError: false,
+        content: [{ type: "text", text: "done" }], timestamp: 1,
+        nestedCalls: {
+          complete: true,
+          calls: [
+            { id: "outer/1", name: "read", status: "ok", arguments: { path: "README.md" }, durationMs: 12 },
+            { id: "outer/2", name: "bash", status: "error", arguments: { command: "false" }, error: "exit 1" },
+          ],
+        },
+      },
+      new BlobStore(),
+    );
+    expect(nested).toMatchObject({
+      role: "toolResult",
+      nestedCalls: { complete: true, calls: [
+        { id: "outer/1", parentToolCallId: "outer", toolName: "read", status: "completed", arguments: { path: "README.md" } },
+        { id: "outer/2", parentToolCallId: "outer", toolName: "bash", status: "failed" },
+      ] },
+    });
+    expect(Buffer.byteLength(JSON.stringify(nested))).toBeLessThan(10_000);
+  });
+
   it("replaces live output frames in place while empty updates preserve readable output", () => {
     const first = mergeLiveToolOutput(undefined, { output: "waiting\nworker: thinking", outputTruncated: true });
     expect(mergeLiveToolOutput(first, {})).toEqual(first);

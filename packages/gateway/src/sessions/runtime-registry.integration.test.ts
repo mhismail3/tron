@@ -9551,6 +9551,101 @@ export default function (pi) {
     expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
   });
 
+  it("projects codemode nested calls live and after a cold reload", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-nested-tools-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const extensions = join(cwd, ".pi", "extensions");
+    await Promise.all([
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd),
+    ]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await Promise.all([
+      writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
+      writeFile(join(extensions, "failing-tool.ts"), `export default function (pi) { pi.registerTool({ name: "test_fail", label: "Fail fixture", description: "Fails without throwing", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "expected failure" }], details: {}, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.125 } }, isError: true }) }); }\n`),
+      writeFile(join(cwd, "read-me.txt"), "faux-provider nested read\n"),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-nested-tools", tokensPerSecond: 10_000 });
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const script = `const results = await Promise.all([\n      tools.read({ path: "read-me.txt" }),\n      tools.bash({ command: "sleep 0.2; printf nested-bash" }),\n      tools.test_fail({}).catch((error) => String(error)),\n    ]); return results.map((result) => text(result)).join("\\n");`;
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: script }, { id: "codemode-parent" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("test_fail", {}, { id: "top-level-fail" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("done"),
+    ]);
+    const events: Array<{ topic: string; payload: any }> = [];
+    const makeRegistry = () => new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels, trust,
+      broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    let registry = makeRegistry();
+    registries.push(registry);
+    await initializeRegistry(registry);
+    let slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const prompting = slot.prompt("run nested tools");
+    await waitUntil(() => slot.snapshot().toolExecutions.some((tool) =>
+      tool.toolCallId === "codemode-parent" && (tool.nestedCalls?.calls.length ?? 0) === 3));
+    const live = slot.snapshot();
+    const liveParent = live.toolExecutions.find((tool) => tool.toolCallId === "codemode-parent");
+    expect(liveParent?.nestedCalls?.calls.map((call) => call.toolName).sort()).toEqual(["bash", "read", "test_fail"]);
+    expect(live.toolExecutions.map((tool) => tool.toolCallId)).toEqual(["codemode-parent"]);
+    await prompting;
+    await waitUntil(() => !slot.isBusy);
+    const settled = slot.snapshot();
+    const canonicalParent = settled.transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-parent");
+    expect(canonicalParent).toMatchObject({
+      kind: "message", role: "toolResult", isError: false,
+      usage: { cost: { total: 0.125 } },
+      nestedCalls: { complete: true, calls: [
+        { id: "codemode-parent/1", toolName: "read", status: "completed" },
+        { id: "codemode-parent/2", toolName: "bash", status: "completed" },
+        { id: "codemode-parent/3", toolName: "test_fail", status: "failed" },
+      ] },
+    });
+    expect(settled.stats.cost).toBeGreaterThanOrEqual(0.125);
+    expect(settled.transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "top-level-fail"))
+      .toMatchObject({ isError: true });
+    expect(events.some((event) => event.topic === "session.toolProgress"
+      && event.payload.data?.toolCallId === "top-level-fail"
+      && event.payload.data?.status === "failed")).toBe(true);
+    const liveSnapshot = JSON.parse(JSON.stringify(live));
+    await registry.dispose();
+    registry = makeRegistry();
+    registries.push(registry);
+    await initializeRegistry(registry);
+    slot = await registry.acquire(slot.id);
+    const reloaded = slot.snapshot();
+    const reloadedParent = reloaded.transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-parent");
+    expect(reloadedParent).toMatchObject({
+      role: "toolResult",
+      nestedCalls: { complete: true, calls: [
+        { id: "codemode-parent/1", status: "completed" },
+        { id: "codemode-parent/2", status: "completed" },
+        { id: "codemode-parent/3", status: "failed" },
+      ] },
+    });
+    expect(reloaded.toolExecutions).toEqual([]);
+    const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-nested-calls.json");
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await writeFile(artifactPath, `${JSON.stringify({ live: liveSnapshot, reloaded: reloadedParent }, null, 2)}\n`);
+  });
+
   it("keeps one tool display segment across tool-only agent continuations", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-tool-segment-continuation-"));
     const agentDir = join(root, "agent");

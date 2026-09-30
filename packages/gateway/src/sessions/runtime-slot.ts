@@ -57,6 +57,7 @@ import type {
   SessionSummaryUpdate,
   SessionTreeNode,
   ToolExecutionState,
+  NestedToolExecutionState,
   ResourceInvocation,
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -586,6 +587,8 @@ export class RuntimeSlot {
   private readonly toolProgressPublishedAt = new Map<string, number>();
   /** Monotonic invocation starts keep duration independent of wall-clock changes. */
   private readonly toolStartedAtMonotonicMs = new Map<string, number>();
+  private readonly nestedToolRoots = new Map<string, string>();
+  private readonly nestedToolStartedAt = new Map<string, number>();
   private activeOperationId: string | undefined;
   /** Display lineage survives tool-only agent continuations even when lifecycle
    * settlement rotates the operation owner. User, visible content, and compaction
@@ -2040,6 +2043,107 @@ export class RuntimeSlot {
         new Date(entry.message.timestamp).toISOString(),
       );
     }
+  }
+
+  private nestedToolCallsFromDetails(value: unknown): ToolExecutionState["nestedCalls"] | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const details = (value as Record<string, unknown>).details;
+    if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
+    const sourceCalls = (details as Record<string, unknown>).calls;
+    if (!Array.isArray(sourceCalls)) return undefined;
+    let complete = sourceCalls.length <= 32;
+    const calls = sourceCalls.slice(0, 32).flatMap((candidate): NestedToolExecutionState[] => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+      const item = candidate as Record<string, unknown>;
+      if (typeof item.id !== "string" || typeof item.name !== "string") return [];
+      const status: NestedToolExecutionState["status"] = item.status === "ok" ? "completed"
+        : item.status === "error" || item.status === "cancelled" ? "failed" : "running";
+      const args = typeof item.args === "string" ? item.args : "";
+      let argumentsValue: JsonValue | undefined;
+      let argumentsBytes: number | undefined;
+      if (args) {
+        try {
+          const parsed: unknown = JSON.parse(args);
+          if (Buffer.byteLength(JSON.stringify(parsed)) <= 1_024) argumentsValue = projectJson(parsed, 1_024);
+          else { argumentsBytes = Buffer.byteLength(args); complete = false; }
+        } catch { argumentsBytes = Buffer.byteLength(args); complete = false; }
+      }
+      const id = item.id.slice(0, 512);
+      const durationMs = typeof item.durationMs === "number" && Number.isFinite(item.durationMs)
+        ? Math.max(0, Math.round(item.durationMs)) : undefined;
+      return [{
+        id, parentToolCallId: id.slice(0, Math.max(0, id.lastIndexOf("/"))),
+        toolName: item.name.slice(0, 256), status,
+        ...(argumentsValue === undefined ? {} : { arguments: argumentsValue }),
+        ...(argumentsBytes === undefined ? {} : { argumentsBytes }),
+        ...(durationMs === undefined ? {} : { durationMs }),
+      }];
+    });
+    return { calls, complete };
+  }
+
+  private projectNestedToolExecution(
+    event: { toolCallId: string; toolName: string; args?: unknown; parentToolCallId?: string },
+    status: NestedToolExecutionState["status"],
+  ): void {
+    if (!event.parentToolCallId) return;
+    const rootToolCallId = this.nestedToolRoots.get(event.parentToolCallId) ?? event.parentToolCallId;
+    const parent = this.toolExecutions.get(rootToolCallId);
+    if (!parent) return;
+    const calls = parent.nestedCalls?.calls ?? [];
+    const existing = calls.find((call) => call.id === event.toolCallId);
+    if (!existing && calls.length >= 32) {
+      this.toolExecutions.set(rootToolCallId, {
+        ...parent,
+        nestedCalls: { calls, complete: false },
+        updatedAt: new Date().toISOString(),
+        progressSequence: parent.progressSequence + 1,
+      });
+      this.publishToolProgress(this.toolExecutions.get(rootToolCallId)!);
+      return;
+    }
+    let argumentsValue: JsonValue | undefined;
+    let argumentsBytes: number | undefined;
+    let complete = parent.nestedCalls?.complete ?? true;
+    if (event.args !== undefined) {
+      let encodedBytes = 0;
+      try { encodedBytes = Buffer.byteLength(JSON.stringify(event.args)); } catch { encodedBytes = Number.MAX_SAFE_INTEGER; }
+      if (encodedBytes <= 1_024) argumentsValue = projectJson(event.args);
+      else {
+        argumentsBytes = encodedBytes;
+        complete = false;
+      }
+    }
+    const started = this.nestedToolStartedAt.get(event.toolCallId);
+    if (!existing && status === "running") {
+      this.nestedToolStartedAt.set(event.toolCallId, performance.now());
+      this.nestedToolRoots.set(event.toolCallId, rootToolCallId);
+    }
+    const nested: NestedToolExecutionState = {
+      id: event.toolCallId,
+      parentToolCallId: event.parentToolCallId,
+      toolName: event.toolName,
+      status,
+      ...(argumentsValue === undefined ? (existing?.arguments === undefined ? {} : { arguments: existing.arguments }) : { arguments: argumentsValue }),
+      ...(argumentsBytes === undefined ? (existing?.argumentsBytes === undefined ? {} : { argumentsBytes: existing.argumentsBytes }) : { argumentsBytes }),
+      ...(status === "running" || started === undefined
+        ? (existing?.durationMs === undefined ? {} : { durationMs: existing.durationMs })
+        : { durationMs: Math.max(0, Math.round(performance.now() - started)) }),
+    };
+    const nextCalls = existing
+      ? calls.map((call) => call.id === event.toolCallId ? nested : call)
+      : [...calls, nested];
+    this.toolExecutions.set(rootToolCallId, {
+      ...parent,
+      nestedCalls: { calls: nextCalls, complete },
+      updatedAt: new Date().toISOString(),
+      progressSequence: parent.progressSequence + 1,
+    });
+    if (status !== "running") {
+      this.nestedToolStartedAt.delete(event.toolCallId);
+      this.nestedToolRoots.delete(event.toolCallId);
+    }
+    this.publishToolProgress(this.toolExecutions.get(rootToolCallId)!);
   }
 
   private clearProcessActivities(): void {
@@ -3715,6 +3819,10 @@ export class RuntimeSlot {
       }
       case "tool_execution_start": {
         if (!this.hasActiveAgentRun) break;
+        if ("parentToolCallId" in event && event.parentToolCallId) {
+          this.projectNestedToolExecution(event, "running");
+          break;
+        }
         if (this.canonicalToolResultHandoffs.has(event.toolCallId)) break;
         this.ensureAgentProjection();
         const now = new Date().toISOString();
@@ -3771,6 +3879,10 @@ export class RuntimeSlot {
       }
       case "tool_execution_update": {
         if (!this.hasActiveAgentRun) break;
+        if ("parentToolCallId" in event && event.parentToolCallId) {
+          this.projectNestedToolExecution(event, "running");
+          break;
+        }
         if (this.canonicalToolResultHandoffs.has(event.toolCallId)) break;
         this.ensureAgentProjection();
         const now = new Date().toISOString();
@@ -3784,6 +3896,7 @@ export class RuntimeSlot {
           performance.now()
         );
         const extensionOrigin = this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin;
+        const nestedCalls = this.nestedToolCallsFromDetails(event.partialResult) ?? existing?.nestedCalls;
         const toolLabel = existing?.toolLabel ?? this.toolLabel(event.toolName);
         const extensionActivity = this.updateExtensionActivity(
           event.toolCallId, event.toolName, extensionOrigin, "running", startedAt, now, event.partialResult, undefined, durationMs
@@ -3796,6 +3909,7 @@ export class RuntimeSlot {
           status: "running",
           arguments: projectJson(event.args),
           partialResult: projectToolResult(event.partialResult),
+          ...(nestedCalls ? { nestedCalls } : {}),
           ...(output.output === undefined
             ? (existing?.output === undefined ? {} : {
                 output: existing.output,
@@ -3820,6 +3934,10 @@ export class RuntimeSlot {
       }
       case "tool_execution_end": {
         if (!this.hasActiveAgentRun) break;
+        if ("parentToolCallId" in event && event.parentToolCallId) {
+          this.projectNestedToolExecution(event, event.isError ? "failed" : "completed");
+          break;
+        }
         this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
@@ -3850,6 +3968,7 @@ export class RuntimeSlot {
         const extensionOrigin = this.extensionToolOrigin(event.toolName)
           ?? existing?.extensionOrigin
           ?? retained?.extensionOrigin;
+        const nestedCalls = this.nestedToolCallsFromDetails(event.result) ?? existing?.nestedCalls;
         const toolLabel = existing?.toolLabel ?? retained?.toolLabel ?? this.toolLabel(event.toolName);
         const extensionActivity = this.updateExtensionActivity(
           event.toolCallId, event.toolName, extensionOrigin, event.isError ? "failed" : "completed", startedAt, now, event.result, now, durationMs
@@ -3863,6 +3982,7 @@ export class RuntimeSlot {
           arguments: existing?.arguments ?? null,
           ...(existing?.partialResult === undefined ? {} : { partialResult: existing.partialResult }),
           result: projectToolResult(event.result),
+          ...(nestedCalls ? { nestedCalls } : {}),
           ...(output.output === undefined
             ? (existing?.output === undefined ? {} : {
                 output: existing.output,

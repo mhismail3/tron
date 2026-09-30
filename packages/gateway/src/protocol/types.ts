@@ -174,6 +174,8 @@ export type TranscriptItem =
       /** Extension-authored human-readable label from the mounted runtime. */
       toolLabel?: string;
       isError?: boolean;
+      /** Bounded record of child executions, not their result payloads. */
+      nestedCalls?: NestedToolCallsProjection;
       details?: JsonValue;
       /** Strictly admitted first-party display descriptor. Raw tool details
        * remain available for technical inspection but never select a renderer. */
@@ -502,6 +504,21 @@ export interface ProcessTranscriptLease {
   };
 }
 
+export interface NestedToolExecutionState {
+  id: string;
+  parentToolCallId: string;
+  toolName: string;
+  status: "running" | "completed" | "failed";
+  arguments?: JsonValue;
+  argumentsBytes?: number;
+  durationMs?: number;
+}
+
+export interface NestedToolCallsProjection {
+  calls: NestedToolExecutionState[];
+  complete: boolean;
+}
+
 export interface ToolExecutionState {
   toolCallId: string;
   toolName: string;
@@ -513,6 +530,8 @@ export interface ToolExecutionState {
   arguments: JsonValue;
   partialResult?: JsonValue;
   result?: JsonValue;
+  /** Bounded live children of this model-issued call; canonical `nestedCalls` is on its result. */
+  nestedCalls?: NestedToolCallsProjection;
   /** Bounded text extracted from Pi's current tool result for immediate audit. */
   output?: string;
   outputTruncated?: boolean;

@@ -32,7 +32,7 @@ import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../util
 import type { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { projectForkBoundary, type ForkBoundaryAnchor } from "./fork-boundary.js";
-import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../protocol/types.js";
+import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../protocol/types.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "./extension-notification-receipts.js";
@@ -348,7 +348,17 @@ export function mergeLiveToolOutput(
 export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) return projectJson(value, maximumBytes);
   const record = value as Record<string, unknown>;
-  if (!Array.isArray(record.content)) return projectJson(value, maximumBytes);
+  if (!Array.isArray(record.content)) {
+    if (!Object.hasOwn(record, "structuredContent")) return projectJson(record, maximumBytes);
+    const minimal: Record<string, unknown> = {};
+    let fields = 0;
+    for (const key in record) {
+      if (!Object.prototype.hasOwnProperty.call(record, key) || key === "structuredContent") continue;
+      if (fields++ >= 1_000) break;
+      minimal[key] = record[key];
+    }
+    return projectJson(minimal, maximumBytes);
+  }
   let truncated = false;
   // Retain at most the newest content rows before cloning any row. Each row is
   // projected independently so a giant detail object cannot be spread into an
@@ -381,7 +391,7 @@ export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonVa
   const projectedRecord: Record<string, unknown> = { content };
   let properties = 1;
   for (const key in record) {
-    if (!Object.prototype.hasOwnProperty.call(record, key) || key === "content") continue;
+    if (!Object.prototype.hasOwnProperty.call(record, key) || key === "content" || key === "structuredContent") continue;
     if (properties >= 1_000) break;
     projectedRecord[key] = record[key];
     properties += 1;
@@ -389,6 +399,41 @@ export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonVa
   const bounded = projectJson(projectedRecord, maximumBytes);
   if (!truncated || typeof bounded !== "object" || bounded === null || Array.isArray(bounded)) return bounded;
   return { ...bounded, truncated: true };
+}
+
+function projectNestedCalls(value: unknown): NestedToolCallsProjection {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+  const sourceCalls = Array.isArray(record.calls) ? record.calls : [];
+  let complete = record.complete === true;
+  const calls = sourceCalls.slice(0, 32).map((candidate) => {
+    const item = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+      ? candidate as Record<string, unknown> : {};
+    const id = typeof item.id === "string" ? item.id.slice(0, 512) : "";
+    const toolName = typeof item.name === "string" ? item.name.slice(0, 256) : "unknown";
+    const status: NestedToolCallsProjection["calls"][number]["status"] = item.status === "ok" ? "completed" : item.status === "error" ? "failed" : "running";
+    let args: JsonValue | undefined;
+    let argumentsBytes = typeof item.argumentsBytes === "number" && Number.isSafeInteger(item.argumentsBytes)
+      ? Math.max(0, item.argumentsBytes) : undefined;
+    if (item.arguments !== undefined) {
+      let bytes = 0;
+      try { bytes = Buffer.byteLength(JSON.stringify(item.arguments)); } catch { bytes = Number.MAX_SAFE_INTEGER; }
+      if (bytes <= 1_024) args = projectJson(item.arguments, 1_024);
+      else { argumentsBytes = bytes; complete = false; }
+    }
+    if (!id) complete = false;
+    const durationMs = typeof item.durationMs === "number" && Number.isFinite(item.durationMs)
+      ? Math.max(0, Math.round(item.durationMs)) : undefined;
+    return {
+      id, parentToolCallId: id.includes("/") ? id.slice(0, id.lastIndexOf("/")) : "",
+      toolName, status,
+      ...(args === undefined ? {} : { arguments: args }),
+      ...(argumentsBytes === undefined ? {} : { argumentsBytes }),
+      ...(durationMs === undefined ? {} : { durationMs }),
+    };
+  }).filter((call) => call.id);
+  if (sourceCalls.length > calls.length) complete = false;
+  return { calls, complete };
 }
 
 interface BudgetedJsonNode {
@@ -1243,6 +1288,7 @@ export function projectMessage(
         ...(message.details === undefined ? {} : { details: projectJson(message.details) }),
         ...(display ? { display } : {}),
         ...(message.usage === undefined ? {} : { usage: projectJson(message.usage) }),
+        ...(message.nestedCalls === undefined ? {} : { nestedCalls: projectNestedCalls(message.nestedCalls) }),
         semantic: semanticForMessage("toolResult"),
         ...(toolMetadata ? {
           startedAt: toolMetadata.startedAt,

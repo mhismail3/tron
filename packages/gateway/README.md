@@ -1386,6 +1386,16 @@ frame is projected only while its explicit Gateway presentation identity remains
 canonical binding retires that identity, a briefly retained Pi `streamingMessage` cannot create
 a second stream identity or duplicate finalized tool groups in a settlement snapshot.
 
+Pi nested tool calls keep their `<parent>/<n>` identity under the model-issued call; they are
+never independent transcript rows, invocation receipts, segments, or extension activities.
+Live parent progress carries a bounded child list (32 calls; arguments at most 1 KiB, otherwise
+a byte count), and the canonical parent result carries Pi's bounded `nestedCalls` record with its
+`complete` flag. Child failures use `failed` even when the tool returns `isError` instead of
+throwing. Opaque `structuredContent` is not forwarded by generic live tool-result projection.
+The integration E2E in `runtime-registry.integration.test.ts` exercises a faux-provider codemode
+script with parallel `read`, `bash`, and non-throwing failure calls; it retains
+`test-results/pi-sdk-099-nested-calls.json` for live and cold-reload inspection.
+
 Active message queues are projected with stable per-entry IDs, delivery behavior,
 display text, total attachment count, optional photo/file counts, optional bounded upload descriptors,
 and a monotonic queue revision. Descriptors contain only upload/blob ID, safe name, MIME type, and size;

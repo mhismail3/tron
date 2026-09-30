@@ -358,6 +358,7 @@ package struct MessageTranscriptItem: TranscriptPayload {
     let toolName: String?
     let toolLabel: String?
     let isError: Bool?
+    let nestedCalls: JSONValue?
     let details: JSONValue?
     let display: DisplayProjection?
     let usage: JSONValue?
@@ -372,7 +373,7 @@ package struct MessageTranscriptItem: TranscriptPayload {
 
     private enum CodingKeys: String, CodingKey {
         case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, stopReason,
-             errorMessage, toolCallId, toolName, toolLabel, isError, details, display, usage, startedAt,
+             errorMessage, toolCallId, toolName, toolLabel, isError, nestedCalls, details, display, usage, startedAt,
              completedAt, durationMs, lastProgressAt, progressSequence, toolSegmentId, semantic, extensionOrigin
     }
 
@@ -380,7 +381,7 @@ package struct MessageTranscriptItem: TranscriptPayload {
         id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind, role: TranscriptItem.Role,
         presentationId: String, content: [ContentPart], provider: String? = nil, modelId: String? = nil,
         stopReason: String? = nil, errorMessage: String? = nil, toolCallId: String? = nil, toolName: String? = nil,
-        toolLabel: String? = nil, isError: Bool? = nil, details: JSONValue? = nil,
+        toolLabel: String? = nil, isError: Bool? = nil, nestedCalls: JSONValue? = nil, details: JSONValue? = nil,
         display: DisplayProjection? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
         completedAt: String? = nil, durationMs: Int? = nil, lastProgressAt: String? = nil,
         progressSequence: Int? = nil, toolSegmentId: String? = nil,
@@ -390,7 +391,8 @@ package struct MessageTranscriptItem: TranscriptPayload {
         self.id = id; self.parentId = parentId; self.timestamp = timestamp; self.kind = kind; self.role = role
         self.presentationId = presentationId; self.content = content; self.provider = provider; self.modelId = modelId
         self.stopReason = stopReason; self.errorMessage = errorMessage; self.toolCallId = toolCallId; self.toolName = toolName
-        self.toolLabel = toolLabel; self.isError = isError; self.details = details; self.display = display
+        self.toolLabel = toolLabel; self.isError = isError; self.nestedCalls = nestedCalls
+        self.details = details; self.display = display
         self.usage = usage; self.startedAt = startedAt; self.completedAt = completedAt
         self.durationMs = durationMs; self.lastProgressAt = lastProgressAt; self.progressSequence = progressSequence
         self.toolSegmentId = toolSegmentId
@@ -431,6 +433,7 @@ package struct MessageTranscriptItem: TranscriptPayload {
         toolName = try values.decodeIfPresent(String.self, forKey: .toolName)
         toolLabel = try values.decodeIfPresent(String.self, forKey: .toolLabel)
         isError = try values.decodeIfPresent(Bool.self, forKey: .isError)
+        nestedCalls = try values.decodeIfPresent(JSONValue.self, forKey: .nestedCalls)
         details = try values.decodeIfPresent(JSONValue.self, forKey: .details)
         display = try values.decodeIfPresent(DisplayProjection.self, forKey: .display)
         if let display {

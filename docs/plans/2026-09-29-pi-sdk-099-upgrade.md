@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-29, P99-3
+- **Last updated:** 2026-09-29, P99-5
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -211,7 +211,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Upstream delta | Tron disposition | Task |
 | --- | --- | --- |
 | Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Adopt**; delete Tron's adapter and ConnectionOwner MCP generality | P99-6, P99-7, P99-8 |
-| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; nested-call projection, exposure/namespace projections and nested-tool safety remain | P99-3, P99-5, P99-6 |
+| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; exposure/namespace and first-party nested-tool safety remain | P99-3, P99-5, P99-6 |
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7 | P99-10, P99-15 |
 | Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapt**: pass `getDeviceId` to `ModelRuntime.login`; redact `deviceId` from settings projection; fixed port 1455 shared with Codex legacy | P99-9 |
@@ -227,7 +227,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Claude Sonnet 5.5 (0.99.0); GPT-6.1 Sol and Codex default (0.99.1); Kimi K3 defaults for Fireworks/Together/OpenCode Go | **Inherit**; refresh release-date snapshot; context-window regression | P99-12 |
 | Built-in section in `pi config`; `-builtin:<name>` in `extensions`; SDK `builtin: true` | **Adapt**: compose Tron built-ins with `builtin: true`, surface toggles on iOS | P99-6, P99-15 |
 | `defaultTools` `+name`/`-name` entries | **Adapt**: settings projection and patch (D-5) | P99-6 |
-| codemode `models.classify` cost added to tool result usage; `ctx.executeTool` usage added to the calling result | **Verify** session cost totals include tool-result usage | P99-5 |
+| codemode `models.classify` cost added to tool result usage; `ctx.executeTool` usage added to the calling result | **Verified** Pi's session stats include tool-result usage, exercised with a priced nested fixture result | P99-5 |
 | TypeScript 7 / ES2024 build; `tsx` replaced by Node type stripping | **Adapt**: P99-3 resolves its five candidate API integration errors; Node 22.22.0 is the validation runtime | P99-2, P99-3 |
 | Startup header/banner and `[Themes]` changes; light/dark detection order; `TERM=*-direct` | **Not applicable** (TUI only) | — |
 | OpenAI Codex provider renamed "OpenAI Codex (legacy)" | **Inherit**; iOS shows provider names from the Gateway | P99-9 |
@@ -250,7 +250,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-2 | Done | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | luna-worker, 2026-09-29 |
 | P99-3 | Done | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | luna-worker, 2026-09-29 |
 | P99-4 | Done | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
-| P99-5 | Claimed | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | luna-worker, 2026-09-29 |
+| P99-5 | Done | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | luna-worker, 2026-09-29 |
 | P99-6 | Claimed | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
 | P99-7 | Claimed | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
 | P99-8 | Claimed | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | luna-worker, 2026-09-29 |
@@ -670,6 +670,16 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: setup-only and pre-first-message failure receipts remain memory-only; Tron does not write Pi JSONL directly or create a second receipt journal. Automation ownership remains live-only until the first persisted message.
 - Deviations: Full Gateway validation remains short of green after three suite attempts, each with unrelated timing/performance/resource-sensitive failures; changed-area TypeScript and integration validations pass. Fork catalog parent lookup needed lexical normalization of macOS `/var` and `/private/var` path aliases to keep persisted header paths authoritative without synchronous per-session filesystem reads.
 - For the next agent: full Gateway suite should be repeated at the final cross-module checkpoint under lower host load. P99-4-specific test coverage is green; no user decision remains.
+
+### P99-5 · Done · 2026-09-29 · luna-worker
+
+- Result: Nested calls stay children of their model-issued parent in the live runtime and canonical transcript. Live child arguments are capped at 1 KiB and the list at 32; overflow is represented by byte count and/or `complete: false`. Canonical child summaries use the same bounds and Pi's completeness bit. Non-throwing `isError` children are failed, opaque `structuredContent` is omitted from generic live result frames, and iOS models decode optional live and canonical nested-call payloads. Pi's own session stats include usage from tool results.
+- Evidence: Node 22.22.0 TypeScript check passed after the final dependency cleanup; `check:pi-sdk` reports coherent 0.99.1. Focused faux-provider codemode E2E plus projection test: 2/2 passed in 1.57 s; E2E retains `packages/gateway/test-results/pi-sdk-099-nested-calls.json`, showing one live codemode row with three children and the same canonical children after a cold runtime reload. The E2E verifies `read`, `bash`, a non-throwing failing nested tool, a direct non-throwing failing tool, and tool-result cost of $0.125. Final full Gateway Vitest: 2,302 passed, 3 failed in 110 s; focused reruns all passed: knowledge tagger 18/18 in 3 s, recent-model-usage 3/3 in 1 s, and session-search stall 2/2 in 5 s. `git diff --check` passed.
+- Changes: `packages/gateway/src/protocol/types.ts`, `sessions/runtime-slot.ts`, `sessions/projection.ts`, projection and runtime-registry integration tests, Gateway README; iOS `SessionRuntimeModels.swift`, `TranscriptModels.swift`, `ToolExecutionStatePolicy.swift`; this plan's matrix, task row and handoff. No additional Pi family dependency is declared; the fixture imports `createCodemodeExtension` from the pinned `pi-coding-agent` root export.
+- Tasks added: none.
+- Kept on purpose: Pi's canonical `nestedCalls` is authoritative; no child JSONL/tool result, invocation receipt, segment, or extension-activity row is synthesized. The `complete` bit reports Pi or projection truncation. The structured payload remains out of the generic mobile contract. Pi's `getSessionStats()` already adds tool-result usage, confirmed from the pinned source and the faux-provider regression; Tron does not double-count it.
+- Deviations: The fake codemode factory is registered only through the test fixture's project extension; production runtime/admin composition remains P99-6. One full-suite logger rotation timeout passed the required focused rerun. No iOS build/test was run; iOS received optional Codable model fields for P99-16 without view behavior.
+- For the next agent: move `pi-codemode` from devDependency to runtime dependency when P99-6 composes the first-party factory. Nested IDs are not canonical independent results: the current workspace `tool_call` hook still applies handoff, but confirm how nested `subagent` stop routing gets the parent call ID. Browser/display receipts currently authorize exact canonical tool IDs, not nested result IDs; P99-6 must keep artifacts attached to the parent codemode card rather than creating orphan rows. Test all-tool nested concurrency and UI/desktop ownership at that phase. P99-16 should decode the new optional child fields and render children under the parent; no RPC or work-kind change was made here.
 
 ### Draft · Proposed · 2026-09-29 · planning session
 
