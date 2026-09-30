@@ -357,18 +357,41 @@ struct ChatRowStabilityTests {
         }
     }
 
+    /// Failure modes: the open detail stops following the arriving trace, or it
+    /// opens another reply's trace. An earlier reply opens with thinking at the
+    /// same ordinal, which is how every reply's trace used to resolve to the
+    /// oldest loaded one.
     @Test("an open thinking detail follows the trace the transcript installs next")
     func thinkingDetailFollowsLiveTraceContent() async throws {
         try await withTestWatchdog(timeout: .seconds(240)) {
-            let snapshot = try streamingTraceSnapshot(lineCount: 6)
+            var fixture = try streamingTraceSnapshot(lineCount: 6)
+            let earlierTrace = (1...6).map { "Earlier reply reasoning line \($0)." }.joined(separator: "\n")
+            fixture.transcript.append(try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: try JSONSerialization.data(withJSONObject: assistantMessage(
+                    id: "stability-earlier-thinking-reply",
+                    content: [
+                        ["id": "stability-earlier-thinking-reply:0", "ordinal": 0, "thinkingRunOrdinal": 0,
+                         "type": "thinking", "text": earlierTrace],
+                        ["id": "stability-earlier-thinking-reply:1", "ordinal": 1, "type": "text",
+                         "text": "An earlier reply that also thought first."],
+                    ]
+                ))
+            ))
+            fixture.transcriptTotal = fixture.transcript.count
+            let snapshot = fixture
             try await withStabilityHarness(snapshot: snapshot) { harness in
                 var next = snapshot
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.isReady
-                        && !$0.observation.thinkingTraceMeasurements.isEmpty
+                        && $0.observation.thinkingTraceMeasurements.keys.contains {
+                            $0.contains(RowStabilityFixture.traceMotionReplyID)
+                        }
                 }
                 let identity = try #require(
-                    harness.probeObservation.thinkingTraceMeasurements.keys.first
+                    harness.probeObservation.thinkingTraceMeasurements.keys.first {
+                        $0.contains(RowStabilityFixture.traceMotionReplyID)
+                    }
                 )
                 // The reader opens the trace's detail through the row's own
                 // control; the transcript presents it above the rows.
@@ -378,6 +401,11 @@ struct ChatRowStabilityTests {
                 )
                 _ = try await harness.recorder.waitUntil { _ in harness.presentsManagedSheet }
                 let opened = harness.probeObservation.thinkingSheetSamples[identity] ?? []
+                let ownLength = traceMotionLines(6).joined(separator: "\n").utf16.count
+                #expect(
+                    opened.first?.sourceUTF16Length == ownLength,
+                    "the detail opened another trace: \(opened.first?.sourceUTF16Length ?? -1) != \(ownLength)"
+                )
                 // The trace keeps arriving while the sheet is open.
                 for count in [30, 60] {
                     next.streaming = try harnessRichAssistantMessage(

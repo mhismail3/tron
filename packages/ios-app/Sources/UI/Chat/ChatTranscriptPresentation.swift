@@ -1630,9 +1630,14 @@ struct ChatThinkingTraceContent: Hashable, Sendable {
         self.streaming = streaming
     }
 
-    /// The identity a row presents and a sheet resolves.
-    static func identity(of segments: [ChatThinkingSegment]) -> String {
-        "thinking-run:\(segments.first?.id ?? "empty")"
+    /// The identity a row presents and a sheet resolves, unique across the
+    /// transcript. Segment and run ids are only unique within one message (most
+    /// replies open with thinking at ordinal 0), so the owning message's
+    /// presentation id scopes them. The run id, not its first line, is the
+    /// suffix: a bounded live frame may drop leading thinking parts, and the
+    /// open sheet must keep following the same trace.
+    static func identity(owner: TranscriptItem, run: ChatThinkingRun) -> String {
+        "thinking-run:\(owner.presentationId):\(run.id)"
     }
 
     /// The trace's rendered content, assembled from the prepared segments the row
@@ -1677,13 +1682,16 @@ enum ChatTranscriptDetailResolution {
         identity: String
     ) -> (item: ChatTranscriptRenderItem, segments: [ChatThinkingSegment], streaming: Bool)? {
         for item in items {
+            let owner: TranscriptItem
             let parts: [ChatMessagePart]
             let streaming: Bool
             switch item {
             case .message(let message):
+                owner = message.item
                 parts = message.parts
                 streaming = message.streaming
             case .transcript(let transcript):
+                owner = transcript
                 parts = ChatTranscriptPresentation.messageParts(in: transcript)
                 streaming = false
             case .toolRun, .notification:
@@ -1691,7 +1699,7 @@ enum ChatTranscriptDetailResolution {
             }
             for part in parts {
                 guard case .thinking(let run) = part,
-                      ChatThinkingTraceContent.identity(of: run.segments) == identity else { continue }
+                      ChatThinkingTraceContent.identity(owner: owner, run: run) == identity else { continue }
                 return (item, run.segments, streaming)
             }
         }

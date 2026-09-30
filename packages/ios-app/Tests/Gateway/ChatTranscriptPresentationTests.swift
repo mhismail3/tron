@@ -1579,6 +1579,73 @@ struct ChatTranscriptPresentationTests {
         #expect(trailingRun.segments.map(\.text) == ["Second"])
     }
 
+    /// Failure mode: a thinking detail resolves by an identity that is only
+    /// unique within one message, so every reply's trace opens the oldest
+    /// loaded reply's trace instead of its own.
+    @Test("every thinking detail resolves its own trace across messages")
+    func thinkingDetailResolvesItsOwnTrace() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"first","presentationId":"first","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"first:0","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"First reply trace"},
+            {"id":"first:1","ordinal":1,"type":"text","text":"First answer"}
+          ]},
+          {"id":"second","presentationId":"second","parentId":"first","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[
+            {"id":"second:0","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"Second reply trace"},
+            {"id":"second:1","ordinal":1,"type":"toolCall","toolCallId":"call-1","name":"read","arguments":{}},
+            {"id":"second:2","ordinal":2,"thinkingRunOrdinal":2,"type":"thinking","text":"Second reply later trace"}
+          ]}
+        ]
+        """)
+        let items = ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline.items
+        var traces: [(identity: String, text: String)] = []
+        for item in items {
+            let owner: TranscriptItem
+            let parts: [ChatMessagePart]
+            switch item {
+            case .message(let message): owner = message.item; parts = message.parts
+            case .transcript(let transcript): owner = transcript; parts = ChatTranscriptPresentation.messageParts(in: transcript)
+            case .toolRun, .notification: continue
+            }
+            for case .thinking(let run) in parts {
+                traces.append((ChatThinkingTraceContent.identity(owner: owner, run: run), run.segments.map(\.text).joined(separator: "\n")))
+            }
+        }
+        #expect(traces.map(\.text) == ["First reply trace", "Second reply trace", "Second reply later trace"])
+        #expect(Set(traces.map(\.identity)).count == traces.count, "trace identities collide: \(traces.map(\.identity))")
+        for trace in traces {
+            let resolved = ChatTranscriptDetailResolution.thinkingTrace(in: items, identity: trace.identity)
+            #expect(resolved?.segments.map(\.text).joined(separator: "\n") == trace.text,
+                    "\(trace.identity) opened another trace")
+        }
+    }
+
+    /// Failure mode: the identity depends on the run's first line, so a bounded
+    /// live frame that drops leading thinking parts renames the trace and the
+    /// open sheet stops following it.
+    @Test("a thinking trace keeps its identity when leading parts leave the frame")
+    func thinkingTraceIdentitySurvivesDroppedLeadingParts() throws {
+        let full = try fixture(transcript: """
+        [{"id":"reply","presentationId":"reply","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+          {"id":"reply:0","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"Opening thought"},
+          {"id":"reply:1","ordinal":1,"thinkingRunOrdinal":0,"type":"thinking","text":"Later thought"}
+        ]}]
+        """)
+        let bounded = try fixture(transcript: """
+        [{"id":"reply","presentationId":"reply","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+          {"id":"reply:1","ordinal":1,"thinkingRunOrdinal":0,"type":"thinking","text":"Later thought"}
+        ]}]
+        """)
+        func identity(_ snapshot: SessionSnapshot) throws -> String {
+            let item = try #require(snapshot.transcript.first)
+            guard case .thinking(let run) = try #require(ChatTranscriptPresentation.messageParts(in: item).first) else {
+                throw CancellationError()
+            }
+            return ChatThinkingTraceContent.identity(owner: item, run: run)
+        }
+        #expect(try identity(full) == identity(bounded))
+    }
+
     @Test("timeline preserves thinking around an intervening tool")
     func preservesThinkingToolOrder() throws {
         let snapshot = try fixture(transcript: """
