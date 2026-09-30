@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-29, MS-5 done; MS-4 waits for the simplification program
+- **Last updated:** 2026-09-30, cross-plan reconciliation; MS-4 waits for the simplification program
 - **Goal:** Give the iOS app compiler-enforced layers, so its structure stays clean, one-directional and easy for agents to work in, and cannot silently regress into cycles.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -61,21 +61,21 @@ That step is the floor a module split can lower.
 
 ### Current layout
 
-Recounted 2026-09-26 (MS-1):
+Recounted 2026-09-30, after MS-5 (Swift files and lines):
 
-| Directory | Files | Lines |
-| --- | --- | --- |
-| `packages/ios-app/Sources/UI` | 151 | 65,622 |
-| `packages/ios-app/Sources/State` | 43 | 25,385 |
-| `packages/ios-app/Sources/Models` | 20 | 7,625 |
-| `packages/ios-app/Sources/Gateway` | 13 | 4,356 |
-| `packages/ios-app/Sources/Support` | 24 | 3,876 |
-| `packages/ios-app/Sources/Notifications` | 3 | 1,606 |
-| `packages/ios-app/Sources/App` | 9 | 1,536 |
-| `packages/ios-app/Sources/Auth` | 1 | 781 |
+| Directory | Module | Files | Lines |
+| --- | --- | --- | --- |
+| `packages/ios-app/Sources/UI` | `TronMobile` | 158 | 70,728 |
+| `packages/ios-app/Sources/State` | `TronMobile` | 51 | 28,812 |
+| `packages/ios-app/Sources/Notifications` | `TronMobile` | 4 | 1,821 |
+| `packages/ios-app/Sources/App` | `TronMobile` | 12 | 2,245 |
+| `packages/ios-app/Sources/Auth` | `TronMobile` | 1 | 781 |
+| `packages/ios-app/Core/Models` | `TronMobileCore` | 22 | 8,775 |
+| `packages/ios-app/Core/Gateway` | `TronMobileCore` | 17 | 6,276 |
+| `packages/ios-app/Core/Support` | `TronMobileCore` | 20 | 3,003 |
 
-The share extension already compiles `packages/ios-app/Core/Support/SharedContent.swift`
-directly, and unit tests reach the app through `@testable import TronMobile`.
+The share extension links `TronMobileCore`; unit tests use
+`@testable import TronMobile` and `@testable import TronMobileCore`.
 
 ## Tasks
 
@@ -85,7 +85,7 @@ directly, and unit tests reach the app through `@testable import TronMobile`.
 | MS-2 | Done | First real slice of `TronMobileCore`, an XcodeGen framework target with `SWIFT_PACKAGE_NAME` set so `package` access works: move a few leaf types from Models, Gateway or Support into it (kept, not a throwaway spike); prove all five configurations build, the share extension, `@testable` tests, both test plans and the source-policy scripts; record baseline and after timings. Device install and **Product → Profile** are checked by the user or supervisor | MS-1, D1, D2 | module-split session, 2026-09-26 |
 | MS-3a | Done | Inside the one app module, relocate declarations so Models, Gateway and Support reference nothing in State, Notifications, Auth, UI or App and import no UI framework (see MS-3 scope); no framework change yet | MS-2 | module-split session, 2026-09-27 |
 | MS-3b | Done | Move Models, Gateway and Support into `TronMobileCore` with `package` access, a Core privacy manifest and a no-UI-import guard; record timings | MS-3a | module-split session, 2026-09-27 |
-| MS-4 | Needs scoping | Extract `Notifications`, then `State` (with `Auth`), then `UI`, one per task, each with timings, after the simplification program has cleaned up State and Chat (D1); split UI by folder where its boundaries are clean | MS-3b, simplification S-IOS-STATE and S-IOS-CHAT work | |
+| MS-4 | Needs scoping | Extract `Notifications`, then `State` (with `Auth`), then `UI`, one per task, each with timings, after the simplification program has cleaned up State and Chat (D1); split UI by folder where its boundaries are clean Before scoping, check the branches that will land in State first: `feat/pi-sdk-099-upgrade` (State and Core models) and `feat/watch-audio-recording` (based before MS-3b) | MS-3b, simplification S-IOS-STATE and S-IOS-CHAT work | |
 | MS-5 | Done | Move the share extension onto `TronMobileCore` instead of compiling `Core/Support/SharedContent.swift` itself. It keeps `SWIFT_PACKAGE_NAME`, which its use of Core's package API requires | MS-3b | module-split session, 2026-09-29 |
 
 ## Task details
@@ -327,3 +327,9 @@ Supervisor decisions, from the MS-1 findings:
   outside this plan: `test-build-matrix-policy.sh` (LocalDevice compilation conditions are no longer exactly
   `TRON_PRIVATE_VARIABLE_BLUR`), and `test-verify-archive-privacy.sh` / `test-ios-artifact-validator.sh`
   (fixtures still say protocol 4 after the bump to 6). Build timings are still unmeasured.
+
+### Cross-plan reconciliation · 2026-09-30 · module-split session
+
+- Result: no task changed state. Other plans' work since MS-3b changes the ground for MS-4: connection-scale-hardening (O-4, C-1 to C-7, G-7, E-3c, F-3), energy-efficiency (T1-NET, T1-CACHE, T1-DRAFTS) and the two Knowledge plans rewrote `AppModel`, `GatewayLifecycleCoordinator`, `DashboardGatewayConnectionPool`, the Core Gateway client and transport, and added Knowledge state owners. The chat-transcript-stability plan (CT-23 blocked, CT-26 and CT-28 open) keeps changing chat code, so the UI split also waits for it through S-IOS-CHAT-1.
+- Branches that will need the module layout: `feat/watch-audio-recording` (three commits, based 2026-09-22) adds `Sources/Gateway/WatchRecording*.swift`; that directory no longer exists, so its merge must place the files by the Core rules (`WatchRecordingInbox.swift` imports WatchConnectivity; decide whether that belongs in Core). `feat/pi-sdk-099-upgrade` is already on the MS-3b layout and edits `Core/Models` and `Sources/State`.
+- Evidence (verified): file counts above; `git diff main...feat/watch-audio-recording`; the other plans' tables and handoffs. Build timings are still unmeasured.
