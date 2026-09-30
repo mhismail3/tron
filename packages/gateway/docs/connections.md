@@ -1,24 +1,27 @@
 # Connection management owner
 
-`ConnectionOwner` owns only the generic account envelope for provider
+`ConnectionOwner` owns only the generic account envelope for supported
 integration instances under `state/integrations/connections.json`. It does not
 own provider credentials, Knowledge records/evidence, connector checkpoints,
 assessment cohorts/usage, or remote-effect receipts. Credential values never
 enter this state; the envelope contains only an opaque credential reference and
-the presentation projection omits that reference.
+the presentation projection omits that reference. Pi's built-in MCP servers are
+not ConnectionOwner instances; their sole configuration authority is Pi's
+`mcp.json` (see [MCP servers](mcp.md)).
 
 A provider/account is represented by an opaque instance ID. Two instances of
 the same definition therefore have independent account identity, scope, policy,
 enablement, and setup operation. There is no generic `enable`/`disable` RPC.
+MCP server administration and OAuth sign-in use Pi's built-in MCP and the
+separate `mcp.*` RPCs; they do not create connection rows.
 
-Knowledge Jev tagging is the `knowledge.jev` definition and its paid `tag`
-capability. The existing generic ConnectionOwner policy (`enabled`,
-`paidAccessApproved`, and `paidBudgetCents`) governs admission; K4's monthly usage
-ledger remains in the Knowledge connector state keyed by that exact connection
-instance. The Jev reference is the existing `connector:jev:personal` Keychain
-item. Jev has no provider identity endpoint, so its capability readiness records
-Keychain availability without claiming a verified provider identity. Setup never
-enables paid access by itself.
+Jev is no longer a ConnectionOwner definition or Keychain connector. Knowledge,
+session search, and the first-party `jev` tool use Pi's `ModelRuntime.classify()`
+with the TypeSafe `jev-latest` classifier and Pi's provider credential store.
+Tron retains its qualified pre-dispatch estimate and monthly tagging ledger;
+provider credential readiness is owned by Pi and configured through Provider
+Settings. Existing persisted `knowledge.jev` connection state is rejected with
+an instance-specific setup error rather than migrated or silently reused.
 
 The accepted owner-typed commands are:
 

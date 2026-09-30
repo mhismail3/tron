@@ -7912,6 +7912,7 @@ export default function (pi) {
     fixture.manager.appendMessage(fauxAssistantMessage("abandoned html branch"));
     fixture.manager.branch(branchRoot.id);
     fixture.manager.appendMessage({ role: "user", content: "html snapshot marker", timestamp: Date.now() });
+    fixture.manager.appendMessage({ role: "custom_message", customType: "hidden-export-marker", content: "hidden custom export marker", display: false, timestamp: Date.now() });
     fixture.manager.appendMessage(fauxAssistantMessage("html snapshot response"));
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as { phase: "running" | "idle" };
@@ -7933,7 +7934,14 @@ export default function (pi) {
       const sessionData = Buffer.from(encoded!, "base64").toString("utf8");
       expect(sessionData).toContain("html snapshot marker");
       expect(sessionData).toContain("html snapshot response");
+      expect(sessionData).toContain("hidden custom export marker");
+      expect(exported).toContain("const hidden = entry.display === false");
+      expect(exported).toContain("hook-message-hidden");
+      expect(exported).toContain("Hidden in terminal");
       expect(sessionData).not.toContain("abandoned html branch");
+      const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-html-export.json");
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, `${JSON.stringify({ format: "html", mimeType: artifact.mimeType, size: artifact.size, visibleMarkers: ["html snapshot marker", "html snapshot response"], hiddenMarkerRenderedHidden: exported.includes('class="hook-message hook-message-hidden"'), abandonedBranchOmitted: !sessionData.includes("abandoned html branch") }, null, 2)}\n`);
     } finally {
       internal.phase = "idle";
     }

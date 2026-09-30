@@ -60,6 +60,78 @@ app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
 calls the product and agent **Tron**; source may use Pi-specific names only where
 it identifies the backing SDK contract.
 
+## Pi SDK boundary map
+
+The SDK host composes Pi's `codemode`, `tool-search`, and `mcp` built-in
+extension factories for session runtimes and session-free resource loads; the
+SDK does not load these factories automatically. Scoped `-builtin:<name>`
+settings control the shared list. MCP may activate codemode or tool-search when
+server exposure requires them, even when they are not `defaultTools` entries.
+
+Pi owns nested execution and canonical session JSONL. Nested tool calls remain
+children of the parent result, never independent transcript rows or receipts.
+New sessions materialize at the first user or assistant message; setup-only
+state before that remains in memory, and receipts appended before first-message
+materialization flush with that message. `runtime-registry.integration.test.ts`
+covers first-message persistence and cold reopen.
+
+Pi's built-in MCP extension and its `mcp.json` files are the only MCP client and
+configuration authority. Gateway binds global config and credentials to its
+agent directory and admits project config only through the trust owner. The
+session-bound sign-in relay routes Pi's own authorization URL and loopback
+callback; see [MCP servers](docs/mcp.md) for accepted transport and credential
+deltas.
+
+`GlobalProviderResources` replays virtual-model registrations. The picker marks
+them virtual, while routed physical responses own effective context limits and
+usage/cost attribution. Process-global Pi markdown/select/settings helpers pin
+the `dark` theme because the Gateway has no terminal and the SDK exposes no
+per-instance global setter; the host-owned RPC callback palette is separate.
+P99-19 tracks an upstream setter request.
+
+Jev uses Pi `ModelRuntime.classify()` with TypeSafe's catalog `jev-latest` for
+Knowledge, session search, and the first-party tool. Tron retains bounded input,
+qualified pre-dispatch price ceilings, assessment versions, and dispatch
+certainty; credentials remain in Pi's provider store. TypeSafe model behavior
+and actual pricing can change without a Tron release.
+
+## Pi SDK boundary map
+
+`RuntimeSlot` composes Pi's `codemode`, `tool-search`, and `mcp` built-in
+extension factories for session runtimes; session-free hook/package loads use
+the same composition. The SDK does not load these built-ins automatically.
+Scoped `-builtin:<name>` settings decide whether each is enabled. MCP can
+activate codemode or tool-search for its exposure needs even when neither is a
+`defaultTools` entry.
+
+Pi owns nested execution and canonical session JSONL. Nested tool calls remain
+children of their parent result, not independent transcript rows or receipts.
+New sessions materialize at the first user or assistant message; earlier
+setup-only state remains in memory, while accepted receipts appended before
+that message are flushed with the first persisted message. The
+`runtime-registry.integration.test.ts` materialization/reopen cases own this
+boundary.
+
+Pi's built-in MCP extension is the sole MCP client and its `mcp.json` files are
+the configuration authority. The Gateway binds global config and credentials
+to its agent directory, reads trusted-project config only after TrustService
+approval, and relays sign-in through the authenticated session operation. See
+[ MCP servers](docs/mcp.md) for accepted transport and credential deltas.
+
+Virtual model registrations are replayed by `GlobalProviderResources`; the
+picker marks them virtual while assistant rows and effective context limits use
+Pi's routed physical model. Usage and cost remain attached to Pi's physical
+responses. The process-global Pi markdown/select/settings helpers explicitly
+pin the `dark` theme because the Gateway has no terminal and Pi exposes no
+per-instance global theme setter; the host-owned RPC callback palette is
+independent. P99-19 tracks an upstream setter request.
+
+Jev uses Pi `ModelRuntime.classify()` with TypeSafe's catalog `jev-latest` for
+Knowledge, session search, and the `jev` tool. Tron retains input bounds,
+qualified pre-dispatch price ceilings, assessment versions, and dispatch
+certainty; TypeSafe provider credentials remain Pi-owned. Actual TypeSafe model
+behavior and price may change without a Tron release.
+
 ## Connection boundaries
 
 `ConnectionOwner` owns the generic account envelope for multi-account
@@ -2556,12 +2628,12 @@ transport only places JSON in `PI_SUBAGENT_EXTENSION_BINDINGS`; it does not load
 an extension or append that value to the child's prompt. Its public request
 schema has no per-call `extensions`/`subagentOnlyExtensions` override. The
 `subagents.defaultExtensions` setting configures `extensions` only, and
-`runtimeSnapshotHost` snapshots runtime MCP servers only. Tron’s Mac-owned MCP
-adapter is separate from that snapshot feature: it uses the pinned official
-MCP SDK, admits bounded tools from explicit ConnectionOwner instances, and
-keeps resources, prompts, OAuth refresh, elicitation, tasks, and Apps
-unsupported. See `docs/mcp.md` for endpoint, stdio, credential, and unknown
-outcome boundaries. Tron therefore does not mutate Pi settings, agent
+`runtimeSnapshotHost` snapshots runtime MCP servers only. Pi's built-in MCP
+configuration is shared through the Gateway agent directory for ordinary CLI
+children; explicit child extension lists disable Pi built-ins and MCP server
+snapshots are bounded to the child's supported configuration. See
+`docs/mcp.md` for the MCP authority and transport boundaries. Tron therefore
+does not mutate Pi settings, agent
 definitions, or workflow scripts to force-load
 `tron-core`, and must not claim automatic identity/workspace propagation to an
 arbitrary child. A public mutable `tool_call` hook prefixes direct model-facing

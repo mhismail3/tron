@@ -61,15 +61,17 @@ catch-up instead of disconnecting the transport or consuming their cursor. A qua
 advance the reducer cursor rejects the suffix before baseline publication and triggers the
 bounded authoritative retry path.
 
-Provider authentication is the deliberate exception to ordinary transport-scoped presentation work.
+Provider and MCP authentication are deliberate exceptions to ordinary transport-scoped presentation work.
 `auth.event` and `auth.prompt` remain bounded disposable projections, but the Gateway operation belongs
-to the authenticated device identity. A socket loss clears the presented prompt and foreground
+to the authenticated device identity. MCP auth events additionally target `{ kind: "mcp", sessionId, server }`;
+provider events retain their provider target. A socket loss clears the presented prompt and foreground
 `auth.resume` rebinds delivery without starting a second Pi login; `auth.completed` may therefore be
 replayed from a bounded Gateway tombstone. An `auth_url` can also carry a Gateway-derived
 `callbackCapture` descriptor containing only an opaque callback ID and exact loopback host/port/path.
 The authorization code/state remain in the iOS listener's memory and travel either as the existing
 Pi manual-code response or as the query-only `auth.callback` relay; they never enter snapshots, caches,
-logs, or durable events.
+logs, or durable events. MCP callback relay is accepted only for the active session-bound `/mcp login`
+operation and only to the loopback listener named by Pi's authorization URL.
 
 `models.catalogChanged` is a global, payload-free invalidation broadcast after the Gateway's live
 release-date catalog changes. The provider-auth coordinator reloads each already materialized
