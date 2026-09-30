@@ -121,12 +121,10 @@ const INBOUND_SILENCE_WARNING_MS = 12_000;
 /** A heartbeat this late means the event loop stalled long enough for clients
  * to notice; shorter timer jitter is normal and not recorded. */
 const EVENT_LOOP_DELAY_WARNING_MS = 1_000;
-/** Delivery windows slow-start and then track one second of acknowledged throughput. */
-const INITIAL_DELIVERY_WINDOW_BYTES = 64 * 1_024;
-const MINIMUM_DELIVERY_WINDOW_BYTES = 32 * 1_024;
-const MAXIMUM_DELIVERY_WINDOW_BYTES = 4 * 1_048_576;
-/** A round trip growing more than 50% over the best observed sample ends slow start. */
-const DELIVERY_SLOW_START_RTT_GROWTH = 1.5;
+/** Keep ordinary in-flight data below the 8 s deadline even on a 20 KiB/s path. */
+const DELIVERY_WINDOW_BYTES = 32 * 1_024;
+/** Only small control replies may bypass queued state; they still count in-flight. */
+const MAXIMUM_PRIORITY_FRAME_BYTES = 16 * 1_024;
 
 function diagnosticErrorCode(error: unknown): string {
   if (error instanceof GatewayError) return error.code;
@@ -497,10 +495,9 @@ export class OrderedOutboundQueue {
   enqueue(frame: OutboundFrame): boolean {
     if (this.retired) return false;
     // The frame ws is already writing cannot be recalled, so replacement looks
-    // only at frames still queued behind it. The newest frame of a state is
-    // appended where it was enqueued, after everything already queued: a
-    // delivered sequence is therefore always a subsequence of the enqueue
-    // sequence, and no frame ever overtakes an earlier one.
+    // only at frames still queued behind it. Ordinary frames retain enqueue
+    // order; bounded priority controls may pass queued state, never the active
+    // write. Callers must not mark session state as priority.
     const candidates = this.supersededIndices(frame);
     const replacement = candidates.length > 0 && frame.sequence !== undefined ? frame.rebaseline?.() : undefined;
     // A sequenced frame is dropped only together with the replacement that
@@ -807,8 +804,6 @@ interface Connection {
   /** Bytes handed to ws since the peer last acknowledged their window ping. */
   deliveryUnacknowledgedBytes: number;
   deliveryWindowBytes: number;
-  deliveryMinimumRttMs: number;
-  deliverySlowStart: boolean;
   deliveryPingSequence: number;
   deliveryPingBytes: number;
   deliveryPingSentAt: number | null;
@@ -1177,7 +1172,7 @@ export class GatewayServer {
           const heartbeatQueue = connection.outbound.snapshot();
           this.options.logger.log(
             "warning",
-            `Closing unresponsive client ${connection.id} after ${connection.unansweredHeartbeats} unanswered heartbeats (lastInboundAgeMs=${progressAge(connection.lastInboundAt, heartbeatAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, heartbeatAt)} queuedFrames=${heartbeatQueue.queuedFrames} queuedBytes=${heartbeatQueue.queuedBytes} completedFrames=${heartbeatQueue.completedFrames})`,
+            `Closing unresponsive client ${connection.id} after ${connection.unansweredHeartbeats} unanswered heartbeats (lastInboundAgeMs=${progressAge(connection.lastInboundAt, heartbeatAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, heartbeatAt)} queuedFrames=${heartbeatQueue.queuedFrames} queuedBytes=${heartbeatQueue.queuedBytes} completedFrames=${heartbeatQueue.completedFrames} deliveryWindowBytes=${connection.deliveryWindowBytes} deliveryUnacknowledgedBytes=${connection.deliveryUnacknowledgedBytes})`,
             { event: "connection.heartbeat-timeout", source: "transport", connectionId: connection.id, ...connection.peer },
           );
           connection.socket.terminate();
@@ -2113,13 +2108,13 @@ export class GatewayServer {
     };
     const outbound = new OrderedOutboundQueue(
       this.options.maximumOutboundBytes ?? 8 * 1_048_576,
-      (encoded, completion, frameBytes = 0, priority = false) => {
+      (encoded, completion, frameBytes = 0) => {
         connection.deliveryUnacknowledgedBytes += frameBytes;
         socket.send(encoded, (error) => {
           if (!error) connection.lastWriteProgressAt = performance.now();
           completion(error);
         });
-        if (!priority && connection.deliveryUnacknowledgedBytes >= Math.max(1, connection.deliveryWindowBytes / 2)) {
+        if (connection.deliveryUnacknowledgedBytes >= Math.max(1, connection.deliveryWindowBytes / 2)) {
           // Ack halfway through the window so the next half can be delivered while
           // the pong returns, rather than draining the entire window before sampling.
           sendDeliveryPing();
@@ -2129,7 +2124,7 @@ export class GatewayServer {
         if (connection.closeInitiated) return;
         this.options.logger.log(
           "warning",
-          `Closing client ${connection.id} at outbound queue capacity (queuedFrames=${snapshot.queuedFrames} queuedBytes=${snapshot.queuedBytes} maximumFrames=${snapshot.maximumFrames} maximumBytes=${snapshot.maximumBytes} frameHighWater=${snapshot.frameHighWater} byteHighWater=${snapshot.byteHighWater} oldestTopic=${snapshot.oldestTopic} nextTopic=${nextTopic} nextBytes=${nextBytes} wsBufferedBytes=${socket.bufferedAmount}; ${this.pressureDiagnostic()})`,
+          `Closing client ${connection.id} at outbound queue capacity (queuedFrames=${snapshot.queuedFrames} queuedBytes=${snapshot.queuedBytes} maximumFrames=${snapshot.maximumFrames} maximumBytes=${snapshot.maximumBytes} frameHighWater=${snapshot.frameHighWater} byteHighWater=${snapshot.byteHighWater} oldestTopic=${snapshot.oldestTopic} nextTopic=${nextTopic} nextBytes=${nextBytes} wsBufferedBytes=${socket.bufferedAmount} deliveryWindowBytes=${connection.deliveryWindowBytes} deliveryUnacknowledgedBytes=${connection.deliveryUnacknowledgedBytes}; ${this.pressureDiagnostic()})`,
           { event: "connection.outbound-capacity", source: "transport", connectionId: connection.id, ...connection.peer },
         );
         this.closeFailedConnection(connection, 1013, "client outbound capacity exceeded");
@@ -2149,7 +2144,8 @@ export class GatewayServer {
       (bytes) => this.resourceSampler.recordOutboundCoalesced(bytes),
       4_096,
       (frame) => {
-        if (frame.priority) return true;
+        if (frame.priority && frame.bytes <= MAXIMUM_PRIORITY_FRAME_BYTES
+          && connection.deliveryUnacknowledgedBytes + frame.bytes <= connection.deliveryWindowBytes) return true;
         if (connection.deliveryUnacknowledgedBytes === 0) return true;
         if (connection.deliveryUnacknowledgedBytes + frame.bytes <= connection.deliveryWindowBytes) return true;
         sendDeliveryPing();
@@ -2188,9 +2184,7 @@ export class GatewayServer {
       lastWriteProgressAt: null,
       pingOutstandingSince: null,
       deliveryUnacknowledgedBytes: 0,
-      deliveryWindowBytes: INITIAL_DELIVERY_WINDOW_BYTES,
-      deliveryMinimumRttMs: Number.POSITIVE_INFINITY,
-      deliverySlowStart: true,
+      deliveryWindowBytes: DELIVERY_WINDOW_BYTES,
       deliveryPingSequence: 0,
       deliveryPingBytes: 0,
       deliveryPingSentAt: null,
@@ -2214,20 +2208,7 @@ export class GatewayServer {
     socket.on("pong", (payload) => {
       const sequence = payload.length === 4 ? payload.readUInt32BE() : -1;
       if (connection.deliveryPingSentAt !== null && sequence === connection.deliveryPingSequence) {
-        const now = performance.now();
-        const elapsedMs = Math.max(1, now - connection.deliveryPingSentAt);
         const acknowledgedBytes = connection.deliveryPingBytes;
-        const measuredBytesPerSecond = acknowledgedBytes * 1_000 / elapsedMs;
-        connection.deliveryMinimumRttMs = Math.min(connection.deliveryMinimumRttMs, elapsedMs);
-        if (connection.deliverySlowStart
-          && elapsedMs <= connection.deliveryMinimumRttMs * DELIVERY_SLOW_START_RTT_GROWTH) {
-          connection.deliveryWindowBytes = Math.min(MAXIMUM_DELIVERY_WINDOW_BYTES, connection.deliveryWindowBytes * 2);
-          if (connection.deliveryWindowBytes === MAXIMUM_DELIVERY_WINDOW_BYTES) connection.deliverySlowStart = false;
-        } else {
-          connection.deliverySlowStart = false;
-          connection.deliveryWindowBytes = Math.max(MINIMUM_DELIVERY_WINDOW_BYTES,
-            Math.min(MAXIMUM_DELIVERY_WINDOW_BYTES, Math.round(measuredBytesPerSecond)));
-        }
         connection.deliveryUnacknowledgedBytes = Math.max(0,
           connection.deliveryUnacknowledgedBytes - acknowledgedBytes);
         connection.deliveryPingBytes = 0;
@@ -3188,9 +3169,9 @@ export class GatewayServer {
       // response before its synchronization suffix without manufacturing
       // transport pressure from concurrent bounded RPC completions.
       const outboundValue = value as { type?: unknown; topic?: unknown };
-      const priority = outboundValue.type === "response"
-        || outboundValue.topic === "transport.resyncRequired"
-        || outboundValue.topic === "system.stopping";
+      const priority = (outboundValue.type === "response" && frame.outputBytes <= MAXIMUM_PRIORITY_FRAME_BYTES)
+        || ((outboundValue.topic === "transport.resyncRequired" || outboundValue.topic === "system.stopping")
+          && frame.outputBytes <= MAXIMUM_PRIORITY_FRAME_BYTES);
       if (!connection.outbound.enqueue({
         encoded: frame.output, bytes: frame.outputBytes,
         ...outboundFrameIdentity(connection, value, frame, this.options.maxFrameBytes),

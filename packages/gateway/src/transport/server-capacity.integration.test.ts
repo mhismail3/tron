@@ -1048,6 +1048,7 @@ describe("WebSocket connection and outbound capacity", () => {
   // produces: without coalescing the same bytes reach the connection's own
   // backstop (64 KiB in these fixtures) and the peer is closed for capacity.
   interface StalledConnection {
+    deliveryWindowBytes: number;
     outbound: OrderedOutboundQueue;
     socket: WebSocket;
     subscriptionTokens: Map<string, string>;
@@ -1119,6 +1120,9 @@ describe("WebSocket connection and outbound capacity", () => {
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "coalescing hello");
     const connection = connections(gateway)[0]!;
+    // These queue-coalescing cases isolate ordering/coverage from the separate
+    // delivery-window liveness cases below.
+    connection.deliveryWindowBytes = Number.MAX_SAFE_INTEGER;
     // Hold every application write: the link is as slow as the peer's socket
     // is, and the queue is where the Gateway's next frames wait.
     const held: StalledLink["held"] = [];
@@ -1177,7 +1181,6 @@ describe("WebSocket connection and outbound capacity", () => {
       deliveryPingSentAt: number | null;
       outbound: OrderedOutboundQueue & { resume(): void };
     };
-    connection.deliveryWindowBytes = 32 * 1_024;
     const reader = (socket as unknown as { _socket: import("node:net").Socket })._socket;
     reader.pause();
     const drainTimer = setInterval(() => {
@@ -1212,7 +1215,7 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(received.findIndex((frame) => frame.type === "response" && frame.id === "priority-pong"))
       .toBeLessThan(received.findIndex((frame) => frame.topic === "session.rebaseline"));
     expect(deliveryPings).toBeGreaterThan(0);
-    expect(connection.deliveryWindowBytes).toBeGreaterThanOrEqual(32 * 1_024);
+    expect(connection.deliveryWindowBytes).toBe(32 * 1_024);
     expect(socket.readyState).toBe(WebSocket.OPEN);
   });
 
@@ -1259,12 +1262,8 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     await bounded(waitUntil(() => connections(gateway).length === 2 && gated.hello && ungated.hello), "throughput hello frames");
     const live = connections(gateway);
-    const [gatedConnection, ungatedConnection] = live as Array<StalledConnection & {
-      deliveryWindowBytes: number;
-      deliverySlowStart: boolean;
-    }>;
+    const [gatedConnection, ungatedConnection] = live;
     ungatedConnection.deliveryWindowBytes = Number.MAX_SAFE_INTEGER;
-    ungatedConnection.deliverySlowStart = false;
     gatedConnection.subscriptionTokens.set("throughput-gated", "token");
     ungatedConnection.subscriptionTokens.set("throughput-ungated", "token");
     let sequence = 0;

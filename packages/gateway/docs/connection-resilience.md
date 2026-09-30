@@ -9,21 +9,24 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 - **Gateway outbound queue:** at most 8 MiB and 4,096 encoded frames per connection,
   including the active write. Exactly one frame enters `ws` at a time, and the
   Gateway pauses ordinary state frames when the bytes handed to `ws` but not yet
-  delivery-acknowledged reach an adaptive per-connection window (slow-starts at
-  64 KiB, doubles on acknowledgements whose round trip stays near the best
-  observed, and settles at about one second of acknowledged throughput, clamped
-  to 32 KiB–4 MiB).
+  delivery-acknowledged reach a fixed 32 KiB per-connection window. The bound
+  is intentionally fixed: low offered traffic cannot masquerade as link
+  capacity and inflate the window. Matching sequenced pongs release the bytes.
   A sequenced WebSocket ping acknowledges every byte handed before it; WebSocket
   clients answer control pings automatically, including `ws` and the iOS
   `URLSessionWebSocketTask` client exercised by `scripts/ios-gateway-e2e-test all`.
   A matching pong is also liveness evidence and suppresses a duplicate heartbeat
-  ping. Responses and the stopping/resync control events can pass queued state,
-  while the frame already handed to `ws` cannot be recalled. The window is
+  ping. Responses and stopping/resync controls no larger than 16 KiB can pass
+  queued state; larger responses remain in order and are still counted against
+  the delivery window. Every frame handed to `ws`, including priority replies,
+  is counted, and the active frame cannot be recalled. The window is
   frame-atomic: one frame larger than the window is handed whole when the window
   is empty. The current largest observed `session.snapshot` is 590 KiB, versus
-  about 80 KiB deliverable within the 8 s liveness deadline at 0.08 Mbit/s; that
-  single frame can therefore still delay an application-level liveness pong
-  (F-8). Completion releases its payload reference and queue byte reservation.
+  about 80 KiB deliverable within the 8 s liveness deadline at 0.08 Mbit/s.
+  Multiple frames can queue behind an outstanding delivery ping, so frame size
+  alone does not explain the measured stream miss. F-4 remains blocked pending
+  rate-capped relay qualification. Completion releases its payload reference
+  and queue byte reservation.
   A newer session
   summary replaces the unsent summary of that session, and a newer session
   snapshot supersedes the unsent sequenced state of its own runtime generation
@@ -37,9 +40,10 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   restores it: a sequenced frame whose effect no snapshot installation performs
   (a failure receipt, a resource/structure/context revision bump, an editor
   directive) is a fence, and it and every frame behind it are delivered in
-  order, as are frames of another runtime generation. The frame
-  already entering `ws` is never recalled, what a client receives stays in
-  enqueue order, and a dropped frame is not counted as outstanding. A peer
+  order, as are frames of another runtime generation. The frame already
+  entering `ws` is never recalled; ordinary frames preserve enqueue order, while
+  the bounded priority controls above may pass queued state. A dropped frame is
+  not counted as outstanding. A peer
   exceeding either limit loses request/subscription admission immediately; a
   one-second forced-close deadline bounds a stalled close handshake. Other peers
   and accepted domain commands continue independently.
