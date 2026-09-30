@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
+import { applyJevModelPricing } from "../providers/jev-model-pricing.js";
 import type {
   AdministrativeDrainBlockerCategory,
   AdministrativeDrainBlockerSummary,
@@ -1560,13 +1561,13 @@ export class RuntimeRegistry {
       agentDir: this.options.agentDir,
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
-      createModelRuntime: async () => installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
+      createModelRuntime: async () => applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
         authPath: join(this.options.agentDir, "auth.json"),
         modelsPath: join(this.options.agentDir, "models.json"),
         modelsStorePath: join(this.options.agentDir, "models-store.json"),
         refreshOnCreate: true,
         allowModelNetwork: false,
-      })))()),
+      })))())),
       trust: this.options.trust,
       blobs: this.blobs,
       exports: this.exports,

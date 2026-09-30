@@ -178,7 +178,11 @@ until the user approves it.
   Tron follows Pi's catalog model `jev-latest`; TypeSafe's actual model and price
   may change without a Tron release. The pre-dispatch ceiling and recorded
   estimated costs use Tron's qualified $0.042/M input, zero-output estimate,
-  not Pi's zero catalog cost; this is an estimate, not provider billing.
+  not Pi's zero catalog cost; this is an estimate, not provider billing. Apply
+  that estimate to the Tron-owned classifier catalog view of `typesafe/jev-latest`
+  in session and administrative ModelRuntime instances, so Pi codemode and
+  Tron-owned Jev consumers account for one consistent price without changing
+  `models.json`; leave every other classifier's catalog price untouched.
 - **D-7 Virtual models: support them.** Selectable in the iOS picker, routed
   physical model shown per response, limits and cost from the physical model.
 - **D-8 Nested presentation persistence is parent-owned.** A Tron inline
@@ -245,7 +249,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Claude Sonnet 5.5 (0.99.0); GPT-6.1 Sol and Codex default (0.99.1); Kimi K3 defaults for Fireworks/Together/OpenCode Go | **Verified/inherited**: refreshed release-date snapshot; catalog regression pins Sonnet 5.5 at 1,000,000 context / 128,000 output and GPT-6.1 Sol at 272,000 / 128,000. K3's 1,048,576 context/output catalog metadata does not widen Tron's 32,768 TPM reservation cap; payload normalization keeps the provider's `max_tokens` field. | P99-12 |
 | Built-in section in `pi config`; `-builtin:<name>` in `extensions`; SDK `builtin: true` | **Adapted**: compose built-ins in Gateway; Extensions settings patches `-builtin:` switches from the scoped settings projection | P99-6, P99-15 |
 | `defaultTools` `+name`/`-name` entries | **Adapted**: Extensions settings projects and patches default tools, including `+codemode`, `+tool_search`, and `codemode.mode` | P99-6, P99-15 |
-| codemode `models.classify` cost added to tool result usage; `ctx.executeTool` usage added to the calling result | **Verified**: P99-5's priced nested fixture covers `ctx.executeTool`; P99-17 g4 runs a faux-provider session with TypeSafe `jev-latest` and System One usage, and proves classifier usage/cost is carried once in codemode result usage and session totals/projection. The catalog's TypeSafe classifier cost is zero, as specified by its model metadata. | P99-5, P99-17 |
+| codemode `models.classify` cost added to tool result usage; `ctx.executeTool` usage added to the calling result | **Verified/adapted per D-6 addendum**: P99-5's priced nested fixture covers `ctx.executeTool`; P99-17 g4 runs a faux-provider session with TypeSafe `jev-latest` and System One usage, proving the Tron-priced classifier estimate is carried once in codemode result usage and session totals/projection. The Tron catalog view prices Jev input at $0.042/M, output free; this is an estimate, not provider billing. Other classifier catalog prices remain unchanged. | P99-5, P99-17 |
 | TypeScript 7 / ES2024 build; `tsx` replaced by Node type stripping | **Adapt**: P99-3 resolves its five candidate API integration errors; Node 22.22.0 is the validation runtime | P99-2, P99-3 |
 | Startup header/banner and `[Themes]` changes; light/dark detection order; `TERM=*-direct` | **Not applicable** (TUI only) | — |
 | OpenAI Codex provider renamed "OpenAI Codex (legacy)" | **Inherit**; iOS shows provider names from the Gateway | P99-9 |
@@ -1171,10 +1175,10 @@ installed. Then close the plan per `docs/plans/README.md`.
 
 ### P99-17 g4 · Done · 2026-09-30 · luna-worker
 
-- Result: Verified codemode `models.classify` System One usage/cost propagation through the real RuntimeRegistry session: the parent codemode result carries the classifier usage and call cost, snapshot statistics add its 136 tokens exactly once, and the codemode result's projected cost is available to the iOS card. TypeSafe's pinned `jev-latest` catalog price is zero, so the observed USD cost is zero.
-- Evidence: Focused integration passed 1/1 (238 ms test execution; 1.12 s Vitest wall). Artifact: `packages/gateway/test-results/pi-sdk-099-classify-cost.json` records the fake request, live codemode projection, canonical tool result, and completed snapshot totals; auth is redacted.
-- Changes: Added `packages/gateway/src/sessions/codemode-classify-cost.integration.test.ts`; updated the classifier-cost matrix disposition and this handoff. No runtime change.
-- Kept on purpose: Usage aggregation is compared against the assistant usage baseline plus classifier tokens, proving single-counting without relying on a new cost price or production hook; the fake provider, credential, and fetch stay isolated.
+- Result: Verified codemode `models.classify` System One usage/cost propagation through the real RuntimeRegistry session: the parent codemode result carries the classifier usage and call cost, snapshot statistics add its 136 tokens exactly once, and the codemode result's projected cost is available to the iOS card. The artifact reflects the later D-6 addendum h1 update: the Tron catalog view prices TypeSafe `jev-latest` at $0.042/M input, output free, explicitly an estimate.
+- Evidence: Focused integration passed 1/1 (238 ms test execution; 1.12 s Vitest wall) before h1; h1 regenerates the artifact with the estimated price and exactly-once totals. Artifact: `packages/gateway/test-results/pi-sdk-099-classify-cost.json` records the fake request, live codemode projection, canonical tool result, and completed snapshot totals; auth is redacted.
+- Changes: Added `packages/gateway/src/sessions/codemode-classify-cost.integration.test.ts`; h1 updates the pricing boundary and expected artifact values. The original g4 test remains the evidence seam.
+- Kept on purpose: Usage aggregation is compared against the assistant usage baseline plus classifier tokens, proving single-counting; fake provider, credential, and fetch stay isolated.
 - Deviations: None.
 
 ### P99-17 g5 · Done · 2026-09-30 · luna-worker
@@ -1201,3 +1205,11 @@ installed. Then close the plan per `docs/plans/README.md`.
   - `tool-technical-details`: metadata rows wrap within the detail surface; raw JSON stays behind disclosure.
 - Kept on purpose: Pi remains named only in technical comments documenting SDK ownership; MCP Settings uses the planned static surface for the long list while settings groups retain tinted Liquid Glass. Hosted Add Server uses the same form component as production; it performs no mutation.
 - Deviations: The Add Server screenshot uses a test-owned large detent to show the complete production form at all capture sizes; production medium/large sheet behavior is unchanged. The main-worktree baseline was detached at `main` commit `f9e81ff81`, used with lane `p9917base`, then removed. No chat behavior change or regression was found.
+
+### P99-17 h1 · Done · 2026-09-30 · luna-worker
+
+- Result: Applied Tron's TypeSafe Jev estimate at the shared classifier catalog boundary: session and administrative ModelRuntime consumers now resolve `typesafe/jev-latest` at $0.042 per million input tokens and zero output cost. Codemode classification, Tron Jev, Knowledge assessment and session search share the adjusted model metadata; other classifiers retain their catalog costs. `models.json` is unchanged. The iOS cost row explicitly says the value is estimated.
+- Evidence: Gateway TypeScript check passed. Focused Gateway suites passed 51/51 across 7 files: codemode classifier usage, Jev client/extension, concurrent nested Jev ceiling, Jev assessment, Knowledge service and session search. The retained g4 artifact `packages/gateway/test-results/pi-sdk-099-classify-cost.json` now records $0.000005376 for 128 input tokens in the codemode result and session totals exactly once. `ToolDetailPresentationTests` passed 35/35 (3.90 s XCTest runner; result `~/Library/Developer/Tron/ios/test-runs/20260930T182123Z-run.eDuaCT/TestResults.xcresult`).
+- Changes: Added `packages/gateway/src/providers/jev-model-pricing.ts`; applied it to the Gateway administrative runtime and session runtimes; removed the Jev client's per-call model price copy; updated the g4 integration expectations/artifact, iOS cost label and this D-6 addendum/handoff.
+- Kept on purpose: The estimate remains catalog metadata and never changes provider billing or persisted `models.json`; the Jev pre-dispatch maximum charge remains independently enforced.
+- Deviations: The first iOS test invocation correctly refused stale build products; rebuilt in owned lane `p9917h1` and reran the focused suite. No product decision or Gateway lifecycle action was needed.

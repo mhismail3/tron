@@ -356,7 +356,7 @@ struct ToolDetailSheet: View {
     private func classifyCostSection(_ presentation: ToolDetailPresentation) -> some View {
         if let cost = presentation.classifyCostUSD {
             HStack {
-                Label("Classification cost", systemImage: "dollarsign.circle")
+                Label("Classification cost (estimated)", systemImage: "dollarsign.circle")
                     .font(TronTypography.secondaryDescription)
                 Spacer()
                 Text(cost.formatted(.currency(code: "USD").precision(.fractionLength(4...6))))

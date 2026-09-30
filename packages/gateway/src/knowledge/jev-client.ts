@@ -1,4 +1,4 @@
-import type { ClassifierApi, ClassifierContext, ClassifierModel } from "@earendil-works/pi-ai";
+import type { ClassifierContext } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 /** Tron pins the model identity to Pi's catalog, but retains a qualified cost
@@ -106,12 +106,9 @@ export class JevDecisionClient {
     const classifierContext = validatedContext(request);
     const maxEstimatedChargeCents = inputCostCents(INPUT_TOKEN_CEILING);
     if (context.maxChargeCents !== undefined && (!Number.isFinite(context.maxChargeCents) || context.maxChargeCents <= 0 || maxEstimatedChargeCents > context.maxChargeCents)) throw new Error("Jev request exceeds maxChargeCents before dispatch");
-    const catalogModel = this.runtime.getModelOfType("classifier", JEV_CLASSIFIER.provider, JEV_DEFAULT_MODEL);
-    if (!catalogModel) throw new Error("Pi's TypeSafe Jev classifier is unavailable");
+    const model = this.runtime.getModelOfType("classifier", JEV_CLASSIFIER.provider, JEV_DEFAULT_MODEL);
+    if (!model) throw new Error("Pi's TypeSafe Jev classifier is unavailable");
     if (!this.runtime.getProviderAuthStatus(JEV_CLASSIFIER.provider).configured) throw new Error("TypeSafe provider credential is not configured");
-    // Keep Pi's catalog API/provider/limits while replacing only the catalog's
-    // zero price in our accounting; it is not TypeSafe's billable price.
-    const model = { ...catalogModel, cost: { input: JEV_CLASSIFIER.inputUsdPerMillion, output: JEV_CLASSIFIER.outputUsdPerMillion, cacheRead: 0, cacheWrite: 0 } } as ClassifierModel<ClassifierApi>;
     assertJSON(request);
     try {
       await context.beforeDispatch?.();

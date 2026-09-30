@@ -95,10 +95,11 @@ describe("codemode classifier usage projection", () => {
       item.kind === "message" && item.role === "toolResult" && item.toolCallId === "classify-parent");
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ url: "https://api.typesafe.ai/v1/systemone", authorization: "Bearer synthetic-typesafe-key", body: { model: "jev-latest" } });
+    const estimatedClassifierCostUSD = 128 * 0.042 / 1_000_000;
     expect(result).toMatchObject({
       role: "toolResult",
-      usage: { input: 128, output: 8, totalTokens: 136, cost: { total: 0 } },
-      details: { calls: [{ name: "models.classify", args: "typesafe/jev-latest", status: "ok", cost: 0 }] },
+      usage: { input: 128, output: 8, totalTokens: 136, cost: { input: estimatedClassifierCostUSD, output: 0, total: estimatedClassifierCostUSD } },
+      details: { calls: [{ name: "models.classify", args: "typesafe/jev-latest", status: "ok", cost: estimatedClassifierCostUSD }] },
     });
     const assistantUsage = snapshot.transcript
       .filter((item) => item.kind === "message" && item.role === "assistant" && item.usage !== undefined)
@@ -118,9 +119,11 @@ describe("codemode classifier usage projection", () => {
       cacheWrite: assistantUsage.cacheWrite,
       total: assistantUsage.total + 136,
     });
-    expect(snapshot.stats.cost).toBe(0);
+    expect(snapshot.stats.cost).toBeCloseTo(estimatedClassifierCostUSD);
+    expect(snapshot.transcript.filter((item) => item.kind === "message" && item.role === "toolResult")
+      .reduce((total, item) => total + (item.kind === "message" && item.role === "toolResult" ? item.usage?.cost.total ?? 0 : 0), 0))
+      .toBeCloseTo(estimatedClassifierCostUSD);
     expect(JSON.stringify(snapshot)).toContain('"usage":{"input":128,"output":8');
-    expect(JSON.stringify(result)).toContain('"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}');
 
     const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-classify-cost.json");
     await mkdir(dirname(artifactPath), { recursive: true });
