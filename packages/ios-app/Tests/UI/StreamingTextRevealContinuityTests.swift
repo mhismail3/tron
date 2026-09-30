@@ -1,7 +1,9 @@
 import SwiftUI
 import Testing
+import Synchronization
 import UIKit
 @testable import TronMobile
+@testable import TronMobileCore
 
 /// Mounts the real `ChatStreamingInlineText` with every gate open, grows its
 /// source on the Gateway's 150 ms progress cadence at about 40 words/s, and
@@ -12,6 +14,11 @@ import UIKit
 /// - the streaming view never converges to the full source.
 /// A reference pane renders the same source settled (not streaming); both
 /// panes share one layout, so glyph pixels compare one to one.
+///
+/// The view's reveal clock is a manual clock, so every sample is rendered at
+/// an exact reveal time after the reveal loop has run its tick for that time.
+/// Sampling on the wall clock let a slow runner space samples further apart,
+/// and each sample then legitimately showed more words.
 @MainActor
 struct StreamingTextRevealContinuityTests {
     private static let paneSize = CGSize(width: 340, height: 360)
@@ -19,13 +26,26 @@ struct StreamingTextRevealContinuityTests {
     private static let wordsPerFrame = 6
     private static let frameCount = 20
     private static let sampleInterval: Duration = .milliseconds(33)
+    /// Simulated time after the last frame for every fade to finish.
+    private static let settleInterval: Duration = .milliseconds(1_200)
 
     @Test("streaming text fades in continuously at 40 words/s on 150 ms frames")
     func streamingRevealIsContinuous() async throws {
+        try await withTestWatchdog(timeout: .seconds(30)) { @MainActor in
+            try await Self.streamAndSample()
+        }
+    }
+
+    private static func streamAndSample() async throws {
         let words = Self.words(count: Self.wordsPerFrame * (Self.frameCount + 1))
+        let clock = RevealClock()
         var admittedWords = Self.wordsPerFrame
         func fixture() -> RevealFixture {
-            RevealFixture(source: words.prefix(admittedWords).joined(separator: " "), paneSize: Self.paneSize)
+            RevealFixture(
+                source: words.prefix(admittedWords).joined(separator: " "),
+                paneSize: Self.paneSize,
+                clock: clock.monotonicClock
+            )
         }
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
@@ -40,24 +60,53 @@ struct StreamingTextRevealContinuityTests {
             window.rootViewController = nil
             previousKeyWindow?.makeKeyAndVisible()
         }
-        try await Task.sleep(for: .milliseconds(500))
+        // The mounted content is admitted at once by a task that starts after
+        // the first commit; two display frames drain the main queue past it.
+        for _ in 0..<2 { try await DisplayFrameScheduler.displayLink.nextFrame() }
 
-        let clock = ContinuousClock()
-        let start = clock.now
-        var nextFrame = start + Self.frameInterval
+        /// Advances reveal time one sample interval. The woken reveal loop is
+        /// enqueued on the main actor before this task yields, so its whole
+        /// tick (ending in its next sleep or its return) runs first.
+        func advanceOneSample() async {
+            clock.advance(by: Self.sampleInterval)
+            await Task.yield()
+        }
+        /// A stream frame restarts the reveal task once SwiftUI commits the new
+        /// source. The restarted loop always has new words to pace, so it is
+        /// handled once it sleeps; only a catch-up (every word shown at once,
+        /// which the render proves) returns instead.
+        func restartHandled(sleepsBefore before: Int) async throws {
+            while !(clock.sleepCount > before && clock.sleeperCount == 1) {
+                if try Self.sample(window).isConverged { return }
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+            }
+        }
+
+        var elapsed: Duration = .zero
+        var nextFrame = Self.frameInterval
         var samples: [RevealSample] = [try Self.sample(window)]
-        while admittedWords < words.count || clock.now < nextFrame {
-            try await Task.sleep(for: Self.sampleInterval)
-            if clock.now >= nextFrame, admittedWords < words.count {
+        while admittedWords < words.count || elapsed < nextFrame {
+            await advanceOneSample()
+            elapsed += Self.sampleInterval
+            if elapsed >= nextFrame, admittedWords < words.count {
+                // The restart must neither grant nor withhold a word.
+                let sleeps = clock.sleepCount
                 admittedWords += Self.wordsPerFrame
                 host.rootView = fixture()
                 nextFrame += Self.frameInterval
+                try await restartHandled(sleepsBefore: sleeps)
             }
             samples.append(try Self.sample(window))
         }
         let streamingSamples = samples
-        let sampleMilliseconds = (clock.now - start) / Duration.milliseconds(1) / Double(samples.count - 1)
-        try await Task.sleep(for: .milliseconds(1_200))
+
+        // The loop sleeps until the last fade completes, then returns.
+        var settleElapsed: Duration = .zero
+        while clock.sleeperCount > 0, settleElapsed < Self.settleInterval {
+            await advanceOneSample()
+            settleElapsed += Self.sampleInterval
+        }
+        #expect(clock.sleeperCount == 0, "the reveal loop stops once every fade completes")
         let settled = try Self.sample(window)
 
         let inkPerWord = settled.referenceInk / Double(words.count)
@@ -67,15 +116,16 @@ struct StreamingTextRevealContinuityTests {
             / Double(streamingSamples.count - 1)
         print("""
             reveal continuity: samples=\(streamingSamples.count) \
-            meanSampleMs=\(String(format: "%.1f", sampleMilliseconds)) largestJumpWords=\
+            sampleMs=\(Self.sampleInterval) largestJumpWords=\
             \(String(format: "%.2f", largestJump)) fadingShare=\(String(format: "%.2f", fadingShare)) \
             settledInkRatio=\(String(format: "%.4f", settled.streamingInk / settled.referenceInk))
             """)
-        // Samples land about 60 ms apart, so steady pacing adds 2–5 words of
-        // ink per sample; the pre-fix catch-up showed 18 or more at once.
+        // Samples land 33 ms apart in reveal time, so steady pacing adds one or
+        // two words of ink per sample; the pre-fix catch-up showed 18 or more
+        // at once.
         #expect(largestJump <= 8, "no sample may reveal more than a few words at once: \(largestJump) words")
         #expect(fadingShare >= 0.8, "words must be fading in most samples: \(fadingShare)")
-        #expect(abs(settled.streamingInk / settled.referenceInk - 1) < 0.01, "the reveal converges to the source")
+        #expect(settled.isConverged, "the reveal converges to the source")
     }
 
     private static func words(count: Int) -> [String] {
@@ -122,12 +172,16 @@ private struct RevealSample {
     var streamingInk = 0.0
     var referenceInk = 0.0
     var fadingPixels = 0
+
+    /// Every admitted word renders at full ink.
+    var isConverged: Bool { abs(streamingInk / referenceInk - 1) < 0.01 }
 }
 
 /// The streaming pane over a settled reference pane of the same source.
 private struct RevealFixture: View {
     let source: String
     let paneSize: CGSize
+    let clock: MonotonicClock
 
     var body: some View {
         VStack(spacing: 0) {
@@ -136,6 +190,7 @@ private struct RevealFixture: View {
         }
         .background(Color.white)
         .environment(\.scenePhase, .active)
+        .environment(\.chatStreamingRevealClock, clock)
     }
 
     private func pane(streaming: Bool) -> some View {
@@ -149,5 +204,72 @@ private struct RevealFixture: View {
         .foregroundStyle(.black)
         .frame(width: paneSize.width, height: paneSize.height, alignment: .topLeading)
         .clipped()
+    }
+}
+
+/// The reveal loop's clock. Its sleeps are main-actor isolated, so resuming
+/// one from the test enqueues the woken loop on the main actor ahead of the
+/// test's next yield; `sleepCount` and `sleeperCount` show whether the loop is
+/// paced (asleep) or has stopped.
+@MainActor
+private final class RevealClock {
+    private struct Sleeper {
+        let id: Int
+        let deadline: Duration
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private let origin = ContinuousClock.now
+    private let offset = Mutex<Duration>(.zero)
+    private var sleepers: [Sleeper] = []
+    private var nextID = 0
+    private(set) var sleepCount = 0
+
+    var sleeperCount: Int { sleepers.count }
+
+    nonisolated var monotonicClock: MonotonicClock {
+        MonotonicClock(
+            now: { self.now() },
+            sleep: { duration in try await self.sleep(for: duration) },
+            gridOrigin: origin
+        )
+    }
+
+    nonisolated private func now() -> ContinuousClock.Instant {
+        origin + offset.withLock { $0 }
+    }
+
+    func advance(by duration: Duration) {
+        let now = offset.withLock { value -> Duration in
+            value += duration
+            return value
+        }
+        let due = sleepers.filter { $0.deadline <= now }
+        sleepers.removeAll { $0.deadline <= now }
+        for sleeper in due { sleeper.continuation.resume() }
+    }
+
+    private func sleep(for duration: Duration) async throws {
+        let id = nextID
+        nextID += 1
+        sleepCount += 1
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    sleepers.append(Sleeper(
+                        id: id, deadline: offset.withLock { $0 } + duration, continuation: continuation
+                    ))
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.cancel(id) }
+        }
+    }
+
+    private func cancel(_ id: Int) {
+        guard let index = sleepers.firstIndex(where: { $0.id == id }) else { return }
+        sleepers.remove(at: index).continuation.resume(throwing: CancellationError())
     }
 }

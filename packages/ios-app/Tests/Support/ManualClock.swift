@@ -53,6 +53,24 @@ final class ManualClock: Sendable {
         for continuation in continuations { continuation.resume() }
     }
 
+    /// Advances exactly to the earliest registered deadline and wakes every
+    /// sleeper due by then, returning the distance advanced (`nil` when nothing
+    /// sleeps). Simulated time never skips a registered timer, so walking long
+    /// backoff curves costs one step per timer instead of one per tick.
+    @discardableResult
+    func advanceToNextDeadline() -> Duration? {
+        let (advanced, continuations) = state.withLock { state -> (Duration?, [CheckedContinuation<Void, Error>]) in
+            guard let deadline = state.sleepers.values.map(\.deadline).min() else { return (nil, []) }
+            let advanced = state.now.duration(to: deadline)
+            state.now = deadline
+            let ready = state.sleepers.filter { $0.value.deadline <= deadline }
+            for token in ready.keys { state.sleepers.removeValue(forKey: token) }
+            return (advanced, ready.values.map(\.continuation))
+        }
+        for continuation in continuations { continuation.resume() }
+        return advanced
+    }
+
     /// Receipt-owner tests model an unanswered application request on a live
     /// socket. Advance only after transmission and the request/liveness timers
     /// are registered; a real send failure instead requires a new connection.

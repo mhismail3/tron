@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Presentation-only token admission for text that is already authoritative in
 /// the installed transcript. It deliberately keeps every token in layout and
@@ -143,6 +144,20 @@ enum ChatThinkingTraceLayoutPolicy {
 private final class ChatStreamingTextRevealSchedule {
     var clock: Double?
     private var arrivals: [String: Double] = [:]
+    /// The instant the policy's millisecond times count from; it lives and
+    /// resets with them.
+    private var origin: ContinuousClock.Instant?
+
+    func milliseconds(at instant: ContinuousClock.Instant) -> Double {
+        let origin = self.origin ?? instant
+        self.origin = origin
+        let elapsed = origin.duration(to: instant).components
+        return Double(elapsed.seconds) * 1_000 + Double(elapsed.attoseconds) / 1e15
+    }
+
+    func instant(atMilliseconds milliseconds: Double) -> ContinuousClock.Instant? {
+        origin.map { $0 + .milliseconds(milliseconds) }
+    }
 
     /// Arrival times of `pending` in order; a word seen for the first time
     /// arrives at `now`.
@@ -166,6 +181,7 @@ private final class ChatStreamingTextRevealSchedule {
 
     func reset() {
         clock = nil
+        origin = nil
         if !arrivals.isEmpty { arrivals.removeAll() }
     }
 }
@@ -307,6 +323,13 @@ private final class ChatStreamingTextSettlement {
     }
 }
 
+extension EnvironmentValues {
+    /// The monotonic clock that paces word starts and fades. Production uses
+    /// the continuous clock; `StreamingTextRevealContinuityTests` drives a
+    /// manual clock so each rendered sample lands at an exact reveal time.
+    @Entry var chatStreamingRevealClock: MonotonicClock = .continuous
+}
+
 /// Reveals newly admitted words without changing the authoritative text,
 /// markdown structure, row identity, or measured layout. The view is intended
 /// for an already-mounted streaming message/thinking run; it is not a fake
@@ -319,8 +342,9 @@ struct ChatStreamingInlineText: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.chatStreamingRevealClock) private var revealClock
     @State private var revealedIDs: Set<String> = []
-    @State private var revealStarts: [String: Date] = [:]
+    @State private var revealStarts: [String: ContinuousClock.Instant] = [:]
     @State private var animationTick = 0
     @State private var hasAdmittedInitialContent = false
     @State private var tokenCache = ChatStreamingTextTokenCache()
@@ -378,7 +402,7 @@ struct ChatStreamingInlineText: View {
             ? (text: AttributedString(), count: 0)
             : tokenCache.resolvedRevealedPrefix(revealedIDs: revealed)
         var result = prefix.text
-        let now = Date.now
+        let now = revealClock.now()
         for token in tokens[prefix.count...] {
             var value = token.value
             guard token.isWord else {
@@ -396,11 +420,12 @@ struct ChatStreamingInlineText: View {
         return Text(result)
     }
 
-    private func tokenOpacity(_ id: String, revealed: Set<String>, now: Date) -> Double {
+    private func tokenOpacity(_ id: String, revealed: Set<String>, now: ContinuousClock.Instant) -> Double {
         if revealed.contains(id) { return 1 }
         guard let started = revealStarts[id] else { return 0 }
+        let elapsed = started.duration(to: now).components
         return ChatStreamingTextRevealPolicy.opacity(
-            elapsedMilliseconds: max(0, Int(now.timeIntervalSince(started) * 1_000))
+            elapsedMilliseconds: max(0, Int(elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000))
         )
     }
 
@@ -461,8 +486,8 @@ struct ChatStreamingInlineText: View {
         // Every stream frame restarts this task. Pacing lives in `schedule`
         // and the pure policy, so the restart itself changes nothing.
         while !Task.isCancelled {
-            let now = Date.now
-            let nowMilliseconds = now.timeIntervalSinceReferenceDate * 1_000
+            let now = revealClock.now()
+            let nowMilliseconds = schedule.milliseconds(at: now)
             let pending = tokens.filter {
                 $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil
             }
@@ -481,12 +506,12 @@ struct ChatStreamingInlineText: View {
             }
             schedule.clock = admission.clock
             for (token, start) in zip(pending, admission.startTimes) {
-                revealStarts[token.id] = Date(timeIntervalSinceReferenceDate: start / 1_000)
+                revealStarts[token.id] = schedule.instant(atMilliseconds: start) ?? now
                 schedule.started(token.id)
             }
 
             let completedIDs = revealStarts.compactMap { id, started in
-                now.timeIntervalSince(started) * 1_000 >= Double(ChatStreamingTextRevealPolicy.fadeMilliseconds)
+                started.duration(to: now) >= .milliseconds(ChatStreamingTextRevealPolicy.fadeMilliseconds)
                     ? id
                     : nil
             }
@@ -497,7 +522,7 @@ struct ChatStreamingInlineText: View {
             animationTick &+= 1
 
             guard admission.nextStart != nil || !revealStarts.isEmpty else { return }
-            try? await Task.sleep(for: .milliseconds(ChatStreamingTextRevealPolicy.tickMilliseconds(
+            try? await revealClock.sleep(.milliseconds(ChatStreamingTextRevealPolicy.tickMilliseconds(
                 now: nowMilliseconds,
                 nextStart: admission.nextStart
             )))

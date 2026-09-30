@@ -4475,6 +4475,9 @@ struct ChatViewScrollHarnessTests {
                 print("Geometry comparison: native=\(String(describing: harness.recorder.samples.last?.nativeContentHeight)) model=\(harness.probeObservation.geometry)")
                 print("Composer catalog: builds=\(harness.probe.composerCatalogBuildCount) installed=\(harness.probe.composerCatalogCommandNames) canonical=\(harness.canonicalCommandNames) activity=\(harness.chatSurfaceActivity)")
             }
+            if let stall = harness.openingTailStallDescription() {
+                Issue.record(Comment(rawValue: stall))
+            }
             await harness.close()
             throw error
         }
@@ -5566,6 +5569,35 @@ final class ChatViewScrollHarness {
     }
 
     var traceRecords: [GatewayProfileLogRecord] { model.chatInteractionTrace.diagnosticRecords(limit: 256) }
+
+    /// Names the opening stall #130 tracks, from the chat trace: an
+    /// opening-tail command applied and positioning never ended, with no
+    /// scroll activity traced after the application. The coordinator then
+    /// re-arms its acknowledgement window (`defaultOpeningTailTimeout`) without
+    /// fresh evidence until the opening's own deadline, so a waiting test sees
+    /// only its watchdog. `nil` for any other trace.
+    func openingTailStallDescription(at now: Date = .now) -> String? {
+        let records = traceRecords.map(\.record) // newest first
+        guard let appliedIndex = records.firstIndex(where: {
+            $0.event == "chat.command.applied" && $0.message.contains("destination=opening-tail")
+        }) else { return nil }
+        // Only availability and the failing test's own teardown may follow it.
+        let later = records[..<appliedIndex].filter { $0.event != "chat.composer.availability" }
+        guard later.allSatisfy({ record in
+            record.event == "chat.context.end" || record.event == "chat.opening.retired"
+                || (record.event == "chat.opening.positioning-ended" && record.message.contains("positioned=0"))
+        }) else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let appliedAt = formatter.date(from: records[appliedIndex].timestamp) else { return nil }
+        let window = ChatScrollCoordinator.defaultOpeningTailTimeout
+        let stalled = Duration.seconds(now.timeIntervalSince(appliedAt))
+        return "Opening stalled (#130): its opening-tail command applied "
+            + String(format: "%.1f s", now.timeIntervalSince(appliedAt))
+            + " ago and positioning never ended; with no positioning evidence traced since, its \(window) "
+            + "acknowledgement re-armed about \(Int(stalled / window)) times without a repair. "
+            + "Applied: \(records[appliedIndex].message)"
+    }
     var screenScale: CGFloat { window.screen.scale }
 
     var canonicalCommandNames: [String] { model.commands.map(\.name) }

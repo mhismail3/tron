@@ -664,6 +664,11 @@ struct DashboardStateOwnerTests {
         }
     }
 
+    /// Failure mode: the pool stops retrying an unreachable profile after a
+    /// fixed attempt allowance, so the twelfth attempt never arrives. The walk
+    /// crosses about half an hour of escalated backoff, so it jumps the manual
+    /// clock from one registered timer to the next: a step per 1-second tick
+    /// cost a real millisecond each and outran the watchdog on a slow runner.
     @MainActor
     @Test("a dashboard connection retries transient failures past the removed attempt allowance")
     func secondaryReconnectHasNoAttemptBudget() async throws {
@@ -690,8 +695,8 @@ struct DashboardStateOwnerTests {
             // pool's five-minute cap, and the twelfth still connects. No attempt
             // allowance stops the retries.
             for attempt in 1...12 {
-                _ = try await Self.secondsUntilRequest(
-                    attempt, clock: clock, factory: factory, limit: 320
+                try await Self.advanceTimersUntilRequest(
+                    attempt, clock: clock, factory: factory, limit: .seconds(320)
                 )
             }
             try await sockets[11].waitUntilSent(count: 2)
@@ -1679,6 +1684,32 @@ struct DashboardStateOwnerTests {
             try await Task.sleep(for: .milliseconds(1))
         }
         return elapsed
+    }
+
+    /// Wakes the pool's registered timers in deadline order until the factory
+    /// has served `target` connections. Each step waits for a timer to be
+    /// registered, so it costs no wall-clock time; `limit` bounds the simulated
+    /// wait, and a pool that stops retrying registers no timer and never
+    /// reaches `target`.
+    @MainActor
+    private static func advanceTimersUntilRequest(
+        _ target: Int,
+        clock: ManualClock,
+        factory: ScriptedGatewaySocketFactory,
+        limit: Duration
+    ) async throws {
+        var elapsed: Duration = .zero
+        while factory.requests.count < target {
+            try await clock.waitUntilSleeping(count: 1)
+            guard factory.requests.count < target else { return }
+            elapsed += clock.advanceToNextDeadline() ?? .zero
+            guard elapsed <= limit else {
+                throw GatewayFailure(
+                    code: "timeout", message: "attempt \(target) never arrived within \(limit) of simulated time",
+                    retryable: true, details: nil
+                )
+            }
+        }
     }
 
     private static func makeAppLog() -> (AppLog, () -> Void) {
