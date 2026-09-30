@@ -83,17 +83,7 @@ struct HostedChatDisplayFixture: View {
                     return target.generation
                 }
                 ready = true
-                if ProcessInfo.processInfo.arguments.contains("-fixture-accessories") {
-                    for _ in 0..<120 where !probe.observation.isReady {
-                        try await DisplayFrameScheduler.displayLink.nextFrame()
-                    }
-                    guard let target = model.mountedPresentationTarget,
-                          let scope = model.composerDrafts.scope(for: target) else { throw CancellationError() }
-                    model.composerDrafts.selectResource(CommandInfo(name: "skill:layout", description: "Layout fixture",
-                        argumentHint: nil, source: .skill, sourcePath: "/fixture/skills/layout"), for: scope)
-                    model.composerDrafts.installHostedAttachment(PendingAttachment(id: "layout-photo", name: "Photo",
-                        mimeType: "image/png", size: 1, previewData: nil), target: target)
-                }
+
             } catch { self.error = String(describing: error) }
         }
     }

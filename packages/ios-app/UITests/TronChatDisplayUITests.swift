@@ -3,11 +3,10 @@ import UIKit
 
 @MainActor
 final class TronChatDisplayUITests: XCTestCase {
-    private func launch(_ orientation: String, accessories: Bool = false) -> XCUIApplication {
+    private func launch(_ orientation: String) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-chat-display-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        if accessories { app.launchArguments.append("-fixture-accessories") }
         app.launchEnvironment["TRON_CHAT_TRANSCRIPT_ORIENTATION"] = orientation
         app.launch()
         XCTAssertTrue(app.buttons["Open Orientation Image photo preview"].waitForExistence(timeout: 15), app.debugDescription)
