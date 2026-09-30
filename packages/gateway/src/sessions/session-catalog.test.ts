@@ -1125,10 +1125,12 @@ describe("SessionCatalog", () => {
     expect([...reads.values()]).toEqual(Array.from({ length: pathCount }, () => 1));
   });
 
-  it("coalesces unique watcher paths beyond the pending bound into a catalog reconcile", async () => {
+  it("bounds overflow watcher events to one reconcile and the unnamed-event debounce", async () => {
     const watch = manualWatch();
+    const outcomes: SessionCatalogReconcileOutcome[] = [];
     const { sessions, catalog, source } = await fixture({
       watchCatalog: watch.backend, reconcileIntervalMs: 0,
+      onReconciled: (outcome) => outcomes.push(outcome),
     });
     catalog.start();
     await catalog.settled();
@@ -1140,7 +1142,17 @@ describe("SessionCatalog", () => {
 
     await waitFor(() => catalog.rows().length === pathCount, 30_000);
     await catalog.settled();
-    expect(walks).toHaveBeenCalled();
+    // Keep the watcher busy after the overflow pass has completed. An event storm
+    // used to schedule another full scan for every event while a scan was active.
+    const end = Date.now() + 500;
+    while (Date.now() < end) {
+      watch.emit(relative(sessions, "workspace/live.jsonl"));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    // At most one unnamed-event pass may follow the overflow pass during this
+    // window; the old dirty loop scanned once per arriving event.
+    expect(walks.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(outcomes.filter(({ trigger }) => trigger === "watcher-overflow")).toHaveLength(1);
     expect(catalog.duplicateSessionIds().size).toBe(0);
   });
 

@@ -107,6 +107,9 @@ export interface SessionCatalogReconcileOutcome {
    * already published, if any, so a file left out is visible here. */
   unproven: number;
   durationMs: number;
+  /** Why this whole-folder cut ran, when it was not a scheduled or ordinary
+   * watcher backstop. */
+  trigger?: "watcher-overflow";
 }
 
 /** One canonical session file. `CatalogMetadataIndexRow` owns everything read
@@ -314,7 +317,6 @@ export class SessionCatalog {
    * arriving still reaches one whole-folder pass. */
   private unnamedEventWindowStartedAt: number | undefined;
   private watcherOverflowReconcilePending = false;
-  private watcherOverflowReconcileDirty = false;
   private watchRetryTimer: NodeJS.Timeout | undefined;
   private watchOutageClearTimer: NodeJS.Timeout | undefined;
   /** One record per outage rather than per retry: while the watcher is down,
@@ -591,13 +593,10 @@ export class SessionCatalog {
     if (this.closed) return;
     const root = this.watchedRoot;
     if (root === undefined) return;
-    if (this.watcherOverflowReconcilePending) {
-      this.watcherOverflowReconcileDirty = true;
-      return;
-    }
     if (filename === null) return this.debounceUnnamedEvent();
     const path = resolve(root, filename);
     if (ignoredCatalogPath(path, root)) return;
+    if (this.watcherOverflowReconcilePending) return this.debounceUnnamedEvent();
     if (path.endsWith(".jsonl")) return this.debounceEvent(path);
     void this.resolveFolderEvent(path, root);
   }
@@ -724,13 +723,11 @@ export class SessionCatalog {
   }
 
   /** A storm of distinct names is not a useful per-file queue. Drop its hints
-   * and reconcile the canonical cut, repeating only if more events arrive while
-   * that cut is in flight. This keeps both timer maps bounded without losing
-   * changes that race the reconcile. */
+   * and reconcile once; events during the pass use the bounded unnamed-event
+   * debounce rather than immediately starting another full-folder pass. */
   private reconcileWatcherOverflow(): void {
     if (this.watcherOverflowReconcilePending || this.closed) return;
     this.watcherOverflowReconcilePending = true;
-    this.watcherOverflowReconcileDirty = false;
     for (const timer of this.eventTimers.values()) clearTimeout(timer);
     this.eventTimers.clear();
     this.eventWindowStartedAt.clear();
@@ -739,13 +736,7 @@ export class SessionCatalog {
       this.unnamedEventTimer = undefined;
       this.unnamedEventWindowStartedAt = undefined;
     }
-    void (async () => {
-      do {
-        this.watcherOverflowReconcileDirty = false;
-        await this.reconcile();
-      } while (!this.closed && this.watcherOverflowReconcileDirty);
-      this.watcherOverflowReconcilePending = false;
-    })().catch(() => {
+    void this.enqueue(() => this.reconcileIndex("watcher-overflow")).finally(() => {
       this.watcherOverflowReconcilePending = false;
     });
   }
@@ -906,7 +897,7 @@ export class SessionCatalog {
     }
   }
 
-  private async reconcileIndex(): Promise<void> {
+  private async reconcileIndex(trigger?: SessionCatalogReconcileOutcome["trigger"]): Promise<void> {
     if (this.closed) return;
     const startedAt = this.now();
     // This pass's read epoch, captured before its first read. Every later
@@ -924,6 +915,7 @@ export class SessionCatalog {
         modified: diff?.modified ?? 0,
         unproven,
         durationMs: this.now() - startedAt,
+        ...(trigger ? { trigger } : {}),
       });
     };
     let scan: SessionCatalogScan;
@@ -1201,13 +1193,10 @@ export class SessionCatalog {
     return true;
   }
 
-  /** Rows are keyed by the walk's realpath form. A caller may hold the same file
-   * as an equivalent but differently spelled path (a symlinked temp root), so a
-   * miss falls back to the exact file the row names. */
+  /** Rows and callers are keyed by their resolved path form, so lookup stays
+   * proportional to one map access rather than scanning the catalog on a miss. */
   private indexed(canonicalPath: string): SessionCatalogRow | undefined {
-    const direct = this.rowsByPath.get(canonicalPath);
-    if (direct) return direct;
-    return [...this.rowsByPath.values()].find((row) => resolve(row.path) === canonicalPath);
+    return this.rowsByPath.get(resolve(canonicalPath));
   }
 
   /** One change is owed a write. The write waits for a quiet spell, capped so a
