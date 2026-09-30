@@ -441,9 +441,9 @@ scripts/tron-profile compare BASE_RUN_DIR CANDIDATE_RUN_DIR
 ```
 
 It shares the whole simulator lifecycle with `scripts/tron-ios-test`: the same
-lane (state directory `TRON_IOS_TEST_STATE_DIR`, device
-`TRON_IOS_TEST_DEVICE_NAME`, inside the lane root
-`TRON_IOS_TEST_DISCOVERY_ROOT`), the same lease and release - the lane's
+lane, chosen by the same selection (`--lane NAME` or `TRON_IOS_TEST_LANE`, else
+this checkout's own lane - see [Simulator lifecycle](#simulator-lifecycle)),
+the same lease and release - the lane's
 simulator is shut down when the run ends, on success, failure, deadline or
 signal - the same sweep before it provisions a boot, and the same memory
 admission, so a run the Mac cannot afford fails with the runner's 73 and the
@@ -1144,17 +1144,27 @@ lease or release each other's simulator. `--lane NAME` (or `TRON_IOS_TEST_LANE`)
 names a lane: the state directory `<lane root>/ios-test-NAME` beside the default
 lane's `<lane root>/ios-test`, and the device `Tron iOS Tests (NAME)`. The lane
 root is `$HOME/.tron/internal`, overridable with
-`TRON_IOS_TEST_DISCOVERY_ROOT`. The lane the command was given is carried into
+`TRON_IOS_TEST_DISCOVERY_ROOT`. With no lane selected, the primary checkout
+uses the default lane and a linked worktree uses its own lane, named by its
+worktree key (`scripts/ios-test-build-identity.py worktree-key`, the name of its
+test products and Gateway E2E fixture too), so agents in parallel worktrees test
+concurrently without naming a lane; `--lane default` selects the default lane
+from any worktree. The selection has one owner, `scripts/ios-test-simulator.py
+lane`, which the runner, `scripts/tron-profile ios` and
+`scripts/ios-gateway-e2e-test` all ask, so one worktree and one selection name
+one lane in all three; each takes `--lane NAME`. Memory admission and idle-lane
+expiry below bound how many worktree lanes exist. The lane the command was given is carried into
 the command the lease holder starts, so the whole command - lease, marker,
 device and release - stays in that one lane; a process that inherits a lease
 (`TRON_IOS_TEST_LOCK_HELD`) while naming a lane that lease does not cover is
 refused (74) rather than run on a lane it does not hold. A named lane refuses
 `TRON_IOS_TEST_STATE_DIR`
 and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
-those two overrides keep naming the default lane until SIM-10 of
+those two overrides name - and, when set without a lane, select - the default
+lane until SIM-10 of
 [the simulator lifecycle plan](../../../docs/plans/2026-09-27-simulator-lifecycle.md)
-removes them, and they are what CI (`scripts/ios-ci-test.sh`) and the profiler
-still use. Lanes do not serialize against each other: each lane owns its own
+removes them, and they are what CI (`scripts/ios-ci-test.sh`) and the
+energy-efficiency profiling lanes still set. Lanes do not serialize against each other: each lane owns its own
 lease and simulator, so worktrees test in parallel until the Mac's memory runs
 out. Two lanes of one worktree do share that worktree's single products
 directory, so run one lane per worktree while building.
@@ -1212,7 +1222,7 @@ device's own boot process, so it is real elapsed time rather than a remembered
 timestamp, and a simulator a lane owns is never also listed as unowned.
 
 `scripts/tron-profile-ios` and `scripts/ios-gateway-e2e-test` do not keep a
-lifecycle of their own: both lease the lane their state directory names, run the
+lifecycle of their own: both lease the lane the shared selection names, run the
 same sweep before provisioning, release the simulator their command booted when
 it ends, and keep the admission refusal (73) instead of reporting it as a broken
 destination. The Gateway fixture and fault proxy that harness leaves running are
@@ -1985,15 +1995,15 @@ belong to one worktree: by default they are
 products (`TRON_IOS_E2E_STATE_DIR` and `TRON_IOS_E2E_DERIVED_DATA` override
 them). So `status`, `logs`, `stop` and `clean` see and remove only this
 worktree's Gateway, state, npm lock hash and products (`clean` also deletes the
-simulator of the lane it holds, which is shared by default, as
-`scripts/tron-ios-test clean` does); run `clean` in a worktree before deleting
+simulator of the lane it holds - this worktree's own lane unless one is
+selected - as `scripts/tron-ios-test clean` does); run `clean` in a worktree before deleting
 it, because no sweep reclaims these directories. `build` stamps
 the products with this worktree's source identity, and `run` refuses — before it
 renews the Gateway fixture — products that carry no identity or were built from
 another worktree or another source state; `build` (or `iterate`) again after an
-edit. Its simulator lane is the shared test lane
-(`TRON_IOS_TEST_STATE_DIR` inside `TRON_IOS_TEST_DISCOVERY_ROOT`, device
-`TRON_IOS_TEST_DEVICE_NAME`): every mutating command sweeps orphaned lanes
+edit. Its simulator lane is the one `scripts/tron-ios-test` would use for this
+worktree and selection (`--lane NAME` or `TRON_IOS_TEST_LANE`, else this
+checkout's own lane), and `status` names it: every mutating command sweeps orphaned lanes
 before it provisions, and the lane's simulator is released when the command
 ends, exactly as `scripts/tron-ios-test` does; a boot the Mac cannot afford is
 refused with 73 and the `status --all` table. On CI, focused result/log evidence

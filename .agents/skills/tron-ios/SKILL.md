@@ -112,9 +112,12 @@ reclaim simulators yourself.
 - A lane is one state directory and one device name: `--lane NAME` (or
   `TRON_IOS_TEST_LANE`) uses `$HOME/.tron/internal/ios-test-NAME` and the device
   `Tron iOS Tests (NAME)`, while the default lane keeps
-  `$HOME/.tron/internal/ios-test` and `Tron iOS Tests`. Lanes do not serialize
-  against each other; lanes of one worktree share its single products directory,
-  so build in one lane per worktree at a time.
+  `$HOME/.tron/internal/ios-test` and `Tron iOS Tests`. With no lane selected, a
+  linked worktree runs in its own lane, named by its worktree key, and the
+  primary checkout in the default lane, so parallel worktrees need no `--lane`;
+  the runner, the profiler and the Gateway E2E harness take the same selection.
+  Lanes do not serialize against each other; lanes of one worktree share its
+  single products directory, so build in one lane per worktree at a time.
 - Every command that provisions a lane's simulator releases it when the command
   ends - success, failure, timeout, SIGINT, SIGTERM or SIGHUP - unless
   `--keep-booted` asks to reuse it for a tight test-fix loop. A signal reaches

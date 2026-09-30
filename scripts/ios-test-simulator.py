@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Own the repository's iOS test resources: simulators, lanes, runs and products.
 
-Provisioning, releasing and sweeping own the simulators a test command uses;
+`lane` selects the one lane a command of any iOS test tool uses;
+provisioning, releasing and sweeping own the simulators a test command uses;
 memory admission refuses a boot the Mac cannot afford before it happens; the
 `simulators` view reports everything that holds memory; and pruning reclaims the
 runs and products finished commands leave behind.
