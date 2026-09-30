@@ -1417,7 +1417,7 @@ export class GatewayService {
           }, resolveAdmission);
           void execution.then(resolveAdmission, rejectAdmission);
           return safeJson(await admission);
-        }).finally(releaseSession);
+        }, false, true).finally(releaseSession);
       }
       case "session.abort":
         return this.mutation(client, method, params, async () => {
@@ -2140,6 +2140,7 @@ export class GatewayService {
     params: Record<string, unknown>,
     operation: (workToken?: string) => Promise<JsonValue>,
     settlementDuringDrain = false,
+    respondBeforeReceiptCompletion = false,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
     // The entry spans the whole receipt-backed operation (a compaction or a
@@ -2156,6 +2157,7 @@ export class GatewayService {
           ? this.workRegistry.beginDerived(admission)
           : this.workRegistry.begin(admission))
       : undefined;
+    let completionOwnsWork = false;
     try {
       const knowledgeMutation = method.startsWith("knowledge.");
       const prior = knowledgeMutation
@@ -2173,10 +2175,30 @@ export class GatewayService {
         knowledgeMutation
           ? async () => this.knowledgeReceiptSafe(await offLoop(operation))
           : () => offLoop(() => operation(work?.token)),
+        respondBeforeReceiptCompletion ? {
+          respondBeforeCompletion: true,
+          onCompletion: completion => {
+            if (!work) return;
+            completionOwnsWork = true;
+            void completion.then(() => work.settle());
+          },
+          onCompletionError: () => {
+            this.dependencies.logger?.log(
+              "warning",
+              "Accepted prompt completed receipt could not be persisted",
+              {
+                event: "receipt.completed-persist-failed",
+                source: "transport",
+                method,
+                ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+              },
+            );
+          },
+        } : undefined,
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
     } finally {
-      work?.settle();
+      if (!completionOwnsWork) work?.settle();
     }
   }
 

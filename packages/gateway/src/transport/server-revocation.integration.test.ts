@@ -56,6 +56,7 @@ async function fixture() {
     http.forEach((outgoing) => outgoing.destroy());
     // RPC rejection is observed by GatewayServer; it is not a disposal error.
     await Promise.allSettled([...pending]);
+    await registry?.administrativeWorkRegistry.waitUntilSettled();
     try {
       await server?.close();
     } finally {
@@ -104,9 +105,10 @@ async function fixture() {
     attach: () => ({ terminal, chunks: [], reset: false }),
     belongsToSession: (id: string, sessionId: string) => terminal?.id === id && terminal.sessionId === sessionId,
   };
+  const logs: Array<{ level: string; message: string; fields?: Record<string, unknown> }> = [];
   const service = new GatewayService({
     config: { tronHome: root }, devices, sessions: registry, receipts, uploads, terminals,
-    logger: { log: () => {} }, iosDeviceInstallService: install,
+    logger: { log: (level: string, message: string, fields?: Record<string, unknown>) => logs.push({ level, message, fields }) }, iosDeviceInstallService: install,
   } as never);
   const invoke = service.invoke.bind(service);
   vi.spyOn(service, "invoke").mockImplementation((...args) => {
@@ -148,7 +150,7 @@ async function fixture() {
     };
   };
   const hold = () => { const value = gate(); releases.push(value.release); return value; };
-  return { root, cwd, registry, devices, paired, pair, receipts, uploads, install, terminals, service, server, port, connect, hold, sockets, http, pending, faux };
+  return { root, cwd, registry, devices, paired, pair, receipts, uploads, install, terminals, service, server, port, connect, hold, sockets, http, pending, faux, logs };
 }
 
 describe("device revocation at real ownership boundaries", () => {
@@ -282,9 +284,9 @@ describe("device revocation at real ownership boundaries", () => {
     expect(slot.isDisposed).toBe(false);
     expect(slot.isEvictionProtected).toBe(true);
     resume.release();
-    // Observe service settlement before reading durable evidence. A status
-    // read racing initial receipt creation can conservatively report unknown.
-    await until(() => f.pending.size === 0);
+    // The response now precedes completed-receipt fsync; wait for the owning
+    // Gateway work registry before reading durable evidence or cleaning up.
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
     expect(await f.receipts.status(f.paired.deviceId, "session.prompt", "revocation-prompt-command")).toMatchObject({ status: "completed" });
     await until(() => !slot.isBusy);
     expect(peer.frames.some((frame) => frame.id === "prompt")).toBe(false);
@@ -296,6 +298,40 @@ describe("device revocation at real ownership boundaries", () => {
     const messages = slot.snapshot().transcript.filter((item) => item.kind === "message");
     expect(messages.filter((item) => item.role === "user")).toHaveLength(1);
     expect(messages.filter((item) => item.role === "assistant")).toHaveLength(1);
+  });
+
+  it("settles accepted prompt work after a failed detached receipt write", async () => {
+    const f = await fixture();
+    const slot = await f.registry.create(f.cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const peer = await f.connect();
+    peer.send("open", "session.open", { sessionId: slot.id });
+    const opened = await peer.response("open");
+    peer.send("sync", "session.sync", { sessionId: slot.id, syncToken: opened.result.syncToken });
+    await peer.response("sync");
+    type ReceiptStoreInternals = {
+      writeReceipt(path: string, value: unknown, mode?: number): Promise<void>;
+    };
+    const receiptStore = f.receipts as unknown as ReceiptStoreInternals;
+    const writeReceipt = receiptStore.writeReceipt.bind(f.receipts);
+    let writes = 0;
+    vi.spyOn(receiptStore, "writeReceipt").mockImplementation(async (path, value, mode) => {
+      writes += 1;
+      if (writes === 2) throw new Error("fixture completed-receipt failure");
+      return writeReceipt(path, value, mode);
+    });
+    peer.send("prompt", "session.prompt", { sessionId: slot.id, text: "accepted once", commandId: "failed-receipt-command" });
+    expect(await peer.response("prompt")).toMatchObject({ ok: true });
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    expect(f.registry.administrativeWorkRegistry.facts()).toEqual([]);
+    expect(f.logs).toContainEqual(expect.objectContaining({
+      level: "warning",
+      fields: expect.objectContaining({ event: "receipt.completed-persist-failed", sessionId: slot.id }),
+    }));
+    await expect(new CommandReceiptStore(f.root).execute(f.paired.deviceId, "session.prompt", "failed-receipt-command", async () => ({}), {
+      respondBeforeCompletion: true,
+    })).rejects.toMatchObject({ details: { outcomeUnknown: true } });
   });
 
   it.each(["receipt", "acquisition"] as const)("preserves terminal creation without attaching a revoked observer during %s", async (stage) => {

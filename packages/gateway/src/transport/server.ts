@@ -59,6 +59,8 @@ function rpcFailureLevel(error: unknown): "warning" | "error" {
 
 /** Per-RPC completions under this bound are debug detail; slower ones warn. */
 const SLOW_RPC_WARNING_MS = 1_000;
+// Prompt acknowledgement has a 250 ms qualification target; warn at that boundary to retain actionable latency evidence.
+const SLOW_PROMPT_WARNING_MS = 250;
 /**
  * The only methods a `cancel` frame may end (`C-6`). A disposable read computes
  * an answer nothing consumes once its client stops waiting for it; an accepted
@@ -3005,8 +3007,9 @@ export class GatewayServer {
       );
       return;
     }
+    const slowWarningMs = request.method === "session.prompt" ? SLOW_PROMPT_WARNING_MS : SLOW_RPC_WARNING_MS;
     this.options.logger.log(
-      request.outcome !== "success" || durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
+      request.outcome !== "success" || durationMs >= slowWarningMs ? "warning" : "debug",
       `RPC ${request.method} for client ${connection.id} completed in ${durationMs}ms (${request.outcome})`,
       {
         event: "rpc.completed", source: "transport", method: request.method,

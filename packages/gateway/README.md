@@ -1109,7 +1109,16 @@ joined retry's does; that barrier stays for the client to synchronize.
 Mutations require `params.commandId`; receipts deduplicate completed commands.
 After an uncertain disconnect, clients reconnect and poll `command.status`, reuse
 a completed result, retry only a confirmed-missing command with the same ID, and
-never blindly replay a pending command. A mutation whose owner reports an unknown
+never blindly replay a pending command. `session.prompt` is the one exception to
+waiting for the completed receipt before replying: it keeps the pending receipt
+durable before Pi admission, responds as soon as that admission resolves, and
+finishes the completed receipt write while retaining the command lane and its
+Gateway drain owner. Same-command duplicates join that lane and receive the
+stored result. Process loss or a failed completion write in this response window
+leaves the pending receipt as an outcome-unknown replay fence; prompts are never
+re-run automatically. Every other receipt-backed method still persists its
+completed receipt before responding because its acknowledgement boundary has
+not been approved to move. A mutation whose owner reports an unknown
 outcome keeps its pending receipt even though the operation threw, so the
 identical command ID cannot execute twice. Refresh authoritative state before
 making a new decision; a new command ID is not proof that replay is safe.
@@ -1827,7 +1836,11 @@ awaits. The idempotent lease is released on success or rejection; existing
 automation leases share that slot-retention authority. Retention does not recreate
 an observer or a missing runtime. Completed receipt results remain available on
 ordinary reconnect without requiring a new session subscription or replaying the
-operation.
+operation. A foreground prompt starts its durable run-marker write before returning
+its admission, but does not wait for the fsync; the exact marker owner remains in
+the drain set and the write is observed for retry/blocking diagnostics. Settlement
+and marker clear still await that owner, so a failed marker cannot be mistaken for
+a settled or replayable run.
 
 Interactive cold opening has one remaining dependency boundary: pinned `@earendil-works/pi-coding-agent` `SessionManager.open()` synchronously parses and retains the complete JSONL before runtime construction. Gateway deliberately does not bypass that owner with a transcript mirror, private-field hydration, or a `node_modules` patch. History-length-independent opening requires an upstream public SDK seam that opens asynchronously through one validated descriptor, restores the current leaf and active context from a compaction checkpoint plus indexed suffix, exposes seekable canonical transcript/tree reads, and invalidates disposable offsets on inode/size/mtime/boundary disagreement while preserving the existing canonical append/migration semantics. Until that seam ships in a pinned dependency, listener/catalog readiness is bounded as documented above, but a first cold open can still scale with the selected file's complete history.
 
