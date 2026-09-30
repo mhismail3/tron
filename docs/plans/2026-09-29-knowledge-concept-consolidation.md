@@ -81,7 +81,13 @@ only on the user's word) apply to every task.
 | C14 | Needs scoping | Supersession stored once; forget scrubs it | C2 | — |
 | C15 | Ready | Naming and dead code: Saved/Pending/scope labels, duplicate digest, double save-time source, dead iOS predicates | C1–C14 | — |
 | C16 | Needs scoping | Audit live Knowledge data for sources left pending by historical connector sweeps and determine safe intake recovery | C4, user Gateway access | — |
-| C17 | Needs scoping | X intake: capture and decide discovered X bookmarks under the same rules as Raindrop intake (decided entries untouched, one Jev budget) | C3, C4, C5 | — |
+| C17 | Needs scoping | Superseded by C18–C23 (user decision 2026-09-29): X gets connector primitives and the ingestion routine, not its own intake pipeline | C3, C4, C5 | — |
+| C18 | Claimed | Decision authority in the store: connector/system writes never override a user or agent admission or scope | none | knowledge-consolidation session, 2026-09-29 |
+| C19 | Claimed | Ingest primitive: save one queued provider item with identity, save date, note, collection and payload, undecided and idempotent | C18 | knowledge-consolidation session, 2026-09-29 |
+| C20 | Claimed | Connector primitives as agent actions: discover, read queue, acknowledge/skip, Raindrop move under write permission | C19 | knowledge-consolidation session, 2026-09-29 |
+| C21 | Claimed | Assessment primitive: assess a source with Jev (one budget) or the Knowledge model; returns a recommendation, decides nothing | C18 | knowledge-consolidation session, 2026-09-29 |
+| C22 | Claimed | Ingestion routine as an editable agent skill, plus owning docs | C19, C20, C21 | knowledge-consolidation session, 2026-09-29 |
+| C23 | Blocked | Dry-run parity with Raindrop intake on live data, then delete the intake pipeline and its batch machinery | C22, user Gateway update | — |
 
 ## Task details
 
@@ -224,6 +230,41 @@ rather than remove the sweep. Scoping: whether X discovery keeps its own paid
 attempt budget, how X items map to research/personal, and reuse of the Raindrop
 intake decision path rather than a second one.
 
+### C18–C23 — Ingestion as primitives plus an agent routine
+
+User decision (2026-09-29): connectors are the only hardcoded part. Everything
+after "the item is in Tron" is an agent routine that agents can edit, run by a
+scheduled automation once the user approves one (K14 of
+`docs/plans/2026-09-28-knowledge-agent-curation.md`).
+
+Layers:
+
+- **Connector (hardcoded, per provider):** authenticated discovery into the
+  connector queue, a bounded queue read, acknowledge/skip, and provider writes
+  (Raindrop move) gated by the connection's write permission. No admission,
+  scope or assessment decisions.
+- **Ingest (hardcoded, provider-neutral):** one primitive saves one queued item
+  as a source with its provider identity, save date, provider note, collection
+  and provider payload, runs save-time recovery and the unsafe-link check, and
+  leaves admission pending. Idempotent by provider identity; re-ingesting never
+  changes a decided admission or scope.
+- **Assessment (hardcoded primitive):** assess a source with Jev (the single
+  monthly ledger from C5) or the Knowledge model and return a recommendation.
+  It records the assessment but never writes admission.
+- **Routine (not hardcoded):** a user skill (`tron-knowledge-ingest`, beside
+  `tron-x` and `tron-raindrop` in the Tron agent skills directory) that says
+  which collections map to which scope, when to assess, how to decide, when to
+  move in Raindrop, and how to report. Agents edit it; it is runtime
+  configuration, not repository source.
+
+Invariants stay with the Knowledge store, not the routine: connector/system
+writes never override a user or agent decision (C18); one Jev ledger; personal
+sources stay out of work retrieval; provider writes need write permission;
+every write is a revision with a receipt.
+
+Until C23, `knowledge.raindrop.intake` stays as it is so there is no gap; C23
+deletes it only after a dry-run of the routine matches it on live data.
+
 ## Handoff log
 
 ### C1, C3–C7, C11 · Claimed · 2026-09-29 · knowledge-consolidation session
@@ -322,3 +363,11 @@ intake decision path rather than a second one.
   suite 2306/2308, the two failures (`recent-model-usage.integration`,
   `session-search-stall`) pass in isolation on both this branch and `main`.
 - Changes: this commit.
+
+### C18–C22 · Claimed · 2026-09-29 · knowledge-consolidation session
+
+- Result: the user chose to replace per-provider intake pipelines with
+  connector primitives and an editable agent routine now, instead of building
+  an X intake first. C17 is superseded; C18–C23 added. One session does C18–C22
+  in order on branch `knowledge/ingestion-primitives` (they share
+  `connectors.ts`, `knowledge-store.ts` and `knowledge-service.ts`).
