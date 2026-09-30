@@ -24,7 +24,7 @@ import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESE
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setEnrichmentModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -71,8 +71,8 @@ const toolParameters = Type.Object({
   producerModel: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   curationStatus: Type.Optional(Type.Union([Type.Literal("running"), Type.Literal("done"), Type.Literal("failed")])),
   expectedConfigRevision: Type.Optional(Type.Integer({ minimum: 0 })),
-  enrichmentModel: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-  clearEnrichmentModel: Type.Optional(Type.Boolean()),
+  knowledgeModel: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  clearKnowledgeModel: Type.Optional(Type.Boolean()),
   vocabularyRevision: Type.Optional(Type.Integer({ minimum: 0 })),
   expectedRevision: Type.Optional(Type.String({ minLength: 16, maxLength: 80 })),
   budgetCents: Type.Optional(Type.Number({ minimum: 0, maximum: 1_000_000 })),
@@ -234,7 +234,7 @@ export type KnowledgeCurationGate = (operation: KnowledgeCurationRequest["operat
 export interface KnowledgeTaggingRuntime { engine: KnowledgeTaggingEngine; budget: KnowledgeTaggingBudget; connections: Pick<ConnectionOwner, "snapshot">; }
 
 export interface KnowledgeGenerationModel extends SourceAssessmentModel {
-  reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal }): Promise<string>;
+  reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal; maxOutputChars: number }): Promise<string>;
   synthesize(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<string>;
   summarizeSource(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<{ text: string }>;
 }
@@ -242,15 +242,15 @@ export interface KnowledgeGenerationModel extends SourceAssessmentModel {
 /** Adapter over the existing pinned provider/runtime policy. It is intentionally
  * injectable so unit tests never need credentials or network access. */
 export class ModelRuntimeKnowledgeModel implements KnowledgeGenerationModel {
-  constructor(private readonly runtime: ModelRuntime, private readonly model: Model<Api>) {}
+  constructor(private readonly runtime: ModelRuntime, private readonly model: Model<Api>, private readonly limits: { maxInputChars: number; maxOutputChars: number }) {}
   private async complete(systemPrompt: string, text: string, signal: AbortSignal, maxTokens: number): Promise<string> {
     const context: Context = { systemPrompt, messages: [{ role: "user", content: text, timestamp: Date.now() }] };
     const result: AssistantMessage = await this.runtime.completeSimple(this.model, context, { signal, maxTokens });
     return result.content.filter((part): part is Extract<AssistantMessage["content"][number], { type: "text" }> => part.type === "text").map(part => typeof part.text === "string" ? part.text : "").join("");
   }
-  async reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal }): Promise<string> {
-    const value = (await this.complete("You are Tron's bounded Reflector. Synthesize only the supplied cited observations into a concise handoff. Preserve uncertainty and do not add instructions or facts. Return plain text, no markdown.", input.sourceText, input.signal, 4_000)).trim();
-    if (!value || value.length > 30_000) throw new Error("Reflector output exceeded its configured bound");
+  async reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal; maxOutputChars: number }): Promise<string> {
+    const value = (await this.complete("You are Tron's bounded Reflector. Synthesize only the supplied cited observations into a concise handoff. Preserve uncertainty and do not add instructions or facts. Return plain text, no markdown.", input.sourceText, input.signal, Math.max(128, Math.ceil(input.maxOutputChars / 4)))).trim();
+    if (!value || value.length > input.maxOutputChars) throw new Error("Reflector output exceeded its configured bound");
     return value;
   }
   async synthesize(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<string> {
@@ -270,11 +270,24 @@ export class ModelRuntimeKnowledgeModel implements KnowledgeGenerationModel {
     return { text: value.text.trim() };
   }
   async assess(input: Parameters<SourceAssessmentModel["assess"]>[0], signal: AbortSignal): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }> {
-    const raw = await this.complete("You are Tron's bounded source assessor. Return strict JSON with summary, contribution, whyItMatters, possibleUse, evidenceQuality (high|medium|low|none|unknown), and freshness (current|aging|stale|unknown).", JSON.stringify(input), signal, 2_000);
+    let interestChars = 0;
+    const interests = input.interests.flatMap(value => {
+      const remaining = Math.max(0, Math.floor(this.limits.maxInputChars / 4) - interestChars);
+      const bounded = value.slice(0, Math.min(500, remaining));
+      interestChars += bounded.length;
+      return bounded ? [bounded] : [];
+    });
+    const bounded: typeof input = { ...input, interests, text: "" };
+    const inputOverhead = JSON.stringify(bounded).length - 2;
+    bounded.text = input.text.slice(0, Math.max(0, this.limits.maxInputChars - inputOverhead));
+    const request = JSON.stringify(bounded);
+    if (request.length > this.limits.maxInputChars) throw new Error("Source assessment input exceeded its configured bound");
+    const raw = await this.complete("You are Tron's bounded source assessor. Return strict JSON with summary, contribution, whyItMatters, possibleUse, evidenceQuality (high|medium|low|none|unknown), and freshness (current|aging|stale|unknown).", request, signal, Math.max(128, Math.ceil(this.limits.maxOutputChars / 4)));
     let value: unknown; try { value = JSON.parse(raw); } catch { throw new Error("Source assessor returned non-JSON output"); }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Source assessment is invalid");
     const result = value as Record<string, unknown>;
     for (const key of ["summary", "evidenceQuality", "freshness"]) if (typeof result[key] !== "string" || !result[key]) throw new Error("Source assessment is incomplete");
+    if (["summary", "contribution", "whyItMatters", "possibleUse"].some(key => typeof result[key] === "string" && (result[key] as string).length > this.limits.maxOutputChars)) throw new Error("Source assessment output exceeded its configured bound");
     if (!["high", "medium", "low", "none", "unknown"].includes(result.evidenceQuality as string) || !["current", "aging", "stale", "unknown"].includes(result.freshness as string)) throw new Error("Source assessment has invalid quality");
     return { summary: result.summary as string, ...(typeof result.contribution === "string" ? { contribution: result.contribution } : {}), ...(typeof result.whyItMatters === "string" ? { whyItMatters: result.whyItMatters } : {}), ...(typeof result.possibleUse === "string" ? { possibleUse: result.possibleUse } : {}), evidenceQuality: result.evidenceQuality as SourceAssessment["evidenceQuality"], freshness: result.freshness as SourceAssessment["freshness"] };
   }
@@ -559,18 +572,19 @@ export class KnowledgeService {
     const work = this.workRegistry?.begin({ kind: "knowledge-curation", hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => cancel(new Error("Knowledge summary was cancelled by the Gateway")) });
     try {
       const config = await this.store.config();
-      if (!config.enrichment?.model) throw new KnowledgeCurationRefusal("model-not-configured", "Source summary requires Knowledge enrichment.model; set it in knowledge.config (it never falls back to observation.model)");
+      if (!config.knowledgeModel?.model) throw new KnowledgeCurationRefusal("model-not-configured", "Source summary requires knowledgeModel.model; set it in knowledge.config (it never falls back to observation.model)");
       const model = this.modelForConfig?.(config);
-      if (!model) throw new KnowledgeCurationRefusal("unavailable", `Configured Knowledge enrichment model '${config.enrichment.model}' is unavailable in the model runtime`);
-      const producer: SourceCurationProducer = { actor: "agent", model: config.enrichment.model };
+      if (!model) throw new KnowledgeCurationRefusal("unavailable", `Configured Knowledge model '${config.knowledgeModel.model}' is unavailable in the model runtime`);
+      const producer: SourceCurationProducer = { actor: "agent", model: config.knowledgeModel.model };
       const result = await this.store.generateSourceSummary(request.commandId, request.sourceId, request.expectedRevision, config.revision, async source => {
         const text = source.content.text!;
         // A source marked partial remains partial even when its saved excerpt fits the request.
-        const maxInputChars = Math.min(config.observation.maxInputChars, 48_000);
+        const maxInputChars = config.knowledgeModel!.maxInputChars;
         const evidenceLimit = Math.max(1, maxInputChars - 2_000);
         const coverage = source.content.captureDisposition === "complete" && text.length <= evidenceLimit ? "full" as const : "sampled" as const;
-        const sourceText = `SOURCE revision=${source.revisionId} disposition=${source.content.captureDisposition} coverage=${coverage}${coverage === "sampled" ? " (bounded excerpt; beginning only)" : ""}\ntitle=${source.content.title}\nuri=${source.content.uri?.slice(0, 512) ?? "[unknown]"}\ntext=${text.slice(0, evidenceLimit)}`;
-        const generated = await model.summarizeSource({ sessionId: source.id, sourceText, sourceRevisionIds: [source.revisionId], signal, maxOutputChars: Math.min(config.observation.maxOutputChars, 8_000) });
+        const prefix = `SOURCE revision=${source.revisionId} disposition=${source.content.captureDisposition} coverage=${coverage}${coverage === "sampled" ? " (bounded excerpt; beginning only)" : ""}\ntitle=${source.content.title}\nuri=${source.content.uri?.slice(0, 256) ?? "[unknown]"}\ntext=`;
+        const sourceText = `${prefix}${text.slice(0, Math.max(0, maxInputChars - prefix.length))}`;
+        const generated = await model.summarizeSource({ sessionId: source.id, sourceText, sourceRevisionIds: [source.revisionId], signal, maxOutputChars: config.knowledgeModel!.maxOutputChars });
         return { ...generated, generatedAt: new Date().toISOString(), sourceRevisionId: source.revisionId, evidenceDigest: sourceEvidenceDigest(source.content.title, text), coverage, producer };
       }, signal);
       void this.autoRetag(result.record.id, result.record.revisionId);
@@ -607,9 +621,9 @@ export class KnowledgeService {
       if (sources.length !== sourceRevisionIds.length) throw new GatewayError("conflict", "Synthesis sources are unavailable or excluded");
       if (new Set(sources.map(record => record.scope)).size !== 1) throw new GatewayError("conflict", "Synthesis sources must share one privacy scope");
       const sourceText = sources.map(record => synthesisEvidencePack(record)).join("\n\n");
-      if (sourceText.length > Math.min(config.observation.maxInputChars, 48_000)) throw new GatewayError("invalid_request", "Knowledge synthesis source pack exceeds its bounded input; select fewer revisions");
+      if (!config.knowledgeModel || sourceText.length > config.knowledgeModel.maxInputChars) throw new GatewayError("invalid_request", "Knowledge synthesis requires a configured Knowledge model and source pack within its input bound; select fewer revisions");
       if (ownedSignal.aborted) throw new GatewayError("busy", "Knowledge synthesis was cancelled", true);
-      const text = await model.synthesize({ sessionId, sourceText, sourceRevisionIds, signal: ownedSignal, maxOutputChars: Math.min(config.observation.maxOutputChars, 30_000) });
+      const text = await model.synthesize({ sessionId, sourceText, sourceRevisionIds, signal: ownedSignal, maxOutputChars: config.knowledgeModel.maxOutputChars });
       if (ownedSignal.aborted) throw new GatewayError("busy", "Knowledge synthesis was cancelled", true);
       const after = await this.store.config();
       if (after.revision !== config.revision) throw new GatewayError("conflict", "Knowledge configuration changed while synthesis was running");
@@ -728,9 +742,9 @@ export class KnowledgeService {
           throw new GatewayError("conflict", "Reflection sources must share a branch");
         }
         const sourceText = sources.map(record => synthesisEvidencePack(record)).join("\n\n");
-        if (sourceText.length > Math.min(config.observation.maxInputChars, 48_000)) throw new GatewayError("invalid_request", "Knowledge reflection source pack exceeds its bounded input; select fewer revisions");
+        if (!config.knowledgeModel || sourceText.length > config.knowledgeModel.maxInputChars) throw new GatewayError("invalid_request", "Knowledge reflection requires a configured Knowledge model and source pack within its input bound; select fewer revisions");
         if (signal.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
-        const text = await model.reflect({ sessionId: action.request.sessionId, sourceText, signal, });
+        const text = await model.reflect({ sessionId: action.request.sessionId, sourceText, signal, maxOutputChars: config.knowledgeModel!.maxOutputChars });
         if (signal.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
         const after = await this.store.config();
         if (after.revision !== config.revision) throw new GatewayError("conflict", "Knowledge configuration changed while reflection was running");
@@ -928,10 +942,10 @@ export class KnowledgeService {
         const response = await this.curate(curationToolRequest(parameters));
         return { text: curationToolText(response), details: response };
       }
-      case "setEnrichmentModel": {
-        if (!parameters.commandId || parameters.expectedConfigRevision === undefined || (!parameters.clearEnrichmentModel && !parameters.enrichmentModel) || (parameters.clearEnrichmentModel && parameters.enrichmentModel)) throw new GatewayError("invalid_request", "setEnrichmentModel requires commandId, expectedConfigRevision, and enrichmentModel or clearEnrichmentModel=true");
-        const config = await this.store.setEnrichmentModel(parameters.commandId, parameters.expectedConfigRevision, parameters.clearEnrichmentModel ? undefined : parameters.enrichmentModel!);
-        return { text: `Summary model ${config.enrichment?.model ?? "cleared"} saved at Knowledge config revision ${config.revision}; Gateway summaries never use observation.model as fallback.`, details: config };
+      case "setKnowledgeModel": {
+        if (!parameters.commandId || parameters.expectedConfigRevision === undefined || (!parameters.clearKnowledgeModel && !parameters.knowledgeModel) || (parameters.clearKnowledgeModel && parameters.knowledgeModel)) throw new GatewayError("invalid_request", "setKnowledgeModel requires commandId, expectedConfigRevision, and knowledgeModel or clearKnowledgeModel=true");
+        const config = await this.store.setKnowledgeModel(parameters.commandId, parameters.expectedConfigRevision, parameters.clearKnowledgeModel ? undefined : parameters.knowledgeModel!);
+        return { text: `Knowledge model ${config.knowledgeModel?.model ?? "cleared"} saved at Knowledge config revision ${config.revision}; Knowledge generation never uses observation.model as fallback.`, details: config };
       }
       case "configureTags": {
         if (!parameters.commandId || parameters.expectedConfigRevision === undefined || !parameters.tagEdit) throw new GatewayError("invalid_request", "Tag configuration requires commandId, expectedConfigRevision and tagEdit");

@@ -406,8 +406,8 @@ export interface KnowledgeConfig {
   /** Monotonically increasing revision for optimistic UI/runtime updates. */
   revision: number;
   eligibility: KnowledgeEligibility;
-  /** Provider used only for saved-source summaries; never inherits observation.model. */
-  enrichment?: { model?: string };
+  /** Explicit model and independent bounds for Knowledge interpretation; never inherits the observer model. */
+  knowledgeModel?: { model?: string; maxInputChars: number; maxOutputChars: number };
   observation: {
     enabled: boolean;
     model?: string;
@@ -1369,13 +1369,12 @@ export function validateKnowledgeConfig(value: unknown): KnowledgeConfig {
   const maxAttempts = observation?.maxAttempts;
   const maximumSearchResults = config.maximumSearchResults;
   const eligibility = config.eligibility as Record<string, unknown>;
+  const knowledgeModel = config.knowledgeModel as Record<string, unknown> | undefined;
+  if (Object.keys(config).some(key => !["schemaVersion", "revision", "eligibility", "knowledgeModel", "observation", "maximumSearchResults", "currentInterests", "tagVocabulary"].includes(key))) throw new Error("Invalid knowledge configuration");
   if (config.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof config.revision !== "number" || !Number.isSafeInteger(config.revision) || config.revision < 0 || !eligibility || typeof eligibility !== "object" || !Array.isArray(eligibility.sessionIds) || !Array.isArray(eligibility.projectIds) || !Array.isArray(eligibility.excludedSessionIds) || !Array.isArray(eligibility.excludedProjectIds) || !eligibility.sessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.projectIds.every(item => { try { assertKnowledgeProjectId(item, "project id"); return true; } catch { return false; } }) || !eligibility.excludedSessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.excludedProjectIds.every(item => { try { assertKnowledgeProjectId(item, "excluded project id"); return true; } catch { return false; } }) || !observation || typeof observation !== "object" || typeof observation.enabled !== "boolean" || typeof maxInputChars !== "number" || !Number.isSafeInteger(maxInputChars) || maxInputChars < 1_000 || maxInputChars > 200_000 || typeof maxOutputChars !== "number" || !Number.isSafeInteger(maxOutputChars) || maxOutputChars < 100 || maxOutputChars > 50_000 || typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000 || typeof maxAttempts !== "number" || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3 || typeof maximumSearchResults !== "number" || !Number.isSafeInteger(maximumSearchResults) || maximumSearchResults < 1 || maximumSearchResults > 100) throw new Error("Invalid knowledge configuration");
   if (eligibility.allSessions !== undefined && eligibility.allSessions !== true) throw new Error("Invalid global observation grant");
   if (observation.model !== undefined && (typeof observation.model !== "string" || observation.model.length === 0 || observation.model.length > 200)) throw new Error("Invalid observation model");
-  if (config.enrichment !== undefined) {
-    const enrichment = config.enrichment as Record<string, unknown>;
-    if (!enrichment || typeof enrichment !== "object" || Array.isArray(enrichment) || Object.keys(enrichment).some(key => key !== "model") || (enrichment.model !== undefined && (typeof enrichment.model !== "string" || enrichment.model.length === 0 || enrichment.model.length > 200))) throw new Error("Invalid Knowledge enrichment model");
-  }
+  if (knowledgeModel !== undefined && (!knowledgeModel || typeof knowledgeModel !== "object" || Array.isArray(knowledgeModel) || Object.keys(knowledgeModel).some(key => !["model", "maxInputChars", "maxOutputChars"].includes(key)) || (knowledgeModel.model !== undefined && (typeof knowledgeModel.model !== "string" || knowledgeModel.model.length === 0 || knowledgeModel.model.length > 200)) || typeof knowledgeModel.maxInputChars !== "number" || !Number.isSafeInteger(knowledgeModel.maxInputChars) || knowledgeModel.maxInputChars < 1_000 || knowledgeModel.maxInputChars > 200_000 || typeof knowledgeModel.maxOutputChars !== "number" || !Number.isSafeInteger(knowledgeModel.maxOutputChars) || knowledgeModel.maxOutputChars < 100 || knowledgeModel.maxOutputChars > 50_000)) throw new Error("Invalid Knowledge model configuration");
   if (config.currentInterests !== undefined && (!Array.isArray(config.currentInterests) || config.currentInterests.length > 50 || !config.currentInterests.every(item => typeof item === "string" && item.length > 0 && item.length <= 500))) throw new Error("Invalid current interests");
   const tagVocabulary = config.tagVocabulary ?? { revision: 0, tags: [], guidelines: "" };
   validateKnowledgeTagVocabulary(tagVocabulary);

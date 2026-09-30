@@ -374,8 +374,9 @@ const knowledge = new KnowledgeService(
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),
   },
   (knowledgeConfig) => {
-    const model = modelForConfig(modelRuntime, knowledgeConfig.enrichment?.model);
-    return model ? new ModelRuntimeKnowledgeModel(modelRuntime, model) : undefined;
+    const config = knowledgeConfig.knowledgeModel;
+    const model = modelForConfig(modelRuntime, config?.model);
+    return model && config ? new ModelRuntimeKnowledgeModel(modelRuntime, model, config) : undefined;
   },
   workRegistry,
   async operation => {

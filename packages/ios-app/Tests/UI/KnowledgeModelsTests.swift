@@ -158,15 +158,19 @@ final class KnowledgeModelsTests: XCTestCase {
     }
 
     /// Failure mode: the settings UI decodes and re-sends the whole config; if
-    /// enrichment is omitted from this model, saving any observation setting
-    /// silently clears the user's summary model.
-    func testKnowledgeConfigRoundTripPreservesEnrichmentModel() throws {
-        let input = #"{"schemaVersion":1,"revision":7,"eligibility":{"sessionIds":[],"projectIds":[],"excludedSessionIds":[],"excludedProjectIds":[]},"observation":{"enabled":false,"maxInputChars":48000,"maxOutputChars":8000,"timeoutMs":30000,"maxAttempts":1},"enrichment":{"model":"opencode-go/deepseek-v4.1-flash"},"maximumSearchResults":50,"currentInterests":[],"tagVocabulary":{"revision":0,"tags":[],"guidelines":""}}"#.data(using: .utf8)!
+    /// the Knowledge model or either of its independent limits is omitted,
+    /// saving an observation setting silently changes interpretation behavior.
+    func testKnowledgeConfigRoundTripPreservesKnowledgeModelAndLimits() throws {
+        let input = #"{"schemaVersion":1,"revision":7,"eligibility":{"sessionIds":[],"projectIds":[],"excludedSessionIds":[],"excludedProjectIds":[]},"observation":{"enabled":false,"maxInputChars":48000,"maxOutputChars":8000,"timeoutMs":30000,"maxAttempts":1},"knowledgeModel":{"model":"opencode-go/deepseek-v4.1-flash","maxInputChars":32000,"maxOutputChars":4000},"maximumSearchResults":50,"currentInterests":[],"tagVocabulary":{"revision":0,"tags":[],"guidelines":""}}"#.data(using: .utf8)!
         let config = try JSONDecoder().decode(KnowledgeConfig.self, from: input)
-        XCTAssertEqual(config.enrichment?.model, "opencode-go/deepseek-v4.1-flash")
+        XCTAssertEqual(config.knowledgeModel?.model, "opencode-go/deepseek-v4.1-flash")
+        XCTAssertEqual(config.knowledgeModel?.maxInputChars, 32_000)
+        XCTAssertEqual(config.knowledgeModel?.maxOutputChars, 4_000)
         let encoded = try JSONEncoder().encode(config)
         let roundTrip = try JSONDecoder().decode(KnowledgeConfig.self, from: encoded)
-        XCTAssertEqual(roundTrip.enrichment?.model, "opencode-go/deepseek-v4.1-flash")
+        XCTAssertEqual(roundTrip.knowledgeModel?.model, "opencode-go/deepseek-v4.1-flash")
+        XCTAssertEqual(roundTrip.knowledgeModel?.maxInputChars, 32_000)
+        XCTAssertEqual(roundTrip.knowledgeModel?.maxOutputChars, 4_000)
     }
 
     func testObservationRoundTripPreservesCanonicalInputIdentity() throws {

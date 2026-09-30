@@ -75,7 +75,7 @@ only on the user's word) apply to every task.
 | C8 | Needs scoping | Library order: save date by default, "Recent activity" option in the filter sheet | none | — |
 | C9 | Needs scoping | One re-tag predicate; enrichment only for retained entries; verdict no longer a tag input | C1 | — |
 | C10 | Needs scoping | Your take is the one note: seed from Raindrop note; hide Saved notes and Correct record for sources | C3 | — |
-| C11 | Claimed | Rename Summary model to Knowledge model; own input/output limits | none | knowledge-consolidation session, 2026-09-29 |
+| C11 | Done | Rename Summary model to Knowledge model; own input/output limits | none | knowledge-consolidation session, 2026-09-29 |
 | C12 | Needs scoping | One summary: the intake assessment keeps only its decision fields | C5 | — |
 | C13 | Needs scoping | One freshness vocabulary; verdict reported beside age, not folded into it | C2 | — |
 | C14 | Needs scoping | Supersession stored once; forget scrubs it | C2 | — |
@@ -273,6 +273,16 @@ save time and recovered save time; unreachable iOS `.sources` branch in
 - Kept on purpose: per-item conflict/error translation remains in the native RPC client, preserving each Gateway outcome's reason and current revision rather than moving curation outcome policy into the view.
 - Deviations: the first UI run selected stale products and executed no tests; after rebuilding the UI-validation tier, the focused test passed. One intermediate test attempt corrected an accessibility label mismatch before passing.
 - For the next agent: C8 remains ready for scoping; no Gateway runtime transition was performed.
+
+### C11 · Done · 2026-09-29 · luna-worker
+
+- Result: renamed the optional summary-model setting to `knowledgeModel`, with independent input/output character limits shared by summaries, triage, synthesis, reflection, and manual-capture assessment. The iOS setting and agent action now use Knowledge model terminology; unset summary generation refuses without falling back to observation.
+- Evidence: read-only inspection of the persisted Knowledge catalog config found no `enrichment` key; `cd packages/gateway && npm run build` (passed); `npx vitest run src/knowledge/knowledge-service.test.ts src/knowledge/knowledge-curation.test.ts src/knowledge/knowledge-summary-scheduling.test.ts src/knowledge/knowledge-intake-enrichment.test.ts` (44 passed); `scripts/tron ios generate` (passed); `scripts/tron-ios-test build` (passed); `scripts/tron-ios-test run --only-testing TronMobileTests/KnowledgeModelsTests` (34 passed); `python3 scripts/check-documentation-policy.py` (passed, 48 authored files); `scripts/personal-info-guard.sh` (passed).
+- Changes: this commit
+- Tasks added: none.
+- Kept on purpose: the configured limits default to 48,000 input and 8,000 output characters when the tool sets a model; iOS preserves these values through whole-config round trips, while clear removes the model configuration.
+- Deviations: none.
+- For the next agent: C8 remains ready for scoping; the persisted catalog configuration was inspected read-only and was not changed.
 
 ### C1 · Done · 2026-09-29 · luna-worker
 

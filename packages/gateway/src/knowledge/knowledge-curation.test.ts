@@ -59,7 +59,7 @@ async function fixture(options: { emptyVocabulary?: boolean } = {}) {
   const store = new KnowledgeStore(new TronWorkspace(root));
   if (!options.emptyVocabulary) await installVocabulary(store);
   const config = await store.config();
-  await store.configure(other("enrichment-model"), { ...config, enrichment: { model: "fixture/enrichment" } });
+  await store.configure(other("knowledge-model"), { ...config, knowledgeModel: { model: "fixture/enrichment", maxInputChars: 48_000, maxOutputChars: 8_000 } });
   const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => summarizer);
   return { root, store, service };
 }
@@ -302,7 +302,7 @@ describe("Knowledge curation", () => {
     const store = new KnowledgeStore(new TronWorkspace(root));
     await installVocabulary(store);
     const config = await store.config();
-    await store.configure(other("failure-enrichment-model"), { ...config, enrichment: { model: "fixture/enrichment" } });
+    await store.configure(other("failure-knowledge-model"), { ...config, knowledgeModel: { model: "fixture/enrichment", maxInputChars: 48_000, maxOutputChars: 8_000 } });
     const failing: KnowledgeGenerationModel = { ...summarizer, async summarizeSource() { throw new Error("model unavailable"); } };
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => failing);
     const record = await capture(store, 17);

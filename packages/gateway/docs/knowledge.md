@@ -255,18 +255,21 @@ owned background work, not a request that waits for a model: the call accepts a
 job and returns its state plus the source's current revision, the model runs
 outside the store lock, and the commit revalidates the exact source revision,
 configuration revision and privacy state before publishing. It uses only
-`KnowledgeConfig.enrichment.model`, a separate `provider/model` setting from
-`observation.model`; unset enrichment is the typed job refusal
-`model-not-configured`, with an actionable `knowledge.config` instruction, and
-never falls back to observation. The enrichment setting round-trips through the
-whole-config `knowledge.config` RPC (the iOS settings sheet preserves it) and
-can be changed by the agent tool action `setEnrichmentModel`. For example, after
-the user-initiated K9 Gateway update, read `knowledge.status.config.revision`,
-then call the agent `knowledge` tool with
-`{action:"setEnrichmentModel", commandId:"knowledge-enrichment-2026-09-29",
+`KnowledgeConfig.knowledgeModel.model`, a separate `provider/model` setting from
+`observation.model`; `knowledgeModel.maxInputChars` and `maxOutputChars` bound
+Knowledge interpretation independently of observation. Unset model configuration
+refuses summary work as `model-not-configured` and never falls back to observation.
+The full `knowledgeModel` object round-trips through the whole-config
+`knowledge.config` RPC. The model can be changed by the agent tool action
+`setKnowledgeModel`. For example, read `knowledge.status.config.revision`, then
+call the agent `knowledge` tool with
+`{action:"setKnowledgeModel", commandId:"knowledge-model-2026-09-29",
 expectedConfigRevision:<current revision>,
-enrichmentModel:"opencode-go/deepseek-v4.1-flash"}`. This plan value is not
-written into the live config by source changes or tests. The job survives a
+knowledgeModel:"opencode-go/deepseek-v4.1-flash"}`. The action retains the
+current limits (or initializes them to 48,000 input and 8,000 output characters).
+This plan value is not written into the live config by source changes or tests.
+The same configured model and limits govern summaries, triage, synthesis,
+reflection, and manual-capture assessment. The job survives a
 dismissed sheet, a backgrounded app and a reconnect, and
 `knowledge.curation.jobs` (agent tool `curationJob`) reports `running`, `done`
 or `failed` with a typed code for one command ID or for one entry. A duplicate

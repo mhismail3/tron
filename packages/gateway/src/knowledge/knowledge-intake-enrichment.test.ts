@@ -30,7 +30,7 @@ describe("K5 Raindrop intake enrichment", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-failure-e2e-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
-    await store.configure("k5-failure-model", { ...initial, enrichment: { model: "fixture/deepseek" }, observation: { ...initial.observation, model: "fixture/observer" } });
+    await store.configure("k5-failure-model", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 }, observation: { ...initial.observation, model: "fixture/observer" } });
     const noCalls: string[] = [];
     const fakeModel: KnowledgeGenerationModel = {
       async reflect() { return "reflect"; }, async synthesize() { return "synthesis"; },
@@ -72,7 +72,7 @@ describe("K5 Raindrop intake enrichment", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-intake-e2e-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
-    await store.configure("k5-intake-enrichment-config", { ...initial, enrichment: { model: "fixture/deepseek" } });
+    await store.configure("k5-intake-enrichment-config", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 } });
     const configured = await store.config();
     await store.configureTags({ commandId: "k5-intake-vocabulary", expectedConfigRevision: configured.revision, edit: { kind: "add", tag: { id: "workflow", label: "Workflows", definition: "Reusable workflows.", category: "practice", decayClass: "stable", state: "active" } } });
     const sequence: string[] = [];
@@ -160,7 +160,7 @@ describe("K5 Raindrop intake enrichment", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-partial-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
-    await store.configure("k5-partial-config", { ...initial, enrichment: { model: "fixture/deepseek" } });
+    await store.configure("k5-partial-config", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 } });
     const summarized: string[] = [];
     const fakeModel: KnowledgeGenerationModel = {
       async reflect() { return "reflect"; }, async synthesize() { return "synthesis"; },

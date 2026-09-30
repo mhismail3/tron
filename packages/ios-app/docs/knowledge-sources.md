@@ -139,8 +139,11 @@ Entry Detail's background work and autosave are validated out of process by
 `TronKnowledgeDetailUITests` against the hosted scripted Gateway; see
 [iOS development](development.md).
 
-Knowledge Configuration stores the source-summary provider/model in
-`KnowledgeConfig.enrichment.model`, separate from the observer model. Its
-Summary model row shows the catalog display name, like the observation Model row, and a divided Clear row in the same group clears the value; the iOS config codec round-trips it
-because `knowledge.config` replaces the whole KnowledgeConfig. Summary jobs
-refuse when it is unset and never fall back to the observation model.
+Knowledge Configuration stores the provider/model and independent input/output
+character limits in `KnowledgeConfig.knowledgeModel`, separate from the observer
+model. The **Knowledge model** row shows the catalog display name; its divided
+Clear row clears the setting. The iOS config codec round-trips the model and its
+limits because `knowledge.config` replaces the whole KnowledgeConfig. Summary,
+triage, synthesis, reflection, and manual-capture assessment share this model and
+its bounds. Summary jobs refuse when it is unset and never fall back to the
+observer model.

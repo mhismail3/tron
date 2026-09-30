@@ -2292,8 +2292,8 @@ struct KnowledgeConfigurationView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var config: KnowledgeConfig?
     @State private var chosenModel: ModelRef?
-    @State private var chosenEnrichmentModel: ModelRef?
-    @State private var enrichmentModelChanged = false
+    @State private var chosenKnowledgeModel: ModelRef?
+    @State private var knowledgeModelChanged = false
     @State private var interestsText = ""
     @State private var saving = false
     @State private var error: String?
@@ -2313,29 +2313,29 @@ struct KnowledgeConfigurationView: View {
             }
             .disabled(config == nil)
             .tronSettingsCaption("The model is used for future eligible turns; earlier turns are not backfilled.")
-            TronSettingsGroup("Source enrichment", accent: .tronKnowledge) {
+            TronSettingsGroup("Knowledge model", accent: .tronKnowledge) {
                 VStack(spacing: 0) {
-                    TronSelectionSheetRow(icon: "sparkles", title: "Summary model", value: SessionModelSelectionPresentation.modelName(chosenEnrichmentModel, catalog: catalogModels), accent: .tronKnowledge) {
-                        ModelPicker(selection: Binding(get: { chosenEnrichmentModel }, set: { chosenEnrichmentModel = $0; enrichmentModelChanged = true }), models: catalogModels.filter(\.available))
-                            .tronNavigationTitle("Summary model", accent: .tronKnowledge)
+                    TronSelectionSheetRow(icon: "sparkles", title: "Knowledge model", value: SessionModelSelectionPresentation.modelName(chosenKnowledgeModel, catalog: catalogModels), accent: .tronKnowledge) {
+                        ModelPicker(selection: Binding(get: { chosenKnowledgeModel }, set: { chosenKnowledgeModel = $0; knowledgeModelChanged = true }), models: catalogModels.filter(\.available))
+                            .tronNavigationTitle("Knowledge model", accent: .tronKnowledge)
                             .presentationDetents([.large])
                     }
-                    if chosenEnrichmentModel != nil {
+                    if chosenKnowledgeModel != nil {
                         TronSettingsDivider(accent: .tronKnowledge)
-                        TronSettingsRow(icon: "xmark.circle", title: "Clear summary model",
-                                        subtitle: "Summaries stay off until you choose a model again", accent: .tronKnowledge) {
-                            Button { chosenEnrichmentModel = nil; enrichmentModelChanged = true } label: {
+                        TronSettingsRow(icon: "xmark.circle", title: "Clear Knowledge model",
+                                        subtitle: "Knowledge generation stays off until you choose a model again", accent: .tronKnowledge) {
+                            Button { chosenKnowledgeModel = nil; knowledgeModelChanged = true } label: {
                                 TronInlineActionLabel("Clear", accent: .tronKnowledge)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Clear summary model")
-                            .accessibilityIdentifier("knowledge.clearSummaryModel")
+                            .accessibilityLabel("Clear Knowledge model")
+                            .accessibilityIdentifier("knowledge.clearKnowledgeModel")
                         }
                     }
                 }
             }
             .disabled(config == nil)
-            .tronSettingsCaption("Summaries use only this model and saved readable source text; they never fall back to the observation model.")
+            .tronSettingsCaption("Summaries, triage, synthesis, reflection, and manual-capture assessment use this model and its own input/output limits. It never falls back to the observer model.")
             TronSettingsGroup("Observation", accent: .tronKnowledge) {
                 TronToggleRow(icon: "globe", title: "Observe all Tron sessions",
                               detail: "When enabled, save future observations from every Tron conversation. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
@@ -2368,9 +2368,9 @@ struct KnowledgeConfigurationView: View {
                 let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
                 if parts.count == 2 { chosenModel = ModelRef(provider: parts[0], id: parts[1]) }
             }
-            if let value = loaded.config.enrichment?.model {
+            if let value = loaded.config.knowledgeModel?.model {
                 let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
-                if parts.count == 2 { chosenEnrichmentModel = ModelRef(provider: parts[0], id: parts[1]) }
+                if parts.count == 2 { chosenKnowledgeModel = ModelRef(provider: parts[0], id: parts[1]) }
             }
         } catch {
             guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
@@ -2383,7 +2383,7 @@ struct KnowledgeConfigurationView: View {
         let requestIdentity = identity ?? model.knowledgePresentationIdentity
         guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { error = "Gateway changed; reopen configuration."; return }
         if let chosenModel { config.observation.model = chosenModel.contextWindowKey }
-        if enrichmentModelChanged { config.enrichment = chosenEnrichmentModel.map { KnowledgeEnrichment(model: $0.contextWindowKey) } }
+        if knowledgeModelChanged { config.knowledgeModel = chosenKnowledgeModel.map { KnowledgeModel(model: $0.contextWindowKey, maxInputChars: config.knowledgeModel?.maxInputChars ?? 48_000, maxOutputChars: config.knowledgeModel?.maxOutputChars ?? 8_000) } }
         if config.observation.enabled && !KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: config.observation.model != nil, supportsGlobalObservation: supportsGlobalObservation) {
             error = config.observation.model == nil ? "Choose a model before enabling observation." : "Update this Gateway before enabling all-session observation."
             return

@@ -67,31 +67,31 @@ describe("KnowledgeService integration", () => {
     }
   });
 
-  it("sets and replays the enrichment model through the revision-fenced Knowledge config owner", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-enrichment-model-set-")); roots.push(root);
+  it("round-trips the Knowledge model and limits through the revision-fenced config owner", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-model-set-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
-    const input = { action: "setEnrichmentModel", commandId: "agent-enrichment-model-set", expectedConfigRevision: 0, enrichmentModel: "opencode-go/deepseek-v4.1-flash" } as const;
+    const input = { action: "setKnowledgeModel", commandId: "agent-knowledge-model-set", expectedConfigRevision: 0, knowledgeModel: "opencode-go/deepseek-v4.1-flash" } as const;
     const first = await service.tool(input);
-    expect(first.details).toMatchObject({ revision: 1, enrichment: { model: "opencode-go/deepseek-v4.1-flash" } });
+    expect(first.details).toMatchObject({ revision: 1, knowledgeModel: { model: "opencode-go/deepseek-v4.1-flash", maxInputChars: 48_000, maxOutputChars: 8_000 } });
     expect(await service.tool(input)).toEqual(first);
-    await expect(service.tool({ ...input, commandId: "agent-enrichment-stale", enrichmentModel: "other/model" })).rejects.toThrow("stale");
-    const clear = await service.tool({ action: "setEnrichmentModel", commandId: "agent-enrichment-clear", expectedConfigRevision: 1, clearEnrichmentModel: true });
+    await expect(service.tool({ ...input, commandId: "agent-knowledge-model-stale", knowledgeModel: "other/model" })).rejects.toThrow("stale");
+    const clear = await service.tool({ action: "setKnowledgeModel", commandId: "agent-knowledge-model-clear", expectedConfigRevision: 1, clearKnowledgeModel: true });
     expect(clear.details).toMatchObject({ revision: 2 });
-    expect((await store.config()).enrichment).toBeUndefined();
+    expect((await store.config()).knowledgeModel).toBeUndefined();
   });
 
-  it("refuses summary generation without enrichment.model even when observation.model exists", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-source-summary-no-enrichment-")); roots.push(root);
+  it("refuses summary generation without knowledgeModel.model even when observation.model exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-source-summary-no-knowledge-model-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
     await store.configure("summary-observation-only", { ...initial, observation: { ...initial.observation, model: "fixture/observation" } });
     const source = await store.captureSource({ commandId: "summary-unset-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Evidence", text: "Clean saved text", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
     let calls = 0;
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => { calls += 1; return model(); });
-    const accepted = await service.invoke({ operation: "knowledge.source.summarize", request: { commandId: "summary-needs-enrichment", sourceId: source.record.id, expectedRevision: source.record.revisionId } }) as { job: { status: string } };
+    const accepted = await service.invoke({ operation: "knowledge.source.summarize", request: { commandId: "summary-needs-knowledge-model", sourceId: source.record.id, expectedRevision: source.record.revisionId } }) as { job: { status: string } };
     expect(accepted.job.status).toBe("running");
-    expect(await waitForJob(service, "summary-needs-enrichment")).toMatchObject({ status: "failed", code: "model-not-configured", reason: expect.stringContaining("knowledge.config") });
+    expect(await waitForJob(service, "summary-needs-knowledge-model")).toMatchObject({ status: "failed", code: "model-not-configured", reason: expect.stringContaining("knowledge.config") });
     expect(calls).toBe(0);
     expect((await store.read(source.record.id))?.content.summary).toBeUndefined();
   });
@@ -99,12 +99,13 @@ describe("KnowledgeService integration", () => {
   it("generates an explicit source-content summary against the exact saved revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-source-summary-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
-    const source = await store.captureSource({ commandId: "source-summary-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Thread", text: "A post and its saved replies", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" } } });
+    const source = await store.captureSource({ commandId: "source-summary-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Thread", text: "A post and its saved replies. ".repeat(500), captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" } } });
     const initial = await store.config();
-    await store.configure("source-summary-config", { ...initial, enrichment: { model: "fixture/enrichment" } });
+    await store.configure("source-summary-config", { ...initial, observation: { ...initial.observation, maxInputChars: 1_000, maxOutputChars: 100 }, knowledgeModel: { model: "fixture/knowledge", maxInputChars: 2_500, maxOutputChars: 300 } });
     let input = "";
+    let outputLimit = 0;
     let generations = 0;
-    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async summarizeSource(request) { generations += 1; input = request.sourceText; return { text: "A post with some saved replies." }; } }));
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async summarizeSource(request) { generations += 1; input = request.sourceText; outputLimit = request.maxOutputChars; return { text: "A post with some saved replies." }; } }));
     const action = { operation: "knowledge.source.summarize" as const, request: { commandId: "source-summary-generate", sourceId: source.record.id, expectedRevision: source.record.revisionId } };
     const accepted = await service.invoke(action) as { job: { status: string } };
     // Accepted, not awaited: generation is owned background work.
@@ -112,12 +113,14 @@ describe("KnowledgeService integration", () => {
     expect(await waitForJob(service, "source-summary-generate")).toMatchObject({ status: "done" });
     expect(input).toContain("coverage=sampled");
     expect(input).toContain("disposition=partial");
+    expect(input.length).toBeLessThanOrEqual(2_500);
+    expect(outputLimit).toBe(300);
     const replay = await service.invoke(action) as { job: { status: string } };
     expect(replay.job.status).toBe("done");
     expect(generations).toBe(1);
     const updated = await store.read(source.record.id);
     expect(updated?.content.assessment).toBeUndefined();
-    expect(updated?.content.summary).toMatchObject({ text: "A post with some saved replies.", sourceRevisionId: source.record.revisionId, coverage: "sampled", producer: { actor: "agent", model: "fixture/enrichment" } });
+    expect(updated?.content.summary).toMatchObject({ text: "A post with some saved replies.", sourceRevisionId: source.record.revisionId, coverage: "sampled", producer: { actor: "agent", model: "fixture/knowledge" } });
     expect(updated?.content.summary?.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
   });
 
@@ -128,7 +131,7 @@ describe("KnowledgeService integration", () => {
     const object = await store.putObject(Buffer.from(article), "text/html");
     const source = await store.captureSource({ commandId: "reextract-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Saved page", object, text: "old navigation text", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
     const initial = await store.config();
-    await store.configure("reextract-enrichment-config", { ...initial, enrichment: { model: "fixture/enrichment" } });
+    await store.configure("reextract-enrichment-config", { ...initial, knowledgeModel: { model: "fixture/enrichment", maxInputChars: 48_000, maxOutputChars: 8_000 } });
     let summaryInput = "";
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async summarizeSource(input) { summaryInput = input.sourceText; return { text: "Summary from clean saved text" }; } }));
     const action = { operation: "knowledge.source.reextract" as const, request: { commandId: "reextract-clean", sourceId: source.record.id, expectedRevision: source.record.revisionId } };
@@ -156,6 +159,8 @@ describe("KnowledgeService integration", () => {
       kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [],
       content: { title: "A / B", text: "https://example.com/a\n\"Quoted\" 🌲", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual", admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", reason: "User saved this source" } },
     }});
+    const triageConfig = await store.config();
+    await store.configure("service-triage-config", { ...triageConfig, knowledgeModel: { model: "fixture/knowledge", maxInputChars: 48_000, maxOutputChars: 8_000 } });
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => model());
     const result = await service.invoke({ operation: "knowledge.source.triage", request: { commandId: "service-triage", sourceId: source.record.id, expectedRevision: source.record.revisionId } });
     // Shared with the Swift wire regression: slash escaping must match JSON.stringify.
@@ -173,7 +178,7 @@ describe("KnowledgeService integration", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
-    const configured = await store.configure("service-reflect-queue-config", { ...initial, observation: { ...initial.observation, model: "fixture/model" }, eligibility: { ...initial.eligibility, sessionIds: ["queued-session"] } });
+    const configured = await store.configure("service-reflect-queue-config", { ...initial, knowledgeModel: { model: "fixture/knowledge", maxInputChars: 48_000, maxOutputChars: 8_000 }, observation: { ...initial.observation, model: "fixture/model" }, eligibility: { ...initial.eligibility, sessionIds: ["queued-session"] } });
     const range = { sessionId: "queued-session", branchId: "queued-branch", fromEntryId: "queued-entry", toEntryId: "queued-entry", entryIds: ["queued-entry"], entryDigest: "a".repeat(64) };
     const source = await store.publishObservationGroup({ commandId: "service-reflect-queue-source", expectedConfigRevision: configured.revision, coverage: { id: "service-reflect-queue-coverage", range, disposition: "observed" }, records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, branchId: range.branchId, evidence: [] }, relations: [], content: { range, items: [{ text: "queued", attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "qualified" }] } }] });
     const release = deferred<void>();
@@ -192,7 +197,7 @@ describe("KnowledgeService integration", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
-    const configured = await store.configure("service-reflect-cancel-config", { ...initial, observation: { ...initial.observation, model: "fixture/model" }, eligibility: { ...initial.eligibility, sessionIds: ["cancel-session"] } });
+    const configured = await store.configure("service-reflect-cancel-config", { ...initial, knowledgeModel: { model: "fixture/knowledge", maxInputChars: 48_000, maxOutputChars: 8_000 }, observation: { ...initial.observation, model: "fixture/model" }, eligibility: { ...initial.eligibility, sessionIds: ["cancel-session"] } });
     const range = { sessionId: "cancel-session", branchId: "cancel-branch", fromEntryId: "cancel-entry", toEntryId: "cancel-entry", entryIds: ["cancel-entry"], entryDigest: "b".repeat(64) };
     const source = await store.publishObservationGroup({ commandId: "service-reflect-cancel-source", expectedConfigRevision: configured.revision, coverage: { id: "service-reflect-cancel-coverage", range, disposition: "observed" }, records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, branchId: range.branchId, evidence: [] }, relations: [], content: { range, items: [{ text: "cancel", attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "qualified" }] } }] });
     const release = deferred<void>();
@@ -313,7 +318,8 @@ describe("KnowledgeService integration", () => {
   it("synthesizes exact source and note revisions through the registered knowledge tool", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
-    const configured = await store.configure("service-synthesis-config", { ...(await store.config()), observation: { ...(await store.config()).observation, enabled: true, model: "fixture/model" } });
+    const synthesisConfig = await store.config();
+    const configured = await store.configure("service-synthesis-config", { ...synthesisConfig, knowledgeModel: { model: "fixture/knowledge", maxInputChars: 48_000, maxOutputChars: 8_000 }, observation: { ...synthesisConfig.observation, enabled: true, model: "fixture/model" } });
     const source = await store.captureSource({ commandId: "service-synthesis-source", record: {
       kind: "source", scope: "research", provenance: { actor: "connector", source: "fixture:account:item", evidence: [] }, relations: [],
       content: { title: "Partial source", text: "source evidence", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" },
@@ -379,7 +385,8 @@ describe("KnowledgeService integration", () => {
   it("rejects excluded observation revisions before invoking the Reflector", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
-    const config = await store.configure("service-reflect-config", { ...(await store.config()), observation: { ...(await store.config()).observation, model: "fixture/model" }, eligibility: { ...(await store.config()).eligibility, sessionIds: ["service-session"] } });
+    const reflectConfig = await store.config();
+    const config = await store.configure("service-reflect-config", { ...reflectConfig, knowledgeModel: { model: "fixture/knowledge", maxInputChars: 48_000, maxOutputChars: 8_000 }, observation: { ...reflectConfig.observation, model: "fixture/model" }, eligibility: { ...reflectConfig.eligibility, sessionIds: ["service-session"] } });
     const range = { sessionId: "service-session", fromEntryId: "service-entry", toEntryId: "service-entry", entryIds: ["service-entry"], entryDigest: "a".repeat(64) };
     const published = await store.publishObservationGroup({ commandId: "service-reflect-source", expectedConfigRevision: config.revision, coverage: { id: "service-reflect-coverage", range, disposition: "observed" }, records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, evidence: [] }, relations: [], content: { range, items: [{ text: "withheld", attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "qualified" }] } }] });
     await store.setScopeExclusion("service-reflect-exclude", { sessionId: range.sessionId }, true, "privacy");
