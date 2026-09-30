@@ -622,8 +622,8 @@ Project state and records every call. The live E2E covers GitHub itself.
 32. **Another session's claim is landed.** `land` refuses unless the claim
     commit of the current remote branch names the caller's session.
 33. **A dirty or mid-merge tree is landed.** Uncommitted or untracked files, a
-    detached HEAD, or a merge, rebase, cherry-pick, revert or bisect in progress refuse
-    before any GitHub write.
+    detached HEAD, or a merge, rebase, cherry-pick, revert or bisect in
+    progress refuse before any GitHub write.
 34. **A failing or stale receipt is merged.** Nothing is pushed, posted or
     opened after a failing receipt. The merge names the verified and pushed
     head with `--match-head-commit`.
