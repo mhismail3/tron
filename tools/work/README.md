@@ -89,6 +89,8 @@ workspace:
    posts a claim comment giving the session, the branch, and the worktree path
    relative to the checkout's parent directory, never an absolute path.
 4. **Worktree.** `start` creates `<worktreeRoot>/<issue>-<slug>` on the branch.
+   `worktreeRoot` is relative to the primary checkout, so `start` gives the
+   same path when run from any worktree.
 
 The session is `--session`, then `WORK_SESSION_ID`, then `PI_SESSION_ID`.
 
