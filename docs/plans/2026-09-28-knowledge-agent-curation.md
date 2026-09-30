@@ -154,7 +154,7 @@ screenshots of each state. Device validation by the user after K9.
 | K7 | Done | iOS: Your take field, tags, verdict, scope editing, research / Moose's Corner filter | K1, K6 | luna-worker + supervisor, 2026-09-29 |
 | K8 | Done | Multi-collection Raindrop intake with collection-to-scope mapping | K1 | luna-worker, 2026-09-29 |
 | K9 | Ready | Maintainer runtime update and live capability check | K1–K8 | — |
-| K10 | Ready | Seed: agent drafts the vocabulary from the 276 entries; user edits it | K9 | — |
+| K10 | Ready | Seed: agent drafts the vocabulary from the 276 entries; user edits it | K9, C1–C9 of `docs/plans/2026-09-29-knowledge-concept-consolidation.md` | — |
 | K11 | Ready | Seed: summarize and tag the existing library within budget | K10 | — |
 | K12 | Ready | User fills Your take at leisure; agent applies verdicts, relations and re-tags | K11 | — |
 | K13 | Ready | Ingest Moose's Corner as personal; decide Unsorted and Shopping with the user | K12 | — |
