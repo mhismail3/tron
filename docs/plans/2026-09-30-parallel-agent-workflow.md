@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, wave 1 landed (W-5, W-8, W-16 to W-21, W-27, W-28); W-29 in review
+- **Last updated:** 2026-09-30, W-29 (#113) Done: CI policy green on main again
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -224,7 +224,7 @@ Dated 2026-09-30:
 | W-26 | Ready | Follow-up: type-specific PR body sections (Repro/Cause/Fix/Verification for bugs) validated before opening | W-6 | Unassigned |
 | W-27 | Done | #107 `tron dev start`/`restart` pass a short revision the payload manifest rejects; decision (b): full 40-hex HEAD plus a separate dirty-tree field (P1); merged, maintainer validation pending | W-20 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-28 | Done | #110 CI workflow file was invalid (runner context in job env), so no CI ran from about 2026-09-24 (P0) | none | session 01a0f183, 2026-09-30 |
-| W-29 | Claimed | #113 CI red on main: failures accumulated while the workflow was invalid (P0) | W-28 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-29 | Done | #113 CI red on main: failures accumulated while the workflow was invalid (P0) | W-28 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-30 | Ready | #116 payload staging fails on macOS 15: rename of a directory frozen to 0555 (P1) | W-29 | Unassigned |
 | W-31 | Ready | #115 seven iOS tests depend on wall-clock speed and fail on the hosted runner (P2) | W-29 | Unassigned |
 | W-32 | Needs scoping | #124 decision: may a dirty dev candidate hand off to Stable (P2, Needs you) | W-27 | Unassigned |
@@ -663,3 +663,33 @@ file-level. Everything else inspected is A.
   commands have not yet run end to end. W-5's own report states this gap.
 - Maintainer-only validation pending: #103 and #107. Run `scripts/tron dev
   restart`, then `scripts/tron dev status`.
+
+### W-29 · Done · 2026-09-30 · session 01a0f183 (orchestrator)
+
+- Result: #114 (squash `231b33516`) fixes the root causes of the failures
+  that built up while the workflow was invalid:
+  - stale protocol literals in fixtures;
+  - BSD-only `stat` in the E2E harness;
+  - XcodeGen resolution, now through `TRON_CI_TOOLS_DIR` and a synthetic
+    pinned XcodeGen in the fixtures;
+  - the hosted-runner memory reserve;
+  - the profiler test placement;
+  - the Mac job, which now compiles unsigned.
+- Evidence:
+  - The Linux `policy` job passed on the merged head.
+  - Locally, `scripts/test-ios-test-infrastructure.py` passed (110 tests).
+  - Independent review: pass, with two nits, both fixed.
+  - The worker timed out while polling CI (90-minute limit). The orchestrator
+    rebased onto wave 1 and resolved two small conflicts.
+  - After the rebase, one new #101 test failed on Linux for the same reason
+    as the others. It now uses the fixture's synthetic XcodeGen. A local
+    negative control was inconclusive because Homebrew's XcodeGen is on the
+    runner's PATH; the Linux job is the control.
+- Deviations: merged while the non-blocking macOS jobs were still running
+  (D-4). `ios` is expected red on #115 and `gateway` red on #116.
+- For the next agent:
+  - #116 (P1) is a probable product bug for macOS 15 users. Take it next
+    among the product fixes.
+  - A Project item added in the last few minutes may not appear in the
+    Project's item listing (GitHub-side lag observed today), so the dashboard
+    can briefly miss new items.
