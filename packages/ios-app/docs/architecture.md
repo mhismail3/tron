@@ -2463,3 +2463,10 @@ guidance. Per-profile persisted policy is restored via
 fenced `session.search.policy.get` after lifecycle/pool admission, with false-
 safe visible errors. A Gateway that reports partial or unavailable semantic
 coverage is displayed as such while lexical results remain usable.
+
+Inline expanded display cards share the message menu's native source-owned
+interaction. The card itself, before disclosure opacity/scale and the row's
+orientation transform, is the hosted source; previews target its converted center
+in the window, not a potentially reflected scroll ancestor. Descendant image
+open/close controls retain their own taps. This is the real card lift, not an
+explicit SwiftUI replacement preview.

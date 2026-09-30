@@ -3726,3 +3726,13 @@ Claimed on `ct-23-cards`. Failure modes recorded before implementation:
 - Missing ancestry must leave existing behavior intact and report once. Today's
   path, bottom coverage, obstruction motion, detached rows and child sheets retain
   their existing contracts. No Gateway lifecycle or device install is authorized.
+
+Baseline clean `ce0b631ca`, run `20260930T044023Z-run.gDn2o8`: dark hosted
+window pixels and XCUITest badge positions are upright at rest in both modes.
+Origin's actual long-press screenshot has no visible card while today's lift is
+upright: B reproduced, A not yet reproduced. Retained PNGs are exported under
+`packages/ios-app/build/ct23-display-baseline/` with an attachment manifest.
+The first status-bar coordinate also failed on today; adjust to the time's center
+before judging the origin behavior. A source-owned native menu experiment now
+wraps the expanded card itself (not the full-width disclosure host); its preview
+explicitly targets the window for highlight and dismissal. Gates remain pending.
