@@ -92,6 +92,7 @@ only on the user's word) apply to every task.
 | C25 | Needs scoping | Expose Jev admission choice, confidence, usefulness score and coverage so the archive threshold can be owned by the editable routine, not the assessment adapter | C21 | — |
 | C26 | Done | Raindrop collection roles: one home per scope, triage inboxes, an archive home; moves must agree with Tron's decision | C20 | knowledge-consolidation session, 2026-09-30 |
 | C27 | Done | X bookmarks through the official X API: OAuth 2.0 PKCE connection with refresh, discovery under the paid cap, credit balance | C20 | knowledge-consolidation session, 2026-09-30 |
+| C29 | Claimed | Connected Services and MCP Servers sheets follow the Providers sheet layout; X shows its credit balance | C27 | knowledge-consolidation session, 2026-09-30 |
 
 ## Task details
 
@@ -315,6 +316,26 @@ can show remaining credits (C29).
 
 The user does the X developer-console steps (create app, set a callback URL,
 buy credits) and the consent; agents never do them.
+
+### C29 — Integration sheets like Providers
+
+User request (2026-09-30): the Connected Services and MCP Servers sheets should
+be laid out like the Providers sheet, and connected services should show the
+remaining credit where the provider reports one. Scope decided with the user:
+only X reports credits (`knowledge.x.credits`, from X's own balance endpoint);
+no other balance is invented (Jev's spend is not shown as a balance).
+
+Layout to match `ProviderSettingsView`: a "Configured" group of connected
+accounts (one row per instance: service and account name, status line such as
+"Connected · OAuth" or "Setup required", a green usage line when available,
+and a Details button opening the instance sheet) and an "Available" group of
+services with no instance (Connect button). Capability, permission, budget and
+Raindrop collection-role details live in the instance detail sheet, not the
+list. The same component serves both surfaces; MCP servers show status only.
+Service labels read plainly ("Jev", not "Jev tagging"; the account name, not
+"Account personal"). X's credit line loads like provider usage: a bounded,
+presentation-fenced read that never blocks the list, shows a pending line while
+loading and nothing on failure.
 
 ## Handoff log
 
@@ -599,3 +620,7 @@ buy credits) and the consent; agents never do them.
   passes alone (temp-dir cleanup race under load) and `request-span` fails on
   `main` too.
 - Changes: this commit.
+
+### C29 · Claimed · 2026-09-30 · knowledge-consolidation session
+
+- Result: C29 claimed; work on branch `ios/integration-sheets`.
