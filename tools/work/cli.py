@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bootstrap  # noqa: E402
 import claim  # noqa: E402
 import start  # noqa: E402
+import verify  # noqa: E402
 from gh import Gh, GhError  # noqa: E402
 
 
@@ -32,6 +33,9 @@ def main(argv: list) -> int:
     begin = commands.add_parser("start", help="claim an issue and create its branch and worktree")
     begin.add_argument("issue", type=int, help="issue number")
     begin.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    check = commands.add_parser("verify", help="run the checks the branch diff requires and write a receipt")
+    check.add_argument("--post", action="store_true",
+                       help="publish the receipt: evidence comment, private logs, commit status")
     args = parser.parse_args(argv)
 
     root = repository_root()
@@ -42,7 +46,15 @@ def main(argv: list) -> int:
             return bootstrap.run(Gh(root), root, config, args.apply, args.report)
         if args.command == "start":
             return start.run(Gh(root), Path.cwd(), config, args.issue, args.session)
-    except (GhError, bootstrap.BootstrapError, claim.ClaimError, FileNotFoundError, json.JSONDecodeError) as error:
+        if args.command == "verify":
+            receipt = verify.verify(root, config)
+            print(f"receipt:  {verify.receipt_path(root, receipt['head'])}")
+            print(f"result:   {'passed' if receipt['passed'] else 'FAILED'} for {receipt['head']}")
+            if args.post:
+                print(f"posted:   {verify.post(Gh(root), root, config, receipt)}")
+            return 0 if receipt["passed"] else 1
+    except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError,
+            FileNotFoundError, json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1
     return 64

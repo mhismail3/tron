@@ -19,6 +19,7 @@
 # Usage:
 #   scripts/personal-info-guard.sh                # full repo scan
 #   scripts/personal-info-guard.sh --staged       # only staged changes (pre-commit)
+#   scripts/personal-info-guard.sh --stdin < text # text about to be published
 
 set -euo pipefail
 
@@ -47,6 +48,33 @@ EXCLUDE_SELF=':(top,exclude,literal)scripts/personal-info-guard.sh'
 
 mode="${1:-full}"
 offenders_total=0
+
+if [ "$mode" = "--stdin" ]; then
+    # Public GitHub text (work verify evidence) is outside the repository
+    # inventory, so the same needles run over it before it is posted.
+    text=$(mktemp "${TMPDIR:-/tmp}/tron-personal-info-guard.XXXXXX") || {
+        echo "personal-info-guard: could not allocate a text buffer" >&2
+        exit 2
+    }
+    trap 'rm -f "$text"' EXIT
+    cat > "$text" || { echo "personal-info-guard: failed to read stdin" >&2; exit 2; }
+    for entry in "${PATTERNS[@]}"; do
+        pattern="${entry%|*}"
+        if hits=$(grep -nE -e "$pattern" "$text"); then
+            echo "❌ ${entry##*|}" >&2
+            printf '%s\n' "$hits" | sed 's/^/    line /' >&2
+            offenders_total=$((offenders_total + $(printf '%s\n' "$hits" | wc -l)))
+        elif [ $? -ne 1 ]; then
+            echo "personal-info-guard: grep failed while checking ${entry##*|}" >&2
+            exit 2
+        fi
+    done
+    if [ "$offenders_total" -gt 0 ]; then
+        echo "❌ FAIL — $offenders_total personal-info offender(s) in the text." >&2
+        exit 1
+    fi
+    exit 0
+fi
 SCAN_PATHS=()
 
 path_list=$(mktemp "${TMPDIR:-/tmp}/tron-personal-info-guard.XXXXXX") || {

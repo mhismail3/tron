@@ -126,6 +126,23 @@ class PersonalInfoGuardTests(unittest.TestCase):
         path.write_text("prefix" + DEVELOPER_WORD + "suffix")
         self.check_guard(0)
 
+    def check_text(self, text, expected):
+        result = subprocess.run(["bash", str(self.guard), "--stdin"], cwd=self.root, env=self.env,
+                                input=text, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+
+    def test_stdin_text_uses_the_same_needles(self):
+        # Text posted to public GitHub is outside the repository inventory.
+        self.check_text("Checks passed in <repo> and ~/Workspace\n", 0)
+        for text in (NEEDLE + "/Workspace/x", "line one\nby " + DEVELOPER_WORD + "\n",
+                     "github.com/" + DEVELOPER_WORD, "mh" + "ismail3/tron"):
+            with self.subTest(text=text):
+                self.check_text("clean first line\n" + text, 1)
+
+    def test_stdin_ignores_the_repository(self):
+        self.put("packages/gateway/fixture.ts", NEEDLE, staged=True)
+        self.check_text("generic evidence", 0)
+
     def test_git_errors_fail_closed(self):
         for operation, staged in (("grep", True), ("diff", True), ("ls-files", False)):
             with self.subTest(operation=operation):

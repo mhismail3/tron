@@ -126,3 +126,123 @@ the GitHub side.
     titles.
 11. **Public claim text leaks a local absolute path.** The repository may be
     public.
+
+## `verify`
+
+`scripts/tron work verify [--post]` validates the committed head of the current
+branch and writes a receipt for that exact commit.
+
+1. **Clean head.** A worktree with modified, staged or untracked files is
+   refused, because the receipt describes a commit and not a working tree.
+2. **Diff.** It fetches the remote base branch (`claim.remote`,
+   `claim.baseBranch`) and computes the changed paths from
+   `merge-base(<remote>/<base>, HEAD)..HEAD`, deletions included.
+3. **Check set.** `verify.checks` names each check with path globs and a shell
+   command run from the repository root after `verify.prelude`. A check is
+   required when any changed path matches its globs, or always when it sets
+   `"always": true`. Every changed path must match at least one check;
+   otherwise verify refuses, lists the unmapped paths and writes no receipt.
+   Globs use `*` within one path segment, `**` across segments and `?` for one
+   character.
+4. **Placeholders.** `{paths}` expands to the shell-quoted absolute paths of the
+   changed files that matched this check and still exist at the head.
+   `{merge_base}` expands to the merge-base commit.
+5. **Run.** Each required check runs in its own process group. Its combined
+   output goes to `<git-dir>/work/logs/<head>/<check>.log`, where `<git-dir>` is
+   `git rev-parse --git-dir`, so every worktree keeps its own logs. The receipt
+   is `<git-dir>/work/receipts/<head>.json`. It records the head, the base
+   branch tip, the merge-base, the changed paths, a hash of the verify
+   configuration, the required check set, and for each check its command, exit
+   code, wall time, log path, and the commit it was carried from, if any. The
+   receipt passes only when every required check exited 0. If the head moves or
+   the worktree changes while checks run, verify refuses and writes no receipt.
+6. **Incremental re-verify.** Verify looks for the nearest earlier passing
+   receipt whose commit `P` is an ancestor of the head and whose configuration
+   hash is identical. A required check is carried from `P` instead of run when it
+   passed there, it is not `always`, and none of the paths changed between `P`
+   and the head match its globs. Those paths include everything an update from
+   the base branch brought in. After a rebase `P` is no longer an ancestor, so
+   nothing is carried. A check's globs must therefore cover everything its
+   result depends on, including the scripts it calls.
+
+`--post` then publishes the receipt:
+
+1. It refuses unless the current branch exists on the remote at exactly the
+   head.
+2. It sets the commit status `verify.statusContext` to `pending` on the head.
+3. The target is the open pull request for the branch, otherwise the issue
+   whose number is in the branch name (`<type>/<issue>-<slug>`).
+4. Full logs and the receipt go only to the private evidence repository
+   `<owner>/<repo><verify.evidenceRepositorySuffix>`, derived at run time,
+   under `<issue>/<head>/`.
+5. The public comment has a table of checks, commands, results, wall times and
+   carried-from commits, plus the last `verify.excerptLines` lines of each
+   failed log. The repository root and home directory are replaced by `<repo>`
+   and `~` in excerpts. The whole comment goes through `verify.scrubCommand` on
+   stdin; any finding or error refuses the comment.
+6. Only after the comment is posted does it set the final status: `success`
+   when the receipt passed, `failure` otherwise. Any error after the pending
+   status sets `failure` before verify exits.
+
+The comment links the evidence directory with a relative link, so no owner
+name is written into public text.
+
+Exit status is 0 only when the receipt passes (and, with `--post`, the evidence
+was posted).
+
+### Tron's check set
+
+Tron's `verify` section in `.github/work.json` follows the validation commands
+in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
+`.node-version` from nvm first on `PATH`. Its limits are deliberate:
+
+- **Gateway** source runs `npm run build` plus `vitest related` on the changed
+  TypeScript files. A change that no test imports runs only the build.
+  Dependency, configuration, script, fixture and protocol-fixture changes run the
+  full Gateway suite.
+- **iOS** runs the source policy, `scripts/tron-ios-test build` and the complete
+  unit target. Focused owners cannot be derived from paths: suite names are not
+  file names, and an `--only-testing` selector that names no suite runs zero
+  tests and passes. The simulator admission and lease rules of
+  `scripts/tron-ios-test` still apply, so a busy Mac fails the check with exit
+  73; verify again once memory is free.
+- **Mac** regenerates the project and runs `build-for-testing` and
+  `test-without-building` for `TronMacTests`, as in the Mac development guide.
+  Packaging checks that need a staged Gateway payload stay with the macOS CI job.
+- **Scripts** run their owning `scripts/test-*` suite where one exists. Scripts
+  without an owner (`scripts/tron`, `scripts/tron-dev`, the hook installer and a
+  few one-off tools) get a syntax check only.
+- **`.github` workflows, forms and rulesets** get a JSON or YAML syntax check;
+  GitHub validates their meaning when they run.
+- The privacy guard, agent policy, documentation policy and `git diff --check`
+  over the branch diff always run.
+
+### Failure modes
+
+`test_verify.py` checks these against real temporary repositories, local bare
+remotes and a fake `gh` (`WORK_GH`) that records every call. The live E2E
+covers the GitHub side.
+
+12. **A stale receipt is accepted for another head.** A receipt is named by and
+    records its head. `--post` publishes only the receipt it just made for the
+    current head, and refuses when the remote branch is at another commit.
+13. **The check set is narrowed by the diff or by carry-over.** The required set
+    comes from the whole branch diff against the merge-base, not from the
+    commits since the last receipt. Carried checks stay in the required set,
+    and `always` checks are never carried.
+14. **A crash or partial post leaves a success status.** The status is
+    `pending` before anything else is posted, `success` is set only after the
+    comment exists and only for a passing receipt, and any error sets `failure`.
+15. **Evidence leaks personal data.** Every public comment passes the scrub
+    command first; excerpts are redacted; full logs go only to the private
+    evidence repository.
+16. **An incoming base-branch change is missed by carry-over.** Carry-over
+    compares the globs against every path changed between `P` and the head,
+    including merged base-branch changes, and carries nothing across a rebase.
+17. **Unmapped paths pass silently.** A changed path that no check covers
+    refuses verification.
+18. **A configuration change reuses an old receipt.** Carry-over requires an
+    identical configuration hash.
+19. **A receipt describes content that is not the committed head.** Dirty
+    worktrees are refused, and a head or worktree that changes during the run
+    discards the receipt.

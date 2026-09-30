@@ -37,6 +37,9 @@ Commands:
   work start <issue> [--session <id>]
                                     Claim a Ready issue: remote branch, Project
                                     status, claim comment, and its worktree
+  work verify [--post]              Run the checks the branch diff requires and write
+                                    a receipt for the committed head; --post publishes
+                                    evidence and the tron/verify commit status
 
 There is no deploy command. Production deployment is manual-only.
 EOF
