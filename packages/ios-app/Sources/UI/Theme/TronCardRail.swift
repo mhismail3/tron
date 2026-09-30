@@ -76,6 +76,7 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
                 }
             }
             .padding(.vertical, 4)
+            .chatSecondaryScrollContent()
         }
         .scrollClipDisabled()
     }

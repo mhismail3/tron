@@ -2491,3 +2491,25 @@ lazy fixture. Phase-height comparisons read the probe's settled records and
 wait for the entrance owner's settlement, not a guessed number of display
 frames. Thinking-row mount/measurement and the unchanged 0.5 pt phase bound
 remain gates in both orientations.
+
+### Inline display orientation evidence (CT-23)
+
+`ChatDisplayOrientationTests` renders a fully loaded asymmetric image through the
+real transcript/media owner in both orientations and reads window pixels. The
+`inline-image-display-at-rest` parity reference is recorded on today's path at
+clean `433b9c340`; the prior ten references are unchanged. The hosted-only
+`-tron-chat-display-fixture` drives the same card in dark mode for
+`TronChatDisplayUITests`: long-press/dismiss/lazy-return screenshots and rendered
+pixel checks are retained in the xcresult. Run hosted owners with the `ui-validation` tier;
+XCUITest selects each orientation through the app's launch environment. These
+checks do not substitute for the user's device compositor/animation review.
+
+Status-bar simulator acceptance is `ChatDisplayOrientationTests`' one-recipient
+matrix and public delegate journey, not a synthetic status-bar tap: even the plain
+SwiftUI control did not receive SpringBoard coordinate taps on this simulator.
+The origin callback must return false, detach, and make oldest loaded history
+visible; today's sole recipient must remain its native transcript. Coverage must
+remove the proxy and restore the native setting. **Device check still required:**
+tap the real status bar with empty composer and with attachments/chips/catalog in
+both orientations. Upright-at-rest device inversion remains open: hosted and
+XCUITest pixels do not reproduce the user's intermittent image/badge flip.

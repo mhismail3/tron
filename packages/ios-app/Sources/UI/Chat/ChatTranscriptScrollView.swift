@@ -725,6 +725,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance,
                 clearance: orientation.layoutClearance(for: safeAreaInsets)
             )
+            .environment(\.chatOwnsStatusBar, true)
+            .chatTranscriptStatusBar(orientation, active: isReady && admitsNativeCallbacks) {
+                scrollCoordinator.requestOldestHistory(reduceMotion: reduceMotion)
+                onExecuteCommand()
+            }
         }
         // The flip belongs on the scroll view itself, outside the sheet host and
         // geometry observations. The owner reads safe areas before the flip;

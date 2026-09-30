@@ -2756,6 +2756,8 @@ struct ChatView: View {
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
                 transcriptScrollPosition = target
+            case .oldestHistory:
+                transcriptScrollPosition.scrollTo(edge: transcriptOrientation.oldestEdge)
             case .openingTail(let renderedID):
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
@@ -2981,6 +2983,7 @@ struct ChatView: View {
             onComposerHeight: composerHeightChanged,
             onComposerHeightSettled: composerHeightSettled
         )
+        .environment(\.chatOwnsStatusBar, true)
     }
 
     private var composerTrailingMode: ComposerTrailingMode? {

@@ -99,7 +99,9 @@ struct TronMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {
+            if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {
+                HostedChatDisplayFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {
                 HostedAskUserFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-pagination-fixture") {
                 HostedSessionPaginationFixture()

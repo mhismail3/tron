@@ -367,6 +367,7 @@ struct TranscriptRow: View, Equatable {
                 }
             }
             .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
+            .chatSecondaryScrollContent()
         }
         .scrollClipDisabled()
         .defaultScrollAnchor(item.role == .user ? .trailing : .leading)

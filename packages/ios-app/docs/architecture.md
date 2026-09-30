@@ -2463,3 +2463,35 @@ guidance. Per-profile persisted policy is restored via
 fenced `session.search.policy.get` after lifecycle/pool admission, with false-
 safe visible errors. A Gateway that reports partial or unavailable semantic
 coverage is displayed as such while lexical results remain usable.
+
+Inline expanded display cards share the message menu's native source-owned
+interaction. The card itself, before disclosure opacity/scale and the row's
+orientation transform, is the hosted source; previews target its converted center
+in the window, not a potentially reflected scroll ancestor. Descendant image
+open/close controls retain their own taps. This is the real card lift, not an
+explicit SwiftUI replacement preview.
+
+The orientation owner mounts an origin-only status-bar probe inside transcript
+content. Public UIKit ancestry finds only its enclosing scroll view; while the
+presentation admits native callbacks it disables that view's `scrollsToTop` and
+registers a transparent 1 pt window scroll proxy. The proxy delegate rejects its
+own scroll and asks the coordinator to detach and issue `oldest-history` through
+`ScrollPosition`. SwiftUI's delegate is never replaced. Coverage/unmount restores
+the original setting and removes the proxy; absent ancestry logs once in
+`ChatTranscriptOrientation` and leaves UIKit behavior unchanged. Today's path
+mounts no probe. The hosted status-bar journey exercises the public delegate path; real system
+taps remain a device check because simulator synthetic delivery is unreliable.
+
+Exactly one scroll is eligible for chat's status-bar gesture. Secondary scroll
+content uses the shared `chatSecondaryScrollContent` ancestry probe, scoped by
+`chatOwnsStatusBar` on transcript/composer content only: attachments, selected
+resources, catalog, horizontal Markdown and card rails opt out without geometry
+or delegate changes. The native composer text view sets its own public property.
+This also fixes today's previously competing empty attachment rail; sheets and
+settings do not inherit a global scroll-view sweep.
+
+Both managed-sheet content boundaries explicitly reset `chatOwnsStatusBar` to
+false. A resource sheet presented by a composer chip/catalog must regain its own
+primary scroll eligibility rather than inherit the covered chat's exclusion.
+`managedSheetRestoresStatusBarOwnership` exercises actual bool/item presentations
+and their native document scrolls; without the reset both variants fail.
