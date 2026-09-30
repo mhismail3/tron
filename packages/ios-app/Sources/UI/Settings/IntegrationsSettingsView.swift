@@ -6,18 +6,6 @@ import TronMobileCore
 /// connection ID to the owner and every read is fenced to the current Gateway
 /// profile, lifecycle generation, and connection epoch.
 struct IntegrationsSettingsView: View {
-    enum Surface: Hashable {
-        case connectedServices
-
-        var title: String { "Connected Services" }
-        func includes(_ definition: IntegrationDefinition) -> Bool { definition.implementation != "mcp" }
-    }
-
-    let surface: Surface
-
-    init(surface: Surface) {
-        self.surface = surface
-    }
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
@@ -32,7 +20,7 @@ struct IntegrationsSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let snapshot {
-                    let definitions = snapshot.definitions.filter(surface.includes)
+                    let definitions = snapshot.definitions
                     ForEach(definitions) { definition in
                         definitionSection(definition, snapshot: snapshot)
                     }
@@ -55,7 +43,7 @@ struct IntegrationsSettingsView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
-        .tronNavigationTitle(surface.title, accent: .tronCyan)
+        .tronNavigationTitle("Connected Services", accent: .tronCyan)
         .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronCyan)
         .task(id: PresentationActivityTaskID(source: "integrations/\(model.knowledgePresentationIdentity)", presentationActive: activity.allowsPresentationPublication)) {

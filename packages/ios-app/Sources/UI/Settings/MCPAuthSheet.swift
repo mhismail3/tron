@@ -70,9 +70,9 @@ struct MCPAuthSheet: View {
     private func cancel() async {
         do {
             _ = try await model.mutateMCPAdmin("mcp.auth.cancel", parameters: ["operationId": .string(operationID)])
+            model.finishMCPAuthOperation(operationID: operationID)
+            finish()
         } catch { self.error = error.localizedDescription }
-        await model.cancelAuth(operationID: operationID)
-        finish()
     }
 
     private func finish() {

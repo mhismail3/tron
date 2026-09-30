@@ -1,0 +1,26 @@
+{
+  "servers": [
+    {
+      "name": "unreachable",
+      "scope": "global",
+      "source": "~/mcp.json",
+      "enabled": true,
+      "exposure": "codemode",
+      "transport": "http://127.0.0.1:1/mcp",
+      "state": "failed",
+      "tools": [],
+      "error": "fetch failed"
+    },
+    {
+      "name": "disabled",
+      "scope": "global",
+      "source": "~/mcp.json",
+      "enabled": false,
+      "exposure": "codemode",
+      "transport": "http://127.0.0.1:1/mcp",
+      "state": "disabled",
+      "tools": []
+    }
+  ],
+  "errors": []
+}

@@ -4197,6 +4197,22 @@ final class AppModel {
         await providerAuth.cancelAuth(operationID: operationID)
     }
 
+    func beginMCPAuthAdmission() -> Int {
+        providerAuth.beginMCPAuthAdmission()
+    }
+
+    func adoptMCPAuthOperation(operationID: String, target: ProviderCatalogTarget, admission: Int) {
+        providerAuth.adoptMCPAuthOperation(operationID: operationID, target: target, admission: admission)
+    }
+
+    func finishMCPAuthAdmission(_ admission: Int) {
+        providerAuth.finishMCPAuthAdmission(admission)
+    }
+
+    func finishMCPAuthOperation(operationID: String) {
+        providerAuth.finishMCPAuthOperation(operationID: operationID)
+    }
+
     func refreshModelCatalog(target: ProviderCatalogTarget, force: Bool = true) async throws {
         try await providerAuth.refreshModelCatalog(target: target, force: force)
     }

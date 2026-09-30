@@ -1,6 +1,16 @@
 import SwiftUI
 import TronMobileCore
 
+enum BuiltinExtensionsSettingsPolicy {
+    static func document(from root: JSONValue, target: SettingsTarget) -> [String: JSONValue]? {
+        root.objectValue?["documents"]?.objectValue?[target.scope.rawValue]?.objectValue
+    }
+
+    static func shouldPersistModeChange(value: String, loadedValue: String, loading: Bool) -> Bool {
+        !loading && value != loadedValue
+    }
+}
+
 /// Settings projection for Pi's built-in extension switches and tool defaults.
 struct BuiltinExtensionsSettingsSection: View {
     @Environment(AppModel.self) private var model
@@ -9,6 +19,7 @@ struct BuiltinExtensionsSettingsSection: View {
     @State private var entries: [String] = []
     @State private var defaultTools: [String] = []
     @State private var mode = "on"
+    @State private var loadedMode = "on"
     @State private var loading = true
     @State private var error: String?
     @State private var generation = 0
@@ -19,13 +30,13 @@ struct BuiltinExtensionsSettingsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-        TronSettingsGroup("Pi Built-ins", detail: "Settings for the agent and its extensions", accent: .tronCyan, surfaceStyle: .glass) {
+        TronSettingsGroup("Built-in extensions", detail: "Settings for the agent and its extensions", accent: .tronCyan, surfaceStyle: .glass) {
             if loading { ProgressView("Loading extension settings…").padding(12) }
             ForEach(builtins, id: \.self) { name in
                 TronToggleRow(
                     icon: "puzzlepiece.extension",
                     title: name,
-                    detail: "Disable this Pi built-in in the current scope",
+                    detail: "Disable this built-in extension in the current scope",
                     accent: .tronCyan,
                     isOn: Binding(get: { !entries.contains("-builtin:\(name)") }, set: { enabled in Task { await setBuiltin(name, enabled: enabled) } })
                 )
@@ -43,7 +54,10 @@ struct BuiltinExtensionsSettingsSection: View {
                     Picker("Codemode", selection: $mode) {
                         Text("On").tag("on")
                         Text("Only").tag("only")
-                    }.onChange(of: mode) { _, value in guard !loading else { return }; Task { await saveMode(value) } }
+                    }.onChange(of: mode) { _, value in
+                        guard BuiltinExtensionsSettingsPolicy.shouldPersistModeChange(value: value, loadedValue: loadedMode, loading: loading) else { return }
+                        Task { await saveMode(value) }
+                    }
                 }
             }.padding(12)
         }
@@ -60,17 +74,18 @@ struct BuiltinExtensionsSettingsSection: View {
         loading = true
         let loaded = await model.refreshSettings(target: target)
         guard current(ticket, identity) else { return }
-        guard loaded, let root = model.settings(for: target)?.objectValue,
-              let scope = root["documents"]?.objectValue?[target.scope.rawValue]?.objectValue else {
+        guard loaded, let settings = model.settings(for: target),
+              let scope = BuiltinExtensionsSettingsPolicy.document(from: settings, target: target) else {
             loading = false
             error = loaded ? nil : "Extension settings are unavailable."
             return
         }
         entries = scope["extensions"]?.arrayValue?.compactMap(\.stringValue) ?? []
-        let effective = root["effective"]?.objectValue ?? [:]
-        defaultTools = effective["defaultTools"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        defaultTools = scope["defaultTools"]?.arrayValue?.compactMap(\.stringValue) ?? []
         toolOverrides = defaultTools.joined(separator: " ")
-        mode = effective["codemode"]?.objectValue?["mode"]?.stringValue ?? "on"
+        let scopedMode = scope["codemode"]?.objectValue?["mode"]?.stringValue ?? "on"
+        loadedMode = scopedMode
+        mode = scopedMode
         loading = false; error = nil
     }
 
@@ -102,5 +117,6 @@ struct BuiltinExtensionsSettingsSection: View {
     }
     private func saveMode(_ value: String) async {
         await persist(.object(["codemode": .object(["mode": .string(value)])]))
+        loadedMode = value
     }
 }

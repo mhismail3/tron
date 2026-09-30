@@ -1,19 +1,39 @@
 import SwiftUI
 import TronMobileCore
 
-private struct MCPServerList: Decodable {
+struct MCPServerList: Decodable {
     struct Server: Decodable, Identifiable {
         let name: String
-        let status: String?
-        let toolCount: Int?
-        let tools: [String]?
-        let exposure: String?
+        let scope: String
+        let source: String
+        let enabled: Bool
+        let exposure: String
+        let transport: String
+        let state: String
+        let tools: [String]
         let error: String?
-        let stderr: String?
         var id: String { name }
     }
     let servers: [Server]
     let errors: [JSONValue]?
+}
+
+enum MCPServerPresentationPolicy {
+    static func stateTitle(_ state: String) -> String {
+        switch state {
+        case "connected": "Connected"
+        case "needs-auth": "Needs sign-in"
+        case "failed": "Failed"
+        case "disabled": "Disabled"
+        default: state.split(separator: "-").map { $0.capitalized }.joined(separator: " ")
+        }
+    }
+
+    static func includes(_ server: MCPServerList.Server, selectedScope: String) -> Bool {
+        selectedScope != "project" || server.scope == "project"
+    }
+
+    static func isNeedsAuth(_ state: String) -> Bool { state == "needs-auth" }
 }
 
 /// MCP configuration is owned by Pi's mcp.json; this screen is only an
@@ -40,6 +60,9 @@ struct MCPServersSettingsView: View {
     @State private var authOperationID: String?
 
     private var cwd: String? { selectedScope == "project" ? projectCWD : nil }
+    private var visibleServers: [MCPServerList.Server] {
+        servers.filter { MCPServerPresentationPolicy.includes($0, selectedScope: selectedScope) }
+    }
     private var requestID: String { "\(model.profileRevision):\(model.foregroundReconciliationGeneration):\(generation):\(selectedScope):\(projectCWD ?? "")" }
 
     var body: some View {
@@ -56,16 +79,16 @@ struct MCPServersSettingsView: View {
                 if let error { TronSettingsNotice(message: error, retry: reload) }
                 TronSettingsGroup("MCP Servers", detail: selectedScope == "global" ? "Global configuration" : "Trusted project configuration", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
                     if loading && servers.isEmpty { ProgressView("Loading MCP servers…").padding() }
-                    else if servers.isEmpty { TronPlaceholderState(title: "No MCP servers", detail: "Add a stdio or HTTP server to your configuration.", icon: "server.rack") }
+                    else if visibleServers.isEmpty { TronPlaceholderState(title: "No MCP servers", detail: "Add a stdio or HTTP server to your configuration.", icon: "server.rack") }
                     ForEach(Array(serverErrors.enumerated()), id: \.offset) { _, item in
                         Text(item.objectValue?["message"]?.stringValue ?? item.stringValue ?? "MCP server reported an error")
                             .font(TronTypography.caption).foregroundStyle(Color.tronError).padding(12).textSelection(.enabled)
                     }
-                    ForEach(servers) { server in
+                    ForEach(visibleServers) { server in
                         serverRow(server)
-                        if server.id != servers.last?.id { TronSettingsDivider(accent: .tronCyan) }
+                        if server.id != visibleServers.last?.id { TronSettingsDivider(accent: .tronCyan) }
                     }
-                    if !servers.isEmpty { TronSettingsDivider(accent: .tronCyan) }
+                    if !visibleServers.isEmpty { TronSettingsDivider(accent: .tronCyan) }
                     HStack {
                         Button("Add Server", systemImage: "plus") { showingAdd = true }
                         Spacer()
@@ -118,7 +141,7 @@ struct MCPServersSettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(server.name).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
-                    Text("\(statusTitle(server.status)) · \(server.toolCount ?? server.tools?.count ?? 0) tools · \(server.exposure ?? "codemode")")
+                    Text("\(MCPServerPresentationPolicy.stateTitle(server.state)) · \(server.tools.count) tools · \(server.exposure)")
                         .font(TronTypography.caption).foregroundStyle(statusColor(server))
                 }
                 Spacer()
@@ -137,26 +160,13 @@ struct MCPServersSettingsView: View {
                 } label: { Image(systemName: "ellipsis.circle") }.disabled(working)
             }
             if let error = server.error { Text(error).font(TronTypography.caption).foregroundStyle(Color.tronError).textSelection(.enabled) }
-            if let stderr = server.stderr, !stderr.isEmpty { Text(stderr).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).lineLimit(4).textSelection(.enabled) }
         }.padding(12)
     }
 
-    private func statusTitle(_ status: String?) -> String {
-        switch status?.lowercased() {
-        case "connected": "Connected"
-        case "needs sign-in": "Needs sign-in"
-        case "failed": "Failed"
-        case "configured": "Configured"
-        case let value?: value.prefix(1).uppercased() + value.dropFirst()
-        case nil: "Configured"
-        }
-    }
-
     private func statusColor(_ server: MCPServerList.Server) -> Color {
-        let status = server.status?.lowercased() ?? ""
-        if status.contains("sign") || status.contains("auth") { return .tronWarning }
-        if status.contains("fail") || server.error != nil { return .tronError }
-        if status.contains("connect") { return .tronEmerald }
+        if MCPServerPresentationPolicy.isNeedsAuth(server.state) { return .tronWarning }
+        if server.state == "failed" || server.error != nil { return .tronError }
+        if server.state == "connected" { return .tronEmerald }
         return .tronTextSecondary
     }
 
@@ -211,6 +221,7 @@ struct MCPServersSettingsView: View {
     private func setToken() async {
         guard let name = tokenServer else { return }
         await mutate("mcp.token.set", ["server": .string(name), "token": .string(token)])
+        guard error == nil else { return }
         tokenServer = nil; token = ""
     }
     private func startAuth(_ server: String) async {
@@ -218,11 +229,18 @@ struct MCPServersSettingsView: View {
             // MCP OAuth is owned by a live Pi session; this screen deliberately
             // reports the missing session rather than inventing a parallel flow.
             guard let session = model.selectedSessionID else { throw GatewayFailure(code: "needs_session", message: "Open the session that uses this MCP server to sign in.", retryable: false, details: nil) }
-            let response = try await model.mutateMCPAdmin("mcp.auth.start", parameters: ["sessionId": .string(session), "server": .string(server)])
-            guard let operationID = response.objectValue?["operationId"]?.stringValue else {
-                throw GatewayFailure(code: "invalid_response", message: "The MCP sign-in operation could not be started.", retryable: true, details: nil)
+            let admission = model.beginMCPAuthAdmission()
+            do {
+                let response = try await model.mutateMCPAdmin("mcp.auth.start", parameters: ["sessionId": .string(session), "server": .string(server)])
+                guard let operationID = response.objectValue?["operationId"]?.stringValue else {
+                    throw GatewayFailure(code: "invalid_response", message: "The MCP sign-in operation could not be started.", retryable: true, details: nil)
+                }
+                model.adoptMCPAuthOperation(operationID: operationID, target: .session(id: session), admission: admission)
+                authOperationID = operationID
+            } catch {
+                model.finishMCPAuthAdmission(admission)
+                throw error
             }
-            authOperationID = operationID
         } catch { self.error = error.localizedDescription }
     }
 }

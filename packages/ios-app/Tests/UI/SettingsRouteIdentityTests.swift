@@ -41,16 +41,4 @@ struct SettingsRouteIdentityTests {
         #expect(AuthorizedDevicePresentationPolicy.selection(current: original, refreshedDevices: []) == original)
     }
 
-    @Test("connected-services route includes account services")
-    func integrationSurfaceFiltering() {
-        let service = IntegrationDefinition(
-            schemaVersion: 1,
-            id: "calendar",
-            implementation: "service",
-            displayName: "Calendar",
-            setupMethods: ["token"],
-            capabilities: []
-        )
-        #expect(IntegrationsSettingsView.Surface.connectedServices.includes(service))
-    }
 }

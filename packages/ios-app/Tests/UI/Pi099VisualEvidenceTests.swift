@@ -172,11 +172,11 @@ struct Pi099VisualEvidenceTests {
                 let result: JSONValue
                 switch method {
                 case "mcp.list":
-                    result = .object(["servers": .array([
-                        .object(["name": .string("calendar"), "status": .string("connected"), "toolCount": .number(5), "exposure": .string("codemode")]),
-                        .object(["name": .string("linear"), "status": .string("needs sign-in"), "toolCount": .number(3), "exposure": .string("direct")]),
-                        .object(["name": .string("weather"), "status": .string("failed"), "toolCount": .number(0), "error": .string("Fixture server unavailable")]),
-                    ]), "errors": .array([])])
+                    let fixtureURL = URL(fileURLWithPath: #filePath)
+                        .deletingLastPathComponent()
+                        .deletingLastPathComponent()
+                        .appendingPathComponent("Fixtures/mcp-list-cli.json")
+                    result = (try? JSONDecoder.gateway.decode(JSONValue.self, from: Data(contentsOf: fixtureURL))) ?? .object(["servers": .array([]), "errors": .array([])])
                 case "provider.list":
                     result = .object(["providers": .array([.object(["id": .string("openai"), "name": .string("OpenAI"), "configured": .bool(false), "usageSupported": .bool(false), "localOnly": .bool(false), "authMethods": .array([.string("api-key")]), "modelCount": .number(0)])])])
                 case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
@@ -185,7 +185,12 @@ struct Pi099VisualEvidenceTests {
                 case "packages.checkUpdates": result = .object(["updates": .array([])])
                 case "modules.list": result = .object(["modules": .array([])])
                 case "settings.get":
-                    result = .object(["documents": .object(["global": .object(["extensions": .array([])])]), "effective": .object(["defaultTools": .array([.string("+codemode"), .string("+tool_search")]), "codemode": .object(["mode": .string("on")])])])
+                    let defaults: [String: JSONValue] = [
+                        "extensions": .array([]),
+                        "defaultTools": .array([.string("+codemode"), .string("+tool_search")]),
+                        "codemode": .object(["mode": .string("on")]),
+                    ]
+                    result = .object(["documents": .object(["global": .object(defaults), "project": .object(defaults)]), "effective": .object(["defaultTools": .array([.string("+codemode"), .string("+tool_search")]), "codemode": .object(["mode": .string("on")])])])
                 default: continue
                 }
                 let response = JSONValue.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result])

@@ -94,7 +94,7 @@ struct SettingsView: View {
                         }
                         settingsDivider(accent: .tronCyan)
                         settingsLink("Connected Services", summary: "Accounts and service capabilities", icon: "link", accent: .tronCyan) {
-                            IntegrationsSettingsView(surface: .connectedServices)
+                            IntegrationsSettingsView()
                         }
                         settingsDivider(accent: .tronCyan)
                         if scope == .project {
