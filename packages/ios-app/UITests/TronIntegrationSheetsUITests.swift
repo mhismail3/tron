@@ -2,7 +2,6 @@ import XCTest
 
 /// Connected Services and MCP sheets against the in-app scripted connection owner.
 /// Failure modes this E2E journey protects:
-/// - a credit result from a previous profile/identity is published late;
 /// - the delayed X credit read blocks the rest of the configured/available list;
 /// - a failed X credit read leaves an error line in the list;
 /// - a setup-required instance is incorrectly repeated under Available;
@@ -77,18 +76,6 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
-    func testLateCreditsAreDiscardedAfterIdentitySwitch() {
-        continueAfterFailure = false
-        let app = launch(scenario: "identity-switch")
-        defer { app.terminate() }
-        XCTAssertTrue(app.staticTexts.matching(identifier: "integration-credit-pending").firstMatch.waitForExistence(timeout: 5))
-        app.buttons["Switch profile identity"].tap()
-        XCTAssertTrue(app.staticTexts["Configured"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["$4.20 available"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts.matching(identifier: "integration-credit-pending").firstMatch.exists)
-    }
-
-    @MainActor
     func testMCPServerUsesConfiguredAvailableGroupsWithoutCredits() {
         continueAfterFailure = false
         let light = launch(surface: "mcp")
@@ -102,6 +89,8 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["local-search"].exists)
         keepScreenshot(app, name: "c29-mcp-servers-dark")
         XCTAssertTrue(app.buttons["Add another server for MCP server"].exists)
+        XCTAssertTrue(app.staticTexts["Not configured"].exists, "An addable service reads like Providers' Available rows")
+        XCTAssertFalse(app.staticTexts["Setup required"].exists, "Setup required is reserved for a configured account needing attention")
         XCTAssertFalse(app.staticTexts["Remote MCP"].exists)
         XCTAssertFalse(app.staticTexts["Loading credits…"].exists)
         XCTAssertFalse(app.staticTexts["$4.20 available"].exists)

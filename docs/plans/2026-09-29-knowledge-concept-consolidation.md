@@ -639,3 +639,20 @@ loading and nothing on failure.
 - Tasks added: none.
 - Deviations: Gateway lifecycle untouched. No live Gateway request was made.
 - For the next agent: eight current light/dark captures are under the workspace `files/c29-screenshots/` directory.
+
+### C29 supervisor fixes · Done · 2026-09-30 · knowledge-consolidation session
+
+- Result: replaced the identity-switch UI test, which could not fail: the
+  fixture's profile switch reconnects the socket, which cancels the pending
+  credit reply, so no late result ever reached the fence. It passed with the
+  identity fence and the credit clear both removed. The fence is now proven by
+  `IntegrationModelsTests.testCreditReadStartedUnderPreviousIdentityIsNeverPublished`,
+  which holds one reply open across an identity change; it fails with the
+  identity check removed and passes with it. The fixture's switch control and
+  credit suppression were deleted with the test. Available rows read "Not
+  configured" in a neutral colour like Providers; "Setup required" (amber) is
+  reserved for a configured account needing attention.
+- Evidence: `IntegrationModelsTests` 8/8 (the new test fails without the
+  identity fence); `TronIntegrationSheetsUITests` 2/2; screenshots regenerated
+  from the result bundle.
+- Changes: this commit.

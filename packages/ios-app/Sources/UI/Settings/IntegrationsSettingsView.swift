@@ -65,7 +65,7 @@ struct IntegrationsSettingsView: View {
                             ForEach(Array(available.enumerated()), id: \.element.id) { index, definition in
                                 let adding = configured.contains { $0.definitionId == definition.id }
                                 let action = definition.implementation == "mcp" && adding ? "Add another server" : "Connect"
-                                IntegrationConfiguredRow(title: definition.displayName, account: "", status: "Setup required", usage: nil,
+                                IntegrationConfiguredRow(title: definition.displayName, account: "", status: "Not configured", usage: nil,
                                                          isLoadingUsage: false, configured: false, actionTitle: action,
                                                          accessibilityAction: "\(action) for \(definition.displayName)", accent: .tronCyan) {
                                     setupDefinition = definition

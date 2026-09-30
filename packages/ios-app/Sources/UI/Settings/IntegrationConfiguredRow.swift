@@ -35,7 +35,9 @@ struct IntegrationConfiguredRow: View {
                 }
                 Text(status)
                     .font(TronTypography.sans(size: TronTypography.sizeSecondary))
-                    .foregroundStyle(connected ? Color.tronEmerald : Color.tronAmber)
+                    // Like Providers: an unconfigured service is neutral; only a
+                    // configured account that needs attention is amber.
+                    .foregroundStyle(connected ? Color.tronEmerald : (configured ? Color.tronAmber : Color.tronTextMuted))
                     .fixedSize(horizontal: false, vertical: true)
                 if isLoadingUsage {
                     Text("Loading credits…")

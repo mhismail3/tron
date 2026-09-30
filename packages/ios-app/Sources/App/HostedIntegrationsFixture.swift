@@ -33,16 +33,6 @@ struct HostedIntegrationsFixtureView: View {
             if ready {
                 NavigationStack {
                     VStack {
-                        if ProcessInfo.processInfo.arguments.contains("-integrations-scenario") &&
-                            ProcessInfo.processInfo.arguments.contains("identity-switch") {
-                            Button("Switch profile identity") {
-                                let alternate = GatewayProfile(id: "integration-fixture-alternate", label: "Alternate server", host: "localhost", port: 9847, machineId: "fixture-integrations")
-                                Task {
-                                    await gateway.suppressCreditsForIdentitySwitch()
-                                    try? await model.connectHostedGateway(profile: alternate, token: "fixture-token")
-                                }
-                            }
-                        }
                         IntegrationsSettingsView(surface: surface)
                     }
                 }
@@ -67,10 +57,8 @@ struct HostedIntegrationsFixtureView: View {
 actor HostedIntegrationsGateway {
     private let scenario: String
     private var sockets: [HostedIntegrationsSocket] = []
-    private var suppressCredits = false
     init(scenario: String) { self.scenario = scenario }
     func attach(_ socket: HostedIntegrationsSocket) { sockets.append(socket) }
-    func suppressCreditsForIdentitySwitch() { suppressCredits = true }
 
     func handle(method: String, params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
         if method == "connections.list" { return (snapshot(), nil) }
@@ -92,7 +80,7 @@ actor HostedIntegrationsGateway {
         let instances: [JSONValue] = [instance("raindrop-1", "knowledge.raindrop", "knowledge-connector", "raindrop-account", "ready", "Mira", collections: [.object(["collectionId": .string("63441068"), "role": .string("research")])]),
                                       instance("jev-1", "knowledge.jev", "knowledge-connector", "jev-account", "setup-required", nil),
                                       instance("x-1", "knowledge.x", "knowledge-connector", "x-account", "ready", "@luna"),
-                                      instance("mcp-1", "mcp.remote-http", "mcp", "local-search", "ready", "local-search")].filter { !suppressCredits || $0.objectValue?["definitionId"]?.stringValue != "knowledge.x" }
+                                      instance("mcp-1", "mcp.remote-http", "mcp", "local-search", "ready", "local-search")]
         let capabilities = instances.compactMap { item -> JSONValue? in
             guard let id = item.objectValue?["id"]?.stringValue, let definitionId = item.objectValue?["definitionId"]?.stringValue else { return nil }
             let capabilityID = definitionId == "knowledge.jev" ? "tag" : (definitionId == "mcp.remote-http" ? "tools" : "read")

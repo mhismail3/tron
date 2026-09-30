@@ -85,6 +85,31 @@ final class IntegrationModelsTests: XCTestCase {
         XCTAssertEqual(credits.totalBalance, 0.3)
     }
 
+    /// Failure mode: an X balance requested under one Gateway profile resolves
+    /// after the user switched profiles and is published on the new profile's
+    /// sheet. The UI fixture cannot hold a reply across its reconnect, so the
+    /// held request here is the only proof of the identity fence.
+    @MainActor
+    func testCreditReadStartedUnderPreviousIdentityIsNeverPublished() async throws {
+        let gate = CreditGate()
+        let client = IntegrationsRPCClient(request: { _, _ in
+            await gate.wait()
+            return try JSONValue.encode(IntegrationXCredits(freeBalance: 0, prepaidBalance: 4.2, totalBalance: 4.2))
+        })
+        let x = IntegrationInstance(id: "x-1", definitionId: "knowledge.x", implementation: "knowledge-connector", providerAccountId: "98765", scope: nil, credentialConfigured: true, credentialAvailability: nil, providerIdentity: nil, providerDisplayName: "@reader", raindropCollections: nil, policy: IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 100, recurringApproved: false), health: "ready", createdAt: "fixture", updatedAt: "fixture", setupRevision: 1, lastError: nil)
+        let first = KnowledgePresentationIdentity(profileID: "gateway-a", lifecycleGeneration: 1, connectionID: 1)
+        var current = first
+        let controller = IntegrationCreditsReadController()
+        controller.start(instances: [x], identity: first, client: client, presentationActive: { true }, currentIdentity: { current })
+        await gate.untilWaiting()
+        XCTAssertEqual(controller.loadingIDs, ["x-1"])
+        current = KnowledgePresentationIdentity(profileID: "gateway-b", lifecycleGeneration: 1, connectionID: 2)
+        await gate.release()
+        for _ in 0..<50 where controller.loadingIDs.contains("x-1") { await Task.yield() }
+        XCTAssertNil(controller.balances["x-1"], "A balance read for the previous profile must not be shown")
+        XCTAssertFalse(controller.loadingIDs.contains("x-1"), "A discarded read must not leave the row loading")
+    }
+
     @MainActor
     func testIntegrationListRejectsNonConnectionCapabilityProvenance() async {
         let client = IntegrationsRPCClient(request: { _, _ in
@@ -105,4 +130,23 @@ final class IntegrationModelsTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+}
+
+/// Holds one credit reply open until the test has changed the presentation identity.
+private actor CreditGate {
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var released = false
+    func wait() async {
+        if released { return }
+        await withCheckedContinuation { continuation in
+            waiter = continuation
+            waiting.forEach { $0.resume() }; waiting.removeAll()
+        }
+    }
+    func untilWaiting() async {
+        if waiter != nil { return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+    func release() { released = true; waiter?.resume(); waiter = nil }
 }
