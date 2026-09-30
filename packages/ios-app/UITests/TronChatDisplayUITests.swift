@@ -43,35 +43,4 @@ final class TronChatDisplayUITests: XCTestCase {
         }
     }
 
-    func testSystemStatusBarControl() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-chat-display-fixture", "-fixture-status-control"]
-        app.launch()
-        XCTAssertTrue(app.staticTexts["Control row 99"].waitForExistence(timeout: 10))
-        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        system.statusBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
-        let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"),
-            object: app.staticTexts["Oldest loaded history"])
-        XCTAssertEqual(XCTWaiter.wait(for: [reached], timeout: 8), .completed, app.debugDescription)
-        app.terminate()
-    }
-
-    func testStatusBarTapReachesOldestLoadedHistory() {
-        for orientation in ["end", "origin"] {
-          for accessories in [false, true] {
-            let app = launch(orientation, accessories: accessories)
-            if accessories { XCTAssertTrue(app.buttons["Remove Photo"].waitForExistence(timeout: 5)) }
-            app.buttons["Inspect recipients"].tap()
-            print("REAL-RECIPIENTS \(app.staticTexts["fixture-scroll-owners"].label)")
-            let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-            system.statusBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
-            let oldest = app.staticTexts["Oldest loaded history"].firstMatch
-            let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: oldest)
-            let result = XCTWaiter.wait(for: [reached], timeout: 8)
-            capture("\(orientation)-status-bar-oldest-accessories-\(accessories)")
-            XCTAssertEqual(result, .completed, app.debugDescription)
-            app.terminate()
-          }
-        }
-    }
 }

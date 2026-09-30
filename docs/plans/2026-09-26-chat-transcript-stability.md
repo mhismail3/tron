@@ -3747,3 +3747,14 @@ The owned composer UITextView uses its public property directly. Other surfaces
 retain their default policy. XCUITest now crosses both modes with accessories
 absent/present; results pending. Proxy automatic safe-area adjustment was also
 incorrectly moving its off-origin sentinel; it now opts out of inset adjustment.
+
+Event-delivery bound closed per supervisor steering: even an independent plain
+SwiftUI scroll control fails the SpringBoard status-bar coordinate tap on this
+simulator (`131b9f215`, `20260930T050723Z-run.jwyRpG`). Synthetic taps are not an
+acceptance gate. Replace them with the hosted one-recipient matrix (empty,
+attachments, chips, catalog, both modes), unchanged SwiftUI delegate, origin's
+public delegate call reaching visible oldest history while detached, and coverage
+cleanup. Today's recipient remains the transcript itself, with no test offset
+write. Real system taps remain a required user-owned device check, not a pass.
+Temporary routing diagnostics/control have been removed. At-rest A remains open;
+no speculative extra row flip is added to compensate for an unreproduced path.

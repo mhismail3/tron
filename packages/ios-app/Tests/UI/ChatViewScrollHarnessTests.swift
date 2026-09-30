@@ -1890,126 +1890,25 @@ struct ChatViewScrollHarnessTests {
                         $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
                     }
                     try await harness.driveFrameBoundary()
-                    guard let bridge = harness.swiftUIContextMenuBridge(),
-                          let delegate = bridge.interaction.delegate else {
-                        Issue.record("\(orientation): SwiftUI's context-menu bridge must be reachable")
-                        return
+                    let sources = harness.promptContextMenuSurfaces().filter {
+                        $0.owner.actions.contains { $0.id == .toolDetails }
                     }
-                    let root = harness.visibleRootView
-                    let rows = TranscriptWindowOracle.rows(in: root).filter(\.isOnScreen)
-                    var resolving: [String] = []
-                    for row in rows {
-                        let location = CGPoint(x: row.windowFrame.midX, y: row.windowFrame.minY + 12)
-                        if delegate.contextMenuInteraction(
-                            bridge.interaction,
-                            configurationForMenuAtLocation: bridge.view.convert(location, from: nil)
-                        ) != nil {
-                            resolving.append(row.semanticID)
-                        }
-                    }
-                    // Failure mode: SwiftUI selects the flipped scroll-content
-                    // host as the preview target even though the card renders
-                    // upright through its row's counter-flip.
-                    if let displayRow = rows.first(where: { $0.semanticID == resolving.first }) {
-                        let point = CGPoint(x: displayRow.windowFrame.midX, y: displayRow.windowFrame.minY + 12)
-                        let configuration = try #require(delegate.contextMenuInteraction(
-                            bridge.interaction,
-                            configurationForMenuAtLocation: bridge.view.convert(point, from: nil)
-                        ))
-                        let preview = try #require(delegate.contextMenuInteraction?(
-                            bridge.interaction,
-                            configuration: configuration,
-                            highlightPreviewForItemWithIdentifier: configuration.identifier ?? ("preview-gate" as NSString)
-                        ))
+                    #expect(sources.count == 1, "\(orientation): one mounted display source")
+                    for source in sources {
+                        let configuration = try #require(source.owner.contextMenuInteraction(source.interaction,
+                            configurationForMenuAtLocation: CGPoint(x: source.view.bounds.midX, y: source.view.bounds.midY)))
+                        let preview = try #require(source.owner.contextMenuInteraction(source.interaction,
+                            configuration: configuration, highlightPreviewForItemWithIdentifier: "card" as NSString))
                         let container = try #require(preview.target.container as? UIView)
                         let failure = ContextMenuPreviewPlacement.failure(
-                            sourceWindowFrame: preview.view.convert(preview.view.bounds, to: nil),
+                            sourceWindowFrame: source.view.convert(source.view.bounds, to: nil),
                             targetTransform: preview.target.transform,
                             containerCenterInWindow: container.convert(preview.target.center, to: nil),
                             previewSize: preview.view.bounds.size,
                             containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
                             previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
                         )
-                        if orientation == .newestAtOrigin {
-                            // Open CT-23 blocker: SwiftUI's public preview delegate
-                            // targets the flipped scroll host. Recorded as a known
-                            // issue so it stays visible, and fails once it is fixed.
-                            withKnownIssue("CT-23: the display-card preview renders flipped on the origin path") {
-                                #expect(failure == nil, "\(orientation): \(failure ?? "")")
-                            }
-                        } else {
-                            #expect(failure == nil, "\(orientation): \(failure ?? "")")
-                        }
-                    }
-                    // The display card is the only row with a SwiftUI
-                    // `.contextMenu`; a bridge that resolved everywhere would
-                    // prove nothing about the card.
-                    #expect(
-                        resolving.count == 1 && resolving.first?.contains("display") == true,
-                        "\(orientation): the card's menu resolves at \(resolving)"
-                    )
-                }
-            }
-        }
-    }
-
-    @Test("the system's scroll-to-top lands on the newest end of the origin-anchored transcript")
-    func scrollToTopLandsOnTheContentTop() async throws {
-        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
-            ($0, try transcriptScrollToTopSnapshot())
-        }
-        try await withTestWatchdog(timeout: .seconds(60)) {
-            for (orientation, snapshot) in snapshots {
-                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
-                    _ = try await harness.recorder.waitUntil {
-                        $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
-                    }
-                    try await harness.driveFrameBoundary()
-                    let scrollView = try harness.nativeTranscriptScrollViewForTesting()
-                    let pinnedOffset = scrollView.contentOffset.y
-                    let contentTop = -scrollView.adjustedContentInset.top
-                    let legalMaximum = max(
-                        contentTop,
-                        scrollView.contentSize.height - scrollView.bounds.height
-                            + scrollView.adjustedContentInset.bottom
-                    )
-                    #expect(legalMaximum > contentTop, "\(orientation): the journey needs scroll range")
-                    // The origin-anchored transcript's pinned newest end *is* its
-                    // content top; today's transcript pins at its content end.
-                    #expect(
-                        orientation.presentsNewestRowFirst
-                            ? pinnedOffset == contentTop : pinnedOffset != contentTop,
-                        "\(orientation): the pinned end relative to the content top"
-                    )
-                    // What UIKit's status-bar tap does: the scroll view's
-                    // content top, `-adjustedContentInset.top`. Today's
-                    // transcript pins at its content end, so the tap reaches the
-                    // oldest loaded history; the origin-anchored transcript pins
-                    // at its content origin, so its content top *is* the pinned
-                    // newest end and the tap stays there. The user's requirement
-                    // — the tap reaches the oldest loaded history — is therefore
-                    // unmet on the origin-anchored path, and this gate records
-                    // the landing so that decision has a measured baseline.
-                    scrollView.setContentOffset(
-                        CGPoint(x: scrollView.contentOffset.x, y: contentTop),
-                        animated: false
-                    )
-                    for _ in 0..<3 { try await harness.driveFrameBoundary() }
-                    if orientation.presentsNewestRowFirst {
-                        #expect(
-                            scrollView.contentOffset.y == pinnedOffset,
-                            "\(orientation): the content top is the pinned newest end"
-                        )
-                        #expect(
-                            harness.isPinnedToBottom(),
-                            "\(orientation): the newest row stays at the composer"
-                        )
-                    } else {
-                        let topRow = try #require(harness.visuallyTopmostOnScreenRow())
-                        #expect(
-                            topRow.semanticID == harness.firstTranscriptID,
-                            "\(orientation): the tap reaches the oldest loaded history at \(topRow.semanticID)"
-                        )
+                        #expect(failure == nil, "\(orientation): \(failure ?? "")")
                     }
                 }
             }
@@ -2019,15 +1918,6 @@ struct ChatViewScrollHarnessTests {
     private func transcriptMenuSnapshot() throws -> SessionSnapshot {
         var snapshot = try harnessInlineMarkdownDisplaySnapshot()
         snapshot.transcript.append(try harnessUserMessage(id: "menu-prompt", text: "A prompt with a context menu."))
-        snapshot.transcriptStart = 0
-        snapshot.transcriptTotal = snapshot.transcript.count
-        return snapshot
-    }
-
-    private func transcriptScrollToTopSnapshot() throws -> SessionSnapshot {
-        var snapshot = try SessionScenarioBuilder(seed: 1_300).openingTail(targetEncodedBytes: 10_000)
-        snapshot.transcript = SessionScenarioBuilder(seed: 1_300).historyPage(count: 15, longRowBytes: 600)
-        snapshot.transcript.append(try harnessUserMessage(id: "scroll-to-top-prompt", text: "A prompt."))
         snapshot.transcriptStart = 0
         snapshot.transcriptTotal = snapshot.transcript.count
         return snapshot
@@ -6087,31 +5977,13 @@ final class ChatViewScrollHarness {
 
     /// The prompt rows' production context-menu surfaces: the native views that
     /// carry the interaction, with the owner that builds their preview. The
-    /// prompt menu is the app's own UIKit interaction (the display cards' menus
-    /// are SwiftUI's, see `swiftUIContextMenuBridge`).
+    /// prompt and display-card menus share this source-owned UIKit interaction.
     func promptContextMenuSurfaces() -> [(view: UIView, interaction: UIContextMenuInteraction, owner: ChatMessageContextMenuOwner)] {
         Self.contextMenuViews(in: hostingController.view).compactMap { view in
             guard let interaction = view.interactions.compactMap({ $0 as? UIContextMenuInteraction }).first,
                   let owner = interaction.delegate as? ChatMessageContextMenuOwner else { return nil }
             return (view, interaction, owner)
         }
-    }
-
-    /// SwiftUI's own context-menu bridge, which resolves the display cards'
-    /// `.contextMenu` menus. `nil` when this build's SwiftUI presents them
-    /// differently, which fails the journey that needs it rather than passing
-    /// quietly. Its delegate is matched by name because the bridge is internal
-    /// to SwiftUI; the name is the only handle on it, and asking an unrelated
-    /// interaction's delegate for a configuration is not safe.
-    func swiftUIContextMenuBridge() -> (view: UIView, interaction: UIContextMenuInteraction)? {
-        for view in Self.contextMenuViews(in: hostingController.view) {
-            for case let interaction as UIContextMenuInteraction in view.interactions {
-                guard let delegate = interaction.delegate,
-                      String(describing: type(of: delegate)).hasSuffix("ContextMenuBridge") else { continue }
-                return (view, interaction)
-            }
-        }
-        return nil
     }
 
     /// The row the reader sees at the top of the transcript, or `nil` when no
