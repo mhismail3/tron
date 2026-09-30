@@ -66,6 +66,10 @@ export const CATALOG_EVENT_MAX_WAIT_MS = 1_000;
  * per-path debounce map and the work a single event can name. */
 export const CATALOG_EVENT_DIRECTORY_LIMIT = 64;
 
+/** Keep arbitrary watcher paths bounded; beyond this, a whole-catalog cut is
+ * cheaper and safer than retaining another timer per transient filename. */
+export const CATALOG_EVENT_PENDING_PATH_LIMIT = 256;
+
 /** The backstop for every change the watcher cannot see: an event the platform
  * coalesced, dropped or reported while the watcher was restarting is repaired
  * by reading the folder's own cut this often. */
@@ -309,6 +313,8 @@ export class SessionCatalog {
   /** The unnamed event's ceiling window, so an unnameable event that never stops
    * arriving still reaches one whole-folder pass. */
   private unnamedEventWindowStartedAt: number | undefined;
+  private watcherOverflowReconcilePending = false;
+  private watcherOverflowReconcileDirty = false;
   private watchRetryTimer: NodeJS.Timeout | undefined;
   private watchOutageClearTimer: NodeJS.Timeout | undefined;
   /** One record per outage rather than per retry: while the watcher is down,
@@ -585,6 +591,10 @@ export class SessionCatalog {
     if (this.closed) return;
     const root = this.watchedRoot;
     if (root === undefined) return;
+    if (this.watcherOverflowReconcilePending) {
+      this.watcherOverflowReconcileDirty = true;
+      return;
+    }
     if (filename === null) return this.debounceUnnamedEvent();
     const path = resolve(root, filename);
     if (ignoredCatalogPath(path, root)) return;
@@ -692,6 +702,10 @@ export class SessionCatalog {
   }
 
   private debounceEvent(path: string): void {
+    if (!this.eventTimers.has(path) && this.eventTimers.size >= CATALOG_EVENT_PENDING_PATH_LIMIT) {
+      this.reconcileWatcherOverflow();
+      return;
+    }
     const armed = this.eventTimers.get(path);
     if (armed) clearTimeout(armed);
     const now = this.now();
@@ -707,6 +721,33 @@ export class SessionCatalog {
     }, Math.max(0, Math.min(CATALOG_EVENT_DEBOUNCE_MS, untilCeiling)));
     timer.unref();
     this.eventTimers.set(path, timer);
+  }
+
+  /** A storm of distinct names is not a useful per-file queue. Drop its hints
+   * and reconcile the canonical cut, repeating only if more events arrive while
+   * that cut is in flight. This keeps both timer maps bounded without losing
+   * changes that race the reconcile. */
+  private reconcileWatcherOverflow(): void {
+    if (this.watcherOverflowReconcilePending || this.closed) return;
+    this.watcherOverflowReconcilePending = true;
+    this.watcherOverflowReconcileDirty = false;
+    for (const timer of this.eventTimers.values()) clearTimeout(timer);
+    this.eventTimers.clear();
+    this.eventWindowStartedAt.clear();
+    if (this.unnamedEventTimer) {
+      clearTimeout(this.unnamedEventTimer);
+      this.unnamedEventTimer = undefined;
+      this.unnamedEventWindowStartedAt = undefined;
+    }
+    void (async () => {
+      do {
+        this.watcherOverflowReconcileDirty = false;
+        await this.reconcile();
+      } while (!this.closed && this.watcherOverflowReconcileDirty);
+      this.watcherOverflowReconcilePending = false;
+    })().catch(() => {
+      this.watcherOverflowReconcilePending = false;
+    });
   }
 
   /** Keep one live watcher on the canonical folder. False means the index is the
@@ -1017,8 +1058,9 @@ export class SessionCatalog {
     // Rows are keyed by the walk's realpath form, and a caller may name the same
     // file through a symlinked root (macOS `/var`), so the fallback resolves it
     // once per miss rather than rebuilding the row from the body every time.
-    const existing = this.indexed(canonicalPath)
-      ?? this.rowsByPath.get(await realpath(canonicalPath).catch(() => canonicalPath));
+    const lookupPath = resolve(canonicalPath);
+    const existing = this.rowsByPath.get(lookupPath)
+      ?? this.rowsByPath.get(await realpath(canonicalPath).catch(() => lookupPath));
     // An exact path that is gone is removal evidence for the row it published:
     // the Gateway deletes the files it rolls back (a failed import, an
     // uncommitted fork artifact) without announcing a removal, and an external

@@ -27,6 +27,7 @@ import { CatalogMetadataIndex, type CatalogMetadataIndexSummary } from "./catalo
 import {
   CATALOG_EVENT_DEBOUNCE_MS,
   CATALOG_EVENT_MAX_WAIT_MS,
+  CATALOG_EVENT_PENDING_PATH_LIMIT,
   SessionCatalog,
   type SessionCatalogChange,
   type SessionCatalogOptions,
@@ -99,6 +100,8 @@ import {
 //     its rows without a pass.
 // 23. Unnameable events that never stop arriving: the whole-index pass still
 //     runs once a second instead of the quiet spell being re-armed forever.
+// 24. A burst of distinct transcript paths: pending watcher timers stay bounded
+//     and overflow reconciles the canonical files.
 
 const roots: string[] = [];
 /** The scheduler each fixture's catalog registers its periodic reconcile with,
@@ -1120,6 +1123,25 @@ describe("SessionCatalog", () => {
     expect(catalog.duplicateSessionIds().size).toBe(0);
     expect([...reads.keys()].sort()).toEqual([...paths].sort());
     expect([...reads.values()]).toEqual(Array.from({ length: pathCount }, () => 1));
+  });
+
+  it("coalesces unique watcher paths beyond the pending bound into a catalog reconcile", async () => {
+    const watch = manualWatch();
+    const { sessions, catalog, source } = await fixture({
+      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+    });
+    catalog.start();
+    await catalog.settled();
+    const walks = vi.spyOn(source, "scan");
+    const pathCount = CATALOG_EVENT_PENDING_PATH_LIMIT + 32;
+    const paths = Array.from({ length: pathCount }, (_unused, index) => join(sessions, "workspace", `overflow-${index}.jsonl`));
+    await Promise.all(paths.map((path, index) => writeSession(path, `overflow-${index}`, sessions, ["created"])));
+    for (const path of paths) watch.emit(relative(sessions, path));
+
+    await waitFor(() => catalog.rows().length === pathCount, 30_000);
+    await catalog.settled();
+    expect(walks).toHaveBeenCalled();
+    expect(catalog.duplicateSessionIds().size).toBe(0);
   });
 
   it("re-reads a path whose events never stop arriving", async () => {
