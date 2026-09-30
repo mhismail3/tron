@@ -205,6 +205,7 @@ struct ChatComposerView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 2)
+                .chatSecondaryScrollContent()
             }
             .scrollClipDisabled()
             .transition(ChatContentTransitionPolicy.composerSurfaceTransition(
@@ -394,6 +395,7 @@ struct ChatPendingAttachmentStrip: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 2)
+            .chatSecondaryScrollContent()
         }
         .scrollClipDisabled()
         .frame(height: presentedAttachments.isEmpty ? 0 : nil, alignment: .top)

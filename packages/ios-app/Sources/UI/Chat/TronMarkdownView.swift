@@ -174,6 +174,7 @@ private struct CodeBlock: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code).font(TronFont.mono(13)).lineSpacing(3).textSelection(.enabled)
                     .padding(12).fixedSize(horizontal: true, vertical: false)
+                    .chatSecondaryScrollContent()
             }
         }
         .background(Color.tronSurfaceElevated, in: RoundedRectangle(cornerRadius: 9))
@@ -214,6 +215,7 @@ private struct MarkdownTable: View {
                     if rowIndex == 0 { Divider().gridCellColumns(widths) }
                 }
             }.padding(10)
+                .chatSecondaryScrollContent()
         }
         .background(Color.tronSurfaceElevated, in: RoundedRectangle(cornerRadius: 9))
     }

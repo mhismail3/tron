@@ -2983,6 +2983,7 @@ struct ChatView: View {
             onComposerHeight: composerHeightChanged,
             onComposerHeightSettled: composerHeightSettled
         )
+        .environment(\.chatOwnsStatusBar, true)
     }
 
     private var composerTrailingMode: ComposerTrailingMode? {

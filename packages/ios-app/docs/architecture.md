@@ -2480,3 +2480,11 @@ own scroll and asks the coordinator to detach and issue `oldest-history` through
 the original setting and removes the proxy; absent ancestry logs once in
 `ChatTranscriptOrientation` and leaves UIKit behavior unchanged. Today's path
 mounts no probe. `TronChatDisplayUITests` exercises the actual system gesture.
+
+Exactly one scroll is eligible for chat's status-bar gesture. Secondary scroll
+content uses the shared `chatSecondaryScrollContent` ancestry probe, scoped by
+`chatOwnsStatusBar` on transcript/composer content only: attachments, selected
+resources, catalog, horizontal Markdown and card rails opt out without geometry
+or delegate changes. The native composer text view sets its own public property.
+This also fixes today's previously competing empty attachment rail; sheets and
+settings do not inherit a global scroll-view sweep.

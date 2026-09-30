@@ -3736,3 +3736,14 @@ The first status-bar coordinate also failed on today; adjust to the time's cente
 before judging the origin behavior. A source-owned native menu experiment now
 wraps the expanded card itself (not the full-width disclosure host); its preview
 explicitly targets the window for highlight and dismissal. Gates remain pending.
+
+Supervisor approved scope correction: exactly one chat status-bar recipient in
+either orientation. The pre-fix real today tap fails (`ce0b631ca` and
+`573cb3da5`); native inspection found the always-mounted empty 4 pt attachment
+rail still eligible. One shared content-ancestry helper now excludes secondary
+chat scrolls (rails, selected chips, catalog, attachments and Markdown horizontal
+content), scoped by an environment installed only on transcript/composer content.
+The owned composer UITextView uses its public property directly. Other surfaces
+retain their default policy. XCUITest now crosses both modes with accessories
+absent/present; results pending. Proxy automatic safe-area adjustment was also
+incorrectly moving its off-origin sentinel; it now opts out of inset adjustment.

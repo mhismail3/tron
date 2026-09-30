@@ -2,10 +2,11 @@ import XCTest
 
 @MainActor
 final class TronChatDisplayUITests: XCTestCase {
-    private func launch(_ orientation: String) -> XCUIApplication {
+    private func launch(_ orientation: String, accessories: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-chat-display-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if accessories { app.launchArguments.append("-fixture-accessories") }
         app.launchEnvironment["TRON_CHAT_TRANSCRIPT_ORIENTATION"] = orientation
         app.launch()
         XCTAssertTrue(app.buttons["Open Orientation Image photo preview"].waitForExistence(timeout: 15), app.debugDescription)
@@ -44,14 +45,17 @@ final class TronChatDisplayUITests: XCTestCase {
 
     func testStatusBarTapReachesOldestLoadedHistory() {
         for orientation in ["origin", "end"] {
-            let app = launch(orientation)
+          for accessories in [false, true] {
+            let app = launch(orientation, accessories: accessories)
+            if accessories { XCTAssertTrue(app.buttons["Remove Photo"].waitForExistence(timeout: 5)) }
             app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 60, dy: 30)).tap()
             let oldest = app.staticTexts["Oldest loaded history"].firstMatch
             let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: oldest)
             let result = XCTWaiter.wait(for: [reached], timeout: 8)
-            capture("\(orientation)-status-bar-oldest")
+            capture("\(orientation)-status-bar-oldest-accessories-\(accessories)")
             XCTAssertEqual(result, .completed, app.debugDescription)
             app.terminate()
+          }
         }
     }
 }

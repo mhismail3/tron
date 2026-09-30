@@ -57,6 +57,7 @@ struct ChatTranscriptStatusBar: UIViewRepresentable {
             proxy.accessibilityElementsHidden = true
             proxy.showsVerticalScrollIndicator = false
             proxy.showsHorizontalScrollIndicator = false
+            proxy.contentInsetAdjustmentBehavior = .never
             proxy.contentSize = CGSize(width: 1, height: 2)
             proxy.contentOffset = CGPoint(x: 0, y: 1)
             proxy.delegate = self
