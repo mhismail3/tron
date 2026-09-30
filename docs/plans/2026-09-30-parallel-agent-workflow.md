@@ -214,7 +214,7 @@ Dated 2026-09-30:
 | W-16 | Claimed | #98 iOS Gateway E2E fixture and DerivedData keyed by worktree, with a build-identity check (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-17 | Claimed | #99 Default iOS test lane per worktree; E2E and profiler accept lanes; concurrent two-worktree iOS proof (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-18 | Claimed | #100 Lease the Development simulator and the physical iPhone (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-19 | Claimed | #102 Worktree-relative Mac Release DerivedData; hook installer works from linked worktrees (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-19 | Done | #102 Worktree-relative Mac Release DerivedData; hook installer works from linked worktrees (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-20 | Done | #103 Dev Gateway status names the worktree and branch it runs (P2); merged, maintainer validation after W-27 | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-21 | Claimed | #101 Scope retained test/profile artifacts and `latest` pointers to the worktree (P3) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-22 | Ready | Follow-up: triage procedure; an agent classifies `needs-triage` issues (type, area, priority, duplicate search) and places them as Proposed for maintainer approval | W-11 | Unassigned |
@@ -222,6 +222,7 @@ Dated 2026-09-30:
 | W-24 | Ready | Follow-up: bug tasks record a failing reproduction before a fix; an unreproducible bug goes to Needs you with the missing details | W-11 | Unassigned |
 | W-25 | Ready | Follow-up: agents write to GitHub only through `scripts/tron work`, with a local audit log of every write | W-6 | Unassigned |
 | W-26 | Ready | Follow-up: type-specific PR body sections (Repro/Cause/Fix/Verification for bugs) validated before opening | W-6 | Unassigned |
+| W-27 | Claimed | #107 `tron dev start`/`restart` pass a short revision the payload manifest rejects; decision (b): full 40-hex HEAD plus a separate dirty-tree field (P1) | W-20 | session 01a0f183 (orchestrator), 2026-09-30 |
 
 ## Task details
 
@@ -558,3 +559,31 @@ file-level. Everything else inspected is A.
   requires its exact key set, and a handoff copies the manifest to Stable.
 - For the next agent: the maintainer validation (`scripts/tron dev restart`,
   then `scripts/tron dev status`) is blocked by W-27 (#107).
+
+### W-19 · Done · 2026-09-30 · wave 1 (worker → reviewer → worker; orchestrator merge)
+
+- Result: The Mac Release build uses the worktree-relative
+  `packages/mac-app/build/DerivedData-Release`, and the reinstall runbook
+  passes that relative `--app` path. `scripts/install-hooks.sh` resolves Git's
+  hooks directory, so it works from any worktree and honours
+  `core.hooksPath`.
+- Evidence:
+  - The implementer's red phase failed 2 of 3 on the old installer.
+  - Five negative controls each failed the new tests.
+  - Rerun by the orchestrator on the rebased head:
+    - `python3 scripts/test-personal-info-guard.py`: OK (12 tests)
+    - `python3 scripts/test-mac-reinstall.py`: OK (69 tests)
+    - documentation, agent and privacy policy checks: passed
+    - total: 44 s
+  - Reviewer verdict: pass, with two wording nits, both fixed. The reviewer
+    had read-only tools and ran no commands.
+- Changes: squash PR for #102.
+- Kept on purpose: the real installer was not run in a linked worktree,
+  because it would overwrite the shared hook. Disposable repositories cover
+  that case instead.
+- Deviations: none.
+- For the next agent: keep a Release worktree until its reinstall finishes,
+  because `--confirm-offline` checks the artifact again.
+- Tasks added: W-27 (#107). The #103 worker found it: `tron-dev` passes a
+  12-character or `-dirty` revision, but the manifest requires 40 hex
+  characters. The user chose option (b).
