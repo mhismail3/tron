@@ -1,8 +1,8 @@
 # Pi SDK 0.99 integration and built-in MCP adoption
 
 - **Started:** 2026-09-29
-- **Status:** Paused (user requested a pause after P99-20; resume on the user's instruction)
-- **Last updated:** 2026-09-30, checkpoint after P99-20
+- **Status:** Active
+- **Last updated:** 2026-09-30, resumed after checkpoint
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -271,15 +271,15 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-5 | Done | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | luna-worker, 2026-09-29 |
 | P99-6 | Done | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
 | P99-7 | Done | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
-| P99-8 | Ready | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | Unassigned |
+| P99-8 | Claimed | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | luna-worker, 2026-09-30 |
 | P99-9 | Done | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | luna-worker, 2026-09-29 |
 | P99-10 | Done | Virtual models on the Gateway (D-7) | P99-3 | luna-worker, 2026-09-29 |
 | P99-11 | Done | Theme default and remote extension host rendering | P99-3 | luna-worker, 2026-09-29 |
 | P99-12 | Done | Catalog, provider and classifier deltas; release dates; K3 policy | P99-2 | luna-worker, 2026-09-29 |
 | P99-13 | Done | `bash` structured output and empty-output change | P99-3 | luna-worker, 2026-09-29 |
-| P99-14 | Ready | Qualify installed packages and subagent children against 0.99 | P99-6 | Unassigned |
-| P99-15 | Ready | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | Unassigned |
-| P99-16 | Ready | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | Unassigned |
+| P99-14 | Claimed | Qualify installed packages and subagent children against 0.99 | P99-6 | luna-worker, 2026-09-30 |
+| P99-15 | Claimed | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | luna-worker, 2026-09-30 |
+| P99-16 | Claimed | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | luna-worker, 2026-09-30 |
 | P99-17 | Ready | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | Unassigned |
 | P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
 | P99-20 | Done | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
