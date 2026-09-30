@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-17 final validation and close-out
+- **Last updated:** 2026-09-30, P99-17 Gateway evidence correction and observability
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -1058,3 +1058,13 @@ installed. Then close the plan per `docs/plans/README.md`.
 ### P99-17 correction · Claimed · 2026-09-30 · luna-worker
 
 - Correction: P99-17 D marked the row Done while these Gateway evidence gaps were open: MCP RPC-to-token-to-tool E2E and typed-command fail-closed proof; actual installed browser fork direct/nested receipt and abort-stash proof; virtual-model resume/fork/retry/compaction lifecycle; codemode classifier cost in session totals; and codemode execution observability plus MCP process-count limitation documentation. The row is Claimed until these are proven and final validation completes.
+
+### P99-17 E · Partial · 2026-09-30 · luna-worker
+
+- Result: Added the missing privacy-safe top-level codemode execution log event. It records outcome, duration, nested-call count, completeness and session ID, and excludes script, arguments and output. Updated the observability catalog to state that MCP stdio process count is not exposed by Pi's public runtime API (P99-22's process-group cleanup assertions are the lifecycle evidence), and added public per-session MCP status/process count to P99-19. P99-17 remains Claimed.
+- Evidence: Node 22.22.0 TypeScript check passed. Focused RuntimeRegistry codemode integration passed 1/1 (Vitest 1.26 s); the retained artifact `packages/gateway/test-results/pi-sdk-099-nested-presentation.json` includes the log diagnostic and parent live/cold-reload evidence. Full Gateway Vitest passed 2,316/2,317 across 214/215 files in 109.57 s; `session-search-stall.test.ts` failed under suite load (event-loop stretch threshold), then passed isolated 2/2 in 4.93 s. The focused test validates the exact privacy-safe field set and fails if no diagnostic is emitted.
+- Changes: `packages/gateway/src/sessions/runtime-slot.ts`, `runtime-registry.ts`, `gateway-main.ts`, `codemode-nested-presentation.integration.test.ts`, `packages/gateway/docs/observability.md`, and this plan. Commits: `9d8a16105` (reopen P99-17 and correction), `858e274fa` (observability implementation).
+- Tasks added: none.
+- Kept on purpose: P99-17 remains Claimed. No Gateway lifecycle action, live MCP connection, provider credential, actual browser or user installation was touched. The artifacts are ignored test output, not committed fixtures.
+- Deviations: The other requested end-to-end gaps are still open: full RuntimeRegistry MCP RPC → Pi `/mcp login` → callback/token → next-turn tool call and typed `/mcp login` fail-closed; direct and nested receipts from the read-only installed browser fork with fake executable and aborted-stash proof; virtual model lifecycle through resume/fork/automatic retry/compaction; and `models.classify` cost in codemode result/session totals. The full-suite timing failure passed its isolated rerun. No visual/iOS/Mac validation was run in this Gateway-only part.
+- For the next agent: complete each remaining Gateway integration with retained artifacts under `packages/gateway/test-results`, then repeat final TypeScript/full Gateway and cross-module gates before moving P99-17 beyond Claimed. Inspect whether Pi emits abort/timeout explicitly on codemode `tool_execution_end`; this implementation records those only when present in result details, otherwise the authoritative event status is completed/failed.
