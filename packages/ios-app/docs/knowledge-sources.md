@@ -144,6 +144,8 @@ character limits in `KnowledgeConfig.knowledgeModel`, separate from the observer
 model. The **Knowledge model** row shows the catalog display name; its divided
 Clear row clears the setting. The iOS config codec round-trips the model and its
 limits because `knowledge.config` replaces the whole KnowledgeConfig. Summary,
-triage, synthesis, reflection, and manual-capture assessment share this model and
-its bounds. Summary jobs refuse when it is unset and never fall back to the
+synthesis, reflection, and manual source assessment share this model and its
+bounds. The manual Entry Detail action calls `knowledge.source.assess` with
+`assessor: "model"`; its returned recommendation is displayed but does not
+change admission. Summary jobs refuse when it is unset and never fall back to the
 observer model.

@@ -211,9 +211,12 @@ final class KnowledgeRPCClient {
               value.jobs.allSatisfy({ $0.sourceId == sourceID && ["summary", "tags"].contains($0.operation) && ["running", "done", "failed"].contains($0.status) }) else { throw invalidResponse() }
         return value
     }
-    func triage(sourceID: String, expectedRevision: String) async throws -> KnowledgeTriageResult {
-        struct Params: Encodable { let sourceId: String; let expectedRevision: String }
-        return try await mutate("knowledge.source.triage", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision))
+    func assess(sourceID: String, expectedRevision: String, assessor: KnowledgeSourceAssessor) async throws -> KnowledgeSourceAssessmentResult {
+        struct Params: Encodable { let sourceId: String; let expectedRevision: String; let assessor: KnowledgeSourceAssessor }
+        let value: KnowledgeSourceAssessmentResult = try await mutate("knowledge.source.assess", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision, assessor: assessor))
+        guard value.source.id == sourceID, value.source.revisionId != expectedRevision,
+              value.assessment.recommendation.map({ [.pending, .retained, .archived].contains($0) }) ?? true else { throw invalidResponse() }
+        return value
     }
     func correct(id: String, expectedRevision: String, replacement: KnowledgeRecordDraft, relation: KnowledgeRelation, confirmedByUser: Bool) async throws -> KnowledgeMutationResult {
         struct Params: Encodable { let recordId: String; let expectedRevision: String; let replacement: KnowledgeRecordDraft; let relation: KnowledgeRelation; let confirmedByUser: Bool }

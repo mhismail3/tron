@@ -88,7 +88,7 @@ only on the user's word) apply to every task.
 | C21 | Done | Assessment primitive: assess a source with Jev (one budget) or the Knowledge model; returns a recommendation, decides nothing | C18 | knowledge-consolidation session, 2026-09-29 |
 | C22 | Done | Ingestion routine as an editable agent skill, plus owning docs | C19, C20, C21 | knowledge-consolidation session, 2026-09-29 |
 | C23 | Blocked | Dry-run parity with Raindrop intake on live data, then delete the intake pipeline and its batch machinery | C22, user Gateway update | — |
-| C24 | Ready | Migrate iOS manual source assessment from `knowledge.source.triage` to `knowledge.source.assess` with `assessor: model` | C21 | — |
+| C24 | Done | Migrate iOS manual source assessment from `knowledge.source.triage` to `knowledge.source.assess` with `assessor: model` | C21 | knowledge-consolidation session, 2026-09-29 |
 | C25 | Needs scoping | Expose Jev admission choice, confidence, usefulness score and coverage so the archive threshold can be owned by the editable routine, not the assessment adapter | C21 | — |
 
 ## Task details
@@ -439,3 +439,13 @@ deletes it only after a dry-run of the routine matches it on live data.
 - Kept on purpose: when Jev usage settles but no source-write receipt exists, a retry with the same command ID returns a typed conflict directing a new command ID; no parallel persistent assessment receipt/schema was added. If the source write committed before a lost response, its receipt is returned before the paid ledger is touched.
 - Deviations: none.
 - For the next agent: C24 still migrates iOS manual assessment to the Gateway primitive; C23 remains gated on user-approved live dry-run parity and a user Gateway update. No live Gateway access or lifecycle action was performed.
+
+### C24 · Done · 2026-09-29 · luna-worker
+
+- Result: iOS manual Entry Detail assessment now calls `knowledge.source.assess` with `assessor: "model"`, decodes the shared source/assessment response, updates the presented source and reports its recommendation without changing admission. iOS architecture and Knowledge source docs now name the current primitive.
+- Evidence: `scripts/tron ios generate` passed; `scripts/tron-ios-test build` passed; `scripts/tron-ios-test run --only-testing TronMobileTests/KnowledgeModelsTests` passed (35 tests); `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build` passed; `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run --only-testing TronMobileUITests/TronKnowledgeDetailUITests` passed (7 tests); documentation policy and personal-info guard passed.
+- Changes: this commit.
+- Tasks added: none.
+- Kept on purpose: the manual assessment uses the Knowledge model, matching its previous intended configuration and keeping paid Jev out of iOS; the result remains a recommendation, not an admission decision.
+- Deviations: none.
+- For the next agent: C23 remains gated on user-approved live dry-run parity and a user Gateway update. No live Gateway access or lifecycle action was performed.

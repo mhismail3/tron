@@ -599,6 +599,14 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(KnowledgeSourcePresentationPolicy.publishedAt(xPost), "2025-12-30T12:00:00Z")
     }
 
+    func testSourceAssessmentResponseDecodesTheAssessmentPrimitiveEnvelope() throws {
+        let data = Data(#"{"source":{"schemaVersion":1,"id":"source-1","revisionId":"revision-2","kind":"source","scope":"research","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","provenance":{"actor":"user","evidence":[]},"relations":[],"content":{"title":"Assessment result","uri":"https://example.test/source","text":"Evidence","captureDisposition":"complete","capturedAt":"2026-01-01T00:00:00Z","assessment":{"summary":"Useful source","evidenceQuality":"high","freshness":"current","generatedAt":"2026-01-02T00:00:00Z","recommendation":"retained","confidence":0.9,"classification":"reference"}}},"assessment":{"summary":"Useful source","evidenceQuality":"high","freshness":"current","generatedAt":"2026-01-02T00:00:00Z","recommendation":"retained","confidence":0.9,"classification":"reference"}}"#.utf8)
+        let result = try JSONDecoder().decode(KnowledgeSourceAssessmentResult.self, from: data)
+        XCTAssertEqual(result.source.revisionId, "revision-2")
+        XCTAssertEqual(result.assessment.recommendation, .retained)
+        XCTAssertEqual(result.assessment.classification, "reference")
+    }
+
     func testSourceWireShapeDecodesCaptureReasonAndAssessmentMetadataWithoutInventingConfidence() throws {
         let data = Data(#"{"schemaVersion":1,"id":"source","revisionId":"r1","kind":"source","scope":"research","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","provenance":{"actor":"connector","evidence":[]},"relations":[],"content":{"title":"Metadata","uri":"https://example.com","captureDisposition":"metadata-only","captureReason":"Provider returned metadata without readable text","capturedAt":"2026-01-01T00:00:00Z","assessment":{"summary":"Bounded review","evidenceQuality":"unknown","freshness":"unknown","generatedAt":"2026-01-01T00:00:00Z","evidenceDigest":"0000000000000000000000000000000000000000000000000000000000000000","coverage":"sampled","classification":"reference","inputDigest":"digest","usage":{"inputTokens":12,"outputTokens":4,"estimatedCostCents":0,"pricing":"fixture"}}}}"#.utf8)
         let record = try JSONDecoder().decode(KnowledgeRecord.self, from: data)

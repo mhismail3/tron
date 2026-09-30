@@ -2419,7 +2419,7 @@ the grant and restores the retained individual selections; empty selection never
 grants global access. The switch and RPC admission require
 `knowledge-global-observation.v1` so an unsupported Gateway cannot silently
 ignore the setting. Exclusions always override either scope and remain
-Gateway-authoritative. Editable current interests are persisted in the Gateway configuration and do not enable observation; source triage is an explicit `knowledge.source.triage` mutation that resolves those interests server-side. Starting a
+Gateway-authoritative. Editable current interests are persisted in the Gateway configuration and do not enable observation; manual source assessment calls `knowledge.source.assess` with `assessor: "model"`, which resolves those interests server-side and returns a recommendation without deciding admission. Starting a
 session from an entry pins the originating Gateway and opens the existing New Session sheet for workspace/model/trust choices, then seeds only an unsent draft;
 no prompt is replayed or automatically sent.
 
