@@ -12,7 +12,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import claim as claims
 import start
 import verify
-from gh import Gh
+from gh import Gh, GhError
 
 # Issue forms prefix titles with "[Task]: "; claim.slugify drops it the same way.
 _FORM_PREFIX = re.compile(r"^\s*\[[^\]]*\]:?\s*")
@@ -110,7 +110,7 @@ def update_from_base(root: Path, remote: str, base: str) -> bool:
         conflicts = _out(root, "diff", "--name-only", "--diff-filter=U").splitlines()
         detail = ("conflicts in: " + ", ".join(conflicts)) if conflicts else (merged.stderr or merged.stdout).strip()
         raise LandError(f"merging {remote}/{base} stopped; {detail}. Resolve and commit the merge, "
-                        "then run land again. Nothing was pushed.")
+                        "then run land again. Nothing new was pushed.")
     return True
 
 
@@ -207,9 +207,12 @@ def verification(receipt: dict) -> str:
     return "\n".join(lines)
 
 
-def pull_body(keyword: str, number: int, summary: str, receipt: dict) -> str:
-    return (f"{keyword} #{number}\n\n## Summary\n\n{summary.strip()}\n\n"
-            f"## Verification\n\n{verification(receipt)}\n")
+def pull_body(keyword: str, number: int, summary: str, receipt: dict, action: Optional[str]) -> str:
+    body = f"{keyword} #{number}\n\n## Summary\n\n{summary.strip()}\n\n## Verification\n\n{verification(receipt)}\n"
+    if action is not None:
+        # On GitHub before the merge, so a stop after the merge cannot lose it.
+        body += f"\n## Maintainer validation\n\n{action.strip()}\n"
+    return body
 
 
 def _handoff(number: int, pull: int, merge_sha: str, action: str) -> str:
@@ -245,12 +248,36 @@ def delete_branch(root: Path, remote: str, branch: str, head: str) -> str:
         return "already deleted"
     if at != head:
         return f"kept: it is at {at[:12]}, not the merged head {head[:12]}"
-    _git(root, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{head}", remote, f":refs/heads/{branch}")
+    # The lease covers a push that lands between the read above and this delete.
+    deleted = _git(root, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{head}", remote,
+                   f":refs/heads/{branch}", check=False)
+    if deleted.returncode != 0:
+        return f"kept: the delete was refused ({deleted.stderr.strip().splitlines()[-1]})"
     return "deleted"
 
 
 def after_merge(gh: Gh, root: Path, config: dict, issue: dict, pull: int, merge_sha: str, head: str,
                 branch: str, action: Optional[str]) -> None:
+    try:
+        _finish_issue(gh, root, config, issue, pull, merge_sha, head, branch, action)
+    except (GhError, LandError, claims.ClaimError) as error:
+        # Nothing reruns these steps: the claim branch may be gone, so name them.
+        number, rules, settings = issue["number"], config["claim"], config["land"]
+        if action is not None:
+            steps = (f"reopen #{number} if it is closed, comment the validation text below on it, add the "
+                     f"{settings['userValidationLabel']} label and set Status to "
+                     f"{config['dashboard']['needsYouStatus']}")
+        else:
+            steps = f"close #{number} if it is open and set Status to {settings['doneStatus']}"
+        message = (f"#{pull} merged as {merge_sha[:12]}, then finishing stopped: {error}\n"
+                   f"Finish by hand: {steps}; delete {rules['remote']}/{branch} if it is still at {head[:12]}.")
+        if action is not None:
+            message += f"\nValidation text (also in #{pull}'s body):\n\n{action.strip()}"
+        raise LandError(message) from None
+
+
+def _finish_issue(gh: Gh, root: Path, config: dict, issue: dict, pull: int, merge_sha: str, head: str,
+                  branch: str, action: Optional[str]) -> None:
     rules, settings = config["claim"], config["land"]
     owner, name = _repository(gh)
     current = start.load_issue(gh, owner, name, issue["number"], rules, config["project"]["title"])
@@ -342,8 +369,9 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     pull = _open_pull(gh, branch)
     if summary_path is not None:
         summary = summary_path.read_text()
-    elif pull is not None and _SUMMARY.search(pull["body"] or ""):
-        summary = _SUMMARY.search(pull["body"]).group(1)
+    elif pull is not None and _SUMMARY.search((pull["body"] or "").replace("\r\n", "\n")):
+        # A body saved from the web editor has CRLF line ends.
+        summary = _SUMMARY.search(pull["body"].replace("\r\n", "\n")).group(1)
     else:
         raise LandError("--summary-file is required to open the pull request")
     title = title_arg or (pull["title"] if pull else default_title(branch, issue["title"]))
@@ -360,14 +388,15 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
         receipt = verify.verify(root, config)
         head = receipt["head"]
         if not receipt["passed"]:
-            raise LandError(f"verify failed for {head[:12]}; nothing was pushed or published")
+            raise LandError(f"verify failed for {head[:12]}; nothing new was pushed or published")
         pushed = _git(root, "push", "-q", remote, f"HEAD:refs/heads/{branch}", check=False)
         if pushed.returncode != 0:
             raise LandError(f"push to {remote}/{branch} was refused: {pushed.stderr.strip()}")
         print(f"posted:   {verify.post(gh, root, config, receipt)}")
 
-        body = pull_body(keyword, number, summary, receipt)
-        _scrub(root, config, "pull request text", f"{title}\n{body}")
+        # Every part of the body already passed the scrub: the title, summary and
+        # validation text in the gates, the receipt fields in verify.post's comment.
+        body = pull_body(keyword, number, summary, receipt, action)
         if pull is None:
             url = gh.run("pr", "create", "--base", base, "--head", branch, "--title", title, "--body-file", "-",
                          stdin=body).strip().splitlines()[-1]
@@ -467,7 +496,7 @@ def steward(gh: Gh, repo: Path, config: dict, number: Optional[int]) -> int:
     state, details = head_state(row["contexts"], config)
     if state != "success":
         raise LandError(f"#{row['pr']} is not ready at {head[:12]}: " + "; ".join(details))
-    if not (row["body"] or "").startswith(f"Closes #{number}"):
+    if not re.match(rf"Closes #{number}(?!\d)", row["body"] or ""):
         raise LandError(f"#{row['pr']} does not close #{number}; a validation handoff is its owner's to land")
     if _remote_head(root, remote, branch) != head:
         raise LandError(f"{remote}/{branch} is not at the pull request head {head[:12]}")
