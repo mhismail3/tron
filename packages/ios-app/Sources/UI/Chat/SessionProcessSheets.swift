@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SwiftUI
 import TronMobileCore
 
@@ -923,61 +924,60 @@ private struct ReadOnlySubagentTranscriptRow: View, Equatable {
     }
 }
 
-/// Keep edge rubber-banding inside this transcript. The sheet's toolbar remains
-/// outside the scroll hierarchy and continues to own resize/swipe dismissal.
+/// Select sheet tracking independently of the transcript's reflected content edge.
 private struct SubagentSheetScrollBoundary: UIViewRepresentable {
     func makeUIView(context: Context) -> Probe { Probe() }
     func updateUIView(_ view: Probe, context: Context) { view.reconcile() }
     static func dismantleUIView(_ view: Probe, coordinator: ()) { view.restore() }
 
     final class Probe: UIView {
-        private weak var scroll: UIScrollView?
-        private let boundary = ContentPanBoundary()
+        private weak var owner: UIViewController?
+        private let recipient = UIScrollView()
+        private var previous: [(NSDirectionalRectEdge, UIScrollView?)] = []
+        private var reported = false
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            recipient.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+            recipient.contentSize = CGSize(width: 1, height: 3)
+            recipient.contentInsetAdjustmentBehavior = .never
+            recipient.contentOffset.y = 1
+            recipient.isScrollEnabled = false
+            recipient.scrollsToTop = false
+            recipient.isUserInteractionEnabled = false
+            recipient.accessibilityElementsHidden = true
+            addSubview(recipient)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
         override func didMoveToWindow() { super.didMoveToWindow(); reconcile() }
         override func layoutSubviews() { super.layoutSubviews(); reconcile() }
         func reconcile() {
             guard window != nil else { restore(); return }
-            var ancestor = superview
-            while let view = ancestor, !(view is UIScrollView) { ancestor = view.superview }
-            guard let owner = ancestor as? UIScrollView else { restore(); return }
-            if owner !== scroll {
+            var responder: UIResponder? = self
+            while let current = responder, !(current is UIViewController) { responder = current.next }
+            var controller = responder as? UIViewController
+            while let parent = controller?.parent { controller = parent }
+            guard let controller, controller.sheetPresentationController != nil,
+                  controller.presentingViewController != nil else {
                 restore()
-                scroll = owner
-                owner.addGestureRecognizer(boundary)
-            }
-            var parent = owner.superview
-            while let view = parent {
-                for pan in view.gestureRecognizers?.compactMap({ $0 as? UIPanGestureRecognizer }) ?? [] {
-                    pan.require(toFail: boundary)
+                if !reported {
+                    reported = true
+                    Logger(subsystem: "com.tron.mobile", category: "ChatTranscriptOrientation")
+                        .error("Child sheet scroll boundary unavailable: no presented sheet controller")
                 }
-                parent = view.superview
+                return
+            }
+            guard owner !== controller else { return }
+            restore()
+            owner = controller
+            for edge: NSDirectionalRectEdge in [.top, .bottom, .leading, .trailing] {
+                previous.append((edge, controller.contentScrollView(for: edge)))
+                controller.setContentScrollView(recipient, for: edge)
             }
         }
         func restore() {
-            scroll?.removeGestureRecognizer(boundary)
-            scroll = nil
+            for (edge, scroll) in previous { owner?.setContentScrollView(scroll, for: edge) }
+            previous.removeAll()
+            owner = nil
         }
-    }
-
-    /// A content-only pan participates beside the native scroll pan. Ancestor
-    /// pans must wait for it to fail; because toolbar touches are outside this
-    /// scroll subtree, their sheet pan never waits. No UIKit delegate is replaced.
-    final class ContentPanBoundary: UIPanGestureRecognizer {
-        init() {
-            super.init(target: nil, action: nil)
-            cancelsTouchesInView = false
-        }
-        private func isAncestorPan(_ other: UIGestureRecognizer) -> Bool {
-            guard other is UIPanGestureRecognizer, let ancestor = other.view,
-                  let view, ancestor !== view else { return false }
-            return view.isDescendant(of: ancestor)
-        }
-        override func shouldBeRequiredToFail(by otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            isAncestorPan(otherGestureRecognizer)
-        }
-        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
-            isAncestorPan(preventedGestureRecognizer)
-        }
-        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
     }
 }
