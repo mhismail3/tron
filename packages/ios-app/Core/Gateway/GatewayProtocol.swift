@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 package struct GatewayRequest: Encodable, Sendable {
     let type = "request"

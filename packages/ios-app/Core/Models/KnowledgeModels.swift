@@ -1,6 +1,5 @@
 import Foundation
 import CryptoKit
-import TronMobileCore
 
 // These projections intentionally mirror packages/gateway/src/knowledge/
 // knowledge-contract.ts. The Gateway owns all bytes and revisions; iOS only
