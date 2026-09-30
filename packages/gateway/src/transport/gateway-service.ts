@@ -41,6 +41,7 @@ import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
 import type { GlobalProviderResources } from "../admin/global-provider-resources.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
+import type { McpAdminService, McpScope } from "../admin/mcp-admin-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
   IOS_DEVICE_INSTALL_CAPABILITY,
@@ -290,6 +291,7 @@ export interface GatewayServiceDependencies {
   sessionSearch?: SessionSearchService;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
+  mcpAdmin?: McpAdminService;
 }
 
 export class GatewayService {
@@ -481,6 +483,56 @@ export class GatewayService {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "connections.list accepts no parameters");
         return safeJson(await this.dependencies.connections.invoke({ operation: method, request: {} } as ConnectionAction));
       }
+      case "mcp.list": {
+        const scope = await this.mcpScope(params);
+        const work = this.workRegistry?.begin({ kind: "rpc-mutation", method, hostEpoch: this.workRegistry.runtimeEpoch });
+        try { return safeJson(await this.requireMcpAdmin().list(scope)); }
+        finally { work?.settle(); }
+      }
+      case "mcp.add":
+      case "mcp.remove":
+      case "mcp.logout":
+        return this.mutation(client, method, params, async () => {
+          const scope = await this.mcpScope(params);
+          const server = string(params.server, "server", { min: 1, max: 128 });
+          if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
+          let args: string[];
+          if (method === "mcp.add") {
+            const transport = oneOf(params.transport, "transport", ["stdio", "http"] as const);
+            const exposure = params.exposure === undefined ? undefined : oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
+            if (transport === "http") {
+              const url = string(params.url, "url", { min: 1, max: 4_096 });
+              let parsed: URL; try { parsed = new URL(url); } catch { throw new GatewayError("invalid_request", "MCP URL is invalid"); }
+              if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new GatewayError("invalid_request", "MCP URL must use HTTP or HTTPS");
+              args = [server, "--url", url, ...(exposure ? ["--exposure", exposure] : [])];
+            } else {
+              const command = string(params.command, "command", { min: 1, max: 1_024 });
+              const argv = params.args === undefined ? [] : arrayOfStrings(params.args, "args", 64);
+              args = [server, ...(exposure ? ["--exposure", exposure] : []), "--", command, ...argv];
+            }
+          } else args = [server];
+          const result = await this.requireMcpAdmin().mutate(scope, method === "mcp.add" ? "add" : method === "mcp.remove" ? "remove" : "logout", args, server);
+          return safeJson({ ...(result as object), reloadRequired: method !== "mcp.logout", reloadMessage: method === "mcp.logout" ? undefined : "Existing sessions load server configuration after /reload or a new session." });
+        });
+      case "mcp.update":
+        return this.mutation(client, method, params, async () => {
+          const scope = await this.mcpScope(params);
+          const server = string(params.server, "server", { min: 1, max: 128 });
+          rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "enabled", "exposure"], method);
+          if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
+          const patch: { enabled?: boolean; exposure?: import("../admin/mcp-admin-service.js").McpExposure } = {};
+          if (params.enabled !== undefined) patch.enabled = boolean(params.enabled, "enabled");
+          if (params.exposure !== undefined) patch.exposure = oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
+          if (Object.keys(patch).length === 0) throw new GatewayError("invalid_request", "MCP update requires enabled or exposure");
+          return safeJson(await this.requireMcpAdmin().update(scope, server, patch));
+        });
+      case "mcp.token.set":
+        return this.mutation(client, method, params, async () => {
+          const scope = await this.mcpScope(params);
+          const server = string(params.server, "server", { min: 1, max: 128 });
+          const token = string(params.token, "token", { min: 1, max: 16_384 });
+          return safeJson(await this.requireMcpAdmin().storeBearer(scope, server, token));
+        });
       case "knowledge.config":
       case "knowledge.tags.configure":
       case "knowledge.tags.reconcile":
@@ -2160,6 +2212,21 @@ export class GatewayService {
     } finally {
       work?.settle();
     }
+  }
+
+  private requireMcpAdmin(): McpAdminService {
+    if (!this.dependencies.mcpAdmin) throw new GatewayError("unsupported", "MCP administration is unavailable");
+    return this.dependencies.mcpAdmin;
+  }
+
+  private async mcpScope(params: Record<string, unknown>): Promise<McpScope> {
+    const scope = params.scope === undefined ? "global" : oneOf(params.scope, "scope", ["global", "project"] as const);
+    if (scope === "global") return { scope };
+    const cwd = optionalString(params.cwd, "cwd", 4_096);
+    if (!cwd) throw new GatewayError("invalid_request", "Project MCP scope requires cwd");
+    const resolved = await this.dependencies.trust.requireResolved(cwd);
+    if (!resolved.trusted) throw new GatewayError("unauthenticated", "Project MCP servers require a trusted project");
+    return { scope, cwd: resolved.cwd, trusted: true };
   }
 
   private async modelRuntime(params: Record<string, unknown>): Promise<ModelRuntime> {

@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
@@ -14,6 +15,7 @@ import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
 import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
+import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
 import { GlobalProviderResources } from "./admin/global-provider-resources.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
 import { GatewayWorkRegistry } from "./sessions/gateway-work-registry.js";
@@ -628,6 +630,11 @@ const service = new GatewayService({
   automations,
   knowledge,
   connections,
+  mcpAdmin: new McpAdminService(
+    config.agentDir,
+    join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
+    new MacKeychainMcpCredentialOwner(),
+  ),
   ...(sessionSearch ? { sessionSearch } : {}),
 });
 transport = new GatewayServer({

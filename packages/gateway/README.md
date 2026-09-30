@@ -260,15 +260,9 @@ attribution headers.
 session. It returns one row per entry of the single `TRON_MODULES` definition
 that `RuntimeSlot` also registers (`tron-modules.ts`: stable name, one-line
 purpose, declared tool and command names), so the installed list cannot name a
-module a session does not load or omit one it does. `connections` names the MCP
-instances a session runtime would admit tools from, using the same admission
-rule as the MCP adapter; it carries only the connection identity, its definition
-and health, and an unconfigured Connections owner yields an empty list. An
-individual MCP tool name is only discoverable inside a session runtime, so this
-read never opens a server, resolves credentials or admits a runtime binding.
-The `modules.v1` capability advertises the method. It is a bounded read: the
-module rows come from a fixed definition, and the connection rows are the
-already-redacted `connections.list` projection.
+module a session does not load or omit one it does. MCP servers are managed only
+through the explicit `mcp.*` methods below; they are not projected as Tron
+connection instances.
 
 `hooks.list` serves the same hook fields `session.resources` returns
 (`extensions`, `extensionLoadErrors`, `hookInventory`) for one scope without a
@@ -295,6 +289,25 @@ the subagent catalog and that same session-free extension load, capped at 256
 names per kind: a failed extension load or failed subagent discovery leaves the
 kinds that did resolve in place and adds one bounded `providesDiagnostic`
 instead of failing the read.
+
+### MCP administration
+
+`mcp.list` is an explicit request (never a poll) that runs the bundled `pi mcp
+list --json` CLI out of process. `scope` is `global` or `project`; project scope
+requires a canonical trusted `cwd`. Output is bounded to 1 MiB and the process
+timeout is 30 seconds. `mcp.add`, `mcp.remove`, `mcp.logout`, `mcp.update` and
+`mcp.token.set` require a `commandId` and use the bounded command receipt store.
+Add/remove report the affected server and require `/reload` or a new session for
+configuration changes; sign-out and new credentials are observed by running
+sessions at the next turn. `mcp.update` patches only `enabled` and `exposure` on
+an existing entry in the scope's `mcp.json`, under a file lock, retaining all
+other JSON keys and failing closed on malformed or oversized files.
+
+`mcp.token.set` stores bearer credentials through the host Keychain credential
+owner and writes only a `!command` reference in `mcp.json`; token values are
+never returned or logged. OAuth authorization relay is session-bound and uses
+the `AuthBroker` loopback callback validation and relay; clients return the
+callback query to the owning operation, never choose a callback destination.
 
 ### Agent home
 
