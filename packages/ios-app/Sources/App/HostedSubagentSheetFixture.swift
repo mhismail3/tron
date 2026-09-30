@@ -88,9 +88,9 @@ private actor HostedSubagentSheetSocket: GatewaySocketConnection {
               object["method"]?.stringValue == "session.processTranscript.open" else { return }
         let items: [JSONValue] = (0..<32).map { index in
             .object([
-                "id": .string("entry-\(index)"), "parentId": index > 0 ? .string("entry-\(index - 1)") : .null,
+                "id": .string("entry-\(index)"), "presentationId": .string("entry-\(index)"), "parentId": index > 0 ? .string("entry-\(index - 1)") : .null,
                 "timestamp": .string("2026-01-01T00:00:01Z"), "kind": .string("message"), "role": .string("assistant"),
-                "content": .array([.object(["id": .string("text-\(index)"), "type": .string("text"),
+                "content": .array([.object(["id": .string("text-\(index)"), "ordinal": .number(0), "type": .string("text"),
                     "text": .string("Child history row \(index). A bounded paragraph for scrolling.")])])
             ])
         }
