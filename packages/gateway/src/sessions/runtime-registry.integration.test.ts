@@ -9647,6 +9647,137 @@ export default function (pi) {
     await writeFile(artifactPath, `${JSON.stringify({ live: liveSnapshot, reloaded: reloadedParent }, null, 2)}\n`);
   });
 
+  it("returns Pi structured bash output through nested codemode calls", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-codemode-bash-output-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const extensions = join(cwd, ".pi", "extensions");
+    await Promise.all([
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd),
+    ]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`);
+    const faux = fauxProvider({ provider: "tron-codemode-bash-output", tokensPerSecond: 10_000 });
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const script = [
+      'const large = await tools.bash({ command: "yes x | head -c 1100000" });',
+      'const empty = await tools.bash({ command: "true" });',
+      'const failed = await tools.bash({ command: "printf failed-output; exit 7" }).catch((error) => ({ error: String(error) }));',
+      'return JSON.stringify({ large: { outputLength: large.output.length, truncated: large.truncated, full_output_path: large.full_output_path, exit_code: large.exit_code, wall_time_seconds: large.wall_time_seconds }, empty, failed });',
+    ].join("\n");
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: script }, { id: "codemode-bash-output" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("done"),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("inspect structured bash results");
+    await waitUntil(() => !slot.isBusy);
+    const parent = slot.snapshot().transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-bash-output");
+    expect(parent).toMatchObject({
+      role: "toolResult",
+      nestedCalls: { complete: true, calls: [
+        { toolName: "bash", status: "completed" },
+        { toolName: "bash", status: "completed" },
+        { toolName: "bash", status: "failed" },
+      ] },
+    });
+    const parentText = parent?.kind === "message" ? contentText(parent.content) : "";
+    const outputMarker = "Output:\n";
+    const structured = JSON.parse(parentText.slice(parentText.indexOf(outputMarker) + outputMarker.length)) as {
+      large: { outputLength: number; truncated: boolean; full_output_path?: string; exit_code: number; wall_time_seconds: number };
+      empty: { output: string; truncated: boolean; exit_code: number; wall_time_seconds: number };
+      failed: { output: string; truncated: boolean; exit_code: number; wall_time_seconds: number };
+    };
+    expect(structured.large.outputLength).toBeGreaterThan(1_048_576);
+    expect(structured.large).toMatchObject({ truncated: true, exit_code: 0 });
+    expect(structured.large.full_output_path).toBeTypeOf("string");
+    expect(structured.large.wall_time_seconds).toBeGreaterThanOrEqual(0);
+    expect(structured.empty).toMatchObject({ output: "", truncated: false, exit_code: 0 });
+    expect(structured.empty.wall_time_seconds).toBeGreaterThanOrEqual(0);
+    expect(structured.failed).toMatchObject({ output: "failed-output", truncated: false, exit_code: 7 });
+    expect(structured.failed.wall_time_seconds).toBeGreaterThanOrEqual(0);
+    const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-bash-structured-output.json");
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await writeFile(artifactPath, `${JSON.stringify({ structured, parent }, null, 2)}\n`);
+  });
+
+  it("aborts a nested codemode bash process tree", async () => {
+    if (process.platform === "win32") return;
+    const root = await mkdtemp(join(tmpdir(), "tron-codemode-bash-abort-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const extensions = join(cwd, ".pi", "extensions");
+    await Promise.all([
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
+    ]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`);
+    const pidPath = join(cwd, "nested.pid");
+    const childProgram = "setInterval(() => {}, 1000)";
+    const commandProgram = [
+      "const { spawn } = require('node:child_process');",
+      "const { writeFileSync } = require('node:fs');",
+      `const child = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(childProgram)}], { detached: true, stdio: 'ignore' });`,
+      `writeFileSync(${JSON.stringify(pidPath)}, String(child.pid));`,
+      "setInterval(() => {}, 1000);",
+    ].join(" ");
+    const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(commandProgram)}`;
+    const faux = fauxProvider({ provider: "tron-codemode-bash-abort", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage([fauxToolCall(
+      "codemode", { code: `await tools.bash({ command: ${JSON.stringify(command)} }); return "unexpected";` }, { id: "codemode-bash-abort" },
+    )], { stopReason: "toolUse" })]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust, broadcast: () => {},
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const prompting = slot.prompt("run nested process");
+    await waitUntil(() => existsSync(pidPath));
+    const childPid = Number(await readFile(pidPath, "utf8"));
+    expect(() => process.kill(childPid, 0)).not.toThrow();
+    const operationId = slot.snapshot().operation?.id;
+    expect(operationId).toBeDefined();
+    await slot.abort("codemode", operationId);
+    await expect(prompting).resolves.toMatchObject({ operationId });
+    await waitUntil(() => {
+      try { process.kill(childPid, 0); return false; }
+      catch { return true; }
+    });
+    expect(slot.snapshot().toolExecutions).toEqual([]);
+  });
+
   it("connects Pi MCP stdio and streamable HTTP fixtures and exposes resources through composed built-ins", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-pi-mcp-fixture-e2e-"));
     const agentDir = join(root, "agent");

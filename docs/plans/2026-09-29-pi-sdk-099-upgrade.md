@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-12
+- **Last updated:** 2026-09-30, P99-13
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -248,7 +248,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | `builtin:<name>` naming in errors, diagnostics and source info | **Adapt**: agent-instructions and extension diagnostics map `builtin:` sources | P99-6 |
 | `--no-extensions` also disables built-ins | **Qualify** `pi-subagents` children that pass `--no-extensions` | P99-14 |
 | Tool calls without a renderer show arguments; MCP titled `server/tool` | **Adapt** iOS generic tool card for MCP titles | P99-16 |
-| `bash`/`powershell` structured results up to 1 MiB with `truncated`/`full_output_path`; empty output `""` instead of `(no output)` | **Verify/adapt** Tron's bash wrapper and output projection | P99-13 |
+| `bash`/`powershell` structured results up to 1 MiB with `truncated`/`full_output_path`; empty output `""` instead of `(no output)` | **Verified/adapted**: a retained faux-provider codemode E2E proves Tron `DirectBashProcessOwner` preserves Pi's output schema through owned `BashOperations`, including >1 MiB truncation, full-output path, empty output and nonzero exit; nested abort kills its owned process tree. Gateway projection preserves empty content; existing `ToolDetailPresentationTests.commandAndExplicitEmptyOutput` confirms iOS renders no fabricated result. | P99-13 |
 | Managed git packages no longer auto-install Pi peers; warning for host modules in `dependencies` | **Qualify** `pi-agent-browser-native` (git); project warnings | P99-14 |
 | New sessions persisted at the first user message (#10000) | **Adapted**: forks materialize with retained user entries; catalog parent identity comes from normalized canonical header paths; pre-message receipts persist with the first user message, proven by teardown/reopen integration | P99-4 |
 | RpcClient listener fix; X11 clipboard; Finder paste; Kitty images; cursor after exit; `/settings` input; autocomplete fixes; pinned `-e` git refs | **Not applicable** (Tron uses the SDK, not RpcClient or the TUI) | — |
@@ -272,7 +272,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-10 | Done | Virtual models on the Gateway (D-7) | P99-3 | luna-worker, 2026-09-29 |
 | P99-11 | Done | Theme default and remote extension host rendering | P99-3 | luna-worker, 2026-09-29 |
 | P99-12 | Done | Catalog, provider and classifier deltas; release dates; K3 policy | P99-2 | luna-worker, 2026-09-29 |
-| P99-13 | Claimed | `bash` structured output and empty-output change | P99-3 | luna-worker, 2026-09-29 |
+| P99-13 | Done | `bash` structured output and empty-output change | P99-3 | luna-worker, 2026-09-29 |
 | P99-14 | Claimed | Qualify installed packages and subagent children against 0.99 | P99-6 | luna-worker, 2026-09-29 |
 | P99-15 | Ready | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | Unassigned |
 | P99-16 | Ready | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | Unassigned |
@@ -590,6 +590,16 @@ definition, so it inherits `outputSchema`. Prove that codemode receives
 Tron's `BashOperations`, that process-tree ownership and abort still hold for
 nested bash calls, and that empty output (`""` instead of `(no output)`)
 renders correctly on iOS.
+
+### P99-13 · Done · 2026-09-30 · luna-worker
+
+- Result: Verified Pi's structured `bash` result reaches codemode through Tron's owned `DirectBashProcessOwner` operations. A codemode call observes output, truncation, full-output path, exit code and wall time for 1,100,000 bytes; subsequent calls verify empty output and exit code 7. A separate codemode abort E2E proves the Gateway stop path kills a detached descendant of nested bash.
+- Evidence: Node 22.22.0 TypeScript check passed. Focused RuntimeRegistry E2Es passed 2/2 in 1.49 s (Vitest duration 0.50 s). The retained artifact `packages/gateway/test-results/pi-sdk-099-bash-structured-output.json` captures structured values and parent transcript. The `ToolDetailPresentationTests.commandAndExplicitEmptyOutput` iOS regression already verifies empty bash content stays absent rather than falling back to a placeholder; no iOS production change was needed. Final full Gateway Vitest: 2,315 passed, 2 failed across 214 files in 141.66 s; the resource-sensitive knowledge tagger (18/18, 2.23 s) and session-search-stall (2/2, 5.50 s) failures passed on isolated reruns. Logger rotation also failed under the prior full-suite load run, then passed isolated (16/16, 1.33 s). The separate initial full run exposed a duplicate test fixture mkdir, fixed before the final run. `git diff --check` and `scripts/personal-info-guard.sh` passed.
+- Changes: added two faux-provider codemode RuntimeRegistry integration cases in `packages/gateway/src/sessions/runtime-registry.integration.test.ts` and updated this plan's change matrix, task status and handoff. No runtime, protocol, or iOS source changes; no wire changes.
+- Tasks added: none.
+- Kept on purpose: Pi's bash output schema and its process implementation remain authoritative; Tron only owns exact process-tree abort and delegates execution/result shaping to Pi. Empty output remains an empty value; no `"(no output)"` compatibility text is introduced.
+- Deviations: none. The already-existing iOS empty-output presentation regression was inspected instead of duplicated or rewritten.
+- For the next agent: the iOS test suite/build remains with P99-16/P99-17. Regenerate the retained JSON by running `node node_modules/vitest/vitest.mjs run src/sessions/runtime-registry.integration.test.ts -t 'structured bash output'` from `packages/gateway`.
 
 ### P99-14 — Installed package qualification
 
