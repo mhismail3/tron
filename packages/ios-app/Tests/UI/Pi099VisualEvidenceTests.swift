@@ -50,6 +50,7 @@ struct Pi099VisualEvidenceTests {
         try index.write(to: Self.captureDirectory.appendingPathComponent("index.json"), options: .atomic)
         #expect(artifacts.count == scenes.count * 4)
         #expect(scenes.map(\.id).contains("mcp-servers-global"))
+        #expect(scenes.map(\.id).contains("mcp-add-server"))
         #expect(scenes.map(\.id).contains("tool-codemode"))
     }
 
@@ -100,6 +101,7 @@ struct Pi099VisualEvidenceTests {
         let views: [Scene] = [
             scene("mcp-servers-global", MCPServersSettingsView(projectCWD: nil).environment(model)),
             scene("mcp-servers-project", MCPServersSettingsView(projectCWD: "/fixture/trusted-project").environment(model)),
+            scene("mcp-add-server", MCPAddServerPresentationEvidence()),
             scene("extensions-codemode-tools", ExtensionsSettingsView(projectCWD: nil).environment(model)),
             scene("provider-typesafe", ProvidersSettingsView(sessionID: nil).environment(model)),
             scene("tool-codemode", ToolDetailSheet(tool: codemode, density: .expanded)),
@@ -189,5 +191,33 @@ struct Pi099VisualEvidenceTests {
     }
     private func tool(_ name: String, request: JSONValue?, response: JSONValue?, content: String, nestedCalls: JSONValue? = nil, details: JSONValue? = nil, usage: JSONValue? = nil, error: Bool = false, subtitle: String = "Completed") -> ChatToolPresentation {
         ChatToolPresentation(id: "fixture-\(name)", title: name, toolName: name, subtitle: subtitle, request: request, response: response, content: content, fallbackContent: nil, nestedCalls: nestedCalls, details: details, usage: usage, error: error, startedAt: "2026-09-30T10:00:00Z", completedAt: "2026-09-30T10:00:01Z", durationMs: 930, lastProgressAt: "2026-09-30T10:00:01Z", progressSequence: 2)
+    }
+}
+
+@MainActor
+private struct MCPAddServerPresentationEvidence: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isPresented = true
+    @State private var serverName = "calendar"
+    @State private var transport = "http"
+    @State private var url = "https://mcp.example.test"
+    @State private var command = ""
+    @State private var args = ""
+
+    var body: some View {
+        Color.tronBackground
+            .preferredColorScheme(colorScheme)
+            .sheet(isPresented: $isPresented) {
+                MCPAddServerForm(
+                    serverName: $serverName,
+                    transport: $transport,
+                    url: $url,
+                    command: $command,
+                    args: $args,
+                    working: false,
+                    onAdd: { }
+                )
+                .presentationDetents([.large])
+            }
     }
 }

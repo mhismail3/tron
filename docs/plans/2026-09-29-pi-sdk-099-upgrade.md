@@ -1176,3 +1176,28 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Changes: Added `packages/gateway/src/sessions/codemode-classify-cost.integration.test.ts`; updated the classifier-cost matrix disposition and this handoff. No runtime change.
 - Kept on purpose: Usage aggregation is compared against the assistant usage baseline plus classifier tokens, proving single-counting without relying on a new cost price or production hook; the fake provider, credential, and fetch stay isolated.
 - Deviations: None.
+
+### P99-17 g5 · Done · 2026-09-30 · luna-worker
+
+- Result: MCP Settings now uses the static scroll surface for its long server list, eliminating Liquid Glass's reflected duplicate header and accessibility-size right-edge strip. User-facing copy no longer names Pi, statuses use sentence case, and nested `display` calls use the same human title/icon mapping as tool chips. Add Server evidence presents the production `MCPAddServerForm` in the hosted visual test, not a hand-built replica.
+- Evidence: Hosted visual evidence passed 1/1 in 17.2 s and retained 68 captures (17 scenes × light/dark × standard/accessibility) under `packages/ios-app/build/p99-captures/` with `index.json`; all 17 accessibility scene pairs were reviewed. The MCP global capture confirms clean card edges, no ghost header, sentence-case statuses and un-clipped controls. Add sheet capture shows the actual presented production form. `ToolDetailPresentationTests` 35/35, `ExtensionsCatalogPresentationTests` 3/3, and `SettingsRouteIdentityTests` 3/3 passed. `ChatViewScrollHarnessTests.unifiedResponseAndNotificationSettlement()` passed twice on candidate (1.97 s, 1.77 s) and twice on detached `main` baseline (1.94 s, 1.72 s), in separate lanes; no regression observed. Initial XCTest filter without `()` selected zero tests and was corrected; actual four executions each ran 1 test. Final build and visual rerun passed.
+- Changes: `MCPServersSettingsView.swift`, `ToolDetailPresentation.swift`, `Pi099VisualEvidenceTests.swift`, this handoff. Capture verdicts (each covers standard/accessibility in light/dark):
+  - `extensions-codemode-tools`: readable built-in toggles and tool settings; no overlaps.
+  - `mcp-add-server`: production form is fully visible in the hosted large-detent sheet.
+  - `mcp-servers-global`: clean card edges; no reflected duplicate heading or right-edge bar; statuses are sentence case.
+  - `mcp-servers-project`: scope control and project list remain readable without clipping.
+  - `provider-typesafe`: provider rows and availability controls remain distinct and legible.
+  - `routed-physical-model`: routed and physical model rows are readable at accessibility size.
+  - `tool-chips`: chip labels, results, durations and nested states remain separated.
+  - `tool-codemode`: output, nested failures, Display call and technical-details affordance remain visible.
+  - `tool-codemode-continuation`: long nested presentation scrolls without control overlap.
+  - `tool-mcp-error`: failed status and server error remain visible and distinct.
+  - `tool-mcp-image`: image result metadata remains readable behind the generic result presentation.
+  - `tool-mcp-structured`: structured-only result remains bounded and disclosed without clipping.
+  - `tool-mcp-text`: text result wraps within the detail surface.
+  - `tool-picker`: grouped tool names and exposure labels stay in their rows.
+  - `tool-read-mcp-resource`: resource URI and text remain legible within the detail surface.
+  - `tool-search`: loaded-tool list remains within the result preview.
+  - `tool-technical-details`: metadata rows wrap within the detail surface; raw JSON stays behind disclosure.
+- Kept on purpose: Pi remains named only in technical comments documenting SDK ownership; MCP Settings uses the planned static surface for the long list while settings groups retain tinted Liquid Glass. Hosted Add Server uses the same form component as production; it performs no mutation.
+- Deviations: The Add Server screenshot uses a test-owned large detent to show the complete production form at all capture sizes; production medium/large sheet behavior is unchanged. The main-worktree baseline was detached at `main` commit `f9e81ff81`, used with lane `p9917base`, then removed. No chat behavior change or regression was found.

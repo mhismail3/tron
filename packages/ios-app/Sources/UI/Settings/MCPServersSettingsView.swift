@@ -54,9 +54,9 @@ struct MCPServersSettingsView: View {
                     }
                 }
                 if let error { TronSettingsNotice(message: error, retry: reload) }
-                TronSettingsGroup("MCP Servers", detail: selectedScope == "global" ? "Pi global configuration" : "Trusted project configuration", accent: .tronCyan) {
+                TronSettingsGroup("MCP Servers", detail: selectedScope == "global" ? "Global configuration" : "Trusted project configuration", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
                     if loading && servers.isEmpty { ProgressView("Loading MCP servers…").padding() }
-                    else if servers.isEmpty { TronPlaceholderState(title: "No MCP servers", detail: "Add a stdio or HTTP server to Pi's configuration.", icon: "server.rack") }
+                    else if servers.isEmpty { TronPlaceholderState(title: "No MCP servers", detail: "Add a stdio or HTTP server to your configuration.", icon: "server.rack") }
                     ForEach(Array(serverErrors.enumerated()), id: \.offset) { _, item in
                         Text(item.objectValue?["message"]?.stringValue ?? item.stringValue ?? "MCP server reported an error")
                             .font(TronTypography.caption).foregroundStyle(Color.tronError).padding(12).textSelection(.enabled)
@@ -72,7 +72,7 @@ struct MCPServersSettingsView: View {
                         Button("Reload", systemImage: "arrow.clockwise") { reload() }
                     }.padding(12)
                 }
-                TronSettingsCaption("Server changes are loaded by new sessions or after /reload. OAuth tokens remain in Pi's authentication store; bearer tokens are stored in the Mac Keychain.")
+                TronSettingsCaption("Server changes are loaded by new sessions or after /reload. Sign-in tokens stay on your Mac; bearer tokens are stored in the Mac Keychain.")
             }.padding(.horizontal, 20).padding(.vertical, 18)
         }
         .tronScrollEdgeChrome().tronNavigationTitle("MCP Servers").tronSettingsLayout()
@@ -81,24 +81,15 @@ struct MCPServersSettingsView: View {
         .onChange(of: activity.allowsPresentationPublication) { _, active in if !active { generation &+= 1; loading = false } }
         .tronSettingsVisualTheme(accent: .tronCyan)
         .tronManagedSheet(isPresented: $showingAdd, identity: "settings.mcp.add") {
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        TronSettingsGroup("Server", accent: .tronCyan) {
-                            TextField("Server name", text: $serverName).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
-                            Picker("Transport", selection: $transport) { Text("HTTP").tag("http"); Text("stdio").tag("stdio") }.padding(12)
-                        }
-                        TronSettingsGroup(transport == "http" ? "HTTP Endpoint" : "Local Process", accent: .tronCyan) {
-                            if transport == "http" { TextField("https://…", text: $url).textInputAutocapitalization(.never).keyboardType(.URL).padding(12) }
-                            else {
-                                TextField("Command", text: $command).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
-                                TextField("Arguments (space separated)", text: $args).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
-                            }
-                        }
-                        Button("Add Server") { Task { await addServer() } }.buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || serverName.isEmpty)
-                    }.padding(18)
-                }.tronScrollEdgeChrome().tronNavigationTitle("Add MCP Server").tronPresentation().presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
-            }.tronSettingsVisualTheme(accent: .tronCyan)
+            MCPAddServerForm(
+                serverName: $serverName,
+                transport: $transport,
+                url: $url,
+                command: $command,
+                args: $args,
+                working: working,
+                onAdd: { Task { await addServer() } }
+            )
         }
         .tronManagedSheet(isPresented: Binding(get: { authOperationID != nil }, set: { if !$0 { authOperationID = nil } }), identity: "settings.mcp.auth") {
             if let operationID = authOperationID {
@@ -125,7 +116,7 @@ struct MCPServersSettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(server.name).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
-                    Text("\(server.status ?? "configured") · \(server.toolCount ?? server.tools?.count ?? 0) tools · \(server.exposure ?? "codemode")")
+                    Text("\(statusTitle(server.status)) · \(server.toolCount ?? server.tools?.count ?? 0) tools · \(server.exposure ?? "codemode")")
                         .font(TronTypography.caption).foregroundStyle(statusColor(server))
                 }
                 Spacer()
@@ -146,6 +137,17 @@ struct MCPServersSettingsView: View {
             if let error = server.error { Text(error).font(TronTypography.caption).foregroundStyle(Color.tronError).textSelection(.enabled) }
             if let stderr = server.stderr, !stderr.isEmpty { Text(stderr).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).lineLimit(4).textSelection(.enabled) }
         }.padding(12)
+    }
+
+    private func statusTitle(_ status: String?) -> String {
+        switch status?.lowercased() {
+        case "connected": "Connected"
+        case "needs sign-in": "Needs sign-in"
+        case "failed": "Failed"
+        case "configured": "Configured"
+        case let value?: value.prefix(1).uppercased() + value.dropFirst()
+        case nil: "Configured"
+        }
     }
 
     private func statusColor(_ server: MCPServerList.Server) -> Color {
@@ -214,5 +216,43 @@ struct MCPServersSettingsView: View {
             }
             authOperationID = operationID
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+/// Shared by the production managed sheet and hosted presentation evidence.
+struct MCPAddServerForm: View {
+    @Binding var serverName: String
+    @Binding var transport: String
+    @Binding var url: String
+    @Binding var command: String
+    @Binding var args: String
+    let working: Bool
+    let onAdd: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    TronSettingsGroup("Server", accent: .tronCyan) {
+                        TextField("Server name", text: $serverName).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
+                        Picker("Transport", selection: $transport) { Text("HTTP").tag("http"); Text("stdio").tag("stdio") }.padding(12)
+                    }
+                    TronSettingsGroup(transport == "http" ? "HTTP Endpoint" : "Local Process", accent: .tronCyan) {
+                        if transport == "http" { TextField("https://…", text: $url).textInputAutocapitalization(.never).keyboardType(.URL).padding(12) }
+                        else {
+                            TextField("Command", text: $command).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
+                            TextField("Arguments (space separated)", text: $args).textInputAutocapitalization(.never).autocorrectionDisabled().padding(12)
+                        }
+                    }
+                    Button("Add Server", action: onAdd).buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || serverName.isEmpty)
+                }.padding(18)
+            }
+            .tronScrollEdgeChrome()
+            .tronNavigationTitle("Add MCP Server")
+            .tronPresentation()
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
+        }
+        .tronSettingsVisualTheme(accent: .tronCyan)
     }
 }

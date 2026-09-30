@@ -736,6 +736,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
         }
         switch name {
         case "codemode": return "Codemode"
+        case "display": return "Display"
         case "tool_search": return "Search tools"
         case "list_mcp_resources": return "List MCP resources"
         case "list_mcp_resource_templates": return "List MCP resource templates"
@@ -761,6 +762,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
         }
         return switch title {
         case "codemode": "Codemode"
+        case "display": "Display"
         case "tool_search": "Search tools"
         case "list_mcp_resources": "List MCP resources"
         case "list_mcp_resource_templates": "List MCP resource templates"
@@ -780,6 +782,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
         if title.hasPrefix("mcp__") { return "network" }
         return switch title {
         case "codemode": "terminal"
+        case "display": "rectangle.on.rectangle"
         case "tool_search": "magnifyingglass"
         case "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource": "externaldrive"
         case "read": "doc.text"
