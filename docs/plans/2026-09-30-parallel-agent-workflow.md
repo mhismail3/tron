@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, approval; W-1 Done
+- **Last updated:** 2026-09-30, W-2 claimed
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -194,7 +194,7 @@ Dated 2026-09-30:
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | W-1 | Done | User setup: `gh` re-authenticated, repository settings applied (squash-only), private evidence repository created, D-1–D-5 settled | none | User, 2026-09-30 |
-| W-2 | Ready | GitHub bootstrap: labels, Project and fields, Epic/Task issue forms, ruleset spec; the user applies the settings and ruleset changes | W-1 | Unassigned |
+| W-2 | Claimed | GitHub bootstrap: labels, Project and fields, Epic/Task issue forms, ruleset spec; the user applies the settings and ruleset changes | W-1 | session 01a0f183, 2026-09-30 |
 | W-3 | Ready | Shared-resource isolation audit so any two worktrees can validate concurrently; each fix becomes a sub-issue | none | Unassigned |
 | W-4 | Ready | Core: repository config, `gh` resolution, `start`/claim, naming, soft cap | W-2 | Unassigned |
 | W-5 | Ready | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | Unassigned |
