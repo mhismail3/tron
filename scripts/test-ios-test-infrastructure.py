@@ -264,6 +264,9 @@ class ContainedFixture:
         lane root from HOME and from the state directory, both of which are
         contained here, so a fixture that needs its own value sets the variable
         (and the synthetic tools still refuse a value that escapes).
+        TRON_IOS_TEST_LANE and TRON_IOS_TEST_DEVICE_NAME are removed too: a
+        lane a developer exported would select another lane than the one a
+        case sets up, or conflict with its TRON_IOS_TEST_STATE_DIR.
         """
         self.contained_root = root
         home = root / "home"
@@ -286,6 +289,8 @@ class ContainedFixture:
         })
         environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
         environment.pop("TRON_IOS_TEST_DISCOVERY_ROOT", None)
+        environment.pop("TRON_IOS_TEST_LANE", None)
+        environment.pop("TRON_IOS_TEST_DEVICE_NAME", None)
         return environment
 
     def run_script(self, command: list[str], root: Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -3376,6 +3381,15 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
        or idle-lane expiry never removes it, so per-worktree lanes accumulate.
     6. A worktree whose directory name starts with `.`, `-` or `_` derives a
        lane name the lane validator refuses, so every command there fails.
+    7. A deleted worktree's lane - a simulator of gigabytes - outlives its
+       worktree for the whole idle period, because only idle expiry removes a
+       lane; or the removal that closes this takes a lane that is not the
+       deleted worktree's to lose: the default lane (whose marker may name a
+       deleted worktree that created it), a lane whose worktree still exists,
+       or a lane a live command holds.
+    8. A read-only command (`help`, `status`) in a linked worktree creates that
+       worktree's lane directory, which holds no ownership marker, so no sweep
+       ever reclaims it.
     """
 
     def setUp(self) -> None:
@@ -3589,6 +3603,47 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
                 result = self.tool(worktree, "tron-ios-test", "status")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(f"Lane: {key} ({self.lane_root}/ios-test-{key})\n", result.stdout)
+
+    def test_a_deleted_worktrees_lane_is_removed_by_the_next_sweep(self) -> None:
+        """Failure mode 7: a lane outlives its worktree only while a command holds it."""
+        gone, held, kept = (self.linked(name) for name in ("gone-worktree", "held-worktree", "kept-worktree"))
+        for worktree in (gone, held, kept):
+            self.stamp_products(worktree)
+            result = self.focused_run(worktree)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        # The default lane, created - and so attributed - by a worktree deleted below.
+        default_run = self.tool(gone, "tron-ios-test", "run", "--lane", "default",
+                                "--only-testing", "TronMobileTests/StubTests")
+        self.assertEqual(default_run.returncode, 0, default_run.stderr)
+        default_lane = self.lane_root / "ios-test"
+        self.assertEqual(self.lane_marker(default_lane)["worktree"], os.path.realpath(gone))
+        lanes = {worktree: self.lane_root / f"ios-test-{self.key(worktree)}" for worktree in (gone, held, kept)}
+        udids = {worktree: str(self.lane_marker(lane)["udid"]) for worktree, lane in lanes.items()}
+        gone_key = self.key(gone)
+        self.hold_lease(lanes[held], command="run")
+        for worktree in (gone, held):
+            self.git(self.primary, "worktree", "remove", "--force", str(worktree))
+
+        reap = self.tool(self.primary, "tron-ios-test", "reap")
+        self.assertEqual(reap.returncode, 0, reap.stderr)
+        self.assertIn(f"removed lane {gone_key}", reap.stdout)
+        self.assertFalse(lanes[gone].exists())
+        self.assertFalse(self.present(udids[gone]))
+        for lane, worktree in ((lanes[held], held), (lanes[kept], kept), (default_lane, gone)):
+            with self.subTest(kept=lane.name):
+                self.assertEqual(self.lane_marker(lane)["worktree"], os.path.realpath(worktree))
+                self.assertTrue(self.present(str(self.lane_marker(lane)["udid"])))
+
+    def test_a_read_only_command_creates_no_lane_state(self) -> None:
+        """Failure mode 8: only a command that leases the lane creates its directory."""
+        worktree = self.linked("read-only-worktree")
+        lane = self.lane_root / f"ios-test-{self.key(worktree)}"
+        for tool, command in (("tron-ios-test", "status"), ("ios-gateway-e2e-test", "help"),
+                              ("ios-gateway-e2e-test", "status")):
+            with self.subTest(tool=tool, command=command):
+                result = self.tool(worktree, tool, command)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(lane.exists())
 
 
 class DevelopmentSimulatorFixture(LifecycleHarness, unittest.TestCase):

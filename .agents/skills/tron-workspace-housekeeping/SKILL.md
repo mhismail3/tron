@@ -149,8 +149,8 @@ Simulator lifetime is the test tooling's, not housekeeping's. A command of
 `scripts/tron-ios-test`, `scripts/tron-profile ios` or
 `scripts/ios-gateway-e2e-test` releases the simulator it booted when that command
 ends - success, failure, timeout or signal - and every provisioning command
-first sweeps: orphaned owned lanes are shut down and lanes unused for 7 days are
-removed. The runner's sweep also prunes runs beyond the retention windows and
+first sweeps: orphaned owned lanes are shut down, and lanes unused for 7 days or
+whose creating worktree was deleted (never the default lane) are removed. The runner's sweep also prunes runs beyond the retention windows and
 the products of worktrees that no longer exist. A boot is admitted on the Mac's
 free memory and swap as well, so no lane can push the shared Mac into swap. Use
 those commands instead of `xcrun simctl`, `rm`, or process signals:

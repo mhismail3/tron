@@ -492,7 +492,8 @@ def worktree_lane(worktree: Path) -> str:
     The primary checkout keeps the default lane. A linked worktree gets the lane
     named by its worktree key - the key that also names its test products and
     its Gateway E2E fixture - so parallel worktrees never contend for one lease;
-    memory admission and idle-lane expiry bound how many such lanes exist.
+    memory admission and the sweep's lane removal - idle for the TTL, or its
+    worktree deleted - bound how many such lanes exist.
     """
     located = subprocess.run(
         ["git", "-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
@@ -1124,18 +1125,29 @@ def sweep(arguments: argparse.Namespace) -> int:
     return DESTINATION_EXIT if failures else 0
 
 
-def expiry_of(marker_path: Path, now: float) -> str:
+def expiry_of(marker_path: Path, now: float, default_state_dir: Path) -> str:
     """Why a lane is or is not due for removal.
 
     "no-marker" means there is nothing that proves this directory is ours:
     marker-less state is never removed, and the default lane's directory exists
-    as soon as any command creates it, before it has a simulator. "undated"
-    means a marker written before lanes recorded their last use; it is kept
-    until a command uses the lane and dates it.
+    as soon as any command creates it, before it has a simulator.
+    "worktree-deleted" means the worktree that created the lane is gone: every
+    linked worktree has a lane of its own, so its simulator would otherwise
+    outlive it for the whole idle period. The default lane is exempt - its
+    marker names whichever checkout first created it - and a later command in a
+    named lane simply provisions it again. "undated" means a marker written
+    before lanes recorded their last use; it is kept until a command uses the
+    lane and dates it.
     """
     marker = load_marker(marker_path)
     if marker is None:
         return "no-marker"
+    worktree = marker.get("worktree")
+    if (
+        isinstance(worktree, str) and worktree and not Path(worktree).exists()
+        and lane_label(marker_path.parent, default_state_dir) != "default"
+    ):
+        return "worktree-deleted"
     last_used = marker.get("last_used_epoch_seconds")
     if not isinstance(last_used, (int, float)) or isinstance(last_used, bool):
         return "undated"
@@ -1171,21 +1183,25 @@ def remove_lane(directory: Path, arguments: argparse.Namespace) -> None:
     shutil.rmtree(directory)
 
 
-def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
-    """Remove a lane unused for longer than the TTL.
+REMOVABLE_EXPIRY = ("expired", "worktree-deleted")
 
-    Returns "expired", or why not: "fresh", "undated", "no-marker", "busy" (a
+
+def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
+    """Remove a lane unused for longer than the TTL, or whose worktree is gone.
+
+    Returns "expired" or "worktree-deleted", or why not: "fresh", "undated",
+    "no-marker", "busy" (a
     live process holds the lease), "skipped" (an unreadable marker or an unsafe
     directory) or "failed". A lane the file system refuses to remove is reported
     as "failed" and the sweep carries on with the other lanes: removal races a
     command that is provisioning the same lane, and the sweep must survive it.
     """
     try:
-        outcome = expiry_of(marker_path, time.time())
+        outcome = expiry_of(marker_path, time.time(), arguments.default_state_dir)
     except DestinationError as error:
         print(f"warning: skipping {marker_path}: {error}", file=sys.stderr)
         return "skipped"
-    if outcome != "expired":
+    if outcome not in REMOVABLE_EXPIRY:
         return outcome
     with lease_hold(marker_path.parent / LEASE_NAME) as held:
         if not held:
@@ -1193,8 +1209,8 @@ def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
         # Under the lease the lane cannot start a command that would refresh it,
         # so this second reading decides.
         try:
-            outcome = expiry_of(marker_path, time.time())
-            if outcome != "expired":
+            outcome = expiry_of(marker_path, time.time(), arguments.default_state_dir)
+            if outcome not in REMOVABLE_EXPIRY:
                 return outcome
             remove_lane(marker_path.parent, arguments)
         except (DestinationError, OSError) as error:
@@ -1202,8 +1218,9 @@ def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
             # file that vanished, or a state directory the sweep cannot delete.
             print(f"warning: could not remove lane {marker_path.parent}: {error}", file=sys.stderr)
             return "failed"
-    print(f"removed lane {lane_label(marker_path.parent)} ({marker_path.parent})")
-    return "expired"
+    reason = "its worktree no longer exists" if outcome == "worktree-deleted" else "unused for longer than the TTL"
+    print(f"removed lane {lane_label(marker_path.parent, arguments.default_state_dir)} ({marker_path.parent}): {reason}")
+    return outcome
 
 
 def remove_lane_command(arguments: argparse.Namespace) -> int:
@@ -1549,7 +1566,7 @@ def parse_args() -> argparse.Namespace:
             parser.error(f"{arguments.command} requires --discovery-root")
         if arguments.marker is not None:
             parser.error(f"{arguments.command} does not take --marker")
-        if arguments.command in ("lanes", "simulators") and arguments.default_state_dir is None:
+        if arguments.default_state_dir is None:
             parser.error(f"{arguments.command} requires --default-state-dir")
         return arguments
     if arguments.command == "lane-remove":

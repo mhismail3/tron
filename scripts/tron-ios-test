@@ -51,8 +51,9 @@ Commands:
                        a lane a live process holds (73) and state with no ownership marker (66).
   reap                 Shut down this repository's owned simulators that are booted
                        with no live lease (orphans of a crash, a kill or --keep-booted),
-                       delete lanes no command has used for 7 days, and prune results
-                       and products.
+                       delete lanes no command has used for 7 days or whose creating
+                       worktree no longer exists (never the default lane), and prune
+                       results and products.
   prune                Reclaim disk only: keep the newest 50 runs of each worktree plus
                        everything younger than 7 days, and delete the test products of
                        worktrees that no longer exist. Touches no simulator, so it takes
@@ -342,6 +343,7 @@ if [[ "$command" == reap ]]; then
   # shuts that lane's simulator down or removes the lane, so a running command
   # is never disturbed. Disk is reclaimed here too: every sweep prunes.
   python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" \
+    --default-state-dir "$DEFAULT_STATE_ROOT" \
     --results-root "$RESULTS_ROOT" --products-root "$PRODUCTS_ROOT" \
     --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
   exit 0
@@ -452,6 +454,7 @@ fi
 # lease a live process holds is never touched - including this lane, whose lease
 # this command already holds, which is why --keep-booted survives its own lane.
 if ! python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" \
+  --default-state-dir "$DEFAULT_STATE_ROOT" \
   --results-root "$RESULTS_ROOT" --products-root "$PRODUCTS_ROOT" \
   --development-state "$DEVELOPMENT_STATE"; then
   echo "warning: the orphaned-simulator sweep did not complete; continuing" >&2

@@ -70,8 +70,6 @@ proxy_script="$repo_root/scripts/ios-gateway-fault-proxy.mjs"
 # dial the lane itself.
 e2e_test_filter="TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
 e2e_lan_endpoint="off"
-mkdir -p "$test_state_root"
-chmod 700 "$test_state_root"
 simulator_args=(
   --marker "$simulator_marker"
   --runtime "$TRON_CI_IOS_RUNTIME_VERSION"
@@ -586,15 +584,21 @@ case "$command" in
   status|logs|-h|--help|help) ;;
   *) usage >&2; die "unknown command: $command" ;;
 esac
-if [[ "$command" != status && "$command" != logs && "$command" != -h && "$command" != --help && "$command" != help \
-      && "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
-  # The same lease, and the same release, as scripts/tron-ios-test: when this
-  # command ends, on success, failure, deadline or signal, the holder shuts down
-  # the lane's simulator - and never the remembered Development simulator.
-  # The lane travels with the command, as in scripts/tron-ios-test: the command
-  # the holder starts re-derives every lane path from the lane it leased.
-  exec python3 "$lock_owner" --lock "$test_lock" --marker "$simulator_marker" \
-    --development-state "$development_state" -- "$0" "$command" --lane "$test_lane"
+if [[ "$command" != status && "$command" != logs && "$command" != -h && "$command" != --help && "$command" != help ]]; then
+  # Only a command that leases the lane creates its state directory: a
+  # read-only command must not leave a marker-less lane directory that no
+  # sweep reclaims.
+  mkdir -p "$test_state_root"
+  chmod 700 "$test_state_root"
+  if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
+    # The same lease, and the same release, as scripts/tron-ios-test: when this
+    # command ends, on success, failure, deadline or signal, the holder shuts down
+    # the lane's simulator - and never the remembered Development simulator.
+    # The lane travels with the command, as in scripts/tron-ios-test: the command
+    # the holder starts re-derives every lane path from the lane it leased.
+    exec python3 "$lock_owner" --lock "$test_lock" --marker "$simulator_marker" \
+      --development-state "$development_state" -- "$0" "$command" --lane "$test_lane"
+  fi
 fi
 case "$command" in
   prepare|build|run|run-lan|iterate|all|stop|clean)
@@ -602,7 +606,8 @@ case "$command" in
     # anything: owned lanes booted with no live lease are reclaimed, and this
     # command's own lane is leased above, so the sweep never touches it.
     python3 "$simulator_owner" sweep \
-      --discovery-root "$test_discovery_root" --development-state "$development_state" \
+      --discovery-root "$test_discovery_root" --default-state-dir "$test_default_state_root" \
+      --development-state "$development_state" \
       || echo "warning: the orphaned-simulator sweep did not complete; continuing" >&2
     ;;
 esac

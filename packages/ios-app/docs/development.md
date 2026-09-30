@@ -1152,12 +1152,13 @@ concurrently without naming a lane; `--lane default` selects the default lane
 from any worktree. The selection has one owner, `scripts/ios-test-simulator.py
 lane`, which the runner, `scripts/tron-profile ios` and
 `scripts/ios-gateway-e2e-test` all ask, so one worktree and one selection name
-one lane in all three; each takes `--lane NAME`. Memory admission and idle-lane
-expiry below bound how many worktree lanes exist. The lane the command was given is carried into
-the command the lease holder starts, so the whole command - lease, marker,
-device and release - stays in that one lane; a process that inherits a lease
-(`TRON_IOS_TEST_LOCK_HELD`) while naming a lane that lease does not cover is
-refused (74) rather than run on a lane it does not hold. A named lane refuses
+one lane in all three; each takes `--lane NAME`. Memory admission and the lane
+removal below bound how many worktree lanes exist. The lane the command was
+given is carried into the command the lease holder starts, so the whole command
+- lease, marker, device and release - stays in that one lane. The runner also
+refuses (74) to run when it inherits a lease (`TRON_IOS_TEST_LOCK_HELD`) that
+does not cover the lane it names, rather than run on a lane it does not hold;
+the profiler and the Gateway E2E harness only skip taking a lease they inherit. A named lane refuses
 `TRON_IOS_TEST_STATE_DIR`
 and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
 those two overrides name - and, when set without a lane, select - the default
@@ -1180,11 +1181,15 @@ lane-remove NAME` deletes one lane's simulator and state, and the test products
 of the worktree that created the lane once that worktree no longer exists - a
 live worktree's products are shared with its other lanes and are kept. It
 refuses a lane a live process holds (73) and state with no ownership marker or
-whose directory holds another lane's marker (66). The sweep also deletes any lane no command has used for 7 days once its
-lease is free, so an abandoned lane costs nothing; marker-less state (including
-the default lane's directory, which exists before its first provision) is never
-removed, and a marker written before lanes recorded their last use is kept until
-a command dates it.
+whose directory holds another lane's marker (66). The sweep also deletes, once
+its lease is free, any lane no command has used for 7 days and any lane other
+than the default one whose creating worktree no longer exists - a deleted
+worktree's simulator would otherwise hold gigabytes for the whole idle period,
+and a later command in that lane simply provisions it again - so an abandoned
+lane costs nothing. Marker-less state (including the default lane's directory,
+which exists before its first provision, and the directory holding only the
+lease file that `clean` leaves) is never removed, and a marker written before
+lanes recorded their last use is kept until a command dates it.
 
 How many simulators the Mac runs is decided by its memory, not by a fixed count.
 Before `simctl boot` - never for a lane whose simulator is already booted, which

@@ -636,6 +636,7 @@ class Profiler:
         result = run(
             [sys.executable, str(SIMULATOR), "sweep",
              "--discovery-root", str(self.lane.lane_root),
+             "--default-state-dir", str(self.lane.default_state_root),
              "--development-state", str(self.development_state)],
             capture_output=True,
         )
