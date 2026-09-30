@@ -2479,7 +2479,8 @@ own scroll and asks the coordinator to detach and issue `oldest-history` through
 `ScrollPosition`. SwiftUI's delegate is never replaced. Coverage/unmount restores
 the original setting and removes the proxy; absent ancestry logs once in
 `ChatTranscriptOrientation` and leaves UIKit behavior unchanged. Today's path
-mounts no probe. `TronChatDisplayUITests` exercises the actual system gesture.
+mounts no probe. The hosted status-bar journey exercises the public delegate path; real system
+taps remain a device check because simulator synthetic delivery is unreliable.
 
 Exactly one scroll is eligible for chat's status-bar gesture. Secondary scroll
 content uses the shared `chatSecondaryScrollContent` ancestry probe, scoped by

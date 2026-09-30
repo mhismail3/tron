@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class TronChatDisplayUITests: XCTestCase {
@@ -18,6 +19,32 @@ final class TronChatDisplayUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+        assertUprightImagePixels(attachmentName: name)
+    }
+
+    /// Inspect actual compositor pixels: the old origin menu had no colored
+    /// preview at all even though its AX buttons and delegate were reachable.
+    private func assertUprightImagePixels(attachmentName: String) {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else { return XCTFail("Missing screenshot") }
+        let width = image.width, height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return XCTFail("Missing pixel context") }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var redY = 0, blueY = 0, redCount = 0, blueCount = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                if bytes[i] > 160 && bytes[i + 1] < 70 && bytes[i + 2] < 70 { redY += y; redCount += 1 }
+                if bytes[i + 2] > 160 && bytes[i] < 70 && bytes[i + 1] < 70 { blueY += y; blueCount += 1 }
+            }
+        }
+        XCTAssertGreaterThan(redCount, 500, "\(attachmentName): real card must remain visible")
+        XCTAssertGreaterThan(blueCount, 500, "\(attachmentName): real card must remain visible")
+        if redCount > 0 && blueCount > 0 {
+            XCTAssertLessThan(Double(redY) / Double(redCount), Double(blueY) / Double(blueCount), attachmentName)
+        }
     }
 
     func testInlineImageMenuLiftAndDismiss() {
@@ -38,6 +65,14 @@ final class TronChatDisplayUITests: XCTestCase {
             capture("\(orientation)-image-after-dismiss")
             XCTAssertEqual(image.frame.midX, original.midX, accuracy: 0.5)
             XCTAssertEqual(image.frame.midY, original.midY, accuracy: 0.5)
+            XCTAssertLessThan(badge.frame.midY, image.frame.midY)
+            let scroll = app.scrollViews.firstMatch
+            scroll.swipeDown(velocity: .fast)
+            scroll.swipeDown(velocity: .fast)
+            XCTAssertFalse(image.isHittable, "Exercise offscreen lazy history, not only the original mount")
+            for _ in 0..<4 where !image.isHittable { scroll.swipeUp(velocity: .fast) }
+            XCTAssertTrue(image.isHittable)
+            capture("\(orientation)-image-after-lazy-return")
             XCTAssertLessThan(badge.frame.midY, image.frame.midY)
             app.terminate()
         }
