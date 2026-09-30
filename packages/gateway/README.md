@@ -748,7 +748,9 @@ Its key and self-signed certificate live at `~/.tron/gateway/lan-endpoint/`
 (`tls-key.pem`, `tls-certificate.pem`, both 0600 inside a 0700 directory), are
 created once on first use, and are replaced only by an explicit rotation: a
 paired phone pins the certificate's public key, so a silent regeneration would
-break the pin instead of fixing it. The listener shares the main listener's HTTP
+break the pin instead of fixing it. A key left without its certificate (a
+crash between the two first writes) is completed from that key, which keeps the
+pin; a certificate without its key is refused. The listener shares the main listener's HTTP
 and WebSocket handling — admission, capacity, heartbeat, revocation, hello and
 its header, request-idle and TLS handshake bounds are the same code — and serves
 only the socket route and the authenticated

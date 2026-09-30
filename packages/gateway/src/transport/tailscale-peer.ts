@@ -120,7 +120,8 @@ export async function readTailscaleStatus(run: TailscaleStatusCommand, timeoutMs
  * outranks a remembered address: a peer Tailscale cannot reach uses no path. */
 export function classifyPeer(peer: TailscalePeer | undefined): PeerPathLookup {
   if (peer === undefined) return { peerPath: "unknown", peerRelay: "" };
-  if (peer.Online !== true) return { peerPath: "offline", peerRelay: "" };
+  if (peer.Online === false) return { peerPath: "offline", peerRelay: "" };
+  if (peer.Online !== true) return { peerPath: "unknown", peerRelay: "" };
   if (typeof peer.CurAddr === "string" && peer.CurAddr.length > 0) return { peerPath: "direct", peerRelay: "" };
   const relay = typeof peer.Relay === "string" ? peer.Relay : "";
   return relay.length > 0 ? { peerPath: "relay", peerRelay: relay } : { peerPath: "unknown", peerRelay: "" };

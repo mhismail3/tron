@@ -27,6 +27,7 @@ import { CatalogMetadataIndex, type CatalogMetadataIndexSummary } from "./catalo
 import {
   CATALOG_EVENT_DEBOUNCE_MS,
   CATALOG_EVENT_MAX_WAIT_MS,
+  CATALOG_EVENT_PENDING_PATH_LIMIT,
   SessionCatalog,
   type SessionCatalogChange,
   type SessionCatalogOptions,
@@ -99,6 +100,8 @@ import {
 //     its rows without a pass.
 // 23. Unnameable events that never stop arriving: the whole-index pass still
 //     runs once a second instead of the quiet spell being re-armed forever.
+// 24. A burst of distinct transcript paths: pending watcher timers stay bounded
+//     and overflow reconciles the canonical files.
 
 const roots: string[] = [];
 /** The scheduler each fixture's catalog registers its periodic reconcile with,
@@ -1120,6 +1123,37 @@ describe("SessionCatalog", () => {
     expect(catalog.duplicateSessionIds().size).toBe(0);
     expect([...reads.keys()].sort()).toEqual([...paths].sort());
     expect([...reads.values()]).toEqual(Array.from({ length: pathCount }, () => 1));
+  });
+
+  it("bounds overflow watcher events to one reconcile and the unnamed-event debounce", async () => {
+    const watch = manualWatch();
+    const outcomes: SessionCatalogReconcileOutcome[] = [];
+    const { sessions, catalog, source } = await fixture({
+      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+      onReconciled: (outcome) => outcomes.push(outcome),
+    });
+    catalog.start();
+    await catalog.settled();
+    const walks = vi.spyOn(source, "scan");
+    const pathCount = CATALOG_EVENT_PENDING_PATH_LIMIT + 32;
+    const paths = Array.from({ length: pathCount }, (_unused, index) => join(sessions, "workspace", `overflow-${index}.jsonl`));
+    await Promise.all(paths.map((path, index) => writeSession(path, `overflow-${index}`, sessions, ["created"])));
+    for (const path of paths) watch.emit(relative(sessions, path));
+
+    await waitFor(() => catalog.rows().length === pathCount, 30_000);
+    await catalog.settled();
+    // Keep the watcher busy after the overflow pass has completed. An event storm
+    // used to schedule another full scan for every event while a scan was active.
+    const end = Date.now() + 500;
+    while (Date.now() < end) {
+      watch.emit(relative(sessions, "workspace/live.jsonl"));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    // At most one unnamed-event pass may follow the overflow pass during this
+    // window; the old dirty loop scanned once per arriving event.
+    expect(walks.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(outcomes.filter(({ trigger }) => trigger === "watcher-overflow")).toHaveLength(1);
+    expect(catalog.duplicateSessionIds().size).toBe(0);
   });
 
   it("re-reads a path whose events never stop arriving", async () => {

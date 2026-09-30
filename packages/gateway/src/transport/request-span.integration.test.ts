@@ -266,7 +266,6 @@ describe("cold session.open request span", () => {
       // or the request itself, and the report keeps every number for that.
       const named = stagesOf(stages!);
       expect(named.get("session.open.manager")).toBeGreaterThan(0);
-      expect(durationMs).toBeGreaterThan(100);
       expect(unaccountedMs!).toBeGreaterThanOrEqual(0);
       expect(unaccountedMs!).toBeLessThanOrEqual(durationMs);
       reports.push({

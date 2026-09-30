@@ -314,14 +314,16 @@ function validateCredentials(key: string, certificate: string): LanCredentials {
   return { key, certificate };
 }
 
-/** The stored key and certificate, created once when both are absent. A half
- * present, unreadable or mismatched pair is refused rather than overwritten. */
+/** The stored key and certificate, created once when both are absent. A key
+ * without its certificate is completed from that key; a certificate without its
+ * key, or an unreadable or mismatched pair, is refused rather than overwritten. */
 async function loadOrCreateLanCredentials(stateDirectory: string): Promise<LanCredentials> {
   const keyPath = join(stateDirectory, LAN_KEY_FILE);
   const certificatePath = join(stateDirectory, LAN_CERTIFICATE_FILE);
   const [key, certificate] = await Promise.all([readOptional(keyPath), readOptional(certificatePath)]);
   if (key !== null && certificate !== null) return validateCredentials(key, certificate);
-  if (key !== null || certificate !== null) throw new LanCredentialError("certificate_incomplete");
+  if (key !== null) return completeLanCredentials(key, certificatePath);
+  if (certificate !== null) throw new LanCredentialError("certificate_incomplete");
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
   const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   // A new pair is read back before it is written: a certificate this Gateway
@@ -344,6 +346,30 @@ async function loadOrCreateLanCredentials(stateDirectory: string): Promise<LanCr
     return validateCredentials(existingKey, existingCertificate);
   }
   return created;
+}
+
+/** Creation writes the key before the certificate, so a crash between the two
+ * leaves a key alone. No phone can have pinned it (the pin is advertised only
+ * once both load), and the pin is the key's own public point, so a certificate
+ * issued from the stored key keeps the pin a later pairing would record. */
+async function completeLanCredentials(key: string, certificatePath: string): Promise<LanCredentials> {
+  let privateKey: KeyObject;
+  try {
+    privateKey = createPrivateKey(key);
+  } catch {
+    throw new LanCredentialError("certificate_unreadable");
+  }
+  const completed = validateCredentials(key, selfSignedCertificate(privateKey, hostname()));
+  try {
+    await writeFile(certificatePath, completed.certificate, { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    // Another start completed the pair first: use what it published.
+    const existing = await readOptional(certificatePath);
+    if (existing === null) throw new LanCredentialError("certificate_incomplete");
+    return validateCredentials(key, existing);
+  }
+  return completed;
 }
 
 export class LanEndpoint {
