@@ -3706,3 +3706,23 @@ Device checklist / residual review:
 - Existing display-card preview flip and static parity residual remain open.
 - Retain footer/retry order, row detail routes, accessibility order, environments,
   detents and canonical lease/recovery ownership when addressing later work.
+
+### CT-23 display cards and status bar · worker lane ct23d
+
+Claimed on `ct-23-cards`. Failure modes recorded before implementation:
+
+- Inline images and their close badges can be mirrored at rest by native/glass
+  rendering even when ordinary text counter-flips correctly. A loaded asymmetric
+  image (not a placeholder) must enter parity from today's clean committed path;
+  window-rendered pixels and the close control must remain upright in both modes.
+- SwiftUI's menu portal can target the flipped ancestor, collapsing the lift or
+  rotating/displacing dismissal. Gate the actual mounted card's preview source,
+  identity window target and center (0.5 pt), plus real long-press screenshots.
+- Native child renderers (video, web/PDF, attachments, Markdown code/math/images)
+  may cross the same transform boundary; inspect and exercise those owners.
+- Status-bar taps on origin currently remain at newest. An origin-only public
+  UIKit bridge must detach and route oldest through the coordinator, never replace
+  SwiftUI's delegate; teardown must restore ownership and sheets must not compete.
+- Missing ancestry must leave existing behavior intact and report once. Today's
+  path, bottom coverage, obstruction motion, detached rows and child sheets retain
+  their existing contracts. No Gateway lifecycle or device install is authorized.
