@@ -137,8 +137,11 @@ def check_runs_state(contexts: List[dict], names: List[str]) -> Tuple[str, List[
 
 
 def verify_state(contexts: List[dict], context: str) -> str:
+    """'success', 'failure', 'pending', or 'missing' when the head has no such status."""
     found = [c.get("state") for c in contexts if c.get("__typename") == "StatusContext" and c.get("context") == context]
-    if not found or found[-1] in ("PENDING", "EXPECTED"):
+    if not found:
+        return "missing"
+    if found[-1] in ("PENDING", "EXPECTED"):
         return "pending"
     return "success" if found[-1] == "SUCCESS" else "failure"
 
@@ -154,7 +157,7 @@ def head_state(contexts: List[dict], config: dict) -> Tuple[str, List[str]]:
 def _combine(states: List[str]) -> str:
     if "failure" in states:
         return "failure"
-    return "pending" if "pending" in states else "success"
+    return "success" if all(state == "success" for state in states) else "pending"
 
 
 def _open_pull(gh: Gh, branch: str) -> Optional[dict]:
@@ -446,9 +449,9 @@ def steward(gh: Gh, repo: Path, config: dict, number: Optional[int]) -> int:
     rows = steward_rows(gh, repo, config)
     if number is None:
         for row in rows:
+            age = f"{row['head_age_hours']}h old" if row["head_age_hours"] is not None else "age unknown"
             print(f"#{row['issue']} PR #{row['pr']} {row['branch']} session {row['session'] or '?'} "
-                  f"checks {row['checks']} verify {row['verify']} unresolved {row['unresolved']} "
-                  f"head {row['head_age_hours']}h old "
+                  f"checks {row['checks']} verify {row['verify']} unresolved {row['unresolved']} head {age} "
                   f"{'worktree here' if row['worktree'] else 'no local worktree'}")
         print(f"{len(rows)} open pull request(s) from claim branches")
         return 0

@@ -41,14 +41,14 @@ def main(argv: list) -> int:
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
-    finish = commands.add_parser("land", help="update, verify, open the pull request, wait for checks, merge")
-    finish.add_argument("--title", help="pull request title (default: '<type>: <issue title>' or the current one)")
-    finish.add_argument("--summary-file", type=Path, help="Markdown for the Summary section (required to open)")
-    finish.add_argument("--needs-user-validation", metavar="TEXT",
+    landing = commands.add_parser("land", help="update, verify, open the pull request, wait for checks, merge")
+    landing.add_argument("--title", help="pull request title (default: '<type>: <issue title>' or the current one)")
+    landing.add_argument("--summary-file", type=Path, help="Markdown for the Summary section (required to open)")
+    landing.add_argument("--needs-user-validation", metavar="TEXT",
                         help="exact maintainer-only action and check; the issue stays open as Needs you")
-    finish.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
-    steward = commands.add_parser("steward", help="report open claim pull requests; --land one whose owner is gone")
-    steward.add_argument("--land", type=int, metavar="ISSUE",
+    landing.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    stewardship = commands.add_parser("steward", help="report open claim pull requests; --land one whose owner is gone")
+    stewardship.add_argument("--land", type=int, metavar="ISSUE",
                          help="merge this issue's pull request if its head is verified, green and up to date")
     args = parser.parse_args(argv)
 

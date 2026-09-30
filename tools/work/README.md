@@ -471,8 +471,8 @@ branch in this repository, it lists:
 - the body starts with `Closes #N`. A `Refs #N` body means a validation
   handoff whose text only the owner has.
 
-The steward never runs checks, merges the base branch or pushes. That work
-belongs to the owner's worktree. A pull request that needs any of it has to be
+The steward never runs checks, merges the base branch or pushes commits. That
+work belongs to the owner's worktree. A pull request that needs any of it has to be
 resumed by a session that claims it.
 
 ### Failure modes
