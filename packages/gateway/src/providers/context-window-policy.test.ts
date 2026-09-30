@@ -45,6 +45,14 @@ describe("context window policy", () => {
     return { session, policy, faux, modelRuntime, settingsManager };
   }
 
+  it("retains the catalog context and output limits for Claude Sonnet 5.5 and GPT-6.1 Sol", async () => {
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const sonnet = runtime.getModel("anthropic", "claude-sonnet-5-5");
+    const sol = runtime.getModel("openai-codex", "gpt-6.1-sol");
+    expect(sonnet).toMatchObject({ contextWindow: 1_000_000, maxTokens: 128_000 });
+    expect(sol).toMatchObject({ contextWindow: 272_000, maxTokens: 128_000 });
+  });
+
   it("separates Astra's documented maximum from its default without guessing for aliases/proxies", () => {
     expect(contextWindowLimits(astra)).toEqual({ minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: 272_000 });
     expect(contextWindowLimits({ ...astra, provider: "openai", api: "openai-responses", baseUrl: "https://api.openai.com/v1" })?.maximum).toBe(1_050_000);

@@ -127,6 +127,51 @@ describe("global provider resources", () => {
     expect(f.runtime.getModels().some(({ id }) => id === "router")).toBe(true);
   });
 
+  it("registers CortexKit-style image and classifier overrides without exposing them in the chat picker", async () => {
+    const f = await fixture();
+    const resources = await f.createResources();
+    await f.runtime.setRuntimeApiKey("typesafe", "fixture-only-typesafe-key");
+    const gateway = new GatewayService({ modelRuntime: f.runtime, globalProviderResources: resources } as unknown as GatewayServiceDependencies);
+
+    await expect(gateway.invoke(client, "provider.list", {})).resolves.toMatchObject({
+      providers: expect.arrayContaining([
+        expect.objectContaining({ id: "typesafe", configured: true, modelCount: 0 }),
+      ]),
+    });
+    const result = await gateway.invoke(client, "model.list", {}) as { models: Array<Record<string, unknown>> };
+    expect(result.models.some(model => model.provider === "cortexkit")).toBe(false);
+  });
+
+  it("refreshes pi.dev typed catalogs into models-store.json and reloads the chat overlay", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-pi-catalog-"));
+    roots.push(root);
+    const modelsStorePath = join(root, "models-store.json");
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/api/models/providers/openai");
+      expect(url.searchParams.get("types")).toBe("chat,image,classifier");
+      return new Response(JSON.stringify({ models: [
+        { type: "chat", id: "catalog-chat", name: "Catalog chat", api: "openai-completions", reasoning: false, input: ["text"], contextWindow: 8192, maxTokens: 1024, cost: { input: 0, output: 0 } },
+        { type: "image", id: "catalog-image", name: "Catalog image", api: "openai-images", input: ["text"], output: ["image"], cost: { input: 0, output: 0 } },
+        { type: "classifier", id: "catalog-classifier", name: "Catalog classifier", api: "typesafe-system-one", input: ["text"], contextWindow: 8192, cost: { input: 0.042, output: 0 } },
+      ] }), { status: 200, headers: { "last-modified": new Date("2030-09-29T00:00:00Z").toUTCString(), etag: '"typed-catalog"' } });
+    });
+    vi.stubGlobal("fetch", fetch);
+    const runtime = await ModelRuntime.create({ modelsPath: join(root, "models.json"), modelsStorePath, catalogBaseUrl: "https://pi.invalid", refreshOnCreate: false });
+    await runtime.setRuntimeApiKey("openai", "fixture-only-key");
+    await runtime.refresh({ providers: ["openai"], force: true, allowNetwork: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const chat = runtime.getModels().filter(model => model.provider === "openai");
+    expect(chat.map(model => model.id)).toContain("catalog-chat");
+    expect(chat.some(model => model.id === "catalog-image" || model.id === "catalog-classifier")).toBe(false);
+    const stored = JSON.parse(await (await import("node:fs/promises")).readFile(modelsStorePath, "utf8")) as Record<string, { models: Array<{ type?: string; id: string }> }>;
+    expect(stored.openai?.models.map(model => model.type)).toEqual(["chat", "image", "classifier"]);
+    const reloaded = await ModelRuntime.create({ modelsPath: join(root, "models.json"), modelsStorePath, catalogBaseUrl: "https://pi.invalid", refreshOnCreate: false });
+    await reloaded.refresh({ providers: ["openai"], allowNetwork: false });
+    expect(reloaded.getModels().filter(model => model.provider === "openai").map(model => model.id)).toContain("catalog-chat");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("loads user extensions for global catalog and OAuth before any session exists", async () => {
     const f = await fixture();
     await writeFile(f.extensionPath, providerExtension("global-fixture"));
