@@ -29,6 +29,11 @@ export interface SourceTriageResult {
  * readable text only; the adapter is supplied by the existing model owner.
  */
 export async function triageSource(store: KnowledgeStore, input: SourceTriageInput, model: SourceAssessmentModel, now: () => string = () => new Date().toISOString()): Promise<SourceTriageResult> {
+  const receipt = await store.sourceAssessmentReceipt(input.commandId);
+  if (receipt) {
+    if (receipt.record.id !== input.sourceId || receipt.record.kind !== "source" || !receipt.record.content.assessment) throw new Error("Source assessment command ID belongs to a different mutation");
+    return { source: receipt.record, assessment: receipt.record.content.assessment };
+  }
   const config = await store.config();
   if (input.signal?.aborted) throw new Error("Source triage was cancelled");
   const source = await store.read(input.sourceId, input.expectedRevision, false, true, true);

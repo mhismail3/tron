@@ -6,7 +6,7 @@ import { triageSource } from "./source-triage.js";
 import { xPostIdentity } from "./x-public-post.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import type { KnowledgeStore } from "./knowledge-store.js";
+import { sourceAdmissionIsDecided, type KnowledgeStore } from "./knowledge-store.js";
 import { CONNECTOR_CREDENTIAL_SERVICE, isConnectorCredentialReference, type ConnectorCredentialStore } from "./connector-credentials.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
@@ -523,12 +523,9 @@ export class KnowledgeConnectorExtension {
       origin: "connector", identity, ...(request.connector === "raindrop" && item.collectionId ? { collectionId: item.collectionId } : {}),
       ...(request.connector === "raindrop" && item.annotation ? { annotations: [{ text: item.annotation }] } : {}),
       ...(request.connector === "x" || isPublicXPost(item.url) ? { publicPostLookup: true } : {}),
-    }, { signal: activeSignal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? activeSignal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
+    }, { writer: "connector", signal: activeSignal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? activeSignal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
     let source = captured.record;
-    const admissionDecided = source.content.admission?.producer?.actor === "user" || source.content.admission?.producer?.actor === "agent"
-      || (source.content.admission !== undefined && source.content.admission.status !== "pending" && source.content.admission.producer?.actor !== "connector");
-    const scopeDecided = source.content.scopeProducer?.actor === "user" || source.content.scopeProducer?.actor === "agent";
-    if (source.scope !== request.scope && !admissionDecided && !scopeDecided) {
+    if (source.scope !== request.scope && !sourceAdmissionIsDecided(source)) {
       try {
         const placed = await this.store.curateSource({ commandId: `${request.commandId}:scope`, operation: "placement", producer: { actor: "connector" }, item: { recordId: source.id, expectedRevision: source.revisionId, placement: { scope: request.scope } } });
         source = placed.record as KnowledgeRecord & { kind: "source" };
@@ -565,7 +562,7 @@ export class KnowledgeConnectorExtension {
 
   private async recoverSaveTime(source: KnowledgeRecord & { kind: "source" }, commandId: string, evidence?: { objectHash: string; bytes: Uint8Array }): Promise<KnowledgeRecord & { kind: "source" }> {
     if (source.content.identity?.provider.toLowerCase() !== "raindrop" || source.content.sourceSavedAt) return source;
-    const recovered = await recoverProviderSaveTime(this.store, { commandId, sourceId: source.id, expectedRevision: source.revisionId, ...(evidence ? { evidence } : {}) });
+    const recovered = await recoverProviderSaveTime(this.store, { commandId, sourceId: source.id, expectedRevision: source.revisionId, writer: "connector", ...(evidence ? { evidence } : {}) });
     if (recovered.status !== "recovered" || !recovered.revisionId) return source;
     const current = await this.store.read(source.id, recovered.revisionId, false, true, true);
     return current?.kind === "source" ? current : source;
@@ -578,7 +575,7 @@ export class KnowledgeConnectorExtension {
     const evidence = { objectHash: apiObject.hash, bytes };
     const representations = source.content.representations ?? [];
     if (representations.some(value => value.kind === "provider-api" && value.object.hash === apiObject.hash)) return { record: source, evidence };
-    const updated = await this.store.captureSource({ commandId, expectedRevision: source.revisionId, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content: { ...source.content, representations: [...representations, { kind: "provider-api", object: apiObject, mediaType: "application/json" }] } } });
+    const updated = await this.store.captureSource({ writer: "connector", commandId, expectedRevision: source.revisionId, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content: { ...source.content, representations: [...representations, { kind: "provider-api", object: apiObject, mediaType: "application/json" }] } } });
     if (updated.record.kind !== "source") throw new Error("Provider payload attachment returned a non-source record");
     return { record: updated.record, evidence };
   }
@@ -594,7 +591,7 @@ export class KnowledgeConnectorExtension {
       else if (host === "github.com" || host.endsWith(".github.com")) disposition = disposition === "complete" ? "partial" : disposition;
     } catch { disposition = "reference-only"; }
     if (disposition === source.content.captureDisposition) return source;
-    const updated = await this.store.captureSource({ commandId, expectedRevision: source.revisionId, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content: { ...source.content, captureDisposition: disposition } } });
+    const updated = await this.store.captureSource({ writer: "connector", commandId, expectedRevision: source.revisionId, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content: { ...source.content, captureDisposition: disposition } } });
     if (updated.record.kind !== "source") throw new Error("Linked capture quality update returned a non-source record");
     return updated.record;
   }
@@ -704,6 +701,16 @@ export class KnowledgeConnectorExtension {
           setOutcome(item, { sourceId: source.id, sourceRevision: source.revisionId, disposition: "pending", assessment: "not-run", move: "not-attempted", reason: "Source captured; processing not yet complete" });
           let sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
           captured += 1;
+          if (sourceAdmissionIsDecided(source)) {
+            const status = source.content.admission?.status;
+            const disposition = status === "archived" ? "archived" : status === "retained" ? "retained" : "pending";
+            if (disposition === "archived") archived += 1;
+            else if (disposition === "retained") retained += 1;
+            else pending += 1;
+            setOutcome(item, { ...sourceRef, disposition, assessment: "not-run", move: "not-attempted", reason: "Canonical source admission was already decided by a user or agent" });
+            await markDone(item.id);
+            continue;
+          }
           if (mappedScope === "personal") {
             if (connectionAuthority && expectedSetupRevision !== (await this.connectionFor(request.connectionId, "raindrop", true))?.setupRevision) throw new GatewayError("conflict", "Raindrop collection mapping changed during intake; retry with the current setup revision");
             const admitted = source.content.admission?.status === "retained" ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-personal-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "retained", producer: { actor: "connector" }, reason: "Personal collection uses Raindrop link, title, preview and saved note as sufficient evidence" })).record as KnowledgeRecord & { kind: "source" };
@@ -852,7 +859,8 @@ export class KnowledgeConnectorExtension {
     const processed = { id: item.id, disposition: request.disposition, reason: request.reason.trim(), ...(item.collectionId ? { collectionId: item.collectionId } : {}), processedAt };
     const updated = await this.store.updateConnectorState(request.commandId, request.connector, current => {
       const live = current ?? state!;
-      if (live.processedItems?.some(candidate => candidate.id === item.id)) return live;
+      const prior = live.processedItems?.find(candidate => candidate.id === item.id);
+      if (prior) return { ...live, pending: live.pending.filter(candidate => candidate.id !== item.id), processedItems: [...(live.processedItems ?? []).filter(candidate => candidate.id !== item.id), { ...prior, ...(item.collectionId ? { collectionId: item.collectionId } : {}) }].slice(-2_000), ...(item.collectionId ? { capturedCollections: { ...(live.capturedCollections ?? {}), [item.id]: item.collectionId } } : {}), remaining: Math.max(0, live.pending.length - 1) };
       if (!live.pending.some(candidate => candidate.id === item.id)) throw new GatewayError("conflict", "Connector queue item changed before acknowledgment");
       return { ...live, pending: live.pending.filter(candidate => candidate.id !== item.id), processedItems: [...(live.processedItems ?? []).filter(candidate => candidate.id !== item.id), processed].slice(-2_000), capturedIds: request.disposition === "processed" ? [...new Set([...live.capturedIds, item.id])].slice(-2_000) : live.capturedIds, ...(item.collectionId ? { capturedCollections: { ...(live.capturedCollections ?? {}), [item.id]: item.collectionId } } : {}), remaining: Math.max(0, live.pending.length - 1) };
     }, undefined, request.connectionId);

@@ -39,7 +39,8 @@ function isConnectorProducer(producer: { actor: string } | string | undefined): 
   return actor === "connector" || actor === "system";
 }
 
-function admissionDecisionIsAuthoritative(admission: SourceContent["admission"]): boolean {
+export function sourceAdmissionIsDecided(source: Pick<KnowledgeRecord & { kind: "source" }, "content">): boolean {
+  const admission = source.content.admission;
   if (!admission) return false;
   if (isDecisionProducer(admission.producer)) return true;
   // A non-pending legacy admission without connector ownership is a prior
@@ -105,7 +106,7 @@ type RecordHead = LegacyRecordHead & {
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
 type PendingRecordCleanup = { recordId: string; revisionId: string };
-type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; canonicalUri?: string; record: KnowledgeRecordDraft & { kind: "source" }; signal?: AbortSignal };
+type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; canonicalUri?: string; writer?: "connector"; record: KnowledgeRecordDraft & { kind: "source" }; signal?: AbortSignal };
 type SourcePreviewWriteRequest = { commandId: string; recordId: string; expectedRevision: string; preview: KnowledgeObjectRef; signal?: AbortSignal };
 type StoredReceipt = { operation: string; requestHash: string; createdAt: string; result: ReceiptResult; recordIds: string[]; invalidated?: boolean };
 type ReceiptResult =
@@ -1234,6 +1235,16 @@ export class KnowledgeStore {
     if (request.scope) { clauses.push("json_extract(value, '$.scope') = ?"); parameters.push(request.scope); }
     return { clauses, parameters };
   }
+  async sourceAssessmentReceipt(commandId: string): Promise<KnowledgeMutationResult | undefined> {
+    return this.readState(async (state, paths) => {
+      const receipt = state.receipts.get(`knowledge.source.record-write\0${commandId}`);
+      if (!receipt) return undefined;
+      if (receipt.operation !== "knowledge.source.record-write" || receipt.invalidated) throw conflict("Source assessment receipt is unavailable");
+      const result = await this.receiptResult(paths, state, receipt.result);
+      if (!result || typeof result !== "object" || !("record" in result) || !result.record || typeof result.record !== "object" || (result.record as KnowledgeRecord).kind !== "source") throw conflict("Command ID belongs to a different Knowledge mutation");
+      return result as KnowledgeMutationResult;
+    });
+  }
   async read(id: string, revision?: string, includeSuppressed = false, includeArchived = false, includePending = false): Promise<KnowledgeRecord | null> {
     safeId(id, "record id"); if (revision !== undefined) safeId(revision, "knowledge revision");
     return this.readState(async (state, paths) => {
@@ -1517,7 +1528,7 @@ export class KnowledgeStore {
       if (!head || head.latestRevisionId !== request.expectedRevision) throw conflict("Source revision is stale or unavailable");
       const current = await this.readRecord(paths, request.recordId, head.latestRevisionId);
       if (current.kind !== "source") throw conflict("Source revision is unavailable");
-      if (isConnectorProducer(request.producer) && admissionDecisionIsAuthoritative(current.content.admission)) {
+      if (isConnectorProducer(request.producer) && sourceAdmissionIsDecided(current)) {
         throw decisionAuthorityRefusal("admission", current.revisionId);
       }
       const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.producer ? { producer: request.producer } : {}), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
@@ -1570,7 +1581,7 @@ export class KnowledgeStore {
         if (input.operation === "placement" && isConnectorProducer(input.producer)) {
           const placement = input.item.placement;
           if (placement?.scope !== undefined && current.content.scopeProducer && isDecisionProducer(current.content.scopeProducer)) throw decisionAuthorityRefusal("scope", current.revisionId);
-          if (placement?.admission !== undefined && admissionDecisionIsAuthoritative(current.content.admission)) throw decisionAuthorityRefusal("admission", current.revisionId);
+          if (placement?.admission !== undefined && sourceAdmissionIsDecided(current)) throw decisionAuthorityRefusal("admission", current.revisionId);
         }
         const next = this.curatedSource(state, input.operation, input.producer, input.item, current);
         if (next.scope === current.scope && JSON.stringify(next.content) === JSON.stringify(current.content) && JSON.stringify(next.relations) === JSON.stringify(current.relations)) {
@@ -1706,7 +1717,7 @@ export class KnowledgeStore {
         }
       }
       const current = request.record.id ? await this.currentRecord(state, paths, request.record.id) : null;
-      if (current?.kind === "source" && request.record.kind === "source") this.assertSourceDecisionAuthority(current, request.record, request.record.provenance.actor);
+      if (request.writer === "connector" && current?.kind === "source" && request.record.kind === "source") this.assertSourceDecisionAuthority(current, request.record, "connector");
       return this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision);
     }, undefined, signal);
   }
@@ -1727,7 +1738,7 @@ export class KnowledgeStore {
   private assertSourceDecisionAuthority(current: KnowledgeRecord & { kind: "source" }, next: KnowledgeRecordDraft & { kind: "source" }, producer: string | undefined): void {
     if (!isConnectorProducer(producer)) return;
     if (next.scope !== current.scope && current.content.scopeProducer && isDecisionProducer(current.content.scopeProducer)) throw decisionAuthorityRefusal("scope", current.revisionId);
-    if (JSON.stringify(next.content.admission) !== JSON.stringify(current.content.admission) && admissionDecisionIsAuthoritative(current.content.admission)) throw decisionAuthorityRefusal("admission", current.revisionId);
+    if (JSON.stringify(next.content.admission) !== JSON.stringify(current.content.admission) && sourceAdmissionIsDecided(current)) throw decisionAuthorityRefusal("admission", current.revisionId);
   }
   private async currentRecord(state: KnowledgeState, paths: StorePaths, id: string): Promise<KnowledgeRecord | null> { const head = state.records.get(id); return head ? this.readRecord(paths, id, head.latestRevisionId) : null; }
   private async currentRecordForRead(state: KnowledgeState, paths: StorePaths, id: string): Promise<KnowledgeRecord | null> { const head = state.records.get(id); return head ? await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId) ?? null : null; }

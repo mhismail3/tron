@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
@@ -44,6 +44,48 @@ describe("source assessment primitive", () => {
     const budget = await f.budget.status("jev");
     expect(budget.spentCents).toBeCloseTo(0.00042);
     expect(budget.reservedCents).toBe(0);
+  });
+
+  it("refuses Jev assessment of a personal source before reserving the monthly ledger", async () => {
+    const f = await fixture();
+    const personal = (await f.store.captureSource({ commandId: "assessment-personal-source", record: { ...f.source, id: undefined, revisionId: undefined, updatedAt: undefined, scope: "personal" } })).record as KnowledgeRecord & { kind: "source" };
+    let dispatched = false;
+    const model: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); dispatched = true; await context?.onDispatch?.(); return { summary: "must not assess", evidenceQuality: "unknown", freshness: "unknown" }; } };
+    const service = new KnowledgeService(f.store, new KnowledgeObservationService(f.store, undefined), {}, undefined, undefined, undefined, undefined, { budget: f.budget, assessment: model });
+    const before = await f.budget.status("jev");
+    await expect(service.invoke({ operation: "knowledge.source.assess", request: { commandId: "jev-personal-refusal", sourceId: personal.id, expectedRevision: personal.revisionId, assessor: "jev" } })).rejects.toMatchObject({ code: "unsupported" });
+    expect(dispatched).toBe(false);
+    expect(await f.budget.status("jev")).toEqual(before);
+  });
+
+  it("replays a committed assessment receipt before touching the paid ledger", async () => {
+    const f = await fixture();
+    let calls = 0;
+    const model: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); calls += 1; await context?.onDispatch?.(); return { summary: "useful", evidenceQuality: "high", freshness: "current", recommendation: "retained", confidence: 0.91, classification: "research", model: "jev-1.13.0", usage: { inputTokens: 100, outputTokens: 2, estimatedCostCents: 0.00042, pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" } }; } };
+    const service = new KnowledgeService(f.store, new KnowledgeObservationService(f.store, undefined), {}, undefined, undefined, undefined, undefined, { budget: f.budget, assessment: model });
+    const capture = f.store.captureSource.bind(f.store);
+    vi.spyOn(f.store, "captureSource").mockImplementationOnce(async value => { await capture(value); throw new Error("response lost after durable commit"); });
+    const request = { operation: "knowledge.source.assess" as const, request: { commandId: "replay-committed-assessment", sourceId: f.source.id, expectedRevision: f.source.revisionId, assessor: "jev" as const } };
+    await expect(service.invoke(request)).rejects.toThrow("response lost after durable commit");
+    const replay = await service.invoke(request);
+    expect((replay as { source: KnowledgeRecord }).source).toEqual(await f.store.read(f.source.id, undefined, false, true, true));
+    expect(calls).toBe(1);
+    expect(await f.budget.status("jev")).toMatchObject({ spentCents: 0.00042, reservedCents: 0 });
+  });
+
+  it("settles a received Jev result when record persistence fails and requires a new command", async () => {
+    const f = await fixture();
+    let calls = 0;
+    const model: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); calls += 1; await context?.onDispatch?.(); return { summary: "useful", evidenceQuality: "high", freshness: "current", recommendation: "retained", confidence: 0.91, classification: "research", model: "jev-1.13.0", usage: { inputTokens: 100, outputTokens: 2, estimatedCostCents: 0.00042, pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" } }; } };
+    const service = new KnowledgeService(f.store, new KnowledgeObservationService(f.store, undefined), {}, undefined, undefined, undefined, undefined, { budget: f.budget, assessment: model });
+    const write = vi.spyOn(f.store, "captureSource").mockRejectedValueOnce(new Error("injected record persistence failure"));
+    const request = { operation: "knowledge.source.assess" as const, request: { commandId: "settled-write-failure-assessment", sourceId: f.source.id, expectedRevision: f.source.revisionId, assessor: "jev" as const } };
+    await expect(service.invoke(request)).rejects.toThrow("injected record persistence failure");
+    const budget = await f.budget.status("jev");
+    expect(budget).toMatchObject({ spentCents: 0.00042, reservedCents: 0 });
+    await expect(service.invoke(request)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("retry with a new commandId") });
+    expect(calls).toBe(1);
+    write.mockRestore();
   });
 
   it("refuses Jev dispatch before assessment when the monthly ledger is exhausted", async () => {

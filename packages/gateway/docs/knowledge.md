@@ -591,9 +591,13 @@ revision with `assessor: "model"` (the explicitly configured Knowledge model)
 or `assessor: "jev"` (the bounded Jev intake rubric/profile and persisted current
 interests). Both record a revisioned assessment derivative and return its
 recommendation, confidence, and classification; assessment never changes source
-admission. Jev reserves against the same monthly Jev ledger as tagging and legacy
-intake immediately before dispatch, marks the reservation dispatched at the HTTP
+admission. Jev refuses personal-scope sources before reserving the shared monthly
+ledger. It reserves against the same ledger as tagging and legacy intake
+immediately before dispatch, marks the reservation dispatched at the HTTP
 boundary, then settles provider usage or leaves an uncertain dispatch reserved.
+If Jev responds but source persistence fails, known usage settles the attempt. A
+committed source-write receipt is replayed before Jev reservation; a settled
+attempt whose record was not committed requires a new command ID.
 An optional `maxChargeCents` is checked against Jev's conservative per-request
 ceiling; a value below that supported bound is refused before reservation or
 dispatch. Assessing one source does not require Raindrop's legacy batch pilot
@@ -839,10 +843,11 @@ Knowledge ingestion has four distinct owners:
   scheduler or run journal.
 
 The store remains authoritative: connector/system writes cannot override a user
-or agent admission or scope decision; mutations remain revision-fenced and
-receipted; personal sources never appear in work retrieval; personal ingestion
-never calls Jev; provider movement requires write permission and an explicit
-collection destination. The routine's dry run performs no source/admission,
+or agent admission or scope decision; connector writer identity is explicit at
+the connector-owned capture call and is never inferred from copied source
+provenance. Mutations remain revision-fenced and receipted; personal sources
+never appear in work retrieval; personal ingestion never calls Jev; provider
+movement requires write permission and an explicit collection destination. The routine's dry run performs no source/admission,
 acknowledgment, remote-move, or paid-assessment effects. It may refresh Raindrop
 queue bookkeeping through free read-only provider discovery, but must not invoke
 paid X discovery; it reports X from its existing queue. Until C23, the legacy

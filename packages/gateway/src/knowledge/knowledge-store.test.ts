@@ -57,9 +57,14 @@ describe("KnowledgeStore", () => {
     expect(connectorDecision.record.content).toMatchObject({ admission: { status: "retained", producer: { actor: "connector" } } });
 
     const recaptured = await capture("connector-recapture", { admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "user" } }, scopeProducer: { actor: "user" } }, "research", "connector");
-    await expect(store.captureSource({ commandId: command("connector-recapture-scope"), expectedRevision: recaptured.record.revisionId, record: { ...recaptured.record, scope: "personal", content: { ...recaptured.record.content, title: "Changed by recapture" } } }))
+    await expect(store.captureSource({ writer: "connector", commandId: command("connector-recapture-scope"), expectedRevision: recaptured.record.revisionId, record: { ...recaptured.record, scope: "personal", content: { ...recaptured.record.content, title: "Changed by recapture" } } }))
       .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
-    await expect(store.captureSource({ commandId: command("connector-recapture-admission"), expectedRevision: recaptured.record.revisionId, record: { ...recaptured.record, content: { ...recaptured.record.content, admission: { status: "archived", decidedAt: "2026-01-02T00:00:00Z", producer: { actor: "connector" } } } } }))
+    await expect(store.captureSource({ writer: "connector", commandId: command("connector-recapture-admission"), expectedRevision: recaptured.record.revisionId, record: { ...recaptured.record, content: { ...recaptured.record.content, admission: { status: "archived", decidedAt: "2026-01-02T00:00:00Z", producer: { actor: "connector" } } } } }))
+      .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
+
+    const userProvenance = await capture("user-provenance-connector-recapture", { admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "user" } } }, "research", "user");
+    expect(userProvenance.record.provenance.actor).toBe("user");
+    await expect(store.captureSource({ writer: "connector", commandId: command("user-provenance-recapture"), expectedRevision: userProvenance.record.revisionId, record: { ...userProvenance.record, content: { ...userProvenance.record.content, admission: { status: "archived", decidedAt: "2026-01-02T00:00:00Z", producer: { actor: "connector" } } } } }))
       .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
 
     const correction = await capture("connector-correction", { admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "agent" } } }, "research", "connector");

@@ -112,9 +112,10 @@ describe("knowledge connectors", () => {
 
   // Failure modes: the same identity is rediscovered from another mapped
   // collection, and scope-only decisions do not block admission processing.
-  it("preserves decided admission and scope when a bookmark is rediscovered", async () => {
+  it("preserves decided admission and scope when a bookmark is rediscovered without another paid assessment", async () => {
     let recommendArchive = false;
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: recommendArchive ? "archived" : "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    let assessmentCalls = 0;
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { assessmentCalls += 1; await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: recommendArchive ? "archived" : "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
     const { store, extension } = await mappedRaindropFixture(async url => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/7?") || url.includes("/raindrops/9?")) { const collection = Number(/raindrops\/(\d+)/.exec(url)?.[1]); return response({ items: [{ _id: 701, title: "Decided source", link: "https://example.com/701", collection: { $id: collection } }] }); }
@@ -123,6 +124,7 @@ describe("knowledge connectors", () => {
     const intake = (id: string, sourceCollection: string) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command(id), connectionId: "mapped", sourceCollection, limit: 1, pilot: { id: `pilot-${sourceCollection}`, maxItems: 1, budgetCents: 1 } } });
     const first = await intake("decision-first", "7") as any;
     expect(first).toMatchObject({ retained: 1, pending: 0 });
+    expect(assessmentCalls).toBe(1);
     const source = await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "701" });
     const archived = await store.setSourceAdmission({ commandId: command("decision-archive"), recordId: source!.id, expectedRevision: source!.revisionId, status: "archived", producer: { actor: "connector" }, reason: "Jev archive" });
     const restored = await store.curateSource({ commandId: command("decision-restore"), operation: "placement", producer: { actor: "agent" }, item: { recordId: source!.id, expectedRevision: archived.record.revisionId, placement: { admission: "retained", reason: "Restored by agent" } } });
@@ -135,6 +137,30 @@ describe("knowledge connectors", () => {
     expect(current?.content.admission).toMatchObject({ status: "retained", producer: { actor: "agent" } });
     expect(rerun).toMatchObject({ retained: 1, pending: 0 });
     expect(rerun.outcomes).toHaveLength(1);
+    expect(assessmentCalls).toBe(1);
+    const connectorState = await store.connectorState("raindrop", "mapped");
+    expect(connectorState?.pending.some(item => item.id === "701")).toBe(false);
+    expect(connectorState?.processedItems?.some(item => item.id === "701")).toBe(true);
+  });
+
+  it("acknowledges an agent-archived personal source without assessment or intake error", async () => {
+    let assessmentCalls = 0;
+    const assessment: SourceAssessmentModel = { async assess() { assessmentCalls += 1; return { summary: "not called", evidenceQuality: "unknown", freshness: "unknown" }; } };
+    const { store, extension } = await mappedRaindropFixture(async url => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      if (url.includes("/raindrops/8?")) return response({ items: [{ _id: 880, title: "Archived personal item", link: "https://example.com/880", collection: { $id: 8 } }] });
+      throw new Error("unexpected provider request");
+    }, undefined, assessment);
+    const seed = await store.captureSource({ commandId: command("agent-archived-personal-seed"), record: { kind: "source", scope: "personal", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: "Archived personal item", uri: "https://example.com/880", text: "Saved private evidence.", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z", identity: { provider: "raindrop", accountId: "42", itemId: "880" }, admission: { status: "pending", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "connector" } } } } });
+    const archived = await store.curateSource({ commandId: command("agent-archived-personal-decision"), operation: "placement", producer: { actor: "agent" }, item: { recordId: seed.record.id, expectedRevision: seed.record.revisionId, placement: { admission: "archived", reason: "Agent archived it" } } });
+    const result = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("agent-archived-personal-intake"), connectionId: "mapped", sourceCollection: "8", limit: 1 } }) as any;
+    expect(result).toMatchObject({ archived: 1, pending: 0, assessmentFailed: 0 });
+    expect(result.outcomes[0]).toMatchObject({ itemId: "880", disposition: "archived", assessment: "not-run" });
+    expect(assessmentCalls).toBe(0);
+    const state = await store.connectorState("raindrop", "mapped");
+    expect(state?.pending.some(item => item.id === "880")).toBe(false);
+    expect(state?.processedItems?.some(item => item.id === "880")).toBe(true);
+    expect((await store.read(archived.record.id, undefined, false, true, true))?.content.admission).toMatchObject({ status: "archived", producer: { actor: "agent" } });
   });
 
   it("decides a connector-pending admission while preserving an agent scope", async () => {

@@ -429,3 +429,13 @@ deletes it only after a dry-run of the routine matches it on live data.
 - Kept on purpose: `knowledge.raindrop.intake` remains until C23 after live dry-run parity and a user Gateway update; the routine introduces no parallel queue, scheduler, or run journal.
 - Deviations: dry-run may perform bounded free Raindrop discovery/queue bookkeeping but does not ingest, assess, curate, acknowledge, move, or spend; it must not discover X because X discovery may be paid. Per supervisor direction, the routine applies the assessment's returned recommendation without adding a numeric confidence threshold; C25 captures the raw-signal ownership gap.
 - For the next agent: C23 remains gated on user-approved live dry-run parity and a user Gateway update before deleting the legacy intake pipeline; C24 separately migrates the iOS manual-assessment caller. No Gateway lifecycle action or live Gateway access was performed.
+
+### C18–C22 review fixes · Done · 2026-09-29 · luna-worker
+
+- Result: Legacy intake now acknowledges user/agent-decided admissions before assessment, including agent-archived personal items; Jev refuses personal sources before ledger reservation; source capture guards use an explicit connector writer identity; Jev response usage settles across record-write failures, and committed source-assessment receipts replay before a paid reservation. The editable routine now uses X destination scope from its stated setting and documents exact connector action parameters.
+- Evidence: each new Gateway failure-mode test failed with its corresponding guard/settlement/replay behavior reverted; final `npm run build` passed and `npx vitest run src/knowledge` passed (28 files, 386 tests); documentation policy and personal-info guard passed.
+- Changes: this commit.
+- Tasks added: none.
+- Kept on purpose: when Jev usage settles but no source-write receipt exists, a retry with the same command ID returns a typed conflict directing a new command ID; no parallel persistent assessment receipt/schema was added. If the source write committed before a lost response, its receipt is returned before the paid ledger is touched.
+- Deviations: none.
+- For the next agent: C24 still migrates iOS manual assessment to the Gateway primitive; C23 remains gated on user-approved live dry-run parity and a user Gateway update. No live Gateway access or lifecycle action was performed.

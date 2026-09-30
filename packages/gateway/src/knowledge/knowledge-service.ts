@@ -735,6 +735,8 @@ export class KnowledgeService {
           if (!model) throw new GatewayError("unsupported", "Source assessment requires an explicitly configured Knowledge model");
           return this.runOwned("source assessment", (signal, retirements) => triageSource(this.store, { commandId: request.commandId, sourceId: request.sourceId, expectedRevision: request.expectedRevision, signal, retirements }, model), signal);
         }
+        const assessable = await this.store.read(request.sourceId, request.expectedRevision, false, true, true);
+        if (assessable?.kind === "source" && assessable.scope === "personal") throw new GatewayError("unsupported", "Jev source assessment is unavailable for personal sources");
         const tagging = this.tagging;
         const assessmentModel = tagging?.assessment;
         if (!tagging || !assessmentModel) throw new GatewayError("unsupported", "Jev source assessment is not installed");
@@ -744,13 +746,25 @@ export class KnowledgeService {
         return this.runOwned("Jev source assessment", async (signal, retirements) => {
           let attemptId: string | undefined;
           let dispatched = false;
+          let receivedUsage: { inputTokens: number; outputTokens: number; estimatedCostCents: number } | undefined;
+          const trackingAssessment: SourceAssessmentModel = { async assess(input, assessmentSignal, context) {
+            const result = await assessmentModel.assess(input, assessmentSignal, context);
+            if (result.usage) receivedUsage = { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, estimatedCostCents: result.usage.estimatedCostCents };
+            return result;
+          } };
           try {
             const result = await triageSource(this.store, {
               commandId: request.commandId, sourceId: request.sourceId, expectedRevision: request.expectedRevision, signal, retirements,
               ...(request.maxChargeCents !== undefined ? { maxChargeCents: request.maxChargeCents } : {}),
-              beforeDispatch: async () => { attemptId = await tagging.budget.reserveAssessment(connectionId, request.commandId); },
+              beforeDispatch: async () => {
+                try { attemptId = await tagging.budget.reserveAssessment(connectionId, request.commandId); }
+                catch (error) {
+                  if (error instanceof GatewayError && error.code === "conflict") throw new GatewayError("conflict", "This Jev assessment was paid and settled but its source revision was not recorded; retry with a new commandId");
+                  throw error;
+                }
+              },
               onDispatch: async () => { if (!attemptId) throw new GatewayError("conflict", "Jev assessment has no monthly reservation"); await tagging.budget.markDispatch(connectionId, attemptId); dispatched = true; },
-            }, assessmentModel);
+            }, trackingAssessment);
             if (attemptId) {
               const usage = result.assessment.usage;
               if (usage) await tagging.budget.settle(connectionId, attemptId, { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, estimatedCostCents: usage.estimatedCostCents });
@@ -759,6 +773,7 @@ export class KnowledgeService {
             return result;
           } catch (error) {
             if (attemptId && !dispatched) await tagging.budget.releaseUndispatched(connectionId, attemptId);
+            else if (attemptId && dispatched && receivedUsage) await tagging.budget.settle(connectionId, attemptId, receivedUsage);
             throw error;
           }
         }, signal);
