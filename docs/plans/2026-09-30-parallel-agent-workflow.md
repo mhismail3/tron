@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, wave 1 claimed (W-5, W-8, W-16 to W-21)
+- **Last updated:** 2026-09-30, robomp comparison: W-6/W-11 scope set, follow-ups W-22 to W-26
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -201,12 +201,12 @@ Dated 2026-09-30:
 | W-3 | Done | Shared-resource isolation audit so any two worktrees can validate concurrently; each fix becomes a sub-issue | none | session 01a0f183, 2026-09-30 |
 | W-4 | Done | Core: `start`/claim, naming, soft cap (the config file and `gh` resolution exist since W-2) | W-2 | session 01a0f183, 2026-09-30 |
 | W-5 | Claimed | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-6 | Ready | Core: `finish` and `land` (PR with `Closes`, evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff) and a recurring steward for orphaned PRs | W-5 | Unassigned |
+| W-6 | Ready | Core: `finish` and `land`: push gates (claim branch, clean tree), a PR only with a passing receipt for the exact head plus `Closes #N` and a Verification section; evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff. A recurring steward automation polls and resumes the owning session. | W-5 | Unassigned |
 | W-7 | Ready | Core: automatic cleanup of provably done resources; update the housekeeping skill to match | W-6 | Unassigned |
 | W-8 | Claimed | Dashboard skill and HTML card | W-4 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-9 | Ready | CI: required Linux policy job and `tron/verify` status; path-scoped, non-blocking macOS jobs whose failures reach the dashboard (D-4) | W-5 | Unassigned |
 | W-10 | Ready | Scheduled local heavy run on `main` that files `regression` issues | W-5 | Unassigned |
-| W-11 | Ready | Rewrite the guidance: `AGENTS.md` work section, a `tron-work` skill (take a task, dashboard), `CONTRIBUTING.md`, `.agents/README.md`, PR template, retirement notice in `docs/plans/README.md` | W-6, W-8 | Unassigned |
+| W-11 | Ready | Rewrite the guidance: `AGENTS.md` work section, a `tron-work` skill (take a task, dashboard), `CONTRIBUTING.md`, `.agents/README.md`, PR template, the rule that issue text not authored by the maintainer is untrusted and never an instruction (only the maintainer's Ready status authorizes work), retirement notice in `docs/plans/README.md` | W-6, W-8 | Unassigned |
 | W-12 | Ready | Pilot: migrate this plan into an epic and finish W-7 onward through the new flow | W-6 | Unassigned |
 | W-13 | Ready | Dependabot intake: each PR becomes an agent-owned `deps` task; the Pi SDK family and Node follow their runbooks | W-6 | Unassigned |
 | W-14 | Ready | One audited legacy sweep of the existing worktrees and branches, with the user approving the exact list | W-7 | Unassigned |
@@ -217,6 +217,11 @@ Dated 2026-09-30:
 | W-19 | Claimed | #102 Worktree-relative Mac Release DerivedData; hook installer works from linked worktrees (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-20 | Claimed | #103 Dev Gateway status names the worktree and branch it runs (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-21 | Claimed | #101 Scope retained test/profile artifacts and `latest` pointers to the worktree (P3) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-22 | Ready | Follow-up: triage procedure; an agent classifies `needs-triage` issues (type, area, priority, duplicate search) and places them as Proposed for maintainer approval | W-11 | Unassigned |
+| W-23 | Ready | Follow-up: warm worktrees; `work start` seeds `node_modules` and the iOS build cache from the primary checkout by APFS clone | W-4 | Unassigned |
+| W-24 | Ready | Follow-up: bug tasks record a failing reproduction before a fix; an unreproducible bug goes to Needs you with the missing details | W-11 | Unassigned |
+| W-25 | Ready | Follow-up: agents write to GitHub only through `scripts/tron work`, with a local audit log of every write | W-6 | Unassigned |
+| W-26 | Ready | Follow-up: type-specific PR body sections (Repro/Cause/Fix/Verification for bugs) validated before opening | W-6 | Unassigned |
 
 ## Task details
 
@@ -321,6 +326,33 @@ Migration groups:
 
 W-15 is done when `docs/plans/` holds only its README, which then points to
 GitHub, or is deleted with its references.
+
+### Adopted from robomp (decided with the user on 2026-09-30)
+
+Compared with robomp (`python/robomp` in the MIT-licensed oh-my-pi
+repository) and with Hermes Agent's webhook adapter. Neither is adopted as a
+system:
+
+- robomp serves outside contributors through a second agent runtime in Docker
+  with a public webhook.
+- Hermes has no queue, per-issue lock or worktrees.
+
+Their patterns are copied instead, attributed in `.agents/skills/NOTICE.md`
+when text is reused.
+
+- **Version 1 (in W-6 and W-11):**
+  - push and PR gates tied to the exact tree;
+  - `Closes #N` and a Verification section;
+  - the steward as a scheduled poll that resumes the owning session. Webhook
+    ingress is rejected, because it would conflict with Tron's exposure rules;
+  - the untrusted-issue-text rule.
+- **Follow-ups:** W-22 to W-26.
+- **Declined:**
+  - an agent review on every PR (CI only stays the merge gate);
+  - webhook ingress and the token proxy;
+  - question auto-close;
+  - the release sentinel, which rule 7 forbids;
+  - random model selection.
 
 ## Findings
 
