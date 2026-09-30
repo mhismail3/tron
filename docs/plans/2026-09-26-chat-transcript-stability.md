@@ -111,7 +111,7 @@ breaks context-menu previews.
 | CT-27 | Done | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | chat scroll session (worker lane ct-27-rows), 2026-09-28 |
 | CT-28 | Ready | Record-only invariant monitor in the product (pinned bottom band uncovered for more than 2 frames, detached anchor moved without input, opening revealed uncovered), deduplicated, reaching device exports and surviving relaunch; delete the noisy tail-edge trace records; write the missing send-choreography device checklist in `development.md` | CT-25 | |
 | CT-24 | Done | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
-| CT-23 | Blocked | One orientation owner, single-sample geometry and read-time frame reflection retained; origin's inner/outer safe-area exclusion fixes detached viewport clipping without offset commands. Four bottom gates ×3 pass with zero blank/uncovered boundaries; pinned/detached keyboard and catch-up pass. Final clean `9d606ec1d`: today parity 10/10, origin 9/10 (original opened-history residual; ordinary-send remains borderline across runs), row stability 14/14 both after correcting test traversal/settlement. Parity capture snaps today's estimated end only, never an exact origin pin; negative control reproduces keyboard detachment. Display SwiftUI preview, accessibility/status-bar requirements, navigation fade decision and additional full-checkpoint failures still block production cutover. Optimized streaming wakeups remain an open production-performance item after bounded bisection/trace investigation, not a device-evaluation blocker. Today's path/default unchanged; no Gateway/device lifecycle action. See the consolidated CT-23 flip2 status below for clean revisions, measurements, controls and remaining decisions | CT-24 | chat scroll session (worker lane ct23b), 2026-09-29 |
+| CT-23 | Blocked | Evaluation remains behind the orientation switch. Source-owned expanded-card UIKit previews and origin-only status-bar routing implemented; native preview/window-pixel, one-recipient composer matrix, public oldest-history delegate and coverage cleanup gates pass both orientations at `733fc5f68`. Final parity today 11/11, origin 9/11 (opened-history + borderline send); four origin bottom gates, obstruction follow, detached journeys, row stability and child sheets pass. Default tier retains one known displaced-resume watchdog; today top matrix has an unresolved `first=nil` boundary. Intermittent device at-rest image inversion, actual system taps, accessibility and prior navigation/performance/device checks remain open. Signed LocalDevice artifact prepared, not installed; lane ct23d removed. See **CT-23 display cards and status bar** handoff | CT-24 | chat scroll session (worker lane ct23d), 2026-09-30 |
 | CT-22 | Claimed | Exact tail prototype (keep the SwiftUI `ScrollView`, rows and animations): measure two ways of making the pinned bottom exact on a throwaway branch. (a) Previously measured rows keep their last measured height when they leave the viewport. (b) The newest rows render in an eager stack below a `LazyVStack` of older history, so the bottom and everything near it are measured, never estimated; the boundary moves in coarse steps so rows rarely change parent. Judged by the CT-2 fixtures, the parity gate, the harness and CT-10's scale numbers | CT-20 | chat scroll investigation session, 2026-09-27 |
 | CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15, CT-20 | |
 | CT-17 | Needs scoping | Qualification: with the switch on, the CT-12 and CT-14 gates pass against the `main` reference, the CT-2 fixtures and a 512-row blank fixture read zero blank boundaries, every `ChatViewScrollHarnessTests` visible invariant holds, and frame cost, opening time and memory at 150, 300 and 512 heavy rows are no worse than CT-10's baseline | CT-16, CT-14, CT-10 | |
@@ -3777,3 +3777,119 @@ propagate intrinsic-size invalidation when its internal asynchronous load change
 content without a representable update. Enable UIHostingController's native
 intrinsic-content sizing, rather than adding measurement state or waits. Today's
 known top-matrix `first=nil` boundary also repeats; attribution remains pending.
+
+#### CT-23 display cards and status bar — final handoff
+
+**Ready for user-owned device evaluation, not production cutover.** Final
+product/test source is clean **`733fc5f68`**. Every final run and the signed app
+below carries that clean revision. This handoff is documentation-only afterward.
+No Gateway lifecycle, device installation, deployment, remote Git operation or
+change outside this worktree was performed.
+
+Changes and established causes:
+
+- The original expanded card's SwiftUI menu targeted the reflected scroll host.
+  Real XCUITest baseline `ce0b631ca` / `20260930T044023Z-run.gDn2o8` shows the
+  origin preview absent while today's is upright. The actual expanded card now
+  owns the existing native menu interaction; highlight and dismissal lift that
+  same mounted view with identity window target, centered within 0.5 pt. No
+  explicit replacement-preview content is used. Collapsed display pills retain
+  their prior SwiftUI menu; this task's preview evidence is for expanded cards.
+- Nested media loading must invalidate its hosting controller's intrinsic size.
+  Without `sizingOptions = .intrinsicContentSize`, prepared Markdown stayed at
+  placeholder height until remount (242→216 pt). Existing row-stability gate
+  caught this new boundary regression; final source holds 216→216 in both modes.
+- Origin alone installs the public-hierarchy status-bar probe. It never replaces
+  SwiftUI's delegate. The transparent off-origin scroll recipient asks the
+  coordinator to detach and issue oldest-history via the normal declarative
+  command owner; coverage/removal releases it and restores the original setting.
+  Missing ancestry fails safe and logs once in `ChatTranscriptOrientation`.
+- Supervisor-approved single-recipient rule excludes secondary chat scrolls
+  through one contained content probe (rails, attachments, chips, catalog,
+  horizontal Markdown). Native text/PDF owners set their own public properties
+  within the same chat-only environment. No window-wide mutation or private API.
+- The image parity scenario was recorded on TODAY at clean `433b9c340`, before
+  product changes. Its eight reference frames were added without changing any
+  of the previous ten entries or tolerances. Hosted loaded image/PDF pixels and
+  native code transforms are upright in both modes. Real XCUITest image pixels
+  remain upright at rest, in the menu, after dismissal and after lazy return.
+  **A is not reproduced or claimed fixed.** The user's intermittent device
+  inversion is authoritative. Optimized/device-scale/real-artifact factors and
+  inline VideoPlayer remain device checks; HTML is not inline-eligible, and the
+  current Markdown renderer has no separate native LaTeX/image block renderer.
+
+Final evidence (each run under `~/Library/Developer/Tron/ios/test-runs/` retains
+metadata, log, summary and `TestResults.xcresult`):
+
+| Gate | Result | Run |
+|---|---|---|
+| Origin cross-owner checkpoint + XCUITest | 35 Swift Testing cases, only parity fails; both child XCTest journeys and real menu/pixel/lazy-return XCUITest pass | `20260930T053505Z-run.DgqYvO` |
+| Today cross-owner checkpoint | 35 Swift Testing cases, only top-matrix `first=nil` fails; child journeys pass | `20260930T053924Z-run.7BcADA` |
+| Parity | Today **11/11**; origin **9/11**: opened-history 0.02809 and send pinned 0.02502 against unchanged 0.025. Image passes: origin 0.00505, today 0.00384 | Same two runs |
+| Four origin bottom journeys | 72/340/90/68 boundaries, **zero blank/uncovered**, min coverage 1.0, settled clearance 12 pt, no materialization/physical/past-end repairs | Origin checkpoint |
+| Obstruction follow, detached, keyboard, catch-up | Both paths pass their existing expectations; origin pinned animated gap error is floating-point noise and detached identity/position gates pass. Today's known motion residuals remain measurement-only | Same two runs |
+| Row stability | **14/14 both**; prepared inline cards 216→216, one fetch each, no settled remount size regression | Same two runs |
+| Status-bar / display native gates | Four integration cases pass: one recipient across empty/attachments/chips/catalog in both modes, unchanged transcript delegate, origin public callback reaches oldest detached, coverage cleanup; image/PDF pixels and real-card highlight/dismissal targets pass | Same two runs |
+| Child sheet gates | Pass existing non-detent contracts. Existing accepted detent limitation remains: origin collapse **14 blank frames**, expansion 0; neither is claimed a continuity fix | Same two runs |
+| Full default unit tier | **2,038 total: 1,990 passed, 47 skipped, 1 failure**, `displacedRetainedResume` 15 s watchdog. No expected display-preview issue remains | `20260930T054323Z-run.YHuN0m` |
+| Signed generic LocalDevice build + artifact validation | Pass, stamped `733fc5f68`, dirty=false; no install | `~/Library/Developer/Tron/ios/ct23-device-evaluation/ct23d-local-device-build.log` |
+
+The top-matrix today failure is `first=nil` with a full native clip, not a new
+clipped viewport band. It repeats focused (`20260930T053051Z-run.2MxoM1` and
+`20260930T053258Z-run.OxuI5u`). This family was recorded before this task, but
+precise attribution to this revision is **not settled**; do not present all
+cross-owner gates as green. The default watchdog is the previously reported
+retained-resume family. Origin's ordinary-send static frame remains borderline,
+not fixed by the new image reference. No bound, skip or watchdog was loosened.
+
+Synthetic status taps were stopped per supervisor: even an independent plain
+SwiftUI scroll control failed SpringBoard status-bar element-coordinate delivery
+(`20260930T050723Z-run.jwyRpG`). Temporary diagnostic/control source is removed.
+The accepted automated proof is recipient ownership plus the public delegate
+journey, **not proof of real UIKit system-tap delivery**. The new once-per-probe
+missing-ancestor log would diagnose a missing bridge; the hosted recipient matrix
+would diagnose competing eligible scrolls in one step. Neither log means a system
+gesture was received.
+
+Screenshots, with human-readable names and original attachment manifests:
+
+`~/Library/Developer/Tron/ios/ct23-device-evaluation/display-cards/`
+
+- `baseline-menu/origin-image-mid-menu.png`: reproduced missing preview.
+- `final-menu/{origin,end}-image-at-rest.png`
+- `final-menu/{origin,end}-image-mid-menu.png`
+- `final-menu/{origin,end}-image-after-dismiss.png`
+- `final-menu/{origin,end}-image-after-lazy-return.png`
+- `final-hosted/inline-{image,pdf,code}-newestAt{Origin,End}.png`
+- `final-hosted/status-bar-origin-oldest.png`
+- `final-{origin,end,unit}.log`: complete repeatable selector/command output.
+
+Export again with `xcrun xcresulttool export attachments --test-id
+'TronChatDisplayUITests/testInlineImageMenuLiftAndDismiss()' --path <run>/TestResults.xcresult
+--output-path <directory>`; use `ChatDisplayOrientationTests` for hosted images.
+Stills/pixel checks do not prove the entire animation trajectory or device parity.
+
+Prepared app (signed, validated with `--configuration LocalDevice --require-profile`):
+`~/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice/Build/Products/LocalDevice-iphoneos/TronMobile.app`.
+The user/supervisor owns any install. Source and build are prepared only.
+
+Device checklist, toggling orientation with a full relaunch between modes:
+
+1. Real **status-bar tap reaches oldest loaded history** and detaches, with empty
+   composer and with attachments, selected chips and an open catalog; repeat after
+   opening/dismissing a sheet, and confirm sheets/settings keep their own scrolling.
+2. Dark-mode image card at rest: image upright and close badge top-right, cold
+   load and retained thumbnail, real Gateway PNG, after scrolling away/back and
+   after a menu cycle. The reported intermittent at-rest inversion remains open.
+3. Long-press image and other expanded cards: real upright lift in place, no
+   degenerate line or rotated/right-edge dismissal; Tool Details opens correctly.
+   Compare appearance to today's path. Collapsed pills' older menu path is not
+   covered by the expanded-card fix.
+4. Prior CT-23 checklist still applies (keyboard/obstruction continuity, child
+   detent collapse band, VoiceOver, navigation fade and performance residuals).
+
+Cleanup: `scripts/tron-ios-test lane-remove ct23d` completed; `status --all`
+shows no ct23d lane, no booted simulator and no Simulator.app. Reusable products
+and retained artifacts remain. Personal-info guard, documentation policy and
+`git diff --check` pass. All source and documentation are committed; no staged
+files or background process from this task remains.
