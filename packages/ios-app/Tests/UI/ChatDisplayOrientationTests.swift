@@ -116,6 +116,36 @@ enum ChatDisplayOrientationFixture {
 @MainActor
 @Suite(.serialized, .enabled(if: UIValidationTier.isActive))
 struct ChatDisplayOrientationTests {
+    @Test("composer-owned managed sheets reset inherited secondary-scroll policy for both presentation forms")
+    func managedSheetRestoresStatusBarOwnership() async throws {
+        for itemBased in [false, true] {
+            let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let window = UIWindow(windowScene: scene)
+            let host = UIHostingController(rootView: AnyView(StatusBarSheetInheritanceFixture(itemBased: itemBased)))
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                host.dismiss(animated: false)
+                host.rootView = AnyView(EmptyView())
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+            func document(in view: UIView) -> TronDocumentTextView? {
+                if let text = view as? TronDocumentTextView { return text }
+                return view.subviews.lazy.compactMap { document(in: $0) }.first
+            }
+            for _ in 0..<90 where host.presentedViewController?.view.flatMap({ document(in: $0) }) == nil {
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+            }
+            for _ in 0..<24 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+            let presented = try #require(host.presentedViewController?.view)
+            let text = try #require(document(in: presented))
+            #expect(!text.text.isEmpty && text.window === window)
+            #expect(text.scrollsToTop, "The sheet, not its covered composer, owns status-bar scrolling (item=\(itemBased))")
+        }
+    }
+
     @Test("display preview lifts the single mounted upright card with an identity window target")
     func inlineImagePreviewTargetsMountedCard() async throws {
         for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
@@ -251,6 +281,36 @@ struct ChatDisplayOrientationTests {
                 throw error
             }
             await harness.close()
+        }
+    }
+}
+
+/// Reproduces the environment inherited by the composer's resource-detail sheets.
+/// The real managed presentation and native document scroll are retained, with no
+/// synthetic delegate or replacement UI to mask the owning-boundary defect.
+@MainActor
+private struct StatusBarSheetInheritanceFixture: View {
+    let itemBased: Bool
+    private struct Route: Identifiable { let id = "resource-detail" }
+    @State private var item: Route?
+    @State private var presented = false
+    var body: some View {
+        Group {
+            if itemBased {
+                Color.clear.tronManagedSheet(item: $item, identity: { $0.id }) { _ in
+                    TronReadOnlyTextView(text: String(repeating: "A resource document line.\n", count: 100))
+                }
+            } else {
+                Color.clear.tronManagedSheet(isPresented: $presented, identity: "resource-detail") {
+                    TronReadOnlyTextView(text: String(repeating: "A resource document line.\n", count: 100))
+                }
+            }
+        }
+        .environment(\.chatOwnsStatusBar, true)
+        .environment(\.scenePhase, .active)
+        .tronPresentation()
+        .task {
+            if itemBased { item = Route() } else { presented = true }
         }
     }
 }

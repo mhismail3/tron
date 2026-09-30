@@ -3893,3 +3893,11 @@ shows no ct23d lane, no booted simulator and no Simulator.app. Reusable products
 and retained artifacts remain. Personal-info guard, documentation policy and
 `git diff --check` pass. All source and documentation are committed; no staged
 files or background process from this task remains.
+
+Final boundary review found an additional failure mode before handoff acceptance:
+composer-owned sheets inherit `chatOwnsStatusBar=true`, so their native document
+scroll can opt out even after the underlying transcript bridge retires. Supervisor
+approved resetting this policy at both shared managed-sheet content boundaries,
+with a real hosted sheet/document regression and no-reset negative control.
+The prior final evidence above remains at its stated revision; corrected-boundary
+focused/default/build results will be appended after clean commits.
