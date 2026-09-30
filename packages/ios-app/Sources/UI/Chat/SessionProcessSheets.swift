@@ -641,6 +641,8 @@ struct ReadOnlySubagentSessionSheet: View {
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
+        // Prefer reading at medium; UIKit still owns edge-pull dismissal.
+        .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.hidden)
         .tronPresentation()
         .accessibilityIdentifier("read-only-subagent-session-sheet")
