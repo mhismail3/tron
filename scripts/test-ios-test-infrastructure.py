@@ -7,6 +7,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess as _subprocess
 import sys
@@ -108,6 +109,8 @@ CONTAINMENT_VARIABLES = (
     "TRON_PROFILE_IOS_DERIVED_DATA",
     "TRON_IOS_E2E_STATE_DIR",
     "TRON_IOS_E2E_DERIVED_DATA",
+    # The Gateway E2E harness derives its default fixture and DerivedData from it.
+    "TMPDIR",
 )
 _VARIABLE_LIST = ",\n        ".join(f'"{name}"' for name in CONTAINMENT_VARIABLES)
 # Prepended to every synthetic tool, so even a script that a fixture launched by
@@ -264,6 +267,8 @@ class ContainedFixture:
         """
         self.contained_root = root
         home = root / "home"
+        temporary = root / "tmp"
+        temporary.mkdir(exist_ok=True)
         environment = os.environ.copy()
         environment.update({
             "HOME": str(home),
@@ -275,6 +280,7 @@ class ContainedFixture:
             "TRON_PROFILE_IOS_DERIVED_DATA": str(home / "Library/Developer/Tron/ios/profile-derived-data"),
             "TRON_IOS_E2E_STATE_DIR": str(root / "e2e-state"),
             "TRON_IOS_E2E_DERIVED_DATA": str(root / "e2e-derived"),
+            "TMPDIR": str(temporary),
             "FAKE_CONTAINMENT_ROOT": str(root),
             "FAKE_CONTAINMENT_LOG": str(self.containment_log(root)),
         })
@@ -3082,6 +3088,21 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
        next Tron test tool does not reclaim it.
     6. `clean` deletes the remembered Development simulator when the lane's
        marker names it.
+
+    W-16 (issue #98): the fixture and products are one worktree's, not one user's.
+
+    7. Two worktrees resolve the same default fixture directory or DerivedData,
+       so one worktree's `state.env`, Gateway pid, npm lock hash, logs and test
+       products are another's, and unleased `status`/`logs` show its Gateway.
+    8. The worktree-keyed default replaces an explicit TRON_IOS_E2E_STATE_DIR
+       or TRON_IOS_E2E_DERIVED_DATA, which CI sets.
+    9. `build` leaves products without the build identity of the source that
+       produced them, so `run` cannot prove where they came from.
+    10. `run` executes products that carry no identity, another worktree's
+        identity or another source state's, or renews the Gateway fixture
+        before it refuses them.
+    11. `stop` or `clean` in one worktree removes another worktree's fixture or
+        DerivedData.
     """
 
     def setUp(self) -> None:
@@ -3093,11 +3114,163 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             "TRON_IOS_E2E_DERIVED_DATA": str(self.root / "e2e-derived"),
         }
 
-    def e2e(self, *arguments: str, timeout: float = 180) -> subprocess.CompletedProcess[str]:
+    def e2e(
+        self, *arguments: str, timeout: float = 180, harness: Path = E2E,
+        environment: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [str(E2E), *arguments], env=self.environment,
+            [str(harness), *arguments], env=environment or self.environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
         )
+
+    def default_roots_environment(self) -> dict[str, str]:
+        """The harness's own defaults: no overrides, TMPDIR inside the fixture."""
+        environment = dict(self.environment)
+        environment.pop("TRON_IOS_E2E_STATE_DIR")
+        environment.pop("TRON_IOS_E2E_DERIVED_DATA")
+        return environment
+
+    def second_worktree(self) -> Path:
+        """Another checkout of the harness: the same scripts at another path."""
+        other = self.root / "other-worktree"
+        ignore = shutil.ignore_patterns("__pycache__")
+        shutil.copytree(ROOT / "scripts", other / "scripts", ignore=ignore)
+        shutil.copytree(ROOT / "config", other / "config", ignore=ignore)
+        return other
+
+    def reported(self, output: str, label: str) -> Path:
+        """The one path `status` reports under `label`."""
+        values = [line.split(": ", 1)[1] for line in output.splitlines() if line.startswith(f"{label}: ")]
+        self.assertEqual(len(values), 1, f"expected one {label!r} line:\n{output}")
+        return Path(values[0])
+
+    def worktree_key(self, worktree: Path) -> str:
+        return subprocess.run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(worktree)],
+            env=self.environment, check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+
+    def source_identity(self) -> dict[str, object]:
+        return json.loads(subprocess.run(
+            [sys.executable, str(IDENTITY), "show", "--worktree", str(ROOT)],
+            env=self.environment, check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout)
+
+    def populate_fixture(self, fixture: Path, derived: Path) -> None:
+        """What `prepare` and `build` leave: owned fixture state and products."""
+        fixture.mkdir(parents=True, exist_ok=True)
+        (fixture / ".tron-ios-e2e-owned").write_text("tron.ios-e2e-state.v1\n")
+        for name in ("state.env", "gateway.log", "npm-lock.sha256"):
+            (fixture / name).write_text(name + "\n")
+        for name in ("tron", "agent", "home", "results"):
+            (fixture / name).mkdir(exist_ok=True)
+        (derived / "Build/Products").mkdir(parents=True, exist_ok=True)
+        (derived / ".tron-ios-e2e-owned").write_text("tron.ios-e2e-derived.v1\n")
+
+    def built_products(self, identity: dict[str, object] | None) -> Path:
+        """Focused products in the override DerivedData, stamped with `identity`."""
+        derived = self.root / "e2e-derived"
+        products = derived / "Build/Products"
+        products.mkdir(parents=True)
+        (derived / ".tron-ios-e2e-owned").write_text("tron.ios-e2e-derived.v1\n")
+        (products / "Tron Development_UnitTests_iOS.xctestrun").write_text("xctestrun\n")
+        if identity is not None:
+            (derived / "build-identity.json").write_text(json.dumps(identity))
+        return derived
+
+    def assert_no_fixture_renewed(self) -> None:
+        state = self.root / "e2e-state"
+        for name in ("state.env", "gateway.pid", "proxy.pid", "gateway.log", "tron", "home"):
+            self.assertFalse((state / name).exists(), f"run renewed {name} before refusing its products")
+
+    def test_each_worktree_owns_its_default_fixture_and_products(self) -> None:
+        """Failure modes 7 and 8: default roots follow the worktree; overrides win."""
+        environment = self.default_roots_environment()
+        other = self.second_worktree()
+        here = self.e2e("status", environment=environment)
+        there = self.e2e("status", harness=other / "scripts/ios-gateway-e2e-test", environment=environment)
+        self.assertEqual(here.returncode, 0, here.stderr)
+        self.assertEqual(there.returncode, 0, there.stderr)
+
+        temporary = Path(environment["TMPDIR"])
+        for output, worktree in ((here.stdout, ROOT), (there.stdout, other)):
+            key = self.worktree_key(worktree)
+            for label in ("Fixture", "DerivedData"):
+                path = self.reported(output, label)
+                self.assertEqual(path.parent, temporary, output)
+                self.assertTrue(path.name.endswith(f"-{os.getuid()}-{key}"), output)
+        self.assertNotEqual(self.reported(here.stdout, "Fixture"), self.reported(there.stdout, "Fixture"))
+        self.assertNotEqual(self.reported(here.stdout, "DerivedData"), self.reported(there.stdout, "DerivedData"))
+
+        overridden = self.e2e("status")
+        self.assertEqual(overridden.returncode, 0, overridden.stderr)
+        self.assertEqual(self.reported(overridden.stdout, "Fixture"), self.root / "e2e-state")
+        self.assertEqual(self.reported(overridden.stdout, "DerivedData"), self.root / "e2e-derived")
+
+    def test_stop_and_clean_touch_only_this_worktrees_fixture(self) -> None:
+        """Failure mode 11: another worktree's fixture and products survive."""
+        environment = self.default_roots_environment()
+        other_harness = self.second_worktree() / "scripts/ios-gateway-e2e-test"
+        there = self.e2e("status", harness=other_harness, environment=environment)
+        self.assertEqual(there.returncode, 0, there.stderr)
+        other_fixture = self.reported(there.stdout, "Fixture")
+        other_derived = self.reported(there.stdout, "DerivedData")
+        self.populate_fixture(other_fixture, other_derived)
+        here = self.e2e("status", environment=environment)
+        self.assertEqual(here.returncode, 0, here.stderr)
+        own_fixture = self.reported(here.stdout, "Fixture")
+        own_derived = self.reported(here.stdout, "DerivedData")
+        self.populate_fixture(own_fixture, own_derived)
+
+        stopped = self.e2e("stop", environment=environment)
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertFalse((own_fixture / "state.env").exists())
+        self.assertFalse((own_fixture / "home").exists())
+        self.assertTrue((own_derived / "Build/Products").is_dir())
+
+        cleaned = self.e2e("clean", environment=environment)
+        self.assertEqual(cleaned.returncode, 0, cleaned.stderr)
+        self.assertFalse(own_fixture.exists())
+        self.assertFalse(own_derived.exists())
+
+        for name in ("state.env", "gateway.log", "npm-lock.sha256", "tron", "agent", "home", "results"):
+            self.assertTrue((other_fixture / name).exists(), f"another worktree lost {name}")
+        self.assertTrue((other_derived / "Build/Products").is_dir())
+
+    def test_an_e2e_build_stamps_its_products_with_this_worktrees_identity(self) -> None:
+        """Failure mode 9: the products name the source that built them."""
+        result = self.e2e("build")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stamp = json.loads((self.root / "e2e-derived/build-identity.json").read_text())
+        self.assertEqual(stamp, self.source_identity())
+
+    def test_run_refuses_products_not_built_from_this_worktree(self) -> None:
+        """Failure mode 10: every unproven product set is refused before the
+        Gateway fixture is renewed."""
+        foreign = self.source_identity()
+        foreign["worktree"] = "/private/tmp/tron-foreign"
+        foreign["worktree_key"] = "tron-foreign-0123456789ab"
+        stale = self.source_identity()
+        stale["revision"] = "0" * 40
+        stale["source_fingerprint"] = "0" * 64
+        cases = (
+            (foreign, ["refusing to run", "/private/tmp/tron-foreign", str(ROOT)]),
+            (stale, ["refusing to run", "revision 000000000"]),
+            (None, ["carry no build identity"]),
+        )
+        for identity, expected in cases:
+            with self.subTest(expected=expected[-1]):
+                derived = self.built_products(identity)
+                try:
+                    result = self.e2e("run")
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    for text in expected:
+                        self.assertIn(text, result.stderr)
+                    self.assertIn("build", result.stderr.splitlines()[-1])
+                    self.assert_no_fixture_renewed()
+                    self.assertNotIn("boot", self.simctl_commands())
+                finally:
+                    shutil.rmtree(derived)
 
     def test_an_e2e_build_releases_its_lane_and_sweeps_orphans(self) -> None:
         """Failure modes 1, 2 and 3: the command ends with nothing of its own booted."""

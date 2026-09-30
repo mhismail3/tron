@@ -1977,7 +1977,19 @@ The Gateway uses a fixture-owned home, state directory, agent directory,
 delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly
 bound to that fixture on initial startup and restart so a caller's store cannot
 become a migration input. Use `logs`, `status`, `stop`, and `clean` to inspect
-or manage those resources. Its simulator lane is the shared test lane
+or manage those resources. The fixture directory and the focused DerivedData
+belong to one worktree: by default they are
+`$TMPDIR/tron-ios-gateway-e2e-<uid>-<worktree key>` and
+`$TMPDIR/tron-ios-gateway-e2e-derived-<uid>-<worktree key>`, with the key
+`scripts/ios-test-build-identity.py worktree-key` gives the per-worktree test
+products (`TRON_IOS_E2E_STATE_DIR` and `TRON_IOS_E2E_DERIVED_DATA` override
+them). So `status`, `logs`, `stop` and `clean` see and remove only this
+worktree's Gateway, state, npm lock hash and products; run `clean` in a worktree
+before deleting it, because no sweep reclaims these directories. `build` stamps
+the products with this worktree's source identity, and `run` refuses — before it
+renews the Gateway fixture — products that carry no identity or were built from
+another worktree or another source state; `build` (or `iterate`) again after an
+edit. Its simulator lane is the shared test lane
 (`TRON_IOS_TEST_STATE_DIR` inside `TRON_IOS_TEST_DISCOVERY_ROOT`, device
 `TRON_IOS_TEST_DEVICE_NAME`): every mutating command sweeps orphaned lanes
 before it provisions, and the lane's simulator is released when the command
