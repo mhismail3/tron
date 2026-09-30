@@ -209,7 +209,8 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   grace and runtime disposal behavior, and unresolved runs recover as interrupted
   or `outcomeUnknown` rather than a successful terminal receipt. Drain logs include
   blocker session, category, state and age. Persistence diagnostics are logged to
-  the Gateway log, whose active/rotated files remain bounded to one MiB each.
+  the Gateway log, whose eight active/rotated segments are bounded to 5 MiB
+  each (40 MiB total).
 
 ## Frame compression
 
