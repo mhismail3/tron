@@ -2371,6 +2371,10 @@ struct ChatView: View {
             presentedComposerResourcePicker == nil ? [] : composerResourceResults
         }
         probe.composerResourceSelection = { selectComposerResource($0) }
+        probe.composerResourcePickerPresentation = { destination in
+            if let destination { requestAttachmentPresentation(destination) }
+            else { dismissComposerResourcePicker() }
+        }
         probe.installScrollControls(
             geometry: { previous, current, viewport in
                 if viewport {

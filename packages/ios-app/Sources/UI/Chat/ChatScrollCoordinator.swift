@@ -345,7 +345,7 @@ final class ChatScrollCoordinator {
     /// keeps one immutable render commit. Catch-up retains that freeze until its
     /// explicit tail command settles, then admits one newest projection.
     var defersAutomaticLiveProjectionIntake: Bool {
-        viewportMode == .anchored || catchUpPhase != .none
+        viewportMode.defersAutomaticProjectionIntake(catchingUp: catchUpPhase != .none)
     }
     var blocksAutomaticLiveProjectionIntake: Bool {
         defersAutomaticLiveProjectionIntake
@@ -442,7 +442,7 @@ final class ChatScrollCoordinator {
             revision: sample.revision,
             rawFrame: orientation.transcriptFrame(
                 sample.rawFrame,
-                containerHeight: geometry.containerHeight
+                geometry: geometry
             )
         )
     }
