@@ -58,6 +58,10 @@ callback capture derived exclusively from its provider-authored loopback
 `redirect_uri`. A callback submitted by the phone is relayed only to that
 loopback listener; Tron does not select or accept a client-supplied destination.
 The adapter routes Pi's pasted-redirect `ctx.ui.input` to the same auth prompt.
+The built-in command is identified by Pi's synthetic `builtin:mcp` source path;
+its source category is only `builtin`. The RuntimeRegistry integration proves
+RPC-to-token-to-direct-tool sign-in, while a chat `/mcp login` without an active
+Tron operation fails closed: no auth URL is relayed and no browser opens.
 Outside a Tron operation, MCP `openUrl` fails closed and never launches a Mac
 browser. Relay outcomes are recorded without URLs, callback queries, codes or
 tokens.

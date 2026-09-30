@@ -251,7 +251,8 @@ function admitHandlers(state: RegistrationAdmission, _event: string, handlers: E
 
 function admitCommand(state: RegistrationAdmission, name: string, command: RegisteredCommand): RegisteredCommand {
   if (admittedCallbackOwners.get(command.handler) === state.extension) return command;
-  const callback = state.extension.sourceInfo.source === "builtin:mcp" && name === "mcp"
+  // Pi separates a synthetic built-in's source (`builtin`) from its path (`builtin:mcp`).
+  const callback = state.extension.sourceInfo.path === "builtin:mcp" && name === "mcp"
     ? adaptMcpAuthCommandHandler(command.handler)
     : command.handler;
   const handler = ownCallback(callback, state.extension);

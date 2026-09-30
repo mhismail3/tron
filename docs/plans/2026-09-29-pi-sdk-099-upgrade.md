@@ -1069,6 +1069,14 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Deviations: The other requested end-to-end gaps are still open: full RuntimeRegistry MCP RPC → Pi `/mcp login` → callback/token → next-turn tool call and typed `/mcp login` fail-closed; direct and nested receipts from the read-only installed browser fork with fake executable and aborted-stash proof; virtual model lifecycle through resume/fork/automatic retry/compaction; and `models.classify` cost in codemode result/session totals. The full-suite timing failure passed its isolated rerun. No visual/iOS/Mac validation was run in this Gateway-only part.
 - For the next agent: complete each remaining Gateway integration with retained artifacts under `packages/gateway/test-results`, then repeat final TypeScript/full Gateway and cross-module gates before moving P99-17 beyond Claimed. Inspect whether Pi emits abort/timeout explicitly on codemode `tool_execution_end`; this implementation records those only when present in result details, otherwise the authoritative event status is completed/failed.
 
+### P99-17 g1 · Done · 2026-09-30 · luna-worker
+
+- Result: Proved MCP sign-in across the real Gateway RPC, RuntimeRegistry session, AuthBroker callback relay, Pi OAuth token store, and next-turn direct tool call; chat `/mcp login` without a Tron operation fails closed without relaying an auth URL or opening a browser.
+- Evidence: Focused `mcp-auth-session.integration.test.ts` passed 2/2 tests in 2.04 s; retained artifact `packages/gateway/test-results/pi-sdk-099-mcp-signin-session.json` records RPC start, MCP auth target/URL, callback, successful completion, agent-directory token persistence, and successful direct tool result.
+- Changes: Added the live session integration regression, corrected built-in MCP command adaptation to match Pi's synthetic `sourceInfo.path` (`builtin:mcp`) rather than its generic `source` (`builtin`), and documented the real-path evidence in `packages/gateway/docs/mcp.md`.
+- Kept on purpose: Pi's MCP sign-in flow and token store remain authoritative; the no-operation case continues to reject browser opening.
+- Deviations: None.
+
 ### P99-17 F · Partial · 2026-09-30 · luna-worker
 
 - Result: Fixed codemode nested-call icon parity (per-tool kind), added an explicit disclosure chevron, changed the bounded omission note to plain language, and applied the attention/warning color to MCP sign-in-needed status while keeping failures red. Replaced hand-drawn MCP list/project, Extensions, TypeSafe-provider and tool-chip scenes with mounted production settings screens and `ToolCard` using a local fake Gateway transport. Invalid codemode `terminal.2` SF Symbol corrected to supported `terminal`. P99-17 remains Claimed.
