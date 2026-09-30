@@ -133,7 +133,7 @@ import { admitBrowserToolReference } from "../display/browser-tool-reference.js"
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import type { JevDecisionClient } from "../knowledge/jev-client.js";
+import { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
@@ -1545,7 +1545,7 @@ export class RuntimeSlot {
                 || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
               compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
               ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
-              ...(this.dependencies.jev ? { jev: this.dependencies.jev } : {}),
+              jev: new JevDecisionClient(modelRuntime),
               ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
               ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
               ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import type { ConnectorCredentialStore } from "./connector-credentials.js";
 import type { SourceAssessment } from "./knowledge-contract.js";
 import type { SourceAssessmentModel, SourceAssessmentModelInput, SourceAssessmentDispatchContext } from "./source-capture.js";
-import { JevDecisionClient, JEV_DEFAULT_MODEL, JEV_MAX_BODY_BYTES, JEV_MAX_STATE_BYTES, JEV_MAX_STATE_QUESTION_BYTES, type JevHTTP, type JevChoiceAnswer, type JevScoreAnswer, type JevQuestion } from "./jev-client.js";
+import { JevDecisionClient, JEV_DEFAULT_MODEL, JEV_MAX_BODY_BYTES, JEV_MAX_STATE_BYTES, JEV_MAX_STATE_QUESTION_BYTES, type JevChoiceAnswer, type JevScoreAnswer, type JevQuestion } from "./jev-client.js";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 const JEV_PROFILE_VERSION = "tron-source-profile-v2";
 export const JEV_RUBRIC_VERSION = "tron-source-rubric-v3";
@@ -62,7 +62,7 @@ export interface JevAssessmentResult extends Omit<SourceAssessment, "generatedAt
 /** Knowledge's narrow rubric adapter over the reusable typed Jev transport. */
 export class JevSourceAssessmentModel implements SourceAssessmentModel {
   private readonly client: JevDecisionClient;
-  constructor(credentials: ConnectorCredentialStore, http?: JevHTTP) { this.client = new JevDecisionClient(credentials, http); }
+  constructor(runtime: ModelRuntime) { this.client = new JevDecisionClient(runtime); }
   async assess(input: Parameters<SourceAssessmentModel["assess"]>[0], signal: AbortSignal, context?: SourceAssessmentDispatchContext): Promise<JevAssessmentResult> {
     if (signal.aborted) throw new Error("Jev assessment cancelled");
     const interests = input.interests.slice(0, 50).map(value => bounded(value, 500));

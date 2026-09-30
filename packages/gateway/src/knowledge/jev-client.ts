@@ -1,21 +1,17 @@
-import type { ConnectorCredentialStore } from "./connector-credentials.js";
-import { requestFixedHost } from "./fixed-host-transport.js";
+import type { ClassifierApi, ClassifierContext, ClassifierModel } from "@earendil-works/pi-ai";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
-export const JEV_DEFAULT_MODEL = "jev-1.13.0";
+/** Tron pins the model identity to Pi's catalog, but retains a qualified cost
+ * because TypeSafe's catalog currently reports zero rather than billable price. */
+export const JEV_CLASSIFIER = { provider: "typesafe", model: "jev-latest", inputUsdPerMillion: 0.042, outputUsdPerMillion: 0 } as const;
+export const JEV_DEFAULT_MODEL = JEV_CLASSIFIER.model;
 export const JEV_MAX_STATE_BYTES = 24_000;
 export const JEV_MAX_BODY_BYTES = 60_000;
 export const JEV_MAX_STATE_QUESTION_BYTES = 28_000;
-const JEV_MAX_RESPONSE_BYTES = 512_000;
 const JEV_MAX_QUESTIONS = 16;
 const JEV_MAX_JSON_DEPTH = 8;
-// Published direct price for this exact supported version: $0.042/M input,
-// output free. New versions require explicit contract/pricing qualification.
-function inputCostCents(tokens: number): number { return tokens * 42 / 10_000_000; }
 const INPUT_TOKEN_CEILING = 64_000;
 
-export interface JevHTTPResponse { status: number; body: string; }
-export type JevHTTP = (input: string, init: { method: "POST"; headers: Record<string, string>; body: string; signal: AbortSignal }) => Promise<JevHTTPResponse>;
 export type JevQuestion =
   | { type: "noul"; instructions: string | Record<string, unknown> | unknown[]; criteria?: { true?: unknown; false?: unknown } }
   | { type: "choice"; instructions: string | Record<string, unknown> | unknown[]; criteria: Record<string, unknown> }
@@ -36,7 +32,7 @@ export interface JevDispatchContext {
   /** Per-call bound, not a workflow allowance. Workflow owners reserve separately. */
   maxChargeCents?: number;
   beforeDispatch?: () => Promise<void>;
-  /** Called immediately before the POST is handed to the HTTP transport. */
+  /** Called immediately before classify is handed to Pi. */
   onDispatch?: (certainty: "sent") => Promise<void> | void;
 }
 
@@ -50,114 +46,84 @@ function assertJSON(value: unknown): void {
     if (item === null || typeof item === "string" || typeof item === "boolean") return;
     if (typeof item === "number" && Number.isFinite(item)) return;
     if (Array.isArray(item)) { for (const entry of item) visit(entry, depth + 1); return; }
-    if (isRecord(item) && [Object.prototype, null].includes(Object.getPrototypeOf(item))) {
-      for (const entry of Object.values(item)) visit(entry, depth + 1);
-      return;
-    }
+    if (isRecord(item) && [Object.prototype, null].includes(Object.getPrototypeOf(item))) { for (const entry of Object.values(item)) visit(entry, depth + 1); return; }
     throw invalid();
   }
   visit(value, 0);
 }
-function finiteProbabilityMap(value: unknown, expected: readonly string[]): Record<string, number> {
-  if (!isRecord(value) || Object.keys(value).length !== expected.length || Object.keys(value).some(key => !expected.includes(key))) throw invalid();
-  const result: Record<string, number> = Object.create(null); let sum = 0;
-  for (const key of expected) {
-    const probability = value[key];
-    if (typeof probability !== "number" || !Number.isFinite(probability) || probability < 0 || probability > 1) throw invalid();
-    result[key] = probability; sum += probability;
-  }
-  if (Math.abs(sum - 1) > 0.02) throw invalid();
-  return result;
-}
-function confidence(value: unknown): number { if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) throw invalid(); return value; }
-function validateAnswer(value: unknown, question: JevQuestion): JevAnswer {
-  if (!isRecord(value) || value.type !== question.type) throw invalid();
-  if (question.type === "noul") return { type: "noul", noul: confidence(value.noul) };
-  if (question.type === "choice") {
-    const options = Object.keys(question.criteria);
-    if (typeof value.choice !== "string" || !options.includes(value.choice)) throw invalid();
-    const probabilities = finiteProbabilityMap(value.probabilities, options);
-    if (probabilities[value.choice] !== Math.max(...Object.values(probabilities))) throw invalid();
-    return { type: "choice", choice: value.choice, probabilities, confidence: confidence(value.confidence) };
-  }
-  const levels = question.criteria.map((_, index) => String(index));
-  const legend = isRecord(value.legend) ? value.legend : undefined;
-  if (typeof value.score !== "number" || !Number.isFinite(value.score) || value.score < 0 || value.score > levels.length - 1 || !legend || Object.keys(legend).length !== levels.length || levels.some(level => typeof legend[level] !== "string")) throw invalid();
-  levels.forEach((level, index) => { const criterion = question.criteria[index]; if (typeof criterion === "string" && legend[level] !== criterion) throw invalid(); });
-  const probabilities = finiteProbabilityMap(value.probabilities, levels);
-  const expected = levels.reduce((sum, level) => sum + Number(level) * probabilities[level]!, 0);
-  if (Math.abs(expected - value.score) > 0.15) throw invalid();
-  return { type: "score", score: value.score, legend: legend as Record<string, string>, probabilities, confidence: confidence(value.confidence) };
-}
-function validateRequest(request: JevDecisionRequest, model: string): string {
+function byteLength(value: unknown): number { return Buffer.byteLength(JSON.stringify(value), "utf8"); }
+function inputCostCents(tokens: number): number { return tokens * JEV_CLASSIFIER.inputUsdPerMillion / 10_000; }
+function boundedString(value: unknown): string { return typeof value === "string" ? value : JSON.stringify(value); }
+function validatedContext(request: JevDecisionRequest): ClassifierContext {
   assertJSON(request.state); assertJSON(request.questions);
-  if (!description(request.state) || !isRecord(request.questions)) throw invalid();
+  if (!isRecord(request.state) || !isRecord(request.questions)) throw invalid();
   const questions = Object.entries(request.questions);
-  if (questions.length === 0 || questions.length > JEV_MAX_QUESTIONS) throw invalid();
-  const stateBytes = Buffer.byteLength(JSON.stringify(request.state), "utf8");
-  if (stateBytes > JEV_MAX_STATE_BYTES) throw new Error("Jev request exceeds its explicit bound");
+  if (!questions.length || questions.length > JEV_MAX_QUESTIONS || byteLength(request.state) > JEV_MAX_STATE_BYTES) throw new Error("Jev request exceeds its explicit bound");
+  const converted: ClassifierContext["questions"] = {};
   for (const [id, question] of questions) {
     if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(id) || !isRecord(question) || !description(question.instructions) || Object.keys(question).some(key => !["type", "instructions", "criteria"].includes(key))) throw invalid();
-    if (question.type === "choice" && (!isRecord(question.criteria) || Object.keys(question.criteria).length < 2 || Object.keys(question.criteria).length > 255 || Object.values(question.criteria).some(value => value !== null && !description(value)))) throw invalid();
-    if (question.type === "score" && (!Array.isArray(question.criteria) || question.criteria.length < 2 || question.criteria.length > 10 || question.criteria.some(value => !description(value)))) throw invalid();
-    if (question.type === "noul" && question.criteria !== undefined && (!isRecord(question.criteria) || Object.entries(question.criteria).some(([key, value]) => !["true", "false"].includes(key) || !description(value)))) throw invalid();
-    if (question.type !== "choice" && question.type !== "score" && question.type !== "noul") throw invalid();
-    // State plus each question has a separate provider ceiling. UTF-8 bytes
-    // are a conservative bound here, not a claim to exact provider tokenization.
-    if (stateBytes + Buffer.byteLength(JSON.stringify(question), "utf8") > JEV_MAX_STATE_QUESTION_BYTES) throw new Error("Jev state plus question exceeds its explicit bound");
+    const instructions = boundedString(question.instructions);
+    if (question.type === "choice" && isRecord(question.criteria) && Object.keys(question.criteria).length >= 2 && Object.keys(question.criteria).length <= 255) {
+      converted[id] = { type: "choice", instructions, criteria: Object.fromEntries(Object.entries(question.criteria).map(([key, value]) => [key, boundedString(value)])) };
+    } else if (question.type === "score" && Array.isArray(question.criteria) && question.criteria.length >= 2 && question.criteria.length <= 10) {
+      converted[id] = { type: "score", instructions, criteria: question.criteria.map(boundedString) };
+    } else if (question.type === "noul" && (question.criteria === undefined || isRecord(question.criteria))) {
+      const criteria = isRecord(question.criteria) ? question.criteria : {};
+      converted[id] = { type: "bool", instructions, criteria: { true: boundedString(criteria.true ?? "The statement is true."), false: boundedString(criteria.false ?? "The statement is false.") } };
+    } else throw invalid();
+    if (byteLength(request.state) + byteLength(question) > JEV_MAX_STATE_QUESTION_BYTES) throw new Error("Jev state plus question exceeds its explicit bound");
   }
-  const body = JSON.stringify({ model, state: request.state, questions: request.questions });
-  if (Buffer.byteLength(body, "utf8") > JEV_MAX_BODY_BYTES) throw new Error("Jev request exceeds its explicit bound");
-  return body;
+  if (byteLength({ model: JEV_DEFAULT_MODEL, state: request.state, questions: converted }) > JEV_MAX_BODY_BYTES) throw new Error("Jev request exceeds its explicit bound");
+  return { state: request.state as ClassifierContext["state"], questions: converted };
 }
-async function defaultHTTP(input: string, init: Parameters<JevHTTP>[1]): Promise<JevHTTPResponse> {
-  const response = await requestFixedHost(input, {
-    method: init.method, headers: init.headers, body: init.body, signal: init.signal,
-    allowedHosts: ["api.typesafe.ai"], timeoutMs: 20_000, maxBodyBytes: JEV_MAX_RESPONSE_BYTES,
-  });
-  return { status: response.status, body: response.body };
+function answerRecord(result: Record<string, unknown>, request: JevDecisionRequest): Record<string, JevAnswer> {
+  const answers: Record<string, JevAnswer> = Object.create(null);
+  for (const [id, question] of Object.entries(request.questions)) {
+    const answer = result[id];
+    if (!isRecord(answer)) throw invalid();
+    if (question.type === "noul" && answer.type === "bool" && typeof answer.probability === "number" && Number.isFinite(answer.probability) && answer.probability >= 0 && answer.probability <= 1) {
+      answers[id] = { type: "noul", noul: answer.probability };
+    } else if (question.type === "choice" && answer.type === "choice" && typeof answer.choice === "string" && isRecord(answer.probabilities) && typeof answer.confidence === "number") {
+      const options = Object.keys(question.criteria);
+      if (!options.includes(answer.choice) || Object.keys(answer.probabilities).length !== options.length || options.some(option => typeof (answer.probabilities as Record<string, unknown>)[option] !== "number")) throw invalid();
+      answers[id] = { type: "choice", choice: answer.choice, probabilities: answer.probabilities as Record<string, number>, confidence: answer.confidence };
+    } else if (question.type === "score" && answer.type === "score" && typeof answer.score === "number" && typeof answer.confidence === "number") {
+      answers[id] = { type: "score", score: answer.score, legend: Object.fromEntries(question.criteria.map((criterion, index) => [String(index), boundedString(criterion)])), probabilities: {}, confidence: answer.confidence };
+    } else throw invalid();
+  }
+  return answers;
 }
-function assertActive(signal: AbortSignal): void { if (signal.aborted) throw new Error("Jev evaluation cancelled"); }
 
-/** Stateless typed transport. Callers own disclosure, workflow allowances and persistence. */
+/** Bounded adapter over Pi's classifier path; Pi owns provider auth and HTTP dispatch. */
 export class JevDecisionClient {
-  constructor(private readonly credentials: ConnectorCredentialStore, private readonly http: JevHTTP = defaultHTTP) {}
+  constructor(private readonly runtime: ModelRuntime) {}
   async evaluate(request: JevDecisionRequest, signal: AbortSignal, context: JevDispatchContext = {}): Promise<JevDecisionResponse> {
-    assertActive(signal);
+    if (signal.aborted) throw new JevEvaluationError("Jev evaluation cancelled", "notSent");
     const requestedModel = request.model ?? JEV_DEFAULT_MODEL;
     if (requestedModel !== JEV_DEFAULT_MODEL) throw new Error("Jev model is not configured");
-    // Snapshot before any await: caller mutation cannot change the transmitted
-    // rubric or the response validator after the paid request is admitted.
-    const body = validateRequest(request, requestedModel);
-    const admitted = JSON.parse(body) as JevDecisionRequest;
+    const classifierContext = validatedContext(request);
     const maxEstimatedChargeCents = inputCostCents(INPUT_TOKEN_CEILING);
     if (context.maxChargeCents !== undefined && (!Number.isFinite(context.maxChargeCents) || context.maxChargeCents <= 0 || maxEstimatedChargeCents > context.maxChargeCents)) throw new Error("Jev request exceeds maxChargeCents before dispatch");
-    const token = await this.credentials.read("connector:jev:personal");
-    if (!token) throw new Error("Jev capability is not configured");
-    assertActive(signal);
+    const catalogModel = this.runtime.getModelOfType("classifier", JEV_CLASSIFIER.provider, JEV_DEFAULT_MODEL);
+    if (!catalogModel) throw new Error("Pi's TypeSafe Jev classifier is unavailable");
+    // Keep Pi's catalog API/provider/limits while replacing only the catalog's
+    // zero price in our accounting; it is not TypeSafe's billable price.
+    const model = { ...catalogModel, cost: { input: JEV_CLASSIFIER.inputUsdPerMillion, output: JEV_CLASSIFIER.outputUsdPerMillion, cacheRead: 0, cacheWrite: 0 } } as ClassifierModel<ClassifierApi>;
+    assertJSON(request);
     await context.beforeDispatch?.();
-    assertActive(signal);
-    let response: JevHTTPResponse;
+    if (signal.aborted) throw new JevEvaluationError("Jev evaluation cancelled", "notSent");
+    await context.onDispatch?.("sent");
     try {
-      try { await context.onDispatch?.("sent"); }
-      catch (error) { if (error instanceof JevEvaluationError) throw error; throw new JevEvaluationError("Jev dispatch admission was revoked", "notSent"); }
-      response = await this.http(JEV_ENDPOINT, { method: "POST", headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json" }, body, signal });
+      const result = await this.runtime.classify(model, classifierContext, { signal });
+      if (signal.aborted) throw new Error("Jev evaluation cancelled after dispatch");
+      if (result.stopReason !== "stop" || !isRecord(result.answers)) throw new Error("Jev classifier did not complete");
+      const usage = result.usage;
+      const inputTokens = usage?.input ?? 0; const outputTokens = usage?.output ?? 0;
+      if (!Number.isSafeInteger(inputTokens) || inputTokens < 0 || inputTokens > INPUT_TOKEN_CEILING || !Number.isSafeInteger(outputTokens) || outputTokens < 0) throw invalid();
+      return { requestedModel, actualModel: result.model, answers: answerRecord(result.answers as Record<string, unknown>, request), usage: { input_tokens: inputTokens, output_tokens: outputTokens }, estimatedCostCents: inputCostCents(inputTokens), maxEstimatedChargeCents };
     } catch (error) {
       if (error instanceof JevEvaluationError) throw error;
-      throw new JevEvaluationError(signal.aborted ? "Jev evaluation cancelled" : "Jev provider request failed", "uncertain");
+      throw new JevEvaluationError(signal.aborted ? "Jev evaluation cancelled" : "Jev classifier request failed", "uncertain");
     }
-    try { assertActive(signal); } catch { throw new JevEvaluationError("Jev evaluation was cancelled after dispatch", "uncertain"); }
-    if (response.status < 200 || response.status >= 300) throw new JevEvaluationError(`Jev request failed (${response.status})`, "uncertain");
-    if (Buffer.byteLength(response.body, "utf8") > JEV_MAX_RESPONSE_BYTES) throw new JevEvaluationError("Jev response exceeded its bounded body limit", "uncertain");
-    let value: unknown; try { value = JSON.parse(response.body); } catch { throw new JevEvaluationError("Jev response is invalid", "uncertain"); }
-    const usage = isRecord(value) && isRecord(value.usage) ? value.usage : undefined;
-    if (!isRecord(value) || value.model !== requestedModel || !isRecord(value.answers) || Object.keys(value.answers).length !== Object.keys(admitted.questions).length || !usage || !Number.isSafeInteger(usage.input_tokens) || !Number.isSafeInteger(usage.output_tokens) || (usage.input_tokens as number) < 0 || (usage.input_tokens as number) > INPUT_TOKEN_CEILING || (usage.output_tokens as number) < 0) throw invalid();
-    const answers: Record<string, JevAnswer> = Object.create(null);
-    for (const [id, question] of Object.entries(admitted.questions)) {
-      if (!Object.hasOwn(value.answers, id)) throw invalid();
-      answers[id] = validateAnswer(value.answers[id], question);
-    }
-    const usageResult = { input_tokens: usage.input_tokens as number, output_tokens: usage.output_tokens as number };
-    return { requestedModel, actualModel: value.model, answers, usage: usageResult, estimatedCostCents: inputCostCents(usageResult.input_tokens), maxEstimatedChargeCents };
   }
 }

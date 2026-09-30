@@ -200,7 +200,7 @@ const globalProviderResources = await GlobalProviderResources.create({
 startupCheckpoint("global-provider-resources");
 const connections = new ConnectionOwner(config.tronHome);
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
-const jevClient = new JevDecisionClient(knowledgeCredentials);
+const jevClient = new JevDecisionClient(modelRuntime);
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
 // One sampler for the process: the transport records its own traffic and logs
@@ -352,12 +352,12 @@ let queueKnowledgeSummary: (source: KnowledgeRecord & { kind: "source" }) => voi
 const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   credentials: knowledgeCredentials,
   queueSummary: source => queueKnowledgeSummary(source),
-  assessment: new JevSourceAssessmentModel(knowledgeCredentials),
+  assessment: new JevSourceAssessmentModel(modelRuntime),
   ...(xPricing ? { xPricing } : {}),
   connections,
 });
 const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, connections, knowledgeCredentials);
-const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(knowledgeCredentials), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections };
+const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(modelRuntime), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections };
 const knowledge = new KnowledgeService(
   knowledgeStore,
   new KnowledgeObservationService(
