@@ -18,7 +18,7 @@ final class TronSubagentSheetScrollUITests: XCTestCase {
         open.tap()
         let newest = row(31, in: app)
         XCTAssertTrue(newest.waitForExistence(timeout: 10), app.debugDescription)
-        let header = app.navigationBars["Scroll worker"]
+        let header = app.navigationBars.containing(.staticText, identifier: "Scroll worker").firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 5), app.debugDescription)
         let scroll = app.scrollViews.firstMatch
         let medium = scroll.frame
