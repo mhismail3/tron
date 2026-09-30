@@ -1031,8 +1031,7 @@ command, query, diff, and readable result. Extension-authored Pi tool labels are
 invocation names and become the native row/detail title (for example, `subagent_wait` displays as **Subagent Wait**),
 while arbitrary extension tools may foreground only the first
 trusted common string key and otherwise lead with their result. Pi codemode uses that same tool-detail route:
-its script and readable result lead, bounded nested invocations stay inside the parent detail with their own
-semantic status/duration and standard nested detail sheet, and `details.tronNested` attachments remain parent-owned.
+its readable result leads, the complete script is behind its dedicated source sheet, bounded nested invocations stay inside the parent detail with their own semantic status/duration and standard nested detail sheet, and `details.tronNested` attachments remain parent-owned.
 Admitted display descriptors use the existing session-bound display presentation route; no nested call becomes a
 canonical transcript row or independent receipt. MCP tool names use the projected server/tool identity, resource
 and search tools remain generic result cards, and session tool selection groups the runtime's tool inventory by

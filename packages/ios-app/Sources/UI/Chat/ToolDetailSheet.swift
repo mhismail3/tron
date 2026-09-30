@@ -5,6 +5,7 @@ struct ToolDetailSheet: View {
     let tool: ChatToolPresentation
     let density: ToolDetailDisplayDensity
     @State private var showingTechnicalDetails = false
+    @State private var showingCodemodeSource = false
     @State private var showingChanges = false
     @State private var selectedNestedCall: NestedToolCallPresentation?
     @Environment(\.canonicalResourceSessionID) private var sessionID
@@ -25,11 +26,14 @@ struct ToolDetailSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 chipSection(presentation)
-                primarySection(presentation)
+                if presentation.displayTitle != "Codemode" {
+                    primarySection(presentation)
+                }
                 resultSection(presentation)
                 nestedCallsSection(presentation)
                 attachmentSection(presentation)
                 classifyCostSection(presentation)
+                codemodeSourceButton(presentation)
                 diffSection(presentation)
                 technicalDetailsButton
             }
@@ -48,6 +52,30 @@ struct ToolDetailSheet: View {
         ) {
             if let diff = presentation.diff {
                 ToolChangesSheet(diff: diff, accent: accent)
+            }
+        }
+        .tronManagedSheet(isPresented: $showingCodemodeSource, identity: "chat.tool.codemode-source.\(tool.id)") {
+            if let source = presentation.primaryPreview?.text {
+                NavigationStack {
+                    ScrollView {
+                        Text(verbatim: source)
+                            .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                    }
+                    .tronScrollEdgeChrome()
+                    .toolbar {
+                        ToolbarItem(placement: .principal) {
+                            TronSheetTitle(title: "Codemode source", accent: accent)
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+                .tronPresentation()
             }
         }
         .tronManagedSheet(
@@ -334,6 +362,23 @@ struct ToolDetailSheet: View {
             .foregroundStyle(Color.tronTextSecondary)
             .padding(10)
             .tronGlassSurface(accent: accent, tintOpacity: 0.06)
+        }
+    }
+
+    @ViewBuilder
+    private func codemodeSourceButton(_ presentation: ToolDetailPresentation) -> some View {
+        if presentation.displayTitle == "Codemode", presentation.primaryPreview != nil {
+            Button { showingCodemodeSource = true } label: {
+                TronSettingsRow(
+                    icon: "chevron.left.forwardslash.chevron.right",
+                    title: "View script",
+                    subtitle: "Open the complete codemode source",
+                    accent: accent,
+                    subtitleColor: Color.tronTextSecondary
+                )
+            }
+            .buttonStyle(.plain)
+            .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
         }
     }
 
