@@ -43,13 +43,14 @@ final class TronChatDisplayUITests: XCTestCase {
     }
 
     func testStatusBarTapReachesOldestLoadedHistory() {
-        for orientation in ["end", "origin"] {
+        for orientation in ["origin", "end"] {
             let app = launch(orientation)
             app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 60, dy: 30)).tap()
             let oldest = app.staticTexts["Oldest loaded history"].firstMatch
             let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: oldest)
-            XCTAssertEqual(XCTWaiter.wait(for: [reached], timeout: 8), .completed, app.debugDescription)
+            let result = XCTWaiter.wait(for: [reached], timeout: 8)
             capture("\(orientation)-status-bar-oldest")
+            XCTAssertEqual(result, .completed, app.debugDescription)
             app.terminate()
         }
     }

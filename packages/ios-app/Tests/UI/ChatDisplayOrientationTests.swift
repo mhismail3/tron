@@ -131,6 +131,14 @@ struct ChatDisplayOrientationTests {
                 _ = try await ChatDisplayOrientationFixture.waitForLoadedImage(harness)
                 for _ in 0..<24 { try await harness.driveFrameBoundary() }
                 let image = try ChatDisplayOrientationFixture.capture(harness)
+                func inspectScrolls(_ view: UIView) {
+                    if let scroll = view as? UIScrollView {
+                        print("CARD-SCROLL orientation=\(orientation) type=\(type(of: scroll)) top=\(scroll.scrollsToTop) enabled=\(scroll.isScrollEnabled) frame=\(scroll.convert(scroll.bounds, to: nil)) offset=\(scroll.contentOffset) content=\(scroll.contentSize) delegate=\(String(describing: scroll.delegate))")
+                    }
+                    view.subviews.forEach(inspectScrolls)
+                }
+                if let window = harness.visibleRootView.window { inspectScrolls(window) }
+
                 let colors = try #require(try ChatDisplayOrientationFixture.colorCenters(image))
                 #expect(colors.red.y < colors.blue.y, "\(orientation): red \(colors.red), blue \(colors.blue)")
                 Attachment.record(try #require(image.pngData()), named: "inline-image-\(orientation).png")
