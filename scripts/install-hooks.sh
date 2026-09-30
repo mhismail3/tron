@@ -3,7 +3,8 @@
 #
 # Run once per clone, from the main checkout or any linked worktree:
 # `scripts/install-hooks.sh`. Idempotent. Git resolves the hooks directory
-# (common directory or core.hooksPath), so every worktree shares one hook.
+# (the common directory's hooks, or core.hooksPath), so by default every
+# worktree shares one hook.
 # Regression: scripts/test-personal-info-guard.py PreCommitHookInstallTests.
 
 set -euo pipefail
@@ -33,5 +34,5 @@ HOOK
 
 chmod +x "$PRE_COMMIT"
 
-echo "✅ Installed pre-commit hook → $PRE_COMMIT (shared by every worktree of this clone)"
+echo "✅ Installed pre-commit hook in Git's hooks directory → $PRE_COMMIT"
 echo "   It checks staged gateway TypeScript and runs scripts/personal-info-guard.sh --staged."

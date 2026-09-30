@@ -1075,7 +1075,7 @@ class Reinstall:
                     require(str(safe_path(args.app)) == self.receipt['app'], 'different-artifact: finish active operation first')
             else:
                 require(args.app is not None and not args.status and not args.verify,
-                        'artifact-required: begin with --app /absolute/path/Tron.app')
+                        'artifact-required: begin with --app <path>/Tron.app')
                 self.begin(safe_path(args.app))
             print(f'Operation: {self.operation}\nPhase: {self.receipt["phase"]}', flush=True)
             if args.status:
