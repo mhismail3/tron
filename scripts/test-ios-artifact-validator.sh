@@ -4,10 +4,14 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/tron-ios-artifact.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
+# The fixture app declares the canonical protocol. A literal went stale at each
+# lockstep bump (#113): the positive case then failed, and every negative case
+# below passed on the protocol mismatch instead of the defect it names.
+protocol="$(PYTHONPATH="$root/scripts" python3 -c 'from gateway_protocol_contract import load_contract; print(load_contract().protocol_version)')"
 app="$tmp/TronMobile.app"
 ext="$app/PlugIns/com.tron.mobile.ShareExtension.appex"
 mkdir -p "$ext/_CodeSignature" "$app/_CodeSignature"
-cat >"$app/Info.plist" <<'PLIST'
+cat >"$app/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>com.tron.mobile</string>
 <key>TRONBuildRole</key><string>local-device</string>
@@ -16,8 +20,8 @@ cat >"$app/Info.plist" <<'PLIST'
 <key>TRONAPNsEnvironment</key><string>development</string>
 <key>TRONAppAttestEnvironment</key><string>development</string>
 <key>TRONPrivateBlurEnabled</key><string>YES</string>
-<key>TRONGatewayProtocolVersion</key><string>4</string>
-<key>TRONGatewayMinProtocolVersion</key><string>4</string>
+<key>TRONGatewayProtocolVersion</key><string>$protocol</string>
+<key>TRONGatewayMinProtocolVersion</key><string>$protocol</string>
 </dict></plist>
 PLIST
 cat >"$ext/Info.plist" <<'PLIST'
@@ -74,7 +78,7 @@ grep -c -- '--verify' "$tmp/codesign.log" | grep -Fxq 2
 python3 - "$app/Info.plist" <<'PY'
 import plistlib, sys
 with open(sys.argv[1], "rb") as handle: document = plistlib.load(handle)
-document["TRONGatewayProtocolVersion"] = "3"
+document["TRONGatewayProtocolVersion"] = str(int(document["TRONGatewayProtocolVersion"]) - 1)
 with open(sys.argv[1], "wb") as handle: plistlib.dump(document, handle)
 PY
 if PATH="$fakebin:$PATH" CODESIGN_LOG="$tmp/codesign.log" \
@@ -82,10 +86,10 @@ if PATH="$fakebin:$PATH" CODESIGN_LOG="$tmp/codesign.log" \
   echo "validator accepted an incompatible Gateway protocol" >&2
   exit 1
 fi
-python3 - "$app/Info.plist" <<'PY'
+python3 - "$app/Info.plist" "$protocol" <<'PY'
 import plistlib, sys
 with open(sys.argv[1], "rb") as handle: document = plistlib.load(handle)
-document["TRONGatewayProtocolVersion"] = "4"
+document["TRONGatewayProtocolVersion"] = sys.argv[2]
 with open(sys.argv[1], "wb") as handle: plistlib.dump(document, handle)
 PY
 if PATH="$fakebin:$PATH" CODESIGN_LOG="$tmp/codesign.log" CODESIGN_FAIL=1 \

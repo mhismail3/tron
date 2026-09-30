@@ -90,7 +90,11 @@ Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
 Use `scripts/verify-ci-toolchain.sh node` to verify the current executable and
 reject duplicated version mirrors. Install native project generation with
 `scripts/install-ci-tools.sh xcodegen`; both `scripts/tron ios generate` and
-`scripts/tron mac generate` reject a mismatched XcodeGen. Xcode version literals
+`scripts/tron mac generate` reject a mismatched XcodeGen. `TRON_CI_TOOLS_DIR`
+relocates that cache (default `.ci-tools`) for the installer, project
+generation, the Mac bundle script, `scripts/tron-ios-test` and
+`scripts/ios-gateway-e2e-test`; the iOS runner fixtures use it to serve a
+synthetic XcodeGen on every host. Xcode version literals
 remain intentional Apple-toolchain pins. Run
 `python3 scripts/check-documentation-policy.py` after changing documentation
 navigation, commands, repository paths, or backticked paths in source

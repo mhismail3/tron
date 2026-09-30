@@ -13,8 +13,9 @@ ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
 # Keep the caller/setup-node toolchain ahead of Homebrew; .ci-tools contributes
-# repository-pinned helpers such as XcodeGen but never owns Node or npm.
-export PATH="$repo_root/.ci-tools/bin:$PATH:/opt/homebrew/bin"
+# repository-pinned helpers such as XcodeGen but never owns Node or npm. The
+# cache is wherever scripts/install-ci-tools.sh put it (TRON_CI_TOOLS_DIR).
+export PATH="${TRON_CI_TOOLS_DIR:-$repo_root/.ci-tools}/bin:$PATH:/opt/homebrew/bin"
 identity_owner="$repo_root/scripts/ios-test-build-identity.py"
 # Keyed by worktree as scripts/tron-ios-test keys its products, so two worktrees
 # never share a Gateway pid, state.env, npm lock hash, log or test products.
