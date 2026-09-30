@@ -65,6 +65,9 @@ export function isIgnoredCatalogDirectory(directory: string, canonicalRoot: stri
   const parts = fromRoot.split(sep);
   return parts.length === 2 && parts[1] === "subagent-artifacts";
 }
+// The catalog scheduler must get a request turn before one buffered transcript batch monopolizes the loop.
+const CATALOG_METADATA_YIELD_EVERY_ENTRIES = 256;
+
 type SessionInfo = Awaited<ReturnType<typeof SessionManager.listAll>>[number];
 export type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
   fileIdentity?: string;
@@ -74,7 +77,10 @@ export type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
 /** SDK-compatible row metadata without constructing its unused transcript-wide
  * `allMessagesText` accumulator. The complete JSONL remains authoritative for
  * RuntimeSlot.open; this pass is only catalog discovery metadata. */
-export async function buildCatalogSessionInfo(filePath: string): Promise<CatalogSessionInfo | null> {
+export async function buildCatalogSessionInfo(
+  filePath: string,
+  yieldToLoop?: () => Promise<void>,
+): Promise<CatalogSessionInfo | null> {
   try {
     const physical = await lstat(filePath);
     if (!physical.isFile() || physical.isSymbolicLink()) return null;
@@ -90,11 +96,17 @@ export async function buildCatalogSessionInfo(filePath: string): Promise<Catalog
     let sawPrePromptMessage = false;
     let firstUserEntryId: string | undefined;
     let automationCreation: { automationId: string; sessionId: string } | undefined;
+    let entriesSinceYield = 0;
     const lines = createInterface({
       input: createReadStream(filePath, { encoding: "utf8" }),
       crlfDelay: Infinity,
     });
     for await (const line of lines) {
+      if (yieldToLoop && entriesSinceYield >= CATALOG_METADATA_YIELD_EVERY_ENTRIES) {
+        await yieldToLoop();
+        entriesSinceYield = 0;
+      }
+      entriesSinceYield += 1;
       let value: unknown;
       try { value = JSON.parse(line); } catch { continue; }
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;

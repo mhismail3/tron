@@ -1907,18 +1907,21 @@ export class RuntimeRegistry {
           unproven: [...evidence.unprovenPaths],
         };
       },
-      summaryFor: (path) => this.canonicalCatalogSummary(path),
+      summaryFor: (path, yieldToLoop) => this.canonicalCatalogSummary(path, yieldToLoop),
     };
   }
 
-  private async canonicalCatalogSummary(path: string): Promise<CatalogMetadataIndexSummary | undefined> {
+  private async canonicalCatalogSummary(
+    path: string,
+    yieldToLoop?: () => Promise<void>,
+  ): Promise<CatalogMetadataIndexSummary | undefined> {
     // Pi appends synchronously between this read's awaits, so a summary is only
     // published with the size it actually parsed: the row's counts describe that
     // prefix, and a later size would claim messages it never counted.
     for (let attempt = 0; attempt < CATALOG_SUMMARY_ATTEMPTS; attempt += 1) {
       const before = await lstat(path).catch(() => undefined);
       if (!before?.isFile() || before.isSymbolicLink()) return undefined;
-      const info = await buildCatalogSessionInfo(path);
+      const info = await buildCatalogSessionInfo(path, yieldToLoop);
       const after = await lstat(path).catch(() => undefined);
       if (!info || !after?.isFile() || after.isSymbolicLink()) return undefined;
       if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) continue;

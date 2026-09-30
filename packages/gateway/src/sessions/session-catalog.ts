@@ -3,6 +3,7 @@ import { lstat, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { backgroundWork, type BackgroundWorkRegistration } from "../background-work.js";
 import { isIgnoredCatalogDirectory } from "./catalog-discovery.js";
+import { offLoop } from "../transport/request-span.js";
 import type {
   CatalogMetadataIndex,
   CatalogMetadataIndexRow,
@@ -221,7 +222,7 @@ export interface SessionCatalogSource {
   scan(): Promise<SessionCatalogScan>;
   /** Canonical metadata for one file, or undefined when it cannot be read as a
    * canonical session right now. */
-  summaryFor(path: string): Promise<CatalogMetadataIndexSummary | undefined>;
+  summaryFor(path: string, yieldToLoop?: () => Promise<void>): Promise<CatalogMetadataIndexSummary | undefined>;
 }
 
 export interface SessionCatalogOptions {
@@ -388,7 +389,9 @@ export class SessionCatalog {
    * for a named session waits for that change to land instead of answering from
    * a cut that predates it. Nothing queued settles immediately. */
   awaitQueuedChanges(): Promise<void> {
-    return this.lane;
+    // Waiting for catalog work uses no event-loop time. Do not let this request
+    // hold the scheduler paused while the queued refresh tries to yield.
+    return offLoop(() => this.lane);
   }
 
   /** Session IDs a pass could read a header for but could not publish a row or
@@ -437,7 +440,7 @@ export class SessionCatalog {
   async searchIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
     // The startup durable load and its reconcile are already in this lane, so
     // one await is a completed cut rather than a second pass.
-    await this.lane;
+    await offLoop(() => this.lane);
     if (this.closed || !this.reconciledCut) return undefined;
     const duplicates = this.duplicateSessionIds();
     const identities = new Map<string, SessionCatalogIdentity>();
@@ -974,7 +977,7 @@ export class SessionCatalog {
     const reconciled = await this.options.index.reconcile(
       this.options.catalogRoot(),
       scan.candidates,
-      (candidate) => this.options.source.summaryFor(candidate.path),
+      (candidate) => this.options.source.summaryFor(candidate.path, () => this.backgroundWork.yieldToLoop()),
       // Asked between batches and before each parse: shutdown stops the pass
       // there, and that is also where the pass hands the loop back to the
       // scheduler, which pauses it while a request competes for the loop or the
@@ -1046,7 +1049,7 @@ export class SessionCatalog {
         }
       }
     }
-    const summary = await this.options.source.summaryFor(canonicalPath);
+    const summary = await this.options.source.summaryFor(canonicalPath, () => this.backgroundWork.yieldToLoop());
     if (!summary) return false;
     const rebuilt = await this.options.index.entryFromSummary(summary);
     if (!rebuilt) return false;
@@ -1081,7 +1084,7 @@ export class SessionCatalog {
       // next: a first cut that has no durable rows to reuse parses every body at
       // scale, and none of that may hold the loop while a request waits.
       await this.backgroundWork.yieldToLoop();
-      const summary = await this.options.source.summaryFor(candidate.path);
+      const summary = await this.options.source.summaryFor(candidate.path, () => this.backgroundWork.yieldToLoop());
       const row = summary ? await this.options.index.entryFromSummary(summary) : undefined;
       if (!row || row.id !== candidate.id || row.cwd !== candidate.cwd) {
         const key = resolve(candidate.path);

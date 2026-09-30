@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, opendir, readdir, realpath, rm, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { BackgroundWorkScheduler } from "../background-work.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, visitConcurrently } from "./catalog-discovery.js";
 
 const roots: string[] = [];
@@ -28,6 +29,30 @@ describe("catalog discovery", () => {
     releaseSlow();
     await expect(visit).rejects.toBe(failure);
     expect(admitted).toEqual([0, 1]);
+  });
+
+  it("yields long metadata parses through the background scheduler without losing rows", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-yield-"));
+    roots.push(root);
+    const path = join(root, "large.jsonl");
+    const header = { type: "session", id: "large", cwd: root, timestamp: "2026-01-01T00:00:00.000Z" };
+    const messages = Array.from({ length: 600 }, (_, index) => ({
+      type: "message", message: { role: "user", content: [{ type: "text", text: `entry-${index}-${"x".repeat(50)}` }] },
+    }));
+    await writeFile(path, [header, ...messages].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    const scheduler = new BackgroundWorkScheduler();
+    scheduler.start({ requestsInFlight: () => false, eventLoopP99Ms: () => 0 });
+    let yields = 0;
+    try {
+      const summary = await buildCatalogSessionInfo(path, async () => {
+        yields += 1;
+        await scheduler.yieldToLoop();
+      });
+      expect(summary).toMatchObject({ id: "large", messageCount: 600, firstMessage: "entry-0-" + "x".repeat(50) });
+      expect(yields).toBeGreaterThan(1);
+    } finally {
+      scheduler.stop();
+    }
   });
 
   it("returns identical evidence and path-ordered rows for different directory walk orders", async () => {

@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BackgroundWorkScheduler } from "../background-work.js";
+import { RequestSpan, requestsCompetingForLoop, runInRequestSpan } from "../transport/request-span.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
@@ -156,7 +157,10 @@ async function appendMessage(path: string, content: string, ordinal: number): Pr
   })}\n`, { flag: "a" });
 }
 
-async function fixture(extra: Partial<SessionCatalogOptions> = {}) {
+async function fixture(
+  extra: Partial<SessionCatalogOptions> = {},
+  requestsInFlight: () => boolean = () => false,
+) {
   const root = await mkdtemp(join(tmpdir(), "tron-session-catalog-"));
   roots.push(root);
   const sessions = join(root, "sessions");
@@ -199,7 +203,7 @@ async function fixture(extra: Partial<SessionCatalogOptions> = {}) {
   // G-9: the periodic reconcile is one of the scheduler's jobs. A test drives a
   // real scheduler with the loop and in-flight signals it wants to read.
   const scheduler = new BackgroundWorkScheduler();
-  scheduler.start({ requestsInFlight: () => false, eventLoopP99Ms: () => 0 });
+  scheduler.start({ requestsInFlight, eventLoopP99Ms: () => 0 });
   schedulers.push(scheduler);
   const catalog = new SessionCatalog({
     catalogRoot: () => sessions, index, source, persistDebounceMs: 5, backgroundWork: scheduler, ...extra,
@@ -285,6 +289,29 @@ describe("SessionCatalog", () => {
     })]);
     // The repaired cut is durable, so the next start does not need the bodies.
     expect(existsSync(indexPath)).toBe(true);
+  });
+
+  it("lets queued catalog refreshes yield while a request awaits a missing row", async () => {
+    const state = { competing: false };
+    const context = await fixture({}, () => state.competing);
+    context.catalog.start();
+    await context.catalog.settled();
+    const file = join(context.sessions, "new-session.jsonl");
+    await writeSession(file, "new-session", context.sessions, Array.from({ length: 600 }, (_, index) => `message-${index}`));
+
+    void context.catalog.refresh(file);
+    const span = new RequestSpan();
+    await runInRequestSpan(span, async () => {
+      state.competing = requestsCompetingForLoop();
+      expect(state.competing).toBe(true);
+      const [, identities] = await Promise.all([
+        context.catalog.awaitQueuedChanges(),
+        context.catalog.searchIdentities(),
+      ]);
+      expect(context.catalog.row(file)?.messageCount).toBe(600);
+      expect(identities?.has("new-session")).toBe(true);
+      span.breakdown(0);
+    });
   });
 
   it("keeps one row per canonical file when two files claim one session ID", async () => {

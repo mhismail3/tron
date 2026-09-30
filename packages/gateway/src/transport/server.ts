@@ -2580,7 +2580,7 @@ export class GatewayServer {
           throw new GatewayError("conflict", "Session synchronization ownership changed before acknowledgement", true);
         }
       }
-      const responseSentIntact = runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: frame.id, ok: true, result }));
+      const responseSentIntact = runInRequestSpan(requestSpan, () => stage("frame.write", () => this.send(connection, { type: "response", id: frame.id, ok: true, result })));
       if (responseSentIntact && sessionOpenFlight !== undefined) {
         sessionOpenFlight.answered = true;
         this.markSessionOpenDelivered(connection, requestId, requestId);

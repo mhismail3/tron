@@ -7,6 +7,7 @@ import { readJson } from "../util/json.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
+import { stage, wait } from "./request-span.js";
 
 const COMMAND_RECEIPT_MAX_BYTES = 1_048_576 + 4 * 1_024;
 // High-frequency revisioned UI updates are still idempotent mutations. Keep a
@@ -294,7 +295,8 @@ export class CommandReceiptStore {
     lane.users += 1;
     this.lanes.set(key, lane);
     try {
-      return await lane.mutex.run(async () => {
+      return await wait("receipt.command-lane", (acquired) => lane.mutex.run(async () => {
+        acquired();
         const path = join(this.directory, `${key}.json`);
         const pending: Receipt = {
           version: 1,
@@ -311,7 +313,7 @@ export class CommandReceiptStore {
         // per-command lane's own slow step and runs outside it. Holding the
         // process-wide mutex across the fsync serialized every other command's
         // receipt write behind one command's disk write.
-        const admission = await this.inventoryMutex.run(async () => {
+        const admission = await stage("receipt.inventory-admission", () => this.inventoryMutex.run(async () => {
           await mkdir(this.directory, { recursive: true, mode: 0o700 });
           const existing = await this.readReceipt(path);
           if (existing) {
@@ -344,7 +346,7 @@ export class CommandReceiptStore {
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
           reserved = true;
           return { exists: false } as const;
-        });
+        }));
         if (admission.exists) return admission.result;
         // This write's accounting is the only step that adds its bytes to the
         // totals, so the lane reports it as unaccounted before the publication
@@ -352,7 +354,7 @@ export class CommandReceiptStore {
         // clears that again: whatever reached the disk is then the truth.
         lane.unaccountedWrite = true;
         try {
-          await this.writeReceipt(path, pending);
+          await stage("receipt.pending-persist", () => this.writeReceipt(path, pending));
         } catch (error) {
           await this.inventoryMutex.run(async () => {
             lane.unaccountedWrite = false;
@@ -413,7 +415,7 @@ export class CommandReceiptStore {
         }
         lane.unaccountedWrite = true;
         try {
-          await this.writeReceipt(path, completed);
+          await stage("receipt.completed-persist", () => this.writeReceipt(path, completed));
         } catch (error) {
           await this.inventoryMutex.run(async () => {
             lane.unaccountedWrite = false;
@@ -435,7 +437,7 @@ export class CommandReceiptStore {
           reserved = false;
         });
         return result;
-      });
+      }));
     } finally {
       lane.users -= 1;
       if (lane.users === 0 && this.lanes.get(key) === lane) this.lanes.delete(key);
