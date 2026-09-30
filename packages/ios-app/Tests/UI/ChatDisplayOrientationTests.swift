@@ -1,4 +1,5 @@
 import SwiftUI
+import PDFKit
 import Testing
 import UIKit
 @testable import TronMobile
@@ -8,9 +9,22 @@ import UIKit
 /// position. A placeholder or a symmetric thumbnail cannot expose this defect.
 @MainActor
 enum ChatDisplayOrientationFixture {
-    static func snapshot(history: Bool = false) throws -> SessionSnapshot {
+    static func snapshot(history: Bool = false, kind: String = "image") throws -> SessionSnapshot {
         var snapshot = try SessionScenarioBuilder(seed: 1_310).openingTail(targetEncodedBytes: 10_000)
         snapshot.transcript = try decodeTranscriptFixture([TranscriptItem].self, from: HostedChatDisplayFixture.imageTranscriptData)
+        if kind != "image" {
+            var rows = try #require(JSONSerialization.jsonObject(with: HostedChatDisplayFixture.imageTranscriptData) as? [[String: Any]])
+            var display = try #require(rows[1]["display"] as? [String: Any])
+            display["kind"] = kind
+            display["eligibleSurfaces"] = ["sheet", "inline"]
+            var artifact = try #require(display["artifact"] as? [String: Any])
+            artifact["kind"] = kind
+            artifact["name"] = kind == "pdf" ? "orientation.pdf" : "orientation.swift"
+            artifact["mimeType"] = kind == "pdf" ? "application/pdf" : "text/plain"
+            display["artifact"] = artifact
+            rows[1]["display"] = display
+            snapshot.transcript = try decodeTranscriptFixture([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
+        }
         if history {
             snapshot.transcript = SessionScenarioBuilder(seed: 1_310).historyPage(count: 30, longRowBytes: 200) + snapshot.transcript
         }
@@ -20,7 +34,20 @@ enum ChatDisplayOrientationFixture {
         return snapshot
     }
 
-    static func mediaFetch() throws -> ChatMediaFetch {
+    static func mediaFetch(kind: String = "image") throws -> ChatMediaFetch {
+        if kind == "pdf" {
+            let bounds = CGRect(x: 0, y: 0, width: 160, height: 160)
+            let data = UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
+                context.beginPage()
+                UIColor.red.setFill(); context.cgContext.fill(CGRect(x: 0, y: 0, width: 160, height: 80))
+                UIColor.blue.setFill(); context.cgContext.fill(CGRect(x: 0, y: 80, width: 160, height: 80))
+            }
+            return { _ in ChatMediaPayload(data: data, mimeType: "application/pdf") }
+        }
+        if kind == "code" {
+            let data = Data("// Upright native code preview\nlet direction = \"top to bottom\"\n".utf8)
+            return { _ in ChatMediaPayload(data: data, mimeType: "text/plain") }
+        }
         let image = UIGraphicsImageRenderer(size: CGSize(width: 160, height: 160)).image { context in
             UIColor.red.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 160, height: 80))
@@ -31,11 +58,11 @@ enum ChatDisplayOrientationFixture {
         return { _ in ChatMediaPayload(data: data, mimeType: "image/png") }
     }
 
-    static func harness(orientation: ChatTranscriptOrientation = .selected, history: Bool = false) async throws -> ChatViewScrollHarness {
+    static func harness(orientation: ChatTranscriptOrientation = .selected, history: Bool = false, kind: String = "image") async throws -> ChatViewScrollHarness {
         try await ChatViewScrollHarness.composerSubmissionHarness(
-            snapshot: snapshot(history: history), displayFrameScheduler: .displayLink,
+            snapshot: snapshot(history: history, kind: kind), displayFrameScheduler: .displayLink,
             enablesPresentationCover: true,
-            mediaFetch: mediaFetch(), orientation: orientation
+            mediaFetch: mediaFetch(kind: kind), orientation: orientation
         )
     }
 
@@ -123,6 +150,32 @@ struct ChatDisplayOrientationTests {
                 }
             } catch { await harness.close(); throw error }
             await harness.close()
+        }
+    }
+
+    @Test("native inline PDF and code renderers remain upright and cannot compete for status-bar ownership")
+    func nativeInlineRenderers() async throws {
+        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+            for kind in ["pdf", "code"] {
+                let harness = try await ChatDisplayOrientationFixture.harness(orientation: orientation, kind: kind)
+                do {
+                    _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                    for _ in 0..<60 { try await harness.driveFrameBoundary() }
+                    func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+                    let views = descendants(harness.visibleRootView)
+                    let renderer = try #require(views.first { kind == "pdf" ? $0 is PDFView : $0 is TronDocumentTextView })
+                    #expect(!TranscriptWindowOracle.isFlipped(renderer), "\(orientation)/\(kind)")
+                    let eligible = descendants(try #require(harness.visibleRootView.window)).compactMap { $0 as? UIScrollView }.filter(\.scrollsToTop)
+                    #expect(eligible.count == 1, "\(orientation)/\(kind): \(eligible)")
+                    let image = try ChatDisplayOrientationFixture.capture(harness)
+                    if kind == "pdf" {
+                        let colors = try #require(try ChatDisplayOrientationFixture.colorCenters(image))
+                        #expect(colors.red.y < colors.blue.y)
+                    }
+                    Attachment.record(try #require(image.pngData()), named: "inline-\(kind)-\(orientation).png")
+                } catch { await harness.close(); throw error }
+                await harness.close()
+            }
         }
     }
 

@@ -66,7 +66,9 @@ final class TronChatDisplayUITests: XCTestCase {
             XCTAssertEqual(image.frame.midX, original.midX, accuracy: 0.5)
             XCTAssertEqual(image.frame.midY, original.midY, accuracy: 0.5)
             XCTAssertLessThan(badge.frame.midY, image.frame.midY)
-            let scroll = app.scrollViews.firstMatch
+            let scroll = app.scrollViews.allElementsBoundByIndex.first {
+                $0.frame.width > app.frame.width * 0.9 && $0.frame.height > app.frame.height * 0.5
+            }!
             scroll.swipeDown(velocity: .fast)
             scroll.swipeDown(velocity: .fast)
             XCTAssertFalse(image.isHittable, "Exercise offscreen lazy history, not only the original mount")

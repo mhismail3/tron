@@ -3758,3 +3758,13 @@ cleanup. Today's recipient remains the transcript itself, with no test offset
 write. Real system taps remain a required user-owned device check, not a pass.
 Temporary routing diagnostics/control have been removed. At-rest A remains open;
 no speculative extra row flip is added to compensate for an unreproduced path.
+
+Native row audit: image chips use SwiftUI `Image(uiImage:)` (no image-specific
+orientation/drawing group); PDF and code/text displays host native PDFView and
+UITextView, Markdown code/table blocks use horizontal scrolls. HTML is not inline
+eligible; Markdown has no separate LaTeX/image native renderer in the current
+block renderer. Add loaded native PDF/code integration gates, including PDF window
+pixels and single-recipient ownership. The existing PDF subtree edge policy and
+owned text view now exclude their own scrolls only inside chat content; standalone
+sheet environments keep native defaults. VideoPlayer still needs device compositor
+review; no speculative renderer flip is introduced.
