@@ -23,6 +23,13 @@ final class ChatHostedNativeRowMarker: UIView {
     var hostIdentity = UUID()
 }
 
+struct ChatHostedObstructionProbe: UIViewRepresentable {
+    func makeUIView(context: Context) -> ChatHostedObstructionMarker { ChatHostedObstructionMarker() }
+    func updateUIView(_ uiView: ChatHostedObstructionMarker, context: Context) {}
+}
+
+final class ChatHostedObstructionMarker: UIView {}
+
 struct ChatHostedNativeRowProbe: UIViewRepresentable {
     static let composerID = "hosted-composer"
     let physicalID: String
@@ -340,6 +347,7 @@ final class ChatHostedProbe {
     var composerCatalogWillInstall: (@MainActor (ComposerResourceCatalog) async -> Void)?
     var composerCatalogDidFinish: (@MainActor ([CommandInfo]) -> Void)?
     var composerPickerEntries: (@MainActor () -> [ComposerResourceEntry])?
+    var composerResourcePickerPresentation: (@MainActor (ChatAttachmentDestination?) -> Void)?
     var composerResourceSelection: (@MainActor (ComposerResourceEntry) -> Void)?
     private var committedHistoryRowEvaluationCount = 0
     private var remountedWhileSemanticIDDisplayed = 0
@@ -991,6 +999,7 @@ final class ChatHostedProbe {
         composerCatalogWillInstall = nil
         composerCatalogDidFinish = nil
         composerPickerEntries = nil
+        composerResourcePickerPresentation = nil
         composerResourceSelection = nil
         revision &+= 1
     }

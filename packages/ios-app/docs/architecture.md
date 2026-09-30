@@ -967,7 +967,32 @@ before-streaming placement. It patches immutable tool descriptors only; canonica
 membership/order/phase ambiguity, duplicate calls, or placement flips reuse fragments and globally
 assemble. Status, editor, widget, and other unrelated sequenced events do not manufacture projection
 work. `ChatView.body` never constructs the timeline. `ChatView` is the composition and lifecycle root;
-`ChatTranscriptScrollView` is the one physical transcript/semantic-geometry owner; native geometry is admitted directly to the scroll coordinator and is never mirrored into root view state. The origin-anchored transcript is selected only in hosted tests with `TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`; today's newest-at-end layout remains the default. Only the flipped path mounts the inset `GeometryReader`: it captures safe-area insets before the render transform, and the owner applies the swapped vertical values as scroll-content and indicator margins while ignoring container and keyboard safe areas both inside and outside the scroll transform. The inner exclusion prevents UIKit overlay-inset offset adjustment; the outer exclusion keeps the viewport from shrinking and clipping a detached reader during the keyboard ramp. Row and marker callbacks retain their raw frames; the coordinator reflects them with its current container geometry when reading them, so a resize does not leave cached semantic frames in an obsolete coordinate system.
+`ChatTranscriptScrollView` is the physical transcript/semantic-geometry owner. The
+origin-anchored evaluation layout is selected by `ChatTranscriptOrientation`:
+LocalDevice defaults to it; hosted tests opt in with
+`TRON_CHAT_TRANSCRIPT_ORIENTATION=origin`; Release retains today's layout.
+`ChatTranscriptViewport` reads all obstructions from the root's single safe-area
+inset before the render flip, and independently proposes the full viewport to the
+scroll view. Ignoring safe areas only on the transformed scroll view is not enough:
+a keyboard plus accessories can otherwise shrink its clip below the navigation bar.
+The origin's newest clearance is `ChatTranscriptOriginClearance`, the first element
+**inside** the lazy stack. Its layout animates in the causing component's transaction
+(no copied curve, timer or offset command), and the lazy item's native anchor absorbs
+its growth/shrink before a detached reader. Outer padding moves that reader; animated
+content margins run ahead of closing compositor animation. Oldest clearance and scroll
+indicators remain orientation-mapped margins, applied once.
+`ChatTranscriptViewportGeometry` holds the latest applied native `ScrollGeometry`
+sample and the current declared spacer height in non-observable fields; either input
+republishes the derived coordinator geometry from a SwiftUI callback, without a layout
+feedback loop. A declared change need not change the lazy native content-size estimate,
+so native-sample-only publication leaves stale obstruction diagnostics. The adapter
+removes the spacer from semantic content/usable viewport heights and reports it as the
+bottom obstruction; distance from newest is exactly native distance from content
+origin, not an estimate. Raw row/marker frames are reflected when read using current
+viewport geometry, never cached in a superseded reflected space. The hosted animated
+obstruction journeys retain every presentation-layer display sample (including unchanged
+frames); they gate pin distance, rendered clearance, detached identity and position,
+and navigation-to-composer coverage through keyboard/accessory combinations.
 `ChatComposerView` renders value inputs and emits intents through the root's sole safe-area inset,
 and `ChatRoutes` contains modal routing without mirrored authority. `ChatSessionPresentation`
 groups disposable opening, import, queue-deferral, and entrance-ledger state. Canonical truth remains

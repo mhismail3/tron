@@ -3481,3 +3481,93 @@ Review remains a separate required gate; this handoff is not production approval
   row; user decision. (4) Navigation-bar fade; user decision after comparison.
   (5) Parity residual on the flipped path (7/10, pinned-offset class).
   (6) Streaming interrupt wakeups +7.6-8.3%.
+
+### CT-23 animated obstruction follow · worker lane ct23c
+
+Claimed on `ct-23-follow` from the merged evaluation baseline. Failure modes,
+recorded before implementation:
+
+- Model-layer / stepped-inset sampling can certify a pin while the rendered row
+  jumps ahead of the composer's animation. Record every CADisplayLink callback
+  using presentation-layer window coordinates, including unchanged frames.
+- Catalog opening/closing, editor growth and keyboard show/hide can take different
+  transaction paths; exercise the actual composer/catalog and keyboard notification
+  owner, not a replacement component or a sequence of discrete inset writes.
+- Moving clearance into content can move a detached reader or remount its anchor;
+  the existing detached streaming/keyboard/page journey must retain identity and
+  position (<0.5 pt), with no added commands or per-frame compensation.
+- An adapter that mixes requested and applied geometry can break exact origin pin
+  classification during keyboard ramps. Preserve the single-sample geometry gate.
+- Top clearance, short-content alignment, row entrances and long lazy history must
+  retain their contracts; unchanged parity, bottom and row-stability gates apply.
+
+Evidence and final design pending. No Gateway lifecycle or device installation
+is authorized or performed.
+
+Additional device failure mode (before fixing): with the keyboard up and composer
+accessories installed, the transformed viewport can acquire a top clip below the
+navigation bar. New hosted matrix measures native window frame, all ancestor clips,
+content/adjusted/safe-area insets and the first row for short/tall drafts crossed
+with no accessory/attachments/skill/catalog and keyboard down/up, both orientations.
+
+Selected design: the newest obstruction is an animating first **lazy item**, not
+outer padding. Pinned catalog open/close and keyboard now follow exactly; the lazy
+stack absorbs the spacer before a detached anchor. The owner separately proposes
+the full viewport, fixing the native clip band. Supervisor approved the adapter
+contract revision: retain latest applied native geometry and current declared
+spacer; republish when either changes, with no observable geometry storage and no
+offset writes. Native geometry can stay unchanged while the declared spacer
+shrinks (negative control `4de6bcc31`: model 114.3 pt, actual marker 53 pt across
+all 12 hide boundaries). Current source passes those ramp boundaries.
+
+Focused evidence so far (not final gates): `20260930T003408Z-run.uAsBBR`, all 22
+pinned motion phases exact 12 pt to floating-point precision, including photo/file,
+skill/command, tall draft + keyboard + photo + chip + catalog, with declared/rendered
+clearance equal at rest. `20260930T003714Z-run.ZfcHfI`: detached version passes every
+frame <0.5 pt, same instance, zero commands; top-coverage opening watchdog failed
+before the matrix. Focused top matrix `20260930T004007Z-run.Bv0rd6` passes all 16
+states. `20260930T002324Z-run.EglMF6`: real motion, band, pinned stepped ramp and
+streaming/keyboard/page detached journey pass (ramp worst gap 2.4 pt; detached 0).
+The initial baseline and rejected designs are retained in run logs; final evidence
+and documentation cleanup are still in progress. Sheet task starts after follow gates.
+
+#### Follow checkpoint (committed before every evidence run)
+
+- Final follow source: `483ef7fbc`; full owned native layout change at `27349d638`.
+  Generic signed LocalDevice compilation succeeded at the requested
+  `~/Library/Developer/Tron/ios/ct23-device-evaluation/LocalDevice` path. Not installed.
+- Latest 24-phase pinned/detached motion + recent-activity width: origin
+  `20260930T010120Z-run.SUh7C8`, today `20260930T010222Z-run.hxqohV`, all pass.
+  Each xcresult retains JSON display samples (timestamps, presented row/composer,
+  spacer height, declared obstruction, pin distance and row identity). Origin's
+  gaps are 12 pt to floating-point precision; detached movement <0.5 pt with the
+  same row instance and zero commands, even when the composer covers it.
+- Main cross-module checkpoint: origin `20260930T004646Z-run.WvnTVn`, today
+  `20260930T004939Z-run.1FGkV2`. Four origin bottom journeys have 0 blank/uncovered
+  boundaries (72/340/90/68), 1.0 coverage and 12 pt settled clearance. Keyboard
+  ramp max error 1.9 pt; detached streaming/show/hide/page movement 0.0. Row
+  stability 14/14 both. Parity origin 9/10 (opened-history RMS 0.02777 against
+  0.025), today 10/10. Today's CT24 send negative expectation failed because this
+  run had **no** blanks; it is not a new positive-path regression or a changed gate.
+- Full default unit tier at final follow source: `20260930T005557Z-run.yt3Xpq`,
+  1,923 tests, one failure (`displacedRetainedResume` load watchdog) plus the known
+  flipped display-card preview issue. No new default-tier failure established.
+- Components measured: command/skills catalog open/close; skill and command chips
+  add/remove; photo and file strips add/remove; editor growth/shrink; actual system
+  keyboard show/hide; recent-subagent activity add/remove (width rather than vertical
+  obstruction); combinations of keyboard + tall draft + photo + chip + catalog.
+  Queued cards are transcript rows, not a second inset; existing queued-replacement
+  parity/row-stability gates cover them. Navigation clearance is measured against
+  the actual bar bottom; all short/tall/accessory/keyboard states retain coverage.
+- Today's independent motion residuals: catalog-close up to ~88 pt, combined
+  catalog-close ~23 pt, tall-draft growth under keyboard ~143 pt. JSON retains
+  every frame; only those named today phases are measurement-only. Origin gates
+  all phases. Today's other phases remain within the 3 pt motion contract.
+- Physical interactive keyboard dragging, actual device rotation and device
+  compositor appearance are not proven by hosted keyboard notifications/focus.
+  Sheet detent animation is owned by the next task. No user-facing curve or
+  component-specific production branch was introduced.
+- No `Observation tracking feedback loop` diagnostic appears in the checkpoint.
+  Native geometry is stored in a plain non-observable owner, not view state.
+  Pre-existing initial geometry-cycle and UIKit editor state-update warnings also
+  occur on today's baseline; they are not silently represented as a clean log.

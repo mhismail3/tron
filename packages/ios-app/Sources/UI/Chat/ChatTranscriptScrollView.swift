@@ -31,7 +31,7 @@ extension ChatHostedProbe: ChatTranscriptHostedRecording {}
 #endif
 
 private struct ChatScrollGeometryObservation: Equatable {
-    let geometry: ChatTranscriptGeometry
+    let geometry: ScrollGeometry
     let viewportActivation: Int
     let presentationEpoch: Int
     let presentationPhase: ChatOpenPresentationPhase
@@ -671,6 +671,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let responseState: ChatResponseState?
     let mutatingQueuedMessageIDs: Set<String>
     let orientation: ChatTranscriptOrientation
+    @State private var viewportGeometry = ChatTranscriptViewportGeometry()
     @Binding var scrollPosition: ScrollPosition
     let earlierRow: (InstalledChatTranscript) -> Earlier
     let openingSurface: () -> Opening
@@ -685,14 +686,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let onAutomaticProjectionIntakeAvailable: () -> Void
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
 
-    @ViewBuilder
     var body: some View {
-        if orientation.presentsNewestRowFirst {
-            GeometryReader { insetReader in
-                transcriptBody(safeAreaInsets: insetReader.safeAreaInsets)
-            }
-        } else {
-            transcriptBody(safeAreaInsets: .init())
+        ChatTranscriptViewport(orientation: orientation) { insets in
+            transcriptBody(safeAreaInsets: insets)
         }
     }
 
@@ -726,12 +722,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 physicalRows: physicalRows,
                 terminalPhysicalID: terminalPhysicalID,
                 terminalMaterializationID: terminalMaterializationID,
-                terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance
+                terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance,
+                obstruction: orientation.layoutClearance(for: safeAreaInsets).top
             )
         }
         // The flip belongs on the scroll view itself, outside the sheet host and
-        // geometry observations. On the flipped path, the inset adapter reads
-        // safe areas before this transform and applies them as content margins.
+        // geometry observations. The owner reads safe areas before the flip;
+        // newest clearance is animated layout inside the lazy content.
         .chatTranscriptViewport(orientation, safeAreaInsets: safeAreaInsets)
         // The sheet a row asked for is presented here, outside the lazy stack, so
         // streaming a row out of realization cannot dismiss it. The resolver is
@@ -796,40 +793,27 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         }
         .onScrollGeometryChange(for: ChatScrollGeometryObservation.self) { value in
             ChatScrollGeometryObservation(
-                geometry: orientation.coordinatorGeometry(value),
+                geometry: value,
                 viewportActivation: viewportActivation,
                 presentationEpoch: presentationEpoch,
                 presentationPhase: presentationPhase
             )
         } action: { previous, observation in
             guard scrollCoordinator.admitsViewportCallback(capturedActivation: observation.viewportActivation),
-                  observation.presentationEpoch == presentationEpoch else { return }
-            let current = observation.geometry
-            let prior = previous.geometry
-            hostedRecorder?.updateGeometry(current)
-            if isReady, current.isAtCatchUpBoundary {
-                hostedRecorder?.recordScrollSettle(distanceFromBottom: current.distanceFromBottom)
-            }
-            guard admitsNativeCallbacks else { return }
-            if observation.presentationPhase == .opening {
-                // Preserve the initial native viewport even if the transition to
-                // positioning has identical geometry and emits no second callback.
-                // The coordinator records evidence only; opening cannot mutate
-                // anchoring or publish commands through this path.
-                scrollCoordinator.observeOpeningGeometry(current)
-                return
-            }
-            guard observation.presentationPhase == .positioning
-                    || observation.presentationPhase == .revealing
-                    || observation.presentationPhase == .presenting
-                    || observation.presentationPhase == .presented
-                    || observation.presentationPhase == .ready,
-                  admitsGeometryCallbacks else { return }
-            if current.hasIndependentViewportMovement(from: prior) {
-                scrollCoordinator.viewportChanged(previous: prior, current: current)
-            } else {
-                scrollCoordinator.geometryChanged(previous: prior, current: current)
-            }
+                  observation.presentationEpoch == presentationEpoch,
+                  let change = viewportGeometry.update(
+                    native: observation.geometry,
+                    previousNative: previous.geometry,
+                    obstruction: orientation.layoutClearance(for: safeAreaInsets).top,
+                    orientation: orientation
+                  ) else { return }
+            publishGeometry(change, phase: observation.presentationPhase)
+        }
+        .onChange(of: orientation.layoutClearance(for: safeAreaInsets).top, initial: true) { _, obstruction in
+            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
+                  let change = viewportGeometry.update(obstruction: obstruction, orientation: orientation)
+            else { return }
+            publishGeometry(change, phase: presentationPhase)
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
             guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
@@ -842,7 +826,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             scrollCoordinator.scrollPhaseChanged(
                 from: oldPhase,
                 to: newPhase,
-                finalGeometry: orientation.coordinatorGeometry(context.geometry)
+                finalGeometry: orientation.coordinatorGeometry(context.geometry, obstruction: orientation.layoutClearance(for: safeAreaInsets).top)
             )
         }
         .onChange(of: scrollCoordinator.commandRevision) { _, _ in
@@ -945,6 +929,30 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .overlay { openingSurface() }
     }
 
+    private func publishGeometry(
+        _ change: (previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry),
+        phase: ChatOpenPresentationPhase
+    ) {
+        let (prior, current) = change
+        hostedRecorder?.updateGeometry(current)
+        if isReady, current.isAtCatchUpBoundary {
+            hostedRecorder?.recordScrollSettle(distanceFromBottom: current.distanceFromBottom)
+        }
+        guard admitsNativeCallbacks else { return }
+        if phase == .opening {
+            scrollCoordinator.observeOpeningGeometry(current)
+            return
+        }
+        guard phase == .positioning || phase == .revealing || phase == .presenting
+                || phase == .presented || phase == .ready,
+              admitsGeometryCallbacks else { return }
+        if current.hasIndependentViewportMovement(from: prior) {
+            scrollCoordinator.viewportChanged(previous: prior, current: current)
+        } else {
+            scrollCoordinator.geometryChanged(previous: prior, current: current)
+        }
+    }
+
     /// The transcript's scrollable content. The tail affordance and the
     /// earlier-messages row each sit at one of the transcript's visual ends,
     /// which are the content origin and the far end of the origin-anchored
@@ -958,7 +966,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         physicalRows: ChatPhysicalTranscriptRows?,
         terminalPhysicalID: String?,
         terminalMaterializationID: String?,
-        terminalRowOwnsTailAffordance: Bool
+        terminalRowOwnsTailAffordance: Bool,
+        obstruction: CGFloat
     ) -> some View {
         let hasEarlierMessages = (installed?.sourceWindow.originalStart ?? 0) > 0
         let newestFirst = orientation.presentsNewestRowFirst
@@ -970,10 +979,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // the row ID remains the ForEach identity while its current position
         // supplies the orientation owner's accessibility order.
         VStack(alignment: .leading, spacing: 0) {
-            if newestFirst {
-                tailMarker(terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance)
-            }
             LazyVStack(alignment: .leading, spacing: 0) {
+                if newestFirst {
+                    ChatTranscriptOriginClearance(height: obstruction)
+                        .id("transcript-obstruction")
+                    tailMarker(terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance)
+                }
                 if let installed, let physicalRows {
                     if !newestFirst, hasEarlierMessages {
                         earlierMessagesRow(

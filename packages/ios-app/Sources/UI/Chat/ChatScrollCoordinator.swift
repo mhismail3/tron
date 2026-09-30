@@ -442,7 +442,7 @@ final class ChatScrollCoordinator {
             revision: sample.revision,
             rawFrame: orientation.transcriptFrame(
                 sample.rawFrame,
-                containerHeight: geometry.containerHeight
+                geometry: geometry
             )
         )
     }
