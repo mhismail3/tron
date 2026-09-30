@@ -1,0 +1,165 @@
+{
+  "labels": [
+    {
+      "name": "epic",
+      "color": "5319e7",
+      "description": "Parent issue for a multi-task effort; holds goal, constraints and decisions"
+    },
+    {
+      "name": "task",
+      "color": "1d76db",
+      "description": "One claimable unit of work; one branch, one worktree, one PR"
+    },
+    {
+      "name": "bug",
+      "color": "d73a4a",
+      "description": "Something isn't working"
+    },
+    {
+      "name": "chore",
+      "color": "c5def5",
+      "description": "Maintenance with no product behavior change"
+    },
+    {
+      "name": "dependencies",
+      "color": "0366d6",
+      "description": "Dependency update; follows the owning dependency runbook"
+    },
+    {
+      "name": "enhancement",
+      "color": "a2eeef",
+      "description": "New feature or request"
+    },
+    {
+      "name": "area:gateway",
+      "color": "0e8a16",
+      "description": "packages/gateway"
+    },
+    {
+      "name": "area:ios",
+      "color": "0e8a16",
+      "description": "packages/ios-app"
+    },
+    {
+      "name": "area:mac",
+      "color": "0e8a16",
+      "description": "packages/mac-app"
+    },
+    {
+      "name": "area:relay",
+      "color": "0e8a16",
+      "description": "packages/push-relay"
+    },
+    {
+      "name": "area:tooling",
+      "color": "0e8a16",
+      "description": "scripts, tools, CI and agent guidance"
+    },
+    {
+      "name": "area:docs",
+      "color": "0e8a16",
+      "description": "Documentation only"
+    },
+    {
+      "name": "needs-triage",
+      "color": "fbca04",
+      "description": "Filed but not yet prioritized or placed under an epic"
+    },
+    {
+      "name": "needs-decision",
+      "color": "b60205",
+      "description": "Blocked on a decision from the maintainer"
+    },
+    {
+      "name": "needs-user-validation",
+      "color": "d93f0b",
+      "description": "Merged; waiting for a maintainer-only action and check"
+    },
+    {
+      "name": "regression",
+      "color": "b60205",
+      "description": "Filed by a scheduled or non-blocking check on main"
+    }
+  ],
+  "project": {
+    "title": "Tron",
+    "shortDescription": "Epics, tasks and their status for every agent working on Tron",
+    "public": false,
+    "fields": [
+      {
+        "name": "Status",
+        "type": "single_select",
+        "options": [
+          {
+            "name": "Proposed",
+            "color": "GRAY",
+            "description": "Awaiting maintainer approval; cannot be claimed"
+          },
+          {
+            "name": "Ready",
+            "color": "BLUE",
+            "description": "Approved; claimable once blockers are closed"
+          },
+          {
+            "name": "In progress",
+            "color": "YELLOW",
+            "description": "Claimed; has a branch and worktree"
+          },
+          {
+            "name": "In review",
+            "color": "PURPLE",
+            "description": "PR open; landing"
+          },
+          {
+            "name": "Needs you",
+            "color": "ORANGE",
+            "description": "Waiting for a maintainer decision or maintainer-only validation"
+          },
+          {
+            "name": "Blocked",
+            "color": "RED",
+            "description": "Cannot proceed; the reason is in the latest comment"
+          },
+          {
+            "name": "Done",
+            "color": "GREEN",
+            "description": "Closed with evidence"
+          }
+        ]
+      },
+      {
+        "name": "Priority",
+        "type": "single_select",
+        "options": [
+          {
+            "name": "P0",
+            "color": "RED",
+            "description": "Drop everything"
+          },
+          {
+            "name": "P1",
+            "color": "ORANGE",
+            "description": "Next"
+          },
+          {
+            "name": "P2",
+            "color": "YELLOW",
+            "description": "Normal"
+          },
+          {
+            "name": "P3",
+            "color": "GRAY",
+            "description": "Someday"
+          }
+        ]
+      },
+      {
+        "name": "Epic rank",
+        "type": "number"
+      }
+    ]
+  },
+  "rulesets": [
+    ".github/rulesets/main.json"
+  ]
+}

@@ -31,6 +31,9 @@ Commands:
                                     Resumable preparation or archive-only recovery
                                     registration; app replacement remains manual
   version                           Print the canonical Tron version
+  work bootstrap [--apply] [--report <path>]
+                                    Plan or converge GitHub labels and the tracking
+                                    Project to .github/work.json (tools/work)
 
 There is no deploy command. Production deployment is manual-only.
 EOF
@@ -72,6 +75,9 @@ case "$cmd" in
       exit 66
     fi
     exec node "$GATEWAY/dist/admin/diagnose.js" "$@"
+    ;;
+  work)
+    exec python3 "$ROOT/tools/work/cli.py" "$@"
     ;;
   bundle)
     [[ "${1:-}" == gateway ]] || { usage >&2; exit 64; }

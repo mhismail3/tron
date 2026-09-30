@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, W-2 claimed
+- **Last updated:** 2026-09-30, W-2 Done
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -152,10 +152,13 @@ Dated 2026-09-30:
 ### Vocabulary for agents
 
 - **Labels:**
-  - Type: `epic`, `task`, `bug`, `chore`, `deps`.
+  - Type: `epic`, `task`, `bug`, `chore`, `dependencies`, `enhancement`.
   - Area: `area:gateway`, `area:ios`, `area:mac`, `area:relay`, `area:tooling`,
     `area:docs`.
-  - Flags: `needs-decision`, `needs-user-validation`, `regression`.
+  - Flags: `needs-triage`, `needs-decision`, `needs-user-validation`,
+    `regression`.
+- `.github/work.json` is the source of truth for this vocabulary; this
+  section is a summary.
 - **Project fields:**
   - Status: Proposed, Ready, In progress, In review, Needs you, Blocked, Done.
   - Priority: P0 (drop everything), P1 (next), P2 (normal), P3 (someday).
@@ -194,9 +197,9 @@ Dated 2026-09-30:
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | W-1 | Done | User setup: `gh` re-authenticated, repository settings applied (squash-only), private evidence repository created, D-1–D-5 settled | none | User, 2026-09-30 |
-| W-2 | Claimed | GitHub bootstrap: labels, Project and fields, Epic/Task issue forms, ruleset spec; the user applies the settings and ruleset changes | W-1 | session 01a0f183, 2026-09-30 |
+| W-2 | Done | GitHub bootstrap: labels, Project and fields, Epic/Task issue forms, ruleset spec; the user applies the settings and ruleset changes | W-1 | session 01a0f183, 2026-09-30 |
 | W-3 | Ready | Shared-resource isolation audit so any two worktrees can validate concurrently; each fix becomes a sub-issue | none | Unassigned |
-| W-4 | Ready | Core: repository config, `gh` resolution, `start`/claim, naming, soft cap | W-2 | Unassigned |
+| W-4 | Ready | Core: `start`/claim, naming, soft cap (the config file and `gh` resolution exist since W-2) | W-2 | Unassigned |
 | W-5 | Ready | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | Unassigned |
 | W-6 | Ready | Core: `finish` and `land` (PR with `Closes`, evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff) and a recurring steward for orphaned PRs | W-5 | Unassigned |
 | W-7 | Ready | Core: automatic cleanup of provably done resources; update the housekeeping skill to match | W-6 | Unassigned |
@@ -305,3 +308,48 @@ Dated 2026-09-30:
 - For the next agent: W-2 and W-3 are Ready. Until W-9 lands, claims and
   merges still follow the protocol in `docs/plans/README.md`. Do not add
   rulesets before the work tooling can replace direct pushes to `main`.
+
+### W-2 · Done · 2026-09-30 · session 01a0f183
+
+- Result:
+  - `scripts/tron work bootstrap` plans, and with `--apply` converges, the
+    repository labels and one private owner-level Project titled Tron. The
+    Project is linked to this repository and has Status, Priority and Epic
+    rank fields.
+  - The tooling lives in `tools/work/`, declared by `.github/work.json`.
+  - Epic and Task issue forms were added.
+  - The branch ruleset is written in `.github/rulesets/main.json`.
+    Bootstrap reports it with a one-line apply command, but does not apply it.
+- Evidence:
+  - `python3 -m unittest discover -s tools/work` gives 6 passed.
+  - Negative controls: removing ID preservation from `plan_options` fails 3
+    tests, and removing the in-use check fails 1.
+  - The live apply made 20 changes in 13.4 s and converged in the same run. A
+    fresh plan afterwards exited 0 with no changes.
+  - Live refusal control: a temporary draft item set to Ready, plus a
+    declaration without Ready, made bootstrap refuse and name the option. The
+    item was then deleted and the plan re-checked as in sync.
+  - Reports are in the Tron internal workspace under
+    `files/w-2-bootstrap/`. Regenerate them with
+    `scripts/tron work bootstrap --report <path>`.
+  - With PATH set to `/usr/bin:/bin`, `gh` still resolved through the Homebrew
+    fallback.
+- Changes: this commit.
+- Tasks added: none.
+- Kept on purpose:
+  - The existing undeclared labels (`documentation`, `wontfix`, …) are
+    reported, never deleted, and are left for the maintainer.
+  - The user-facing bug and feature forms stay, because the repository is
+    public. Their `needs-triage` label now exists.
+- Deviations:
+  - The type label is `dependencies`, not `deps`, because Dependabot already
+    applies that label.
+  - No custom Project views were created. The dashboard (W-8) is the primary
+    view, and GitHub's default table remains.
+  - The Project is private, the least exposure available, even though the
+    issues themselves are public.
+  - The ruleset requires the `policy` CI job and the `tron/verify` status.
+    Apply it only at the W-9 cutover.
+- For the next agent:
+  - W-4 builds `start` and claiming on `tools/work/gh.py` and `.github/work.json`.
+  - Keep the rule that nothing in `tools/work/` names this repository.

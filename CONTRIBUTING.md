@@ -12,6 +12,8 @@ source contracts, but not as a second user-facing product.
 - `packages/mac-app` — macOS installer/menu bar and gateway packaging
 - `packages/push-relay` — closed product-operated App Attest/APNs transport
 - `scripts/tron` — contributor command entry point
+- `tools/work` — repository-agnostic GitHub work tracking for parallel agents,
+  configured by `.github/work.json`
 
 The custom Rust backend, Engine/Activity protocol, agent workers, event
 journals and the SQLite session mirror, browser operator, and legacy notification delivery subsystem were

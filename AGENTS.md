@@ -218,6 +218,7 @@ owns the TronMac commands.
 - iOS architecture/development/events: `packages/ios-app/docs/`
 - Mac architecture/development: `packages/mac-app/docs/`
 - Contributor workflow: `CONTRIBUTING.md` and `scripts/tron --help`
+- Work tracking tooling and its GitHub vocabulary: `tools/work/README.md`
 - Multi-session work plans and completed-work history: `docs/plans/`
 
 ### Work plans

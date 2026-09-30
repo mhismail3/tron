@@ -88,6 +88,8 @@ jobs:
           python3 scripts/test-tron-profile-attribution.py
       - name: Test the incident triage tool
         run: python3 scripts/test-tron-triage.py
+      - name: Test the work tooling
+        run: python3 -m unittest discover -s tools/work
       - run: python3 scripts/check-documentation-policy.py
       - name: Check shell syntax
         run: |

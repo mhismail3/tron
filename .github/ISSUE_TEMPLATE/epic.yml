@@ -1,0 +1,43 @@
+name: Epic
+description: A multi-task effort. Starts Proposed; tasks cannot be claimed until the maintainer approves.
+title: "[Epic]: "
+labels: ["epic"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: The outcome in one or two sentences, and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: What must not change, and the rules that override an agent's own judgment for this epic.
+    validations:
+      required: true
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Decisions
+      description: Settled decisions with their reasons, and open ones (open ones also get the needs-decision label).
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Dated current state, measurements and evidence an agent needs before starting.
+    validations:
+      required: false
+  - type: dropdown
+    id: landing
+    attributes:
+      label: Landing
+      description: Tasks merge straight to main unless the epic must ship as one release.
+      options:
+        - Tasks merge to main
+        - Integration branch (reason in Decisions)
+    validations:
+      required: true
