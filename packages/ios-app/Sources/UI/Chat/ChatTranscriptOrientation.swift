@@ -86,6 +86,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
 
     /// The scroll view's layout edge that holds the newest row.
     var newestEdge: Edge { layoutEdge(.bottom) }
+    var oldestEdge: Edge { layoutEdge(.top) }
 
     /// The anchor that puts a target's newest side at the transcript's pinned
     /// bottom: the `initialOffset`, `alignment` and pinned `sizeChanges` roles,
@@ -419,6 +420,21 @@ private struct ChatTranscriptOrientationModifier: ViewModifier {
 }
 
 extension View {
+    /// Today's UIKit behavior stays untouched; only the reflected viewport needs
+    /// a separate system-tap recipient. Mount inside its content for exact ancestry.
+    func chatTranscriptStatusBar(
+        _ orientation: ChatTranscriptOrientation,
+        active: Bool,
+        scrollToOldest: @escaping () -> Void
+    ) -> some View {
+        background {
+            if orientation.presentsNewestRowFirst {
+                ChatTranscriptStatusBar(active: active, scrollToOldest: scrollToOldest)
+                    .frame(width: 0, height: 0)
+            }
+        }
+    }
+
     /// Native anchoring and edge effects are shared by main and child transcripts.
     /// The sheet retains its visual-top underflow alignment; chat uses newest.
     func chatTranscriptScrollBehavior(

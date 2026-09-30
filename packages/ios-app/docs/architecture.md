@@ -2470,3 +2470,13 @@ orientation transform, is the hosted source; previews target its converted cente
 in the window, not a potentially reflected scroll ancestor. Descendant image
 open/close controls retain their own taps. This is the real card lift, not an
 explicit SwiftUI replacement preview.
+
+The orientation owner mounts an origin-only status-bar probe inside transcript
+content. Public UIKit ancestry finds only its enclosing scroll view; while the
+presentation admits native callbacks it disables that view's `scrollsToTop` and
+registers a transparent 1 pt window scroll proxy. The proxy delegate rejects its
+own scroll and asks the coordinator to detach and issue `oldest-history` through
+`ScrollPosition`. SwiftUI's delegate is never replaced. Coverage/unmount restores
+the original setting and removes the proxy; absent ancestry logs once in
+`ChatTranscriptOrientation` and leaves UIKit behavior unchanged. Today's path
+mounts no probe. `TronChatDisplayUITests` exercises the actual system gesture.

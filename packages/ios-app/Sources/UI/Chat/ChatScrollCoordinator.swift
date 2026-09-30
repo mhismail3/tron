@@ -1154,6 +1154,13 @@ final class ChatScrollCoordinator {
         }
     }
 
+    /// The system gesture is direct reader intent, not catch-up or a layout
+    /// correction. Detach before applying an edge so incoming rows stay frozen.
+    func requestOldestHistory(reduceMotion: Bool) {
+        beginDirectInteraction(allowsBottomRubberBand: false)
+        publish(.oldestHistory, animation: reduceMotion ? .disabled : .smooth(duration: 0.3), origin: .oldestHistory)
+    }
+
     func requestHistoricalEntryScroll(semanticID: String, installed: InstalledChatTranscript?) {
         cancelLayoutRestore()
         sequence &+= 1
@@ -1696,7 +1703,7 @@ final class ChatScrollCoordinator {
                 issuedRevision: physicalTailRepairIssuedEvidenceRevision
             )
         }
-        if applied.origin == .pastEndRepair || applied.origin == .targetFreeRebase {
+        if applied.origin == .pastEndRepair || applied.origin == .targetFreeRebase || applied.origin == .oldestHistory {
             // Application is the correction, and it needs no marker proof: the
             // tail is legal as soon as the command lands. Release through the
             // bounded lease path so native pinning owns the viewport again from
