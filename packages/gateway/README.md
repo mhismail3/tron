@@ -1398,7 +1398,7 @@ script with parallel `read`, `bash`, and non-throwing failure calls; it retains
 
 Nested `display` artifacts and trusted `agent_browser` live-view receipts have a separate
 presentation seam because Pi's canonical `nestedCalls` summaries intentionally omit tool-result
-payloads. The Tron inline presentation extension observes nested `tool_result` events and retains
+payloads. Tron's first-party display extension observes nested `tool_result` events and retains
 only validated display descriptors plus sealed browser receipt metadata, keyed to the parent call
 ID. It caps the stash at 32 descriptors per parent and 16 KiB, reports `complete: false` when
 bounded data is dropped, and clears it on parent completion, agent end/abort, or runtime shutdown.

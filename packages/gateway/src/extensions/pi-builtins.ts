@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { createNestedPresentationExtension } from "../display/nested-presentation-extension.js";
 import {
   createCodemodeExtension,
   createMcpExtension,
@@ -12,7 +11,6 @@ import {
  * Gateway pins PI_CODING_AGENT_DIR to its agent directory at startup. */
 export function piBuiltinExtensions(agentDir: string): Array<{ name: string; factory: ExtensionFactory; builtin: true; replaceable: true }> {
   return [
-    { name: "tron-nested-presentation", factory: createNestedPresentationExtension, builtin: true, replaceable: true },
     { name: "codemode", factory: createCodemodeExtension(), builtin: true, replaceable: true },
     { name: "tool-search", factory: createToolSearchExtension(), builtin: true, replaceable: true },
     {

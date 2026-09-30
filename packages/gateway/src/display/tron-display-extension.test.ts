@@ -23,7 +23,7 @@ function fixture(internalFilesRoot?: () => Promise<string>) {
       revoke: async (...args: unknown[]) => { revokes.push(args); },
     } as any,
   });
-  factory({ registerTool(value: unknown) { tool = value; } } as any);
+  factory({ on() { return () => {}; }, registerTool(value: unknown) { tool = value; } } as any);
   return { tool: () => tool, ingests, revokes };
 }
 
@@ -121,7 +121,7 @@ describe("first-party Tron display extension", () => {
         revoke: async (...args: unknown[]) => { revokes.push(args); },
       } as any,
     });
-    factory({ registerTool(value: unknown) { tool = value; } } as any);
+    factory({ on() { return () => {}; }, registerTool(value: unknown) { tool = value; } } as any);
     await expect(tool.execute("call", {
       title: "Preview",
       altText: "A preview image.",

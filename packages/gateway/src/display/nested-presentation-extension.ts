@@ -14,7 +14,7 @@ interface NestedDisplayDescriptor {
 
 /** Carries only bounded, admitted presentation metadata from nested tool results
  * into the model-issued parent's canonical details; Pi remains the transcript owner. */
-export const createNestedPresentationExtension: ExtensionFactory = (pi) => {
+export function registerNestedPresentationHandlers(pi: Parameters<ExtensionFactory>[0]): void {
   const pending = new Map<string, { calls: NestedDisplayDescriptor[]; complete: boolean }>();
   let pendingBytes = 0;
 
