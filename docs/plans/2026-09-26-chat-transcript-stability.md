@@ -111,7 +111,7 @@ breaks context-menu previews.
 | CT-27 | Done | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | chat scroll session (worker lane ct-27-rows), 2026-09-28 |
 | CT-28 | Ready | Record-only invariant monitor in the product (pinned bottom band uncovered for more than 2 frames, detached anchor moved without input, opening revealed uncovered), deduplicated, reaching device exports and surviving relaunch; delete the noisy tail-edge trace records; write the missing send-choreography device checklist in `development.md` | CT-25 | |
 | CT-24 | Done | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
-| CT-23 | Blocked | Evaluation remains behind the orientation switch. Source-owned expanded-card UIKit previews and origin-only status-bar routing implemented; native preview/window-pixel, one-recipient composer matrix, public oldest-history delegate and coverage cleanup gates pass both orientations at `733fc5f68`. Final parity today 11/11, origin 9/11 (opened-history + borderline send); four origin bottom gates, obstruction follow, detached journeys, row stability and child sheets pass. Default tier retains one known displaced-resume watchdog; today top matrix has an unresolved `first=nil` boundary. Intermittent device at-rest image inversion, actual system taps, accessibility and prior navigation/performance/device checks remain open. Signed LocalDevice artifact prepared, not installed; lane ct23d removed. See **CT-23 display cards and status bar** handoff | CT-24 | chat scroll session (worker lane ct23d), 2026-09-30 |
+| CT-23 | Blocked | Evaluation remains behind the orientation switch. Source-owned expanded-card UIKit previews and origin-only status-bar routing implemented; native preview/window-pixel, one-recipient composer matrix, public oldest-history delegate and coverage cleanup gates pass both orientations; final shared-sheet boundary correction at `86338f93a` also passes its negative-control-backed gate. Main checkpoint parity today 11/11, origin 9/11 (opened-history + borderline send); four origin bottom gates, obstruction follow, detached journeys, row stability and child sheets pass. Default tier retains one known displaced-resume watchdog; today top matrix has an unresolved `first=nil` boundary. Intermittent device at-rest image inversion, actual system taps, accessibility and prior navigation/performance/device checks remain open. Signed LocalDevice artifact prepared, not installed; lane ct23d removed. See **CT-23 display cards and status bar** handoff | CT-24 | chat scroll session (worker lane ct23d), 2026-09-30 |
 | CT-22 | Claimed | Exact tail prototype (keep the SwiftUI `ScrollView`, rows and animations): measure two ways of making the pinned bottom exact on a throwaway branch. (a) Previously measured rows keep their last measured height when they leave the viewport. (b) The newest rows render in an eager stack below a `LazyVStack` of older history, so the bottom and everything near it are measured, never estimated; the boundary moves in coarse steps so rows rarely change parent. Judged by the CT-2 fixtures, the parity gate, the harness and CT-10's scale numbers | CT-20 | chat scroll investigation session, 2026-09-27 |
 | CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15, CT-20 | |
 | CT-17 | Needs scoping | Qualification: with the switch on, the CT-12 and CT-14 gates pass against the `main` reference, the CT-2 fixtures and a 512-row blank fixture read zero blank boundaries, every `ChatViewScrollHarnessTests` visible invariant holds, and frame cost, opening time and memory at 150, 300 and 512 heavy rows are no worse than CT-10's baseline | CT-16, CT-14, CT-10 | |
@@ -3780,9 +3780,11 @@ known top-matrix `first=nil` boundary also repeats; attribution remains pending.
 
 #### CT-23 display cards and status bar — final handoff
 
-**Ready for user-owned device evaluation, not production cutover.** Final
-product/test source is clean **`733fc5f68`**. Every final run and the signed app
-below carries that clean revision. This handoff is documentation-only afterward.
+**Ready for user-owned device evaluation, not production cutover.** Main
+cross-owner/image checkpoints below ran at clean **`733fc5f68`**. Final source and
+signed app are **`86338f93a`**, after the shared-sheet boundary correction and its
+focused/default checks recorded at the end of this handoff. Documentation-only
+commits follow each evidence checkpoint.
 No Gateway lifecycle, device installation, deployment, remote Git operation or
 change outside this worktree was performed.
 
@@ -3832,7 +3834,7 @@ metadata, log, summary and `TestResults.xcresult`):
 | Status-bar / display native gates | Four integration cases pass: one recipient across empty/attachments/chips/catalog in both modes, unchanged transcript delegate, origin public callback reaches oldest detached, coverage cleanup; image/PDF pixels and real-card highlight/dismissal targets pass | Same two runs |
 | Child sheet gates | Pass existing non-detent contracts. Existing accepted detent limitation remains: origin collapse **14 blank frames**, expansion 0; neither is claimed a continuity fix | Same two runs |
 | Full default unit tier | **2,038 total: 1,990 passed, 47 skipped, 1 failure**, `displacedRetainedResume` 15 s watchdog. No expected display-preview issue remains | `20260930T054323Z-run.YHuN0m` |
-| Signed generic LocalDevice build + artifact validation | Pass, stamped `733fc5f68`, dirty=false; no install | `~/Library/Developer/Tron/ios/ct23-device-evaluation/ct23d-local-device-build.log` |
+| Signed generic LocalDevice build + artifact validation | Final rebuilt artifact passes, stamped `86338f93a`, dirty=false; no install | `~/Library/Developer/Tron/ios/ct23-device-evaluation/ct23d-local-device-build.log` |
 
 The top-matrix today failure is `first=nil` with a full native clip, not a new
 clipped viewport band. It repeats focused (`20260930T053051Z-run.2MxoM1` and
@@ -3901,3 +3903,32 @@ approved resetting this policy at both shared managed-sheet content boundaries,
 with a real hosted sheet/document regression and no-reset negative control.
 The prior final evidence above remains at its stated revision; corrected-boundary
 focused/default/build results will be appended after clean commits.
+
+**Shared-sheet boundary correction completed at clean `86338f93a`.** Both
+managed-sheet modifiers reset `chatOwnsStatusBar=false` on their content, so a
+composer-owned resource sheet regains its own native scroll eligibility.
+`managedSheetRestoresStatusBarOwnership` mounts real bool/item sheets with the
+composer's inherited environment and inspects their native document scrolls.
+Before the reset, clean `f383a225d` / `20260930T055824Z-run.Ns82xP` fails both
+variants; no substitute delegate or hand-written flag in the fixture can mask it.
+
+Approved final checks, without repeating unchanged main parity/bottom journeys:
+
+- `20260930T060033Z-run.mDKf2n`: **29/29 pass**, full
+  `SessionSheetPresentationTests` plus all five `ChatDisplayOrientationTests`.
+  The latter directly crosses both orientations and every composer state,
+  exercises the public oldest-history callback, coverage cleanup, source-owned
+  previews, native renderers and the new sheet-inheritance gate.
+- `20260930T060250Z-run.SivraB`: full default unit tier **2,039 total,
+  1,990 passed, 48 skipped, one failure**: the same retained-resume watchdog.
+  No expected display-preview failure. No claim that the default tier is green.
+- Generic signed LocalDevice rebuilt and `validate-ios-artifact.py
+  --configuration LocalDevice --require-profile` passes. The app at the path
+  above now contains `TronBuildIdentity.json` revision `86338f93a`, dirty=false.
+  No installation. Build output remains `ct23d-local-device-build.log`.
+- Additional retained logs in the screenshot root: `sheet-boundary-negative.log`,
+  `sheet-boundary-final.log`, `final-unit-after-sheet-boundary.log`.
+- Recreated test lane was removed again after these checks; `status --all` shows
+  no ct23d lane or running simulator. Final policy/guard/diff checks pass and the
+  index is empty. Existing main parity/top-matrix and device-only risks above
+  remain open; the environment fix does not claim to resolve them.
