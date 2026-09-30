@@ -278,7 +278,7 @@ def comment_body(receipt: dict, settings: dict, root: Path, evidence_link: str) 
     return "\n".join(lines) + "\n"
 
 
-def _scrub(root: Path, command: str, text: str) -> None:
+def scrub(root: Path, command: str, text: str) -> None:
     completed = subprocess.run(["bash", "-c", command], cwd=root, input=text, capture_output=True, text=True)
     if completed.returncode != 0:
         detail = (completed.stdout + completed.stderr).strip()
@@ -337,7 +337,7 @@ def post(gh: Gh, repo: Path, config: dict, receipt: dict) -> str:
         # Relative to the issue or pull request page, so no owner is written.
         link = f"../../{evidence_repository.split('/', 1)[1]}/tree/HEAD/{evidence_dir}"
         body = comment_body(receipt, settings, root, link)
-        _scrub(root, settings["scrubCommand"], body)
+        scrub(root, settings["scrubCommand"], body)
         message = f"verify evidence for {head[:12]}"
         for name in receipt["required"]:
             entry = receipt["checks"][name]
