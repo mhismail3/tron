@@ -745,6 +745,7 @@ export type KnowledgeCurationCode =
   | "invalid-input"
   | "unknown-tag"
   | "command-id-reuse"
+  | "decision-authority"
   | "budget-exhausted"
   | "model-not-configured"
   | "unavailable"

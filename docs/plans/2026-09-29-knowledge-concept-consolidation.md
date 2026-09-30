@@ -82,7 +82,7 @@ only on the user's word) apply to every task.
 | C15 | Ready | Naming and dead code: Saved/Pending/scope labels, duplicate digest, double save-time source, dead iOS predicates | C1–C14 | — |
 | C16 | Needs scoping | Audit live Knowledge data for sources left pending by historical connector sweeps and determine safe intake recovery | C4, user Gateway access | — |
 | C17 | Needs scoping | Superseded by C18–C23 (user decision 2026-09-29): X gets connector primitives and the ingestion routine, not its own intake pipeline | C3, C4, C5 | — |
-| C18 | Claimed | Decision authority in the store: connector/system writes never override a user or agent admission or scope | none | knowledge-consolidation session, 2026-09-29 |
+| C18 | Done | Decision authority in the store: connector/system writes never override a user or agent admission or scope | none | knowledge-consolidation session, 2026-09-29 |
 | C19 | Claimed | Ingest primitive: save one queued provider item with identity, save date, note, collection and payload, undecided and idempotent | C18 | knowledge-consolidation session, 2026-09-29 |
 | C20 | Claimed | Connector primitives as agent actions: discover, read queue, acknowledge/skip, Raindrop move under write permission | C19 | knowledge-consolidation session, 2026-09-29 |
 | C21 | Claimed | Assessment primitive: assess a source with Jev (one budget) or the Knowledge model; returns a recommendation, decides nothing | C18 | knowledge-consolidation session, 2026-09-29 |
@@ -371,3 +371,19 @@ deletes it only after a dry-run of the routine matches it on live data.
   an X intake first. C17 is superseded; C18–C23 added. One session does C18–C22
   in order on branch `knowledge/ingestion-primitives` (they share
   `connectors.ts`, `knowledge-store.ts` and `knowledge-service.ts`).
+
+### C18 · Done · 2026-09-29 · luna-worker
+
+- Result: the Knowledge store now returns a typed `decision-authority` refusal
+  when connector/system admission or scope writes would replace a user/agent
+  decision. Intake uses those store refusals instead of duplicating admission
+  ownership logic.
+- Evidence: `cd packages/gateway && npm run build` passed; final `npx vitest run src/knowledge` passed (26 files, 376 tests); documentation policy passed (48 authored files); personal-info guard passed. An earlier suite invocation hit a transient `ENOTEMPTY` test-temp cleanup error; the isolated case and subsequent full suite passed. Revert proof: removing the `setSourceAdmission` store guard made the added regression fail because the connector overwrite resolved and archived the source; restored code passes.
+- Changes: this commit
+- Tasks added: none
+- Kept on purpose: agents can replace user/agent decisions; connector decisions
+  remain permitted when the prior admission/scope is undecided; legacy
+  non-pending admissions without connector producer metadata stay protected.
+- Deviations: none.
+- For the next agent: C19 can build ingest primitives on the store-owned
+  decision boundary; C23's live dry-run remains a maintainer/Gateway gate.

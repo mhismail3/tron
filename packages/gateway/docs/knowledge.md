@@ -818,16 +818,20 @@ derived from the exact source revision; an existing summary with the same
 source-evidence digest and current tag input digest is reused on rerun. Summary
 or tag failure is recorded on that job without rewriting a committed admission;
 an item left pending by its existing assessment remains pending. Other cohort
-items continue. Intake-owned admission state records a connector producer; an
-explicit user/agent admission or scope placement remains authoritative on rerun.
-Legacy admissions without producer metadata are conservatively treated as prior
-decisions. Scope producer metadata is recorded for new explicit placements;
-legacy scope changes without it cannot be distinguished from prior intake
-placement. A decided scope alone does not stop intake: it keeps that scope while
-intake processes an undecided admission, and connector mapping never replaces a
-decided scope. Decided bookmarks leave the connector pending queue even when no
-remote move is requested, and the invocation `pending` counter excludes retained
-or archived bookmarks that simply were not moved. Intake reserves its shared
+items continue. Intake-owned admission state records a connector producer. The
+Knowledge store is the decision authority: connector/system admission writes and
+placements that would replace a user/agent decision fail with the typed
+`decision-authority` refusal. Connector re-capture and generic record correction
+writes are fenced at the same store boundary. Legacy non-pending admissions
+without connector ownership are conservatively treated as prior decisions; legacy
+scope changes without producer metadata cannot be distinguished from prior
+intake placement. Intake relies on those store refusals to retain an existing
+decision and continues processing an undecided admission in an agent-decided
+scope. A refusal does not turn into a silent no-op; intake reports the preserved
+admission and completes the queue identity when it can establish the authoritative
+record. Focused KnowledgeStore coverage exercises admission writes,
+curation placement, recapture/correction, permitted agent overrides, and
+connector decisions on undecided records. Intake reserves its shared
 monthly Jev attempt before dispatch and marks it dispatched only at the HTTP
 transport boundary; cancellation before that boundary releases the reservation
 so tagging can use the shared budget. The order differs from the initial K5 draft: K8's existing Jev

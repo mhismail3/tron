@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { KnowledgeAssessmentApprovalRequest, KnowledgeConnectorConfigurationRequest, KnowledgeConnectorRunRequest, KnowledgeConnectorState, KnowledgeConnectorStatus, KnowledgeAction, KnowledgeRecord, KnowledgeRaindropRequest, KnowledgeRaindropIntakeRequest } from "./knowledge-contract.js";
+import { KnowledgeCurationRefusal, type KnowledgeAssessmentApprovalRequest, type KnowledgeConnectorConfigurationRequest, type KnowledgeConnectorRunRequest, type KnowledgeConnectorState, type KnowledgeConnectorStatus, type KnowledgeAction, type KnowledgeRecord, type KnowledgeRaindropRequest, type KnowledgeRaindropIntakeRequest } from "./knowledge-contract.js";
 import { captureSource, isVerifiedSourceCapture, recoverProviderSaveTime } from "./source-capture.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
@@ -653,21 +653,17 @@ export class KnowledgeConnectorExtension {
           if (connectionAuthority && expectedSetupRevision !== (await this.connectionFor(request.connectionId, "raindrop", true))?.setupRevision) throw new GatewayError("conflict", "Raindrop collection mapping changed during intake; retry with the current setup revision");
           if (mapping && item.collectionId !== mapping.collectionId) throw new GatewayError("conflict", "Raindrop item collection does not match the selected mapping");
           const existing = await canonicalFor(item.id);
-          const admission = existing?.content.admission;
-          const decidedAdmission = admission && ((admission.producer?.actor === "user" || admission.producer?.actor === "agent") || (admission.status !== "pending" && admission.producer?.actor !== "connector"));
-          const decidedScope = existing && (existing.content.scopeProducer?.actor === "user" || existing.content.scopeProducer?.actor === "agent");
-          if (existing && decidedAdmission) {
-            const status = admission?.status === "archived" ? "archived" : "retained";
-            if (status === "archived") archived += 1; else retained += 1;
-            setOutcome(item, { sourceId: existing.id, sourceRevision: existing.revisionId, disposition: status, assessment: existing.content.assessment ? "reused" : "not-run", move: "not-attempted", reason: "Existing admission or user/agent placement is authoritative; intake left it unchanged" });
-            await markDone(item.id);
-            continue;
-          }
           const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: existing ? existing.scope : mappedScope, title: item.title, origin: "connector", ...(isPublicXPost(item.url) ? { publicPostLookup: true } : {}), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
           let source = result.record;
-          if (!decidedScope && source.scope !== mappedScope) {
-            const placed = await this.store.curateSource({ commandId: command(request.commandId, `scope-${item.id}-${mappedScope}`), operation: "placement", producer: { actor: "connector" }, item: { recordId: source.id, expectedRevision: source.revisionId, placement: { scope: mappedScope } } });
-            source = placed.record as KnowledgeRecord & { kind: "source" };
+          if (source.scope !== mappedScope) {
+            try {
+              const placed = await this.store.curateSource({ commandId: command(request.commandId, `scope-${item.id}-${mappedScope}`), operation: "placement", producer: { actor: "connector" }, item: { recordId: source.id, expectedRevision: source.revisionId, placement: { scope: mappedScope } } });
+              source = placed.record as KnowledgeRecord & { kind: "source" };
+            } catch (error) {
+              if (!(error instanceof KnowledgeCurationRefusal) || error.code !== "decision-authority") throw error;
+              // The store is the decision authority; keep processing the item
+              // in its existing scope instead of duplicating that rule here.
+            }
           }
           setOutcome(item, { sourceId: source.id, sourceRevision: source.revisionId, disposition: "pending", assessment: "not-run", move: "not-attempted", reason: "Source captured; processing not yet complete" });
           const attached = await this.attachProviderPayload(item, source, command(request.commandId, `metadata-${item.id}`));
@@ -737,7 +733,22 @@ export class KnowledgeConnectorExtension {
           const finalInterests = (await this.store.config()).currentInterests ?? [];
           if (!assessment || (assessment.model === JEV_DEFAULT_MODEL && assessment.coverage !== undefined && (assessment.coverage !== "full" && assessment.coverage !== "sampled")) || (assessment.model === JEV_DEFAULT_MODEL && assessment.inputDigest !== undefined && (assessment.profileVersion !== jevProfileVersion(finalInterests) || assessment.inputDigest !== jevInputDigest({ title: source.content.title, text: source.content.text ?? "", interests: finalInterests, source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt } }, finalInterests)))) throw new GatewayError("conflict", "Source assessment authority changed before admission");
           const status = assessment.recommendation === "archived" ? "archived" : "retained";
-          const admitted = source.content.admission?.status === status ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status, producer: { actor: "connector" }, reason: status === "archived" ? "Jev clear low-value classification; recoverable intake archive" : "Jev intake accepted source", ...(assessment?.profileVersion ? { profileVersion: assessment.profileVersion } : {}), ...(assessment?.rubricVersion ? { rubricVersion: assessment.rubricVersion } : {}) })).record as KnowledgeRecord & { kind: "source" };
+          let admitted: KnowledgeRecord & { kind: "source" };
+          try {
+            admitted = (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status, producer: { actor: "connector" }, reason: status === "archived" ? "Jev clear low-value classification; recoverable intake archive" : "Jev intake accepted source", ...(assessment?.profileVersion ? { profileVersion: assessment.profileVersion } : {}), ...(assessment?.rubricVersion ? { rubricVersion: assessment.rubricVersion } : {}) })).record as KnowledgeRecord & { kind: "source" };
+          } catch (error) {
+            if (!(error instanceof KnowledgeCurationRefusal) || error.code !== "decision-authority") throw error;
+            const authoritative = await this.store.read(source.id, undefined, false, true, true);
+            if (!authoritative || authoritative.kind !== "source") throw error;
+            admitted = authoritative;
+            const decision = admitted.content.admission?.status;
+            const disposition = decision === "archived" ? "archived" : decision === "retained" ? "retained" : "pending";
+            if (disposition === "archived") archived += 1; else if (disposition === "retained") retained += 1; else pending += 1;
+            sourceRef = { sourceId: admitted.id, sourceRevision: admitted.revisionId };
+            setOutcome(item, { ...sourceRef, disposition, assessment: assessmentOutcome, move: "not-attempted", reason: "The Knowledge store preserved an existing authoritative admission" });
+            await markDone(item.id);
+            continue;
+          }
           source = admitted; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
           setOutcome(item, { ...sourceRef, disposition: status, assessment: assessmentOutcome });
           if (status === "archived") archived += 1; else retained += 1;

@@ -30,6 +30,27 @@ import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
 import type { ConnectionInstance } from "../integrations/connection-contract.js";
 
+function isDecisionProducer(producer: SourceCurationProducer | undefined): boolean {
+  return producer?.actor === "user" || producer?.actor === "agent";
+}
+
+function isConnectorProducer(producer: { actor: string } | string | undefined): boolean {
+  const actor = typeof producer === "string" ? producer : producer?.actor;
+  return actor === "connector" || actor === "system";
+}
+
+function admissionDecisionIsAuthoritative(admission: SourceContent["admission"]): boolean {
+  if (!admission) return false;
+  if (isDecisionProducer(admission.producer)) return true;
+  // A non-pending legacy admission without connector ownership is a prior
+  // decision; do not infer permission from missing historical metadata.
+  return admission.status !== "pending" && admission.producer?.actor !== "connector";
+}
+
+function decisionAuthorityRefusal(field: "admission" | "scope", currentRevision: string): KnowledgeCurationRefusal {
+  return new KnowledgeCurationRefusal("decision-authority", `Connector/system cannot replace the current authoritative ${field} decision`, currentRevision);
+}
+
 const STATE_MAX_BYTES = 4 * 1_048_576;
 // One-time rescue also admits legacy states that outgrew their old read ceiling.
 const LEGACY_MIGRATION_MAX_BYTES = 64 * 1_048_576;
@@ -1489,6 +1510,9 @@ export class KnowledgeStore {
       if (!head || head.latestRevisionId !== request.expectedRevision) throw conflict("Source revision is stale or unavailable");
       const current = await this.readRecord(paths, request.recordId, head.latestRevisionId);
       if (current.kind !== "source") throw conflict("Source revision is unavailable");
+      if (isConnectorProducer(request.producer) && admissionDecisionIsAuthoritative(current.content.admission)) {
+        throw decisionAuthorityRefusal("admission", current.revisionId);
+      }
       const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.producer ? { producer: request.producer } : {}), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, admission } }, request.expectedRevision);
     });
@@ -1536,6 +1560,11 @@ export class KnowledgeStore {
         const current = await this.readRecord(paths, input.item.recordId, head.latestRevisionId);
         if (current.kind !== "source") throw new KnowledgeCurationRefusal("invalid-input", "Knowledge curation applies to source records only");
         if (this.recordExcluded(state, current)) throw new KnowledgeCurationRefusal("excluded", "Knowledge record is excluded from retrieval");
+        if (input.operation === "placement" && isConnectorProducer(input.producer)) {
+          const placement = input.item.placement;
+          if (placement?.scope !== undefined && current.content.scopeProducer && isDecisionProducer(current.content.scopeProducer)) throw decisionAuthorityRefusal("scope", current.revisionId);
+          if (placement?.admission !== undefined && admissionDecisionIsAuthoritative(current.content.admission)) throw decisionAuthorityRefusal("admission", current.revisionId);
+        }
         const next = this.curatedSource(state, input.operation, input.producer, input.item, current);
         if (next.scope === current.scope && JSON.stringify(next.content) === JSON.stringify(current.content) && JSON.stringify(next.relations) === JSON.stringify(current.relations)) {
           return { record: current, stateRevision: state.stateRevision } satisfies KnowledgeMutationResult;
@@ -1669,6 +1698,8 @@ export class KnowledgeStore {
           throw conflict("Redirect target changed while source capture was publishing");
         }
       }
+      const current = request.record.id ? await this.currentRecord(state, paths, request.record.id) : null;
+      if (current?.kind === "source" && request.record.kind === "source") this.assertSourceDecisionAuthority(current, request.record, request.record.provenance.actor);
       return this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision);
     }, undefined, signal);
   }
@@ -1686,6 +1717,11 @@ export class KnowledgeStore {
   }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
+  private assertSourceDecisionAuthority(current: KnowledgeRecord & { kind: "source" }, next: KnowledgeRecordDraft & { kind: "source" }, producer: string | undefined): void {
+    if (!isConnectorProducer(producer)) return;
+    if (next.scope !== current.scope && current.content.scopeProducer && isDecisionProducer(current.content.scopeProducer)) throw decisionAuthorityRefusal("scope", current.revisionId);
+    if (JSON.stringify(next.content.admission) !== JSON.stringify(current.content.admission) && admissionDecisionIsAuthoritative(current.content.admission)) throw decisionAuthorityRefusal("admission", current.revisionId);
+  }
   private async currentRecord(state: KnowledgeState, paths: StorePaths, id: string): Promise<KnowledgeRecord | null> { const head = state.records.get(id); return head ? this.readRecord(paths, id, head.latestRevisionId) : null; }
   private async currentRecordForRead(state: KnowledgeState, paths: StorePaths, id: string): Promise<KnowledgeRecord | null> { const head = state.records.get(id); return head ? await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId) ?? null : null; }
   private async putRecord(state: KnowledgeState, paths: StorePaths, draft: KnowledgeRecordDraft, expectedRevision?: string): Promise<KnowledgeMutationResult> {
@@ -1894,7 +1930,7 @@ export class KnowledgeStore {
       return this.putRecord(state, paths, record, existing?.revisionId);
     });
   }
-  async correct(commandId: string, recordId: string, expectedRevision: string, replacement: KnowledgeRecordDraft, relation: KnowledgeRecord["relations"][number]): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); return this.putRecord(state, paths, { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }, expectedRevision); }); }
+  async correct(commandId: string, recordId: string, expectedRevision: string, replacement: KnowledgeRecordDraft, relation: KnowledgeRecord["relations"][number]): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); const next = { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }; if (current.kind === "source" && next.kind === "source") this.assertSourceDecisionAuthority(current, next, next.provenance.actor); return this.putRecord(state, paths, next, expectedRevision); }); }
   async setScopeExclusion(commandId: string, scope: { sessionId?: string; branchId?: string; projectId?: string }, excluded: boolean, reason?: string): Promise<{ excluded: boolean; stateRevision: number }> {
     if (!scope.sessionId && !scope.projectId) throw invalid("Scope exclusion requires a session or project"); return this.mutate("knowledge.scope-exclusion", commandId, { scope, excluded, reason }, async state => { const key = scope.sessionId ? (scope.branchId ? `branch:${scope.sessionId}:${scope.branchId}` : `session:${scope.sessionId}`) : `project:${scope.projectId}`; state.scopeExclusions.set(key, { ...scope, excluded, ...(reason === undefined ? {} : { reason }), updatedAt: now() }); return { excluded, stateRevision: state.stateRevision + 1 }; });
   }
