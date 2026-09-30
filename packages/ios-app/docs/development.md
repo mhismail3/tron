@@ -1066,7 +1066,8 @@ pointer in it would name whichever worktree finished last.
 The shared per-user iOS build root is `$HOME/Library/Developer/Tron/ios`: test
 runs use its `test-runs` folder, each worktree's test products use its own
 `test-derived-data/<worktree-key>` folder (its directory name plus a hash of its
-path), and `scripts/tron-ios-simulator` builds into `simulator-derived-data`.
+path), and `scripts/tron-ios-simulator install` builds into
+`simulator-derived-data/<worktree-key>`, keyed the same way.
 The lease serializes the one owned simulator and the retained runs, but products
 are never shared between worktrees: `build` stamps its products with the
 building worktree, its HEAD revision and a fingerprint of its dirty-tree content
@@ -1246,6 +1247,24 @@ reports how long it has been booted, read from its own boot process and printed
 by the same owner as the `status --all` row, and `stop` is the way to release it.
 The test tooling never shuts it down and never deletes it; the simulators it does
 own are deleted by `clean`, `lane-remove` and the sweep.
+
+The Development simulator and each physical device are exclusive across every
+worktree on this Mac, so their helpers lease them through the same lock owner as
+the test lanes (`scripts/ios-test-lock.py`). `scripts/tron-ios-simulator start`,
+`install` and `stop` hold one host-wide lease
+(`$HOME/.tron/internal/run/ios-simulator.lease.lock`), and
+`scripts/tron-ios-device install`, `launch` and `stop` hold a lease per device
+identifier (`$HOME/.tron/internal/run/ios-device-<DEVICE_ID>.lease.lock`),
+including the Gateway's detached Rebuild iPhone App install. The lease covers
+the whole command - build, install and launch - and a contended command exits 73
+before it touches the device, naming the holder's worktree, PID and start time.
+A holder killed outright leaves no stale lease: the lease is released once the
+command tree it started has ended, and the next holder replaces its metadata.
+The lease serializes commands, not sessions: an app one command launched can be
+replaced by the next command that takes the lease.
+`status` and `remember` take no lease. `DeviceLeaseFixture` in
+`scripts/test-ios-test-infrastructure.py` covers contention and stale-lease
+release.
 
 ### Test runner safety contract
 

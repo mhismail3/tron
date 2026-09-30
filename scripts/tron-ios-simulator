@@ -8,9 +8,12 @@ IOS_DIR="$ROOT_DIR/packages/ios-app"
 STATE_DIR="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}"
 STATE_FILE="$STATE_DIR/ios-simulator-udid"
 SIMULATOR_ID="${TRON_IOS_SIMULATOR_ID:-}"
-DERIVED_DATA="${TRON_IOS_SIMULATOR_DERIVED_DATA:-$HOME/Library/Developer/Tron/ios/simulator-derived-data}"
 BUNDLE_ID="com.tron.mobile.beta"
 SIMULATOR_OWNER="$ROOT_DIR/scripts/ios-test-simulator.py"
+LOCKER="$ROOT_DIR/scripts/ios-test-lock.py"
+# One host-wide lease for the one remembered Development simulator, whichever
+# worktree runs this helper.
+LEASE_LOCK="$STATE_DIR/ios-simulator.lease.lock"
 
 usage() {
     cat <<'USAGE'
@@ -29,10 +32,16 @@ Commands:
   stop       Terminate Development and shut down only the remembered simulator.
   remember   Save an explicit simulator ID, or the Simulator app's current device.
 
+`start`, `install` and `stop` hold the Development simulator's host-wide lease
+(<state directory>/ios-simulator.lease.lock) for the whole command. A command
+that finds it held exits 73 naming the holder's worktree, PID and start time;
+wait for that command to finish. `install` builds into this worktree's own
+DerivedData, $HOME/Library/Developer/Tron/ios/simulator-derived-data/<worktree-key>.
+
 Environment overrides:
   TRON_IOS_SIMULATOR_ID            Explicit simulator UUID to use and remember
   TRON_IOS_SIMULATOR_STATE_DIR     Local state directory
-  TRON_IOS_SIMULATOR_DERIVED_DATA  Stable DerivedData path
+  TRON_IOS_SIMULATOR_DERIVED_DATA  Explicit DerivedData path (replaces the per-worktree one)
 
 This helper intentionally uses the Development bundle ID and never uninstalls,
 erases, or runs tests. Pairing is stored in that bundle's data container on the
@@ -51,6 +60,31 @@ USAGE
 die() {
     echo "error: $*" >&2
     exit 1
+}
+
+# Re-run this command under the Development simulator's lease, unless this
+# process is that leased command. The holder exits 73 naming the owner when
+# another command holds it.
+hold_development_lease() {
+    if [[ -n "${TRON_IOS_TEST_LEASE_LOCK:-}" && "$TRON_IOS_TEST_LEASE_LOCK" -ef "$LEASE_LOCK" ]]; then
+        return
+    fi
+    exec python3 "$LOCKER" --lock "$LEASE_LOCK" --resource "Development simulator" \
+        --worktree "$ROOT_DIR" -- "$0" "$@"
+}
+
+# Each worktree builds into its own DerivedData: two worktrees' installs never
+# share build products, while the simulator and its paired app container stay
+# shared by design.
+derived_data_path() {
+    if [ -n "${TRON_IOS_SIMULATOR_DERIVED_DATA:-}" ]; then
+        printf '%s\n' "$TRON_IOS_SIMULATOR_DERIVED_DATA"
+        return
+    fi
+    local key
+    key="$(python3 "$ROOT_DIR/scripts/ios-test-build-identity.py" worktree-key --worktree "$ROOT_DIR")" \
+        || die "cannot derive this worktree's DerivedData directory"
+    printf '%s\n' "$HOME/Library/Developer/Tron/ios/simulator-derived-data/$key"
 }
 
 available_device_line() {
@@ -129,6 +163,8 @@ installed_development_code_identifier() {
 
 install_development() {
     local simulator_id="$1"
+    local derived_data
+    derived_data="$(derived_data_path)"
     boot_simulator "$simulator_id"
     (
         cd "$IOS_DIR"
@@ -138,10 +174,10 @@ install_development() {
             -scheme "Tron Development" \
             -configuration Development \
             -destination "platform=iOS Simulator,id=$simulator_id" \
-            -derivedDataPath "$DERIVED_DATA"
+            -derivedDataPath "$derived_data"
     )
 
-    local app="$DERIVED_DATA/Build/Products/Development-iphonesimulator/TronMobile.app"
+    local app="$derived_data/Build/Products/Development-iphonesimulator/TronMobile.app"
     [ -d "$app" ] || die "expected simulator app not found: $app"
     xcrun simctl terminate "$simulator_id" "$BUNDLE_ID" 2>/dev/null || true
     xcrun simctl install "$simulator_id" "$app"
@@ -186,6 +222,11 @@ show_status() {
 }
 
 command="${1:-start}"
+case "$command" in
+    start|install|stop)
+        hold_development_lease "$command"
+        ;;
+esac
 case "$command" in
     start)
         simulator_id="$(resolve_simulator_id)"

@@ -3818,6 +3818,349 @@ class DevelopmentSimulatorFixture(LifecycleHarness, unittest.TestCase):
         self.assertEqual(self.shutdown_targets(), [])
 
 
+# Shared by the synthetic tools of `DeviceLeaseFixture`: every call is logged
+# under the caller the case named, and a gated call holds its command open until
+# the case opens the gate, recording the command tree's process group first.
+DEVICE_LEASE_TOOL_SOURCE = '''import time
+from pathlib import Path
+
+
+def log(line):
+    with open(os.environ["FAKE_TOOL_LOG"], "a", encoding="utf-8") as handle:
+        handle.write(os.environ.get("FAKE_CALLER", "unknown") + " " + line + "\\n")
+
+
+def gate():
+    name = os.environ.get("FAKE_GATE")
+    if not name:
+        return
+    gates = Path(os.environ["FAKE_GATES"])
+    (gates / (name + ".reached")).write_text(str(os.getpgid(0)) + "\\n")
+    while not (gates / (name + ".open")).exists():
+        time.sleep(0.05)
+'''
+
+DEVICE_LEASE_FAKE_TOOLS = {
+    "xcrun": '''arguments = sys.argv[1:]
+log("xcrun " + " ".join(arguments))
+if arguments[:3] == ["--sdk", "iphoneos", "--show-sdk-version"]:
+    print("26.5"); raise SystemExit(0)
+if arguments[:4] == ["simctl", "list", "devices", "available"]:
+    print("    iPhone 17 Pro (" + os.environ["FAKE_SIMULATOR_UDID"] + ") (Booted)"); raise SystemExit(0)
+if arguments[:2] == ["simctl", "get_app_container"]:
+    print(os.environ["FAKE_INSTALLED_APP"]); raise SystemExit(0)
+if arguments[:2] == ["simctl", "launch"] or arguments[:4] == ["devicectl", "device", "process", "launch"]:
+    gate(); raise SystemExit(0)
+if arguments[:2] in (["simctl", "boot"], ["simctl", "bootstatus"], ["simctl", "terminate"], ["simctl", "install"]):
+    raise SystemExit(0)
+if arguments[:3] == ["devicectl", "device", "install"]:
+    raise SystemExit(0)
+print("unexpected xcrun arguments: " + repr(arguments), file=sys.stderr)
+raise SystemExit(2)
+''',
+    "xcodebuild": '''arguments = sys.argv[1:]
+if arguments[:1] == ["-version"]:
+    print("Xcode 26.6"); raise SystemExit(0)
+
+
+def value(flag):
+    return arguments[arguments.index(flag) + 1]
+
+
+derived = os.path.abspath(value("-derivedDataPath"))
+platform = "iphonesimulator" if "Simulator" in value("-destination") else "iphoneos"
+log("xcodebuild build " + derived)
+gate()
+Path(derived, "Build/Products", value("-configuration") + "-" + platform, "TronMobile.app").mkdir(parents=True, exist_ok=True)
+''',
+    "codesign": 'print("Identifier=com.tron.mobile.beta", file=sys.stderr)\n',
+    # `open -a Simulator` must never reach the real Simulator app from a fixture.
+    "open": 'log("open " + " ".join(sys.argv[1:]))\n',
+    "xcode-select": 'print("/Applications/Xcode.app/Contents/Developer")\n',
+    "xcodegen": '''if sys.argv[1:] == ["--version"]:
+    print("Version: " + os.environ["FAKE_XCODEGEN_VERSION"]); raise SystemExit(0)
+log("xcodegen " + " ".join(sys.argv[1:]))
+''',
+}
+
+
+class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
+    """W-18 (#100): the Development simulator and each physical device are leased.
+
+    `scripts/tron-ios-simulator` and `scripts/tron-ios-device` run from two
+    synthetic worktrees (copies of the real scripts beside synthetic repository
+    tools), against a synthetic xcrun, xcodebuild and codesign, so no case boots
+    the Development simulator or reaches a physical device.
+
+    Failure modes these cases target, written before the code:
+
+    1. Two worktrees run `scripts/tron-ios-simulator install` (or `start`/`stop`)
+       at once, and both build, install and launch on the one Development
+       simulator.
+    2. A contended command does not exit 73, does not name the holder (worktree,
+       PID, start time), or has already touched the simulator or device before
+       it is refused.
+    3. Development simulator builds from different worktrees share one
+       DerivedData directory.
+    4. Two installs or launches run at once on one physical device, or the lease
+       of one device blocks another device.
+    5. A holder killed outright leaves a stale lease, so the next command is
+       refused although nothing runs any more.
+    6. That stale lease is released while the command tree the killed holder
+       started is still building or installing, so a second command starts
+       under it.
+    7. The command, re-executed under its own lease, takes the lease again and
+       refuses itself.
+    8. A device identifier with path characters names a lease file outside the
+       lease directory.
+    """
+
+    DEVICE_ONE = "11111111-2222-3333-4444-555555555555"
+    DEVICE_TWO = "66666666-7777-8888-9999-AAAAAAAAAAAA"
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.home = self.root / "home"
+        self.bin = self.root / "bin"
+        self.gates = self.root / "gates"
+        self.gates.mkdir()
+        self.tool_log = self.root / "tools.log"
+        self.tool_log.write_text("")
+        xcodegen_version = next(
+            line.split("=", 1)[1].strip()
+            for line in (ROOT / "config/ci-toolchain.env").read_text().splitlines()
+            if line.startswith("TRON_CI_XCODEGEN_VERSION=")
+        )
+        for name, body in DEVICE_LEASE_FAKE_TOOLS.items():
+            self.synthetic_stub(self.bin / name, DEVICE_LEASE_TOOL_SOURCE + body)
+        self.environment = self.contained_environment(self.root)
+        # The Development simulator's DerivedData is derived from HOME and the
+        # worktree here, as it is on a real Mac.
+        self.environment.pop("TRON_IOS_SIMULATOR_DERIVED_DATA")
+        for inherited in (
+            "DEVELOPER_DIR", "TRON_IOS_DEVICE_ID", "TRON_IOS_DEVICE_NAME", "TRON_IOS_SCHEME",
+            "TRON_IOS_CONFIGURATION", "TRON_IOS_REQUIRED_SDK_MAJOR", "TRON_IOS_SIMULATOR_ID",
+            "TRON_IOS_TEST_LOCK_HELD", "TRON_IOS_TEST_LEASE_FD", "TRON_IOS_TEST_LEASE_LOCK",
+        ):
+            self.environment.pop(inherited, None)
+        self.environment.update({
+            "PATH": f"{self.bin}:{os.environ['PATH']}",
+            "FAKE_TOOL_LOG": str(self.tool_log),
+            "FAKE_GATES": str(self.gates),
+            "FAKE_SIMULATOR_UDID": UDID_A,
+            "FAKE_INSTALLED_APP": str(self.root / "installed/TronMobile.app"),
+            "FAKE_XCODEGEN_VERSION": xcodegen_version,
+            "TRON_XCODEGEN": str(self.bin / "xcodegen"),
+            "TRON_IOS_GATEWAY_PROTOCOL_TARGET": "source",
+        })
+        state = Path(self.environment["TRON_IOS_SIMULATOR_STATE_DIR"])
+        state.mkdir(parents=True)
+        (state / "ios-simulator-udid").write_text(UDID_A + "\n")
+        self.started: list[tuple[subprocess.Popen[str], Path]] = []
+        self.groups: list[int] = []
+        self.outputs: list[str] = []
+
+    def tearDown(self) -> None:
+        try:
+            for reached in self.gates.glob("*.reached"):
+                (self.gates / (reached.name.removesuffix(".reached") + ".open")).write_text("")
+            for process, output in self.started:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
+                self.outputs.append(output.read_text())
+            for group in self.groups:
+                try:
+                    os.killpg(group, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            # scripts/tron-ios-device keeps each build's log in /tmp; remove the
+            # ones these cases produced, and only those.
+            for output in self.outputs:
+                for line in output.splitlines():
+                    if line.startswith("Full log: /tmp/xcode-"):
+                        Path(line.removeprefix("Full log: ")).unlink(missing_ok=True)
+            self.assert_no_containment_violations()
+        finally:
+            self.temporary.cleanup()
+
+    def make_worktree(self, name: str) -> Path:
+        """A worktree holding the real helpers and synthetic repository tools."""
+        worktree = self.root / name
+        (worktree / "packages/ios-app").mkdir(parents=True)
+        for relative in (
+            "config/ci-toolchain.env", "scripts/tron-ios-simulator", "scripts/tron-ios-device",
+            "scripts/ios-test-lock.py", "scripts/ios-test-build-identity.py",
+        ):
+            source = ROOT / relative
+            target = worktree / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+            target.chmod(source.stat().st_mode & 0o777)
+        for tool in ("generate-xcode-project", "verify-gateway-protocol-contract.py", "validate-ios-artifact.py"):
+            self.synthetic_stub(worktree / "scripts" / tool, DEVICE_LEASE_TOOL_SOURCE + f'log("{tool}")\n')
+        return worktree
+
+    def caller_environment(self, caller: str, gate: str | None) -> dict[str, str]:
+        environment = dict(self.environment, FAKE_CALLER=caller)
+        if gate is not None:
+            environment["FAKE_GATE"] = gate
+        return environment
+
+    def run_tool(self, worktree: Path, tool: str, *arguments: str, caller: str) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(
+            [str(worktree / "scripts" / tool), *arguments], env=self.caller_environment(caller, None),
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+        )
+        self.outputs.append(result.stdout)
+        return result
+
+    def start_tool(self, worktree: Path, tool: str, *arguments: str, caller: str, gate: str) -> subprocess.Popen[str]:
+        """A command held open at its first gated call, as a long build is."""
+        output = self.root / f"{caller}-{gate}.out"
+        with output.open("w") as handle:
+            process = subprocess.Popen(
+                [str(worktree / "scripts" / tool), *arguments], env=self.caller_environment(caller, gate),
+                text=True, stdout=handle, stderr=subprocess.STDOUT,
+            )
+        self.started.append((process, output))
+        return process
+
+    def wait_reached(self, gate: str, timeout: float = 30) -> int:
+        """The process group of the command tree that reached `gate`."""
+        path = self.gates / f"{gate}.reached"
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            text = path.read_text().strip() if path.exists() else ""
+            if text:
+                group = int(text)
+                # A leased command runs in the holder's own process group; one
+                # still in this test's group was never leased, and killing that
+                # group on teardown would kill the test run itself.
+                if group == os.getpgrp():
+                    self.fail(f"the command that reached {gate!r} runs in the test's own process group: it holds no lease")
+                self.groups.append(group)
+                return group
+            time.sleep(0.05)
+        self.fail(f"no command reached the {gate!r} gate within {timeout:g}s\n" + self.tool_log.read_text())
+
+    def open_gate(self, gate: str) -> None:
+        (self.gates / f"{gate}.open").write_text("")
+
+    def output_of(self, process: subprocess.Popen[str]) -> str:
+        return next(output.read_text() for started, output in self.started if started is process)
+
+    def tool_calls(self, caller: str) -> list[str]:
+        prefix = caller + " "
+        return [line.removeprefix(prefix) for line in self.tool_log.read_text().splitlines() if line.startswith(prefix)]
+
+    def derived_data(self, caller: str) -> str:
+        builds = [call.removeprefix("xcodebuild build ") for call in self.tool_calls(caller) if call.startswith("xcodebuild build ")]
+        self.assertEqual(len(builds), 1, self.tool_calls(caller))
+        return builds[0]
+
+    def assert_names_holder(self, stderr: str, resource: str, worktree: Path, pid: int) -> None:
+        self.assertIn(f"{resource} is already leased", stderr)
+        self.assertTrue(str(worktree) in stderr or os.path.realpath(worktree) in stderr, stderr)
+        self.assertIn(f"PID {pid}", stderr)
+        self.assertRegex(stderr, r"started \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+    def test_one_development_simulator_serializes_worktrees_and_keeps_their_derived_data_apart(self) -> None:
+        """Failure modes 1, 2, 3 and 7."""
+        alpha, beta = self.make_worktree("alpha"), self.make_worktree("beta")
+        holder = self.start_tool(alpha, "tron-ios-simulator", "install", caller="alpha", gate="build")
+        self.wait_reached("build")
+
+        for verb in ("install", "start", "stop"):
+            refused = self.run_tool(beta, "tron-ios-simulator", verb, caller="beta")
+            self.assertEqual(refused.returncode, 73, refused.stderr)
+            self.assert_names_holder(refused.stderr, "Development simulator", alpha, holder.pid)
+        self.assertEqual(self.tool_calls("beta"), [])
+
+        self.open_gate("build")
+        self.assertEqual(holder.wait(timeout=60), 0, self.output_of(holder))
+        self.assertIn(f"xcrun simctl launch {UDID_A} com.tron.mobile.beta", self.tool_calls("alpha"))
+        admitted = self.run_tool(beta, "tron-ios-simulator", "install", caller="beta")
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+
+        derived_root = self.home / "Library/Developer/Tron/ios/simulator-derived-data"
+        alpha_derived, beta_derived = Path(self.derived_data("alpha")), Path(self.derived_data("beta"))
+        self.assertEqual(alpha_derived.parent, derived_root)
+        self.assertEqual(beta_derived.parent, derived_root)
+        self.assertTrue(alpha_derived.name.startswith("alpha-"), alpha_derived)
+        self.assertTrue(beta_derived.name.startswith("beta-"), beta_derived)
+
+    def test_one_device_is_leased_for_build_install_and_launch_and_other_devices_are_not(self) -> None:
+        """Failure modes 2, 4 and 7."""
+        alpha, beta = self.make_worktree("alpha"), self.make_worktree("beta")
+        holder = self.start_tool(
+            alpha, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE, caller="alpha", gate="build",
+        )
+        self.wait_reached("build")
+
+        for verb in ("install", "launch", "stop"):
+            refused = self.run_tool(beta, "tron-ios-device", verb, "--device-id", self.DEVICE_ONE, caller="beta")
+            self.assertEqual(refused.returncode, 73, refused.stderr)
+            self.assert_names_holder(refused.stderr, f"physical iOS device {self.DEVICE_ONE}", alpha, holder.pid)
+        self.assertEqual(self.tool_calls("beta"), [])
+        other = self.run_tool(beta, "tron-ios-device", "launch", "--device-id", self.DEVICE_TWO, caller="other")
+        self.assertEqual(other.returncode, 0, other.stderr)
+
+        self.open_gate("build")
+        self.assertEqual(holder.wait(timeout=60), 0, self.output_of(holder))
+        # The one lease covered the whole build, install and launch, in order.
+        steps = ("xcodebuild build", "xcrun devicectl device install", "xcrun devicectl device process launch")
+        self.assertEqual(
+            [step for call in self.tool_calls("alpha") for step in steps if call.startswith(step)], list(steps),
+        )
+        admitted = self.run_tool(beta, "tron-ios-device", "launch", "--device-id", self.DEVICE_ONE, caller="beta")
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+
+    def test_a_killed_holder_keeps_the_lease_until_its_command_ends_then_releases_it(self) -> None:
+        """Failure modes 5 and 6."""
+        alpha, beta = self.make_worktree("alpha"), self.make_worktree("beta")
+        holder = self.start_tool(
+            alpha, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE, caller="alpha", gate="build",
+        )
+        group = self.wait_reached("build")
+        holder.kill()
+        holder.wait(timeout=10)
+
+        # The holder is gone, but the build it started still runs.
+        refused = self.run_tool(beta, "tron-ios-device", "launch", "--device-id", self.DEVICE_ONE, caller="beta")
+        self.assertEqual(refused.returncode, 73, refused.stderr)
+        self.assert_names_holder(refused.stderr, f"physical iOS device {self.DEVICE_ONE}", alpha, holder.pid)
+        self.assertIn("has exited", refused.stderr)
+        self.assertEqual(self.tool_calls("beta"), [])
+
+        self.open_gate("build")
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            try:
+                os.killpg(group, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("the killed holder's command tree never ended")
+        self.assertIn("devicectl device install", " ".join(self.tool_calls("alpha")))
+
+        # Its stale metadata does not block the next command.
+        admitted = self.run_tool(beta, "tron-ios-device", "launch", "--device-id", self.DEVICE_ONE, caller="beta")
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        self.assertIn("devicectl device process launch", " ".join(self.tool_calls("beta")))
+
+    def test_a_device_identifier_cannot_name_a_lease_outside_the_lease_directory(self) -> None:
+        """Failure mode 8."""
+        alpha = self.make_worktree("alpha")
+        refused = self.run_tool(alpha, "tron-ios-device", "launch", "--device-id", "../../../escape", caller="alpha")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("invalid device identifier", refused.stderr)
+        self.assertEqual(self.tool_calls("alpha"), [])
+        self.assertEqual([path for path in self.root.rglob("*") if "escape" in path.name or ".." in path.name], [])
+
+
 class ContainmentFixture(ContainedFixture, unittest.TestCase):
     """The guard that keeps every other fixture inside its own temporary directory.
 

@@ -169,6 +169,10 @@ reclaim simulators yourself.
   (`scripts/tron-ios-simulator stop` for the Development simulator).
 - Never force a boot past memory admission (exit 73) by booting the device
   another way; free memory first, or report the shortage.
+- Never work around a held Development simulator or physical-device lease
+  (exit 73 from `scripts/tron-ios-simulator` or `scripts/tron-ios-device`,
+  naming the holder) with raw `xcodebuild`, `simctl` or `devicectl`; wait for
+  the holder's command to finish.
 - Never install a production Release artifact through the ordinary device
   helper or automate signing, archive delivery, upload, or deployment.
 - Never modify `.codex/environments/environment.toml`; old names may appear only

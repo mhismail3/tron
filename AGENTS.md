@@ -116,7 +116,12 @@
   the configurations. Signed artifacts remain the authority for Apple
   environments.
 - Never erase iOS application or Keychain data to recover from a build/signing
-  mismatch, and do not install on a device another session currently owns.
+  mismatch.
+- `scripts/tron-ios-simulator` (`start`, `install`, `stop`) and
+  `scripts/tron-ios-device` (`install`, `launch`, `stop`) hold a host-wide
+  lease on the Development simulator and on each physical device for the whole
+  command. Exit 73 names the holder's worktree, PID and start time: wait for it,
+  and never reach the device another way (`xcodebuild`, `simctl`, `devicectl`).
 
 ## Process lifecycle and cleanup
 

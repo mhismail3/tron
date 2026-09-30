@@ -20,6 +20,10 @@ LAUNCH_TIMEOUT_SECONDS="${TRON_IOS_LAUNCH_TIMEOUT_SECONDS:-20}"
 REQUIRED_SDK_MAJOR="${TRON_IOS_REQUIRED_SDK_MAJOR:-}"
 GATEWAY_PROTOCOL_TARGET="${TRON_IOS_GATEWAY_PROTOCOL_TARGET:-stable}"
 GATEWAY_MAC_APP="${TRON_IOS_GATEWAY_MAC_APP:-/Applications/Tron.app}"
+LOCKER="$ROOT_DIR/scripts/ios-test-lock.py"
+# Host-wide: every worktree, and the Gateway's detached install helper, lease a
+# device here.
+DEVICE_LEASE_DIR="$HOME/.tron/internal/run"
 
 usage() {
     cat <<'USAGE'
@@ -53,6 +57,13 @@ install targets.
 Without a device override, the script selects the only selectable physical iOS
 device. If multiple physical devices are selectable, set TRON_IOS_DEVICE_ID or
 TRON_IOS_DEVICE_NAME locally.
+
+`install`, `launch` and `stop` hold the device's host-wide lease
+($HOME/.tron/internal/run/ios-device-<DEVICE_ID>.lease.lock) for the whole
+command: build, install and launch. A command that finds it held exits 73
+naming the holder's worktree, PID and start time; wait for that command to
+finish. The lease is keyed by the resolved device identifier, which both device
+selection and the Gateway's install use.
 USAGE
 }
 
@@ -254,6 +265,21 @@ resolve_device_id() {
     echo "Selectable physical devices:" >&2
     printf '%s\n' "$devices" >&2
     die "set TRON_IOS_DEVICE_ID or TRON_IOS_DEVICE_NAME when zero or multiple physical devices are selectable"
+}
+
+# Re-run this command under the resolved device's lease, unless this process is
+# that leased command. The re-run names the resolved device explicitly, so it
+# cannot select a different device than the one it leased.
+hold_device_lease() {
+    local device_id="$1"
+    shift
+    [[ "$device_id" =~ ^[A-Za-z0-9-]+$ ]] || die "invalid device identifier: $device_id"
+    local lease="$DEVICE_LEASE_DIR/ios-device-$device_id.lease.lock"
+    if [[ -n "${TRON_IOS_TEST_LEASE_LOCK:-}" && "$TRON_IOS_TEST_LEASE_LOCK" -ef "$lease" ]]; then
+        return
+    fi
+    exec python3 "$LOCKER" --lock "$lease" --resource "physical iOS device $device_id" \
+        --worktree "$ROOT_DIR" -- "$0" "$@" --device-id "$device_id"
 }
 
 pretty_xcode_output() {
@@ -474,21 +500,28 @@ status_installed_app() {
 
 main() {
     local cmd="${1:-help}"
+    local device_id
     shift || true
     case "$cmd" in
         install)
             parse_common_args "$@"
             validate_install_pair
+            device_id="$(resolve_device_id)"
+            hold_device_lease "$device_id" "$cmd" "$@"
             build_install_launch
             ;;
         launch)
             parse_common_args "$@"
             [[ "$BUILD_MODE" == "optimized" ]] || die "--fast-debug is only valid with install"
+            device_id="$(resolve_device_id)"
+            hold_device_lease "$device_id" "$cmd" "$@"
             launch_installed_app
             ;;
         stop)
             parse_common_args "$@"
             [[ "$BUILD_MODE" == "optimized" ]] || die "--fast-debug is only valid with install"
+            device_id="$(resolve_device_id)"
+            hold_device_lease "$device_id" "$cmd" "$@"
             stop_installed_app
             ;;
         status)
