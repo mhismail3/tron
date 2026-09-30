@@ -1060,9 +1060,9 @@ always use diagnostics `Never` plus `-collect-test-diagnostics never`. Use
 it has a larger finite bound and never runs as an automatic retry. Every attempt
 retains a full log, metadata, process evidence, and a unique xcresult under
 `$HOME/Library/Developer/Tron/ios/test-runs`; `status` reports the newest run
-this worktree started in its lane as `Latest result`, resolved from each run's
-`owner.json`, because the root is shared and a single pointer in it would name
-whichever worktree finished last.
+this worktree started in its lane as `Latest run` (it may still be in progress),
+resolved from each run's `owner.json`, because the root is shared and a single
+pointer in it would name whichever worktree finished last.
 The shared per-user iOS build root is `$HOME/Library/Developer/Tron/ios`: test
 runs use its `test-runs` folder, each worktree's test products use its own
 `test-derived-data/<worktree-key>` folder (its directory name plus a hash of its

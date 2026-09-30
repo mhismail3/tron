@@ -108,7 +108,7 @@ was given. Routine runs are serial, use an exact owned simulator UDID, disable
 verbose test diagnostics, and preserve unique complete logs plus xcresults under
 $HOME/Library/Developer/Tron/ios/test-runs by default; each run directory records
 the worktree and lane that produced it, which is what clean and prune scope and
-group by and what status resolves this lane's latest result from. Test products are built
+group by and what status resolves this lane's latest run from. Test products are built
 per worktree under $HOME/Library/Developer/Tron/ios/test-derived-data and stamped
 with the worktree and source state that produced them; run refuses products
 stamped for another worktree or another source state. diagnose never runs
@@ -336,10 +336,10 @@ if [[ "$command" == status ]]; then
     echo "Test products: not built"
   fi
   # Resolved from the runs' own owners: the results root is shared by every
-  # worktree and lane, so no single pointer in it can name this lane's result.
+  # worktree and lane, so no single pointer in it can name this lane's run.
   latest_run="$(python3 "$SIMULATOR" latest-run --results-root "$RESULTS_ROOT" \
     --worktree "$ROOT" --lane "$LANE_LABEL")" || exit "$EXIT_DESTINATION"
-  echo "Latest result: ${latest_run:-none}"
+  echo "Latest run: ${latest_run:-none}"
   exit 0
 fi
 

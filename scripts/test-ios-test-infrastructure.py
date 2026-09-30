@@ -1028,14 +1028,14 @@ exit 0
         return self.write_lane(directory, udid, name=name)
 
     def latest_run(self) -> Path:
-        """The run `status` names as this worktree's and lane's latest result."""
+        """The run `status` names as this worktree's and lane's latest run."""
         status = self.invoke(command="status")
         self.assertEqual(status.returncode, 0, status.stderr)
-        prefix = "Latest result: "
+        prefix = "Latest run: "
         for line in status.stdout.splitlines():
             if line.startswith(prefix) and line != f"{prefix}none":
                 return Path(line[len(prefix):])
-        raise AssertionError(f"no latest result in:\n{status.stdout}")
+        raise AssertionError(f"no latest run in:\n{status.stdout}")
 
     def latest_metadata(self) -> dict[str, object]:
         return json.loads((self.latest_run() / "metadata.json").read_text())
@@ -3433,7 +3433,7 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
        worktree's lane directory, which holds no ownership marker, so no sweep
        ever reclaims it.
     9. W-21 (issue #101): `status` names another worktree's or another lane's
-       run as this worktree's latest result - one `latest` link in the shared
+       run as this worktree's latest run - one `latest` link in the shared
        results root followed whichever run finished last anywhere - or names an
        older run of this worktree and lane instead of its newest.
     """
@@ -3526,14 +3526,14 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
         raise AssertionError(f"no completed run in:\n{result.stdout}")
 
     def reported_latest(self, worktree: Path, *arguments: str) -> str:
-        """What `status` in a worktree names as its latest result."""
+        """What `status` in a worktree names as its latest run."""
         status = self.tool(worktree, "tron-ios-test", "status", *arguments)
         self.assertEqual(status.returncode, 0, status.stderr)
-        prefix = "Latest result: "
+        prefix = "Latest run: "
         for line in status.stdout.splitlines():
             if line.startswith(prefix):
                 return line[len(prefix):]
-        raise AssertionError(f"no latest result in:\n{status.stdout}")
+        raise AssertionError(f"no latest run in:\n{status.stdout}")
 
     def lane_marker(self, lane: Path) -> dict[str, object]:
         return json.loads((lane / "simulator.json").read_text())
@@ -3698,7 +3698,7 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
                 self.assertTrue(self.present(str(self.lane_marker(lane)["udid"])))
 
     def test_status_names_the_newest_run_of_this_worktree_and_lane(self) -> None:
-        """Failure mode 9: the latest result is this worktree's and lane's own."""
+        """Failure mode 9: the latest run is this worktree's and lane's own."""
         first, second = self.linked("first-worktree"), self.linked("second-worktree")
         for worktree in (first, second):
             self.stamp_products(worktree)

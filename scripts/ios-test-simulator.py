@@ -1296,7 +1296,7 @@ def run_attribution(run: Path) -> tuple[str | None, str, float]:
 def latest_run(arguments: argparse.Namespace) -> int:
     """Print the newest run this worktree started in this lane, or nothing.
 
-    The results root is shared by every worktree and lane, so the latest result
+    The results root is shared by every worktree and lane, so the latest run
     is resolved from each run's own owner rather than kept as one pointer in the
     root, which named whichever run finished last anywhere (W-21, issue #101).
     Runs in a lane never overlap - the lane's lease serializes them - so the
