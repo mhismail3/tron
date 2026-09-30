@@ -283,7 +283,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-17 | Claimed | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | luna-worker, 2026-09-30 |
 | P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
 | P99-20 | Done | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
-| P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); root-export a per-instance theme setter; structured per-session MCP status (user authorizes filing) | P99-8, P99-11 | Unassigned |
+| P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); root-export a per-instance theme setter; public per-session MCP status/process count (user authorizes filing) | P99-8, P99-11 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
 | P99-22 | Done | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | luna-worker, 2026-09-29 |
 | P99-23 | Done | Parent-owned persistence/projection for bounded nested display artifacts and trusted browser live-view receipts, with no child canonical rows or independent receipts | P99-22 | luna-worker, 2026-09-29 |

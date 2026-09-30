@@ -701,6 +701,7 @@ export class RuntimeRegistry {
        * reserved or already-running automation target. */
       sessionAutomationReserved?: (sessionId: string) => boolean;
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
+      codemodeDiagnostic?: RuntimeSlotDependencies["codemodeDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       /** Handled catalog-index write failures. The index write is fire-and-forget
        * outside any request span, so its owner records them. */
@@ -1579,6 +1580,7 @@ export class RuntimeRegistry {
       noteModelUsed: (sessionId: string, model: { provider: string; id: string }) => { void this.noteModelUsed(sessionId, model); },
       ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
+      ...(this.options.codemodeDiagnostic ? { codemodeDiagnostic: this.options.codemodeDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
       sessionAudience: (sessionId: string) => this.subscribers.get(sessionId)?.size ?? 0,
       ...(this.options.resources ? { resources: this.options.resources } : {}),

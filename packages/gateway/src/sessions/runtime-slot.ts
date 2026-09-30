@@ -429,6 +429,7 @@ export interface RuntimeSlotDependencies {
   runtimeDisposalTimedOut?: (graceMs: number) => void;
   persistenceDiagnostic?: (sessionId: string, code: string) => void;
   compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
+  codemodeDiagnostic?: (diagnostic: { sessionId: string; outcome: "completed" | "failed" | "aborted" | "timeout"; durationMs: number; nestedCallCount: number; complete: boolean }) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
   /** Bounded recency for the shared model picker. Called once per admitted
@@ -3975,6 +3976,18 @@ export class RuntimeSlot {
       }
       case "tool_execution_end": {
         if (!this.hasActiveAgentRun) break;
+        if (!("parentToolCallId" in event && event.parentToolCallId) && event.toolName === "codemode") {
+          const details = event.result && typeof event.result === "object" && "details" in event.result
+            ? event.result.details as Record<string, unknown> | undefined : undefined;
+          const nestedState = this.toolExecutions.get(event.toolCallId)?.nestedCalls;
+          const status = typeof details?.status === "string" ? details.status : undefined;
+          const outcome = status === "aborted" || status === "timeout" ? status : event.isError ? "failed" : "completed";
+          const retained = this.toolMetadata.get(event.toolCallId);
+          const startedAt = this.toolStartedAtMonotonicMs.get(event.toolCallId);
+          const durationMs = startedAt === undefined ? retained?.durationMs ?? 0 : Math.max(0, performance.now() - startedAt);
+          const complete = nestedState?.complete ?? (typeof details?.complete === "boolean" ? details.complete : true);
+          this.dependencies.codemodeDiagnostic?.({ sessionId: this.id, outcome, durationMs, nestedCallCount: nestedState?.calls.length ?? 0, complete });
+        }
         if ("parentToolCallId" in event && event.parentToolCallId) {
           this.updateNestedExtensionActivity(event, event.isError ? "failed" : "completed", event.result);
           this.projectNestedToolExecution(event, event.isError ? "failed" : "completed");

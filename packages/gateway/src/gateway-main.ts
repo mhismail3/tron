@@ -277,6 +277,11 @@ const sessions = new RuntimeRegistry({
     `Session compaction ${diagnostic.outcome}`,
     { event: "session.compaction.completed", source: "session", ...diagnostic },
   ),
+  codemodeDiagnostic: (diagnostic) => logger.log(
+    diagnostic.outcome === "completed" ? "info" : "warning",
+    `Codemode execution ${diagnostic.outcome}`,
+    { event: "codemode.execution.completed", source: "session", ...diagnostic },
+  ),
   machineId: config.machineId,
   notifications,
   browserLiveViews,

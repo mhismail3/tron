@@ -95,9 +95,11 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
+    const codemodeDiagnostics: Array<Record<string, unknown>> = [];
     const registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       browserLiveViews: views,
+      codemodeDiagnostic: (diagnostic) => codemodeDiagnostics.push(diagnostic),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
@@ -128,6 +130,14 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
     expect(parent?.nestedCalls?.calls.map((call) => call.toolName)).toEqual(expect.arrayContaining([
       "computer", "display", "agent_browser", "native_capture",
     ]));
+    expect(codemodeDiagnostics).toHaveLength(1);
+    expect(codemodeDiagnostics[0]).toMatchObject({
+      sessionId: slot.id, outcome: "completed", durationMs: expect.any(Number),
+      nestedCallCount: expect.any(Number), complete: true,
+    });
+    expect(codemodeDiagnostics[0].nestedCallCount).toBeGreaterThanOrEqual(5);
+    expect(Object.keys(codemodeDiagnostics[0]).sort()).toEqual(["complete", "durationMs", "nestedCallCount", "outcome", "sessionId"]);
+    expect(JSON.stringify(codemodeDiagnostics)).not.toContain(script);
     expect(nativeBindings.length).toBeGreaterThanOrEqual(1);
     expect(nativeBindings.every((binding) => binding.canonicalSessionID === slot.id)).toBe(true);
     await views.catalogNative(slot.id);
@@ -166,6 +176,6 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
 
     const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-nested-presentation.json");
     await mkdir(dirname(artifactPath), { recursive: true });
-    await writeFile(artifactPath, `${JSON.stringify({ live: retainedLive, parent: retainedParent, reloadedParent, computer: { calls: driver.calls, maximumActive: driver.maximumActive }, nativeSession: nativeBindings[0]?.canonicalSessionID }, null, 2)}\n`);
+    await writeFile(artifactPath, `${JSON.stringify({ live: retainedLive, parent: retainedParent, reloadedParent, codemodeDiagnostics, computer: { calls: driver.calls, maximumActive: driver.maximumActive }, nativeSession: nativeBindings[0]?.canonicalSessionID }, null, 2)}\n`);
   });
 });

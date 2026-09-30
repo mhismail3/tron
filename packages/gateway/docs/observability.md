@@ -298,10 +298,17 @@ Conventions used in the rows:
 | `mcp.auth-url.routed` | info | `packages/gateway/src/admin/auth-broker.ts` | a provider-authored MCP authorization URL is emitted to its active session operation | fixed message only; no URL, server name, or callback data | Detects that sign-in reached the phone-owned operation without retaining OAuth material; `packages/gateway/src/admin/auth-broker.test.ts` |
 | `mcp.callback-relay.succeeded` | info | `packages/gateway/src/admin/auth-broker.ts` | Pi's captured MCP callback was relayed to its loopback listener | fixed message only | Distinguishes a completed callback delivery from an authorization URL that was merely presented; `packages/gateway/src/admin/auth-broker.test.ts` |
 | `mcp.callback-relay.failed` | warning | `packages/gateway/src/admin/auth-broker.ts` | the captured MCP callback could not be delivered to its loopback listener | fixed message only; no host, port, query, code, or token | Diagnoses the boundary failure without leaking authorization data; `packages/gateway/src/admin/auth-broker.test.ts` |
+| `codemode.execution.completed` | info for success, warning for failure/abort/timeout | `packages/gateway/src/gateway-main.ts`, raised at `packages/gateway/src/sessions/runtime-slot.ts` | a top-level codemode tool execution ends | `sessionId`, outcome, `durationMs`, nested-call count, `complete`; never script, arguments or output | Makes script failure and incomplete nested execution diagnosable without recording user code; `packages/gateway/src/sessions/codemode-nested-presentation.integration.test.ts` |
 | `auth.login.started` | info | `packages/gateway/src/admin/auth-broker.ts` | a provider login operation is admitted | provider and auth type in the message | An interrupted login must be explainable from the timeline alone |
 | `auth.login.recovered` | info | `packages/gateway/src/admin/auth-broker.ts` | an existing login operation is reattached to a new client | provider and auth type in the message | — |
 | `auth.login.succeeded` | info | `packages/gateway/src/admin/auth-broker.ts` | the operation retired with a stored credential, or the credential was stored after it ended | provider and auth type in the message | — |
 | `auth.login.ended` | warning | `packages/gateway/src/admin/auth-broker.ts` | the operation retired without a stored credential, with its reason | provider, auth type and elapsed seconds in the message | A login that ends without a credential is a caller stop or a timeout, not a success |
+
+Pi's public runtime API does not expose the number of MCP stdio child processes
+owned by a runtime, so Tron does not claim or log that count. The P99-22 MCP
+fixture's process-group cleanup checks are the available lifecycle evidence;
+see `runtime-registry.integration.test.ts` for shutdown and capacity-eviction
+PID assertions.
 
 One Gateway name is not written as a literal. The `code` passed to the session's
 persistence diagnostic is used directly as the event, which is why the
