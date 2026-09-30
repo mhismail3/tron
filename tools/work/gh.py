@@ -37,24 +37,32 @@ class Gh:
         self.binary = resolve_gh()
         self.cwd = cwd
 
+    def _exec(self, *args: str, stdin: Optional[str] = None) -> subprocess.CompletedProcess:
+        return subprocess.run([self.binary, *args], cwd=self.cwd, input=stdin, capture_output=True, text=True)
+
     def run(self, *args: str, stdin: Optional[str] = None) -> str:
-        completed = subprocess.run(
-            [self.binary, *args],
-            cwd=self.cwd,
-            input=stdin,
-            capture_output=True,
-            text=True,
-        )
+        completed = self._exec(*args, stdin=stdin)
         if completed.returncode != 0:
             detail = completed.stderr.strip() or completed.stdout.strip()
             raise GhError(f"gh {' '.join(args[:3])} failed: {detail}")
         return completed.stdout
 
-    def graphql(self, query: str, **variables: Any) -> dict:
+    def graphql(self, query: str, missing_ok: bool = False, **variables: Any) -> dict:
+        """Run a query; with missing_ok, NOT_FOUND errors leave their fields null instead of failing."""
         body = json.dumps({"query": query, "variables": variables})
-        response = json.loads(self.run("api", "graphql", "--input", "-", stdin=body))
-        if response.get("errors"):
-            raise GhError("GraphQL: " + "; ".join(error.get("message", "?") for error in response["errors"]))
+        completed = self._exec("api", "graphql", "--input", "-", stdin=body)
+        # gh exits non-zero whenever the response carries errors, but still
+        # prints the response; anything unparseable is a transport failure.
+        try:
+            response = json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            response = {}
+        if not isinstance(response, dict) or response.get("data") is None:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise GhError(f"gh api graphql failed: {detail}")
+        errors = [e for e in response.get("errors") or [] if not (missing_ok and e.get("type") == "NOT_FOUND")]
+        if errors:
+            raise GhError("GraphQL: " + "; ".join(e.get("message", "?") for e in errors))
         return response["data"]
 
     def rest(self, method: str, path: str, body: Optional[dict] = None) -> Any:

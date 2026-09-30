@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bootstrap  # noqa: E402
 import claim  # noqa: E402
+import dashboard  # noqa: E402
 import start  # noqa: E402
 import verify  # noqa: E402
 from gh import Gh, GhError  # noqa: E402
@@ -36,6 +37,9 @@ def main(argv: list) -> int:
     check = commands.add_parser("verify", help="run the checks the branch diff requires and write a receipt")
     check.add_argument("--post", action="store_true",
                        help="publish the receipt: evidence comment, private logs, commit status")
+    board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
+    board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
+    board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
     args = parser.parse_args(argv)
 
     root = repository_root()
@@ -53,7 +57,9 @@ def main(argv: list) -> int:
             if args.post:
                 print(f"posted:   {verify.post(Gh(root), root, config, receipt)}")
             return 0 if receipt["passed"] else 1
-    except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError,
+        if args.command == "dashboard":
+            return dashboard.run(Gh(root), Path.cwd(), config, args.html, args.json)
+    except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError,
             FileNotFoundError, json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1

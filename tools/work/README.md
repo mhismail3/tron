@@ -257,3 +257,87 @@ covers the GitHub side.
 19. **A receipt describes content that is not the committed head.** Dirty
     worktrees are refused, and a head or worktree that changes during the run
     discards the receipt.
+
+## `dashboard`
+
+`scripts/tron work dashboard [--html <path>] [--json <path>]` shows the state of
+all work in one read-only view. It is fetched live on every run from GitHub and
+local Git, and it keeps no cache or registry. Without flags it prints a short
+text summary. `--html` writes one self-contained HTML file with inline CSS, no
+external assets and no script, readable in a narrow phone sheet and in dark
+mode. `--json` writes the same model as JSON for tests and other tools.
+
+It reads, in a bounded number of calls:
+
+- the Project's items (paginated GraphQL): Status, Priority and Epic rank, and
+  each issue's state, labels, parent, sub-issue progress, blockers and latest
+  comment;
+- open issues carrying a `dashboard.needsYouLabels` label or the
+  `dashboard.regressionLabel`, whether or not they are in the Project;
+- open pull requests with their head branch, the combined check state of the
+  head commit, and the `dashboard.verifyContext` commit status;
+- the state of any issue named by a claim branch that the reads above did not
+  return (one aliased query);
+- remote branches (`git ls-remote`), the claim owner from each claim branch's
+  claim commit (the same code as `start`), and local worktrees
+  (`git worktree list`).
+
+Sections, in order:
+
+1. **Needs you:** open issues labeled with a `needsYouLabels` label, or with
+   Status `needsYouStatus`.
+2. **Epics:** open issues labeled `epicLabel`, by Epic rank, with sub-issue
+   progress.
+3. **In progress:** issues with Status `claim.claimedStatus`, with the claim
+   branch, the worktree relative to the checkout's parent directory, the owning
+   session, last activity, the pull request, its checks and its verify status.
+4. **Ready queue:** Ready issues that are not epics. They are ordered by the
+   Epic rank of their parent epic (or their own Epic rank when they have no
+   ranked parent; unranked last), then by Priority in the order the options are
+   declared, then unblocked before blocked, then issue number.
+5. **Blocked:** issues with Status `blockedStatus`.
+6. **Stale claims:** In-progress issues with no push to their claim branch and
+   no comment on the issue or its pull request for 48 hours. They are only
+   flagged, never reset.
+7. **Soft cap:** the number of In-progress issues against `claim.softCap`.
+8. **Disagreements:** a claim branch whose open issue is not In progress, an
+   In-progress issue without a claim branch, or an issue with more than one
+   claim branch. The branch is the authority; Status is its projection.
+9. **Orphans:** worktrees under `claim.worktreeRoot` that are not on the claim
+   branch of an open issue, and remote claim branches whose issue is closed or
+   does not exist.
+10. **Regressions:** open issues labeled `regressionLabel`.
+
+The names it reads (statuses, labels, fields, the verify context) come from the
+`dashboard` and `claim` sections of `.github/work.json`.
+
+### Failure modes
+
+`test_dashboard.py` checks these against recorded GitHub-shaped responses.
+
+12. **GitHub text injects markup into the HTML.** Titles, labels and branch
+    names are attacker-controlled in a public repository. Every such string is
+    HTML-escaped, and only `https://` links are rendered.
+13. **A Project item without usable content crashes the run or shows up.**
+    Deleting an issue before removing its Project item leaves an item whose
+    content is null. Such items, drafts, pull requests and issues from other
+    repositories are ignored and only counted.
+14. **Staleness is misjudged.** Last activity is the latest of the claim
+    branch's head commit, the issue's latest comment and its pull request's
+    latest comment, so a recent comment keeps an old branch fresh. A claim is
+    stale only past 48 hours.
+15. **A disagreement between the claim branch and Status goes unreported.**
+    Each of the three kinds above is reported, and a consistent claim is not.
+16. **The Ready queue is ordered wrongly.** Priority follows the declared option
+    order, not the alphabetical order of names, and a parent epic's rank wins
+    over the task's own.
+17. **An orphan is missed, or live work is called an orphan.** A worktree on the
+    claim branch of an open issue is not an orphan; a worktree outside the
+    worktree root is not reported at all.
+18. **Output leaks a local absolute path.** Worktrees appear only relative to
+    the checkout's parent directory.
+19. **A Needs-you item is missed.** A labeled issue that is not in the Project
+    still appears, and closed issues do not.
+20. **Pagination drops items.** Every page of Project items, pull requests and
+    labeled issues is read, and the number of calls grows with pages, not with
+    issues.
