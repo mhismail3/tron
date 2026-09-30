@@ -288,6 +288,8 @@ struct ChatVisualParityManifest: Codable, Equatable {
 enum ChatVisualParityReference {
     /// One entry per reviewed recording session.
     static let recordedRevisions: Set<String> = [
+        // CT-23 image card, today path, clean source before card changes.
+        "433b9c340b56d6c7342f11de52b26175e6215ec5",
         // CT-12's reference, re-recorded per display frame by CT-14 on the
         // unchanged chat before any container change.
         "eed1e15a5de1a4ef0f66e338f89e9be7508e266c",

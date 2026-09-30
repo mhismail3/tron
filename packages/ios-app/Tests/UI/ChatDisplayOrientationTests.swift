@@ -10,12 +10,7 @@ import UIKit
 enum ChatDisplayOrientationFixture {
     static func snapshot() throws -> SessionSnapshot {
         var snapshot = try SessionScenarioBuilder(seed: 1_310).openingTail(targetEncodedBytes: 10_000)
-        snapshot.transcript = try decodeTranscriptFixture([TranscriptItem].self, from: Data(#"""
-        [
-          {"id":"image-request","parentId":null,"presentationId":"image-request","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"image-call-content","ordinal":0,"type":"toolCall","toolCallId":"image-call","name":"display","arguments":{"presentation":{"surface":"inline"}}}]},
-          {"id":"image-result","parentId":"image-request","presentationId":"image-result","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"image-result-text","ordinal":0,"type":"text","text":"Displayed Orientation Image."}],"toolCallId":"image-call","toolName":"display","isError":false,"display":{"schema":"tron.display.v1","displayId":"orientation-image","revision":1,"title":"Orientation Image","altText":"Red above blue, with the close badge at top right.","kind":"image","presentation":{"requestedSurface":"inline","inlineTapAction":"sheet"},"eligibleSurfaces":["sheet","inline","floating"],"fallbackText":"Orientation Image","artifact":{"id":"6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc40","name":"orientation.png","mimeType":"image/png","size":1024,"kind":"image"}}}
-        ]
-        """#.utf8))
+        snapshot.transcript = try decodeTranscriptFixture([TranscriptItem].self, from: HostedChatDisplayFixture.imageTranscriptData)
         snapshot.transcriptStart = 0
         snapshot.transcriptTotal = snapshot.transcript.count
         snapshot.toolExecutions = []
@@ -95,7 +90,10 @@ struct ChatDisplayOrientationTests {
         for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
             let harness = try await ChatDisplayOrientationFixture.harness(orientation: orientation)
             do {
-                let image = try await ChatDisplayOrientationFixture.waitForLoadedImage(harness)
+                harness.visibleRootView.window?.overrideUserInterfaceStyle = .dark
+                _ = try await ChatDisplayOrientationFixture.waitForLoadedImage(harness)
+                for _ in 0..<24 { try await harness.driveFrameBoundary() }
+                let image = try ChatDisplayOrientationFixture.capture(harness)
                 let colors = try #require(try ChatDisplayOrientationFixture.colorCenters(image))
                 #expect(colors.red.y < colors.blue.y, "\(orientation): red \(colors.red), blue \(colors.blue)")
                 Attachment.record(try #require(image.pngData()), named: "inline-image-\(orientation).png")

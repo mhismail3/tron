@@ -2491,3 +2491,15 @@ lazy fixture. Phase-height comparisons read the probe's settled records and
 wait for the entrance owner's settlement, not a guessed number of display
 frames. Thinking-row mount/measurement and the unchanged 0.5 pt phase bound
 remain gates in both orientations.
+
+### Inline display orientation evidence (CT-23)
+
+`ChatDisplayOrientationTests` renders a fully loaded asymmetric image through the
+real transcript/media owner in both orientations and reads window pixels. The
+`inline-image-display-at-rest` parity reference is recorded on today's path at
+clean `433b9c340`; the prior ten references are unchanged. The hosted-only
+`-tron-chat-display-fixture` drives the same card in dark mode for
+`TronChatDisplayUITests`: long-press/dismiss screenshots and actual status-bar taps
+are retained in the xcresult. Run hosted owners with the `ui-validation` tier;
+XCUITest selects each orientation through the app's launch environment. These
+checks do not substitute for the user's device compositor/animation review.
