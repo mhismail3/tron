@@ -92,7 +92,7 @@ only on the user's word) apply to every task.
 | C25 | Needs scoping | Expose Jev admission choice, confidence, usefulness score and coverage so the archive threshold can be owned by the editable routine, not the assessment adapter | C21 | — |
 | C26 | Done | Raindrop collection roles: one home per scope, triage inboxes, an archive home; moves must agree with Tron's decision | C20 | knowledge-consolidation session, 2026-09-30 |
 | C27 | Done | X bookmarks through the official X API: OAuth 2.0 PKCE connection with refresh, discovery under the paid cap, credit balance | C20 | knowledge-consolidation session, 2026-09-30 |
-| C29 | Claimed | Connected Services and MCP Servers sheets follow the Providers sheet layout; X shows its credit balance | C27 | knowledge-consolidation session, 2026-09-30 |
+| C29 | Done | Connected Services and MCP Servers sheets follow the Providers sheet layout; X shows its credit balance | C27 | knowledge-consolidation session, 2026-09-30 |
 
 ## Task details
 
@@ -621,6 +621,12 @@ loading and nothing on failure.
   `main` too.
 - Changes: this commit.
 
-### C29 · Claimed · 2026-09-30 · knowledge-consolidation session
+### C29 · Done · 2026-09-30 · luna-worker
 
-- Result: C29 claimed; work on branch `ios/integration-sheets`.
+- Result: Connected Services and MCP Servers now use a shared Providers-style Configured/Available layout; X credits are a bounded, fenced presentation read and capabilities, policy, collection roles, and account management remain in instance details.
+- Evidence: `scripts/tron ios generate` (passed); `scripts/tron-ios-test build` (passed); `scripts/tron-ios-test run --only-testing TronMobileTests/IntegrationModelsTests` (7 passed); `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build` (passed); `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run --only-testing TronMobileUITests/TronIntegrationSheetsUITests` (2 passed); `cd packages/gateway && npm run build` (passed); `npx vitest run src/integrations src/knowledge` (32 files, 410 tests passed); `python3 scripts/check-documentation-policy.py` (passed, 50 authored files); `scripts/personal-info-guard.sh` (passed).
+- Changes: this commit.
+- Tasks added: none.
+- Kept on purpose: configured-but-setup-required instances stay in Configured; available definitions require no instance, and every non-MCP integration keeps its add-account action in detail.
+- Deviations: Gateway definition labels were simplified to plain Jev and X so the native client does not need a second display-name registry.
+- For the next agent: screenshots are retained under `~/.tron/workspace/files/c29-screenshots/`; no live Gateway request or runtime transition was performed.
