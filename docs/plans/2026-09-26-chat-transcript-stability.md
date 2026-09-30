@@ -3959,3 +3959,10 @@ header minY **430.39→78 pt** (medium→large); today's repeated older-edge dra
 removes the sheet scroll view (dismissal). Fixture setup corrections preceded
 this run and are not counted as negative controls. First product experiment is
 only the public `.presentationContentInteraction(.scrolls)` on the child sheet.
+
+The `.scrolls`-only experiment at clean `d163a520f`, run
+`20260930T084258Z-run.y5T86O`, fixes medium history scrolling but is insufficient:
+origin's large newest-edge content pull collapses the sheet (header **78→430.39 pt**),
+and today's oldest-edge pulls still dismiss. Next contained public-API experiment:
+set the child transcript scroll's `transfersVerticalScrollingToParent=false`,
+restoring it on removal; leave the native delegate and header gestures untouched.

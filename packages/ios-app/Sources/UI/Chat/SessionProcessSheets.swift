@@ -796,6 +796,7 @@ struct ReadOnlySubagentSessionSheet: View {
                 .padding(.horizontal, 16)
                 .padding(orientation.paddingEdgeSet(.top), 12)
                 .scrollTargetLayout()
+                .background { SubagentSheetScrollBoundary().frame(width: 0, height: 0) }
             }
             .chatTranscriptViewport(orientation, safeAreaInsets: insets)
             .chatTranscriptScrollBehavior(
@@ -918,6 +919,36 @@ private struct ReadOnlySubagentTranscriptRow: View, Equatable {
             message.item.role == .user ? .trailing : .leading
         case .toolRun, .notification:
             .leading
+        }
+    }
+}
+
+/// Keep edge rubber-banding inside this transcript. The sheet's toolbar remains
+/// outside the scroll hierarchy and continues to own resize/swipe dismissal.
+private struct SubagentSheetScrollBoundary: UIViewRepresentable {
+    func makeUIView(context: Context) -> Probe { Probe() }
+    func updateUIView(_ view: Probe, context: Context) { view.reconcile() }
+    static func dismantleUIView(_ view: Probe, coordinator: ()) { view.restore() }
+
+    final class Probe: UIView {
+        private weak var scroll: UIScrollView?
+        private var previous = true
+        override func didMoveToWindow() { super.didMoveToWindow(); reconcile() }
+        override func layoutSubviews() { super.layoutSubviews(); reconcile() }
+        func reconcile() {
+            guard window != nil else { restore(); return }
+            var ancestor = superview
+            while let view = ancestor, !(view is UIScrollView) { ancestor = view.superview }
+            guard let owner = ancestor as? UIScrollView else { restore(); return }
+            guard owner !== scroll else { return }
+            restore()
+            scroll = owner
+            previous = owner.transfersVerticalScrollingToParent
+            owner.transfersVerticalScrollingToParent = false
+        }
+        func restore() {
+            if let scroll { scroll.transfersVerticalScrollingToParent = previous }
+            scroll = nil
         }
     }
 }
