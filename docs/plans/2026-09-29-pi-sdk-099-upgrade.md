@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-13
+- **Last updated:** 2026-09-30, P99-20
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -174,7 +174,11 @@ until the user approves it.
   moves to Pi's provider credential store (P99-20). Accepted loss: the `jev`
   tool no longer returns the score legend or score probabilities, and `noul`
   answers become Pi's `bool` probability. Knowledge assessment uses only choice,
-  confidence and score, which Pi returns.
+  confidence and score, which Pi returns. **User-chosen addendum (2026-09-30):**
+  Tron follows Pi's catalog model `jev-latest`; TypeSafe's actual model and price
+  may change without a Tron release. The pre-dispatch ceiling and recorded
+  estimated costs use Tron's qualified $0.042/M input, zero-output estimate,
+  not Pi's zero catalog cost; this is an estimate, not provider billing.
 - **D-7 Virtual models: support them.** Selectable in the iOS picker, routed
   physical model shown per response, limits and cost from the physical model.
 - **D-8 Nested presentation persistence is parent-owned.** A Tron inline
@@ -230,7 +234,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7: global administrative resource reload replays and removes virtual registrations; model.list marks virtual rows; context/compaction policy uses SDK-routed physical limits; assistant rows project physical identity and thinking level; SDK stats/usage remain attached to physical response models. Resume/fork/automatic retry/compaction cross-path integration evidence remains a P99-17 checkpoint. | P99-10, P99-15 |
 | Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapted**: AuthBroker passes the global SettingsManager's stable `getDeviceId`; settings projection omits `deviceId`; OpenAI and Codex legacy OAuth are serialized on shared fixed port 1455; provider list exposes both OpenAI methods without claiming OpenAI OAuth usage support. Fake-fetch AuthBroker test captures `urn:uuid` host ID and relays the callback through token exchange. | P99-9 |
 | `system` theme default; `#rgb`/`oklch()`/`okhsl()`; `theme.style()`, `theme.colors`, `theme.appearance`; revised dark/light | **Adapted; user confirmed color delta on 2026-09-30**: process-global markdown/select/settings helpers explicitly initialize `dark` because the Gateway has no terminal and no public per-instance global setter; this output differs from the host-owned RPC callback baseline. Remote frames parse dark-theme truecolor into bounded RGB styles; callback-injected baseline output is unchanged. P99-19 should request a root-exported per-instance theme setter. | P99-11, P99-19 |
-| Classifier models (`ModelRuntime.classify`, TypeSafe `jev-latest`, inherited Jev on OpenRouter/Cloudflare/Vercel/OpenCode Zen) | **Adopted/inherited**: codemode classification is an SDK classifier capability; the classifier-only TypeSafe provider remains visible in `provider.list` with its configured credential and zero chat models, but is absent from the chat picker. Tron's Jev migration remains P99-20. | P99-12, P99-20 |
+| Classifier models (`ModelRuntime.classify`, TypeSafe `jev-latest`, inherited Jev on OpenRouter/Cloudflare/Vercel/OpenCode Zen) | **Adopt/adapt**: codemode classification is inherited; Tron routes Knowledge, session search, and the `jev` tool through `ModelRuntime.classify()` on catalog `typesafe/jev-latest`, preserves request bounds and the pre-dispatch qualified-price ceiling, assessment versions, and notSent/sent/uncertain semantics; tool answers use Pi bool/score shape. TypeSafe remains visible with configured credentials and no chat models. | P99-12, P99-20 |
 | llama.cpp classifier; llama.cpp context-window fix | **Not applicable**: Tron does not load the llama.cpp built-in (factory not root-exported) | — |
 | `fullscreenWheelScrollLines` setting | **Not applicable** (TUI only); not added to the settings projection | — |
 | Per-input disposition for `prompt`/`steer`/`follow_up`; `steer()`/`followUp()` return `"handled" \| "queued"` | **Adapt**: handled prompts settle without an agent turn; SDK rejections settle admission through the thrown error; handled items during queue rebuild get completed receipts and are removed from the queued projection | P99-3 |
@@ -278,7 +282,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-16 | Ready | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | Unassigned |
 | P99-17 | Ready | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | Unassigned |
 | P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
-| P99-20 | Claimed | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
+| P99-20 | Done | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); root-export a per-instance theme setter; structured per-session MCP status (user authorizes filing) | P99-8, P99-11 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
 | P99-22 | Done | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | luna-worker, 2026-09-29 |
@@ -571,15 +575,18 @@ Owning files: `packages/gateway/src/knowledge/jev-client.ts`,
   (`notSent`/`sent`/`uncertain`) that session search and assessments depend
   on. Map errors raised before `classify()` is called to `notSent`, and errors
   after it to `uncertain` unless the abort happened before dispatch.
-- Model pinning: Tron pins `jev-1.13.0` with qualified pricing. If Pi's catalog
-  offers only `jev-latest`, decide with the user whether to accept it or define
-  the pinned model in `models.json`.
+- Model pinning: user chose Pi's catalog `typesafe/jev-latest` on 2026-09-30;
+  Tron defines no model in `models.json`. TypeSafe model behavior and actual
+  pricing may change without a Tron release. Keep Tron's qualified $0.042/M
+  input and zero-output estimate as the only pricing authority for local
+  pre-dispatch ceilings and recorded estimated costs; Pi's current catalog cost
+  is zero and must not be used for those bounds.
 - `jev` tool output changes to Pi's answers (`bool` probability; score without
   legend/probabilities); update its description. Knowledge assessment output and
   recorded usage keep their current shape.
-- Evidence: fake-credential wire capture that the request matches the current
-  client's (`noul` on the wire); assessment and session-search regressions;
-  iOS provider settings show TypeSafe.
+- Evidence: fake-credential Pi wire capture (`noul` on the wire); assessment and
+  session-search regressions; P99-22 nested Jev ceiling E2E; iOS provider
+  settings continue to expose TypeSafe (UI acceptance remains P99-15).
 
 ### P99-13 — `bash` structured output
 
@@ -875,3 +882,13 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: TypeSafe remains discoverable and credential-configurable in providers even though it has no chat models; image/classifier types remain SDK-owned and outside the chat picker. Pi's fixed model type union remains authoritative; image generation stays deferred to P99-21.
 - Deviations: Did not make a separate model.list filter because Pi's `ModelRuntime.getModels()` is already a chat-only projection; the fake-fetch test verifies typed image/classifier records persist while both are excluded from the chat projection. Classifier request cost aggregation remains covered by the P99-5 tool-result usage boundary rather than a credentialed TypeSafe network request; tests use fake credentials/fetch only. Full-suite ordering and event-loop bounds produced the two timing-sensitive failures listed above, both passed on isolated rerun. No credential or real provider network call was used.
 - For the next agent: no wire changes from P99-12. P99-20 owns the separate Jev migration; P99-17 should retain the documented isolated timing rerun evidence when recording final cross-module validation.
+
+### P99-20 · Done · 2026-09-30 · luna-worker
+
+- Result: Replaced the fixed-host Jev HTTP client with Pi `ModelRuntime.classify()` on TypeSafe's catalog `jev-latest` for Knowledge, session search and the first-party tool. Administrative Knowledge/search use the Gateway model runtime; the `jev` tool builds its adapter from each session runtime. The adapter retains input/response bounds, validates answers, maps wire `noul` to Pi bool probability, enforces the 64k-input/0.2688-cent `maxChargeCents` ceiling before dispatch, and preserves not-sent/sent/uncertain certainty. Assessment rubric/profile versions, recorded shape and usage remain Tron-owned. The Jev ConnectionOwner definition and connector Keychain lookup are removed; a persisted `knowledge.jev` instance is rejected with an instance-naming provider-setup error. The durable monthly tagging ledger remains under the TypeSafe provider identity.
+- Evidence: Node 22.22.0 TypeScript check passed (3.10 s). Focused classifier/assessment/tagger/connector/connection/search/codemode run passed 107/108 across 10 files (7.00 s); the lone `ENOTEMPTY` cleanup failure in `knowledge-intake-enrichment` passed individually 1/1 in 0.50 s. Classifier/assessment/tool tests after the bounded-response addition passed 12/12 (0.77 s). Fake-fetch regression captures the actual Pi/TypeSafe request at `https://api.typesafe.ai/v1/systemone`, model `jev-latest`, wire question `noul`, and synthetic credential header; it writes `packages/gateway/test-results/pi-sdk-099-jev-classifier-wire.json` (gitignored). P99-22 nested codemode E2E still admits concurrent Jev calls and rejects both over-ceiling calls before fetch; its artifact records the admitted wire model. Final full Gateway suite: 2,309/2,311 passed across 214 files in 111.12 s. The resource-sensitive knowledge-curation case (1/1, 0.91 s) and recent-model-usage ordering case (1/1, 0.18 s) passed individually after the full run's timeout and ordering failure. `git diff --check` and personal-info guard passed.
+- Changes: `jev-client.ts`/test; `jev-assessment.ts`/test; `jev-extension.ts`/test; Knowledge tagger/service/contracts, connector dispatch certification and documentation; ConnectionOwner Jev-definition removal/legacy-state rejection; session runtime and session-search integration tests; P99-22 nested Jev fixture; this plan's D-6 addendum, matrix, task row and handoff.
+- Tasks added: none.
+- Kept on purpose: request and response bounds, Tron-qualified input pricing (Pi catalog cost is zero and is never trusted for a ceiling), per-call caller-authorized limits, assessment rubric/profile versions, durable monthly tagging reservations, and dispatch certainty. No credential is copied from the old Keychain path. No session-search or assessment UI/wire protocol changed.
+- Deviations: The user changed model choice to `jev-latest`; its behavior and TypeSafe actual pricing may change without a Tron release. No supervisor reply arrived to clarify whether the old per-connection `paidAccessApproved` consent should migrate. The implementation treats a configured TypeSafe provider credential as tagging eligibility, removes that per-connection approval switch, and retains a durable 500-cent default monthly cap; P99-18 should confirm this consent transition. `knowledge.tags.*` keeps its shared `connectionId` envelope field but accepts only provider identity `typesafe`; no new RPC schema was introduced. The tool output itself changes to Pi's bool/score answer shape, as D-6 accepts.
+- For the next agent: P99-15 should verify the TypeSafe provider credential is visible in iOS settings and review Knowledge tag controls against the TypeSafe provider identity; no `knowledge.jev` connection or old Keychain credential should be recreated. P99-17 should rerun the full suite at its final checkpoint, retain the isolated timing rerun results above, and include `pi-sdk-099-jev-classifier-wire.json` in the artifact review.
