@@ -262,7 +262,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-14 | Claimed | Qualify installed packages and subagent children against 0.99 | P99-6 | luna-worker, 2026-09-30 |
 | P99-15 | Claimed | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | luna-worker, 2026-09-30 |
 | P99-16 | Claimed | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | luna-worker, 2026-09-30 |
-| P99-17 | Ready | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | Unassigned |
+| P99-17 | Claimed | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | luna-worker, 2026-09-30 |
 | P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
 | P99-20 | Claimed | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); structured per-session MCP status (user authorizes filing) | P99-8 | Unassigned |
