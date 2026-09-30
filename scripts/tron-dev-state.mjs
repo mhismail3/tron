@@ -325,7 +325,9 @@ async function selectedDevManifest(devHome) {
 // payload and proves the running Gateway is exactly it, so admission reads the
 // source record of that payload's runtime epoch - not the latest build or a
 // build sharing its fingerprint. Only an explicit clean record is admitted;
-// dirty and unknown dirtiness both fail closed.
+// dirty and unknown dirtiness both fail closed. The admitted version and
+// fingerprint are printed so `handoff-debug` can refuse, under its operation
+// lock, a selection that changed after this unlocked read.
 async function handoffAdmission(statePath, devHome) {
   const manifest = await selectedDevManifest(devHome);
   const state = await readState(statePath);
@@ -336,7 +338,7 @@ async function handoffAdmission(statePath, devHome) {
   const reason = source?.dirty === true
     ? `was built from uncommitted changes${typeof source.worktree === "string" ? ` in ${source.worktree}` : ""}`
     : "has no recorded source dirtiness";
-  throw new Error(`Debug handoff refused: candidate ${manifest.version} ${reason}; commit the changes, then run scripts/tron dev restart and hand off the clean candidate`);
+  throw new Error(`Debug handoff refused: candidate ${manifest.version} ${reason}; commit any changes, then run scripts/tron dev restart and hand off the clean candidate`);
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -375,7 +377,8 @@ if (command === "transition") {
 } else if (command === "handoff-admission") {
   if (!args[0] || !args[1]) throw new Error("handoff-admission requires lifecycle path and dev home");
   try {
-    await handoffAdmission(args[0], args[1]);
+    const manifest = await handoffAdmission(args[0], args[1]);
+    process.stdout.write(`${manifest.version} ${manifest.payloadFingerprint}\n`);
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

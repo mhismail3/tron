@@ -242,9 +242,11 @@ case "$command" in
   handoff)
     supervisor_live || { echo "Debug Gateway is not supervised and ready" >&2; exit 1; }
     [[ "$(status)" == *'"readiness":"ready"'* ]] || { echo "Debug Gateway is not ready" >&2; exit 1; }
-    # Stable only receives a candidate recorded as built from a clean tree.
-    "$NODE_BIN" "$STATE_HELPER" handoff-admission "$STATE_FILE" "$HOME/.tron-dev" || exit 1
-    "$NODE_BIN" "$DEPLOY" handoff-debug --host "$HOST" --dev-home "$HOME/.tron-dev" --stable-home "$HOME/.tron" --stable-bundled-root /Applications/Tron.app/Contents/Resources/Gateway
+    # Stable only receives a candidate recorded as built from a clean tree;
+    # handoff-debug re-checks that exact admitted identity under its lock.
+    admitted="$("$NODE_BIN" "$STATE_HELPER" handoff-admission "$STATE_FILE" "$HOME/.tron-dev")" || exit 1
+    read -r admitted_version admitted_fingerprint <<<"$admitted"
+    "$NODE_BIN" "$DEPLOY" handoff-debug --host "$HOST" --dev-home "$HOME/.tron-dev" --stable-home "$HOME/.tron" --stable-bundled-root /Applications/Tron.app/Contents/Resources/Gateway --version "$admitted_version" --fingerprint "$admitted_fingerprint"
     ;;
   start|restart)
     # Measure the source before building; a dirty tree still stages its full

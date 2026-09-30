@@ -159,8 +159,12 @@ candidate only after pre/post authenticated identity proof. Stable is always a
 known commit: handoff refuses the selected candidate unless its runtime epoch's
 source record says it was built from a clean tree. A dirty candidate and one
 whose dirtiness is unknown (no record, or a record written before dirtiness was
-recorded) both fail closed; commit the changes, run `scripts/tron dev restart`,
-and hand off the resulting clean candidate. Promotion still
+recorded) both fail closed; commit any changes, run `scripts/tron dev restart`,
+and hand off the resulting clean candidate. The copy pins the admitted version
+and fingerprint under the Debug payload lock, so a Debug apply or rollback that
+changes the selection after admission is refused rather than copied. The clean
+record reflects the tree when `start`/`restart` measured it, before the build;
+edits made while that build runs are not detected. Promotion still
 requires explicit user confirmation in iOS pinned to version plus fingerprint. Debug and Stable RPCs are
 channel-bound; neither runtime can mutate the other channel. Do not
 replace `/Applications/Tron.app`, invoke production

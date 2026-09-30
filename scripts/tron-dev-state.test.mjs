@@ -279,13 +279,16 @@ test("Debug status reports the dirtiness recorded for the running candidate", ()
 // Handoff source admission failure modes (#124: Stable is always a known commit):
 // 13. A candidate recorded as built from a dirty tree is copied into Stable.
 // 14. A candidate whose dirtiness is unknown - no record for its epoch
-//     (evicted or never recorded) or a record written before dirtiness was -
-//     is treated as clean instead of refused.
+//     (evicted or never recorded) or a record written before dirtiness was
+//     recorded - is treated as clean instead of refused.
 // 15. The decision reads another candidate's record than the payload handoff
 //     copies (the latest build, or a clean build sharing its fingerprint), so
 //     a dirty selected candidate passes or a clean one is refused.
 // 16. A refusal does not tell the maintainer how to produce an admissible
 //     candidate (commit, then restart).
+// 17. Admission does not hand `handoff-debug` the exact identity it admitted,
+//     so the copy cannot pin that candidate against a later selection change
+//     (gateway-payload-deploy.test.mjs covers the pinned copy).
 const selectDevPayload = (home, epoch) => {
   const version = `debug-${epoch.slice(-12)}`;
   const root = join(home, "gateway", "payloads", "dev");
@@ -316,8 +319,9 @@ test("Debug handoff admits only a selected candidate recorded as built from a cl
     run(state, "record-source", epochFor(2), worktree, "true");
     run(state, "record-source", epochFor(3), worktree, "false");
 
-    selectDevPayload(home, epochFor(1));
-    assert.equal(handoffAdmission(state, home).admitted, true);
+    const cleanVersion = selectDevPayload(home, epochFor(1));
+    // Failure mode 17: stdout is exactly the admitted version and fingerprint.
+    assert.deepEqual(handoffAdmission(state, home), { admitted: true, stdout: `${cleanVersion} ${sharedFingerprint}\n`, stderr: "" });
 
     // Failure modes 13 and 15: the selected candidate is dirty although the
     // latest record (epoch 3) and the running epoch are clean builds with the
