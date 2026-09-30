@@ -186,11 +186,10 @@ def release_simulator(marker: Path, development_state: Path) -> None:
 
 
 def verify_inherited(lock: Path, lane: str) -> int:
-    """Whether the lease this process inherited is `lock`, the lease of `lane`.
+    """Exit 0 if the lease this process inherited is `lock`, the lease of `lane`.
 
-    Compared as files, not as spellings: the same lock reaches a command with or
-    without a trailing slash, `./` or `//`, and each lane tool re-derives its
-    own lane path, so a string comparison would refuse every leased command.
+    Compared as files, not as spellings: a lock reached through a trailing
+    slash, `./`, `//` or a symlink is still the lease that covers this lane.
     """
     inherited = os.environ.get("TRON_IOS_TEST_LEASE_LOCK") or ""
     try:
