@@ -224,7 +224,7 @@ build_candidate() {
   [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null || true)" ]] || revision="${revision}-dirty"
   version="debug-${revision}-$(date -u +%Y%m%d%H%M%S)"
   result="$("$NODE_BIN" "$DEPLOY" stage --channel dev --home "$HOME/.tron-dev" --source "$ROOT/packages/mac-app/Sources/Resources/Gateway" --version "$version" --source-revision "$revision")"
-  printf '%s' "$result" | "$NODE_BIN" -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const x=JSON.parse(b);console.log(`${x.manifest.version} ${x.manifest.payloadFingerprint}`)})'
+  printf '%s' "$result" | "$NODE_BIN" -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const x=JSON.parse(b);console.log(`${x.manifest.version} ${x.manifest.payloadFingerprint} ${x.manifest.runtimeEpoch}`)})'
 }
 
 if supervisor_live; then SUPERVISOR_LIVE=yes; else SUPERVISOR_LIVE=no; fi
@@ -250,7 +250,8 @@ case "$command" in
   start|restart)
     identity_line="$(build_candidate)"
     identity_line="$("$NODE_BIN" "$STATE_HELPER" validate-build-identity "$identity_line")" || exit 78
-    read -r version payload_fingerprint <<<"$identity_line"
+    read -r version payload_fingerprint candidate_epoch <<<"$identity_line"
+    "$NODE_BIN" "$STATE_HELPER" record-source "$STATE_FILE" "$candidate_epoch" "$ROOT"
     if supervisor_live; then
       token_args=(--channel dev --home "$HOME/.tron-dev" --version "$version" --fingerprint "$payload_fingerprint" --host "$HOST" --port 9848 --command-id "debug-update-$(date +%s)-$$")
       TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 "$NODE_BIN" "$DEPLOY" promote "${token_args[@]}" >&2

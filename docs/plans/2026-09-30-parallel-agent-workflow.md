@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, robomp comparison: W-6/W-11 scope set, follow-ups W-22 to W-26
+- **Last updated:** 2026-09-30, W-20 (#103) merged; awaiting maintainer validation
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -215,7 +215,7 @@ Dated 2026-09-30:
 | W-17 | Claimed | #99 Default iOS test lane per worktree; E2E and profiler accept lanes; concurrent two-worktree iOS proof (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-18 | Claimed | #100 Lease the Development simulator and the physical iPhone (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-19 | Claimed | #102 Worktree-relative Mac Release DerivedData; hook installer works from linked worktrees (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-20 | Claimed | #103 Dev Gateway status names the worktree and branch it runs (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-20 | Done | #103 Dev Gateway status names the worktree and branch it runs (P2); merged, maintainer validation after W-27 | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-21 | Claimed | #101 Scope retained test/profile artifacts and `latest` pointers to the worktree (P3) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-22 | Ready | Follow-up: triage procedure; an agent classifies `needs-triage` issues (type, area, priority, duplicate search) and places them as Proposed for maintainer approval | W-11 | Unassigned |
 | W-23 | Ready | Follow-up: warm worktrees; `work start` seeds `node_modules` and the iOS build cache from the primary checkout by APFS clone | W-4 | Unassigned |
@@ -539,3 +539,22 @@ file-level. Everything else inspected is A.
     to parse.
   - W-5 still needs W-3's P1 issues (#98, #99) before concurrent iOS checks
     can be relied on.
+
+### W-20 · Done (maintainer validation pending) · 2026-09-30 · wave 1
+
+- Result: `scripts/tron dev start`/`restart` record the source worktree and
+  branch of each candidate in `lifecycle.json`. The records are keyed by the
+  staged manifest's `runtimeEpoch`, bounded to 8, and always keep the running
+  record. `scripts/tron dev status` prints the worktree and branch of the
+  Gateway that is actually running.
+- Evidence:
+  - Rerun by the orchestrator on the rebased head:
+    `node --test scripts/tron-dev-state.test.mjs` gave 11 passed.
+  - The implementer ran six negative controls, and each one failed a test.
+  - The review found a should-fix: keying by fingerprint let two checkouts
+    with identical Gateway files relabel the running Gateway. It was fixed by
+    keying on the runtime epoch.
+- Kept on purpose: the payload manifest is unchanged. The signed launcher
+  requires its exact key set, and a handoff copies the manifest to Stable.
+- For the next agent: the maintainer validation (`scripts/tron dev restart`,
+  then `scripts/tron dev status`) is blocked by W-27 (#107).
