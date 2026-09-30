@@ -34,9 +34,23 @@ Tron does not maintain a second server schema.
 
 ## Sign-in relay
 
-Gateway-mediated OAuth sign-in relay is not yet implemented. The MCP
-`openUrl` callback currently fails closed rather than opening a browser on the
-Mac. Pi's pasted-redirect fallback remains available where supported.
+`mcp.auth.start` accepts `{ sessionId, server, commandId }` and executes Pi's own
+`/mcp login <server>` command through the session's regular prompt admission.
+`mcp.auth.cancel` accepts `{ operationId }`. Auth operations belong to the
+authenticated device and target `{ kind: "mcp", sessionId, server }`; auth
+resume replays the latest event or pasted-redirect prompt, and the shared
+15-minute timeout/cancel/tombstone rules apply. Session close and runtime
+teardown cancel operations for that session.
+
+The per-session `openUrl` hook is bound to the active Tron-started operation.
+Pi's authorization URL is delivered as the existing `auth.event` shape, with a
+callback capture derived exclusively from its provider-authored loopback
+`redirect_uri`. A callback submitted by the phone is relayed only to that
+loopback listener; Tron does not select or accept a client-supplied destination.
+The adapter routes Pi's pasted-redirect `ctx.ui.input` to the same auth prompt.
+Outside a Tron operation, MCP `openUrl` fails closed and never launches a Mac
+browser. Relay outcomes are recorded without URLs, callback queries, codes or
+tokens.
 
 The connection loader rejects a persisted MCP instance with an error naming
 the instance and directing configuration to Pi's `mcp.json`. The current live

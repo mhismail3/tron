@@ -70,6 +70,94 @@ async function settleWorkEntry(predicate: () => boolean): Promise<void> {
 
 describe("AuthBroker", () => {
   afterEach(() => vi.useRealTimers());
+  it("routes an MCP authorization URL to its targeted operation and relays only its callback to loopback", async () => {
+    let receivedQuery = "";
+    let finishLogin!: () => void;
+    const callbackReceived = new Promise<void>((resolve) => { finishLogin = resolve; });
+    const listener = createServer((request, response) => {
+      receivedQuery = new URL(request.url ?? "/", "http://127.0.0.1").search.slice(1);
+      response.end("ok");
+      finishLogin();
+    });
+    await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+    const address = listener.address();
+    if (!address || typeof address === "string") throw new Error("loopback callback listener did not bind");
+    const { events, emit, waitFor } = authEvents();
+    const lifecycle: string[] = [];
+    const broker = new AuthBroker(runtimeWithLogin(async () => {}), emit, () => {}, {
+      log: (_level, _message, event) => lifecycle.push(event),
+    });
+    const admission = broker.startMcp("phone", "device-identity", "mcp-command-0001", "session-1", "fixture", async (_interaction, operationId) => {
+      broker.openMcpAuthorizationUrl(operationId,
+        `https://oauth.invalid/authorize?client_id=fixture&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${address.port}/callback`)}&state=state-1`);
+      await callbackReceived;
+    });
+    try {
+      await waitFor(() => events.some((event) => event.topic === "auth.event"));
+      const event = events.find((item) => item.topic === "auth.event")!.payload as Record<string, any>;
+      expect(event.target).toEqual({ kind: "mcp", sessionId: "session-1", server: "fixture" });
+      const capture = event.callbackCapture as { id: string };
+      expect(capture.id).toBeTruthy();
+      expect(await broker.forwardCallback("device-identity", admission.operationId, capture.id, "code=auth-code&state=state-1")).toBe(true);
+      await waitFor(() => events.some((item) => item.topic === "auth.completed"));
+      const completion = events.find((item) => item.topic === "auth.completed")!.payload as Record<string, any>;
+      expect(completion.target).toEqual({ kind: "mcp", sessionId: "session-1", server: "fixture" });
+      expect(completion.success).toBe(true);
+      expect(receivedQuery).toBe("code=auth-code&state=state-1");
+      expect(lifecycle).toContain("mcp.auth-url.routed");
+      expect(lifecycle).toContain("mcp.callback-relay.succeeded");
+    } finally {
+      listener.close();
+    }
+  });
+  it("records an MCP loopback relay failure without logging callback data", async () => {
+    const fixture = createServer((_request, response) => response.end("reserved"));
+    await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const address = fixture.address();
+    if (!address || typeof address === "string") throw new Error("loopback fixture failed to bind");
+    await new Promise<void>((resolve) => fixture.close(() => resolve()));
+    const { events, emit, waitFor } = authEvents();
+    const logs: Array<{ message: string; event: string }> = [];
+    const broker = new AuthBroker(runtimeWithLogin(async () => {}), emit, () => {}, {
+      log: (_level, message, event) => logs.push({ message, event }),
+    });
+    const admission = broker.startMcp("phone", "owner", "mcp-command-failure", "session-fail", "fixture", async (_interaction, operationId) => {
+      broker.openMcpAuthorizationUrl(operationId, `https://oauth.invalid/authorize?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${address.port}/callback`)}&state=state`);
+      await new Promise<void>((resolve) => _interaction.signal?.addEventListener("abort", () => resolve(), { once: true }));
+    });
+    await waitFor(() => events.some((event) => event.topic === "auth.event"));
+    const payload = events.find((event) => event.topic === "auth.event")!.payload as Record<string, any>;
+    await expect(broker.forwardCallback("owner", admission.operationId, payload.callbackCapture.id, "code=secret&state=state"))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect(logs.map((entry) => entry.event)).toContain("mcp.callback-relay.failed");
+    expect(JSON.stringify(logs)).not.toContain("secret");
+    broker.cancel("owner", admission.operationId);
+  });
+  it("retires an MCP operation when its session closes and rejects an unowned URL", async () => {
+    const { events, emit, waitFor } = authEvents();
+    const broker = new AuthBroker(runtimeWithLogin(async () => {}), emit);
+    const admission = broker.startMcp("phone", "device-identity", "mcp-command-0002", "session-2", "fixture", async (interaction) => {
+      await interaction.prompt({ type: "manual_code", message: "Paste redirect URL" });
+    });
+    await waitFor(() => events.some((event) => event.topic === "auth.prompt"));
+    broker.cancelSession("session-2");
+    expect(broker.activeOperationCount).toBe(0);
+    expect(() => broker.openMcpAuthorizationUrl(admission.operationId, "https://oauth.invalid/authorize")).toThrow(/no active Tron/);
+  });
+  it("uses the shared operation timeout for a waiting MCP pasted-redirect prompt", async () => {
+    vi.useFakeTimers();
+    const { events, emit, waitFor } = authEvents();
+    const broker = new AuthBroker(runtimeWithLogin(async () => {}), emit, () => {}, { operationTimeoutMs: 100 });
+    broker.startMcp("phone", "device-identity", "mcp-command-0003", "session-3", "fixture", async (interaction) => {
+      await interaction.prompt({ type: "manual_code", message: "Paste redirect URL" });
+    });
+    await waitFor(() => events.some((event) => event.topic === "auth.prompt"));
+    await vi.advanceTimersByTimeAsync(100);
+    await waitFor(() => events.some((event) => event.topic === "auth.completed"));
+    expect(broker.activeOperationCount).toBe(0);
+    expect((events.find((event) => event.topic === "auth.completed")!.payload as Record<string, any>).error)
+      .toContain("timed out");
+  });
   it("forwards an interactive runtime prompt and stores the response without returning credentials", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-auth-broker-"));
     const runtime = await ModelRuntime.create({

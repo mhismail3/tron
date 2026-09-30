@@ -11,7 +11,7 @@ import type {
   RegisteredTool,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE } from "./extension-adapters.js";
+import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE, adaptMcpAuthCommandHandler } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
@@ -249,12 +249,17 @@ function admitHandlers(state: RegistrationAdmission, _event: string, handlers: E
     : ownCallback(adaptedExtensionEventHandler(state.extension, handler), state.extension));
 }
 
-function admitCommand(state: RegistrationAdmission, _name: string, command: RegisteredCommand): RegisteredCommand {
+function admitCommand(state: RegistrationAdmission, name: string, command: RegisteredCommand): RegisteredCommand {
   if (admittedCallbackOwners.get(command.handler) === state.extension) return command;
-  const handler = ownCallback(command.handler, state.extension);
+  const callback = state.extension.sourceInfo.source === "builtin:mcp" && name === "mcp"
+    ? adaptMcpAuthCommandHandler(command.handler)
+    : command.handler;
+  const handler = ownCallback(callback, state.extension);
   attributedCommandOwners.set(handler, state.extension);
   return { ...command, handler };
 }
+
+
 
 function admitShortcut(state: RegistrationAdmission, _key: ExtensionShortcutKey, shortcut: ExtensionShortcut): ExtensionShortcut {
   if (admittedCallbackOwners.get(shortcut.handler) === state.extension) return shortcut;

@@ -216,6 +216,7 @@ const sessions = new RuntimeRegistry({
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
+  mcpAuth: { openUrl: (operationId, url) => auth.openMcpAuthorizationUrl(operationId, url) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
   trust,
@@ -226,7 +227,10 @@ const sessions = new RuntimeRegistry({
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
   beforeSessionRekey: (previousId, nextId) => automations.rekeySessionTarget(previousId, nextId),
   beforeSessionDelete: (sessionId) => automations.blockSessionTarget(sessionId),
-  sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
+  sessionClosed: (sessionId) => {
+    auth.cancelSession(sessionId);
+    transport?.revokeSessionTerminals(sessionId);
+  },
   persistenceDiagnostic: (sessionId, code) => logger.log("warning", "Session persistence diagnostic", {
     event: code, source: "session", sessionId,
   }),

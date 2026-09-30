@@ -37,6 +37,7 @@ import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
+import { currentMcpAuthOperationId } from "../extensions/extension-adapters.js";
 import type {
   ChatOrigin,
   CommandDetail,
@@ -397,6 +398,7 @@ export interface RuntimeSlotDependencies {
   agentDir: string;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
+  mcpAuth?: { openUrl(operationId: string, url: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
   trust: TrustService;
   blobs: BlobStore;
@@ -1527,7 +1529,13 @@ export class RuntimeSlot {
         modelRuntime,
         resourceLoaderOptions: {
           extensionFactories: [
-            ...piBuiltinExtensions(this.dependencies.agentDir),
+            ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
+              const operationId = currentMcpAuthOperationId();
+              if (!operationId || !this.dependencies.mcpAuth) {
+                throw new Error("MCP authorization URL has no active Tron sign-in operation");
+              }
+              this.dependencies.mcpAuth.openUrl(operationId, url);
+            }),
             ...tronModuleFactories({
               sessionId: () => this.id,
               cwd: () => this.cwd,

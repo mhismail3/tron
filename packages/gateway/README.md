@@ -305,9 +305,21 @@ other JSON keys and failing closed on malformed or oversized files.
 
 `mcp.token.set` stores bearer credentials through the host Keychain credential
 owner and writes only a `!command` reference in `mcp.json`; token values are
-never returned or logged. Gateway-mediated OAuth relay is pending: the MCP
-`openUrl` callback currently fails closed instead of opening a browser on the
-Mac, while Pi's pasted-redirect fallback remains available.
+never returned or logged. `mcp.auth.start` takes `{ sessionId, server,
+commandId }` and starts Pi's own `/mcp login <server>` extension command through
+the attached session's normal prompt admission. It returns `{ operationId,
+recovered }`; `mcp.auth.cancel` takes `{ operationId }`. The authenticated device
+owns the operation. One operation is active per device/session/server, with the
+same 15-minute timeout, cancellation, tombstone and `auth.resume` replay rules
+as provider authentication. Events retain the standard `auth.event`,
+`auth.prompt` and `auth.completed` shapes and add target
+`{ kind: "mcp", sessionId, server }`. The per-session MCP `openUrl` hook routes
+only the authorization URL for that active operation into the auth event; an
+unowned request fails closed and never opens the Mac browser. Callback capture
+is parsed only from Pi's authorization URL and relay is restricted to its
+provider-authored loopback listener. Pi's pasted-redirect prompt is delivered
+through the same operation. Closing or evicting the session cancels its MCP
+auth operation.
 
 ### Agent home
 
@@ -1780,7 +1792,9 @@ category `provider-login`. Accepting `gateway.restart` cancels every login that 
 (prompt, browser, or device code) and sends it a failed `auth.completed`; a login whose answer or callback
 was already submitted keeps its work entry, so the drain waits only for credential completion. Start, recovery,
 and each ending (with provider ID, method, age, and reason, never prompt values) are logged under source
-`auth` with `auth.login.*` events. A WebSocket disconnect
+`auth` with `auth.login.*` events. MCP relay lifecycle outcomes use
+`mcp.auth-url.routed`, `mcp.callback-relay.succeeded` and
+`mcp.callback-relay.failed`. A WebSocket disconnect
 only detaches event delivery: `auth.resume` rebinds the same stable-device-owned operation to a
 replacement connection and replays its latest bounded event/prompt or terminal tombstone. Current
 clients send a `commandId` with `auth.begin`; a bounded in-memory admission receipt returns the

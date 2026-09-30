@@ -672,6 +672,7 @@ export class RuntimeRegistry {
       tronHome: string;
       /** Exact provider-owned root under the resolved Tron home. */
       delegatedArtifactRoot?: string;
+      mcpAuth?: RuntimeSlotDependencies["mcpAuth"];
       idleRuntimeMs: number;
       maximumLiveRuntimes?: number;
       modelRuntimeFactory?: () => Promise<ModelRuntime>;
@@ -1557,6 +1558,7 @@ export class RuntimeRegistry {
     return {
       agentDir: this.options.agentDir,
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
+      ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
       createModelRuntime: async () => installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
         authPath: join(this.options.agentDir, "auth.json"),
         modelsPath: join(this.options.agentDir, "models.json"),

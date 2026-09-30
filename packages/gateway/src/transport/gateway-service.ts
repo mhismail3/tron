@@ -41,6 +41,7 @@ import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
 import type { GlobalProviderResources } from "../admin/global-provider-resources.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
+import { withMcpAuthInteraction } from "../extensions/extension-adapters.js";
 import type { McpAdminService, McpScope } from "../admin/mcp-admin-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
@@ -209,7 +210,7 @@ const restartDrainMethods = new Set([
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
-  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
+  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel", "mcp.auth.start", "mcp.auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
   "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate",
@@ -1718,6 +1719,43 @@ export class GatewayService {
           : await this.dependencies.devices.admitDevice(client.identity, start);
         if (!admission) throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
         return { operationId: admission.operationId, recovered: admission.recovered };
+      }
+      case "mcp.auth.start": {
+        rejectUnknownFields(params, ["sessionId", "server", "commandId"], method);
+        const sessionId = string(params.sessionId, "sessionId", { min: 1, max: 200 });
+        const server = string(params.server, "server", { min: 1, max: 128 });
+        const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
+        if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
+        const slot = await this.openedSlot(client, { sessionId });
+        const start = () => this.dependencies.auth.startMcp(
+          client.id,
+          client.identity,
+          commandId,
+          sessionId,
+          server,
+          async (interaction, operationId) => {
+            await new Promise<void>((resolve, reject) => {
+              const aborted = () => reject(new GatewayError("cancelled", "MCP sign-in was cancelled"));
+              interaction.signal?.addEventListener("abort", aborted, { once: true });
+              const finish = (error?: unknown) => {
+                interaction.signal?.removeEventListener("abort", aborted);
+                error ? reject(error) : resolve();
+              };
+              withMcpAuthInteraction(operationId, interaction, () => {
+                void slot.prompt(`/mcp login ${server}`).catch(finish);
+              }, finish);
+            });
+          },
+        );
+        const admission = client.isLocal
+          ? start()
+          : await this.dependencies.devices.admitDevice(client.identity, start);
+        if (!admission) throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
+        return { operationId: admission.operationId, recovered: admission.recovered };
+      }
+      case "mcp.auth.cancel": {
+        rejectUnknownFields(params, ["operationId"], method);
+        return { cancelled: this.dependencies.auth.cancel(client.identity, string(params.operationId, "operationId", { max: 100 })) };
       }
       case "auth.respond": {
         const answered = this.dependencies.auth.respond(

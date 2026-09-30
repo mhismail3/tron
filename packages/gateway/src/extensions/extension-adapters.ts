@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { AuthInteraction } from "@earendil-works/pi-ai";
 import { dirname, join } from "node:path";
 import type { Extension, ExtensionContext, ExtensionUIContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../protocol/types.js";
@@ -7,6 +9,65 @@ import type { FormCapableUI, FormRequest } from "../sessions/extension-adapter-c
 import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js";
 
 const ASK_USER_MARKER = "\0XYZ_ASK_USER";
+const mcpAuthContext = new AsyncLocalStorage<{
+  operationId: string;
+  interaction: AuthInteraction;
+  commandFinished?: (error?: unknown) => void;
+}>();
+
+export function withMcpAuthInteraction<T>(
+  operationId: string,
+  interaction: AuthInteraction,
+  action: () => T,
+  commandFinished?: (error?: unknown) => void,
+): T {
+  return mcpAuthContext.run({ operationId, interaction, ...(commandFinished ? { commandFinished } : {}) }, action);
+}
+
+export function currentMcpAuthOperationId(): string | undefined {
+  return mcpAuthContext.getStore()?.operationId;
+}
+
+export function currentMcpAuthInteraction(): AuthInteraction | undefined {
+  return mcpAuthContext.getStore()?.interaction;
+}
+
+export function finishMcpAuthCommand(error?: unknown): void {
+  mcpAuthContext.getStore()?.commandFinished?.(error);
+}
+
+export function adaptMcpAuthCommandHandler<T extends (...args: any[]) => any>(handler: T): T {
+  return ((...args: Parameters<T>) => {
+    const active = mcpAuthContext.getStore();
+    if (!active) return handler(...args);
+    const context = args[1] as { ui?: object } | undefined;
+    if (!context?.ui) return handler(...args);
+    const base = context.ui as Record<string, unknown>;
+    const ui = new Proxy(base, {
+      get(target, property, receiver) {
+        if (property === "input") return async (message: string, placeholder?: string, options?: { signal?: AbortSignal }) => {
+          const signal = options?.signal ?? active.interaction.signal;
+          if (signal?.aborted) return undefined;
+          return active.interaction.prompt({ type: "manual_code", message, ...(placeholder ? { placeholder } : {}), ...(signal ? { signal } : {}) });
+        };
+        if (property === "notify") return (message: string, level?: "info" | "warning" | "error") => {
+          active.interaction.notify({ type: "info", message: `[${level ?? "info"}] ${message}` });
+        };
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const adapted = new Proxy(context, {
+      get(target, property, receiver) { return property === "ui" ? ui : Reflect.get(target, property, receiver); },
+    });
+    const next = [...args];
+    next[1] = adapted;
+    const result = handler(...next);
+    return Promise.resolve(result).then(
+      (value) => { finishMcpAuthCommand(); return value; },
+      (error: unknown) => { finishMcpAuthCommand(error); throw error; },
+    );
+  }) as T;
+}
 export const AUDITED_ASK_USER_PACKAGE = Object.freeze({
   name: "@zhushanwen/pi-ask-user",
   version: "7.0.15",
