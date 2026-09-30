@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-9
+- **Last updated:** 2026-09-30, P99-10
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -227,7 +227,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Partial**: P99-22 qualifies runtime transports; P99-7 removes Tron's adapter; P99-8 adds CLI administration and bounded patching, while OAuth sign-in relay through `openUrl` remains unimplemented and must not be claimed as adopted end-to-end | P99-6, P99-7, P99-8, P99-22 |
 | Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 parts 2a/2b verify nested interactive limits, notification and schedule receipts, desktop serialization, native-view session ownership, plus part 2c verifies concurrent Jev pre-dispatch ceilings and nested foreground-subagent Stop/workspace handoff. P99-23 persists bounded Tron presentation descriptors on the parent's canonical result under `details.tronNested`; rollback readers ignore this additive details key. | P99-3, P99-5, P99-6, P99-22, P99-23 |
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
-| Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7 | P99-10, P99-15 |
+| Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7: global administrative resource reload replays and removes virtual registrations; model.list marks virtual rows; context/compaction policy uses SDK-routed physical limits; assistant rows project physical identity and thinking level; SDK stats/usage remain attached to physical response models. Resume/fork/automatic retry/compaction cross-path integration evidence remains a P99-17 checkpoint. | P99-10, P99-15 |
 | Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapted**: AuthBroker passes the global SettingsManager's stable `getDeviceId`; settings projection omits `deviceId`; OpenAI and Codex legacy OAuth are serialized on shared fixed port 1455; provider list exposes both OpenAI methods without claiming OpenAI OAuth usage support. Fake-fetch AuthBroker test captures `urn:uuid` host ID and relays the callback through token exchange. | P99-9 |
 | `system` theme default; `#rgb`/`oklch()`/`okhsl()`; `theme.style()`, `theme.colors`, `theme.appearance`; revised dark/light | **Verify/adapt** Tron's RPC baseline theme and process-global helpers | P99-11 |
 | Classifier models (`ModelRuntime.classify`, TypeSafe `jev-latest`, inherited Jev on OpenRouter/Cloudflare/Vercel/OpenCode Zen) | **Adopt**: migrate Tron's Jev to `ModelRuntime.classify()` (D-6); codemode `models.classify` inherited | P99-12, P99-20 |
@@ -269,7 +269,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-7 | Done | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
 | P99-8 | Claimed | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | luna-worker, 2026-09-29 |
 | P99-9 | Done | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | luna-worker, 2026-09-29 |
-| P99-10 | Claimed | Virtual models on the Gateway (D-7) | P99-3 | luna-worker, 2026-09-29 |
+| P99-10 | Done | Virtual models on the Gateway (D-7) | P99-3 | luna-worker, 2026-09-29 |
 | P99-11 | Claimed | Theme default and remote extension host rendering | P99-3 | luna-worker, 2026-09-29 |
 | P99-12 | Claimed | Catalog, provider and classifier deltas; release dates; K3 policy | P99-2 | luna-worker, 2026-09-29 |
 | P99-13 | Claimed | `bash` structured output and empty-output change | P99-3 | luna-worker, 2026-09-29 |
@@ -833,3 +833,13 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: provider usage remains supported only for OpenAI Codex's existing `wham` adapter; `openai` OAuth is intentionally not claimed. Provider methods and labels remain sourced from Pi's provider catalog.
 - Deviations: The auth integration uses Pi's actual OpenAI provider login with fake token-fetch responses and the real local callback listener on port 1455; no external network or real credential was used. No wire protocol changed.
 - For the next agent: no P99-15 wire changes arise from P99-9. Live ChatGPT sign-in remains the P99-18 manual gate; provider catalog and usage-support disposition are covered by the focused regression.
+
+### P99-10 · Done · 2026-09-30 · luna-worker
+
+- Result: GlobalProviderResources now captures, replays and removes global virtual-model registrations alongside provider registrations. `model.list` adds the `virtual` marker. Context-window policy retains virtual selection identity but takes effective limits from `AgentSession.routedModel` when available; compaction policy likewise captures the latest routed physical model and thinking level. Assistant transcript rows preserve the physical provider/model already recorded by Pi and now project optional `thinkingLevel`. Pi's canonical virtual-state custom entry remains outside transcript rows; model usage/cost stays sourced from Pi's physical assistant responses.
+- Evidence: Node 22.22.0 TypeScript check passed. Focused admin/context/compaction tests passed 37/37 in 1.03 s. The virtual routing case uses two faux catalog models, exercises user routing plus SDK retry/direct routing reasons, validates physical assistant identity/thinking level and hidden state, and retains `packages/gateway/test-results/pi-sdk-099-virtual-models.json`. `check:pi-sdk` and personal-info guard passed. Two final Gateway runs each passed 2,308/2,309 (110.92 s, logger rotation timeout; 116.66 s, session-search-stall timing assertion); logger rotation passed its isolated rerun 16/16 in 1.29 s and session-search-stall passed its isolated rerun 2/2 in 5.02 s.
+- Changes: `packages/gateway/src/admin/global-provider-resources.ts` and its test, `providers/context-window-policy.ts` and test, `runtime/compaction-policy.ts`, `sessions/projection.ts`, `protocol/types.ts`, `transport/gateway-service.ts`, Gateway README, and this plan.
+- Tasks added: none.
+- Kept on purpose: model context preferences stay keyed to selected model identity; routed physical limits only bound effective capacity. Cost continues to derive from physical Pi assistant response usage; no second cost accumulator or state projection was added.
+- Deviations: Evidence is narrower than the requested fixture-router lifecycle matrix: the faux-router proof exercises SDK `user`, `retry`, and `direct` routing and transcript projection, but does not yet drive cold resume, fork, actual automatic retry or compaction through the RuntimeRegistry. P99-17 must add that cross-path integration proof before overall plan close-out. No product or schema decision was needed.
+- For the next agent: P99-15/P99-16 must consume the additive `model.list.virtual` boolean and assistant-row `thinkingLevel` / physical `provider` and `modelId`; these are the P99-10 wire additions. P99-17 owns the remaining resume/fork/retry/compaction router E2E and must verify usage/cost grouping by physical model. The retained artifact is gitignored and regenerated by `node node_modules/vitest/vitest.mjs run src/providers/context-window-policy.test.ts -t 'SDK-routed physical'` from `packages/gateway`.

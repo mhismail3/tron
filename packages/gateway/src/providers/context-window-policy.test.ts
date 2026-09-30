@@ -1,6 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BlobStore } from "../sessions/blob-store.js";
+import { projectTranscript } from "../sessions/projection.js";
 import { InMemoryCredentialStore, fauxAssistantMessage, fauxProvider, type Model } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -63,6 +65,48 @@ describe("context window policy", () => {
     for (const modelContextWindows of [null, [], { bad: 1000 }, { "provider/id": 0 }, { "provider/id": "1000" }]) {
       expect(() => contextWindowPreferences({ modelContextWindows })).toThrow();
     }
+  });
+
+  it("uses the SDK-routed physical model's limits while preserving virtual selection", async () => {
+    const { session, policy, modelRuntime, faux } = await fixture();
+    const physical = modelRuntime.getModel("openai-codex", "other")!;
+    await modelRuntime.setRuntimeApiKey(physical.provider, "fixture-only-key");
+    const routes: Array<{ reason: string; model: string }> = [];
+    modelRuntime.registerVirtualModel({
+      provider: physical.provider, id: "router", name: "Fixture router", contextWindow: 0,
+      route: request => {
+        const model = request.reason === "direct" ? modelRuntime.getModel(physical.provider, "gpt-6-astra")! : physical;
+        routes.push({ reason: request.reason, model: model.id });
+        return { model, thinkingLevel: "off", state: { count: ((request.state as { count?: number } | undefined)?.count ?? 0) + 1 } };
+      },
+    });
+    await session.setModel(modelRuntime.getModel(physical.provider, "router")!);
+    expect(session.model?.id).toBe("router");
+    // With no successful routed response, declared virtual limits remain unknown.
+    expect(policy.snapshot()).toBeUndefined();
+    faux.setResponses([(_context, _options, _state, model) => fauxAssistantMessage("physical reply", { provider: model.provider, model: model.id })]);
+    await session.prompt("route this");
+    expect(session.model?.id).toBe("router");
+    expect(session.routedModel?.model.id).toBe("other");
+    expect(policy.snapshot()).toMatchObject({ model: { provider: physical.provider, id: "router" }, maximum: 128_000 });
+    expect(routes).toEqual([{ reason: "user", model: "other" }]);
+    await modelRuntime.resolveModel(session.model!, [], { reason: "retry", thinkingLevel: "off", failed: fauxAssistantMessage("failed", { stopReason: "error" }) });
+    await modelRuntime.resolveModel(session.model!, [], { reason: "direct", thinkingLevel: "off" });
+    expect(routes).toEqual([
+      { reason: "user", model: "other" },
+      { reason: "retry", model: "other" },
+      { reason: "direct", model: "gpt-6-astra" },
+    ]);
+    expect(session.sessionManager.getBranch().some(entry => entry.type === "custom" && entry.customType === "pi.virtual-model-state")).toBe(true);
+    const transcript = projectTranscript(session.sessionManager, new BlobStore());
+    const assistant = transcript.find(item => item.kind === "message" && item.role === "assistant");
+    expect(assistant).toMatchObject({ provider: physical.provider, modelId: "other", thinkingLevel: "off" });
+    expect(transcript.some(item => item.kind === "message" && item.role === "assistant" && item.modelId === "router")).toBe(false);
+    const artifactRoot = join(process.cwd(), "test-results");
+    await mkdir(artifactRoot, { recursive: true });
+    await writeFile(join(artifactRoot, "pi-sdk-099-virtual-models.json"), JSON.stringify({
+      selected: session.model?.id, routed: session.routedModel?.model.id, routes, assistant, transcript,
+    }, null, 2));
   });
 
   it("applies defaults and session overrides without changing catalog, output, costs or reasoning", async () => {

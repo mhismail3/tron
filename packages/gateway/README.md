@@ -2320,7 +2320,13 @@ exists to rebuild it from.
 `model.list` items also carry an optional `cost` of `{input, output}` in USD per
 million tokens, copied from the pinned SDK catalog for the picker's rail cards.
 An all-zero SDK price means the price is unset, not that the model is free, so
-the field is omitted; cache rates and tiered pricing are not projected.
+the field is omitted; cache rates and tiered pricing are not projected. The
+`virtual` boolean identifies Pi virtual-model registrations in the picker;
+virtual models with unset limits retain unknown limits until a physical response
+establishes the SDK's routed limits. Assistant transcript rows continue to name
+the physical response's `provider`/`modelId` and now carry optional
+`thinkingLevel` from Pi's canonical response. Virtual router state remains an
+SDK custom session entry and is excluded from transcript rows.
 
 `model.list` items carry an optional `releaseDate` (`YYYY-MM-DD`) that backs the
 picker's Latest rail; models with no known date omit the field and appear only
