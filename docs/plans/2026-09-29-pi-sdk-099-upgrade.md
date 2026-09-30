@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-22 part 2b
+- **Last updated:** 2026-09-30, P99-22 part 2c
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -225,7 +225,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | Upstream delta | Tron disposition | Task |
 | --- | --- | --- |
 | Built-in `codemode`, `tool_search`, MCP extensions (stdio/HTTP, OAuth, `mcp.json`, `registerMcpServer`, `/mcp`, `pi mcp …`) | **Adopt**; P99-22 part 1 verifies stdio/streamable-HTTP, direct/codemode/deferred exposure, resources, list changes, reconnect, trusted project config, process-group cleanup and Stop/drain lifecycle; adapter/admin migration remains | P99-6, P99-7, P99-8, P99-22 |
-| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 part 2a verifies nested concurrent ask_user serialization/Stop cleanup, durable notify quota/session attribution and schedule receipt replay safety; part 2b verifies desktop-action serialization and native-view session ownership. P99-23 persists bounded Tron presentation descriptors on the parent's canonical result under `details.tronNested`; rollback readers ignore this additive details key. | P99-3, P99-5, P99-6, P99-22, P99-23 |
+| Tool API: `exposure`, `namespace`, `annotations`, `outputSchema`/`structuredContent`, `isError` results, `prepareLoadout`, `ctx.executeTool` with `parentToolCallId` and bounded `nestedCalls` | **Adapt**: P99-3 classifies the new API and attributes `prepareLoadout`; P99-5 projects nested calls as bounded children under the parent and preserves failed/structured-result semantics; P99-22 parts 2a/2b verify nested interactive limits, notification and schedule receipts, desktop serialization, native-view session ownership, plus part 2c verifies concurrent Jev pre-dispatch ceilings and nested foreground-subagent Stop/workspace handoff. P99-23 persists bounded Tron presentation descriptors on the parent's canonical result under `details.tronNested`; rollback readers ignore this additive details key. | P99-3, P99-5, P99-6, P99-22, P99-23 |
 | Warning when an extension replaces a built-in | **Adapt**: project `LoadExtensionsResult.warnings` in extension/package lists | P99-6 |
 | Virtual models (`registerVirtualModel`, routed model, per-physical-model cost, router state entry) | **Adapt** per D-7 | P99-10, P99-15 |
 | Sign in with ChatGPT on `openai`; `deviceId` in global settings | **Adapt**: pass `getDeviceId` to `ModelRuntime.login`; redact `deviceId` from settings projection; fixed port 1455 shared with Codex legacy | P99-9 |
@@ -265,7 +265,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-3 | Done | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | luna-worker, 2026-09-29 |
 | P99-4 | Done | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
 | P99-5 | Done | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | luna-worker, 2026-09-29 |
-| P99-6 | Blocked | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
+| P99-6 | Done | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
 | P99-7 | Claimed | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
 | P99-8 | Claimed | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | luna-worker, 2026-09-29 |
 | P99-9 | Ready | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | Unassigned |
@@ -281,7 +281,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-20 | Ready | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | Unassigned |
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); structured per-session MCP status (user authorizes filing) | P99-8 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
-| P99-22 | Claimed | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | luna-worker, 2026-09-29 |
+| P99-22 | Done | Complete P99-6 nested/concurrent first-party tool and Pi MCP stdio/HTTP E2E qualification before allowing codemode access broadly | P99-6 | luna-worker, 2026-09-29 |
 | P99-23 | Done | Parent-owned persistence/projection for bounded nested display artifacts and trusted browser live-view receipts, with no child canonical rows or independent receipts | P99-22 | luna-worker, 2026-09-29 |
 
 ## Task details
@@ -709,6 +709,16 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Deviations: P99-6 is Blocked because the required acceptance E2Es were not implemented or verified: stdio and streamable-HTTP MCP fixtures, codemode/direct/deferred exposures, resources and `list_changed`, crash/lazy reconnect and process-group cleanup, plus concurrent nested `ask_user`, `notify`, desktop input/capture, `display`/browser receipt attachment, `schedule` receipts, Jev charge ceiling and nested foreground subagent stop routing. The default Pi tool composition is present, but broad all-tool codemode reach must not be considered qualified until these behavioral boundaries pass. No MCP fixture process or Gateway lifecycle action was started. No iOS UI work was done; P99-15/P99-16 own it.
 - For the next agent: complete P99-22 and verify nested child actions/receipts remain attached to the codemode parent card; test runtime Stop/drain aborts the worker. Keep the MCP admin surface/adapter removal to P99-7/P99-8. No `pi-codemode` direct dependency is needed. The full-suite failure reproduced as a focused-pass `ENOTEMPTY` timing/cleanup issue, not a functional assertion.
 
+### P99-6 · Done · 2026-09-30 · luna-worker
+
+- Result: P99-6 codemode reach qualification is complete using the retained P99-22 E2Es and P99-23 parent-only presentation persistence E2E. The new part 2c regression exercises Jev dispatch ceilings during actual concurrent nested HTTP requests, and a foreground subagent started through codemode receives the workspace handoff and is stopped via the Gateway's operation-fenced subagent stop path. Nested subagent process activity is now projected against its codemode parent operation without creating an independent receipt.
+- Evidence: TypeScript check passed. The three focused cases across `codemode-nested-delegation.integration.test.ts` and `jev-extension.test.ts` passed in 1.39 s. Full Gateway Vitest passed 2,309/2,311 tests in 112.94 s; logger rotation (1/1 in 1.10 s) and session-catalog interval repair (1/1 in 0.46 s) failures passed isolated reruns. The integration test retains `packages/gateway/test-results/pi-sdk-099-nested-delegation.json` (gitignored). `git diff --check` and the personal-info guard passed.
+- Changes: `packages/gateway/src/knowledge/jev-extension.ts`, `packages/gateway/src/sessions/runtime-slot.ts`, `packages/gateway/src/sessions/codemode-nested-delegation.integration.test.ts`, and this plan. Jev calls are parallel-safe because each invocation is stateless and independently enforces the estimated per-call ceiling before fake HTTP dispatch; nested foreground activity is transient and creates no child receipt.
+- Tasks added: none.
+- Kept on purpose: Jev remains on its current fakeable HTTP client until P99-20 replaces it with Pi classifiers. Stop routing remains fenced to the codemode parent's operation; test owner and child-session binding are fake extension boundaries, not claims about installing/running pi-subagents.
+- Deviations: the full Gateway run had two timing/resource-sensitive failures, including logger rotation's 15-second timeout; both failed cases passed isolated reruns. No MCP admin/adapter or iOS work was added; P99-7/P99-8 and P99-15/P99-16 retain those owners. No Gateway lifecycle or external network action was invoked.
+- For the next agent: P99-17 retains final validation, rollback/payload qualification, and the trusted-browser receipt/abort-stash follow-up identified by P99-23. P99-6's codemode reach qualification is unblocked; MCP adapter/admin migration remains P99-7/P99-8.
+
 ### P99-23 · Done · 2026-09-30 · luna-worker
 
 - Result: The existing Tron display extension now observes Pi `tool_result` events, collects admitted nested display descriptors by parent call ID, reseals valid trusted browser receipts for the canonical parent ID, and enriches only the parent result's `details` with `tronNested`. The stash is bounded to 32 descriptors per parent and 16 KiB total, reports `complete: false` on overflow, and clears on parent completion, agent end/abort and runtime shutdown. Canonical display artifact reconciliation retains artifact IDs nested under the parent result; cold projection verifies browser receipts against the parent canonical ID. No content, structuredContent, child result, child receipt or transcript row is synthesized.
@@ -748,6 +758,16 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: P99-22 remains Claimed. P99-22 part 2b proves desktop serialization and native session binding only; `display` artifact and browser receipt live/cold-reload attachment are not considered proven. No nested call becomes an independent canonical card.
 - Deviations: The approved plan does not specify how presentation receipts absent from Pi's persisted nested summaries become durable under the parent. I requested a decision through the coordination channel twice; both requests timed out without a reply. I did not invent a new persistence or protocol contract. The test uses a fake Cua client boundary and fake NativeLiveClient; it makes no host automation or network calls.
 - For the next agent: P99-23 must resolve the parent-only persistence seam and add its own E2E before P99-6 is unblocked. Do not claim display/browser receipt success from this test; do not add child rows or re-key a receipt to a nested child ID without an approved contract.
+
+### P99-22 part 2c · Done · 2026-09-30 · luna-worker
+
+- Result: Added a faux-provider RuntimeRegistry integration E2E for nested Jev and foreground subagent delegation. Four concurrent Jev calls execute through the real Tron tool; two exceed `maxChargeCents` and never reach fake HTTP, while two admitted calls overlap at HTTP. The nested subagent receives the Gateway workspace handoff from the `tool_call` hook. Its live process is attached to the codemode parent's operation and aborts through `RuntimeSlot.abortSubagentProcess`; no child canonical tool result or extension-activity receipt is created.
+- Evidence: Node 22.22.0 TypeScript check passed. Focused test command passed 3/3 across the new integration test and Jev extension test in 1.39 s; the integration test retains `packages/gateway/test-results/pi-sdk-099-nested-delegation.json` (gitignored). Final full Gateway run passed 2,309/2,311 tests in 112.94 s; session-catalog interval repair passed its isolated rerun (1/1, 0.46 s) and logger rotation passed its isolated rerun (1/1, 1.10 s). `git diff --check` and personal-info guard passed.
+- Changes: added `packages/gateway/src/sessions/codemode-nested-delegation.integration.test.ts`; changed `packages/gateway/src/knowledge/jev-extension.ts` to allow stateless per-call Jev parallelism under D-3; changed `packages/gateway/src/sessions/runtime-slot.ts` to observe nested extension process lifecycle and preserve foreground operation ownership without writing child receipts.
+- Tasks added: none.
+- Kept on purpose: all Jev calls retain their independent fixed-price pre-dispatch ceiling; the fixture uses fake HTTP and a fake subagent extension, with owner and child-session binding faked at the boundary. The test performs no external network or real child-process work.
+- Deviations: the full Gateway suite had two timing/resource-sensitive failures; both passed isolated reruns. The production nested-activity fix was needed because nested event handling previously only projected live nested-call summaries and never admitted process ownership for foreground subagents.
+- For the next agent: P99-17 retains final validation, rollback/payload qualification, and the trusted-browser receipt/abort-stash follow-up identified by P99-23. P99-6's codemode reach qualification is unblocked; MCP adapter/admin migration remains P99-7/P99-8.
 
 ### Draft · Proposed · 2026-09-29 · planning session
 
