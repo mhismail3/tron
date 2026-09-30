@@ -407,7 +407,9 @@ Sections, in order:
    authority; Status is its projection.
 9. **Orphans:** worktrees under `claim.worktreeRoot` that are not on the claim
    branch of an open issue, and remote claim branches whose issue is closed or
-   does not exist.
+   does not exist. A worktree on a claim branch whose issue is closed or whose
+   remote branch is gone says that `work cleanup --all` removes it once its
+   pull request merged at its head.
 10. **Regressions:** open issues labeled `regressionLabel`.
 
 The names it reads (statuses, labels, fields, the verify context) come from the

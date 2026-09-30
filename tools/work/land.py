@@ -420,9 +420,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
                         "Run land again.")
 
     after_merge(gh, root, config, issue, pull["number"], merge_sha, head, branch, action)
-    primary = start.primary_checkout(root)
-    removal = (f"git -C {primary} worktree remove {root} && " if root.resolve() != primary.resolve() else "")
-    print(f"cleanup:  {removal}git -C {primary} branch -D {branch}")
+    print("cleanup:  run `work cleanup` from this worktree once you are done in it")
     return 0
 
 
