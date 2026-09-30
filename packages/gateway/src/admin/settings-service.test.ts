@@ -81,6 +81,8 @@ describe("SettingsService", () => {
       branchSummary: { reserveTokens: 8_000 },
       retry: { enabled: true, maxRetries: 4, provider: { timeoutMs: 90_000, maxRetries: 2, maxRetryDelayMs: 10_000 } },
       thinkingBudgets: { minimal: 512, high: 8_192 },
+      defaultTools: ["+codemode", "-bash"],
+      codemode: { mode: "only", inlineBudget: 4_000 },
       transport: "websocket",
       steeringMode: "one-at-a-time",
       followUpMode: "all",
@@ -100,7 +102,11 @@ describe("SettingsService", () => {
     });
     expect(document.effective.branchSummary).toEqual({ reserveTokens: 8_000 });
     expect(document.effective.transport).toBe("websocket");
+    expect(document.effective.defaultTools).toEqual(["read", "edit", "write", "codemode"]);
+    expect(document.effective.codemode).toEqual({ mode: "only", inlineBudget: 4_000 });
     expect(document.effective.sessionDir).toBe("/tmp/sessions");
+    await expect(service.update({ defaultTools: ["+" ] }, { cwd, scope: "global", projectTrusted: false })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.update({ codemode: { mode: "disabled" } }, { cwd, scope: "global", projectTrusted: false })).rejects.toMatchObject({ code: "invalid_request" });
     expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).toMatchObject({
       extensions: ["/tmp/extension.ts"],
       packages: [{ source: "npm:test", autoload: false, skills: ["**"] }],

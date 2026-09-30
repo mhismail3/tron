@@ -36,6 +36,7 @@ import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
+import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import type {
   ChatOrigin,
   CommandDetail,
@@ -1519,6 +1520,7 @@ export class RuntimeSlot {
         modelRuntime,
         resourceLoaderOptions: {
           extensionFactories: [
+            ...piBuiltinExtensions(this.dependencies.agentDir),
             ...mcpFactories.map((factory, index) => ({ name: `tron-mcp-${index}`, factory })),
             ...tronModuleFactories({
               sessionId: () => this.id,
@@ -7703,9 +7705,12 @@ export class RuntimeSlot {
   async setTools(toolNames: string[], initiatingWorkToken?: string): Promise<void> {
     await this.lane.run(() => {
       this.assertIdle(false, initiatingWorkToken);
-      const known = new Set(this.runtime.session.getAllTools().map((tool) => tool.name));
+      const tools = this.runtime.session.getAllTools();
+      const known = new Set(tools.map((tool) => tool.name));
       const unknown = toolNames.filter((name) => !known.has(name));
       if (unknown.length > 0) throw new GatewayError("invalid_request", `Unknown agent tools: ${unknown.join(", ")}`);
+      const hidden = toolNames.filter((name) => tools.find((tool) => tool.name === name)?.exposure === "hidden");
+      if (hidden.length > 0) throw new GatewayError("invalid_request", `Hidden agent tools cannot be activated: ${hidden.join(", ")}`);
       this.runtime.session.setActiveToolsByName(toolNames);
       this.revision += 1;
       this.emit("session.contextChanged", {});
@@ -8140,7 +8145,11 @@ export class RuntimeSlot {
       contextUsage: session.getContextUsage(),
       stats: session.getSessionStats(),
       activeTools: session.getActiveToolNames(),
-      availableTools: session.getAllTools(),
+      availableTools: session.getAllTools().map((tool) => ({
+        ...tool,
+        ...(tool.namespace ? { namespace: tool.namespace } : {}),
+        ...(tool.annotations ? { annotations: tool.annotations } : {}),
+      })),
       commands: this.commands(),
       ...this.resourcesValue(),
       diagnostics: this.runtime.diagnostics,
@@ -8191,6 +8200,7 @@ export class RuntimeSlot {
     const loader = session.resourceLoader;
     const allExtensions = loader.getExtensions().extensions;
     const allLoadErrors = loader.getExtensions().errors;
+    const allLoadWarnings = loader.getExtensions().warnings ?? [];
     const hookProjection = projectHookRegistrations(
       allExtensions.map((extension) => ({
         name: basename(extension.path),
@@ -8204,6 +8214,7 @@ export class RuntimeSlot {
         handlers: extension.handlers,
       })),
       allLoadErrors,
+      allLoadWarnings,
     );
     const extensionValues = hookProjection.extensions;
     const loadErrorValues = hookProjection.extensionLoadErrors;
@@ -8215,6 +8226,9 @@ export class RuntimeSlot {
           name: tool.name,
           ...(this.toolLabel(tool.name) ? { label: this.toolLabel(tool.name)! } : {}),
           description: tool.description,
+          exposure: tool.exposure,
+          ...(tool.namespace ? { namespace: tool.namespace } : {}),
+          ...(tool.annotations ? { annotations: tool.annotations } : {}),
           scope: tool.sourceInfo.scope,
           source: tool.sourceInfo.source,
           ...(distribution ? { distribution } : {}),
