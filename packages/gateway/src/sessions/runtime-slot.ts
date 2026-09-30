@@ -60,7 +60,7 @@ import type {
   ResourceInvocation,
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { stage, wait } from "../transport/request-span.js";
+import { count, stage, wait } from "../transport/request-span.js";
 import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
@@ -2958,8 +2958,11 @@ export class RuntimeSlot {
     );
   }
 
-  private clearMarkerOwnership(operationId?: string, existingOwner?: GatewayWorkHandle): Promise<void> {
+  private async clearMarkerOwnership(operationId?: string, existingOwner?: GatewayWorkHandle): Promise<void> {
     const key = operationId ?? "all";
+    // A foreground prompt can answer before its exact marker fsync. Never let a
+    // later clear overtake that publication and leave a stale marker on disk.
+    if (operationId) await this.durableWrites.get(`marker:mark:${operationId}`)?.waiter;
     // Markers are keyed by the session that admitted the work; a retry after a
     // rebind still clears the origin's marker (see the command handoff).
     const sessionId = this.id;
@@ -7066,7 +7069,13 @@ export class RuntimeSlot {
         this.settleOperationWork(operationId);
       } else if (!runSettled) {
         operationWork.transition("foreground-agent-operation");
-        await stage("session.prompt.marker-persist", () => this.enqueueMarkerOwnership(operationId));
+        const markerWrite = this.enqueueMarkerOwnership(operationId);
+        count("session.prompt.marker-persist");
+        // Prompt admission is already authoritative in Pi. Keep the marker owner
+        // tracked for drain and later settlement, but do not hold the response on
+        // its fsync; observing the rejection also prevents a detached write from
+        // becoming an unhandled rejection.
+        void markerWrite.catch(() => {});
       }
       this.revision += 1;
       this.publishSnapshot();

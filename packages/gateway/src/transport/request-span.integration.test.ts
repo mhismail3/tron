@@ -127,6 +127,7 @@ describe("receipt-backed prompt request span", () => {
       },
     ));
     await operationStarted;
+    const secondStartedAt = performance.now();
     const second = runInRequestSpan(secondSpan, () => receipts.execute(
       "device", "session.prompt", "shared-command", async () => ({ accepted: true }),
     ));
@@ -134,15 +135,21 @@ describe("receipt-backed prompt request span", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     const lockHeldMs = performance.now() - lockHeldAt;
     releaseOperation();
-    await Promise.all([first, second]);
+    await first;
+    await second;
+    const secondElapsedMs = performance.now() - secondStartedAt;
     const firstBreakdown = firstSpan.breakdown(1);
     const secondBreakdown = secondSpan.breakdown(1);
     expect(firstBreakdown?.stages).toContain("receipt.pending-persist");
     expect(firstBreakdown?.stages).toContain("receipt.completed-persist");
     expect(secondBreakdown?.stages).toContain("receipt.command-lane=");
     const laneWaitMs = stagesOf(secondBreakdown!.stages).get("receipt.command-lane")!;
-    expect(laneWaitMs).toBeGreaterThan(0);
-    expect(laneWaitMs).toBeLessThanOrEqual(lockHeldMs + 20);
+    // The duplicate waits at least as long as the first command held its lane,
+    // and the lane stage is part of, never more than, its own request. The
+    // first command's completed-receipt fsync also holds the lane (F-5), so
+    // no fixed allowance on top of the held time can bound it on a busy disk.
+    expect(laneWaitMs).toBeGreaterThanOrEqual(lockHeldMs - 1);
+    expect(laneWaitMs).toBeLessThanOrEqual(secondElapsedMs);
   });
 });
 
