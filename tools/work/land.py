@@ -243,16 +243,14 @@ def merge(gh: Gh, pull: int, title: str, number: int, head: str, keyword: str,
 
 
 def delete_branch(root: Path, remote: str, branch: str, head: str) -> str:
-    at = _remote_head(root, remote, branch)
-    if at is None:
+    if _remote_head(root, remote, branch) is None:
         return "already deleted"
-    if at != head:
-        return f"kept: it is at {at[:12]}, not the merged head {head[:12]}"
-    # The lease covers a push that lands between the read above and this delete.
+    # The lease keeps a branch that moved off the merged head, even just before this push.
     deleted = _git(root, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{head}", remote,
                    f":refs/heads/{branch}", check=False)
     if deleted.returncode != 0:
-        return f"kept: the delete was refused ({deleted.stderr.strip().splitlines()[-1]})"
+        detail = (deleted.stderr.strip().splitlines() or ["no detail"])[-1]
+        return f"kept: the delete with a lease on the merged head {head[:12]} was refused ({detail})"
     return "deleted"
 
 
