@@ -96,7 +96,7 @@ struct ChatDisplayOrientationTests {
             let harness = try await ChatDisplayOrientationFixture.harness(orientation: orientation)
             do {
                 let image = try await ChatDisplayOrientationFixture.waitForLoadedImage(harness)
-                let colors = try #require(ChatDisplayOrientationFixture.colorCenters(image))
+                let colors = try #require(try ChatDisplayOrientationFixture.colorCenters(image))
                 #expect(colors.red.y < colors.blue.y, "\(orientation): red \(colors.red), blue \(colors.blue)")
                 Attachment.record(try #require(image.pngData()), named: "inline-image-\(orientation).png")
             } catch {
