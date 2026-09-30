@@ -284,7 +284,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-14 | Done | Qualify installed packages and subagent children against 0.99 | P99-6 | luna-worker, 2026-09-30 |
 | P99-15 | Done | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | luna-worker, 2026-09-30 |
 | P99-16 | Done | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | luna-worker, 2026-09-30 |
-| P99-17 | Done | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | luna-worker, 2026-09-30 |
+| P99-17 | Claimed | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | luna-worker, 2026-09-30 |
 | P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
 | P99-20 | Done | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); root-export a per-instance theme setter; public per-session MCP status/process count (user authorizes filing) | P99-8, P99-11 | Unassigned |
@@ -745,6 +745,10 @@ from a session; Sign in with ChatGPT; select a virtual model if one is
 installed. Then close the plan per `docs/plans/README.md`.
 
 ## Handoff log
+
+### P99-17 review · Reopened · 2026-09-30 · orchestrator session
+
+- Correction to the P99-17 h3 entry: the independent review of the candidate (reviewer output retained in the subagent artifacts) returned BLOCK with three blockers in MCP administration and sign-in: saved `mcp.json` invalid after `mcp.token.set`; `mcp.list` failing on any unhealthy server and iOS decoding a status field Pi does not emit; MCP sign-in events never reaching the iOS sheet. It also found majors M1-M5 (failed sign-ins reported as success, `/mcp login` admissible as a model prompt, missing `Bearer` prefix, unscoped Keychain accounts, unfinished nested calls shown as running) and minors. P99-17 is reopened until the review-fix groups land and a re-review passes. The earlier visual evidence used an invented `mcp.list` fixture shape, which is why the capture review missed B2.
 
 ### P99-14 · Done · 2026-09-30 · luna-worker
 
