@@ -71,7 +71,9 @@ and nonignored untracked file, so new packages, configuration and agent guidance
 need no parallel scan-root list. Ignored generated output is skipped only when
 untracked; tracked files remain in scope. Only the guard's own needle definitions
 are exempt. Pre-commit `--staged` checks changed index blobs, not later working-tree
-edits. Install that hook once per clone with `scripts/install-hooks.sh`, run from
+edits. `--stdin` applies the same needles to text about to be published, such as
+the evidence `scripts/tron work verify --post` writes to GitHub, and exits 1 on
+a finding. Install that hook once per clone with `scripts/install-hooks.sh`, run from
 the main checkout or any linked worktree; Git's hooks directory is shared, so one
 install guards every worktree. The hook runs `personal-info-guard.sh --staged`
 and the Gateway build for staged gateway TypeScript. Run
