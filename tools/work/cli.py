@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import bootstrap  # noqa: E402
 import claim  # noqa: E402
+import cleanup  # noqa: E402
 import dashboard  # noqa: E402
 import land  # noqa: E402
 import start  # noqa: E402
@@ -50,6 +51,9 @@ def main(argv: list) -> int:
     stewardship = commands.add_parser("steward", help="report open claim pull requests; --land one whose owner is gone")
     stewardship.add_argument("--land", type=int, metavar="ISSUE",
                          help="merge this issue's pull request if its head is verified, green and up to date")
+    tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
+    tidy.add_argument("--all", action="store_true", help="every worktree under the worktree root; list the rest")
+    tidy.add_argument("--dry-run", action="store_true", help="report the decisions and change nothing")
     args = parser.parse_args(argv)
 
     root = repository_root()
@@ -74,8 +78,10 @@ def main(argv: list) -> int:
                              args.needs_user_validation)
         if args.command == "steward":
             return land.steward(Gh(root), root, config, args.land)
+        if args.command == "cleanup":
+            return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError,
-            land.LandError, FileNotFoundError, json.JSONDecodeError) as error:
+            land.LandError, cleanup.CleanupError, FileNotFoundError, json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1
     return 64
