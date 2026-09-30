@@ -321,16 +321,17 @@ describe("knowledge connectors", () => {
     expect(source?.content.captureDisposition).toBe("reference-only"); expect(source?.content.captureReason).toContain("Destination safety check failed");
   });
 
-  it("discovers a bounded Raindrop batch before processing it and deduplicates shifted pages", async () => {
+  it("only queues discovered bookmarks during a sweep and deduplicates shifted pages", async () => {
     let calls = 0;
     const first = Array.from({ length: 50 }, (_, index) => ({ _id: index + 1, title: `Bookmark ${index}`, link: `https://example.com/${index}`, excerpt: `Excerpt ${index}` }));
+    let linkedFetches = 0;
     const { store, extension } = await fixture(async (url) => {
       calls += 1;
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/123?page=0")) return response({ items: first });
       if (url.includes("/raindrops/123?page=1")) return response({ items: [{ _id: 50, title: "Duplicate", link: "https://example.com/49" }, { _id: 51, title: "Bookmark 51", link: "https://example.com/51" }] });
       throw new Error(`unexpected endpoint ${url}`);
-    });
+    }, undefined, { sourceFetch: async () => { linkedFetches += 1; return new Response("capture is intake-only"); } });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "123", credentialRef: "connector:raindrop:test-account" } });
     const dryRun = await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("discover"), connector: "raindrop", dryRun: true, limit: 51 } }) as { discovered: number; pending: number };
     expect(dryRun.discovered).toBe(51);
@@ -339,28 +340,11 @@ describe("knowledge connectors", () => {
     const state = await store.connectorState("raindrop");
     expect(state?.checkpoint).toBeUndefined();
     expect(state?.pending.map(item => item.id)).toHaveLength(51);
-    const result = await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("capture"), connector: "raindrop", dryRun: false, limit: 2 } }) as { captured: number; pending: number };
-    expect(result.captured).toBe(0);
-    expect(result.partial).toBe(1);
+    const result = await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("sweep"), connector: "raindrop", dryRun: false, limit: 2 } }) as { discovered: number; pending: number };
+    expect(result.discovered).toBe(0);
     expect(result.pending).toBe(51);
-    expect((await store.list({ kind: "source", includePending: true })).records).toHaveLength(1);
-  });
-
-  it("recovers the bookmark save time from the retained item payload during a sweep", async () => {
-    const { store, extension } = await fixture(async (url) => {
-      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
-      if (url.includes("/raindrops/321?page=0")) return response({ items: [{ _id: 77, title: "Bookmark", link: "https://example.com/saved", created: "2024-09-03T06:22:40.426Z", lastUpdate: "2026-04-13T18:00:34.580Z", collection: { $id: 321 } }] });
-      throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { sourceFetch: async () => new Response("Complete saved evidence", { headers: { "content-type": "text/plain" } }) });
-    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("save-time-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "321", credentialRef: "connector:raindrop:test-account" } });
-    await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("save-time-discover"), connector: "raindrop", dryRun: true, limit: 1 } });
-    const result = await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("save-time-capture"), connector: "raindrop", dryRun: false, limit: 1 } }) as { captured: number };
-    expect(result.captured).toBe(1);
-    const sources = (await store.list({ kind: "source", includeArchived: true, includePending: true })).records.filter(record => record.kind === "source");
-    expect(sources).toHaveLength(1);
-    expect(sources[0]?.content.sourceSavedAt).toBe("2024-09-03T06:22:40.426Z");
-    // The sweep never labels lastUpdate or capture time as publication time.
-    expect(sources[0]?.content.sourcePublishedAt).toBeUndefined();
+    expect(linkedFetches).toBe(0);
+    expect((await store.list({ kind: "source", includePending: true })).records).toHaveLength(0);
   });
 
   it("reads raw bookmark metadata and continues small pages without losing fields", async () => {
@@ -741,21 +725,6 @@ describe("knowledge connectors", () => {
     expect(state?.assessmentPilot).toMatchObject({ id: "frozen-pilot", usedItems: 1, reservedCents: 1 });
     expect(state?.assessmentApprovals?.[0]).toMatchObject({ id: "renewed-cohort", usedItems: 1, reservedCents: 1 });
     expect(Object.keys(state?.assessmentAttempts ?? {})).toEqual(["1", "renewed-cohort:2"]);
-  });
-
-  it("does not let generic connector sweep move a pending source", async () => {
-    let puts = 0;
-    const { store, extension } = await fixture(async (url, init) => {
-      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
-      if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 4, title: "Pending", link: "https://example.test/pending", collection: { $id: 111 } }] });
-      if (init.method === "PUT") puts += 1;
-      throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { sourceFetch: async () => new Response("partial", { headers: { "content-type": "text/plain", "x-tron-source-capture-quality": "partial" } }) });
-    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("sweep-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", destination: "222", allowWrites: true, credentialRef: "connector:raindrop:test-account" } });
-    const result = await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("sweep-pending"), connector: "raindrop", dryRun: false, limit: 1 } });
-    expect(result).toMatchObject({ partial: 1 });
-    expect(puts).toBe(0);
-    expect((await store.list({ kind: "source", includePending: true })).records[0]?.content.admission?.status).toBe("pending");
   });
 
   it("does not permit remote Raindrop effects without a separately approved write policy", async () => {

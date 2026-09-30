@@ -521,8 +521,8 @@ export class KnowledgeConnectorExtension {
 
   private async markUnsafeLinkedCapture(item: PendingItem, source: KnowledgeRecord & { kind: "source" }, commandId: string): Promise<KnowledgeRecord & { kind: "source" }> {
     let disposition = source.content.captureDisposition;
-    // Public post permalinks were read through the X provider, whose disposition
-    // is already truthful; only HTML fetches of other X pages are app shells.
+    // Public post permalinks were read through the X provider; only HTML fetches
+    // of other X pages need the app-shell capture downgrade.
     if (isPublicXPost(item.url)) return source;
     try {
       const host = new URL(item.url).hostname.toLowerCase();
@@ -831,51 +831,13 @@ export class KnowledgeConnectorExtension {
         await this.store.updateConnectorState(command(request.commandId, "dry"), connector, value => ({ ...(value ?? state), health: "ready", remaining: value?.pending.length ?? state.pending.length }));
         return result;
       }
-      let captured = 0; let partial = 0; let lastError: string | undefined;
-      const selectedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
-      for (const item of selectedPending.slice(0, limit)) {
-        let sweptSourceId: string | undefined;
-        try {
-          const live = await this.store.connectorState(connector);
-          if (!live || live.accountId !== current.accountId || live.scope !== current.scope || live.credentialRef !== current.credentialRef || live.enabled !== current.enabled) throw new GatewayError("conflict", "Connector configuration changed during the run");
-          state = live;
-          if (connector === "raindrop" && item.collectionId !== selectedCollection) throw new GatewayError("conflict", "Pending Raindrop item no longer belongs to this collection");
-          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: mappedScope, title: item.title, origin: "connector", identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), ...(item.publishedAt ? { sourcePublishedAt: item.publishedAt } : {}), ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
-          let capturedRecord = result.record;
-          sweptSourceId = capturedRecord.id;
-          if (capturedRecord.scope !== mappedScope) {
-            const placed = await this.store.curateSource({ commandId: command(request.commandId, `scope-${item.id}-${mappedScope}`), operation: "placement", producer: { actor: "connector" }, item: { recordId: capturedRecord.id, expectedRevision: capturedRecord.revisionId, placement: { scope: mappedScope } } });
-            capturedRecord = placed.record as KnowledgeRecord & { kind: "source" };
-          }
-          // X API entities/author fields are authenticated evidence. Retain a
-          // bounded canonical object instead of certifying a public-page fetch.
-          let attachedEvidence: { objectHash: string; bytes: Uint8Array } | undefined;
-          if (item.apiPayload && capturedRecord.content.captureDisposition !== "failed") {
-            const bytes = new TextEncoder().encode(item.apiPayload);
-            const apiObject = await this.store.putObject(bytes, "application/json");
-            attachedEvidence = { objectHash: apiObject.hash, bytes };
-            const updated = await this.store.captureSource({ commandId: command(request.commandId, `api-evidence-${item.id}`), expectedRevision: capturedRecord.revisionId, record: { kind: "source", id: capturedRecord.id, createdAt: capturedRecord.createdAt, scope: capturedRecord.scope, provenance: capturedRecord.provenance, relations: capturedRecord.relations, content: { ...capturedRecord.content, representations: [...(capturedRecord.content.representations ?? []), { kind: "provider-api", object: apiObject, mediaType: "application/json" }] } } });
-            if (updated.record.kind === "source") capturedRecord = updated.record;
-          }
-          // A freshly captured source is still pending, so its own objects are
-          // fenced; hand the exact retained bytes to the reconciliation.
-          capturedRecord = await this.recoverSaveTime(capturedRecord, command(request.commandId, `save-time-${item.id}`), attachedEvidence);
-          if (capturedRecord.content.captureDisposition !== "complete" && mappedScope !== "personal") { partial += 1; lastError = `Capture for ${item.id} is ${capturedRecord.content.captureDisposition}`; break; }
-          const destination = mapping ? mapping.destination : state.destination;
-          if (connector === "raindrop" && state.allowWrites && destination && item.collectionId && item.collectionId !== destination) {
-            const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: capturedRecord, expectedRevision: capturedRecord.revisionId, identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(selectedCollection ? { sourceCollection: selectedCollection } : {}), destination, ...(request.connectionId ? { connectionId: request.connectionId } : {}), ...(expectedSetupRevision !== undefined ? { expectedSetupRevision } : {}) }, signal);
-            if (moved.status !== "moved") { lastError = moved.status === "unsupported" ? "Approved Raindrop move is unavailable" : "Raindrop move could not be verified"; break; }
-          }
-          captured += 1;
-          state = await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), connector, value => { const next = value ?? state; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id || (connector === "raindrop" && candidate.collectionId !== selectedCollection)), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), ...(connector === "raindrop" && selectedCollection ? { capturedCollections: collectionProgress(next.capturedCollections, item.id, selectedCollection) } : {}), remaining: Math.max(0, next.pending.length - 1) }; });
-        } catch (error) { lastError = error instanceof Error ? error.message : "Connector capture failed"; break; } finally { await this.queueSettledEnrichment(sweptSourceId); }
-      }
-      state = await this.store.updateConnectorState(command(request.commandId, "finish"), connector, value => ({ ...(value ?? state), health: lastError ? "partial" : "ready", ...(lastError ? { lastError } : {}), lastRunAt: this.now(), remaining: value?.pending.length ?? state.pending.length }));
+      const scopedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
+      state = await this.store.updateConnectorState(command(request.commandId, "finish"), connector, value => ({ ...(value ?? state), health: "ready", lastRunAt: this.now(), remaining: value?.pending.length ?? state.pending.length }));
       clearTimeout(deadline);
-      return { connector, dryRun: false, discovered: discovered.discovered, captured, partial, pending: state.pending.length, remaining: state.remaining, health: state.health, ...(lastError ? { error: lastError } : {}) };
+      return { connector, dryRun: false, discovered: discovered.discovered, pending: scopedPending.length, remaining: state.remaining, health: state.health };
     } catch (error) {
       const health = credentialUnavailable || error instanceof ConnectorHTTPError && authFailure(error.status) ? "auth-error" : error instanceof ConnectorHTTPError && error.status === 429 ? "rate-limited" : "error";
-      const message = error instanceof ConnectorHTTPError ? `Provider request failed (${error.status})` : error instanceof Error ? error.message : "Connector failed";
+      const message = error instanceof ConnectorHTTPError ? `Provider request failed (${error.status})` : error instanceof Error ? error.message : "Connector discovery failed";
       if (health === "auth-error") await this.recordAdmission(current, "unavailable", "unknown", request.commandId, expectedSetupRevision);
       if (message.includes("authenticated account does not match")) await this.recordAdmission(current, "available", "mismatch", request.commandId, expectedSetupRevision);
       await this.store.updateConnectorState(command(request.commandId, "error"), connector, state => ({ ...(state ?? current), health, lastError: message, lastRunAt: this.now(), remaining: state?.pending.length ?? current.pending.length }));

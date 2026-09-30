@@ -68,7 +68,7 @@ only on the user's word) apply to every task.
 | C1 | Done | Archive is one state: Archive/Unarchive write admission; verdict gains Clear; Archived view, reads and restore agree | none | knowledge-consolidation session, 2026-09-29 |
 | C2 | Blocked | Remove `archive` from the verdict type after live data holds none | C1, user Gateway update, STORM rewrite | — |
 | C3 | Done | Intake never overrides a decided scope or admission; decided-but-unmoved bookmarks leave the queue | none | knowledge-consolidation session, 2026-09-29 |
-| C4 | Claimed | Sweep is discovery-only; intake is the only capture-and-decide path | C3 | knowledge-consolidation session, 2026-09-29 |
+| C4 | Done | Sweep is discovery-only; intake is the only capture-and-decide path | C3 | knowledge-consolidation session, 2026-09-29 |
 | C5 | Claimed | One monthly Jev budget for intake assessment and tagging | none | knowledge-consolidation session, 2026-09-29 |
 | C6 | Claimed | Agent tool: `list` hides personal sources by default; search/recall metadata comes from the read record | none | knowledge-consolidation session, 2026-09-29 |
 | C7 | Claimed | iOS: curation conflict outcomes surface and reload; linked entries open regardless of admission | C1 | knowledge-consolidation session, 2026-09-29 |
@@ -80,6 +80,7 @@ only on the user's word) apply to every task.
 | C13 | Needs scoping | One freshness vocabulary; verdict reported beside age, not folded into it | C2 | — |
 | C14 | Needs scoping | Supersession stored once; forget scrubs it | C2 | — |
 | C15 | Ready | Naming and dead code: Saved/Pending/scope labels, duplicate digest, double save-time source, dead iOS predicates | C1–C14 | — |
+| C16 | Needs scoping | Audit live Knowledge data for sources left pending by historical connector sweeps and determine safe intake recovery | C4, user Gateway access | — |
 
 ## Task details
 
@@ -122,11 +123,13 @@ unmoved bookmarks are re-processed every run.
 
 ### C4 — Sweep is discovery-only
 
-Evidence: the connector `run` path (`connectors.ts` ~820–858) captures sources
-that default to pending (`packages/gateway/src/knowledge/source-capture.ts` ~804),
-never admits them, and marks them captured so intake skips them. Make `run`
-discovery-only; audit live data for sources stuck pending by past sweeps and
-route them through intake.
+Evidence: the connector `run` path (`connectors.ts` ~820–875) captured sources
+that defaulted to pending (`packages/gateway/src/knowledge/source-capture.ts`
+~804), never admitted them, and marked them captured so intake skipped them.
+Make `run` discovery-only; it only discovers provider identities into the
+connector queue. Intake is the sole path that captures and decides bookmarks.
+Historical sources left pending by previous sweep behavior require a separate
+live-data audit (C16); this task must not contact the live Gateway.
 
 ### C5 — One Jev budget
 
@@ -230,6 +233,16 @@ save time and recovered save time; unreachable iOS `.sources` branch in
 - Kept on purpose: legacy admissions without producer metadata are treated as prior decisions; intake never guesses their owner or overwrites them.
 - Deviations: none.
 - For the next agent: C4 can make the connector sweep discovery-only; intake's done receipt is now the boundary that removes completed identities from its queue.
+
+### C4 · Done · 2026-09-29 · luna-worker
+
+- Result: connector runs now only discover bookmarks into the connector queue; capture, admission, provider movement, and post-capture enrichment are absent from the sweep path. The knowledge tool explains that discovery does not capture or decide bookmarks and points processing to intake.
+- Evidence: `cd packages/gateway && npm run build` (passed); `npx vitest run src/knowledge/connectors.test.ts src/knowledge/knowledge-service.test.ts` (69 passed); `python3 scripts/check-documentation-policy.py` (passed); `scripts/personal-info-guard.sh` (passed).
+- Changes: this commit
+- Tasks added: C16 — audit live Knowledge data for sources left pending by historical connector sweeps; requires user Gateway access and was not performed here.
+- Kept on purpose: connector identity and provider metadata remain durably queued and deduplicated; intake continues owning source capture and decisions.
+- Deviations: none.
+- For the next agent: C16 must audit pending records without invoking Gateway mutations until an explicitly approved recovery route is known.
 
 ### C1 · Done · 2026-09-29 · luna-worker
 

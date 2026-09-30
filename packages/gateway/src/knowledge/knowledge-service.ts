@@ -926,7 +926,7 @@ export class KnowledgeService {
         }
         const result = await this.runOwned("connector sweep", ownedSignal => this.extensions.connector!({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId!, connector: parameters.connector!, ...(parameters.connectionId ? { connectionId: parameters.connectionId } : {}), dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } }, ownedSignal), signal);
         if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
-        return { text: `${parameters.connector} connector sweep completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+        return { text: `${parameters.connector} discovery completed; bookmarks are queued for intake and were not captured or decided: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
       case "curate": {
         const response = await this.curate(curationToolRequest(parameters));

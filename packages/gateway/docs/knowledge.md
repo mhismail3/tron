@@ -776,13 +776,13 @@ Provider JSON is preserved; HTTP/metadata responses over 2,000,000 bytes and
 agent text over 128,000 bytes fail rather than truncating fields. Narrow pages
 or fetch individual items; a single item over the agent bound is unsupported. Retries honor `Retry-After` and both common rate-limit
 header spellings. Redirects are not followed, and provider failures are
-redacted. This is metadata access, not full article capture, and the existing
-`connectorSweep` remains a lower-level capture helper rather than an assessed
-intake or complete sync. Its connector sources remain pending and inspectable
-through `includePending`; it cannot acknowledge or move a Raindrop item without
-an explicit retained/archived admission from `raindropIntake`. Agent sweeps use
-the same accepted-work owner as RPC runs, so disconnecting a presentation waiter
-does not replay or abandon admitted provider work. Connector identity reuse
+redacted. This is metadata access, not full article capture. `connectorSweep` only
+verifies the provider and discovers bookmarks into the connector queue; it does
+not capture linked pages, create Knowledge sources, decide admission, or move
+Raindrop items. `raindropIntake` is the only connector path that captures and
+decides bookmarks. Agent sweeps use the same accepted-work owner as RPC runs, so
+disconnecting a presentation waiter does not replay or abandon admitted provider
+work. Connector identity reuse
 resolves through a canonical Knowledge catalog index keyed by
 provider/account/item rather than scanning source pages.
 
@@ -916,12 +916,12 @@ receives a durable
 are absent from normal retrieval but can be explicitly listed/read/restored
 without using privacy suppression. Connector captures awaiting admission are
 also absent from normal retrieval; inspection requires the separate
-`includePending` audit/intake flag. Generic `connectorSweep` cannot move a
-pending source. Only after the local revision commits and the exact source head,
-admission, identity, retained object, and provider collection are revalidated
-does the existing Raindrop preflight/receipt/PUT/read-back path attempt the
-configured Agent Sorted move. Uncertain provider effects remain pending for
-reconciliation. Offset pages are not treated as an atomic snapshot: each
+`includePending` audit/intake flag. Generic `connectorSweep` only discovers and
+queues provider identities; it cannot capture or move a source. Only intake,
+after the local revision commits and the exact source head, admission, identity,
+retained object, and provider collection are revalidated, can use the existing
+Raindrop preflight/receipt/PUT/read-back path to attempt the configured Agent
+Sorted move. Uncertain provider effects remain pending for reconciliation. Offset pages are not treated as an atomic snapshot: each
 bounded run revisits page zero and uses durable IDs, so moved items shrinking
 earlier pages cannot silently skip later entries. Malformed read envelopes are
 rejected locally before credential lookup or provider HTTP; provider failures

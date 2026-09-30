@@ -410,7 +410,8 @@ describe("KnowledgeService integration", () => {
       connector: async action => ({ operation: action.operation, accepted: true }),
     });
     const result = await service.tool({ action: "connectorSweep", commandId: "service-sweep", connector: "raindrop", dryRun: true, limit: 1 });
-    expect(result.text).toContain("connector sweep completed");
+    expect(result.text).toContain("discovery completed");
+    expect(result.text).toContain("were not captured or decided");
     expect(result.details).toEqual({ operation: "knowledge.connector.run", accepted: true });
   });
 
