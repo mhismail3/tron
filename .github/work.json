@@ -1,0 +1,522 @@
+{
+  "labels": [
+    {
+      "name": "epic",
+      "color": "5319e7",
+      "description": "Parent issue for a multi-task effort; holds goal, constraints and decisions"
+    },
+    {
+      "name": "task",
+      "color": "1d76db",
+      "description": "One claimable unit of work; one branch, one worktree, one PR"
+    },
+    {
+      "name": "bug",
+      "color": "d73a4a",
+      "description": "Something isn't working"
+    },
+    {
+      "name": "chore",
+      "color": "c5def5",
+      "description": "Maintenance with no product behavior change"
+    },
+    {
+      "name": "dependencies",
+      "color": "0366d6",
+      "description": "Dependency update; follows the owning dependency runbook"
+    },
+    {
+      "name": "enhancement",
+      "color": "a2eeef",
+      "description": "New feature or request"
+    },
+    {
+      "name": "area:gateway",
+      "color": "0e8a16",
+      "description": "packages/gateway"
+    },
+    {
+      "name": "area:ios",
+      "color": "0e8a16",
+      "description": "packages/ios-app"
+    },
+    {
+      "name": "area:mac",
+      "color": "0e8a16",
+      "description": "packages/mac-app"
+    },
+    {
+      "name": "area:relay",
+      "color": "0e8a16",
+      "description": "packages/push-relay"
+    },
+    {
+      "name": "area:tooling",
+      "color": "0e8a16",
+      "description": "scripts, tools, CI and agent guidance"
+    },
+    {
+      "name": "area:docs",
+      "color": "0e8a16",
+      "description": "Documentation only"
+    },
+    {
+      "name": "needs-triage",
+      "color": "fbca04",
+      "description": "Filed but not yet prioritized or placed under an epic"
+    },
+    {
+      "name": "needs-decision",
+      "color": "b60205",
+      "description": "Blocked on a decision from the maintainer"
+    },
+    {
+      "name": "needs-user-validation",
+      "color": "d93f0b",
+      "description": "Merged; waiting for a maintainer-only action and check"
+    },
+    {
+      "name": "regression",
+      "color": "b60205",
+      "description": "Filed by a scheduled or non-blocking check on main"
+    }
+  ],
+  "project": {
+    "title": "Tron",
+    "shortDescription": "Epics, tasks and their status for every agent working on Tron",
+    "public": false,
+    "fields": [
+      {
+        "name": "Status",
+        "type": "single_select",
+        "options": [
+          {
+            "name": "Proposed",
+            "color": "GRAY",
+            "description": "Awaiting maintainer approval; cannot be claimed"
+          },
+          {
+            "name": "Ready",
+            "color": "BLUE",
+            "description": "Approved; claimable once blockers are closed"
+          },
+          {
+            "name": "In progress",
+            "color": "YELLOW",
+            "description": "Claimed; has a branch and worktree"
+          },
+          {
+            "name": "In review",
+            "color": "PURPLE",
+            "description": "PR open; landing"
+          },
+          {
+            "name": "Needs you",
+            "color": "ORANGE",
+            "description": "Waiting for a maintainer decision or maintainer-only validation"
+          },
+          {
+            "name": "Blocked",
+            "color": "RED",
+            "description": "Cannot proceed; the reason is in the latest comment"
+          },
+          {
+            "name": "Done",
+            "color": "GREEN",
+            "description": "Closed with evidence"
+          }
+        ]
+      },
+      {
+        "name": "Priority",
+        "type": "single_select",
+        "options": [
+          {
+            "name": "P0",
+            "color": "RED",
+            "description": "Drop everything"
+          },
+          {
+            "name": "P1",
+            "color": "ORANGE",
+            "description": "Next"
+          },
+          {
+            "name": "P2",
+            "color": "YELLOW",
+            "description": "Normal"
+          },
+          {
+            "name": "P3",
+            "color": "GRAY",
+            "description": "Someday"
+          }
+        ]
+      },
+      {
+        "name": "Epic rank",
+        "type": "number"
+      }
+    ]
+  },
+  "rulesets": [
+    ".github/rulesets/main.json"
+  ],
+  "claim": {
+    "remote": "origin",
+    "baseBranch": "main",
+    "worktreeRoot": "../tron-worktrees",
+    "readyStatus": "Ready",
+    "claimedStatus": "In progress",
+    "statusField": "Status",
+    "excludeLabels": [
+      "epic"
+    ],
+    "softCap": 6,
+    "branchTypes": [
+      {
+        "label": "bug",
+        "type": "fix"
+      },
+      {
+        "label": "regression",
+        "type": "fix"
+      },
+      {
+        "label": "dependencies",
+        "type": "deps"
+      },
+      {
+        "label": "chore",
+        "type": "chore"
+      },
+      {
+        "label": "area:docs",
+        "type": "docs"
+      }
+    ],
+    "defaultBranchType": "feat"
+  },
+  "verify": {
+    "statusContext": "tron/verify",
+    "prelude": "export PATH=\"$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH\" PYTHONDONTWRITEBYTECODE=1",
+    "scrubCommand": "scripts/personal-info-guard.sh --stdin",
+    "evidenceRepositorySuffix": "-evidence",
+    "excerptLines": 30,
+    "checks": [
+      {
+        "name": "privacy",
+        "always": true,
+        "paths": [
+          ".gitignore",
+          "**/.gitignore"
+        ],
+        "command": "scripts/personal-info-guard.sh"
+      },
+      {
+        "name": "agent-policy",
+        "always": true,
+        "paths": [
+          "AGENTS.md",
+          ".agents/**",
+          ".pi/**",
+          ".codex/**",
+          "scripts/check-agent-policy.sh"
+        ],
+        "command": "scripts/check-agent-policy.sh"
+      },
+      {
+        "name": "documentation-policy",
+        "always": true,
+        "paths": [
+          "**/*.md",
+          "docs/**",
+          "packages/*/docs/**",
+          "scripts/check-documentation-policy.py"
+        ],
+        "command": "python3 scripts/check-documentation-policy.py"
+      },
+      {
+        "name": "whitespace",
+        "always": true,
+        "paths": [],
+        "command": "git diff --check {merge_base} HEAD"
+      },
+      {
+        "name": "work-tooling",
+        "paths": [
+          "tools/work/**",
+          ".github/work.json"
+        ],
+        "command": "python3 -m unittest discover -s tools/work"
+      },
+      {
+        "name": "github-metadata",
+        "paths": [
+          ".github/workflows/**",
+          ".github/ISSUE_TEMPLATE/**",
+          ".github/rulesets/**",
+          ".github/dependabot.yml"
+        ],
+        "command": "for f in {paths}; do case \"$f\" in *.json) python3 -m json.tool \"$f\" > /dev/null ;; *.yml|*.yaml) ruby -ryaml -e 'YAML.load_file(ARGV[0])' \"$f\" ;; *) echo \"no syntax check for $f\" >&2; exit 1 ;; esac; done"
+      },
+      {
+        "name": "gateway",
+        "paths": [
+          "packages/gateway/src/**/*.ts",
+          "packages/gateway/test-support/**",
+          "packages/gateway/package.json",
+          "packages/gateway/package-lock.json",
+          "packages/gateway/tsconfig.json",
+          "packages/gateway/vitest.config.ts",
+          "packages/gateway/vitest.scale.config.ts",
+          "packages/gateway/pi-sdk-baseline.json",
+          "packages/gateway/scripts/**",
+          "packages/gateway/test-fixtures/**",
+          "packages/gateway/src/**/*.json",
+          "packages/gateway/src/**/*.mjs",
+          "packages/gateway/src/**/*.mts",
+          "packages/protocol-fixtures/**",
+          "config/GatewayProtocol.json",
+          ".node-version",
+          "scripts/tron-ios-device-bind.mjs",
+          "scripts/tron-ios-device-bind.test.mjs",
+          "config/PushService.xcconfig"
+        ],
+        "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && set -- {paths} && related=$# && for p in \"$@\"; do case \"$p\" in */packages/gateway/src/*.ts|*/packages/gateway/test-support/*) ;; *) related=0 ;; esac; done && if [ \"$related\" != 0 ] && git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD -- . ../protocol-fixtures ../../config/GatewayProtocol.json ../../config/PushService.xcconfig ../../.node-version ../../scripts/tron-ios-device-bind.mjs ../../scripts/tron-ios-device-bind.test.mjs; then npx vitest related --run \"$@\"; else npm test; fi"
+      },
+      {
+        "name": "push-relay",
+        "paths": [
+          "packages/push-relay/**",
+          "packages/protocol-fixtures/**",
+          ".node-version"
+        ],
+        "command": "cd packages/push-relay && npm ci --no-audit --no-fund && npm run check && npm test && npm run build"
+      },
+      {
+        "name": "ios",
+        "paths": [
+          "packages/ios-app/Configuration/**",
+          "packages/ios-app/Core/**",
+          "packages/ios-app/ShareExtension/**",
+          "packages/ios-app/Sources/**",
+          "packages/ios-app/TestPlans/**",
+          "packages/ios-app/Tests/**",
+          "packages/ios-app/UITests/**",
+          "packages/ios-app/scripts/**",
+          "packages/ios-app/*.entitlements",
+          "packages/ios-app/project.yml",
+          "packages/protocol-fixtures/**",
+          "config/GatewayProtocol.json",
+          "config/PushService.xcconfig",
+          "config/ci-toolchain.env",
+          "scripts/generate-xcode-project",
+          "scripts/tron-ios-test",
+          "scripts/ios-test-*.py",
+          "scripts/verify-ci-toolchain.sh",
+          "scripts/install-ci-tools.sh"
+        ],
+        "command": "packages/ios-app/scripts/test-source-policy.sh && packages/ios-app/scripts/test-build-matrix-policy.sh && packages/ios-app/scripts/test-verify-archive-privacy.sh && scripts/tron-ios-test build && scripts/tron-ios-test run"
+      },
+      {
+        "name": "mac",
+        "paths": [
+          "packages/mac-app/Configuration/**",
+          "packages/mac-app/Sources/**",
+          "packages/mac-app/Tests/**",
+          "packages/mac-app/scripts/**",
+          "packages/mac-app/*.entitlements",
+          "packages/mac-app/project.yml",
+          "packages/mac-app/cua-driver-release.json",
+          "config/PushService.xcconfig",
+          "config/ci-toolchain.env",
+          "scripts/generate-xcode-project",
+          "scripts/verify-ci-toolchain.sh",
+          "scripts/install-ci-tools.sh"
+        ],
+        "command": "scripts/generate-xcode-project mac && cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData && xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData -only-testing:TronMacTests"
+      },
+      {
+        "name": "mac-scripts",
+        "paths": [
+          "packages/mac-app/scripts/**",
+          "scripts/validate-push-service-config.sh",
+          "config/PushService.xcconfig",
+          "scripts/gateway-payload-deploy.mjs",
+          ".node-version"
+        ],
+        "command": "packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh"
+      },
+      {
+        "name": "mac-native-computer-control",
+        "paths": [
+          "packages/mac-app/native-computer-control/**"
+        ],
+        "command": "python3 -m unittest discover -s packages/mac-app/native-computer-control/qualification -p 'test_*.py' && swift test --package-path packages/mac-app/native-computer-control"
+      },
+      {
+        "name": "mac-native-gateway-client",
+        "paths": [
+          "packages/mac-app/native-gateway-client/**"
+        ],
+        "command": "out=\"$(mktemp -d)\" && trap 'rm -rf \"$out\"' EXIT && python3 -m unittest discover -s packages/mac-app/native-gateway-client -p 'test_*.py' && python3 packages/mac-app/native-gateway-client/build.py --test --output \"$out/tron-native-capture-test.node\" && TRON_CAPTURE_TEST_ADDON=\"$out/tron-native-capture-test.node\" node --expose-gc --test packages/mac-app/native-gateway-client/addon.test.mjs"
+      },
+      {
+        "name": "cua-assets",
+        "paths": [
+          "scripts/test-cua-assets.sh",
+          "packages/mac-app/cua-driver-release.json",
+          "packages/mac-app/scripts/ensure-cua-driver.sh",
+          "packages/mac-app/scripts/verify-macho-architectures.sh"
+        ],
+        "command": "scripts/test-cua-assets.sh"
+      },
+      {
+        "name": "privacy-guard-tests",
+        "paths": [
+          "scripts/personal-info-guard.sh",
+          "scripts/test-personal-info-guard.py"
+        ],
+        "command": "python3 scripts/test-personal-info-guard.py"
+      },
+      {
+        "name": "protocol-contract",
+        "paths": [
+          "scripts/gateway_protocol_contract.py",
+          "scripts/verify-gateway-protocol-contract.py",
+          "scripts/test-gateway-protocol-contract.py",
+          "config/GatewayProtocol.json",
+          "packages/protocol-fixtures/**"
+        ],
+        "command": "python3 scripts/test-gateway-protocol-contract.py"
+      },
+      {
+        "name": "ios-test-infrastructure",
+        "paths": [
+          "scripts/ios-test-*.py",
+          "scripts/tron-ios-test",
+          "scripts/tron-ios-simulator",
+          "scripts/patch-ios-gateway-e2e-xctestrun.py",
+          "scripts/ios-gateway-e2e-test",
+          "scripts/test-ios-test-infrastructure.py",
+          "scripts/tron-profile-ios"
+        ],
+        "command": "python3 scripts/test-ios-test-infrastructure.py"
+      },
+      {
+        "name": "ios-artifact-validator",
+        "paths": [
+          "scripts/validate-ios-artifact.py",
+          "scripts/test-ios-artifact-validator.sh"
+        ],
+        "command": "scripts/test-ios-artifact-validator.sh"
+      },
+      {
+        "name": "ios-device",
+        "paths": [
+          "scripts/tron-ios-device",
+          "scripts/tron-ios-device-test",
+          "scripts/tron-ios-device-bind.mjs"
+        ],
+        "command": "scripts/tron-ios-device-test && node --test scripts/tron-ios-device-bind.test.mjs"
+      },
+      {
+        "name": "ios-release-doctor",
+        "paths": [
+          "scripts/ios-release-toolchain-doctor.sh",
+          "config/ci-toolchain.env"
+        ],
+        "command": "scripts/ios-release-toolchain-doctor.sh --self-test"
+      },
+      {
+        "name": "mac-reinstall",
+        "paths": [
+          "scripts/tron_mac_reinstall.py",
+          "scripts/test-mac-reinstall.py",
+          "scripts/verify-mac-install.sh"
+        ],
+        "command": "python3 scripts/test-mac-reinstall.py"
+      },
+      {
+        "name": "native-host",
+        "paths": [
+          "scripts/validate-native-host.py",
+          "scripts/test-native-host.py"
+        ],
+        "command": "python3 scripts/test-native-host.py"
+      },
+      {
+        "name": "profiler",
+        "paths": [
+          "scripts/tron-profile*",
+          "scripts/tron_profile_*.py",
+          "scripts/test-tron-profile*.py"
+        ],
+        "command": "python3 scripts/test-tron-profile.py && python3 scripts/test-tron-profile-ios.py && python3 scripts/test-tron-profile-attribution.py"
+      },
+      {
+        "name": "triage",
+        "paths": [
+          "scripts/tron_triage.py",
+          "scripts/tron-triage",
+          "scripts/test-tron-triage.py"
+        ],
+        "command": "python3 scripts/test-tron-triage.py"
+      },
+      {
+        "name": "dev-lifecycle-state",
+        "paths": [
+          "scripts/tron-dev-state.mjs",
+          "scripts/tron-dev-state.test.mjs"
+        ],
+        "command": "node --test scripts/tron-dev-state.test.mjs"
+      },
+      {
+        "name": "gateway-payload-deploy",
+        "paths": [
+          "scripts/gateway-payload-deploy.mjs",
+          "scripts/gateway-payload-deploy.test.mjs"
+        ],
+        "command": "node --test scripts/gateway-payload-deploy.test.mjs"
+      },
+      {
+        "name": "version",
+        "paths": [
+          "VERSION.env",
+          "scripts/tron-version"
+        ],
+        "command": "scripts/tron-version check && scripts/tron-version test"
+      },
+      {
+        "name": "toolchain",
+        "paths": [
+          ".node-version",
+          "config/ci-toolchain.env",
+          "scripts/verify-ci-toolchain.sh",
+          "scripts/install-ci-tools.sh"
+        ],
+        "command": "scripts/verify-ci-toolchain.sh node"
+      },
+      {
+        "name": "script-syntax",
+        "paths": [
+          "scripts/*"
+        ],
+        "command": "for f in {paths}; do case \"$f\" in *.py) python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' \"$f\" ;; *.mjs|*.js) node --check \"$f\" ;; *.ts) node --experimental-strip-types --check \"$f\" ;; *) case \"$(head -n 1 \"$f\")\" in *bash*|*/sh) bash -n \"$f\" ;; *python*) python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' \"$f\" ;; *) echo \"no syntax check for $f\" >&2; exit 1 ;; esac ;; esac; done"
+      }
+    ]
+  },
+  "dashboard": {
+    "needsYouStatus": "Needs you",
+    "blockedStatus": "Blocked",
+    "epicLabel": "epic",
+    "needsYouLabels": [
+      "needs-decision"
+    ],
+    "regressionLabel": "regression",
+    "priorityField": "Priority",
+    "rankField": "Epic rank",
+    "verifyContext": "tron/verify"
+  }
+}

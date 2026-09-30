@@ -690,13 +690,19 @@ final class SessionSheetPresentationTests: XCTestCase {
                     // without sending a scroll command or dragging the sheet.
                     for _ in 0..<12 { try await DisplayFrameScheduler.displayLink.nextFrame() }
                     let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                    XCTAssertEqual(self.views(of: UIScrollView.self, in: controller.view).filter(\.scrollsToTop).count, 1,
+                                   "The child sheet retains its own native status-bar scroll recipient")
                     self.capture(controller, name: "worker-initial-\(texts.count)-messages")
                     self.assertSubagentOpeningOffset(scroll, isLong: texts.count > 1)
+                    let visibility = SubagentPresentedFrameRecorder(controller: controller)
+                    print("CT23-SHEET-OPEN count=\(texts.count) rows=\(visibility.presentedRows()) scroll=\(scroll.frame) content=\(scroll.contentSize) adjusted=\(scroll.adjustedContentInset)")
+                    if !texts.isEmpty { XCTAssertNotNil(visibility.visibleAnchor(), "Opening must present an actual row, not merely a legal offset") }
                     controller.sheetPresentationController?.selectedDetentIdentifier = .large
                     controller.presentationController?.containerView?.layoutIfNeeded()
                     for _ in 0..<6 { try await DisplayFrameScheduler.displayLink.nextFrame() }
                     self.assertSubagentOpeningOffset(scroll, isLong: texts.count > 1)
                     self.capture(controller, name: "worker-expanded-\(texts.count)-messages")
+                    if !texts.isEmpty { XCTAssertNotNil(visibility.visibleAnchor()) }
                     if texts.count > 1 {
                         scroll.setContentOffset(CGPoint(x: 0, y: 200), animated: false)
                         for _ in 0..<6 { try await DisplayFrameScheduler.displayLink.nextFrame() }
@@ -716,8 +722,171 @@ final class SessionSheetPresentationTests: XCTestCase {
     private func assertSubagentOpeningOffset(_ scroll: UIScrollView, isLong: Bool) {
         let top = -scroll.adjustedContentInset.top
         let tail = max(top, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
-        XCTAssertEqual(scroll.contentOffset.y, isLong ? tail : top, accuracy: 2,
+        let newest = ChatTranscriptOrientation.selected.presentsNewestRowFirst ? top : tail
+        XCTAssertEqual(scroll.contentOffset.y, isLong ? newest : top, accuracy: 2,
             "Initial and resized sheets must show the tail (or top-aligned short content), never an empty lazy-layout gap")
+    }
+
+    func testSubagentTranscriptOriginJourneys() async throws {
+        try XCTSkipIf(!UIValidationTier.isActive, "Every-frame sheet journey belongs to UI validation")
+        try await withTestWatchdog(timeout: .seconds(90)) { @MainActor in
+            let gateway = ProcessSheetGatewayFixture()
+            defer { Task { await gateway.client.close() } }
+            try await self.withModel(client: gateway.client) { model in
+                try await gateway.connect(model: model, capabilities: [SessionProcessAdmissionPolicy.transcriptCapability])
+                let parent = try SessionScenarioBuilder(seed: 8_924).openingTail(targetEncodedBytes: 4_096)
+                model.installHostedSubscribedSnapshot(parent)
+                let probe = ReadOnlySubagentHostedProbe()
+                var texts = (0..<120).map { index in
+                    index >= 112
+                        ? String(repeating: "Tall child reply \(index) retains its canonical paragraphs.\n\n", count: 28)
+                        : "Child history row \(index)."
+                }
+                let initial = try self.subagentPage(texts: texts, start: 40, revision: "sheet-1", opening: true)
+                let opening = Task { try await gateway.respond(at: 1, method: "session.processTranscript.open", result: initial) }
+                defer { opening.cancel() }
+                try await self.withSheet(ReadOnlySubagentSessionSheet(parentSessionID: parent.sessionId,
+                    process: ProcessSheetGatewayFixture.process()).environment(model)
+                    .environment(\.readOnlySubagentHostedProbe, probe)) { controller in
+                    try await opening.value
+                    try await self.waitForRouting { probe.store?.status == .open && !self.views(of: UIScrollView.self, in: controller.view).isEmpty }
+                    let store = try XCTUnwrap(probe.store)
+                    let scroll = try XCTUnwrap(TranscriptWindowOracle.transcriptScrollView(in: controller.view))
+                    let recorder = SubagentPresentedFrameRecorder(controller: controller)
+                    recorder.start()
+                    defer { recorder.stop() }
+                    recorder.phase = "opening"
+                    try await Task.sleep(for: .milliseconds(750))
+                    for index in 0..<3 {
+                        texts.append(String(repeating: "New canonical child reply \(index).\n\n", count: 10 + index * 3))
+                        recorder.phase = "pinned-append-\(index)"
+                        try await self.refreshSubagent(gateway, store: store, texts: texts, revision: "append-\(index)")
+                        try await Task.sleep(for: .milliseconds(750))
+                    }
+                    for index in 0..<2 {
+                        recorder.phase = "pinned-canonical-growth-\(index)"
+                        texts[texts.count - 1] += String(repeating: "Canonical recorded text grows.\n\n", count: 6)
+                        try await self.refreshSubagent(gateway, store: store, texts: texts, revision: "growth-\(index)")
+                        try await Task.sleep(for: .milliseconds(500))
+                    }
+                    // Real UIKit sheet detent animation; no driven intermediate heights.
+                    recorder.phase = "expand-detent"
+                    controller.sheetPresentationController?.animateChanges {
+                        controller.sheetPresentationController?.selectedDetentIdentifier = .large
+                    }
+                    try await Task.sleep(for: .milliseconds(900))
+                    recorder.phase = "collapse-detent"
+                    controller.sheetPresentationController?.animateChanges {
+                        controller.sheetPresentationController?.selectedDetentIdentifier = .medium
+                    }
+                    try await Task.sleep(for: .milliseconds(900))
+                    // Detents remain measured in the artifact and per-phase log:
+                    // UIKit applies nested endpoint layout before presentation
+                    // settles. This shared residual is accepted for CT-23; do not
+                    // disguise it with compensation or a substituted curve.
+                    let pinnedSamples = recorder.samples.filter { !$0.phase.contains("detent") }
+                    let gaps = pinnedSamples.compactMap(\.gap)
+                    let blanks = pinnedSamples.filter(\.blank).count
+                    let worst = gaps.map { abs($0 - 12) }.max() ?? .infinity
+                    print("CT23-SHEET-PIN orientation=\(ChatTranscriptOrientation.selected) frames=\(pinnedSamples.count) blanks=\(blanks) worstGap=\(worst)")
+                    if ChatTranscriptOrientation.selected.presentsNewestRowFirst {
+                        XCTAssertEqual(blanks, 0)
+                        XCTAssertEqual(gaps.count, pinnedSamples.count)
+                        XCTAssertLessThanOrEqual(worst, 3)
+                    }
+                    recorder.phase = "detach"
+                    let direction: CGFloat = ChatTranscriptOrientation.selected.presentsNewestRowFirst ? 1 : -1
+                    scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentOffset.y + direction * scroll.bounds.height * 1.5), animated: true)
+                    try await Task.sleep(for: .milliseconds(750))
+                    let anchor = try XCTUnwrap(recorder.visibleAnchor())
+                    recorder.anchorID = anchor.id
+                    recorder.phase = "detached-append"
+                    let firstDetached = recorder.samples.count
+                    let installedBeforeAppend = store.presentation.timeline.items
+                    texts[texts.count - 1] += "\nCanonical text changes behind the detached installed projection."
+                    texts.append("Child appends while its reader stays on earlier content.")
+                    try await self.refreshSubagent(gateway, store: store, texts: texts, revision: "detached")
+                    try await Task.sleep(for: .milliseconds(750))
+                    if ChatTranscriptOrientation.selected.presentsNewestRowFirst {
+                        XCTAssertEqual(store.presentation.timeline.items, installedBeforeAppend)
+                        XCTAssertEqual(store.items.count, texts.count - 40, "Canonical store still advances")
+                    }
+                    recorder.phase = "load-earlier"
+                    let before = await gateway.socket.sentFrames().count
+                    store.loadEarlier()
+                    let page = try self.subagentPage(texts: texts, start: 0, end: 40, revision: "detached", opening: false)
+                    let request = try await self.subagentRequest(gateway, method: "session.processTranscript.page", startingAt: before)
+                    try await gateway.respond(at: request, method: "session.processTranscript.page", result: page)
+                    try await self.waitForRouting { store.status == .open && store.transcriptStart == 0 }
+                    try await Task.sleep(for: .milliseconds(750))
+                    let detached = Array(recorder.samples.dropFirst(firstDetached))
+                    if ChatTranscriptOrientation.selected.presentsNewestRowFirst {
+                        XCTAssertTrue(detached.allSatisfy { $0.anchorInstance == anchor.instance })
+                        XCTAssertTrue(detached.allSatisfy { abs(($0.anchorTop ?? .infinity) - anchor.top) < 0.5 })
+                        XCTAssertEqual(store.presentation.timeline.items.count, installedBeforeAppend.count + 40,
+                                       "Explicit historical page installs without admitting the live append")
+                    }
+                    print("CT23-SHEET-DETACH frames=\(detached.count) maxMove=\(detached.map { abs(($0.anchorTop ?? .infinity) - anchor.top) }.max() ?? .infinity)")
+                    recorder.phase = "return-to-newest"
+                    let firstReturning = recorder.samples.count
+                    let newestOffset = ChatTranscriptOrientation.selected.presentsNewestRowFirst
+                        ? -scroll.adjustedContentInset.top
+                        : max(-scroll.adjustedContentInset.top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+                    scroll.setContentOffset(CGPoint(x: 0, y: newestOffset), animated: true)
+                    try await Task.sleep(for: .milliseconds(1000))
+                    if ChatTranscriptOrientation.selected.presentsNewestRowFirst {
+                        XCTAssertEqual(store.presentation.timeline.items.count, texts.count)
+                        XCTAssertFalse(recorder.samples.dropFirst(firstReturning).contains(where: \.blank))
+                        XCTAssertLessThanOrEqual(abs((recorder.samples.last?.gap ?? .infinity) - 12), 3)
+                    }
+                    recorder.stop()
+                    for phase in Set(recorder.samples.map(\.phase)).sorted() {
+                        let frames = recorder.samples.filter { $0.phase == phase }
+                        print("CT23-SHEET-PHASE \(phase) frames=\(frames.count) blanks=\(frames.filter(\.blank).count) gapError=\(frames.compactMap(\.gap).map { abs($0 - 12) }.max() ?? .infinity)")
+                    }
+                    let artifact = XCTAttachment(data: try JSONEncoder().encode(recorder.samples), uniformTypeIdentifier: "public.json")
+                    artifact.name = "subagent-transcript-\(ChatTranscriptOrientation.selected).json"
+                    artifact.lifetime = .keepAlways
+                    self.add(artifact)
+                }
+            }
+        }
+    }
+
+    private func subagentPage(texts: [String], start: Int, end: Int? = nil, revision: String, opening: Bool) throws -> JSONValue {
+        var response = try XCTUnwrap(ProcessSheetGatewayFixture.transcript(texts: texts).objectValue)
+        var page = try XCTUnwrap(response["page"]?.objectValue)
+        let all = try XCTUnwrap(page["items"]?.arrayValue)
+        let end = end ?? all.count
+        page["items"] = .array(Array(all[start..<end]))
+        page["start"] = .number(Double(start))
+        page["end"] = .number(Double(end))
+        page["nextEntryId"] = end < all.count ? .string("entry-\(end)") : .null
+        page["revision"] = .string(revision)
+        if !opening { return .object(page) }
+        response["page"] = .object(page)
+        response["revision"] = .string(revision)
+        return .object(response)
+    }
+
+    private func subagentRequest(_ gateway: ProcessSheetGatewayFixture, method: String, startingAt start: Int) async throws -> Int {
+        var index = start
+        while true {
+            try await gateway.waitForRequest(at: index)
+            let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: await gateway.socket.sentFrames()[index])
+            if frame.objectValue?["method"]?.stringValue == method { return index }
+            index += 1
+        }
+    }
+
+    private func refreshSubagent(_ gateway: ProcessSheetGatewayFixture, store: ReadOnlySubagentSessionStore, texts: [String], revision: String) async throws {
+        let before = await gateway.socket.sentFrames().count
+        store.invalidate(ProcessTranscriptChanged(leaseId: try XCTUnwrap(store.leaseID), processId: "worker",
+            revision: revision, total: texts.count, leafEntryId: "entry-\(texts.count - 1)", closed: nil, reason: nil))
+        let request = try await subagentRequest(gateway, method: "session.processTranscript.page", startingAt: before)
+        try await gateway.respond(at: request, method: "session.processTranscript.page",
+                                  result: subagentPage(texts: texts, start: 40, revision: revision, opening: false))
+        try await waitForRouting { store.revision == revision && store.status == .open }
     }
 
     func testNativeCopyMenuIsExplicitAndKeepsItsOpeningText() async throws {
@@ -1151,5 +1320,80 @@ private struct WorkspaceRefreshFixture: View {
             .environment(model)
             .environment(\.tronPresentationActivity, activity.value)
             .environment(\.sessionWorkspaceRefreshProbe, probe)
+    }
+}
+
+/// Window-space, presentation-layer oracle for the actual presented sheet.
+@MainActor
+private final class SubagentPresentedFrameRecorder: NSObject {
+    struct Sample: Encodable {
+        let time: Double
+        let phase: String
+        let bottom: CGFloat
+        let newestBottom: CGFloat?
+        let blank: Bool
+        let anchorTop: CGFloat?
+        let anchorInstance: UUID?
+        let nativeOffset: CGFloat?
+        let nativeHeight: CGFloat?
+        let scrollFrame: CGRect?
+        var gap: CGFloat? { newestBottom.map { bottom - $0 } }
+    }
+    private let controller: UIViewController
+    private var link: CADisplayLink?
+    var phase = "opening"
+    var anchorID: String?
+    private(set) var samples: [Sample] = []
+    init(controller: UIViewController) { self.controller = controller }
+    func start() {
+        let link = CADisplayLink(target: self, selector: #selector(sample))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+    func stop() { link?.invalidate(); link = nil }
+    private func markers(in view: UIView) -> [ChatHostedNativeRowMarker] {
+        (view as? ChatHostedNativeRowMarker).map { [$0] } ?? view.subviews.flatMap { markers(in: $0) }
+    }
+    private func frame(_ view: UIView) -> CGRect? {
+        guard let layer = view.layer.presentation(), let window = view.window?.layer.presentation() else { return nil }
+        return layer.convert(layer.bounds, to: window).standardized
+    }
+    func presentedRows() -> [String: CGRect] {
+        guard let root = controller.view else { return [:] }
+        return Dictionary(markers(in: root).compactMap { marker in
+            frame(marker).map { (marker.physicalID, $0) }
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    func visibleAnchor() -> (id: String, instance: UUID, top: CGFloat)? {
+        guard let sheet = frame(controller.view) else { return nil }
+        func navigationBar(in view: UIView) -> UINavigationBar? {
+            (view as? UINavigationBar) ?? view.subviews.lazy.compactMap { navigationBar(in: $0) }.first
+        }
+        let top = navigationBar(in: controller.view).flatMap(frame)?.maxY
+            ?? sheet.minY + controller.view.safeAreaInsets.top
+        return markers(in: controller.view).compactMap { marker -> (String, UUID, CGFloat)? in
+            guard marker.physicalID != "read-only-subagent-status", let rect = frame(marker), rect.maxY > top, rect.minY < sheet.maxY else { return nil }
+            return (marker.physicalID, marker.hostIdentity, rect.minY)
+        }.min { $0.2 < $1.2 }
+    }
+    @objc private func sample(_ link: CADisplayLink) {
+        guard let sheet = frame(controller.view) else { return }
+        let rootLayer = controller.view.layer.presentation()!
+        let windowLayer = controller.view.window!.layer.presentation()!
+        let bottom = rootLayer.convert(CGPoint(x: 0, y: rootLayer.bounds.maxY - controller.view.safeAreaInsets.bottom), to: windowLayer).y
+        let rows = markers(in: controller.view)
+        // Follow the newest *presented* content, including the existing loading
+        // footer. Canonical status may change before that content is mounted.
+        let newest = rows.compactMap(frame).filter { $0.height > 0 }.max { $0.maxY < $1.maxY }
+        let scroll = TranscriptWindowOracle.transcriptScrollView(in: controller.view)
+        let anchor = rows.first { $0.physicalID == anchorID }
+        let band = CGRect(x: sheet.minX, y: bottom - 36, width: sheet.width, height: 24)
+        let blank = !rows.contains { frame($0)?.intersects(band) == true }
+        samples.append(Sample(time: link.timestamp, phase: phase, bottom: bottom,
+                              newestBottom: newest?.maxY, blank: blank,
+                              anchorTop: anchor.flatMap(frame)?.minY, anchorInstance: anchor?.hostIdentity,
+                              nativeOffset: scroll?.contentOffset.y, nativeHeight: scroll?.contentSize.height,
+                              scrollFrame: scroll.flatMap(frame)))
     }
 }

@@ -3374,7 +3374,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registry.subscribe("phone", second.id);
 
     await Promise.all([first.prompt("one"), second.prompt("two")]);
-    await waitUntil(() => first.isBusy && second.isBusy);
+    await waitUntil(() => first.isBusy && second.isBusy && faux.state.callCount === 2);
     expect(faux.state.callCount).toBe(2);
     expect(summaryUpdates).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -8649,8 +8649,8 @@ export default function (pi) {
 
     complete.mockRestore();
     await slot.reconcileAttention();
+    await waitUntil(() => slot.snapshot().phase === "idle");
     expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2, isUnread: true });
-    expect(slot.snapshot().phase).toBe("idle");
   });
 
   it("cleans up queued manual compaction state when canonical compaction fails", async () => {

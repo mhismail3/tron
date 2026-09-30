@@ -3,12 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
+import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 
 const roots: string[] = [];
 const command = (value: string) => `k5-intake-${value}`;
@@ -28,7 +30,7 @@ describe("K5 Raindrop intake enrichment", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-failure-e2e-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
-    await store.configure("k5-failure-model", { ...initial, enrichment: { model: "fixture/deepseek" }, observation: { ...initial.observation, model: "fixture/observer" } });
+    await store.configure("k5-failure-model", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 }, observation: { ...initial.observation, model: "fixture/observer" } });
     const noCalls: string[] = [];
     const fakeModel: KnowledgeGenerationModel = {
       async reflect() { return "reflect"; }, async synthesize() { return "synthesis"; },
@@ -70,7 +72,7 @@ describe("K5 Raindrop intake enrichment", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-intake-e2e-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
-    await store.configure("k5-intake-enrichment-config", { ...initial, enrichment: { model: "fixture/deepseek" } });
+    await store.configure("k5-intake-enrichment-config", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 } });
     const configured = await store.config();
     await store.configureTags({ commandId: "k5-intake-vocabulary", expectedConfigRevision: configured.revision, edit: { kind: "add", tag: { id: "workflow", label: "Workflows", definition: "Reusable workflows.", category: "practice", decayClass: "stable", state: "active" } } });
     const sequence: string[] = [];
@@ -89,9 +91,13 @@ describe("K5 Raindrop intake enrichment", () => {
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel, undefined, undefined, undefined, tagging as never);
     let userLookup = false;
     const items = Array.from({ length: 10 }, (_, index) => ({ _id: index + 1, title: `Saved source ${index + 1}`, link: `https://example.test/item-${index + 1}`, created: "2026-09-28T00:00:00Z", collection: { $id: 111 } }));
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Jev admission assessment", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 3, estimatedCostCents: 0.00042, pricing: "fixture" } }; } };
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); await context?.onDispatch?.(); return { summary: "Jev admission assessment", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 3, estimatedCostCents: 0.00042, pricing: "fixture" } }; } };
+    const owner = new ConnectionOwner(root);
+    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]]));
+    const jevBudget = new KnowledgeTaggingBudget(store, () => true);
     const extension = new KnowledgeConnectorExtension(store, {
-      credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]])),
+      credentials,
+      jevBudget,
       resolveHost: async () => ["93.184.216.34"],
       sourceFetch: async url => new Response(`Readable evidence for ${url}. `.repeat(12), { headers: { "content-type": "text/plain" } }),
       http: async url => {
@@ -123,7 +129,7 @@ describe("K5 Raindrop intake enrichment", () => {
     expect(finalJobs.jobs.filter(job => job.operation === "tags" && job.status === "done")).toHaveLength(10);
     const providerCallsBeforeReplay = sequence.length;
     const replay = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("replay"), sourceCollection: "111", dryRun: false, limit: 10, pilot: { id: "fixture-pilot", maxItems: 10, budgetCents: 10 } } }) as { captured: number };
-    expect(replay.captured).toBe(10);
+    expect(replay.captured).toBe(0);
     await new Promise(resolve => setTimeout(resolve, 30));
     expect(sequence).toHaveLength(providerCallsBeforeReplay);
     for (const outcome of intake.outcomes) {
@@ -151,7 +157,7 @@ describe("K5 Raindrop intake enrichment", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-partial-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
-    await store.configure("k5-partial-config", { ...initial, enrichment: { model: "fixture/deepseek" } });
+    await store.configure("k5-partial-config", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 } });
     const summarized: string[] = [];
     const fakeModel: KnowledgeGenerationModel = {
       async reflect() { return "reflect"; }, async synthesize() { return "synthesis"; },

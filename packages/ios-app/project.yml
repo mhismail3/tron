@@ -106,9 +106,12 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: NO
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: NO
         INFOPLIST_KEY_UILaunchScreen_Generation: NO
-        # Package access is what the app and the unit tests use to reach this
-        # module's API; the value must match theirs exactly.
+        # Package access is what the app, the share extension and the unit
+        # tests use to reach this module's API; the value must match theirs.
         SWIFT_PACKAGE_NAME: TronIOSApp
+        # The share extension links this framework, so it may use only
+        # extension-safe API.
+        APPLICATION_EXTENSION_API_ONLY: YES
 
   TronMobile:
     type: application
@@ -183,12 +186,16 @@ targets:
     platform: iOS
     sources:
       - path: ShareExtension
-      - path: Core/Support/SharedContent.swift
+    dependencies:
+      # Linked, not embedded: the app embeds the one copy under
+      # TronMobile.app/Frameworks, which the extension's runpath reaches.
+      - target: TronMobileCore
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
-        # SharedContent.swift is compiled here and in TronMobileCore, whose
-        # package access it carries; MS-5 replaces the copy with the module.
+        # The extension consumes TronMobileCore's package API, which only a
+        # module with the same package name may use.
         SWIFT_PACKAGE_NAME: TronIOSApp
         INFOPLIST_FILE: ShareExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProduction.entitlements

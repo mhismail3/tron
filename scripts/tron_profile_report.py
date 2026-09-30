@@ -265,14 +265,6 @@ def write_report(report: dict[str, Any], run_dir: Path) -> Path:
         temporary = Path(handle.name)
     temporary.replace(destination)
     (run_dir / "summary.md").write_text(markdown_summary(report))
-    latest = run_dir.parent / "latest"
-    try:
-        if latest.is_symlink() or not latest.exists():
-            if latest.is_symlink():
-                latest.unlink()
-            latest.symlink_to(run_dir.name)
-    except OSError:
-        pass
     return destination
 
 
@@ -382,22 +374,48 @@ def _comparison_text(comparison: dict[str, Any], base: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def status_text() -> str:
-    root = profile_root()
-    lines = [f"Profile results: {root}"]
-    for tool in TOOLS:
-        latest = root / tool / "latest"
-        if not latest.exists():
-            lines.append(f"{tool}: no runs")
+def newest_report(tool_root: Path, worktree: Path) -> tuple[Path, dict[str, Any]] | None:
+    """The newest report one worktree wrote under a tool's results directory.
+
+    Every worktree shares the profiles root, so the newest report is resolved
+    from each report's own source identity rather than kept as one pointer per
+    tool, which named whichever worktree wrote last (W-21, issue #101). A report
+    that cannot be read cannot be attributed to a worktree and is skipped.
+    """
+    if not tool_root.is_dir():
+        return None
+    newest: tuple[str, int, Path, dict[str, Any]] | None = None
+    for run_dir in tool_root.iterdir():
+        path = run_dir / "report.json"
+        if run_dir.is_symlink() or not path.is_file():
             continue
         try:
-            report = load_report(latest)
-        except ReportError as error:
-            lines.append(f"{tool}: latest run unreadable ({error})")
+            report = load_report(path)
+            written = path.stat().st_mtime_ns
+        except (ReportError, OSError):
             continue
+        source = report.get("source")
+        if not isinstance(source, dict) or source.get("worktree") != str(worktree):
+            continue
+        # created_at has whole seconds; the write time orders two reports of one second.
+        key = (str(report.get("created_at")), written)
+        if newest is None or key > newest[:2]:
+            newest = (*key, run_dir, report)
+    return None if newest is None else (newest[2], newest[3])
+
+
+def status_text(worktree: Path) -> str:
+    root = profile_root()
+    lines = [f"Profile results: {root}", f"Worktree: {worktree}"]
+    for tool in TOOLS:
+        found = newest_report(root / tool, worktree)
+        if found is None:
+            lines.append(f"{tool}: no runs from this worktree")
+            continue
+        run_dir, report = found
         lines.append(
             f"{tool}: latest {report['scenario']} run {report['run_id']} at {report['created_at']} "
-            f"({len(report['metrics'])} metrics) -> {latest.resolve()}"
+            f"({len(report['metrics'])} metrics) -> {run_dir.resolve()}"
         )
     return "\n".join(lines) + "\n"
 
@@ -421,7 +439,8 @@ def main(argv: list[str]) -> int:
     compare_parser.add_argument("--json", action="store_true")
     compare_parser.add_argument("--allow-mismatch", action="store_true")
 
-    commands.add_parser("status", help="show the latest report of each tool")
+    status = commands.add_parser("status", help="show this worktree's newest report of each tool")
+    status.add_argument("--worktree", required=True, type=Path)
     commands.add_parser("environment", help="print the host environment record")
     args = parser.parse_args(argv)
 
@@ -455,7 +474,7 @@ def main(argv: list[str]) -> int:
                 sys.stdout.write(_comparison_text(comparison, base))
             return EXIT_REGRESSION if comparison["regressions"] else EXIT_OK
         if args.command == "status":
-            sys.stdout.write(status_text())
+            sys.stdout.write(status_text(args.worktree.resolve()))
             return EXIT_OK
         if args.command == "environment":
             sys.stdout.write(json.dumps(environment(), indent=2, sort_keys=True) + "\n")

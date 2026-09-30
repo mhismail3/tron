@@ -2371,6 +2371,10 @@ struct ChatView: View {
             presentedComposerResourcePicker == nil ? [] : composerResourceResults
         }
         probe.composerResourceSelection = { selectComposerResource($0) }
+        probe.composerResourcePickerPresentation = { destination in
+            if let destination { requestAttachmentPresentation(destination) }
+            else { dismissComposerResourcePicker() }
+        }
         probe.installScrollControls(
             geometry: { previous, current, viewport in
                 if viewport {
@@ -2752,6 +2756,8 @@ struct ChatView: View {
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
                 transcriptScrollPosition = target
+            case .oldestHistory:
+                transcriptScrollPosition.scrollTo(edge: transcriptOrientation.oldestEdge)
             case .openingTail(let renderedID):
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
@@ -2977,6 +2983,7 @@ struct ChatView: View {
             onComposerHeight: composerHeightChanged,
             onComposerHeightSettled: composerHeightSettled
         )
+        .environment(\.chatOwnsStatusBar, true)
     }
 
     private var composerTrailingMode: ComposerTrailingMode? {

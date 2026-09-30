@@ -20,6 +20,7 @@ struct ExtensionInteractionSheet: View {
     @State private var submitting = false
     @State private var submissionError: String?
     @State private var currentDate = Date()
+    @FocusState private var textFocused: Bool
 
     private var isExpired: Bool {
         guard let expiresAt = interaction.expiresAt,
@@ -97,6 +98,9 @@ struct ExtensionInteractionSheet: View {
         .onAppear { resetState() }
         .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in resetState() }
         .onChange(of: text) { _, _ in persistDraft() }
+        .onChange(of: isExpired) { _, expired in
+            if expired { textFocused = false }
+        }
         .onChange(of: selectedOption) { _, _ in persistDraft() }
         .onChange(of: confirmValue) { _, _ in persistDraft() }
         .task(id: ExtensionInteractionScope(interaction)) {
@@ -172,10 +176,20 @@ struct ExtensionInteractionSheet: View {
                 Text(interaction.method == .editor ? "Response" : "Answer")
                     .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextMuted)
-                TextField(interaction.placeholder ?? "Response", text: $text, axis: interaction.method == .editor ? .vertical : .horizontal)
+                // Never `.disabled` while focused: flipping a first responder's
+                // interaction off inside a layout pass resigns the keyboard
+                // re-entrantly and hung the app (see ExtensionFormSheet). Edits
+                // are refused instead, and submission releases focus first.
+                TextField(interaction.placeholder ?? "Response", text: Binding(
+                    get: { text },
+                    set: { value in
+                        guard !submitting, !isExpired else { return }
+                        text = value
+                    }
+                ), axis: interaction.method == .editor ? .vertical : .horizontal)
                     .lineLimit(interaction.method == .editor ? 5...16 : 1...1)
                     .tronField()
-                    .disabled(submitting)
+                    .focused($textFocused)
                     .accessibilityLabel(interaction.placeholder ?? "Response")
             }
         case .form:
@@ -264,6 +278,9 @@ struct ExtensionInteractionSheet: View {
     }
 
     private func respond(value: JSONValue?) {
+        // Release the keyboard through SwiftUI's focus owner before any
+        // submission state changes, so UIKit and FocusState agree.
+        textFocused = false
         submitting = true
         submissionError = nil
         let expectedToken = presentationSurfaceToken

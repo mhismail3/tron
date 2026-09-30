@@ -116,7 +116,12 @@
   the configurations. Signed artifacts remain the authority for Apple
   environments.
 - Never erase iOS application or Keychain data to recover from a build/signing
-  mismatch, and do not install on a device another session currently owns.
+  mismatch.
+- `scripts/tron-ios-simulator` (`start`, `install`, `stop`) and
+  `scripts/tron-ios-device` (`install`, `launch`, `stop`) hold a host-wide
+  lease on the Development simulator and on each physical device for the whole
+  command. Exit 73 names the holder's worktree, PID and start time: wait for it,
+  and never reach the device another way (`xcodebuild`, `simctl`, `devicectl`).
 
 ## Process lifecycle and cleanup
 
@@ -124,11 +129,13 @@ The live Gateway shares this Mac with every agent session. When memory runs
 short, host swapping slows it enough that phone reconnects fail. Clean up every
 process you start.
 
-- The iOS test tooling owns its simulators, not agent discipline. Every command
-  that boots one releases it when the command ends - success, failure, timeout
+- The iOS test tooling owns its simulators, not agent discipline. Each linked
+  worktree tests in its own simulator lane by default (the primary checkout in
+  the default lane), so parallel sessions need no lane flag. Every command
+  that boots a simulator releases it when the command ends - success, failure, timeout
   or signal - and each provisioning command first sweeps orphaned lanes and
-  expires lanes unused for 7 days; the runner's sweep also prunes old runs and
-  products. Do not shut down, delete or erase simulators by hand.
+  removes lanes unused for 7 days or whose worktree was deleted; the runner's
+  sweep also prunes old runs and products. Do not shut down, delete or erase simulators by hand.
 - Before starting a server, simulator, watcher, emulator or test runner, check
   whether a suitable one is already running and reuse it. For iOS tests, use the
   owned simulator from `scripts/tron-ios-test`; do not boot extra devices.
@@ -218,6 +225,7 @@ owns the TronMac commands.
 - iOS architecture/development/events: `packages/ios-app/docs/`
 - Mac architecture/development: `packages/mac-app/docs/`
 - Contributor workflow: `CONTRIBUTING.md` and `scripts/tron --help`
+- Work tracking tooling and its GitHub vocabulary: `tools/work/README.md`
 - Multi-session work plans and completed-work history: `docs/plans/`
 
 ### Work plans

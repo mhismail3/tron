@@ -6,7 +6,6 @@ import TronMobileCore
 /// connection ID to the owner and every read is fenced to the current Gateway
 /// profile, lifecycle generation, and connection epoch.
 struct IntegrationsSettingsView: View {
-
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     @State private var snapshot: IntegrationSnapshot?
@@ -15,21 +14,44 @@ struct IntegrationsSettingsView: View {
     @State private var error: String?
     @State private var setupDefinition: IntegrationDefinition?
     @State private var selectedInstance: IntegrationInstance?
+    @State private var credits = IntegrationCreditsReadController()
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let snapshot {
                     let definitions = snapshot.definitions
-                    ForEach(definitions) { definition in
-                        definitionSection(definition, snapshot: snapshot)
+                    let configured = snapshot.instances.filter { instance in definitions.contains { $0.id == instance.definitionId } }
+                    let available = definitions.filter { definition in
+                        !configured.contains { $0.definitionId == definition.id }
+                    }
+                    if !configured.isEmpty {
+                        TronSettingsGroup("Configured", accent: .tronCyan, surfaceStyle: .glass) {
+                            ForEach(Array(configured.enumerated()), id: \.element.id) { index, instance in
+                                if let definition = definitions.first(where: { $0.id == instance.definitionId }) {
+                                    instanceRow(instance, definition: definition, snapshot: snapshot)
+                                }
+                                if index < configured.count - 1 { TronSettingsDivider(accent: .tronCyan) }
+                            }
+                        }
+                    }
+                    if !available.isEmpty {
+                        TronSettingsGroup("Available", accent: .tronCyan, surfaceStyle: .glass) {
+                            ForEach(Array(available.enumerated()), id: \.element.id) { index, definition in
+                                let action = "Connect"
+                                IntegrationConfiguredRow(title: definition.displayName, account: "", status: "Not configured", usage: nil,
+                                                         isLoadingUsage: false, configured: false, actionTitle: action,
+                                                         accessibilityAction: "\(action) for \(definition.displayName)", accent: .tronCyan) {
+                                    setupDefinition = definition
+                                }
+                                if index < available.count - 1 { TronSettingsDivider(accent: .tronCyan) }
+                            }
+                        }
+                        .padding(.top, configured.isEmpty ? 0 : TronSpacing.section)
                     }
                     if definitions.isEmpty {
-                        TronPlaceholderState(
-                            title: "No supported integrations",
-                            detail: emptySurfaceDetail,
-                            icon: "link"
-                        )
+                        TronPlaceholderState(title: "No supported integrations", detail: emptySurfaceDetail,
+                                             icon: "link")
                     }
                 } else if isLoading {
                     HStack { Spacer(); ProgressView("Loading integrations…"); Spacer() }
@@ -51,23 +73,15 @@ struct IntegrationsSettingsView: View {
             load()
         }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
-            loadGeneration &+= 1
-            isLoading = false
-            snapshot = nil
-            selectedInstance = nil
-            setupDefinition = nil
-            load()
+            loadGeneration &+= 1; isLoading = false; snapshot = nil
+            selectedInstance = nil; setupDefinition = nil; credits.begin(clear: true); load()
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
-            if !active { loadGeneration &+= 1; isLoading = false }
+            if !active { loadGeneration &+= 1; isLoading = false; credits.begin(clear: true) }
         }
         .tronManagedSheet(isPresented: Binding(get: { setupDefinition != nil }, set: { if !$0 { setupDefinition = nil } }), identity: "integrations.setup") {
             if let definition = setupDefinition {
-                IntegrationSetupView(definition: definition) {
-                    self.setupDefinition = nil
-                    load()
-                }
-                    .environment(model)
+                IntegrationSetupView(definition: definition) { self.setupDefinition = nil; load() }.environment(model)
             }
         }
         .tronManagedSheet(isPresented: Binding(get: { selectedInstance != nil }, set: { if !$0 { selectedInstance = nil } }), identity: "integrations.instance") {
@@ -75,49 +89,44 @@ struct IntegrationsSettingsView: View {
                 IntegrationInstanceView(
                     instance: instance,
                     definition: snapshot?.definitions.first { $0.id == instance.definitionId },
-                    statuses: snapshot?.capabilities.filter { $0.connectionId == instance.id } ?? []
-                ) {
-                    self.selectedInstance = nil
-                    load()
-                }
-                .environment(model)
+                    statuses: snapshot?.capabilities.filter { $0.connectionId == instance.id } ?? [],
+                    addAccount: { addAccount(for: instance) }
+                ) { self.selectedInstance = nil; load() }.environment(model)
             }
         }
-    }
-
-    @ViewBuilder
-    private func definitionSection(_ definition: IntegrationDefinition, snapshot: IntegrationSnapshot) -> some View {
-        let instances = snapshot.instances.filter { $0.definitionId == definition.id }
-        TronSettingsGroup(definition.displayName, accent: .tronBlue) {
-            ForEach(instances) { instance in
-                instanceRow(instance, definition: definition, snapshot: snapshot)
-                if instance.id != instances.last?.id { TronSettingsDivider(accent: .tronBlue) }
-            }
-            if !instances.isEmpty { TronSettingsDivider(accent: .tronBlue) }
-            TronSettingsRow(icon: "plus.circle", title: "Add account", subtitle: setupSummary(definition)) {
-                Button { setupDefinition = definition } label: { TronInlineActionLabel("Set up") }
-                    .buttonStyle(.plain)
-            }
-        }
-        .tronSettingsCaption(capabilityCaption(definition: definition, snapshot: snapshot))
     }
 
     @ViewBuilder
     private func instanceRow(_ instance: IntegrationInstance, definition: IntegrationDefinition, snapshot: IntegrationSnapshot) -> some View {
-        let statuses = snapshot.capabilities.filter { $0.connectionId == instance.id }
-        let available = statuses.count { $0.availability == "available" }
-        let capabilitySummary = statuses.isEmpty
-            ? "No capabilities reported"
-            : "\(available) of \(statuses.count) capabilities available"
-        TronSettingsRow(
-            icon: instance.health == "ready" ? "checkmark.circle" : "exclamationmark.circle",
-            title: instance.displayTitle,
-            subtitle: "\(IntegrationHealthPresentation.label(instance.health)) · \(capabilitySummary)",
-            subtitleLineLimit: 2,
-            accent: instance.health == "ready" ? .tronEmerald : .tronAmber
-        ) {
-            Button { selectedInstance = instance } label: { TronInlineActionLabel("Manage") }.buttonStyle(.plain)
+        let usage = credits.balances[instance.id].map { "\(ProviderUsagePresentation.currency($0.totalBalance, code: "USD")) available" }
+        IntegrationConfiguredRow(title: definition.displayName, account: instance.displayTitle,
+                                 status: connectionStatus(instance, snapshot: snapshot), usage: usage,
+                                 isLoadingUsage: credits.loadingIDs.contains(instance.id), configured: true,
+                                 actionTitle: "Details", accessibilityAction: "Details for \(definition.displayName)", accent: .tronCyan) {
+            selectedInstance = instance
         }
+    }
+
+    private func addAccount(for instance: IntegrationInstance) {
+        guard let definition = snapshot?.definitions.first(where: { $0.id == instance.definitionId }),
+              activity.allowsPresentationPublication else { return }
+        let identity = model.knowledgePresentationIdentity
+        let ticket = loadGeneration
+        selectedInstance = nil
+        Task { @MainActor in
+            await Task.yield()
+            guard activity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == identity,
+                  loadGeneration == ticket else { return }
+            setupDefinition = definition
+        }
+    }
+
+    private func connectionStatus(_ instance: IntegrationInstance, snapshot: IntegrationSnapshot) -> String {
+        guard instance.health == "ready" else { return IntegrationHealthPresentation.label(instance.health) }
+        let method = snapshot.setupOperations.first { $0.instanceId == instance.id && $0.status == "completed" }?.method
+        if method == "oauth" { return "Connected · OAuth" }
+        return "Connected · stored credential"
     }
 
     private func load() {
@@ -136,6 +145,9 @@ struct IntegrationsSettingsView: View {
                     requestedRequest: ticket
                 ) else { return }
                 snapshot = loaded; isLoading = false
+                credits.start(instances: loaded.instances, identity: requestIdentity, client: model.integrations,
+                              presentationActive: { activity.allowsPresentationPublication },
+                              currentIdentity: { model.knowledgePresentationIdentity })
             } catch {
                 guard IntegrationPresentationAdmission.admits(
                     presentationActive: activity.allowsPresentationPublication,
@@ -150,24 +162,8 @@ struct IntegrationsSettingsView: View {
         }
     }
 
-    private var emptySurfaceDetail: String {
-        "No supported account-based services are advertised by this Gateway."
-    }
+    private var emptySurfaceDetail: String { "No supported account-based services are advertised by this Gateway." }
 
-    private func setupSummary(_ definition: IntegrationDefinition) -> String {
-        "Connect using credentials stored on your Mac"
-    }
-
-    private func capabilityCaption(definition: IntegrationDefinition, snapshot: IntegrationSnapshot) -> String? {
-        let statuses = snapshot.capabilities.filter { $0.definitionId == definition.id && $0.connectionId == nil }
-        let unavailable = statuses.filter { $0.availability != "available" && $0.availability != "requires-setup" }
-        guard !unavailable.isEmpty else { return nil }
-        return unavailable.map { "\($0.id): \($0.detail ?? availabilityLabel($0.availability))" }.joined(separator: " · ")
-    }
-
-    private func availabilityLabel(_ value: String) -> String {
-        switch value { case "available": "Available"; case "requires-setup": "Setup required"; case "disabled": "Disabled"; case "unsupported": "Unsupported"; default: "Unavailable" }
-    }
 }
 
 /// The receipt executor owns the accepted command. The sheet retains only its
@@ -209,13 +205,14 @@ private struct IntegrationInstanceView: View {
     let instance: IntegrationInstance
     let definition: IntegrationDefinition?
     let statuses: [IntegrationCapabilityStatus]
+    let addAccount: () -> Void
     let onChanged: () -> Void
     @State private var policy: IntegrationPolicy
     @State private var mutation: IntegrationMutation?
     @State private var error: String?
 
-    init(instance: IntegrationInstance, definition: IntegrationDefinition?, statuses: [IntegrationCapabilityStatus], onChanged: @escaping () -> Void) {
-        self.instance = instance; self.definition = definition; self.statuses = statuses; self.onChanged = onChanged
+    init(instance: IntegrationInstance, definition: IntegrationDefinition?, statuses: [IntegrationCapabilityStatus], addAccount: @escaping () -> Void, onChanged: @escaping () -> Void) {
+        self.instance = instance; self.definition = definition; self.statuses = statuses; self.addAccount = addAccount; self.onChanged = onChanged
         _policy = State(initialValue: instance.policy)
     }
 
@@ -223,13 +220,30 @@ private struct IntegrationInstanceView: View {
         KnowledgeFormSheet(title: definition?.displayName ?? "Connection", accent: .tronCyan, isWorking: mutation != nil, onAction: save) {
             TronSettingsGroup("Connection", accent: .tronBlue) {
                 TronSettingsRow(icon: "person.crop.circle", title: "Account", subtitle: instance.displayTitle)
+                TronSettingsDivider(accent: .tronBlue)
+                TronSettingsRow(icon: instance.health == "ready" ? "checkmark.circle" : "exclamationmark.circle",
+                                title: "Status", subtitle: IntegrationHealthPresentation.label(instance.health),
+                                accent: instance.health == "ready" ? .tronEmerald : .tronAmber)
                 if let scope = instance.scope {
                     TronSettingsDivider(accent: .tronBlue)
                     TronSettingsRow(icon: "scope", title: "Scope", subtitle: scope)
                 }
             }
+            if let mappings = instance.raindropCollections, !mappings.isEmpty {
+                TronSettingsGroup("Raindrop collections", accent: .tronCyan) {
+                    ForEach(Array(mappings.enumerated()), id: \.offset) { index, mapping in
+                        if index > 0 { TronSettingsDivider(accent: .tronCyan) }
+                        TronSettingsRow(icon: "folder", title: "\(mapping.role.capitalized) home", subtitle: "Collection \(mapping.collectionId)")
+                    }
+                }
+            }
             capabilitiesSection
             TronTechnicalMetadataSection(title: "Technical details", items: technicalMetadata, accent: .tronSlate)
+            if let definition {
+                Button { addAccount() } label: { TronInlineActionLabel("Add another account", accent: .tronCyan) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add another account for \(definition.displayName)")
+            }
             TronSettingsGroup("Policy", accent: .tronPurple) {
                 TronToggleRow(icon: "power", title: "Enabled", isOn: $policy.enabled)
                 TronSettingsDivider(accent: .tronPurple)
@@ -331,6 +345,14 @@ private struct IntegrationSetupView: View {
     @State private var accountID = ""
     @State private var scope = ""
     @State private var credentialRef = ""
+    @State private var xClientID = ""
+    @State private var xRedirectURI = ""
+    @State private var xCallbackURL = ""
+    @State private var xAuthorizationCode = ""
+    @State private var xOAuthState: String?
+    @State private var xOAuthOperationID: String?
+    @State private var xAuthorizationURL: URL?
+    @State private var xOAuthCompleted = false
     @State private var policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
     @State private var mutation: IntegrationMutation?
     @State private var error: String?
@@ -341,25 +363,46 @@ private struct IntegrationSetupView: View {
     }
 
     var body: some View {
-        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, isWorking: mutation != nil, onAction: complete) {
+        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, actionTitle: usesXOAuth ? (xOAuthOperationID == nil ? "Authorize X" : "Complete setup") : "Save", isWorking: mutation != nil, onAction: complete) {
             if mutation == nil {
-                TronSettingsGroup("Account", accent: .tronBlue) {
-                    TronTextSettingRow(icon: "number", title: "Instance ID", value: $instanceID)
-                    TronSettingsDivider(accent: .tronBlue)
-                    TronTextSettingRow(icon: "person.crop.circle", title: "Account or server", value: $accountID)
-                    TronSettingsDivider(accent: .tronBlue)
-                    TronTextSettingRow(icon: "scope", title: "Scope", detail: "Optional", value: $scope)
-                    if definition.setupMethods.count > 1 {
+                if usesXOAuth {
+                    TronSettingsGroup("X developer app", accent: .tronBlue) {
+                        TronTextSettingRow(icon: "number", title: "Public client ID", value: $xClientID)
                         TronSettingsDivider(accent: .tronBlue)
-                        TronSelectionRow(icon: "slider.horizontal.3", title: "Setup method", value: method) {
-                            ForEach(definition.setupMethods, id: \.self) { value in Button(value) { method = value } }
+                        TronTextSettingRow(icon: "link", title: "Registered callback URL", value: $xRedirectURI)
+                    }
+                    .tronSettingsCaption("Create a public OAuth 2.0 app in the X developer console, enable tweet.read, users.read, bookmark.read, and offline.access, and register this exact HTTPS callback. Tron does not ask for an app secret.")
+                    if let xAuthorizationURL {
+                        TronSettingsGroup("Authorize your X account", accent: .tronPurple) {
+                            Link(destination: xAuthorizationURL) {
+                                Label("Open X consent", systemImage: "arrow.up.right.square")
+                            }
+                            TronSettingsDivider(accent: .tronPurple)
+                            TronTextSettingRow(icon: "doc.on.clipboard", title: "Paste redirected URL", detail: "or enter the code below", value: $xCallbackURL)
+                            TronSettingsDivider(accent: .tronPurple)
+                            TronTextSettingRow(icon: "number", title: "Authorization code", detail: "Optional alternative", value: $xAuthorizationCode)
+                        }
+                        .tronSettingsCaption("After consent, copy the complete redirected URL from your browser or paste its one-time code. The selected Mac verifies the state and exchanges the code; tokens stay in its Keychain.")
+                    }
+                } else {
+                    TronSettingsGroup("Account", accent: .tronBlue) {
+                        TronTextSettingRow(icon: "number", title: "Instance ID", value: $instanceID)
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronTextSettingRow(icon: "person.crop.circle", title: "Account or server", value: $accountID)
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronTextSettingRow(icon: "scope", title: "Scope", detail: "Optional", value: $scope)
+                        if definition.setupMethods.count > 1 {
+                            TronSettingsDivider(accent: .tronBlue)
+                            TronSelectionRow(icon: "slider.horizontal.3", title: "Setup method", value: method) {
+                                ForEach(definition.setupMethods, id: \.self) { value in Button(value) { method = value } }
+                            }
                         }
                     }
+                    TronSettingsGroup("Credential handoff", accent: .tronPurple) {
+                        TronTextSettingRow(icon: "key", title: "Credential reference", value: $credentialRef)
+                    }
+                    .tronSettingsCaption("Use the credential reference supplied by the paired Mac. The secret stays in its secure credential store and is never sent to or retained by this device.")
                 }
-                TronSettingsGroup("Credential handoff", accent: .tronPurple) {
-                    TronTextSettingRow(icon: "key", title: "Credential reference", value: $credentialRef)
-                }
-                .tronSettingsCaption("Use the credential reference supplied by the paired Mac. The secret stays in its secure credential store and is never sent to or retained by this device.")
                 policySection
             } else {
                 TronSettingsCaption("Completing setup on the selected Mac. Credentials remain in its secure store.")
@@ -368,17 +411,20 @@ private struct IntegrationSetupView: View {
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
         .modifier(IntegrationMutationObserver(mutation: $mutation, error: $error) {
-            onFinished()
-            dismiss()
+            if !usesXOAuth || xOAuthCompleted { onFinished(); dismiss() }
         })
     }
+
+    private var usesXOAuth: Bool { definition.id == "knowledge.x" && method == "oauth" }
 
     private var policySection: some View {
         TronSettingsGroup("Policy", accent: .tronPurple) {
             TronToggleRow(icon: "power", title: "Enabled", isOn: $policy.enabled)
             TronSettingsDivider(accent: .tronPurple)
-            TronToggleRow(icon: "arrow.right.arrow.left", title: "Allow writes", isOn: $policy.allowWrites)
-            TronSettingsDivider(accent: .tronPurple)
+            if definition.id != "knowledge.x" {
+                TronToggleRow(icon: "arrow.right.arrow.left", title: "Allow writes", isOn: $policy.allowWrites)
+                TronSettingsDivider(accent: .tronPurple)
+            }
             TronToggleRow(icon: "creditcard", title: "Paid access approved", isOn: $policy.paidAccessApproved)
             if policy.paidAccessApproved {
                 TronSettingsDivider(accent: .tronPurple)
@@ -391,6 +437,32 @@ private struct IntegrationSetupView: View {
 
     private func complete() {
         guard mutation == nil, activity.allowsPresentationPublication else { return }
+        if usesXOAuth {
+            if let operationID = xOAuthOperationID {
+                guard !xCallbackURL.isEmpty || (!xAuthorizationCode.isEmpty && xOAuthState != nil) else { error = "Paste the redirected URL or its authorization code after consent."; return }
+                let requestIdentity = model.knowledgePresentationIdentity
+                let operationID = operationID, callbackURL = xCallbackURL.isEmpty ? nil : xCallbackURL
+                let code = xAuthorizationCode.isEmpty ? nil : xAuthorizationCode, state = xOAuthState
+                mutation = IntegrationMutation(identity: requestIdentity, task: Task { @MainActor in
+                    guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
+                    _ = try await model.integrations.completeXOAuth(operationID: operationID, callbackURL: callbackURL, code: code, state: state)
+                    xOAuthCompleted = true
+                })
+            } else {
+                guard !instanceID.isEmpty, !xClientID.isEmpty, !xRedirectURI.isEmpty else { error = "Instance ID, public X client ID, and registered callback URL are required."; return }
+                error = nil
+                let requestIdentity = model.knowledgePresentationIdentity
+                let instanceID = instanceID, clientID = xClientID, redirectURI = xRedirectURI, policy = policy
+                mutation = IntegrationMutation(identity: requestIdentity, task: Task { @MainActor in
+                    guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
+                    let started = try await model.integrations.beginXOAuth(instanceID: instanceID, clientID: clientID, redirectURI: redirectURI, policy: policy)
+                    xOAuthOperationID = started.operationId
+                    xOAuthState = started.state
+                    xAuthorizationURL = URL(string: started.authorizationUrl)
+                })
+            }
+            return
+        }
         guard !instanceID.isEmpty, !accountID.isEmpty, !credentialRef.isEmpty else { error = "Instance ID, account/server identity, and an opaque credential reference are required."; return }
         error = nil
         let requestIdentity = model.knowledgePresentationIdentity

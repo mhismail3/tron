@@ -213,7 +213,7 @@ const restartDrainMethods = new Set([
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel", "mcp.auth.start", "mcp.auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
-  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate",
+  "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate", "knowledge.tags.retag-needed", "knowledge.connector.status", "knowledge.connector.queue", "knowledge.raindrop.read", "knowledge.x.credits",
   "connections.list",
 ]);
 
@@ -471,7 +471,9 @@ export class GatewayService {
       case "knowledge.tags.budget":
       case "knowledge.tags.estimate":
       case "knowledge.connector.status":
-      case "knowledge.raindrop.read": {
+      case "knowledge.connector.queue":
+      case "knowledge.raindrop.read":
+      case "knowledge.x.credits": {
 
         const knowledge = this.requireKnowledge();
         const result = await knowledge.invoke({ operation: method, request: params } as KnowledgeAction);
@@ -542,7 +544,7 @@ export class GatewayService {
       case "knowledge.observation.dismiss":
       case "knowledge.source.capture":
       case "knowledge.source.preview.refresh":
-      case "knowledge.source.triage":
+      case "knowledge.source.assess":
       case "knowledge.source.summarize":
       case "knowledge.source.reextract":
       case "knowledge.source.tag":
@@ -559,10 +561,15 @@ export class GatewayService {
       case "knowledge.exclusion":
       case "knowledge.connector.configure":
       case "knowledge.connector.assessment.approve":
-      case "knowledge.connector.run":
+      case "knowledge.x.oauth.begin":
+      case "knowledge.x.oauth.complete":
+      case "knowledge.connector.discover":
+      case "knowledge.connector.ack":
+      case "knowledge.raindrop.move":
+      case "knowledge.source.ingest":
       case "knowledge.raindrop.intake": {
         const knowledge = this.requireKnowledge();
-        return this.mutation(client, method, params, async () => safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction)));
+        return this.mutation(client, method, params, async () => safeJson(await knowledge.invoke({ operation: method, request: params } as unknown as KnowledgeAction)));
       }
       case "connections.setup.begin":
       case "connections.setup.complete":
@@ -1467,7 +1474,7 @@ export class GatewayService {
           }, resolveAdmission);
           void execution.then(resolveAdmission, rejectAdmission);
           return safeJson(await admission);
-        }).finally(releaseSession);
+        }, false, true).finally(releaseSession);
       }
       case "session.abort":
         return this.mutation(client, method, params, async () => {
@@ -2215,6 +2222,7 @@ export class GatewayService {
     params: Record<string, unknown>,
     operation: (workToken?: string) => Promise<JsonValue>,
     settlementDuringDrain = false,
+    respondBeforeReceiptCompletion = false,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
     // The entry spans the whole receipt-backed operation (a compaction or a
@@ -2231,6 +2239,7 @@ export class GatewayService {
           ? this.workRegistry.beginDerived(admission)
           : this.workRegistry.begin(admission))
       : undefined;
+    let completionOwnsWork = false;
     try {
       const knowledgeMutation = method.startsWith("knowledge.");
       const prior = knowledgeMutation
@@ -2248,10 +2257,30 @@ export class GatewayService {
         knowledgeMutation
           ? async () => this.knowledgeReceiptSafe(await offLoop(operation))
           : () => offLoop(() => operation(work?.token)),
+        respondBeforeReceiptCompletion ? {
+          respondBeforeCompletion: true,
+          onCompletion: completion => {
+            if (!work) return;
+            completionOwnsWork = true;
+            void completion.then(() => work.settle());
+          },
+          onCompletionError: () => {
+            this.dependencies.logger?.log(
+              "warning",
+              "Accepted prompt completed receipt could not be persisted",
+              {
+                event: "receipt.completed-persist-failed",
+                source: "transport",
+                method,
+                ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+              },
+            );
+          },
+        } : undefined,
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
     } finally {
-      work?.settle();
+      if (!completionOwnsWork) work?.settle();
     }
   }
 

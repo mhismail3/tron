@@ -1,18 +1,19 @@
-import { createHash, randomUUID } from "node:crypto";
-import type { KnowledgeAssessmentApprovalRequest, KnowledgeConnectorConfigurationRequest, KnowledgeConnectorRunRequest, KnowledgeConnectorState, KnowledgeConnectorStatus, KnowledgeAction, KnowledgeRecord, KnowledgeRaindropRequest, KnowledgeRaindropIntakeRequest } from "./knowledge-contract.js";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { KnowledgeCurationRefusal, type KnowledgeAssessmentApprovalRequest, type KnowledgeConnectorConfigurationRequest, type KnowledgeConnectorDiscoverRequest, type KnowledgeConnectorQueueRequest, type KnowledgeConnectorAckRequest, type KnowledgeRaindropMoveRequest, type KnowledgeConnectorState, type KnowledgeConnectorStatus, type KnowledgeAction, type KnowledgeXOAuthStartRequest, type KnowledgeXOAuthCompleteRequest, type KnowledgeRecord, type KnowledgeRaindropRequest, type KnowledgeRaindropIntakeRequest, type KnowledgeSourceIngestRequest } from "./knowledge-contract.js";
 import { captureSource, isVerifiedSourceCapture, recoverProviderSaveTime } from "./source-capture.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
 import { xPostIdentity } from "./x-public-post.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import type { KnowledgeStore } from "./knowledge-store.js";
-import { CONNECTOR_CREDENTIAL_SERVICE, isConnectorCredentialReference, type ConnectorCredentialStore } from "./connector-credentials.js";
+import { sourceAdmissionIsDecided, type KnowledgeStore } from "./knowledge-store.js";
+import { CONNECTOR_CREDENTIAL_SERVICE, isConnectorCredentialReference, type ConnectorCredentialStore, type WritableConnectorCredentialStore } from "./connector-credentials.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
 import { JEV_DEFAULT_MODEL } from "./jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
-import { normalizeProviderDisplayName, type ConnectionInstance, type ProviderAdmissionObservation } from "../integrations/connection-contract.js";
+import type { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
+import { normalizeProviderDisplayName, validateConnectionPolicy, type ConnectionInstance, type ProviderAdmissionObservation } from "../integrations/connection-contract.js";
 import { FixedHostBodyTooLarge, requestFixedHost } from "./fixed-host-transport.js";
 
 function isPublicXPost(url: string): boolean {
@@ -47,6 +48,8 @@ export interface KnowledgeConnectorOptions {
   queueSummary?: (source: KnowledgeRecord & { kind: "source" }) => void;
   /** Generic account owner. When present, connector configuration requires a connectionId. */
   connections?: ConnectionOwner;
+  /** Shared Knowledge-owned monthly Jev ledger for both tagging and intake assessment. */
+  jevBudget?: KnowledgeTaggingBudget;
 }
 
 interface PendingItem { id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; savedAt?: string; collectionId?: string; apiPayload?: string }
@@ -60,9 +63,6 @@ function bad(message: string): GatewayError { return new GatewayError("invalid_r
  * is an opaque Keychain account name, and no token ever appears here. */
 function missingCredential(connector: Connector, credentialRef: string): GatewayError {
   return new GatewayError("unsupported", `${connector === "raindrop" ? "Raindrop" : "X"} credential is unavailable. Add it to the Mac Keychain: service '${CONNECTOR_CREDENTIAL_SERVICE}', account '${credentialRef}'.`);
-}
-function collectionProgress(current: Record<string, string> | undefined, itemId: string, collectionId: string): Record<string, string> {
-  return Object.fromEntries([...Object.entries(current ?? {}).filter(([id]) => id !== itemId), [itemId, collectionId]].slice(-2_000));
 }
 function command(base: string, suffix: string): string {
   const normalizedBase = base.replace(/[^A-Za-z0-9._:-]/g, "_"); const normalizedSuffix = suffix.replace(/[^A-Za-z0-9._:-]/g, "_");
@@ -92,10 +92,15 @@ async function defaultHTTP(input: string, init: { method?: "GET" | "PUT" | "POST
   });
 }
 
-async function requestJson(http: ConnectorHTTP, endpoint: string, token: string | (() => Promise<string>), options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
+async function requestJson(http: ConnectorHTTP, endpoint: string, token: string | (() => Promise<string>), options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void>; onUnauthorized?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
   const retrySafe = !options.method || options.method === "GET";
   const maxAttempts = retrySafe ? (options.maxAttempts ?? RETRIES) : 1;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  let refreshedAfterUnauthorized = false;
+  let refreshedRetryPending = false;
+  let attempt = 0;
+  while (attempt < maxAttempts || refreshedRetryPending) {
+    if (refreshedRetryPending) refreshedRetryPending = false;
+    else attempt += 1;
     // Resolve the current credential before charging an attempt. A missing or
     // rotated token is an admission failure, not a billable provider try.
     const attemptToken = typeof token === "function" ? await token() : token;
@@ -115,6 +120,12 @@ async function requestJson(http: ConnectorHTTP, endpoint: string, token: string 
     if (result.status >= 200 && result.status < 300) {
       if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).result === false) throw new ConnectorAPIError();
       return { status: result.status, value, headers: result.headers };
+    }
+    if (result.status === 401 && options.onUnauthorized && !refreshedAfterUnauthorized) {
+      refreshedAfterUnauthorized = true;
+      await options.onUnauthorized();
+      refreshedRetryPending = true;
+      continue;
     }
     if (!retryable(result.status) || attempt === maxAttempts) throw new ConnectorHTTPError(result.status, result.headers.get("retry-after"), result.headers.get("x-ratelimit-reset") ?? result.headers.get("ratelimit-reset"));
     if (options.signal.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Connector request cancelled");
@@ -166,7 +177,7 @@ function stateStatus(state: KnowledgeConnectorState | undefined, connector: Conn
   const accountId = authority?.providerAccountId ?? value.accountId;
   const scope = connector === "raindrop" && authority?.raindropCollections ? undefined : authority?.scope ?? value.scope;
   const policy = authority?.policy;
-  return { connector, ...(authority?.id ?? value.connectionId ? { connectionId: authority?.id ?? value.connectionId } : {}), configured, enabled, health, credentialAvailability, providerIdentity, ...(accountId ? { accountId } : {}), ...(scope ? { scope } : {}), ...(authority?.raindropCollections ? { raindropCollections: authority.raindropCollections } : {}), ...(value.destination ? { destination: value.destination } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: policy?.paidBudgetCents ?? value.paidBudgetCents, allowWrites: policy?.allowWrites ?? value.allowWrites, recurringApproved: policy?.recurringApproved ?? value.recurringApproved, paidAccessApproved: policy?.paidAccessApproved ?? value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentPilots ? { assessmentPilots: value.assessmentPilots } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
+  return { connector, ...(authority?.id ?? value.connectionId ? { connectionId: authority?.id ?? value.connectionId } : {}), configured, enabled, health, credentialAvailability, providerIdentity, ...(accountId ? { accountId } : {}), ...(scope ? { scope } : {}), ...(authority?.raindropCollections ? { raindropCollections: authority.raindropCollections } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: connector === "x" ? value.paidBudgetCents : policy?.paidBudgetCents ?? value.paidBudgetCents, allowWrites: policy?.allowWrites ?? value.allowWrites, recurringApproved: policy?.recurringApproved ?? value.recurringApproved, paidAccessApproved: policy?.paidAccessApproved ?? value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentPilots ? { assessmentPilots: value.assessmentPilots } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
 }
 function parseCollection(item: RaindropItemDTO): string | undefined {
   if (!item.collection || typeof item.collection !== "object") return undefined;
@@ -217,11 +228,18 @@ function parseX(value: any): PendingItem[] {
   }).filter((item: PendingItem | undefined): item is PendingItem => Boolean(item));
 }
 
+/** A refused X token refresh: the login itself is gone, so the run's health is
+ * an authorization failure the user fixes by reconnecting, not a generic error. */
+class XAuthorizationError extends GatewayError {
+  constructor() { super("unsupported", "X authorization refresh failed; reconnect the account"); }
+}
+
 export class KnowledgeConnectorExtension {
   private readonly http: ConnectorHTTP;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly now: () => string;
   private readonly lanes = new Map<string, AsyncMutex>();
+  private readonly xOAuthAttempts = new Map<string, { instanceId: string; clientId: string; redirectUri: string; state: string; verifier: string; policy: KnowledgeXOAuthStartRequest["policy"]; createdAt: number }>();
   constructor(private readonly store: KnowledgeStore, private readonly options: KnowledgeConnectorOptions) {
     this.http = options.http ?? defaultHTTP; this.sleep = options.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))); this.now = options.now ?? (() => new Date().toISOString());
   }
@@ -281,10 +299,177 @@ export class KnowledgeConnectorExtension {
     if (action.operation === "knowledge.raindrop.read") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.readRaindrop(action.request, signal)));
     if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.configure(action.request)));
     if (action.operation === "knowledge.connector.assessment.approve") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.approveAssessment(action.request)));
+    if (action.operation === "knowledge.x.oauth.begin") return this.lane("x", action.request.instanceId).run(() => this.beginXOAuth(action.request));
+    if (action.operation === "knowledge.x.oauth.complete") return this.lane("x", this.xOAuthAttempts.get(action.request.operationId)?.instanceId ?? action.request.operationId).run(() => {
+      const controller = new AbortController();
+      const deadline = setTimeout(() => controller.abort(new Error("X OAuth setup deadline exceeded")), RUN_DEADLINE_MS);
+      deadline.unref?.();
+      const ownedSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
+      return this.completeXOAuth(action.request, ownedSignal).finally(() => clearTimeout(deadline));
+    });
+    if (action.operation === "knowledge.x.credits") return this.lane("x", action.request.connectionId).run(() => this.readXCredits(action.request.connectionId, signal));
     if (action.operation === "knowledge.connector.status") return this.store.withConnectorContext(request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector, request.connectionId), action.request.connector, await this.connectionFor(request.connectionId, action.request.connector, Boolean(this.options.connections), true)));
-    if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.run(action.request, signal)));
+    if (action.operation === "knowledge.connector.discover") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.discoverQueue(action.request, signal)));
+    if (action.operation === "knowledge.connector.queue") return this.withConnection(action.request.connector, request.connectionId, () => this.queue(action.request));
+    if (action.operation === "knowledge.connector.ack") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.ack(action.request)));
+    if (action.operation === "knowledge.raindrop.move") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.moveOne(action.request, signal)));
     if (action.operation === "knowledge.raindrop.intake") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.intake(action.request, signal)));
+    if (action.operation === "knowledge.source.ingest") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.ingest(action.request, signal)));
     throw bad("Unsupported knowledge connector operation");
+  }
+
+  private credentialWriter(): WritableConnectorCredentialStore {
+    const writer = this.options.credentials as ConnectorCredentialStore & Partial<WritableConnectorCredentialStore>;
+    if (typeof writer.write !== "function" || typeof writer.delete !== "function") throw new GatewayError("unsupported", "X OAuth requires the Mac Keychain credential writer");
+    return writer as WritableConnectorCredentialStore;
+  }
+
+  private async beginXOAuth(request: KnowledgeXOAuthStartRequest): Promise<Record<string, unknown>> {
+    if (!this.options.connections) throw new GatewayError("unsupported", "X OAuth requires ConnectionOwner");
+    if (!request.commandId || request.commandId.length < 8 || request.commandId.length > 160 || !request.instanceId || request.instanceId.length > 160) throw bad("X OAuth setup identity is invalid");
+    if (typeof request.clientId !== "string" || request.clientId.length < 1 || request.clientId.length > 256 || /[\u0000-\u001f\u007f]/.test(request.clientId)) throw bad("X OAuth client ID is invalid");
+    let redirect: URL;
+    try { redirect = new URL(request.redirectUri); } catch { throw bad("X OAuth redirect URI is invalid"); }
+    if (redirect.protocol !== "https:" || redirect.username || redirect.password || redirect.hash || redirect.search) throw bad("X OAuth redirect URI must be HTTPS without credentials, query, or fragment");
+    try { validateConnectionPolicy(request.policy); } catch { throw bad("X OAuth policy is invalid"); }
+    if ([...this.xOAuthAttempts.values()].some(attempt => attempt.instanceId === request.instanceId && Date.now() - attempt.createdAt < 10 * 60_000)) throw new GatewayError("conflict", "X OAuth setup is already pending for this connection");
+    this.credentialWriter();
+    const operation = await this.options.connections.execute({ kind: "setup.begin", commandId: command(request.commandId, "x-oauth-setup"), instanceId: request.instanceId, definitionId: "knowledge.x", method: "oauth" }) as { operationId: string };
+    const verifier = randomBytes(32).toString("base64url");
+    const state = randomBytes(32).toString("base64url");
+    const challenge = createHash("sha256").update(verifier).digest("base64url");
+    const authorization = new URL("https://twitter.com/i/oauth2/authorize");
+    authorization.search = new URLSearchParams({ response_type: "code", client_id: request.clientId, redirect_uri: request.redirectUri, scope: "tweet.read users.read bookmark.read offline.access", state, code_challenge: challenge, code_challenge_method: "S256" }).toString();
+    this.xOAuthAttempts.set(operation.operationId, { instanceId: request.instanceId, clientId: request.clientId, redirectUri: redirect.toString(), state, verifier, policy: structuredClone(request.policy), createdAt: Date.now() });
+    return { operationId: operation.operationId, instanceId: request.instanceId, authorizationUrl: authorization.toString(), state };
+  }
+
+  private async completeXOAuth(request: KnowledgeXOAuthCompleteRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!this.options.connections) throw new GatewayError("unsupported", "X OAuth requires ConnectionOwner");
+    if (!request.commandId || request.commandId.length < 8 || request.commandId.length > 160) throw bad("X OAuth completion commandId is invalid");
+    const attempt = this.xOAuthAttempts.get(request.operationId);
+    if (!attempt || Date.now() - attempt.createdAt > 10 * 60_000) throw new GatewayError("conflict", "X OAuth setup expired; start authorization again");
+    let code: string | undefined;
+    if (request.callbackUrl !== undefined) {
+      if (request.code !== undefined || request.state !== undefined) throw bad("Provide either the full X OAuth redirect URL or its code and state");
+      let callback: URL;
+      try { callback = new URL(request.callbackUrl); } catch { throw bad("Paste the complete X OAuth redirect URL"); }
+      const expected = new URL(attempt.redirectUri);
+      const codes = callback.searchParams.getAll("code");
+      const states = callback.searchParams.getAll("state");
+      if (callback.origin !== expected.origin || callback.pathname !== expected.pathname || callback.username || callback.password || callback.hash || states.length !== 1 || states[0] !== attempt.state || callback.searchParams.has("error") || codes.length !== 1) throw new GatewayError("conflict", "X OAuth redirect does not match this authorization state or callback");
+      code = codes[0];
+    } else if (request.code !== undefined && request.state === attempt.state) code = request.code;
+    else throw new GatewayError("conflict", "X OAuth code or redirect does not match this authorization state");
+    if (!code || code.length > 4_096 || /[\u0000-\u001f\u007f]/.test(code)) throw bad("X OAuth authorization code is invalid");
+    const signal = externalSignal ?? new AbortController().signal;
+    const writer = this.credentialWriter();
+    const tokenResponse = await this.xOAuthToken({ client_id: attempt.clientId, grant_type: "authorization_code", code, redirect_uri: attempt.redirectUri, code_verifier: attempt.verifier }, signal);
+    const tokens = this.validXTokenResponse(tokenResponse);
+    const credentialRef = `connector:x:${attempt.instanceId}`;
+    await writer.write(credentialRef, JSON.stringify({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, clientId: attempt.clientId, expiresAt: new Date(Date.now() + tokens.expiresIn * 1_000).toISOString() }));
+    let userId: string;
+    try {
+      const profile = await this.http("https://api.x.com/2/users/me?user.fields=id,username", { headers: { authorization: `Bearer ${tokens.accessToken}`, accept: "application/json" }, signal });
+      const body = this.parseXResponse(profile);
+      if (typeof body?.data?.id !== "string" || !/^\d{1,32}$/.test(body.data.id) || typeof body.data.username !== "string") throw new ConnectorShapeError();
+      userId = body.data.id;
+    } catch {
+      await writer.delete(credentialRef);
+      throw new GatewayError("unsupported", "X OAuth account verification failed; the temporary credential was removed");
+    }
+    let result: unknown;
+    try { result = await this.options.connections.execute({ kind: "setup.complete", commandId: command(request.commandId, "x-oauth-complete"), operationId: request.operationId, instanceId: attempt.instanceId, providerAccountId: userId, scope: userId, credentialRef, policy: attempt.policy }); }
+    catch (error) { await writer.delete(credentialRef); throw error; }
+    this.xOAuthAttempts.delete(request.operationId);
+    const setupRevision = Number((result as Record<string, unknown>).setupRevision);
+    await this.options.connections.recordProviderObservation(attempt.instanceId, setupRevision, { credentialAvailability: "available", providerIdentity: "admitted" });
+    await this.store.updateConnectorState(command(request.commandId, "x-oauth-state"), "x", current => {
+      const sameAccount = current?.accountId === userId;
+      return { ...(sameAccount ? current! : initial("x")), connectionId: attempt.instanceId, accountId: userId, scope: userId, credentialRef, enabled: attempt.policy.enabled, allowWrites: attempt.policy.allowWrites, paidAccessApproved: attempt.policy.paidAccessApproved, paidBudgetCents: sameAccount ? current!.paidBudgetCents : attempt.policy.paidBudgetCents, recurringApproved: attempt.policy.recurringApproved, health: "ready" };
+    }, undefined, attempt.instanceId);
+    return result as Record<string, unknown>;
+  }
+
+  private parseXResponse(response: ConnectorHTTPResponse): any {
+    if (response.status < 200 || response.status >= 300 || Buffer.byteLength(response.body, "utf8") > 64_000) throw new GatewayError("unsupported", "X OAuth request failed");
+    try { return JSON.parse(response.body); } catch { throw new ConnectorShapeError(); }
+  }
+
+  private async xOAuthToken(parameters: Record<string, string>, signal: AbortSignal): Promise<unknown> {
+    let response: ConnectorHTTPResponse;
+    try { response = await this.http("https://api.x.com/2/oauth2/token", { method: "POST", headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(parameters).toString(), signal }); }
+    catch { throw new GatewayError("unsupported", "X OAuth token exchange failed"); }
+    return this.parseXResponse(response);
+  }
+
+  private validXTokenResponse(value: unknown): { accessToken: string; refreshToken: string; expiresIn: number } {
+    const token = value as Record<string, unknown> | null;
+    if (!token || typeof token !== "object" || typeof token.access_token !== "string" || token.access_token.length < 1 || token.access_token.length > 4_096 || typeof token.refresh_token !== "string" || token.refresh_token.length < 1 || token.refresh_token.length > 4_096 || !Number.isSafeInteger(token.expires_in) || (token.expires_in as number) < 60 || (token.expires_in as number) > 31_536_000 || token.token_type !== "bearer") throw new ConnectorShapeError();
+    return { accessToken: token.access_token, refreshToken: token.refresh_token, expiresIn: token.expires_in as number };
+  }
+
+  private async storedXOAuth(reference: string): Promise<{ accessToken: string; refreshToken: string; clientId: string; expiresAt: string }> {
+    const value = await this.options.credentials.read(reference);
+    if (!value) throw missingCredential("x", reference);
+    let parsed: unknown;
+    try { parsed = JSON.parse(value); } catch { throw new GatewayError("unsupported", "X OAuth credential is malformed; reconnect the account"); }
+    const token = parsed as Record<string, unknown> | null;
+    if (!token || typeof token.accessToken !== "string" || typeof token.refreshToken !== "string" || typeof token.clientId !== "string" || typeof token.expiresAt !== "string" || !Number.isFinite(Date.parse(token.expiresAt))) throw new GatewayError("unsupported", "X OAuth credential is malformed; reconnect the account");
+    return token as { accessToken: string; refreshToken: string; clientId: string; expiresAt: string };
+  }
+
+  private async markXAuthorizationError(connectionId: string, setupRevision: number): Promise<void> {
+    try { await this.options.connections?.recordProviderObservation(connectionId, setupRevision, { credentialAvailability: "unavailable", providerIdentity: "unknown" }); } catch { return; }
+    // The connection owner's setup revision is the only fence; this adapter
+    // keeps no copy of it (a copy went stale on every policy update).
+    const live = await this.connectionFor(connectionId, "x", true);
+    if (!live || live.setupRevision !== setupRevision) return;
+    await this.store.updateConnectorState(command(connectionId, "x-auth-error"), "x", state => state?.connectionId === connectionId ? { ...state, health: "auth-error", lastError: "X authorization expired; reconnect the account" } : state ?? initial("x"), undefined, connectionId);
+  }
+
+  private async refreshXToken(connectionId: string, credentialRef: string, setupRevision: number, signal: AbortSignal): Promise<void> {
+    try {
+      const live = await this.connectionFor(connectionId, "x", true);
+      if (!live || live.setupRevision !== setupRevision || live.credentialRef !== credentialRef || !live.policy.enabled) throw new GatewayError("conflict", "X connection changed before token refresh");
+      const current = await this.storedXOAuth(credentialRef);
+      const response = await this.xOAuthToken({ client_id: current.clientId, grant_type: "refresh_token", refresh_token: current.refreshToken }, signal);
+      const rotated = this.validXTokenResponse(response);
+      // Rotation is single-use. Persist its only valid refresh token even if
+      // setup changes while X responds, but never issue the stale access token.
+      await this.credentialWriter().write(credentialRef, JSON.stringify({ accessToken: rotated.accessToken, refreshToken: rotated.refreshToken, clientId: current.clientId, expiresAt: new Date(Date.now() + rotated.expiresIn * 1_000).toISOString() }));
+      const afterRotation = await this.connectionFor(connectionId, "x", true);
+      if (!afterRotation || afterRotation.setupRevision !== setupRevision || afterRotation.credentialRef !== credentialRef || !afterRotation.policy.enabled) throw new GatewayError("conflict", "X connection changed during token refresh");
+    } catch (error) {
+      await this.markXAuthorizationError(connectionId, setupRevision);
+      if (error instanceof GatewayError && error.code === "conflict") throw error;
+      throw new XAuthorizationError();
+    }
+  }
+
+  private async xAccessToken(connectionId: string, credentialRef: string, setupRevision: number, signal: AbortSignal): Promise<string> {
+    const current = await this.storedXOAuth(credentialRef);
+    if (Date.parse(current.expiresAt) <= Date.now() + 60_000) await this.refreshXToken(connectionId, credentialRef, setupRevision, signal);
+    return (await this.storedXOAuth(credentialRef)).accessToken;
+  }
+
+  private async readXCredits(connectionId: string, externalSignal?: AbortSignal): Promise<{ freeBalance: number; prepaidBalance: number; totalBalance: number }> {
+    const authority = await this.connectionFor(connectionId, "x", true);
+    if (!authority?.policy.enabled || !authority.credentialRef || !authority.scope) throw new GatewayError("unsupported", "X credits require an enabled OAuth X connection");
+    const state = await this.store.connectorState("x", connectionId);
+    if (!state?.enabled || state.credentialRef !== authority.credentialRef || state.accountId !== authority.providerAccountId) throw new GatewayError("conflict", "X connector configuration is not admitted by this connection");
+    const controller = new AbortController(); const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
+    const deadline = setTimeout(() => controller.abort(new Error("X credits read deadline exceeded")), RUN_DEADLINE_MS); deadline.unref?.();
+    try {
+      const result = await requestJson(this.http, "https://api.x.com/2/usage/credits", () => this.xAccessToken(connectionId, authority.credentialRef!, authority.setupRevision, signal), { sleep: this.sleep, signal, onUnauthorized: () => this.refreshXToken(connectionId, authority.credentialRef!, authority.setupRevision, signal) });
+      const data = result.value?.data;
+      const free = data?.free_balance; const prepaid = data?.prepaid_balance; const total = data?.total_balance;
+      if (![free, prepaid, total].every(value => typeof value === "number" && Number.isFinite(value)) || free < 0 || total < 0) throw new ConnectorShapeError();
+      return { freeBalance: free, prepaidBalance: prepaid, totalBalance: total };
+    } catch (error) {
+      if (error instanceof GatewayError) throw error;
+      throw new GatewayError("unsupported", "X credit balance is unavailable");
+    } finally { clearTimeout(deadline); }
   }
 
   private async readRaindrop(request: KnowledgeRaindropRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -393,9 +578,9 @@ export class KnowledgeConnectorExtension {
   private async configure(request: KnowledgeConnectorConfigurationRequest): Promise<KnowledgeConnectorStatus> {
     const authority = await this.connectionFor(request.connectionId, request.connector, Boolean(this.options.connections));
     if (this.options.connections && (request.accountId !== undefined || request.scope !== undefined || request.credentialRef !== undefined)) throw bad("Account, scope, and credentials are owned by ConnectionOwner; complete setup before connector configuration");
+    if (Object.keys(request as unknown as Record<string, unknown>).some(key => !["commandId", "connector", "connectionId", "enabled", "accountId", "scope", "credentialRef", "allowWrites", "paidAccessApproved", "paidBudgetCents", "recurringApproved"].includes(key))) throw bad("Connector configuration contains unsupported fields");
     if (request.accountId !== undefined && (request.accountId.length < 1 || request.accountId.length > 256 || /[\r\n]/.test(request.accountId))) throw bad("Connector account is invalid");
     if (request.scope !== undefined && (request.scope.length < 1 || request.scope.length > 256 || /[\r\n]/.test(request.scope))) throw bad("Connector scope is invalid");
-    if (request.destination !== undefined && (request.destination.length < 1 || request.destination.length > 256 || /[\r\n]/.test(request.destination))) throw bad("Connector destination is invalid");
     this.assertCredentialNamespace(request.connector, request.credentialRef);
     if (request.paidBudgetCents !== undefined && (!Number.isSafeInteger(request.paidBudgetCents) || request.paidBudgetCents < 0 || request.paidBudgetCents > 1_000_000)) throw bad("Connector paid budget is invalid");
     const current = await this.store.connectorState(request.connector);
@@ -407,16 +592,14 @@ export class KnowledgeConnectorExtension {
     const nextAccountId = request.accountId ?? authority?.providerAccountId ?? current?.accountId;
     const nextScope = request.scope ?? authority?.scope ?? current?.scope;
     const nextCredentialRef = request.credentialRef ?? authority?.credentialRef ?? current?.credentialRef;
-    const nextDestination = request.destination ?? current?.destination;
     const next: KnowledgeConnectorState = identityChanged ? {
       ...initial(request.connector), enabled: request.enabled,
       ...(nextAccountId ? { accountId: nextAccountId } : {}),
       ...(nextScope ? { scope: nextScope } : {}),
       ...(nextCredentialRef ? { credentialRef: nextCredentialRef } : {}),
-      ...(nextDestination ? { destination: nextDestination } : {}),
       ...policyDefaults(request),
       health: request.enabled && Boolean(nextCredentialRef && nextAccountId && (request.connector === "raindrop" && authority ? authority.raindropCollections?.length : nextScope)) ? "ready" : "unconfigured",
-    } : { ...base, enabled: request.enabled, ...(request.accountId !== undefined ? { accountId: request.accountId } : {}), ...(request.scope !== undefined ? { scope: request.scope } : {}), ...(request.destination !== undefined ? { destination: request.destination } : {}), ...(request.credentialRef !== undefined ? { credentialRef: request.credentialRef } : {}), ...policyDefaults(request, current ?? base), health: request.enabled && (request.credentialRef ?? current?.credentialRef) && (request.accountId ?? current?.accountId) && (request.connector === "raindrop" && authority ? authority.raindropCollections?.length : request.scope ?? current?.scope) ? "ready" : "unconfigured" };
+    } : { ...base, enabled: request.enabled, ...(request.accountId !== undefined ? { accountId: request.accountId } : {}), ...(request.scope !== undefined ? { scope: request.scope } : {}), ...(request.credentialRef !== undefined ? { credentialRef: request.credentialRef } : {}), ...policyDefaults(request, current ?? base), health: request.enabled && (request.credentialRef ?? current?.credentialRef) && (request.accountId ?? current?.accountId) && (request.connector === "raindrop" && authority ? authority.raindropCollections?.length : request.scope ?? current?.scope) ? "ready" : "unconfigured" };
     delete next.lastError;
     let currentAuthority = authority;
     if (this.options.connections) {
@@ -452,10 +635,13 @@ export class KnowledgeConnectorExtension {
     return stateStatus(saved, "raindrop");
   }
 
-  private async reserveAssessment(commandId: string, itemId: string, pilot: NonNullable<KnowledgeRaindropIntakeRequest["pilot"]>, sourceCollection: string, cohortId = pilot.id): Promise<void> {
+  private async reserveAssessment(commandId: string, itemId: string, pilot: NonNullable<KnowledgeRaindropIntakeRequest["pilot"]>, sourceCollection: string, jevConnectionId: string, cohortId = pilot.id): Promise<string> {
     const profileVersion = jevProfileVersion((await this.store.config()).currentInterests ?? []);
     // Reservation is a fresh paid-attempt fence on every invocation. Reusing
     // the intake command here would replay an old successful mutation receipt.
+    if (!this.options.jevBudget) throw new GatewayError("unsupported", "Shared Knowledge Jev budget is unavailable");
+    const monthlyAttempt = await this.options.jevBudget.reserveAssessment(jevConnectionId, commandId);
+    try {
     await this.store.updateConnectorState(command(`${commandId}:${randomUUID()}`, "reserve"), "raindrop", current => {
       const state = current ?? initial("raindrop");
       const pilots = state.assessmentPilots ?? {};
@@ -476,9 +662,14 @@ export class KnowledgeConnectorExtension {
         assessmentAttempts: { ...attempts, [attemptKey]: { itemId, cohortId, status: "dispatched" as const, chargeCents: 1 } },
       };
     });
+    return monthlyAttempt;
+    } catch (error) {
+      await this.options.jevBudget.releaseUndispatched(jevConnectionId, monthlyAttempt);
+      throw error;
+    }
   }
 
-  private async settleAssessment(commandId: string, itemId: string, cohortId: string, usage?: { inputTokens: number; outputTokens: number; estimatedCostCents: number }): Promise<void> {
+  private async settleAssessment(commandId: string, itemId: string, cohortId: string, jevConnectionId: string, monthlyAttempt: string, usage?: { inputTokens: number; outputTokens: number; estimatedCostCents: number }): Promise<void> {
     await this.store.updateConnectorState(`${commandId}:settle`, "raindrop", current => {
       const state = current ?? initial("raindrop");
       const mappedEntry = Object.entries(state.assessmentPilots ?? {}).find(([, item]) => item.id === cohortId);
@@ -497,11 +688,70 @@ export class KnowledgeConnectorExtension {
         assessmentAttempts: { ...(state.assessmentAttempts ?? {}), [key]: settled },
       };
     });
+    if (usage) await this.options.jevBudget!.settle(jevConnectionId, monthlyAttempt, usage);
+    else await this.options.jevBudget!.reconcileUncertain(jevConnectionId, monthlyAttempt);
+  }
+
+  private async ingestItem(request: KnowledgeSourceIngestRequest, item: PendingItem, state: KnowledgeConnectorState, signal?: AbortSignal): Promise<KnowledgeRecord & { kind: "source" }> {
+    if (!request.scope) throw bad("Ingestion scope must be resolved before source capture");
+    if (!state.accountId) throw new GatewayError("unsupported", "Connector account is not configured");
+    const identity = { provider: request.connector, accountId: state.accountId, itemId: item.id };
+    const existing = await this.store.sourceByIdentity(identity);
+    const activeSignal = signal ?? new AbortController().signal;
+    const captured = await captureSource(this.store, {
+      commandId: request.commandId, url: item.url, scope: existing?.scope ?? request.scope, title: item.title,
+      origin: "connector", identity, ...(request.connector === "raindrop" && item.collectionId ? { collectionId: item.collectionId } : {}),
+      ...(request.connector === "raindrop" && item.annotation ? { annotations: [{ text: item.annotation }] } : {}),
+      ...(request.connector === "x" || isPublicXPost(item.url) ? { publicPostLookup: true } : {}),
+    }, { writer: "connector", signal: activeSignal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? activeSignal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
+    let source = captured.record;
+    if (source.scope !== request.scope && !sourceAdmissionIsDecided(source)) {
+      try {
+        const placed = await this.store.curateSource({ commandId: `${request.commandId}:scope`, operation: "placement", producer: { actor: "connector" }, item: { recordId: source.id, expectedRevision: source.revisionId, placement: { scope: request.scope } } });
+        source = placed.record as KnowledgeRecord & { kind: "source" };
+      } catch (error) {
+        if (!(error instanceof KnowledgeCurationRefusal) || error.code !== "decision-authority") throw error;
+      }
+    }
+    const attached = await this.attachProviderPayload(item, source, `${request.commandId}:provider-payload`);
+    source = attached.record;
+    source = await this.recoverSaveTime(source, `${request.commandId}:save-time`, attached.evidence);
+    source = await this.markUnsafeLinkedCapture(item, source, `${request.commandId}:capture-safety`);
+    return source;
+  }
+
+  private async ingest(request: KnowledgeSourceIngestRequest, externalSignal?: AbortSignal): Promise<KnowledgeRecord & { kind: "source" }> {
+    if (!request.commandId || !request.connectionId || !request.itemId || (request.scope !== undefined && request.scope !== "personal" && request.scope !== "research")) throw bad("Ingest requires commandId, connectionId, itemId, and a valid Knowledge scope");
+    const state = await this.store.connectorState(request.connector);
+    if (!state?.enabled || !state.accountId) throw new GatewayError("unsupported", `${request.connector} connector is not configured`);
+    const authority = await this.connectionFor(request.connectionId, request.connector, Boolean(this.options.connections));
+    const item = state.pending.find(candidate => candidate.id === request.itemId);
+    if (!item) {
+      const existing = await this.store.sourceByIdentity({ provider: request.connector, accountId: state.accountId, itemId: request.itemId });
+      if (existing) return existing;
+      throw new GatewayError("not_found", "Connector item is not in the pending queue");
+    }
+    let ingestScope = request.scope;
+    if (request.connector === "raindrop") {
+      const mapping = authority?.raindropCollections?.find(candidate => candidate.collectionId === item.collectionId);
+      if (authority?.raindropCollections?.length && !mapping) throw new GatewayError("unsupported", "Queued Raindrop collection is not mapped in the current connection");
+      if (mapping?.role === "archive") throw new GatewayError("unsupported", "Archive-role collections are never ingested");
+      if (mapping?.role === "triage" && !ingestScope) throw bad("Triage ingestion requires an explicit Knowledge scope");
+      if ((mapping?.role === "research" || mapping?.role === "personal") && ingestScope && ingestScope !== mapping.role) throw bad("Home collection ingestion scope must match its role");
+      ingestScope ??= mapping?.role === "research" || mapping?.role === "personal" ? mapping.role : undefined;
+    }
+    if (!ingestScope) throw bad("Ingest requires an explicit Knowledge scope for this collection");
+    if (authority && (authority.providerAccountId !== state.accountId || !authority.policy.enabled)) throw new GatewayError("conflict", "Connector account is not admitted by the current connection");
+    const controller = new AbortController();
+    const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
+    const deadline = setTimeout(() => controller.abort(new Error("Source ingestion deadline exceeded")), RUN_DEADLINE_MS);
+    deadline.unref?.();
+    try { return await this.ingestItem({ ...request, scope: ingestScope }, item, state, signal); } finally { clearTimeout(deadline); }
   }
 
   private async recoverSaveTime(source: KnowledgeRecord & { kind: "source" }, commandId: string, evidence?: { objectHash: string; bytes: Uint8Array }): Promise<KnowledgeRecord & { kind: "source" }> {
     if (source.content.identity?.provider.toLowerCase() !== "raindrop" || source.content.sourceSavedAt) return source;
-    const recovered = await recoverProviderSaveTime(this.store, { commandId, sourceId: source.id, expectedRevision: source.revisionId, ...(evidence ? { evidence } : {}) });
+    const recovered = await recoverProviderSaveTime(this.store, { commandId, sourceId: source.id, expectedRevision: source.revisionId, writer: "connector", ...(evidence ? { evidence } : {}) });
     if (recovered.status !== "recovered" || !recovered.revisionId) return source;
     const current = await this.store.read(source.id, recovered.revisionId, false, true, true);
     return current?.kind === "source" ? current : source;
@@ -514,15 +764,15 @@ export class KnowledgeConnectorExtension {
     const evidence = { objectHash: apiObject.hash, bytes };
     const representations = source.content.representations ?? [];
     if (representations.some(value => value.kind === "provider-api" && value.object.hash === apiObject.hash)) return { record: source, evidence };
-    const updated = await this.store.captureSource({ commandId, expectedRevision: source.revisionId, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content: { ...source.content, representations: [...representations, { kind: "provider-api", object: apiObject, mediaType: "application/json" }] } } });
+    const updated = await this.store.captureSource({ writer: "connector", commandId, expectedRevision: source.revisionId, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content: { ...source.content, representations: [...representations, { kind: "provider-api", object: apiObject, mediaType: "application/json" }] } } });
     if (updated.record.kind !== "source") throw new Error("Provider payload attachment returned a non-source record");
     return { record: updated.record, evidence };
   }
 
   private async markUnsafeLinkedCapture(item: PendingItem, source: KnowledgeRecord & { kind: "source" }, commandId: string): Promise<KnowledgeRecord & { kind: "source" }> {
     let disposition = source.content.captureDisposition;
-    // Public post permalinks were read through the X provider, whose disposition
-    // is already truthful; only HTML fetches of other X pages are app shells.
+    // Public post permalinks were read through the X provider; only HTML fetches
+    // of other X pages need the app-shell capture downgrade.
     if (isPublicXPost(item.url)) return source;
     try {
       const host = new URL(item.url).hostname.toLowerCase();
@@ -530,7 +780,7 @@ export class KnowledgeConnectorExtension {
       else if (host === "github.com" || host.endsWith(".github.com")) disposition = disposition === "complete" ? "partial" : disposition;
     } catch { disposition = "reference-only"; }
     if (disposition === source.content.captureDisposition) return source;
-    const updated = await this.store.captureSource({ commandId, expectedRevision: source.revisionId, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content: { ...source.content, captureDisposition: disposition } } });
+    const updated = await this.store.captureSource({ writer: "connector", commandId, expectedRevision: source.revisionId, record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content: { ...source.content, captureDisposition: disposition } } });
     if (updated.record.kind !== "source") throw new Error("Linked capture quality update returned a non-source record");
     return updated.record;
   }
@@ -549,6 +799,7 @@ export class KnowledgeConnectorExtension {
 
   private async intake(request: KnowledgeRaindropIntakeRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
     const connectionAuthority = await this.connectionFor(request.connectionId, "raindrop", Boolean(this.options.connections));
+    const jevConnectionId = await this.options.jevBudget?.connectionId();
     const state = await this.store.connectorState("raindrop");
     if (!state?.enabled || !state.credentialRef || !state.accountId || (!state.scope && !this.options.connections)) throw new GatewayError("unsupported", "Raindrop connector is not configured");
     const mappings = connectionAuthority?.raindropCollections;
@@ -561,8 +812,10 @@ export class KnowledgeConnectorExtension {
     const sourceCollection = request.sourceCollection ?? (mappings?.length === 1 ? mappings[0]!.collectionId : undefined) ?? (mappings ? undefined : state.scope);
     if (!sourceCollection) throw bad("Choose a mapped Raindrop source collection for intake");
     const mapping = mappings?.find(item => item.collectionId === sourceCollection);
-    if (mappings && !mapping) throw new GatewayError("unsupported", "Raindrop source collection is not mapped to a Knowledge scope");
-    const mappedScope = mapping?.scope ?? "research";
+    if (mappings && !mapping) throw new GatewayError("unsupported", "Raindrop source collection is not mapped to a Knowledge role");
+    if (mapping?.role === "triage") throw new GatewayError("unsupported", "Legacy Raindrop intake cannot choose a triage item's scope; use the ingestion routine");
+    if (mapping?.role === "archive") throw new GatewayError("unsupported", "Archive-role collections are never ingested");
+    const mappedScope = mapping?.role === "personal" ? "personal" : "research";
     const expectedSetupRevision = connectionAuthority?.setupRevision;
     const limit = request.limit ?? 10;
     const token = await this.options.credentials.read(state.credentialRef);
@@ -621,6 +874,7 @@ export class KnowledgeConnectorExtension {
         outcomeMap.set(item.id, { ...(previous ?? { itemId: item.id, title: item.title.slice(0, 512) }), ...patch, ...(patch.reason !== undefined ? { reason: patch.reason.slice(0, 2_000) } : {}) } as IntakeOutcome);
       };
       const canonicalFor = (itemId: string): Promise<KnowledgeRecord & { kind: "source" } | undefined> => this.store.sourceByIdentity({ provider: "raindrop", accountId: state.accountId!, itemId });
+      const markDone = async (itemId: string, disposition: "processed" | "skipped" = "processed", why = "Processed by the bounded legacy Raindrop intake") => this.ack({ commandId: command(request.commandId, `done-${itemId}`), connector: "raindrop", ...(request.connectionId ? { connectionId: request.connectionId } : {}), itemId, disposition, reason: why });
       const approvedItems = cohort.map(itemId => live.pending.find(item => item.id === itemId)).filter((item): item is NonNullable<typeof item> => Boolean(item));
       const approvedSet = new Set(approvedItems.map(item => item.id));
       for (const itemId of cohort) if (!approvedSet.has(itemId)) {
@@ -634,31 +888,32 @@ export class KnowledgeConnectorExtension {
           live = await this.store.connectorState("raindrop") ?? live;
           if (connectionAuthority && expectedSetupRevision !== (await this.connectionFor(request.connectionId, "raindrop", true))?.setupRevision) throw new GatewayError("conflict", "Raindrop collection mapping changed during intake; retry with the current setup revision");
           if (mapping && item.collectionId !== mapping.collectionId) throw new GatewayError("conflict", "Raindrop item collection does not match the selected mapping");
-          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: mappedScope, title: item.title, origin: "connector", ...(isPublicXPost(item.url) ? { publicPostLookup: true } : {}), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
-          let source = result.record;
-          if (source.scope !== mappedScope) {
-            const placed = await this.store.curateSource({ commandId: command(request.commandId, `scope-${item.id}-${mappedScope}`), operation: "placement", producer: { actor: "connector" }, item: { recordId: source.id, expectedRevision: source.revisionId, placement: { scope: mappedScope } } });
-            source = placed.record as KnowledgeRecord & { kind: "source" };
-          }
+          let source = await this.ingestItem({ commandId: command(request.commandId, `ingest-${item.id}`), connector: "raindrop", connectionId: request.connectionId ?? "legacy", itemId: item.id, scope: mappedScope }, item, live, signal);
           setOutcome(item, { sourceId: source.id, sourceRevision: source.revisionId, disposition: "pending", assessment: "not-run", move: "not-attempted", reason: "Source captured; processing not yet complete" });
-          const attached = await this.attachProviderPayload(item, source, command(request.commandId, `metadata-${item.id}`));
-          source = attached.record;
-          source = await this.recoverSaveTime(source, command(request.commandId, `save-time-${item.id}`), attached.evidence);
           let sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
-          source = await this.markUnsafeLinkedCapture(item, source, command(request.commandId, `quality-${item.id}`));
-          sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
           captured += 1;
-          if (mappedScope === "personal") {
+          if (sourceAdmissionIsDecided(source)) {
+            const status = source.content.admission?.status;
+            const disposition = status === "archived" ? "archived" : status === "retained" ? "retained" : "pending";
+            if (disposition === "archived") archived += 1;
+            else if (disposition === "retained") retained += 1;
+            else pending += 1;
+            setOutcome(item, { ...sourceRef, disposition, assessment: "not-run", move: "not-attempted", reason: "Canonical source admission was already decided by a user or agent" });
+            await markDone(item.id, "skipped", "Admission already decided by a user or agent; intake left it unchanged");
+            continue;
+          }
+          // The entry's own scope, not the collection mapping, decides the path:
+          // a source a user or agent placed in personal never reaches Jev.
+          if (source.scope === "personal") {
             if (connectionAuthority && expectedSetupRevision !== (await this.connectionFor(request.connectionId, "raindrop", true))?.setupRevision) throw new GatewayError("conflict", "Raindrop collection mapping changed during intake; retry with the current setup revision");
-            const admitted = source.content.admission?.status === "retained" ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-personal-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "retained", reason: "Personal collection uses Raindrop link, title, preview and saved note as sufficient evidence" })).record as KnowledgeRecord & { kind: "source" };
+            const admitted = source.content.admission?.status === "retained" ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-personal-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "retained", producer: { actor: "connector" }, reason: "Personal collection uses Raindrop link, title, preview and saved note as sufficient evidence" })).record as KnowledgeRecord & { kind: "source" };
             source = admitted; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId }; retained += 1;
-            const destination = mapping ? mapping.destination : live.destination;
-            if (live.allowWrites && destination && destination !== sourceCollection) {
-              const result = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: admitted, expectedRevision: admitted.revisionId, identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, sourceCollection, destination, ...(request.connectionId ? { connectionId: request.connectionId } : {}), ...(expectedSetupRevision !== undefined ? { expectedSetupRevision } : {}) }, signal);
-              if (result.status === "moved") { moved += 1; setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted and its approved collection move was verified", assessment: "not-run", move: "moved" }); }
-              else { pending += 1; setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted; approved remote move remains unresolved", assessment: "not-run", move: result.status }); continue; }
+              if (live.allowWrites && connectionAuthority) {
+              const result = await this.moveOne({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, sourceId: admitted.id, expectedRevision: admitted.revisionId, connectionId: request.connectionId! }, signal);
+              if (result.status === "moved" || result.status === "already-home") { moved += 1; setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source is in its derived home collection", assessment: "not-run", move: "moved" }); }
+              else { setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted; approved remote move remains unresolved", assessment: "not-run", move: result.status }); await markDone(item.id); continue; }
             } else setOutcome(item, { ...sourceRef, disposition: "retained", reason: "Personal source admitted from its saved Raindrop link and metadata", assessment: "not-run", move: "not-attempted" });
-            await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), "raindrop", current => { const next = current ?? live; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id || candidate.collectionId !== sourceCollection), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), capturedCollections: collectionProgress(next.capturedCollections, item.id, sourceCollection), remaining: Math.max(0, next.pending.length - 1) }; });
+            await markDone(item.id);
            
             continue;
           }
@@ -666,7 +921,7 @@ export class KnowledgeConnectorExtension {
             // An incomplete re-capture leaves the bookmark pending but must not
             // revoke an admission already decided for the same canonical source.
             if (source.content.admission?.status !== "retained" && source.content.admission?.status !== "archived") {
-              const admission = await this.store.setSourceAdmission({ commandId: command(request.commandId, `pending-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "pending", reason: "Capture is incomplete or provider metadata is bounded without complete linked evidence" });
+              const admission = await this.store.setSourceAdmission({ commandId: command(request.commandId, `pending-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "pending", producer: { actor: "connector" }, reason: "Capture is incomplete or provider metadata is bounded without complete linked evidence" });
               source = admission.record as KnowledgeRecord & { kind: "source" }; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
             }
             pending += 1; setOutcome(item, { ...sourceRef, disposition: "pending", reason: source.content.captureReason ?? "Capture is incomplete or provider metadata is bounded without complete linked evidence", assessment: "not-run", move: "not-attempted" }); continue;
@@ -682,34 +937,64 @@ export class KnowledgeConnectorExtension {
           if (!assessmentCurrent) {
             if (!this.options.assessment) { pending += 1; lastError = "Jev source assessment is not configured"; setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: "not-run", move: "not-attempted" }); continue; }
             let dispatched = false;
+            let reservationReleased = false;
+            let monthlyAttempt: string | undefined;
+            const releaseReservation = async () => {
+              if (monthlyAttempt && !dispatched && !reservationReleased) {
+                await this.options.jevBudget!.releaseUndispatched(jevConnectionId!, monthlyAttempt);
+                reservationReleased = true;
+              }
+            };
             try {
-              const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => { await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, cohortId); }, onDispatch: () => { dispatched = true; } }, this.options.assessment);
+              const assessmentConnectionId = jevConnectionId;
+              if (!assessmentConnectionId) throw new GatewayError("unsupported", "Jev intake assessment requires the configured TypeSafe provider credential");
+              const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => {
+                monthlyAttempt = await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, assessmentConnectionId, cohortId);
+              }, onDispatch: async () => {
+                try { await this.options.jevBudget!.markDispatch(assessmentConnectionId, monthlyAttempt!); dispatched = true; }
+                catch (error) { await releaseReservation(); throw error; }
+              } }, this.options.assessment);
               assessment = triaged.assessment; source = triaged.source; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId }; assessmentOutcome = assessment.coverage === "sampled" ? "dispatched-settled-sampled" : "dispatched-settled";
               setOutcome(item, { ...sourceRef, assessment: assessmentOutcome });
               const usage = assessment?.usage ? { inputTokens: assessment.usage.inputTokens, outputTokens: assessment.usage.outputTokens, estimatedCostCents: assessment.usage.estimatedCostCents } : undefined;
-              await this.settleAssessment(command(request.commandId, `assess-${item.id}`), item.id, cohortId, usage);
-            } catch (error) { assessmentFailed += 1; pending += 1; lastError = dispatched ? "Jev assessment outcome is uncertain; reconcile before retrying" : (error instanceof Error ? error.message : "Jev assessment failed"); setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: dispatched ? "dispatched-uncertain" : "preflight-failed", move: "not-attempted" }); continue; }
+              await this.settleAssessment(command(request.commandId, `assess-${item.id}`), item.id, cohortId, jevConnectionId, monthlyAttempt!, usage);
+            } catch (error) { if (!dispatched) await releaseReservation(); assessmentFailed += 1; pending += 1; lastError = dispatched ? "Jev assessment outcome is uncertain; reconcile before retrying" : (error instanceof Error ? error.message : "Jev assessment failed"); setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: dispatched ? "dispatched-uncertain" : "preflight-failed", move: "not-attempted" }); continue; }
           }
           const finalInterests = (await this.store.config()).currentInterests ?? [];
           if (!assessment || (assessment.model === JEV_DEFAULT_MODEL && assessment.coverage !== undefined && (assessment.coverage !== "full" && assessment.coverage !== "sampled")) || (assessment.model === JEV_DEFAULT_MODEL && assessment.inputDigest !== undefined && (assessment.profileVersion !== jevProfileVersion(finalInterests) || assessment.inputDigest !== jevInputDigest({ title: source.content.title, text: source.content.text ?? "", interests: finalInterests, source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt } }, finalInterests)))) throw new GatewayError("conflict", "Source assessment authority changed before admission");
           const status = assessment.recommendation === "archived" ? "archived" : "retained";
-          const admitted = source.content.admission?.status === status ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status, reason: status === "archived" ? "Jev clear low-value classification; recoverable intake archive" : "Jev intake accepted source", ...(assessment?.profileVersion ? { profileVersion: assessment.profileVersion } : {}), ...(assessment?.rubricVersion ? { rubricVersion: assessment.rubricVersion } : {}) })).record as KnowledgeRecord & { kind: "source" };
+          let admitted: KnowledgeRecord & { kind: "source" };
+          try {
+            admitted = (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status, producer: { actor: "connector" }, reason: status === "archived" ? "Jev clear low-value classification; recoverable intake archive" : "Jev intake accepted source", ...(assessment?.profileVersion ? { profileVersion: assessment.profileVersion } : {}), ...(assessment?.rubricVersion ? { rubricVersion: assessment.rubricVersion } : {}) })).record as KnowledgeRecord & { kind: "source" };
+          } catch (error) {
+            if (!(error instanceof KnowledgeCurationRefusal) || error.code !== "decision-authority") throw error;
+            const authoritative = await this.store.read(source.id, undefined, false, true, true);
+            if (!authoritative || authoritative.kind !== "source") throw error;
+            admitted = authoritative;
+            const decision = admitted.content.admission?.status;
+            const disposition = decision === "archived" ? "archived" : decision === "retained" ? "retained" : "pending";
+            if (disposition === "archived") archived += 1; else if (disposition === "retained") retained += 1; else pending += 1;
+            sourceRef = { sourceId: admitted.id, sourceRevision: admitted.revisionId };
+            setOutcome(item, { ...sourceRef, disposition, assessment: assessmentOutcome, move: "not-attempted", reason: "The Knowledge store preserved an existing authoritative admission" });
+            await markDone(item.id);
+            continue;
+          }
           source = admitted; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
           setOutcome(item, { ...sourceRef, disposition: status, assessment: assessmentOutcome });
           if (status === "archived") archived += 1; else retained += 1;
-          const destination = mapping ? mapping.destination : live.destination;
-          if (!live.allowWrites || !destination || item.collectionId === destination) { pending += 1; setOutcome(item, { ...sourceRef, disposition: status, reason: "Remote move is not authorized or destination is unavailable", assessment: assessmentOutcome, move: "not-attempted" }); if (source.content.text && source.content.captureDisposition === "complete") { } continue; }
-          const movedResult = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: admitted, expectedRevision: admitted.revisionId, identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, sourceCollection, destination, ...(request.connectionId ? { connectionId: request.connectionId } : {}), ...(expectedSetupRevision !== undefined ? { expectedSetupRevision } : {}) }, signal);
-          if (movedResult.status !== "moved") {
-            pending += 1; lastError = "Raindrop destination move could not be verified";
+          if (!live.allowWrites || !connectionAuthority) { setOutcome(item, { ...sourceRef, disposition: status, reason: "Remote move is not authorized by a mapped connection", assessment: assessmentOutcome, move: "not-attempted" }); await markDone(item.id); continue; }
+          const movedResult = await this.moveOne({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, sourceId: admitted.id, expectedRevision: admitted.revisionId, connectionId: request.connectionId! }, signal);
+          if (movedResult.status !== "moved" && movedResult.status !== "already-home") {
+            lastError = "Raindrop destination move could not be verified";
             setOutcome(item, { ...sourceRef, disposition: status, reason: lastError, assessment: assessmentOutcome, move: movedResult.status });
+            await markDone(item.id);
             if (source.content.text && source.content.captureDisposition === "complete") { }
             if ((await this.store.connectorState("raindrop"))?.pendingRemote) { for (const tail of approvedItems.slice(approvedItems.indexOf(item) + 1)) setOutcome(tail, { disposition: "pending", reason: "Blocked by unresolved remote effect; reconcile before processing", assessment: "not-run", move: "blocked" }); break; }
             continue;
           }
           moved += 1;
           setOutcome(item, { ...sourceRef, disposition: status, reason: "Locally admitted and remotely verified", assessment: assessmentOutcome, move: "moved" });
-          await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), "raindrop", current => { const next = current ?? live; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id || candidate.collectionId !== sourceCollection), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), capturedCollections: collectionProgress(next.capturedCollections, item.id, sourceCollection), remaining: Math.max(0, next.pending.length - 1) }; });
+          await markDone(item.id);
           if (source.content.text && source.content.captureDisposition === "complete") { }
         } catch (error) { pending += 1; lastError = error instanceof Error ? error.message : "Raindrop intake failed"; const prior = outcomeMap.get(item.id); if (prior?.move === "moved") setOutcome(item, { reason: "Remote move verified; local completion receipt requires reconciliation", assessment: prior.assessment, move: "moved" }); else setOutcome(item, { disposition: prior?.disposition ?? "pending", reason: lastError, assessment: prior?.assessment ?? "not-run", move: prior?.move ?? "not-attempted" }); } finally { await this.queueSettledEnrichment(outcomeMap.get(item.id)?.sourceId); }
       }
@@ -724,7 +1009,78 @@ export class KnowledgeConnectorExtension {
     } finally { clearTimeout(deadline); }
   }
 
-  private async run(request: KnowledgeConnectorRunRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
+  private async queue(request: KnowledgeConnectorQueueRequest): Promise<Record<string, unknown>> {
+    if (!request.connectionId) throw bad("Connector queue requires a connectionId");
+    const limit = request.limit ?? 25;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) throw bad("Connector queue limit must be 1..25");
+    const state = await this.store.connectorState(request.connector, request.connectionId);
+    if (!state?.enabled) throw new GatewayError("unsupported", "Connector is not configured for this connection");
+    const authority = await this.connectionFor(request.connectionId, request.connector, Boolean(this.options.connections));
+    let collectionId = request.sourceCollection;
+    let scope: "research" | "personal" | undefined;
+    if (request.connector === "raindrop") {
+      const mappings = authority?.raindropCollections;
+      if (this.options.connections && !mappings?.length) throw new GatewayError("unsupported", "Configure Raindrop collection mappings before reading the queue");
+      if (collectionId === undefined && mappings?.length === 1) collectionId = mappings[0]!.collectionId;
+      if (mappings && !collectionId) throw bad("Choose a mapped Raindrop collection");
+      const mapping = mappings?.find(item => item.collectionId === collectionId);
+      if (mappings && !mapping) throw new GatewayError("unsupported", "Raindrop source collection is not mapped to a Knowledge role");
+      scope = mapping?.role === "research" || mapping?.role === "personal" ? mapping.role : undefined;
+    } else if (request.sourceCollection !== undefined) throw bad("Only Raindrop queues accept sourceCollection");
+    const pending = state.pending.filter(item => request.connector !== "raindrop" || item.collectionId === collectionId).slice(0, limit);
+    const entries = await Promise.all(pending.map(async item => {
+      const source = await this.store.sourceByIdentity({ provider: request.connector, accountId: state.accountId!, itemId: item.id });
+      const role = request.connector === "raindrop" ? authority?.raindropCollections?.find(mapping => mapping.collectionId === item.collectionId)?.role : undefined;
+      return { id: item.id, url: item.url, title: item.title.slice(0, 512), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(role ? { role } : {}), ...(item.savedAt ? { savedAt: item.savedAt } : {}), sourceExists: Boolean(source), ...(source ? { sourceId: source.id, revisionId: source.revisionId, admission: source.content.admission?.status ?? "pending", scope: source.scope } : {}) };
+    }));
+    return { connector: request.connector, connectionId: request.connectionId, ...(collectionId ? { sourceCollection: collectionId } : {}), items: entries, remaining: Math.max(0, state.pending.filter(item => request.connector !== "raindrop" || item.collectionId === collectionId).length - entries.length) };
+  }
+
+  private async ack(request: KnowledgeConnectorAckRequest): Promise<Record<string, unknown>> {
+    if (!request.commandId || request.commandId.length > 160 || !request.itemId || request.itemId.length > 128 || !request.reason.trim() || request.reason.length > 500) throw bad("Connector acknowledgment requires a bounded itemId and reason");
+    const state = await this.store.connectorState(request.connector, request.connectionId);
+    const item = state?.pending.find(candidate => candidate.id === request.itemId);
+    if (!item) {
+      const prior = state?.processedItems?.find(candidate => candidate.id === request.itemId);
+      if (prior) return { ...prior, idempotent: true };
+      throw new GatewayError("not_found", "Connector item is not in the pending queue");
+    }
+    const authority = await this.connectionFor(request.connectionId, request.connector, Boolean(this.options.connections));
+    if (request.connector === "raindrop" && authority?.raindropCollections?.length && !authority.raindropCollections.some(mapping => mapping.collectionId === item.collectionId)) throw new GatewayError("conflict", "Queued Raindrop item is no longer mapped to this connection");
+    const processedAt = this.now();
+    const processed = { id: item.id, disposition: request.disposition, reason: request.reason.trim(), ...(item.collectionId ? { collectionId: item.collectionId } : {}), processedAt };
+    const updated = await this.store.updateConnectorState(request.commandId, request.connector, current => {
+      const live = current ?? state!;
+      const prior = live.processedItems?.find(candidate => candidate.id === item.id);
+      if (prior) return { ...live, pending: live.pending.filter(candidate => candidate.id !== item.id), processedItems: [...(live.processedItems ?? []).filter(candidate => candidate.id !== item.id), { ...prior, ...(item.collectionId ? { collectionId: item.collectionId } : {}) }].slice(-2_000), ...(item.collectionId ? { capturedCollections: { ...(live.capturedCollections ?? {}), [item.id]: item.collectionId } } : {}), remaining: Math.max(0, live.pending.length - 1) };
+      if (!live.pending.some(candidate => candidate.id === item.id)) throw new GatewayError("conflict", "Connector queue item changed before acknowledgment");
+      return { ...live, pending: live.pending.filter(candidate => candidate.id !== item.id), processedItems: [...(live.processedItems ?? []).filter(candidate => candidate.id !== item.id), processed].slice(-2_000), capturedIds: request.disposition === "processed" ? [...new Set([...live.capturedIds, item.id])].slice(-2_000) : live.capturedIds, ...(item.collectionId ? { capturedCollections: { ...(live.capturedCollections ?? {}), [item.id]: item.collectionId } } : {}), remaining: Math.max(0, live.pending.length - 1) };
+    }, undefined, request.connectionId);
+    return updated.processedItems?.find(candidate => candidate.id === item.id) ?? processed;
+  }
+
+  private async moveOne(request: KnowledgeRaindropMoveRequest, signal?: AbortSignal): Promise<{ status: "moved" | "already-home" | "conflict" | "unsupported" }> {
+    if (!request.connectionId || !request.commandId || !request.sourceId || !request.expectedRevision) throw bad("Raindrop move requires an exact source revision and connection");
+    if (Object.keys(request as unknown as Record<string, unknown>).some(key => !["connectionId", "commandId", "itemId", "sourceId", "expectedRevision"].includes(key))) throw bad("Raindrop move does not accept a caller-chosen destination");
+    const source = await this.store.read(request.sourceId, undefined, false, true, true);
+    if (!source || source.kind !== "source" || source.revisionId !== request.expectedRevision) return { status: "conflict" };
+    const state = await this.store.connectorState("raindrop", request.connectionId);
+    const authority = await this.connectionFor(request.connectionId, "raindrop", Boolean(this.options.connections));
+    const mappings = authority?.raindropCollections ?? [];
+    const sourceCollection = source.content.collectionId;
+    if (!state?.allowWrites || !authority?.policy.enabled || !authority.policy.allowWrites || authority.providerAccountId !== state.accountId || !sourceCollection) return { status: "unsupported" };
+    const admission = source.content.admission?.status;
+    const role = admission === "archived" ? "archive" : source.scope;
+    const home = mappings.find(item => item.role === role);
+    if (!home) return { status: "unsupported" };
+    const identity = source.content.identity;
+    const itemId = identity?.provider === "raindrop" ? identity.itemId : source.content.origins?.find(origin => origin.identity?.provider === "raindrop")?.identity?.itemId;
+    const accountId = identity?.provider === "raindrop" ? identity.accountId : source.content.origins?.find(origin => origin.identity?.provider === "raindrop")?.identity?.accountId;
+    if (!itemId || !accountId || itemId !== request.itemId || accountId !== state.accountId) return { status: "conflict" };
+    return this.moveRaindrop({ commandId: request.commandId, itemId, source, expectedRevision: request.expectedRevision, identity: { provider: "raindrop", accountId, itemId }, connectionId: request.connectionId, expectedSetupRevision: authority.setupRevision }, signal);
+  }
+
+  private async discoverQueue(request: KnowledgeConnectorDiscoverRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
     const connector = request.connector; const authority = await this.connectionFor(request.connectionId, connector, Boolean(this.options.connections)); const current = await this.store.connectorState(connector);
     if (!current?.enabled || !current.credentialRef || !current.accountId || (connector === "x" && !current.scope) || (connector === "raindrop" && !current.scope && !authority?.raindropCollections?.length)) throw new GatewayError("unsupported", `Knowledge ${connector} connector is not configured`);
     if (request.sourceCollection !== undefined && !/^-?\d{1,18}$/.test(request.sourceCollection)) throw bad("Connector source collection is invalid");
@@ -735,7 +1091,6 @@ export class KnowledgeConnectorExtension {
     if (connector === "raindrop" && !selectedCollection) throw bad("Choose a mapped Raindrop source collection for connector runs");
     const mapping = selectedCollection ? mappings?.find(item => item.collectionId === selectedCollection) : undefined;
     if (mappings && selectedCollection && !mapping) throw new GatewayError("unsupported", "Raindrop source collection is not mapped to a Knowledge scope");
-    const mappedScope = mapping?.scope ?? "research";
     if (authority && (!authority.policy.enabled || authority.health === "disconnected" || authority.providerAccountId !== current.accountId || authority.scope !== current.scope || authority.credentialRef !== current.credentialRef)) throw new GatewayError("conflict", "Connector configuration is not admitted by the current connection instance");
     const expectedSetupRevision = authority?.setupRevision;
     this.assertCredentialNamespace(connector, current.credentialRef);
@@ -761,7 +1116,9 @@ export class KnowledgeConnectorExtension {
       const reconciled = await this.store.connectorState(connector);
       if (reconciled?.pendingRemote) throw new GatewayError("conflict", "Connector has an unresolved remote effect");
     }
-    const token = await this.options.credentials.read(current.credentialRef);
+    const token = connector === "x" && authority && request.connectionId
+      ? await this.xAccessToken(request.connectionId, current.credentialRef, expectedSetupRevision!, externalSignal ?? new AbortController().signal)
+      : await this.options.credentials.read(current.credentialRef);
     if (!token) { await this.recordAdmission(current, "unavailable", "unknown", request.commandId, expectedSetupRevision); await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw missingCredential(connector, current.credentialRef); }
     const assertCurrentAuthority = async (): Promise<void> => {
       const live = await this.store.connectorState(connector);
@@ -775,7 +1132,9 @@ export class KnowledgeConnectorExtension {
     const currentToken = async (): Promise<string> => {
       const live = await this.store.connectorState(connector);
       if (!live?.credentialRef || live.credentialRef !== current.credentialRef) throw new GatewayError("conflict", "Connector credential changed during provider discovery");
-      const fresh = await this.options.credentials.read(live.credentialRef);
+      const fresh = connector === "x" && authority && request.connectionId
+        ? await this.xAccessToken(request.connectionId, live.credentialRef, expectedSetupRevision!, externalSignal ?? new AbortController().signal)
+        : await this.options.credentials.read(live.credentialRef);
       if (!fresh) { credentialUnavailable = true; throw missingCredential(connector, live.credentialRef); }
       return fresh;
     };
@@ -807,59 +1166,15 @@ export class KnowledgeConnectorExtension {
         const profile = await this.verifyRaindropAccount(current, currentToken, signal, beforeProviderAttempt);
         await this.recordAdmission(current, "available", "admitted", request.commandId, expectedSetupRevision, profile);
       }
-      const discovered = await this.discover(request.commandId, connector, selectedCollection ? { ...current, scope: selectedCollection } : current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt);
+      const discovered = await this.discover(request.commandId, connector, selectedCollection ? { ...current, scope: selectedCollection } : current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt, connector === "x" && authority && request.connectionId ? () => this.refreshXToken(request.connectionId!, current.credentialRef!, expectedSetupRevision!, signal) : undefined);
       let state = await this.store.connectorState(connector) ?? current;
-      if (request.dryRun) {
-        const scopedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
-        const result = { connector, dryRun: true, ...(selectedCollection ? { sourceCollection: selectedCollection, scope: mappedScope } : {}), discovered: discovered.discovered, pending: scopedPending.length, remaining: scopedPending.length, health: state.health };
-        await this.store.updateConnectorState(command(request.commandId, "dry"), connector, value => ({ ...(value ?? state), health: "ready", remaining: value?.pending.length ?? state.pending.length }));
-        return result;
-      }
-      let captured = 0; let partial = 0; let lastError: string | undefined;
-      const selectedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
-      for (const item of selectedPending.slice(0, limit)) {
-        let sweptSourceId: string | undefined;
-        try {
-          const live = await this.store.connectorState(connector);
-          if (!live || live.accountId !== current.accountId || live.scope !== current.scope || live.credentialRef !== current.credentialRef || live.enabled !== current.enabled) throw new GatewayError("conflict", "Connector configuration changed during the run");
-          state = live;
-          if (connector === "raindrop" && item.collectionId !== selectedCollection) throw new GatewayError("conflict", "Pending Raindrop item no longer belongs to this collection");
-          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: mappedScope, title: item.title, origin: "connector", identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), ...(item.publishedAt ? { sourcePublishedAt: item.publishedAt } : {}), ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
-          let capturedRecord = result.record;
-          sweptSourceId = capturedRecord.id;
-          if (capturedRecord.scope !== mappedScope) {
-            const placed = await this.store.curateSource({ commandId: command(request.commandId, `scope-${item.id}-${mappedScope}`), operation: "placement", producer: { actor: "connector" }, item: { recordId: capturedRecord.id, expectedRevision: capturedRecord.revisionId, placement: { scope: mappedScope } } });
-            capturedRecord = placed.record as KnowledgeRecord & { kind: "source" };
-          }
-          // X API entities/author fields are authenticated evidence. Retain a
-          // bounded canonical object instead of certifying a public-page fetch.
-          let attachedEvidence: { objectHash: string; bytes: Uint8Array } | undefined;
-          if (item.apiPayload && capturedRecord.content.captureDisposition !== "failed") {
-            const bytes = new TextEncoder().encode(item.apiPayload);
-            const apiObject = await this.store.putObject(bytes, "application/json");
-            attachedEvidence = { objectHash: apiObject.hash, bytes };
-            const updated = await this.store.captureSource({ commandId: command(request.commandId, `api-evidence-${item.id}`), expectedRevision: capturedRecord.revisionId, record: { kind: "source", id: capturedRecord.id, createdAt: capturedRecord.createdAt, scope: capturedRecord.scope, provenance: capturedRecord.provenance, relations: capturedRecord.relations, content: { ...capturedRecord.content, representations: [...(capturedRecord.content.representations ?? []), { kind: "provider-api", object: apiObject, mediaType: "application/json" }] } } });
-            if (updated.record.kind === "source") capturedRecord = updated.record;
-          }
-          // A freshly captured source is still pending, so its own objects are
-          // fenced; hand the exact retained bytes to the reconciliation.
-          capturedRecord = await this.recoverSaveTime(capturedRecord, command(request.commandId, `save-time-${item.id}`), attachedEvidence);
-          if (capturedRecord.content.captureDisposition !== "complete" && mappedScope !== "personal") { partial += 1; lastError = `Capture for ${item.id} is ${capturedRecord.content.captureDisposition}`; break; }
-          const destination = mapping ? mapping.destination : state.destination;
-          if (connector === "raindrop" && state.allowWrites && destination && item.collectionId && item.collectionId !== destination) {
-            const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: capturedRecord, expectedRevision: capturedRecord.revisionId, identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(selectedCollection ? { sourceCollection: selectedCollection } : {}), destination, ...(request.connectionId ? { connectionId: request.connectionId } : {}), ...(expectedSetupRevision !== undefined ? { expectedSetupRevision } : {}) }, signal);
-            if (moved.status !== "moved") { lastError = moved.status === "unsupported" ? "Approved Raindrop move is unavailable" : "Raindrop move could not be verified"; break; }
-          }
-          captured += 1;
-          state = await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), connector, value => { const next = value ?? state; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id || (connector === "raindrop" && candidate.collectionId !== selectedCollection)), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), ...(connector === "raindrop" && selectedCollection ? { capturedCollections: collectionProgress(next.capturedCollections, item.id, selectedCollection) } : {}), remaining: Math.max(0, next.pending.length - 1) }; });
-        } catch (error) { lastError = error instanceof Error ? error.message : "Connector capture failed"; break; } finally { await this.queueSettledEnrichment(sweptSourceId); }
-      }
-      state = await this.store.updateConnectorState(command(request.commandId, "finish"), connector, value => ({ ...(value ?? state), health: lastError ? "partial" : "ready", ...(lastError ? { lastError } : {}), lastRunAt: this.now(), remaining: value?.pending.length ?? state.pending.length }));
+      const scopedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
+      state = await this.store.updateConnectorState(command(request.commandId, "finish"), connector, value => ({ ...(value ?? state), health: "ready", lastRunAt: this.now(), remaining: value?.pending.length ?? state.pending.length }));
       clearTimeout(deadline);
-      return { connector, dryRun: false, discovered: discovered.discovered, captured, partial, pending: state.pending.length, remaining: state.remaining, health: state.health, ...(lastError ? { error: lastError } : {}) };
+      return { connector, discovered: discovered.discovered, pending: scopedPending.length, remaining: state.remaining, health: state.health };
     } catch (error) {
-      const health = credentialUnavailable || error instanceof ConnectorHTTPError && authFailure(error.status) ? "auth-error" : error instanceof ConnectorHTTPError && error.status === 429 ? "rate-limited" : "error";
-      const message = error instanceof ConnectorHTTPError ? `Provider request failed (${error.status})` : error instanceof Error ? error.message : "Connector failed";
+      const health = credentialUnavailable || error instanceof XAuthorizationError || error instanceof ConnectorHTTPError && authFailure(error.status) ? "auth-error" : error instanceof ConnectorHTTPError && error.status === 429 ? "rate-limited" : "error";
+      const message = error instanceof ConnectorHTTPError ? `Provider request failed (${error.status})` : error instanceof Error ? error.message : "Connector discovery failed";
       if (health === "auth-error") await this.recordAdmission(current, "unavailable", "unknown", request.commandId, expectedSetupRevision);
       if (message.includes("authenticated account does not match")) await this.recordAdmission(current, "available", "mismatch", request.commandId, expectedSetupRevision);
       await this.store.updateConnectorState(command(request.commandId, "error"), connector, state => ({ ...(state ?? current), health, lastError: message, lastRunAt: this.now(), remaining: state?.pending.length ?? current.pending.length }));
@@ -868,18 +1183,19 @@ export class KnowledgeConnectorExtension {
     }
   }
 
-  private async discover(commandId: string, connector: Connector, state: KnowledgeConnectorState, token: string | (() => Promise<string>), limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>): Promise<{ discovered: number }> {
+  private async discover(commandId: string, connector: Connector, state: KnowledgeConnectorState, token: string | (() => Promise<string>), limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>, onUnauthorized?: () => Promise<void>): Promise<{ discovered: number }> {
     const checkpointKey = state.scope ?? "default";
     // Raindrop pagination is offset-based: moving an item shrinks earlier
     // pages, so a persisted page number can skip newly exposed items. Restart
     // each bounded sweep at page zero; the durable identity fence deduplicates
     // already captured/pending items while later pages remain discoverable.
     let cursor = connector === "raindrop" ? undefined : state.checkpoints?.[checkpointKey]; let discovered = 0;
+    const processedIds = (state.processedItems ?? []).filter(item => connector !== "raindrop" || item.collectionId === state.scope).map(item => item.id);
     const seen = connector === "raindrop"
-      ? new Set([...state.pending.filter(item => item.collectionId === state.scope).map(item => item.id), ...state.capturedIds.filter(id => state.capturedCollections?.[id] === state.scope)])
-      : new Set([...state.pending.map(item => item.id), ...state.capturedIds]);
+      ? new Set([...state.pending.filter(item => item.collectionId === state.scope).map(item => item.id), ...state.capturedIds.filter(id => state.capturedCollections?.[id] === state.scope), ...processedIds])
+      : new Set([...state.pending.map(item => item.id), ...state.capturedIds, ...processedIds]);
     for (let page = 0; page < 10 && discovered < limit; page += 1) {
-      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal, ...(beforeAttempt === undefined ? {} : { beforeAttempt }) }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(maxAttempts === undefined ? {} : { maxAttempts }), ...(beforeAttempt === undefined ? {} : { beforeAttempt }) });
+      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal, ...(beforeAttempt === undefined ? {} : { beforeAttempt }) }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(maxAttempts === undefined ? {} : { maxAttempts }), ...(beforeAttempt === undefined ? {} : { beforeAttempt }), ...(onUnauthorized === undefined ? {} : { onUnauthorized }) });
       const parsed = connector === "raindrop" ? parseRaindrop(result.value) : parseX(result.value);
       // The requested collection endpoint is authoritative when an item omits
       // its collection field. A contradictory provider field is never routed.
@@ -962,7 +1278,7 @@ export class KnowledgeConnectorExtension {
 
   /** Raindrop-only reversible move. Capture must be locally complete and the
    * exact pending effect is durable before the provider mutation is attempted. */
-  async moveRaindrop(input: { commandId: string; itemId: string; source: KnowledgeRecord & { kind: "source" }; expectedRevision?: string; identity?: { provider: string; accountId: string; itemId: string }; sourceCollection?: string; destination: string; connectionId?: string; expectedSetupRevision?: number }, externalSignal?: AbortSignal): Promise<{ status: "moved" | "conflict" | "unsupported" }> {
+  private async moveRaindrop(input: { commandId: string; itemId: string; source: KnowledgeRecord & { kind: "source" }; expectedRevision?: string; identity?: { provider: string; accountId: string; itemId: string }; connectionId?: string; expectedSetupRevision?: number }, externalSignal?: AbortSignal): Promise<{ status: "moved" | "already-home" | "conflict" | "unsupported" }> {
     const state = await this.store.connectorState("raindrop"); if (!state?.enabled || !state.allowWrites || !state.credentialRef) return { status: "unsupported" };
     try { this.assertCredentialNamespace("raindrop", state.credentialRef); } catch { return { status: "unsupported" }; }
     if (!input.expectedRevision || !input.identity || input.identity.itemId !== input.itemId || input.source.revisionId !== input.expectedRevision) return { status: "conflict" };
@@ -971,6 +1287,11 @@ export class KnowledgeConnectorExtension {
     let source: KnowledgeRecord | null;
     try { source = await this.store.read(input.source.id, input.expectedRevision, false, true); } catch { return { status: "conflict" }; }
     if (!source || source.kind !== "source" || !isVerifiedSourceCapture(source) || !["retained", "archived"].includes(source.content.admission?.status ?? "")) return { status: "unsupported" };
+    const sourceCollection = source.content.collectionId;
+    const targetRole = source.content.admission?.status === "archived" ? "archive" : source.scope;
+    const initialAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
+    const destination = initialAuthority?.raindropCollections?.find(mapping => mapping.role === targetRole)?.collectionId;
+    if (!sourceCollection || !destination) return { status: "unsupported" };
     // The source head's object reference is part of movement authority; a
     // dangling object must never be acknowledged as a successfully captured
     // item merely because readable text remains in the revision.
@@ -978,10 +1299,10 @@ export class KnowledgeConnectorExtension {
     const moveAuthorityCurrent = async (): Promise<boolean> => {
       if (this.options.connections) {
         const instance = await this.connectionFor(input.connectionId, "raindrop", true);
-        const mapping = instance?.raindropCollections?.find(candidate => candidate.collectionId === input.sourceCollection);
-        return Boolean(instance && instance.setupRevision === input.expectedSetupRevision && instance.policy.enabled && instance.policy.allowWrites && mapping?.scope === input.source.scope && mapping.destination === input.destination);
+        const targetMapping = instance?.raindropCollections?.find(candidate => candidate.role === targetRole);
+        return Boolean(instance && instance.setupRevision === input.expectedSetupRevision && instance.policy.enabled && instance.policy.allowWrites && targetMapping?.collectionId === destination);
       }
-      return Boolean(state.destination && state.destination === input.destination);
+      return false;
     };
     if (!(await moveAuthorityCurrent()) || state.accountId !== input.identity.accountId) return { status: "conflict" };
     if (state.paidBudgetCents > 0) return { status: "unsupported" };
@@ -1001,30 +1322,34 @@ export class KnowledgeConnectorExtension {
     // Re-read both authorities after the await: native/user revocation and a
     // source forget/correction must win over the preflight snapshot.
     const latestState = await this.store.connectorState("raindrop");
-    const latestSource = await this.store.read(source.id, input.expectedRevision, false, true).catch(() => null);
-    if (!latestState?.enabled || !latestState.allowWrites || latestState.accountId !== input.identity.accountId || latestState.credentialRef !== state.credentialRef || !(await moveAuthorityCurrent()) || latestState.paidBudgetCents > 0 || !latestSource || latestSource.kind !== "source" || !isVerifiedSourceCapture(latestSource)) return { status: "conflict" };
+    const latestSource = await this.store.read(source.id, undefined, false, true).catch(() => null);
+    if (!latestState?.enabled || !latestState.allowWrites || latestState.accountId !== input.identity.accountId || latestState.credentialRef !== state.credentialRef || !(await moveAuthorityCurrent()) || latestState.paidBudgetCents > 0 || !latestSource || latestSource.kind !== "source" || latestSource.revisionId !== input.expectedRevision || !isVerifiedSourceCapture(latestSource)) return { status: "conflict" };
     await this.verifyRaindropAccount(latestState, token, signal);
     const remoteItemId = id(preflight.value?.item?._id ?? preflight.value?._id, "Raindrop item");
     const originalCollectionId = String(preflight.value?.item?.collection?.$id ?? preflight.value?.collection?.$id ?? "");
     if (!remoteItemId || remoteItemId !== input.identity.itemId || !originalCollectionId) return { status: "conflict" };
     // A crash may occur after the provider move and before local completion.
     // Destination is an acknowledged success; never reclassify or issue PUT again.
-    if (originalCollectionId === input.destination) return { status: "moved" };
-    const expectedCollection = input.sourceCollection ?? latestState.scope;
-    if (originalCollectionId !== expectedCollection) return { status: "conflict" };
-    const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: latestSource.id, basisRevisionId: latestSource.revisionId, provider: input.identity.provider, accountId: input.identity.accountId, originalCollectionId, destination: input.destination, createdAt: this.now() };
+    // The live location is the authority. A bookmark already at its derived
+    // home is "already-home", except when this same operation's move is the
+    // durable pending effect (a crash after the PUT): that is its completion.
+    if (originalCollectionId === destination) return { status: latestState.pendingRemote?.operationId === input.commandId ? "moved" : "already-home" };
+    const liveAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
+    if (!liveAuthority?.raindropCollections?.some(mapping => mapping.collectionId === originalCollectionId)) return { status: "conflict" };
+    const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: latestSource.id, basisRevisionId: latestSource.revisionId, provider: input.identity.provider, accountId: input.identity.accountId, originalCollectionId, destination, createdAt: this.now() };
     await this.store.updateConnectorState(input.commandId, "raindrop", current => ({ ...(current ?? latestState), pendingRemote: pending }));
     if (signal.aborted) return { status: "conflict" };
     // Recheck write authority at the effect boundary as well. If permission
     // is revoked after the durable receipt, retain uncertainty for reconcile
     // but never issue the remote PUT.
     const effectState = await this.store.connectorState("raindrop");
-    if (!effectState?.enabled || !effectState.allowWrites || effectState.accountId !== input.identity.accountId || effectState.credentialRef !== latestState.credentialRef || !(await moveAuthorityCurrent()) || effectState.paidBudgetCents > 0) return { status: "conflict" };
+    const effectAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
+    if (!effectState?.enabled || !effectState.allowWrites || effectState.accountId !== input.identity.accountId || effectState.credentialRef !== latestState.credentialRef || !(await moveAuthorityCurrent()) || !effectAuthority?.raindropCollections?.some(mapping => mapping.collectionId === originalCollectionId) || effectState.paidBudgetCents > 0) return { status: "conflict" };
     try {
-      await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { method: "PUT", body: { collection: { $id: input.destination } }, sleep: this.sleep, signal });
+      await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { method: "PUT", body: { collection: { $id: destination } }, sleep: this.sleep, signal });
       const verified = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal });
       const collection = verified.value?.item?.collection?.$id ?? verified.value?.collection?.$id;
-      if (String(collection) !== input.destination) return { status: "conflict" };
+      if (String(collection) !== destination) return { status: "conflict" };
       await this.store.updateConnectorState(`${input.commandId}:complete`, "raindrop", current => { const next = current ?? latestState; const { pendingRemote: _pending, ...rest } = next; return rest; });
       return { status: "moved" };
     } catch { return { status: "conflict" }; }

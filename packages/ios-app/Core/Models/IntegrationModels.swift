@@ -46,6 +46,12 @@ package struct IntegrationPolicy: Codable, Hashable, Sendable {
     }
 }
 
+package struct RaindropCollectionMapping: Codable, Hashable, Sendable, Identifiable {
+    package let collectionId: String
+    package let role: String
+    package var id: String { collectionId }
+}
+
 package struct IntegrationInstance: Codable, Hashable, Sendable, Identifiable {
     package let id: String
     package let definitionId: String
@@ -56,6 +62,7 @@ package struct IntegrationInstance: Codable, Hashable, Sendable, Identifiable {
     package let credentialAvailability: String?
     package let providerIdentity: String?
     let providerDisplayName: String?
+    package let raindropCollections: [RaindropCollectionMapping]?
     package var policy: IntegrationPolicy
     package let health: String
     let createdAt: String
@@ -63,13 +70,12 @@ package struct IntegrationInstance: Codable, Hashable, Sendable, Identifiable {
     package let setupRevision: Int
     package let lastError: String?
 
-    /// Provider metadata is a verified display projection; the canonical ID
-    /// remains the technical identity and is the honest fallback.
+    /// Provider metadata is a verified display projection; opaque IDs stay in Technical details.
     package var displayTitle: String {
         if let providerDisplayName, !providerDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return providerDisplayName
         }
-        return "Account \(providerAccountId)"
+        return "Account"
     }
 }
 
@@ -79,7 +85,7 @@ package enum IntegrationHealthPresentation {
         switch health {
         case "ready": "Ready"
         case "disabled": "Disabled"
-        case "auth-error": "Authentication error"
+        case "auth-error": "Needs reconnect"
         case "disconnected": "Disconnected"
         case "setup-required": "Setup required"
         default: "Unavailable"
@@ -106,10 +112,10 @@ package struct IntegrationCapabilityProvenance: Codable, Hashable, Sendable {
 
 package struct IntegrationSetupOperation: Codable, Hashable, Sendable, Identifiable {
     let operationId: String
-    let instanceId: String
-    let definitionId: String
-    let method: String
-    let status: String
+    package let instanceId: String
+    package let definitionId: String
+    package let method: String
+    package let status: String
     let createdAt: String
     let updatedAt: String
     package var id: String { operationId }
@@ -129,6 +135,19 @@ package struct IntegrationSetupStarted: Codable, Hashable, Sendable {
     package let definitionId: String?
     package let method: String?
     package let status: String
+}
+
+package struct IntegrationXOAuthStarted: Codable, Hashable, Sendable {
+    package let operationId: String
+    package let instanceId: String
+    package let authorizationUrl: String
+    package let state: String
+}
+
+package struct IntegrationXCredits: Codable, Hashable, Sendable {
+    package let freeBalance: Double
+    package let prepaidBalance: Double
+    package let totalBalance: Double
 }
 
 package struct IntegrationSetupCompleted: Codable, Hashable, Sendable {

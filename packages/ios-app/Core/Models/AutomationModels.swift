@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 private struct AutomationCodingKey: CodingKey {
     let stringValue: String

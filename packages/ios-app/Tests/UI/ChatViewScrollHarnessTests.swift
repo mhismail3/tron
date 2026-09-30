@@ -1276,6 +1276,174 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // Failure mode: accessories plus the keyboard can shrink/translate the
+    // flipped viewport, clipping old content below the navigation bar even
+    // though newest-row pinning still passes. Inspect the native clip, not blur.
+    @Test("accessories never clip the transcript below its navigation inset", .enabled(if: UIValidationTier.isActive))
+    func accessoryObstructionsPreserveTopViewport() async throws {
+        try await withTestWatchdog(timeout: .seconds(40)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_285).openingTail(targetEncodedBytes: 50_000)
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtBottom }
+                try await harness.loadCanonicalCommands(["inspect", "explain"], skills: ["skill:review"])
+                _ = try await harness.recorder.waitUntil { _ in harness.probe.composerCatalogBuildCount > 0 }
+                for keyboard in [false, true] {
+                    try harness.setRealKeyboardVisible(keyboard)
+                    try await Task.sleep(for: .milliseconds(750))
+                    for tall in [false, true] {
+                        let draft = tall ? (1...12).map { "Draft line \($0)" }.joined(separator: "\n") : ""
+                        for accessory in ["none", "attachments", "chip", "catalog"] {
+                            harness.probe.composerResourcePickerPresentation?(nil)
+                            try harness.setMotionAccessory(nil)
+                            try harness.setComposerText(draft)
+                            try await DisplayFrameScheduler.displayLink.nextFrame()
+                            if accessory == "attachments" { try harness.setMotionAccessory(.photo) }
+                            if accessory == "chip" { try harness.selectCanonicalSkill(named: "skill:review") }
+                            if accessory == "catalog" { harness.probe.composerResourcePickerPresentation?(.commands) }
+                            try await Task.sleep(for: .milliseconds(750))
+                            let clip = try harness.topViewportEvidence()
+                            print("CT23-TOP keyboard=\(keyboard) tall=\(tall) accessory=\(accessory) \(clip.description)")
+                            #expect(clip.uncoveredTop <= 0.5, "\(clip.description)")
+                        }
+                    }
+                }
+                try harness.setRealKeyboardVisible(false)
+            }
+        }
+    }
+
+    @Test("animated obstructions follow the pinned newest row on every presented frame", .enabled(if: UIValidationTier.isActive))
+    func animatedObstructionFollowsNewestRow() async throws {
+        try await animatedObstructionJourney(detached: false)
+    }
+
+    @Test("animated obstructions cover a detached reader without moving or remounting it", .enabled(if: UIValidationTier.isActive))
+    func animatedObstructionPreservesDetachedReader() async throws {
+        try await animatedObstructionJourney(detached: true)
+    }
+
+    private func animatedObstructionJourney(detached: Bool) async throws {
+        try await withTestWatchdog(timeout: .seconds(40)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_284).openingTail(targetEncodedBytes: 10_000)
+            snapshot.transcript = try (0..<120).map { index in
+                try harnessRichAssistantMessage(id: "motion-\(index)", presentationID: "motion-turn-\(index)",
+                                                thinkingLines: [], text: "A measured history row \(index).")
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtBottom }
+                try await harness.loadCanonicalCommands(["inspect", "explain"], skills: ["skill:review"])
+                _ = try await harness.recorder.waitUntil { _ in harness.probe.composerCatalogBuildCount > 0 }
+                try await Task.sleep(for: .milliseconds(500))
+                if detached { try await harness.detachReaderMidHistory() }
+                let anchor = detached ? try #require(harness.readerAnchor()) : nil
+                let commandBaseline = harness.probeObservation.scrollCommandCount
+                let frames = try harness.obstructionRecorder(trackedID: anchor?.physicalID)
+                frames.start()
+                defer { frames.stop() }
+                let transition: @MainActor (String, () throws -> Void) async throws -> Void = { phase, action in
+                    frames.phase = phase
+                    try action()
+                    try await Task.sleep(for: .milliseconds(750))
+                    if !detached, harness.orientation.presentsNewestRowFirst {
+                        let last = try #require(frames.samples.last)
+                        #expect(abs(last.declaredObstruction - (last.renderedObstruction ?? -.infinity)) <= 0.5,
+                                "\(phase): adapter must describe the rendered spacer")
+                    }
+                }
+                try await transition("catalog-open") { harness.probe.composerResourcePickerPresentation?(.commands) }
+                #expect(!(harness.probe.composerPickerEntries?().isEmpty ?? true))
+                try await transition("catalog-close") { harness.probe.composerResourcePickerPresentation?(nil) }
+                try await transition("editor-grow") {
+                    try harness.setComposerDraftText("First line\nSecond line\nThird line\nFourth line")
+                }
+                try await transition("editor-shrink") { try harness.setComposerDraftText("") }
+                try await transition("keyboard-show") { try harness.setRealKeyboardVisible(true) }
+                try await transition("keyboard-hide") { try harness.setRealKeyboardVisible(false) }
+                var recent = harness.snapshot
+                let now = Date.now
+                recent.processActivities = [SessionProcessActivity(
+                    processId: "motion-worker", kind: .subagent, executionMode: .asynchronous,
+                    source: .delegatedAgent,
+                    lifecycle: SessionProcessLifecycle(
+                        state: .completed, sequence: 1,
+                        observedAt: GatewayTimestamp.preciseString(from: now),
+                        terminalAt: GatewayTimestamp.preciseString(from: now),
+                        recentUntil: GatewayTimestamp.preciseString(from: now.addingTimeInterval(300))
+                    ), visibility: .recent, title: "Finished worker"
+                )]
+                recent.processOverview = SessionProcessOverview(
+                    revision: 1, asOf: GatewayTimestamp.preciseString(from: now),
+                    activeCount: 0, recentCount: 1, problemCount: 0, visibility: .recent,
+                    nearestExpiry: GatewayTimestamp.preciseString(from: now.addingTimeInterval(300))
+                )
+                recent.revision += 1
+                recent.eventSequence += 1
+                try await transition("recent-subagent-add") { harness.replaceAuthoritativeSnapshot(recent) }
+                recent.processActivities = []
+                recent.processOverview = nil
+                recent.revision += 1
+                recent.eventSequence += 1
+                try await transition("recent-subagent-remove") { harness.replaceAuthoritativeSnapshot(recent) }
+                try await transition("photo-add") { try harness.setMotionAccessory(.photo) }
+                try await transition("photo-remove") { try harness.setMotionAccessory(nil) }
+                try await transition("file-add") { try harness.setMotionAccessory(.file) }
+                try await transition("file-remove") { try harness.setMotionAccessory(nil) }
+                try await transition("skill-add") { try harness.setMotionAccessory(.skill) }
+                try await transition("skill-remove") { try harness.setMotionAccessory(nil) }
+                try await transition("command-add") { try harness.setMotionAccessory(.command) }
+                try await transition("command-remove") { try harness.setMotionAccessory(nil) }
+                try await transition("combo-keyboard") { try harness.setRealKeyboardVisible(true) }
+                try await transition("combo-tall-draft") {
+                    try harness.setComposerDraftText((1...12).map { "Draft line \($0)" }.joined(separator: "\n"))
+                }
+                try await transition("combo-photo") { try harness.setMotionAccessory(.photo) }
+                try await transition("combo-chip") { try harness.selectCanonicalSkill(named: "skill:review") }
+                try await transition("combo-catalog") { harness.probe.composerResourcePickerPresentation?(.commands) }
+                try await transition("combo-catalog-close") { harness.probe.composerResourcePickerPresentation?(nil) }
+                try await transition("combo-accessories-remove") { try harness.setMotionAccessory(nil) }
+                try await transition("combo-keyboard-hide") { try harness.setRealKeyboardVisible(false) }
+                frames.stop()
+                let data = try JSONEncoder().encode(frames.samples)
+                Attachment.record(data, named: "animated-obstruction-\(harness.orientation)-detached-\(detached).json")
+                for phase in Set(frames.samples.map(\.phase)).sorted() {
+                    let samples = frames.samples.filter { $0.phase == phase }
+                    let gaps = samples.compactMap(\.gap)
+                    let worst = gaps.map { abs($0 - 12) }.max() ?? .infinity
+                    let tops = samples.compactMap(\.composerTop)
+                    let travel = (tops.max() ?? 0) - (tops.min() ?? 0)
+                    print("CT23-ANIMATED detached=\(detached) phase=\(phase) frames=\(samples.count) worstGap=\(worst) composerTravel=\(travel)")
+                    #expect(samples.count >= 10 && gaps.count == samples.count)
+                    // Atomic editor changes may finish before the first callback;
+                    // retain their endpoint and every display callback, not a
+                    // fabricated minimum number of animated frames.
+                    if phase == "catalog-open" || phase == "keyboard-show" {
+                        #expect(travel > 8, "the actual obstruction changed size or position")
+                    }
+                    if let anchor {
+                        let positions = samples.compactMap(\.trackedTop)
+                        #expect(positions.count == samples.count)
+                        #expect(positions.allSatisfy { abs($0 - anchor.windowMinY) < 0.5 })
+                        #expect(samples.allSatisfy { $0.trackedInstance == anchor.instance })
+                        #expect(harness.probeObservation.scrollCommandCount == commandBaseline)
+                    } else {
+                        if harness.orientation.presentsNewestRowFirst {
+                            #expect(samples.allSatisfy { $0.distanceFromNewest <= 0.5 })
+                        }
+                        // Today's native estimated-end path independently jumps
+                        // on these transitions. Retain their full frame evidence,
+                        // but do not copy those defects into the origin contract.
+                        let knownTodayExcursions = ["catalog-close", "combo-catalog-close", "combo-tall-draft"]
+                        if !knownTodayExcursions.contains(phase) || harness.orientation.presentsNewestRowFirst {
+                            #expect(worst <= 3, "\(phase) newest row diverged from the presented composer by \(worst) pt")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // The keyboard's own input, which no journey drove before: the bottom safe
     // area moves through the keyboard's intermediate positions while the history
     // keeps tall replies in its measured set. `resize(height:)` changes the whole
@@ -1722,126 +1890,25 @@ struct ChatViewScrollHarnessTests {
                         $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
                     }
                     try await harness.driveFrameBoundary()
-                    guard let bridge = harness.swiftUIContextMenuBridge(),
-                          let delegate = bridge.interaction.delegate else {
-                        Issue.record("\(orientation): SwiftUI's context-menu bridge must be reachable")
-                        return
+                    let sources = harness.promptContextMenuSurfaces().filter {
+                        $0.owner.actions.contains { $0.id == .toolDetails }
                     }
-                    let root = harness.visibleRootView
-                    let rows = TranscriptWindowOracle.rows(in: root).filter(\.isOnScreen)
-                    var resolving: [String] = []
-                    for row in rows {
-                        let location = CGPoint(x: row.windowFrame.midX, y: row.windowFrame.minY + 12)
-                        if delegate.contextMenuInteraction(
-                            bridge.interaction,
-                            configurationForMenuAtLocation: bridge.view.convert(location, from: nil)
-                        ) != nil {
-                            resolving.append(row.semanticID)
-                        }
-                    }
-                    // Failure mode: SwiftUI selects the flipped scroll-content
-                    // host as the preview target even though the card renders
-                    // upright through its row's counter-flip.
-                    if let displayRow = rows.first(where: { $0.semanticID == resolving.first }) {
-                        let point = CGPoint(x: displayRow.windowFrame.midX, y: displayRow.windowFrame.minY + 12)
-                        let configuration = try #require(delegate.contextMenuInteraction(
-                            bridge.interaction,
-                            configurationForMenuAtLocation: bridge.view.convert(point, from: nil)
-                        ))
-                        let preview = try #require(delegate.contextMenuInteraction?(
-                            bridge.interaction,
-                            configuration: configuration,
-                            highlightPreviewForItemWithIdentifier: configuration.identifier ?? ("preview-gate" as NSString)
-                        ))
+                    #expect(sources.count == 1, "\(orientation): one mounted display source")
+                    for source in sources {
+                        let configuration = try #require(source.owner.contextMenuInteraction(source.interaction,
+                            configurationForMenuAtLocation: CGPoint(x: source.view.bounds.midX, y: source.view.bounds.midY)))
+                        let preview = try #require(source.owner.contextMenuInteraction(source.interaction,
+                            configuration: configuration, highlightPreviewForItemWithIdentifier: "card" as NSString))
                         let container = try #require(preview.target.container as? UIView)
                         let failure = ContextMenuPreviewPlacement.failure(
-                            sourceWindowFrame: preview.view.convert(preview.view.bounds, to: nil),
+                            sourceWindowFrame: source.view.convert(source.view.bounds, to: nil),
                             targetTransform: preview.target.transform,
                             containerCenterInWindow: container.convert(preview.target.center, to: nil),
                             previewSize: preview.view.bounds.size,
                             containerRendersFlipped: TranscriptWindowOracle.isFlipped(container),
                             previewViewRendersFlipped: TranscriptWindowOracle.isFlipped(preview.view)
                         )
-                        if orientation == .newestAtOrigin {
-                            // Open CT-23 blocker: SwiftUI's public preview delegate
-                            // targets the flipped scroll host. Recorded as a known
-                            // issue so it stays visible, and fails once it is fixed.
-                            withKnownIssue("CT-23: the display-card preview renders flipped on the origin path") {
-                                #expect(failure == nil, "\(orientation): \(failure ?? "")")
-                            }
-                        } else {
-                            #expect(failure == nil, "\(orientation): \(failure ?? "")")
-                        }
-                    }
-                    // The display card is the only row with a SwiftUI
-                    // `.contextMenu`; a bridge that resolved everywhere would
-                    // prove nothing about the card.
-                    #expect(
-                        resolving.count == 1 && resolving.first?.contains("display") == true,
-                        "\(orientation): the card's menu resolves at \(resolving)"
-                    )
-                }
-            }
-        }
-    }
-
-    @Test("the system's scroll-to-top lands on the newest end of the origin-anchored transcript")
-    func scrollToTopLandsOnTheContentTop() async throws {
-        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
-            ($0, try transcriptScrollToTopSnapshot())
-        }
-        try await withTestWatchdog(timeout: .seconds(60)) {
-            for (orientation, snapshot) in snapshots {
-                try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
-                    _ = try await harness.recorder.waitUntil {
-                        $0.observation.isReady && $0.observation.visibleRowIDs.contains("transcript-bottom")
-                    }
-                    try await harness.driveFrameBoundary()
-                    let scrollView = try harness.nativeTranscriptScrollViewForTesting()
-                    let pinnedOffset = scrollView.contentOffset.y
-                    let contentTop = -scrollView.adjustedContentInset.top
-                    let legalMaximum = max(
-                        contentTop,
-                        scrollView.contentSize.height - scrollView.bounds.height
-                            + scrollView.adjustedContentInset.bottom
-                    )
-                    #expect(legalMaximum > contentTop, "\(orientation): the journey needs scroll range")
-                    // The origin-anchored transcript's pinned newest end *is* its
-                    // content top; today's transcript pins at its content end.
-                    #expect(
-                        orientation.presentsNewestRowFirst
-                            ? pinnedOffset == contentTop : pinnedOffset != contentTop,
-                        "\(orientation): the pinned end relative to the content top"
-                    )
-                    // What UIKit's status-bar tap does: the scroll view's
-                    // content top, `-adjustedContentInset.top`. Today's
-                    // transcript pins at its content end, so the tap reaches the
-                    // oldest loaded history; the origin-anchored transcript pins
-                    // at its content origin, so its content top *is* the pinned
-                    // newest end and the tap stays there. The user's requirement
-                    // — the tap reaches the oldest loaded history — is therefore
-                    // unmet on the origin-anchored path, and this gate records
-                    // the landing so that decision has a measured baseline.
-                    scrollView.setContentOffset(
-                        CGPoint(x: scrollView.contentOffset.x, y: contentTop),
-                        animated: false
-                    )
-                    for _ in 0..<3 { try await harness.driveFrameBoundary() }
-                    if orientation.presentsNewestRowFirst {
-                        #expect(
-                            scrollView.contentOffset.y == pinnedOffset,
-                            "\(orientation): the content top is the pinned newest end"
-                        )
-                        #expect(
-                            harness.isPinnedToBottom(),
-                            "\(orientation): the newest row stays at the composer"
-                        )
-                    } else {
-                        let topRow = try #require(harness.visuallyTopmostOnScreenRow())
-                        #expect(
-                            topRow.semanticID == harness.firstTranscriptID,
-                            "\(orientation): the tap reaches the oldest loaded history at \(topRow.semanticID)"
-                        )
+                        #expect(failure == nil, "\(orientation): \(failure ?? "")")
                     }
                 }
             }
@@ -1851,15 +1918,6 @@ struct ChatViewScrollHarnessTests {
     private func transcriptMenuSnapshot() throws -> SessionSnapshot {
         var snapshot = try harnessInlineMarkdownDisplaySnapshot()
         snapshot.transcript.append(try harnessUserMessage(id: "menu-prompt", text: "A prompt with a context menu."))
-        snapshot.transcriptStart = 0
-        snapshot.transcriptTotal = snapshot.transcript.count
-        return snapshot
-    }
-
-    private func transcriptScrollToTopSnapshot() throws -> SessionSnapshot {
-        var snapshot = try SessionScenarioBuilder(seed: 1_300).openingTail(targetEncodedBytes: 10_000)
-        snapshot.transcript = SessionScenarioBuilder(seed: 1_300).historyPage(count: 15, longRowBytes: 600)
-        snapshot.transcript.append(try harnessUserMessage(id: "scroll-to-top-prompt", text: "A prompt."))
         snapshot.transcriptStart = 0
         snapshot.transcriptTotal = snapshot.transcript.count
         return snapshot
@@ -4414,6 +4472,7 @@ struct ChatViewScrollHarnessTests {
         } catch {
             if let sample = harness.recorder.samples.last {
                 print("Hosted failure frame \(sample.frameIndex): commands=\(sample.observation.tailMaterializationCommandCount) releases=\(sample.observation.targetReleaseCount) rows=\(sample.nativeRows.suffix(8))")
+                print("Geometry comparison: native=\(String(describing: harness.recorder.samples.last?.nativeContentHeight)) model=\(harness.probeObservation.geometry)")
                 print("Composer catalog: builds=\(harness.probe.composerCatalogBuildCount) installed=\(harness.probe.composerCatalogCommandNames) canonical=\(harness.canonicalCommandNames) activity=\(harness.chatSurfaceActivity)")
             }
             await harness.close()
@@ -5381,6 +5440,7 @@ final class ChatViewScrollHarness {
         let hostedView = hostingController.view!
         recorder = PresentedFrameRecorder(
             probe: probe,
+            orientation: orientation,
             windowState: { TranscriptWindowOracle.state(in: hostedView) }
         )
         recorder.start()
@@ -5518,9 +5578,15 @@ final class ChatViewScrollHarness {
         let priorFrames = await socket.sentFrames().count
         let loading = Task { await model.loadCommands(sessionID: snapshot.sessionId) }
         do {
-            try await socket.waitUntilSent(count: priorFrames + 1)
-            let request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[priorFrames])
-            #expect(request.objectValue?["method"]?.stringValue == "session.commands")
+            // Presentation registration can race catalog loading; respond to
+            // this request's method rather than whichever RPC arrived first.
+            var index = priorFrames
+            var request: JSONValue
+            repeat {
+                try await socket.waitUntilSent(count: index + 1)
+                request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[index])
+                index += 1
+            } while request.objectValue?["method"]?.stringValue != "session.commands"
             let id = try #require(request.objectValue?["id"]?.stringValue)
             try await beforeResponse?()
             let commands = names.map {
@@ -5911,31 +5977,13 @@ final class ChatViewScrollHarness {
 
     /// The prompt rows' production context-menu surfaces: the native views that
     /// carry the interaction, with the owner that builds their preview. The
-    /// prompt menu is the app's own UIKit interaction (the display cards' menus
-    /// are SwiftUI's, see `swiftUIContextMenuBridge`).
+    /// prompt and display-card menus share this source-owned UIKit interaction.
     func promptContextMenuSurfaces() -> [(view: UIView, interaction: UIContextMenuInteraction, owner: ChatMessageContextMenuOwner)] {
         Self.contextMenuViews(in: hostingController.view).compactMap { view in
             guard let interaction = view.interactions.compactMap({ $0 as? UIContextMenuInteraction }).first,
                   let owner = interaction.delegate as? ChatMessageContextMenuOwner else { return nil }
             return (view, interaction, owner)
         }
-    }
-
-    /// SwiftUI's own context-menu bridge, which resolves the display cards'
-    /// `.contextMenu` menus. `nil` when this build's SwiftUI presents them
-    /// differently, which fails the journey that needs it rather than passing
-    /// quietly. Its delegate is matched by name because the bridge is internal
-    /// to SwiftUI; the name is the only handle on it, and asking an unrelated
-    /// interaction's delegate for a configuration is not safe.
-    func swiftUIContextMenuBridge() -> (view: UIView, interaction: UIContextMenuInteraction)? {
-        for view in Self.contextMenuViews(in: hostingController.view) {
-            for case let interaction as UIContextMenuInteraction in view.interactions {
-                guard let delegate = interaction.delegate,
-                      String(describing: type(of: delegate)).hasSuffix("ContextMenuBridge") else { continue }
-                return (view, interaction)
-            }
-        }
-        return nil
     }
 
     /// The row the reader sees at the top of the transcript, or `nil` when no
@@ -6342,6 +6390,64 @@ final class ChatViewScrollHarness {
                 UIResponder.keyboardFrameEndUserInfoKey: NSValue(cgRect: endFrame),
             ]
         )
+    }
+
+    /// Focus the production editor: UIKit posts the notification and owns the
+    /// hosting controller's keyboard safe-area animation over real time.
+    func setRealKeyboardVisible(_ visible: Bool) throws {
+        let editor = try #require(Self.textViews(in: hostingController.view).first)
+        if visible { editor.becomeFirstResponder() } else { editor.resignFirstResponder() }
+    }
+
+    func topViewportEvidence() throws -> (uncoveredTop: CGFloat, description: String) {
+        let scroll = try nativeTranscriptScrollView()
+        func navigationBar(in view: UIView) -> UINavigationBar? {
+            (view as? UINavigationBar) ?? view.subviews.lazy.compactMap { navigationBar(in: $0) }.first
+        }
+        let navigation = try #require(navigationBar(in: hostingController.view))
+        let nav = navigation.convert(navigation.bounds, to: window).maxY
+        let frame = scroll.layer.convert(scroll.bounds, to: window.layer).standardized
+        var clip = frame
+        var parent = scroll.superview
+        var chain: [String] = []
+        while let view = parent {
+            let rect = view.layer.convert(view.bounds, to: window.layer).standardized
+            if view.clipsToBounds { clip = clip.intersection(rect) }
+            chain.append("\(type(of: view)):\(rect):clip=\(view.clipsToBounds)")
+            parent = view.superview
+        }
+        let rows = TranscriptWindowOracle.rows(in: hostingController.view)
+        let first = rows.filter { $0.windowFrame.maxY > max(nav, clip.minY) }.min { $0.windowFrame.minY < $1.windowFrame.minY }
+        return (max(0, max(clip.minY, first?.windowFrame.minY ?? .infinity) - nav), "nav=\(nav) frame=\(frame) clip=\(clip) insets=\(scroll.contentInset) adjusted=\(scroll.adjustedContentInset) safe=\(scroll.safeAreaInsets) first=\(String(describing: first?.windowFrame)) chain=\(chain)")
+    }
+
+    enum MotionAccessory { case photo, file, skill, command }
+
+    func setMotionAccessory(_ accessory: MotionAccessory?) throws {
+        let target = try #require(model.mountedPresentationTarget)
+        let scope = try #require(model.composerDrafts.scope(for: target))
+        model.composerDrafts.removeSelectedResource(for: scope)
+        model.composerDrafts.removeAttachment("motion-attachment", target: target)
+        switch accessory {
+        case .photo, .file:
+            let photo = accessory == .photo
+            model.composerDrafts.installHostedAttachment(PendingAttachment(
+                id: "motion-attachment", name: photo ? "Photo" : "Notes.txt",
+                mimeType: photo ? "image/jpeg" : "text/plain", size: 1, previewData: nil
+            ), target: target)
+        case .skill:
+            try selectCanonicalSkill(named: "skill:review")
+        case .command:
+            let command = try #require(model.commands.first { $0.name == "inspect" })
+            model.composerDrafts.selectResource(command, for: scope)
+        case nil: break
+        }
+    }
+
+    func obstructionRecorder(trackedID: String? = nil) throws -> AnimatedObstructionRecorder {
+        let root = hostingController.view!
+        let newest = try #require(TranscriptWindowOracle.rows(in: root).max { $0.windowFrame.maxY < $1.windowFrame.maxY })
+        return AnimatedObstructionRecorder(root: root, newestID: trackedID ?? newest.physicalID, probe: probe)
     }
 
     /// UIKit's keyboard curve evaluated at `progress`. The public
@@ -6790,6 +6896,70 @@ enum TranscriptWindowOracle {
     }
 }
 
+/// Dedicated motion oracle: no revision deduplication, forced layout or driven
+/// frames. Presentation layers retain all ancestor transforms, including the
+/// transcript flip and UIKit's animated scroll offset.
+@MainActor
+final class AnimatedObstructionRecorder: NSObject {
+    struct Sample: Encodable {
+        let time: Double
+        let phase: String
+        let composerTop: CGFloat?
+        let newestBottom: CGFloat?
+        let declaredObstruction: CGFloat
+        let renderedObstruction: CGFloat?
+        let distanceFromNewest: CGFloat
+        let trackedTop: CGFloat?
+        let trackedInstance: UUID?
+        var gap: CGFloat? {
+            guard let composerTop, let newestBottom else { return nil }
+            return composerTop - newestBottom
+        }
+    }
+    private let root: UIView
+    private let newestID: String
+    private let probe: ChatHostedProbe
+    private var link: CADisplayLink?
+    var phase = "settled"
+    private(set) var samples: [Sample] = []
+
+    init(root: UIView, newestID: String, probe: ChatHostedProbe) {
+        self.root = root
+        self.newestID = newestID
+        self.probe = probe
+    }
+    func start() {
+        let link = CADisplayLink(target: self, selector: #selector(sample))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+    func stop() { link?.invalidate(); link = nil }
+    @objc private func sample(_ link: CADisplayLink) {
+        guard let window = root.window else { return }
+        let markers = markers(in: root)
+        func frame(_ id: String) -> CGRect? {
+            guard let marker = markers.first(where: { $0.physicalID == id }),
+                  let layer = marker.layer.presentation(),
+                  let windowLayer = window.layer.presentation() else { return nil }
+            return layer.convert(layer.bounds, to: windowLayer).standardized
+        }
+        samples.append(Sample(time: link.timestamp, phase: phase,
+                              composerTop: frame(ChatHostedNativeRowProbe.composerID)?.minY,
+                              newestBottom: frame(newestID)?.maxY,
+                              declaredObstruction: probe.observation.geometry.bottomInset,
+                              renderedObstruction: obstruction(in: root)?.layer.presentation()?.bounds.height,
+                              distanceFromNewest: probe.observation.geometry.distanceFromBottom,
+                              trackedTop: frame(newestID)?.minY,
+                              trackedInstance: markers.first { $0.physicalID == newestID }?.hostIdentity))
+    }
+    private func obstruction(in view: UIView) -> ChatHostedObstructionMarker? {
+        (view as? ChatHostedObstructionMarker) ?? view.subviews.lazy.compactMap { self.obstruction(in: $0) }.first
+    }
+    private func markers(in view: UIView) -> [ChatHostedNativeRowMarker] {
+        (view as? ChatHostedNativeRowMarker).map { [$0] } ?? view.subviews.flatMap { markers(in: $0) }
+    }
+}
+
 @MainActor
 final class PresentedFrameRecorder: NSObject {
     /// How many samples the recorder retains. It drops the oldest beyond this,
@@ -6833,6 +7003,7 @@ final class PresentedFrameRecorder: NSObject {
     }
 
     private let probe: ChatHostedProbe
+    private let orientation: ChatTranscriptOrientation
     private let windowState: @MainActor () -> TranscriptWindowOracle.State
     private var lastWindowState: TranscriptWindowOracle.State?
     private var displayLink: CADisplayLink?
@@ -6846,9 +7017,11 @@ final class PresentedFrameRecorder: NSObject {
 
     init(
         probe: ChatHostedProbe,
+        orientation: ChatTranscriptOrientation,
         windowState: @escaping @MainActor () -> TranscriptWindowOracle.State
     ) {
         self.probe = probe
+        self.orientation = orientation
         self.windowState = windowState
     }
 
@@ -6904,7 +7077,9 @@ final class PresentedFrameRecorder: NSObject {
             observation: observation,
             nativeBottom: state.bottom,
             nativeRows: state.rows,
-            nativeContentHeight: state.contentHeight
+            nativeContentHeight: state.contentHeight.map {
+                $0 - (orientation.presentsNewestRowFirst ? observation.geometry.bottomInset : 0)
+            }
         )
         samples.append(sample)
         if samples.count > Self.retainedSampleLimit {

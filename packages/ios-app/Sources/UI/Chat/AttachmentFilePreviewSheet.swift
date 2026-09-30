@@ -410,16 +410,17 @@ struct AttachmentPDFView: UIViewRepresentable {
             view.document = document
             view.autoScales = true
         }
-        softenScrollEdges(in: view)
+        softenScrollEdges(in: view, secondaryToChat: context.environment.chatOwnsStatusBar)
     }
 
-    private func softenScrollEdges(in view: UIView) {
+    private func softenScrollEdges(in view: UIView, secondaryToChat: Bool) {
         if let scrollView = view as? UIScrollView {
+            scrollView.scrollsToTop = !secondaryToChat
             scrollView.topEdgeEffect.style = .soft
             scrollView.bottomEdgeEffect.style = .soft
             scrollView.leftEdgeEffect.style = .soft
             scrollView.rightEdgeEffect.style = .soft
         }
-        view.subviews.forEach { softenScrollEdges(in: $0) }
+        view.subviews.forEach { softenScrollEdges(in: $0, secondaryToChat: secondaryToChat) }
     }
 }

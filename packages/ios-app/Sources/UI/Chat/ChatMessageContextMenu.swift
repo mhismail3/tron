@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ChatMessageMenuAction: Identifiable {
-    enum ID: String { case moveEarlier, moveLater, clearQueue }
+    enum ID: String { case moveEarlier, moveLater, clearQueue, toolDetails }
     let id: ID
     let title: String
     let icon: String
@@ -40,6 +40,9 @@ private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRep
     func makeUIViewController(context: Context) -> UIHostingController<ChatMessageNativeContent<Content>> {
         let host = UIHostingController(rootView: ChatMessageNativeContent(content: content, values: context.environment))
         host.safeAreaRegions = []
+        // Loaded media changes inside this nested host without a representable
+        // update. Propagate its new ideal size to the outer SwiftUI row too.
+        host.sizingOptions = .intrinsicContentSize
         host.view.backgroundColor = .clear
         context.coordinator.attach(to: host.view)
         return host
@@ -136,10 +139,14 @@ final class ChatMessageContextMenuOwner: NSObject, UIContextMenuInteractionDeleg
     }
 
     private func preview() -> UITargetedPreview? {
-        guard let source, source.window != nil else { return nil }
+        guard let source, let window = source.window else { return nil }
         let parameters = UIPreviewParameters()
         parameters.backgroundColor = .clear
         parameters.visiblePath = UIBezierPath(roundedRect: source.bounds, cornerRadius: ChatPromptContainerStyle.cornerRadius)
-        return UITargetedPreview(view: source, parameters: parameters)
+        // The nearest scroll ancestor can be reflected. UIKit must animate the
+        // upright source in window space, never inherit that ancestor's flip.
+        let center = source.convert(CGPoint(x: source.bounds.midX, y: source.bounds.midY), to: window)
+        return UITargetedPreview(view: source, parameters: parameters,
+            target: UIPreviewTarget(container: window, center: center, transform: .identity))
     }
 }

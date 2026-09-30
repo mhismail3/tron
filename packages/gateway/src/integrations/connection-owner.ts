@@ -55,8 +55,8 @@ const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] = [
     schemaVersion: 1,
     id: "knowledge.x",
     implementation: "knowledge-connector",
-    displayName: "X bookmarks",
-    setupMethods: ["token"],
+    displayName: "X",
+    setupMethods: ["oauth"],
     capabilities: [{ id: "read", displayName: "Read bookmarks", effects: ["read"], supported: true }],
   },
 ];

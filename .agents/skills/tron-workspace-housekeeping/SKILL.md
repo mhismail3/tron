@@ -149,8 +149,8 @@ Simulator lifetime is the test tooling's, not housekeeping's. A command of
 `scripts/tron-ios-test`, `scripts/tron-profile ios` or
 `scripts/ios-gateway-e2e-test` releases the simulator it booted when that command
 ends - success, failure, timeout or signal - and every provisioning command
-first sweeps: orphaned owned lanes are shut down and lanes unused for 7 days are
-removed. The runner's sweep also prunes runs beyond the retention windows and
+first sweeps: orphaned owned lanes are shut down, and lanes unused for 7 days or
+whose creating worktree was deleted (never the default lane) are removed. The runner's sweep also prunes runs beyond the retention windows and
 the products of worktrees that no longer exist. A boot is admitted on the Mac's
 free memory and swap as well, so no lane can push the shared Mac into swap. Use
 those commands instead of `xcrun simctl`, `rm`, or process signals:
@@ -169,6 +169,11 @@ those commands instead of `xcrun simctl`, `rm`, or process signals:
   the products of its creating worktree once that worktree is gone.
 - `scripts/tron-ios-test prune` - disk only: old runs, and the products of
   deleted worktrees; `reap` runs the whole sweep on demand.
+- `scripts/ios-gateway-e2e-test clean` - stops this worktree's Gateway E2E
+  fixture and removes its fixture directory and focused DerivedData
+  (`$TMPDIR/tron-ios-gateway-e2e-<uid>-<worktree key>` and
+  `…-derived-<uid>-<worktree key>`), plus the simulator of the lane it holds.
+  Run it from that worktree; no sweep or `prune` reclaims these directories.
 
 `status --all`, `lanes` and `prune` take no lease, so they are safe while other
 sessions test; `lane-remove` refuses (73) a lane a live process holds, and the
@@ -185,8 +190,9 @@ For ordinary, unmanaged, released worktrees:
    worktree follow
    [iOS simulator lanes, runs and products](#ios-simulator-lanes-runs-and-products),
    whose `clean` removes that worktree's lane simulator, its lane's runs and its
-   products. Run any other documented build cleaner of that worktree, and do not
-   clean output owned outside it.
+   products, and run `scripts/ios-gateway-e2e-test clean` from it for its
+   Gateway E2E fixture and DerivedData. Run any other documented build cleaner
+   of that worktree, and do not clean output owned outside it.
 2. `packages/mac-app/scripts/bundle-gateway.sh` makes its generated Gateway
    payload read-only. Before removal, make only that payload writable, refusing
    links and paths outside the worktree:
@@ -246,6 +252,8 @@ For an iOS worktree, confirm no lane it owned survives: `scripts/tron-ios-test
 lanes` no longer names that worktree (the default lane stays listed as
 `not-provisioned`), `status --all` shows nothing booted for it, and products left
 by the removed worktree are reclaimed by the next sweep's prune (or by `prune`).
+Prune does not reclaim a Gateway E2E fixture or DerivedData; only that
+worktree's `scripts/ios-gateway-e2e-test clean` does, so run it before removal.
 
 Finish with removed/retained/blocked counts, exact removed targets, integration
 proof, remaining reasons, and any owner action needed. Recommend this bounded

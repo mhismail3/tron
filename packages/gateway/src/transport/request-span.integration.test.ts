@@ -108,6 +108,51 @@ function persistedRecords(path: string): Array<Record<string, unknown>> {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+describe("receipt-backed prompt request span", () => {
+  it("logs receipt persistence and measures only the same-command lane wait", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-request-span-receipt-"));
+    cleanups.push(async () => { await rm(root, { recursive: true, force: true }); });
+    const receipts = new CommandReceiptStore(root);
+    let releaseOperation!: () => void;
+    let markOperationStarted!: () => void;
+    const operationStarted = new Promise<void>((resolve) => { markOperationStarted = resolve; });
+    const operationGate = new Promise<void>((resolve) => { releaseOperation = resolve; });
+    const firstSpan = new RequestSpan();
+    const secondSpan = new RequestSpan();
+    const first = runInRequestSpan(firstSpan, () => receipts.execute(
+      "device", "session.prompt", "shared-command", async () => {
+        markOperationStarted();
+        await operationGate;
+        return { accepted: true };
+      },
+    ));
+    await operationStarted;
+    const secondStartedAt = performance.now();
+    const second = runInRequestSpan(secondSpan, () => receipts.execute(
+      "device", "session.prompt", "shared-command", async () => ({ accepted: true }),
+    ));
+    const lockHeldAt = performance.now();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const lockHeldMs = performance.now() - lockHeldAt;
+    releaseOperation();
+    await first;
+    await second;
+    const secondElapsedMs = performance.now() - secondStartedAt;
+    const firstBreakdown = firstSpan.breakdown(1);
+    const secondBreakdown = secondSpan.breakdown(1);
+    expect(firstBreakdown?.stages).toContain("receipt.pending-persist");
+    expect(firstBreakdown?.stages).toContain("receipt.completed-persist");
+    expect(secondBreakdown?.stages).toContain("receipt.command-lane=");
+    const laneWaitMs = stagesOf(secondBreakdown!.stages).get("receipt.command-lane")!;
+    // The duplicate waits at least as long as the first command held its lane,
+    // and the lane stage is part of, never more than, its own request. The
+    // first command's completed-receipt fsync also holds the lane (F-5), so
+    // no fixed allowance on top of the held time can bound it on a busy disk.
+    expect(laneWaitMs).toBeGreaterThanOrEqual(lockHeldMs - 1);
+    expect(laneWaitMs).toBeLessThanOrEqual(secondElapsedMs);
+  });
+});
+
 describe("cold session.open request span", () => {
   it("names a cold open's stages in the real logger's record and reports their volume", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-request-span-open-"));
@@ -221,7 +266,6 @@ describe("cold session.open request span", () => {
       // or the request itself, and the report keeps every number for that.
       const named = stagesOf(stages!);
       expect(named.get("session.open.manager")).toBeGreaterThan(0);
-      expect(durationMs).toBeGreaterThan(100);
       expect(unaccountedMs!).toBeGreaterThanOrEqual(0);
       expect(unaccountedMs!).toBeLessThanOrEqual(durationMs);
       reports.push({

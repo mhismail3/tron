@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse, type KnowledgeConnectorOptions } from "./connectors.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
+import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 
 const roots: string[] = [];
 const workspaces: TronWorkspace[] = [];
@@ -19,10 +21,13 @@ const response = (value: unknown, status = 200): ConnectorHTTPResponse => ({ sta
 const command = (name: string) => `multipage-intake-${name}`;
 
 describe("Raindrop intake pagination and cohort accounting", () => {
-  it.each([{ total: 51, incomplete: 1, cohorts: 0, dryRun: false }, { total: 51, incomplete: 0, cohorts: 0, dryRun: true }])("discovers shifted pages and recovers with $incomplete incomplete heads among $total items (dry run: $dryRun)", async ({ total, incomplete, cohorts, dryRun }) => {
+  it.each([{ total: 51, incomplete: 1, cohorts: 0, dryRun: false }, { total: 51, incomplete: 0, cohorts: 0, dryRun: true }])("keeps incomplete captures pending without legacy move authority ($incomplete incomplete; dry run: $dryRun)", async ({ total, incomplete, cohorts, dryRun }) => {
     const root = await mkdtemp(join(tmpdir(), "tron-intake-multipage-")); roots.push(root);
     let workspace = new TronWorkspace(root); workspaces.push(workspace);
     let store = new KnowledgeStore(workspace);
+    const owner = new ConnectionOwner(root);
+    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]]));
+    const budgetFor = (current: KnowledgeStore) => new KnowledgeTaggingBudget(current, () => true);
     const remote = new Map(Array.from({ length: total }, (_, index) => [String(index + 1), "111"]));
     const moved: string[] = []; const requestedPages: number[] = []; let failedMove = false;
     const assessment: SourceAssessmentModel = { async assess(input, _signal, context) {
@@ -31,7 +36,8 @@ describe("Raindrop intake pagination and cohort accounting", () => {
       return { summary: "synthetic assessment", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained" as const, profileVersion: jevProfileVersion(interests), rubricVersion: "tron-source-rubric-v2", inputDigest: jevInputDigest(input, interests) };
     } };
     const options: KnowledgeConnectorOptions = {
-      credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]])),
+      credentials,
+      jevBudget: budgetFor(store),
       assessment,
       resolveHost: async () => ["93.184.216.34"],
       sourceFetch: async url => {
@@ -59,7 +65,7 @@ describe("Raindrop intake pagination and cohort accounting", () => {
       },
     };
     let extension = new KnowledgeConnectorExtension(store, options);
-    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", destination: "900", allowWrites: true, credentialRef: "connector:raindrop:synthetic" } });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", allowWrites: true, credentialRef: "connector:raindrop:synthetic" } });
     const intake = (id: string, pilot: string, limit = 10, isDryRun = false) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command(id), sourceCollection: "111", dryRun: isDryRun, limit, pilot: { id: pilot, maxItems: 10, budgetCents: 10 } } });
     async function completeCohort(commandId: string, cohort: string, expectedMoves: number): Promise<void> {
       const first = await intake(commandId, cohort);
@@ -72,6 +78,7 @@ describe("Raindrop intake pagination and cohort accounting", () => {
         await workspace.dispose();
         workspace = new TronWorkspace(root); workspaces.push(workspace);
         store = new KnowledgeStore(workspace);
+        options.jevBudget = budgetFor(store);
         extension = new KnowledgeConnectorExtension(store, options);
         const resumed = await intake(`${commandId}-resumed`, cohort);
         expect(resumed).toMatchObject({ moved: expectedMoves });
@@ -84,27 +91,22 @@ describe("Raindrop intake pagination and cohort accounting", () => {
       expect(requestedPages).toEqual([0, 0, 0, 0, 0, 0, 1]);
       return;
     }
-    await completeCohort("first", "pilot", Math.max(0, 10 - incomplete));
+    await completeCohort("first", "pilot", 0);
 
     for (let cohort = 1; cohort <= cohorts; cohort += 1) {
       const id = `cohort-${cohort}`;
       await extension.invoke({ operation: "knowledge.connector.assessment.approve", request: { commandId: command(`approve-${cohort}`), connector: "raindrop", id, maxItems: 10, budgetCents: 10 } });
       const firstId = cohort * 10 + 1;
       const lastId = Math.min(total, firstId + 9);
-      await completeCohort(id, id, Math.max(0, lastId - Math.max(incomplete, firstId - 1)));
+      await completeCohort(id, id, 0);
     }
     const state = await store.connectorState("raindrop");
     const selected = Math.min(total, 10 + cohorts * 10);
     const discovered = Math.min(total, 10 + (cohorts + 1) * 10);
-    const expectedPending = [
-      ...Array.from({ length: Math.min(incomplete, discovered) }, (_, index) => String(index + 1)),
-      ...Array.from({ length: Math.max(0, discovered - Math.max(selected, incomplete)) }, (_, index) => String(Math.max(selected, incomplete) + index + 1)),
-    ];
-    expect(state?.pending.map(item => item.id)).toEqual(expectedPending);
+    expect(state?.pending.map(item => item.id)).toEqual(["1"]);
     expect(state?.pendingRemote).toBeUndefined();
-    const completeIds = Array.from({ length: Math.max(0, selected - incomplete) }, (_, index) => String(incomplete + index + 1));
-    expect(moved).toEqual(completeIds);
-    expect(Object.keys(state?.assessmentAttempts ?? {})).toHaveLength(completeIds.length);
+    expect(moved).toEqual([]);
+    expect(Object.keys(state?.assessmentAttempts ?? {})).toHaveLength(Math.max(0, selected - incomplete));
     expect(state?.assessmentApprovals?.reduce((sum, item) => sum + item.itemIds.length, 0) ?? 0).toBe(selected - 10);
     expect(requestedPages).toContain(0);
   }, 30_000);

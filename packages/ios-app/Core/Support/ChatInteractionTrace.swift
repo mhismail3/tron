@@ -775,6 +775,7 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         case .physicalTailRepair: "physical-tail-repair"
         case .pastEndRepair: "past-end-repair"
         case .targetFreeRebase: "target-free-rebase"
+        case .oldestHistory: "oldest-history"
         }
     }
     private static func destination(_ destination: ChatScrollCommand.Destination) -> String {
@@ -782,6 +783,7 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         case .tail: "tail"
         case .materialize: "materialize"
         case .openingTail: "opening-tail"
+        case .oldestHistory: "oldest-history"
         case .offsetY: "offset"
         }
     }

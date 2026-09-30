@@ -1,0 +1,40 @@
+name: Task
+description: One claimable unit of work. One branch, one worktree, one PR.
+title: "[Task]: "
+labels: ["task"]
+body:
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What this task changes and what it deliberately leaves alone. Set the parent epic and blocked-by links on the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable conditions that make this task done.
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Checks
+      description: Focused owner checks, and the end-to-end case that proves the behavior.
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence expected
+      description: Logs, reports, screenshots or clips the PR must carry. Media and full logs go to the private evidence repository, never to this public repository.
+    validations:
+      required: false
+  - type: textarea
+    id: user-action
+    attributes:
+      label: Maintainer-only validation
+      description: Any action only the maintainer can perform before this is proven (for example a dev Gateway restart or an iPhone install), and the check after it.
+    validations:
+      required: false

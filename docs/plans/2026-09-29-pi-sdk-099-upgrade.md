@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-29
 - **Status:** Active
-- **Last updated:** 2026-09-30, P99-17 closed after review fixes
+- **Last updated:** 2026-09-30, P99-18 merge
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -285,7 +285,7 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 | P99-15 | Done | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | luna-worker, 2026-09-30 |
 | P99-16 | Done | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | luna-worker, 2026-09-30 |
 | P99-17 | Done | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | luna-worker, 2026-09-30 |
-| P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
+| P99-18 | Claimed | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | orchestrator session, 2026-09-30 |
 | P99-20 | Done | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); root-export a per-instance theme setter; public per-session MCP status/process count (user authorizes filing) | P99-8, P99-11 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
@@ -745,6 +745,13 @@ from a session; Sign in with ChatGPT; select a virtual model if one is
 installed. Then close the plan per `docs/plans/README.md`.
 
 ## Handoff log
+
+### P99-18 merge · Integrated · 2026-09-30 · orchestrator session
+
+- Result: The user approved the merge and kept Jev consent as "a configured TypeSafe key is consent, fixed $5 monthly cap". `main` had advanced 145 commits, including two active Knowledge plans that built a shared monthly Jev ledger and paid intake/standalone assessment around the `knowledge.jev` connection. At the user's direction the Jev move was redone on that new code instead of dropped: `KnowledgeTaggingBudget` keeps main's `reserveAssessment`, `reserveAuthorized` and `attemptReuse` and resolves its authority to the `typesafe` provider identity; intake and standalone assessment run through Pi's classifier with Tron's price and an optional caller `maxChargeCents`; the `knowledge.jev` definition stays removed. Connected Services keeps main's reworked layout and X OAuth without the MCP surface; its hosted fixture and UI test no longer advertise Jev or MCP connections.
+- Defect found by main's tests and fixed: `KnowledgeStore` required a ConnectionOwner envelope for every connector key, so in production every Jev reservation under the `typesafe` key would have failed with "Connector connection authority is unavailable" (the branch's own budget tests built the store without the authority resolver). The Jev ledger now skips the envelope; Raindrop/X still require it.
+- Evidence: `tsc` clean; `check:pi-sdk` coherent at 0.99.1; Knowledge/integrations/extensions/session-search 496/498 with the two load-sensitive failures passing isolated (21/21); full Gateway Vitest 2,362 passed, 5 failed, 1 skipped (222 files, 189 s, load average ~60), all five passing isolated (170/170). iOS `tron-ios-test build` passed; IntegrationModelsTests, SettingsRouteIdentityTests, MCPServerListTests, BuiltinExtensionsSettingsTests, ProviderAuthCoordinatorTests, ToolDetailPresentationTests and ExtensionsCatalogPresentationTests passed 92/92. `TronIntegrationSheetsUITests` (UI validation scheme) was updated but not run.
+- For the next agent: manual acceptance after the user installs a signed build (MCP OAuth sign-in from the iPhone, a codemode-exposed MCP call, Sign in with ChatGPT, a virtual model if installed, Jev tagging with the TypeSafe key). Then close this plan per the plan README. P99-19, P99-21 and P99-24 remain Needs scoping.
 
 ### P99-17 · Done · 2026-09-30 · orchestrator session
 

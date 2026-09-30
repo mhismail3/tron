@@ -220,6 +220,7 @@ struct TranscriptRow: View, Equatable {
                     case .thinking(let run):
                         ThinkingBlock(
                             segments: run.segments,
+                            traceIdentity: ChatThinkingTraceContent.identity(owner: item, run: run),
                             preparedText: preparedText,
                             label: preparedText.hiddenThinkingLabel,
                             animatesInsertion: streaming
@@ -371,6 +372,7 @@ struct TranscriptRow: View, Equatable {
                 }
             }
             .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
+            .chatSecondaryScrollContent()
         }
         .scrollClipDisabled()
         .defaultScrollAnchor(item.role == .user ? .trailing : .leading)
@@ -484,6 +486,9 @@ struct UserPromptGlassModifier: ViewModifier {
 
 private struct ThinkingBlock: View {
     let segments: [ChatThinkingSegment]
+    /// Presented to the transcript's sheet host, which resolves the trace again
+    /// by it; see `ChatThinkingTraceContent.identity(owner:run:)`.
+    let traceIdentity: String
     let preparedText: ChatTextPreparationSnapshot
     let label: String?
     let animatesInsertion: Bool
@@ -510,11 +515,13 @@ private struct ThinkingBlock: View {
 
     init(
         segments: [ChatThinkingSegment],
+        traceIdentity: String,
         preparedText: ChatTextPreparationSnapshot,
         label: String?,
         animatesInsertion: Bool
     ) {
         self.segments = segments
+        self.traceIdentity = traceIdentity
         self.preparedText = preparedText
         self.label = label
         self.animatesInsertion = animatesInsertion
@@ -580,10 +587,6 @@ private struct ThinkingBlock: View {
         let paragraph = segments.map(\.text).joined(separator: " ")
         guard let label, !label.isEmpty else { return paragraph }
         return "\(label). \(paragraph)"
-    }
-
-    private var traceIdentity: String {
-        ChatThinkingTraceContent.identity(of: segments)
     }
 
     /// The compact row is a tail projection, not a nested scroll surface:

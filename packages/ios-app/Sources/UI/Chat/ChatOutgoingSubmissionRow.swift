@@ -338,6 +338,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
+                .chatSecondaryScrollContent()
             }
             .scrollClipDisabled()
             .defaultScrollAnchor(.trailing)

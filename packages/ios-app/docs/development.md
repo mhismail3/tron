@@ -349,8 +349,8 @@ The application target `TronMobile` and the framework `TronMobileCore`
 (`Core/`) are separate Swift modules; [Modules](architecture.md#modules) owns
 their ownership and access rules. The framework is built and embedded for
 every configuration, so a configuration needs no framework entry of its own.
-Until MS-5, the share extension still compiles `Core/Support/SharedContent.swift`
-directly, so it shares `SWIFT_PACKAGE_NAME`.
+The share extension links `TronMobileCore` without embedding it; the app's copy
+is the only one in the bundle. No other target lists `Core/` sources.
 
 Where new code goes: a Foundation-only value type, wire model, Gateway client
 facility or logging/timing primitive belongs in `Core/<Layer>/`; anything that
@@ -418,7 +418,9 @@ launch and a launch from the device itself are not debugger sessions.
 Agent-runnable measurements go through `scripts/tron-profile`. Every tool it
 fronts writes one `tron.profile-report.v1` report (source revision and dirty
 state, host load and power conditions, per-metric unit, direction, samples,
-median and spread) under `~/Library/Developer/Tron/profiles/<tool>/`, and
+median and spread) under `~/Library/Developer/Tron/profiles/<tool>/`, a root
+every worktree shares; `scripts/tron-profile status` names this worktree's newest
+report of each tool from the worktree each report records, and
 `scripts/tron-profile compare BASE CANDIDATE` gives the only regression verdict:
 a delta counts only beyond a 3% floor, three robust standard deviations and, for
 integer-valued metrics such as frame counts, one unit; the command exits 3 on a
@@ -441,9 +443,9 @@ scripts/tron-profile compare BASE_RUN_DIR CANDIDATE_RUN_DIR
 ```
 
 It shares the whole simulator lifecycle with `scripts/tron-ios-test`: the same
-lane (state directory `TRON_IOS_TEST_STATE_DIR`, device
-`TRON_IOS_TEST_DEVICE_NAME`, inside the lane root
-`TRON_IOS_TEST_DISCOVERY_ROOT`), the same lease and release - the lane's
+lane, chosen by the same selection (`--lane NAME` or `TRON_IOS_TEST_LANE`, else
+this checkout's own lane - see [Simulator lifecycle](#simulator-lifecycle)),
+the same lease and release - the lane's
 simulator is shut down when the run ends, on success, failure, deadline or
 signal - the same sweep before it provisions a boot, and the same memory
 admission, so a run the Mac cannot afford fails with the runner's 73 and the
@@ -1059,11 +1061,15 @@ always use diagnostics `Never` plus `-collect-test-diagnostics never`. Use
 `diagnose --only-testing …` only when verbose collection is explicitly needed;
 it has a larger finite bound and never runs as an automatic retry. Every attempt
 retains a full log, metadata, process evidence, and a unique xcresult under
-`$HOME/Library/Developer/Tron/ios/test-runs`, with `latest` outside the bundle.
+`$HOME/Library/Developer/Tron/ios/test-runs`; `status` reports the newest run
+this worktree started in its lane as `Latest run` (it may still be in progress),
+resolved from each run's `owner.json`, because the root is shared and a single
+pointer in it would name whichever worktree finished last.
 The shared per-user iOS build root is `$HOME/Library/Developer/Tron/ios`: test
 runs use its `test-runs` folder, each worktree's test products use its own
 `test-derived-data/<worktree-key>` folder (its directory name plus a hash of its
-path), and `scripts/tron-ios-simulator` builds into `simulator-derived-data`.
+path), and `scripts/tron-ios-simulator install` builds into
+`simulator-derived-data/<worktree-key>`, keyed the same way.
 The lease serializes the one owned simulator and the retained runs, but products
 are never shared between worktrees: `build` stamps its products with the
 building worktree, its HEAD revision and a fingerprint of its dirty-tree content
@@ -1146,17 +1152,28 @@ lease or release each other's simulator. `--lane NAME` (or `TRON_IOS_TEST_LANE`)
 names a lane: the state directory `<lane root>/ios-test-NAME` beside the default
 lane's `<lane root>/ios-test`, and the device `Tron iOS Tests (NAME)`. The lane
 root is `$HOME/.tron/internal`, overridable with
-`TRON_IOS_TEST_DISCOVERY_ROOT`. The lane the command was given is carried into
-the command the lease holder starts, so the whole command - lease, marker,
-device and release - stays in that one lane; a process that inherits a lease
-(`TRON_IOS_TEST_LOCK_HELD`) while naming a lane that lease does not cover is
-refused (74) rather than run on a lane it does not hold. A named lane refuses
+`TRON_IOS_TEST_DISCOVERY_ROOT`. With no lane selected, the primary checkout
+uses the default lane and a linked worktree uses its own lane, named by its
+worktree key (`scripts/ios-test-build-identity.py worktree-key`, the name of its
+test products and Gateway E2E fixture too), so agents in parallel worktrees test
+concurrently without naming a lane; `--lane default` selects the default lane
+from any worktree. The selection has one owner, `scripts/ios-test-simulator.py
+lane`, which the runner, `scripts/tron-profile ios` and
+`scripts/ios-gateway-e2e-test` all ask, so one worktree and one selection name
+one lane in all three; each takes `--lane NAME`. Memory admission and the lane
+removal below bound how many worktree lanes exist. The lane the command was
+given is carried into the command the lease holder starts, so the whole command
+- lease, marker, device and release - stays in that one lane. The runner also
+refuses (74) to run when it inherits a lease (`TRON_IOS_TEST_LOCK_HELD`) that
+does not cover the lane it names, rather than run on a lane it does not hold;
+the profiler and the Gateway E2E harness only skip taking a lease they inherit. A named lane refuses
 `TRON_IOS_TEST_STATE_DIR`
 and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
-those two overrides keep naming the default lane until SIM-10 of
+those two overrides name - and, when set without a lane, select - the default
+lane until SIM-10 of
 [the simulator lifecycle plan](../../../docs/plans/2026-09-27-simulator-lifecycle.md)
-removes them, and they are what CI (`scripts/ios-ci-test.sh`) and the profiler
-still use. Lanes do not serialize against each other: each lane owns its own
+removes them, and they are what CI (`scripts/ios-ci-test.sh`) and the
+energy-efficiency profiling lanes still set. Lanes do not serialize against each other: each lane owns its own
 lease and simulator, so worktrees test in parallel until the Mac's memory runs
 out. Two lanes of one worktree do share that worktree's single products
 directory, so run one lane per worktree while building.
@@ -1172,11 +1189,15 @@ lane-remove NAME` deletes one lane's simulator and state, and the test products
 of the worktree that created the lane once that worktree no longer exists - a
 live worktree's products are shared with its other lanes and are kept. It
 refuses a lane a live process holds (73) and state with no ownership marker or
-whose directory holds another lane's marker (66). The sweep also deletes any lane no command has used for 7 days once its
-lease is free, so an abandoned lane costs nothing; marker-less state (including
-the default lane's directory, which exists before its first provision) is never
-removed, and a marker written before lanes recorded their last use is kept until
-a command dates it.
+whose directory holds another lane's marker (66). The sweep also deletes, once
+its lease is free, any lane no command has used for 7 days and any lane other
+than the default one whose creating worktree no longer exists - a deleted
+worktree's simulator would otherwise hold gigabytes for the whole idle period,
+and a later command in that lane simply provisions it again - so an abandoned
+lane costs nothing. Marker-less state (including the default lane's directory,
+which exists before its first provision, and the directory holding only the
+lease file that `clean` leaves) is never removed, and a marker written before
+lanes recorded their last use is kept until a command dates it.
 
 How many simulators the Mac runs is decided by its memory, not by a fixed count.
 Before `simctl boot` - never for a lane whose simulator is already booted, which
@@ -1184,7 +1205,9 @@ is the whole point of `--keep-booted` - provisioning reads `memory_pressure` and
 refuses the boot with exit 73 and the simulator table (every lane with its
 state, worktree, lease holder, uptime and disk, every booted device no lane
 owns, and `Simulator.app`) when free memory is below 8 GB.
-`TRON_IOS_TEST_MEMORY_RESERVE_BYTES` overrides that default. Swap in use is
+`TRON_IOS_TEST_MEMORY_RESERVE_BYTES` overrides that default; CI sets it to 0
+because a hosted runner is a dedicated VM with less memory than the default.
+Swap in use is
 reported in that table beside the free memory and never refuses a boot: it
 drains slowly, so a reading at a limit would refuse boots persistently. The
 memory refusal is fast - no wait, no retry - because the caller decides whether to wait
@@ -1214,7 +1237,7 @@ device's own boot process, so it is real elapsed time rather than a remembered
 timestamp, and a simulator a lane owns is never also listed as unowned.
 
 `scripts/tron-profile-ios` and `scripts/ios-gateway-e2e-test` do not keep a
-lifecycle of their own: both lease the lane their state directory names, run the
+lifecycle of their own: both lease the lane the shared selection names, run the
 same sweep before provisioning, release the simulator their command booted when
 it ends, and keep the admission refusal (73) instead of reporting it as a broken
 destination. The Gateway fixture and fault proxy that harness leaves running are
@@ -1228,6 +1251,24 @@ reports how long it has been booted, read from its own boot process and printed
 by the same owner as the `status --all` row, and `stop` is the way to release it.
 The test tooling never shuts it down and never deletes it; the simulators it does
 own are deleted by `clean`, `lane-remove` and the sweep.
+
+The Development simulator and each physical device are exclusive across every
+worktree on this Mac, so their helpers lease them through the same lock owner as
+the test lanes (`scripts/ios-test-lock.py`). `scripts/tron-ios-simulator start`,
+`install` and `stop` hold one host-wide lease
+(`$HOME/.tron/internal/run/ios-simulator.lease.lock`), and
+`scripts/tron-ios-device install`, `launch` and `stop` hold a lease per device
+identifier (`$HOME/.tron/internal/run/ios-device-<DEVICE_ID>.lease.lock`),
+including the Gateway's detached Rebuild iPhone App install. The lease covers
+the whole command - build, install and launch - and a contended command exits 73
+before it touches the device, naming the holder's worktree, PID and start time.
+A holder killed outright leaves no stale lease: the lease is released once the
+command tree it started has ended, and the next holder replaces its metadata.
+The lease serializes commands, not sessions: an app one command launched can be
+replaced by the next command that takes the lease.
+`status` and `remember` take no lease. `DeviceLeaseFixture` in
+`scripts/test-ios-test-infrastructure.py` covers contention and stale-lease
+release.
 
 ### Test runner safety contract
 
@@ -1901,6 +1942,13 @@ accessibility-sized resource captures; those captures are not live-provider vali
 Connected Services and MCP Servers through the real Settings root in light mode, asserts
 one hittable Done control, and verifies dismissal back to Settings. Its offline fixture
 isolates navigation ownership without contacting a Gateway or any provider.
+`TronIntegrationSheetsUITests` drives the shared Configured/Available integration rows and
+instance details against an in-app scripted connection owner. It holds X credits for a
+bounded delay to prove the list remains populated, then checks both successful and failed
+balance reads and confirms MCP servers never show X credit state. Light/dark captures
+are retained in the UI-validation `.xcresult`; export them with
+`xcrun xcresulttool export attachments --path <TestResults.xcresult> --output-path <temporary-directory>`
+and inspect the exported captures. This fixture never calls the selected live Gateway or a provider.
 `SettingsLayoutStyleTests.testIntegrationMutationSettlementRejoinsAfterPresentationSuspension`
 checks that accepted success/failure settles while covered, publishes only when active again,
 and never replays the command. Global default trust retains the standard autosave error/retry notice.
@@ -1979,9 +2027,23 @@ The Gateway uses a fixture-owned home, state directory, agent directory,
 delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly
 bound to that fixture on initial startup and restart so a caller's store cannot
 become a migration input. Use `logs`, `status`, `stop`, and `clean` to inspect
-or manage those resources. Its simulator lane is the shared test lane
-(`TRON_IOS_TEST_STATE_DIR` inside `TRON_IOS_TEST_DISCOVERY_ROOT`, device
-`TRON_IOS_TEST_DEVICE_NAME`): every mutating command sweeps orphaned lanes
+or manage those resources. The fixture directory and the focused DerivedData
+belong to one worktree: by default they are
+`$TMPDIR/tron-ios-gateway-e2e-<uid>-<worktree key>` and
+`$TMPDIR/tron-ios-gateway-e2e-derived-<uid>-<worktree key>`, with the key
+`scripts/ios-test-build-identity.py worktree-key` gives the per-worktree test
+products (`TRON_IOS_E2E_STATE_DIR` and `TRON_IOS_E2E_DERIVED_DATA` override
+them). So `status`, `logs`, `stop` and `clean` see and remove only this
+worktree's Gateway, state, npm lock hash and products (`clean` also deletes the
+simulator of the lane it holds - this worktree's own lane unless one is
+selected - as `scripts/tron-ios-test clean` does); run `clean` in a worktree before deleting
+it, because no sweep reclaims these directories. `build` stamps
+the products with this worktree's source identity, and `run` refuses — before it
+renews the Gateway fixture — products that carry no identity or were built from
+another worktree or another source state; `build` (or `iterate`) again after an
+edit. Its simulator lane is the one `scripts/tron-ios-test` would use for this
+worktree and selection (`--lane NAME` or `TRON_IOS_TEST_LANE`, else this
+checkout's own lane), and `status` names it: every mutating command sweeps orphaned lanes
 before it provisions, and the lane's simulator is released when the command
 ends, exactly as `scripts/tron-ios-test` does; a boot the Mac cannot afford is
 refused with 73 and the `status --all` table. On CI, focused result/log evidence
@@ -2129,11 +2191,11 @@ catalog labels and existing compaction admission; `SessionPresentationStoreTests
 pending model selection and narrow authoritative projection. `SessionSettingPresentationTests`
 covers immediate pending choices, reset semantics, exact-request rollback, scope replacement,
 and shared Extra High labels without rewriting authored content. Project Resources must omit Context Files
-and `AGENTS.md` rows. Agent Instructions lists the Gateway's attributed sections collapsed in
-reading order (`TronSmokeUITests.testAgentInstructionsSectionsExpandWithTheirSources` taps sections open
-and closed on the `-tron-agent-instructions-fixture` host and retains screenshots),
-with View Full Prompt and instruction files opening the document reader, using the same large-only
-adaptive teal document chrome as the workspace sheet:
+and `AGENTS.md` rows. Agent Instructions lists the Gateway's attributed sections as glass rows in
+reading order (`TronSmokeUITests.testAgentInstructionsSectionsOpenSheetsWithTheirSources` opens and
+dismisses medium-detent section sheets on the `-tron-agent-instructions-fixture` host and retains
+screenshots), with View Full Prompt and instruction files opening the document reader at medium, using
+the adaptive teal document chrome of the workspace sheet:
 custom top blur, icon-only Done, and no opaque bottom bar. Project Resources, Session History, and
 Subagent History titles and toolbar actions must use the inherited teal accent. Resource
 categories are ordered Skills, Subagents, Prompts, Tools, then Commands; package Provides groups use the same order, followed by Themes. Resource detail sheets show only the description and bounded body content; their toolbar info action opens the complete metadata and technical JSON without a second content read. Titles, Done actions, icons, and cards explicitly use the chat resource theme for prompts and skills rather than inheriting the overview tint: prompts are purple and skills cyan; extension and tool categories retain their existing colors. Project Resources and chat share the body renderer and info sheet. Completed empty reads show an empty-content message; unavailable session reads settle with a retry instead of an indefinite loading state. Tools and extensions without supported body reads retain their metadata behind Info. Skill chips use the same cyan as their picker, not the general information-blue palette. Subagent pills use their card accent for icons and text, with compact vertical padding. Started timestamps and terminal timestamps (history, immediately before elapsed duration with a small middle-dot separator on the same line) share monospace styling; missing terminal times stay absent. Session History toolbar and older/newer paging actions explicitly use the sheet teal for icons and text in both appearances. Session History entry details have no end-of-content or metadata footer; navigation controls appear only for multipart content. Verify package/inline extension names
@@ -2282,8 +2344,17 @@ the large sheet detent as it takes focus, keeping the paged question viewport us
 while the keyboard appears; changing question pages clears focus. The Other button
 and editor have separate hit targets and accessibility values, with glass drawn only
 as their decorative background. A retiring editor cannot write an answer back after
-Other was deselected. Native Ask User UI regressions exercise medium-to-large typing,
-multiline input, both kinds of deselection, close/reopen drafts, and exact submission.
+Other was deselected. The editor (and the primitive input/editor field) is never
+`.disabled`: disabling a focused text view flips its UIKit interaction off inside a
+layout pass, and the re-entrant keyboard resignation fought `FocusState` until the
+main-thread watchdog killed the app when Send was tapped mid-typing. Send, Cancel and
+expiry release focus through `FocusState` first; the binding then refuses edits.
+Native Ask User UI regressions exercise medium-to-large typing, multiline input, both
+kinds of deselection, close/reopen drafts, exact submission, and Send from a focused
+Other editor on the last page of a paged form
+(`testAskUserSendWithFocusedOtherEditorOnLastPageSubmits`). The hang itself reproduced
+only on device; a watchdog `0x8BADF00D` crash report whose main thread sits in
+`setUserInteractionEnabled:` → `resignFirstResponder` is its one-step signal.
 
 Historical onboarding references captured by executing commit `c3f12c17c` live
 under `docs/assets/parity/`. `TronSmokeUITests` keeps matching medium/pairing
@@ -2414,6 +2485,24 @@ scripts/tron-ios-test run \
 
 On a physical device verify solving-to-thinking-to-hidden expiry, simultaneous synchronous and asynchronous rows, and live-to-terminal updates. A no-edit worker used only as a visual lifecycle fixture must declare `agentContract: { version: 1 }` and an explicit reason-bearing `acceptance: { level: "none", reason: "visual lifecycle probe" }`; otherwise the legacy implementation completion guard can pause the worker after its command and final output have finished, which is canonical resumable state rather than a running process. The composer subagent orb must enter and leave with the same scoped spring as the catch-up arrow; Subagents, a tapped child transcript, and Subagent History open at medium and can expand to large. Row taps present a bottom sheet instead of a rightward push. Activity and History cards share the aggregate tool cards' scroll-optimized surface, 12-point corners, 12/11-point horizontal/vertical padding, and 8-point section spacing. The title leads; plain colored lifecycle text sits at the top-right immediately left of elapsed time on the same baseline, separated by a middle dot, with no status pill or icon (the settled-paused tag is the one exception: one muted pause glyph precedes `Paused`). Accessibility text sizes place the status/timing line below the title instead of squeezing the heading. A DETAILS block renders model/thinking/Started and counts/execution mode in the tool FILE/COMMAND field's 12-point medium code font, natural line spacing, and a 4-point caption gap. Metadata wraps rather than dropping counts. The LIVE OUTPUT (or terminal RESULT/ERROR) block uses the tool result's 11-point medium code font and shared bounded-tail fade, retaining three newest nonempty logical lines without clipping away the newest line when they wrap. Queued and paused previews say LATEST OUTPUT. The existing authoritative process projection updates the open sheet's output and lifecycle without a separate poller or transcript read; VoiceOver includes this bounded latest result. Activity uses one lazy row collection across running/completed headers and retained extension content, so an exact process keeps one identity rather than handing a stale live cell between separate collections. Orb-sheet rows retain the friendly local **Started** timestamp. Verify running counters advance each second without incoming progress, continue across scroll/remount and child-sheet round trips, and settle to the authoritative final duration; queued and unsettled paused rows stay fixed, and a paused row whose process exit the Gateway observed freezes at that settlement instant, leaves the running section for recent, shows the muted `Paused` tag, and loses its stop control. Backgrounded or covered sheets stop refreshing, then catch up from the same receipt-local clock when visible. The lifecycle text and active-sheet container color identify status: amber while in progress, success green after completion, and red after failure, stop, rejection, or interruption. History also uses amber for in-progress rows; terminal history cards and child-session chrome use `tronSubagent` seafoam (`#03C3A8`, darkened in light mode for contrast), as do subagent context/update/fork pills. The History title and Done action retain their originating Manage Session theme. Focused `SessionSheetPresentationTests` inspect rendered toolbar colors and capture light/dark rows under an unrelated inherited theme. Confirm queued and paused producer states say `QUEUED` and `PAUSED` rather than `LIVE ACTIVITY`, that a paused subagent without its process-exit proof reads `Pausing…` while a settled one reads `Paused`, and that a paused completion guard is resumable canonical state, not a still-running child process. Both subagent lists use the same scroll-optimized card treatment; history retains its bounded 400-row projection incrementally through a standard Load More pill. `TronAccessibilityUITests.testActivityValuesUpdateInTheSamePresentedSheet` verifies successive canonical output samples and terminal results replace the accessible preview. The native `Button` owns its label/value/hint directly: adding a second accessibility grouping creates a non-button proxy and duplicate actionable child. `SessionSheetPresentationTests.testSubagentResultsUpdateInOpenActivitySheet` waits for rendered input and a display frame before verifying native scroll identity, offset, and sheet detent. Active rows remain tappable before child-session binding, show a waiting state, and open the canonical tail once that binding appears. Short/empty child transcripts stay top-aligned while long newest pages open at the tail. Verify content is already visible without dragging on first open and after medium/large resizing, including long prepared Markdown; scrolling away must disable tail-following during subsequent resizing. Closing a child must reveal the same loaded history and cursor without an extra request, automatic Load More, or a spurious History changed card. An active child sheet shows the leading stop icon only when `process-transcript-abort.v1` is advertised; it stays muted gray while the lease loads, transitions to enabled red only after abort authority arrives, and tapping it disables the control and stops only that exact lease-bound execution through the synchronous parent abort or asynchronous trusted-controller path. Terminal sheets omit it, and earlier-page loading uses the same compact transcript pill as the main chat. Child transcript checks must verify the main transcript's zero-spacing stack, shared 16-point horizontal inset, 12-point top/tail affordances, eight-point row spacing, prepared Markdown in thinking and assistant text, one reconciled run chip per exact invocation/result identity during both live refresh and history paging, preserved orphan results, and no second process-summary tool/output card; explicit earlier paging, append-aware transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion remain correct. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
 
+The CT-23 child-sheet gesture boundary is exercised by
+`TronSubagentSheetScrollUITests` in the UI-validation tier. Its hosted launch
+fixture (`-tron-subagent-sheet-fixture`) opens the real managed read-only sheet
+through the normal canonical transcript lease. Both orientations receive physical
+window-coordinate content and header drags; retained screenshots accompany sheet
+frame, row movement, edge rubber-band, header resize/dismiss and check-button
+assertions. Run with `scripts/tron-ios-test run --only-testing
+TronMobileUITests/TronSubagentSheetScrollUITests` after a build, with
+`TRON_IOS_TEST_TIER=ui-validation`.
+
+Read-only child sheets prefer transcript scrolling at the medium detent via
+`.presentationContentInteraction(.scrolls)`. This does **not** prevent UIKit's
+edge-pull collapse/dismissal: the content-only gesture contract is still blocked
+in CT-23. The gesture matrix retains before/after frame evidence and the full
+journey intentionally fails on that boundary; it is not a green acceptance gate.
+Header drag and the check button retain native behavior. No scroll-tracking proxy,
+gesture delegate replacement or scroll repair is installed.
+
 ## Manual iOS release validation and delivery
 
 The repository does not archive or upload production iOS artifacts. A maintainer
@@ -2493,3 +2582,25 @@ lazy fixture. Phase-height comparisons read the probe's settled records and
 wait for the entrance owner's settlement, not a guessed number of display
 frames. Thinking-row mount/measurement and the unchanged 0.5 pt phase bound
 remain gates in both orientations.
+
+### Inline display orientation evidence (CT-23)
+
+`ChatDisplayOrientationTests` renders a fully loaded asymmetric image through the
+real transcript/media owner in both orientations and reads window pixels. The
+`inline-image-display-at-rest` parity reference is recorded on today's path at
+clean `433b9c340`; the prior ten references are unchanged. The hosted-only
+`-tron-chat-display-fixture` drives the same card in dark mode for
+`TronChatDisplayUITests`: long-press/dismiss/lazy-return screenshots and rendered
+pixel checks are retained in the xcresult. Run hosted owners with the `ui-validation` tier;
+XCUITest selects each orientation through the app's launch environment. These
+checks do not substitute for the user's device compositor/animation review.
+
+Status-bar simulator acceptance is `ChatDisplayOrientationTests`' one-recipient
+matrix and public delegate journey, not a synthetic status-bar tap: even the plain
+SwiftUI control did not receive SpringBoard coordinate taps on this simulator.
+The origin callback must return false, detach, and make oldest loaded history
+visible; today's sole recipient must remain its native transcript. Coverage must
+remove the proxy and restore the native setting. **Device check still required:**
+tap the real status bar with empty composer and with attachments/chips/catalog in
+both orientations. Upright-at-rest device inversion remains open: hosted and
+XCUITest pixels do not reproduce the user's intermittent image/badge flip.

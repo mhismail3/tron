@@ -7,6 +7,7 @@ import { readJson } from "../util/json.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
+import { count, stage, wait } from "./request-span.js";
 
 const COMMAND_RECEIPT_MAX_BYTES = 1_048_576 + 4 * 1_024;
 // High-frequency revisioned UI updates are still idempotent mutations. Keep a
@@ -34,6 +35,15 @@ interface CommandReceiptCapacity {
 interface CommandReceiptUsage {
   entries: number;
   bytes: number;
+}
+
+export interface CommandReceiptExecutionOptions {
+  /** Only prompts may answer once admitted while their completed receipt is still being fsynced. */
+  respondBeforeCompletion?: boolean;
+  /** Own the still-running completed write before the early result can be delivered. */
+  onCompletion?: (completion: Promise<void>) => void;
+  /** Record a post-response persistence failure without changing the accepted result. */
+  onCompletionError?: (error: unknown) => void;
 }
 
 interface Receipt {
@@ -273,17 +283,26 @@ export class CommandReceiptStore {
     if (changed) this.inventory = undefined;
   }
 
+  private releaseLane(key: string, lane: { users: number }): void {
+    lane.users -= 1;
+    if (lane.users === 0 && this.lanes.get(key) === lane) this.lanes.delete(key);
+  }
+
   async execute(
     identity: string,
     method: string,
     commandId: string,
     operation: () => Promise<JsonValue>,
+    options: CommandReceiptExecutionOptions = {},
   ): Promise<JsonValue> {
     if (!/^[A-Za-z0-9._:-]{8,160}$/.test(commandId)) {
       throw new GatewayError("invalid_request", "Mutating requests require a stable commandId");
     }
     const identityHash = createHash("sha256").update(identity).digest("base64url");
     const key = createHash("sha256").update(identityHash).update("\0").update(method).update("\0").update(commandId).digest("base64url");
+    if (options.respondBeforeCompletion && method !== "session.prompt") {
+      throw new Error("Early receipt responses are restricted to session.prompt");
+    }
     const lane = this.lanes.get(key) ?? {
       mutex: new AsyncMutex(),
       users: 0,
@@ -293,8 +312,15 @@ export class CommandReceiptStore {
     };
     lane.users += 1;
     this.lanes.set(key, lane);
+    let resolveEarly!: (result: JsonValue) => void;
+    let rejectEarly!: (error: unknown) => void;
+    const earlyResult = options.respondBeforeCompletion
+      ? new Promise<JsonValue>((resolve, reject) => { resolveEarly = resolve; rejectEarly = reject; })
+      : undefined;
+    let releaseLaneAfterExecution = false;
     try {
-      return await lane.mutex.run(async () => {
+      const execution = wait("receipt.command-lane", (acquired) => lane.mutex.run(async () => {
+        acquired();
         const path = join(this.directory, `${key}.json`);
         const pending: Receipt = {
           version: 1,
@@ -311,7 +337,7 @@ export class CommandReceiptStore {
         // per-command lane's own slow step and runs outside it. Holding the
         // process-wide mutex across the fsync serialized every other command's
         // receipt write behind one command's disk write.
-        const admission = await this.inventoryMutex.run(async () => {
+        const admission = await stage("receipt.inventory-admission", () => this.inventoryMutex.run(async () => {
           await mkdir(this.directory, { recursive: true, mode: 0o700 });
           const existing = await this.readReceipt(path);
           if (existing) {
@@ -344,7 +370,7 @@ export class CommandReceiptStore {
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
           reserved = true;
           return { exists: false } as const;
-        });
+        }));
         if (admission.exists) return admission.result;
         // This write's accounting is the only step that adds its bytes to the
         // totals, so the lane reports it as unaccounted before the publication
@@ -352,7 +378,7 @@ export class CommandReceiptStore {
         // clears that again: whatever reached the disk is then the truth.
         lane.unaccountedWrite = true;
         try {
-          await this.writeReceipt(path, pending);
+          await stage("receipt.pending-persist", () => this.writeReceipt(path, pending));
         } catch (error) {
           await this.inventoryMutex.run(async () => {
             lane.unaccountedWrite = false;
@@ -412,33 +438,47 @@ export class CommandReceiptStore {
           throw outcomeUnknown("Successful command receipt exceeds its bounded capacity; refresh authoritative state instead of replaying");
         }
         lane.unaccountedWrite = true;
-        try {
-          await this.writeReceipt(path, completed);
-        } catch (error) {
+        const persistCompletion = async (): Promise<void> => {
+          try {
+            if (options.respondBeforeCompletion) await this.writeReceipt(path, completed);
+            else await stage("receipt.completed-persist", () => this.writeReceipt(path, completed));
+          } catch (error) {
+            await this.inventoryMutex.run(async () => {
+              lane.unaccountedWrite = false;
+              if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
+              reserved = false;
+            });
+            throw error;
+          }
           await this.inventoryMutex.run(async () => {
+            // Replace the pending estimate and release its reservation atomically.
+            lane.creditedBytes = completedBytes;
             lane.unaccountedWrite = false;
+            this.replaceReceiptBytes(pendingBytes, completedBytes);
             if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
             reserved = false;
           });
-          throw error;
+        };
+        if (options.respondBeforeCompletion) {
+          count("receipt.completed-persist");
+          const completion = persistCompletion().catch((error: unknown) => {
+            try { options.onCompletionError?.(error); } catch { /* accepted response is already authoritative */ }
+          });
+          options.onCompletion?.(completion);
+          resolveEarly(result);
+          await completion;
+        } else {
+          await persistCompletion();
         }
-        await this.inventoryMutex.run(async () => {
-          // The exact persisted size replaces the pending estimate in the same
-          // step that releases the reservation that covered it. A rebuild that
-          // landed during the write credited this lane's pending size rather
-          // than the file (see `inventoryUsage`), so that difference is exactly
-          // what is left to apply here.
-          lane.creditedBytes = completedBytes;
-          lane.unaccountedWrite = false;
-          this.replaceReceiptBytes(pendingBytes, completedBytes);
-          if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
-          reserved = false;
-        });
         return result;
-      });
+      }));
+      if (!earlyResult) return await execution;
+      releaseLaneAfterExecution = true;
+      void execution.then(resolveEarly, rejectEarly);
+      void execution.then(() => this.releaseLane(key, lane), () => this.releaseLane(key, lane));
+      return await earlyResult;
     } finally {
-      lane.users -= 1;
-      if (lane.users === 0 && this.lanes.get(key) === lane) this.lanes.delete(key);
+      if (!releaseLaneAfterExecution) this.releaseLane(key, lane);
     }
   }
 

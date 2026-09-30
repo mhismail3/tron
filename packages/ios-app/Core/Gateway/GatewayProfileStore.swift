@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 import Security
 
 package struct GatewayProfileDocument: Codable, Equatable, Sendable {

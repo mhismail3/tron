@@ -99,7 +99,11 @@ struct TronMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {
+            if ProcessInfo.processInfo.arguments.contains("-tron-subagent-sheet-fixture") {
+                HostedSubagentSheetFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {
+                HostedChatDisplayFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {
                 HostedAskUserFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-pagination-fixture") {
                 HostedSessionPaginationFixture()
@@ -109,6 +113,8 @@ struct TronMobileApp: App {
                 HostedSessionArchiveFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-knowledge-detail-fixture") {
                 HostedKnowledgeDetailFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-integrations-fixture") {
+                HostedIntegrationsFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-dashboard-menu-fixture") {
                 HostedDashboardMenuFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-accessibility-fixture") {

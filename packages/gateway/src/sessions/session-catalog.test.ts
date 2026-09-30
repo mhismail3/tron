@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BackgroundWorkScheduler } from "../background-work.js";
+import { RequestSpan, requestsCompetingForLoop, runInRequestSpan } from "../transport/request-span.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
@@ -26,6 +27,7 @@ import { CatalogMetadataIndex, type CatalogMetadataIndexSummary } from "./catalo
 import {
   CATALOG_EVENT_DEBOUNCE_MS,
   CATALOG_EVENT_MAX_WAIT_MS,
+  CATALOG_EVENT_PENDING_PATH_LIMIT,
   SessionCatalog,
   type SessionCatalogChange,
   type SessionCatalogOptions,
@@ -98,6 +100,8 @@ import {
 //     its rows without a pass.
 // 23. Unnameable events that never stop arriving: the whole-index pass still
 //     runs once a second instead of the quiet spell being re-armed forever.
+// 24. A burst of distinct transcript paths: pending watcher timers stay bounded
+//     and overflow reconciles the canonical files.
 
 const roots: string[] = [];
 /** The scheduler each fixture's catalog registers its periodic reconcile with,
@@ -156,7 +160,10 @@ async function appendMessage(path: string, content: string, ordinal: number): Pr
   })}\n`, { flag: "a" });
 }
 
-async function fixture(extra: Partial<SessionCatalogOptions> = {}) {
+async function fixture(
+  extra: Partial<SessionCatalogOptions> = {},
+  requestsInFlight: () => boolean = () => false,
+) {
   const root = await mkdtemp(join(tmpdir(), "tron-session-catalog-"));
   roots.push(root);
   const sessions = join(root, "sessions");
@@ -199,7 +206,7 @@ async function fixture(extra: Partial<SessionCatalogOptions> = {}) {
   // G-9: the periodic reconcile is one of the scheduler's jobs. A test drives a
   // real scheduler with the loop and in-flight signals it wants to read.
   const scheduler = new BackgroundWorkScheduler();
-  scheduler.start({ requestsInFlight: () => false, eventLoopP99Ms: () => 0 });
+  scheduler.start({ requestsInFlight, eventLoopP99Ms: () => 0 });
   schedulers.push(scheduler);
   const catalog = new SessionCatalog({
     catalogRoot: () => sessions, index, source, persistDebounceMs: 5, backgroundWork: scheduler, ...extra,
@@ -285,6 +292,29 @@ describe("SessionCatalog", () => {
     })]);
     // The repaired cut is durable, so the next start does not need the bodies.
     expect(existsSync(indexPath)).toBe(true);
+  });
+
+  it("lets queued catalog refreshes yield while a request awaits a missing row", async () => {
+    const state = { competing: false };
+    const context = await fixture({}, () => state.competing);
+    context.catalog.start();
+    await context.catalog.settled();
+    const file = join(context.sessions, "new-session.jsonl");
+    await writeSession(file, "new-session", context.sessions, Array.from({ length: 600 }, (_, index) => `message-${index}`));
+
+    void context.catalog.refresh(file);
+    const span = new RequestSpan();
+    await runInRequestSpan(span, async () => {
+      state.competing = requestsCompetingForLoop();
+      expect(state.competing).toBe(true);
+      const [, identities] = await Promise.all([
+        context.catalog.awaitQueuedChanges(),
+        context.catalog.searchIdentities(),
+      ]);
+      expect(context.catalog.row(file)?.messageCount).toBe(600);
+      expect(identities?.has("new-session")).toBe(true);
+      span.breakdown(0);
+    });
   });
 
   it("keeps one row per canonical file when two files claim one session ID", async () => {
@@ -1093,6 +1123,37 @@ describe("SessionCatalog", () => {
     expect(catalog.duplicateSessionIds().size).toBe(0);
     expect([...reads.keys()].sort()).toEqual([...paths].sort());
     expect([...reads.values()]).toEqual(Array.from({ length: pathCount }, () => 1));
+  });
+
+  it("bounds overflow watcher events to one reconcile and the unnamed-event debounce", async () => {
+    const watch = manualWatch();
+    const outcomes: SessionCatalogReconcileOutcome[] = [];
+    const { sessions, catalog, source } = await fixture({
+      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+      onReconciled: (outcome) => outcomes.push(outcome),
+    });
+    catalog.start();
+    await catalog.settled();
+    const walks = vi.spyOn(source, "scan");
+    const pathCount = CATALOG_EVENT_PENDING_PATH_LIMIT + 32;
+    const paths = Array.from({ length: pathCount }, (_unused, index) => join(sessions, "workspace", `overflow-${index}.jsonl`));
+    await Promise.all(paths.map((path, index) => writeSession(path, `overflow-${index}`, sessions, ["created"])));
+    for (const path of paths) watch.emit(relative(sessions, path));
+
+    await waitFor(() => catalog.rows().length === pathCount, 30_000);
+    await catalog.settled();
+    // Keep the watcher busy after the overflow pass has completed. An event storm
+    // used to schedule another full scan for every event while a scan was active.
+    const end = Date.now() + 500;
+    while (Date.now() < end) {
+      watch.emit(relative(sessions, "workspace/live.jsonl"));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    // At most one unnamed-event pass may follow the overflow pass during this
+    // window; the old dirty loop scanned once per arriving event.
+    expect(walks.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(outcomes.filter(({ trigger }) => trigger === "watcher-overflow")).toHaveLength(1);
+    expect(catalog.duplicateSessionIds().size).toBe(0);
   });
 
   it("re-reads a path whose events never stop arriving", async () => {

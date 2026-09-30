@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
+import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 
@@ -82,6 +83,77 @@ describe("CommandReceiptStore", () => {
     expect(maximum).toBe(2);
     release();
     await executions;
+  });
+
+  it("returns a prompt result while completion persistence is in flight but keeps duplicates on the lane", async () => {
+    const root = await temporaryRoot("tron-receipts-prompt-response-");
+    let completionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { completionStarted = resolve; });
+    let releaseCompletion!: () => void;
+    const completionGate = new Promise<void>((resolve) => { releaseCompletion = resolve; });
+    let writeCount = 0;
+    const workRegistry = new GatewayWorkRegistry("prompt-receipt-drain");
+    const work = workRegistry.begin({ kind: "rpc-mutation", method: "session.prompt", sessionId: "session", hostEpoch: "epoch" });
+    const store = new CommandReceiptStore(root, async (path, value, mode) => {
+      writeCount += 1;
+      if (writeCount === 2) {
+        completionStarted();
+        await completionGate;
+      }
+      await durableAtomicWriteJson(path, value, mode);
+    });
+    let operations = 0;
+    const first = store.execute("device", "session.prompt", "early-result", async () => {
+      operations += 1;
+      return { accepted: true };
+    }, { respondBeforeCompletion: true, onCompletion: completion => { void completion.then(() => work.settle()); } });
+    await started;
+    await expect(first).resolves.toEqual({ accepted: true });
+    expect(workRegistry.size).toBe(1);
+    let duplicateSettled = false;
+    const duplicate = store.execute("device", "session.prompt", "early-result", async () => {
+      operations += 1;
+      return { accepted: false };
+    }, { respondBeforeCompletion: true }).finally(() => { duplicateSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(duplicateSettled).toBe(false);
+    expect(operations).toBe(1);
+    releaseCompletion();
+    await expect(duplicate).resolves.toEqual({ accepted: true });
+    expect(operations).toBe(1);
+    await work.settled;
+    expect(workRegistry.size).toBe(0);
+  });
+
+  it("keeps a pending prompt receipt as the replay fence after a response-window crash", async () => {
+    const root = await temporaryRoot("tron-receipts-prompt-crash-");
+    let completionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { completionStarted = resolve; });
+    let releaseCompletion!: () => void;
+    const completionGate = new Promise<void>((resolve) => { releaseCompletion = resolve; });
+    let writeCount = 0;
+    const store = new CommandReceiptStore(root, async (path, value, mode) => {
+      writeCount += 1;
+      if (writeCount === 2) {
+        completionStarted();
+        await completionGate;
+      }
+      await durableAtomicWriteJson(path, value, mode);
+    });
+    let operations = 0;
+    const first = store.execute("device", "session.prompt", "crash-window", async () => {
+      operations += 1;
+      return { accepted: true };
+    }, { respondBeforeCompletion: true });
+    await started;
+    await expect(first).resolves.toEqual({ accepted: true });
+    // A fresh process/store sees only the durable pending receipt.
+    await expect(new CommandReceiptStore(root).execute("device", "session.prompt", "crash-window", async () => {
+      operations += 1;
+      return { accepted: false };
+    }, { respondBeforeCompletion: true })).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    expect(operations).toBe(1);
+    releaseCompletion();
   });
 
   it("does not serialize one command's durable receipt write behind the inventory mutex", async () => {

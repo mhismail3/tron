@@ -664,10 +664,11 @@ rows are in priority order.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | R-1 | Done | Release candidate: every synthetic exit criterion passes, merge to `main`, prepare Mac and iOS builds | all Phase 1 | orchestrator, 2026-09-29: merged to `main` with four known misses the user accepted in writing (see handoff); F-4..F-7 own them |
-| F-4 | Ready | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | |
-| F-5 | Ready | Prompt admission p99 ~610 ms against 250 ms in `multi-session` | R-1 | |
-| F-6 | Ready | Event loop p99 ~38 ms against 20 ms, max up to 1.4 s under load; attribute with a CPU profile | R-1 | |
-| F-7 | Ready | Warm `session.open` p99 ~335 ms against 300 ms | R-1 | |
+| F-4 | Blocked | Streaming under a 2 Mbit/s cap: pong waits ~24 s behind superseding stream state (2 misses per run in `bandwidth-stream`); pongs must never wait behind stream bytes | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-4), 2026-09-30; `ws.bufferedAmount` cannot bound bytes already accepted into kernel/path buffers, so the required mechanism and qualification remain outstanding (see handoff) |
+| F-5 | Blocked | Prompt admission p99 target 250 ms in `multi-session` | R-1 | merged `hardening/integration` 2026-09-30 (user-approved: respond before the completed receipt and the run marker fsync). Same-host one-iteration runs: p50 53.9 -> 26.8 ms, p99/max 449.9 -> 258.2 ms; 8 ms over target on one sample, so a multi-iteration quiet-host run decides Done |
+| F-6 | Blocked | Event-loop delay p99 20 ms target; attribute with a CPU profile | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30; catalog metadata parsing now yields through G-9; diagnostic p99 34.630 ms/max 274.951 ms misses target and needs a qualifying quiet-host run (see handoff) |
+| F-7 | Blocked | Warm `session.open` p99 300 ms target in `multi-session` | R-1 | orchestrator-dispatched deepseek-worker (branch hardening/f-567), 2026-09-30; available F-567 runs all exceed target (368–3,559 ms); prior 131.8 ms run was baseline, not candidate (see handoff) |
+| T-7 | Done | The profiler prime's first `session.list` waits on a named catalog-readiness deadline (90 s) instead of the 40 x 250 ms measured-retry budget, which a 3,000-file fixture outlasts on a busy host | F-5, F-6, F-7 | orchestrator, 2026-09-30; `scripts/tron-profile-gateway-driver.mjs`, `test-tron-profile.py` OK |
 | R-2 | Ready | User installs the Mac Release build and the iOS build; agent verifies the deployment | R-1 | E-3d owes one user action: prove the LAN kill switch on the installed release (`launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off`, user restarts the Gateway, `lan.listener state=disabled reason=setting_off` appears) |
 | R-3 | Ready | User runs Tron normally for at least 24 hours, then exports phone logs | R-2 | |
 | R-4 | Ready | Analyse the day with the triage tool; check real-use exit criteria; open Phase 3 rows | R-3 | Read `lan.listener` transitions and `transport=lan` on `http.upgrade` to see whether the lane carried the day (E-3d) |
@@ -1859,6 +1860,103 @@ Read the numbers as one sample per case.
 - Met: `session.list` p99 94–127 ms (one 1.5 s iteration under load); cold large open p99 ~530 ms; catalog walks 0; blackhole recovery 17–70 ms; restart reconnect max 5.8–7.2 s with 0 requests over 1 s in the quiet run (G-13's criterion; 1 in one loaded iteration); pong misses 0 outside the stream case.
 - Missed (user accepted in writing 2026-09-29, "Merge now, fix misses after"): bandwidth-stream ping-to-pong ~24 s / 2 misses per run (F-4); prompt admission p99 ~610 ms (F-5); event-loop p99 ~38 ms and max 217 ms quiet / 1.4 s loaded (F-6); warm open p99 ~335 ms (F-7).
 - Installed for rollback: Mac app 0.1.0 (8); launcher still logs a refused stale external selection of `0.1.0-beta.7-source-1790559163986`.
+
+### 2026-09-30 — F-567 qualification attempt (worker)
+
+- Before isolated-test/code work — failure modes to cover: a multi-megabyte transcript can deliver many buffered readline records without a scheduler turn, delaying request callbacks; the new scheduler handoff must not drop, reorder or change catalog metadata/counts while parsing continues.
+- Result: no product change. The required full-size CPU-profile run
+  (`scripts/tron-profile gateway --scenario multi-session --no-build --iterations 1 --cases none --cpu-profile`)
+  exited 6 in `prime`: `session.list` returned retryable `busy` (“The session
+  catalog has not been read yet”) through the driver's 40 × 250 ms retry limit.
+  Its fixture log records no first `catalog.reconciled` before the 11.5 s prime
+  window closed. No F-5/F-6/F-7 metric was produced, so the rows remain Blocked.
+- Evidence: failed run
+  `~/Library/Developer/Tron/profiles/gateway/20260929T234124Z-multi-session-0d7ab5`
+  (`driver-prime.log`, `fixture/gateway.jsonl`, prime CPU profile). A 400-file /
+  96 MiB smoke completed at
+  `~/Library/Developer/Tron/profiles/gateway/20260929T234418Z-multi-session-0dc352`,
+  but the host was heavily loaded (1-minute load 66 on 18 CPUs, one simulator
+  active), producing only one sample and invalidating it as qualification or
+  before/after evidence. It is not used to claim any target.
+- Finding: first full-size run makes the existing prime retry horizon shorter
+  than this fixture's first catalog cut on this run. That is a harness/readiness
+  boundary, not sufficient evidence to raise a timeout or alter production
+  behavior. The prior R-1 artifacts' O-3 spans and delay histograms cannot
+  identify a new fix's same-run effect; no change was made speculatively.
+- Changes: plan status and handoff only.
+- Deviations: blocked rather than claim the target without quiet-host numbers.
+- For the next agent: after the fixture's catalog-readiness boundary and host
+  contention are resolved, retry the exact full-size CPU-profile command on a
+  quiet host, inspect `rpc.completed` stages/unaccounted time for prompt/open,
+  `gateway.resources` event-loop records and the profile from the mixed window;
+  implement only an owner-level cause supported by that evidence, then rerun
+  against an equivalent baseline and candidate before marking any row Done.
+
+### 2026-09-30 — F-567 measurement and owner fix (worker)
+
+- Change: `buildCatalogSessionInfo` now yields every 256 transcript entries via
+  G-9's existing background scheduler. The focused regression protects full
+  row preservation; no second yield mechanism was added. Slow `rpc.completed`
+  spans now name runtime-slot and command-lane/inventory admission waits,
+  pending/completed durable receipt writes, prompt marker persistence, and
+  response write.
+- Evidence: full-size profile
+  `~/Library/Developer/Tron/profiles/gateway/20260930T010618Z-multi-session-74bbd7`
+  (dirty diagnostic run, 1 iteration, host load 3.55/7.27/19.18). Catalog
+  reconciliation completed 3,000 files in 5.620 s, versus 22.479 s in the
+  earlier diagnostic under load 18; this is indicative, not an equivalent-host
+  comparison. The mixed-window event-loop p99/max was 34.630/274.951 ms and
+  remains above the 20 ms p99 target; F-6 stays Blocked pending a quiet-host
+  qualification. No per-task CPU attribution was obtained for this run.
+- F-5: prompt-admission p99/max was 1,224.560 ms in this one-iteration run.
+  Its retained `rpc.completed` record has `unaccountedMs=1061` and no receipt,
+  marker, or lane stage breakdown, so the earlier 360/501/260 ms attribution is
+  unverified. F-5 remains Blocked; no durability semantics were changed.
+- F-7 remains Blocked. The 131.8 ms result came from baseline commit
+  `3c5711a77951`, not this candidate. Available candidate runs report warm-open
+  p99 2,152 ms (`003413Z`), 3,559 ms (`004726Z`), 368 ms (`005901Z`), and
+  509.272 ms (`010618Z`), all above the 300 ms target.
+- Validation: `npm run build`; focused `catalog-discovery.test.ts` and
+  `command-receipts.test.ts` (30/30); the five-file rerun passed 317/318 tests.
+  One pre-existing timing assertion in `request-span.integration.test.ts`
+  failed because a 100 MiB cold-open sample completed in 86 ms, below its
+  `>100 ms` fixture floor; `runtime-registry.integration.test.ts` and
+  `session-archive.integration.test.ts` passed. `npx tsc --noEmit -p .`,
+  `python3 scripts/check-documentation-policy.py`,
+  `scripts/personal-info-guard.sh`, and `git diff --check` passed. A final
+  qualification profile was not run: host load had risen to 22.66/18.77/17.96.
+- Changes: catalog owner, focused regression, prompt request-span stages and
+  this task status/handoff; no changes to thresholds or deadlines.
+
+### 2026-09-30 — F-5 · Blocked · worker session (branch `hardening/f-5`)
+
+- Change: only `session.prompt` responds after its operation resolves while its completed receipt remains in the per-command lane. Pending receipt durability remains before execution; same-command duplicates join the lane. The RPC work owner remains through in-flight receipt completion and settles on either write success or failure; failures log `receipt.completed-persist-failed` with session identity when available. The detached receipt fsync is count-only, outside request-span timing. Foreground prompts start marker persistence before response without awaiting fsync; marker clear waits for an in-flight mark. Other receipt-backed methods retain completed-before-response semantics.
+- Failure modes written before implementation: (1) crash after response leaves a durable pending receipt; a duplicate reports outcomeUnknown and never executes; (2) a duplicate during completion persistence waits and receives the stored result; (3) completion-write failure cannot alter the sent response, is logged, and settles the RPC work owner; (4) drain retains ownership through the in-flight write; (5) marker failure stays observed, retried/blocked and diagnostic without an unhandled rejection; (6) clear cannot overtake its mark.
+- Evidence: focused receipt tests cover early response + held duplicate lane and process-loss pending-fence recovery; GatewayService integration covers a failed completion write settling its work owner and logging session identity. Full `runtime-registry.integration.test.ts` and transport merge gate results are recorded in the review-fix handoff below. `npx tsc --noEmit -p .` passes. The request-span cold-open timing-floor failure is pre-existing.
+- Measurement: same-host base `f820546ff4db` run `20260930T075051Z-multi-session-444352`: prompt admission p50/p99/max `53.878/449.884/449.884 ms`, host load `15.34/13.28/11.43`, one booted simulator. Candidate runs: `20260930T075356Z-multi-session-8ae30f` (before prompt-specific 250 ms log threshold) `25.960/291.491/291.491 ms`, load `3.45/9.69/10.38`; final code `20260930T080008Z-multi-session-865198` `26.773/258.191/258.191 ms`, load `1.99/4.30/7.52`. The 3,000-file/2,048 MiB fixture ran with `--no-build --iterations 1 --cases none`, plain Node 22.22.0. Results are indicative one-iteration measurements, not equivalent-load proof, and final p99 remains 8.191 ms over the 250 ms target, so the row stays Blocked. The final retained `fixture/gateway.jsonl` has no `session.prompt` `rpc.completed` records (only `session.list` records); therefore it supplies no prompt stage breakdown despite the threshold/logging change. No stage breakdown is claimed.
+- Deviations/left: no separate marker-failure integration test was added; the existing RuntimeSlot owner/retry path was retained and the source was reviewed. Repeat qualification on a comparable quiet host and capture prompt `rpc.completed` evidence before marking Done.
+
+### 2026-09-30 — F-5 independent-review fixes (worker)
+
+- Detached completed-receipt fsync no longer contributes request-span duration; failed writes log session identity and settle the RPC work owner. Revocation coverage waits on the work registry; added a GatewayService transport regression for failed persistence.
+- Evidence: focused transport/receipt set 179/179, runtime-registry 245/245, prompt request-span 1/1, TypeScript, documentation policy and personal-info guard pass. Cold-open request-span timing floor still fails intermittently (94 ms vs >100 ms). F-5 stays Blocked pending comparable-load qualification.
+
+### 2026-09-30 — F-567 independent-review fixes (worker)
+
+- Fixed refresh/search deadlock: catalog waiters leave the request-competing
+  signal while waiting; regression covers a live `RequestSpan` with scheduler
+  contention and a 600-entry refresh.
+- Corrected F-5 attribution to unverified and returned F-7 to Blocked; candidate
+  warm-open p99 evidence is 368–3,559 ms. Focused catalog tests passed.
+- Added a receipt-backed prompt-span integration case for pending/completed
+  persistence stages and same-command lane wait; F-5/F-6/F-7 still need valid
+  qualification evidence.
+- For the next agent: rerun F-5/F-6 on a quiet host after checking `rpc.completed`
+  `receipt.pending-persist`, `receipt.completed-persist`,
+  `session.prompt.marker-persist`, `session.prompt.runtime-lane`,
+  `receipt.command-lane`, and `receipt.inventory-admission`. A product-level F-5 change would require an
+  approved durability design; do not remove/relax receipt or run-marker fsyncs
+  to satisfy latency.
 
 ### Draft · 2026-09-27 · connection investigation session
 
@@ -10678,6 +10776,30 @@ recovery gaps; all three were fixed on the same branch.
   future protocol bump keeps `PROTOCOL_VERSION`/`MIN_PROTOCOL_VERSION` in
   `config/GatewayProtocol.json` as the single authority. A real-device check of
   the old-Mac scenario is R-2's install, not this row.
+
+#### F-4 · Blocked · 2026-09-30 · orchestrator-dispatched deepseek-worker (branch `hardening/f-4`)
+
+- Result: removed the ineffective `ws.bufferedAmount` gate and its private
+  `_socket`/`drain` hook, and deleted the test that modeled an unreachable
+  production state. One-frame-at-a-time `ws` sends do not bound bytes accepted
+  into kernel/path buffers; F-4 remains blocked pending a mechanism that does.
+- Evidence: reviewer's real-`ws` probe observed 1,114,112 bytes written with a
+  paused reader, zero gate closures and zero `drain` events; this disproves the
+  gate rather than qualifying F-4. After removal, focused merge-gate checks
+  passed (6 files/135 tests; registry 245 tests) and `tsc --noEmit` passed.
+- Qualification blocked: both before-change profile attempts using
+  `scripts/tron-profile gateway --scenario multi-session --no-build --iterations
+  1 --cases bandwidth-stream,bandwidth` stopped in `prime` because
+  `session.list` returned `busy: The session catalog has not been read yet`;
+  the fixture's `gateway.startup-step attention-recovery` took 11.5 s, beyond
+  the driver's retry window. Host load was 61–87 with parallel iOS builds, so no
+  after-change numbers or claim against the pong deadline/link-use targets are
+  available. The stored R-1 baseline remains `bandwidth-stream` 24,430–24,577 ms,
+  2 deadline misses; `bandwidth` max ping 1,558–1,622 ms, 0 misses and link use
+  0.979–0.993.
+- For the next agent: re-run the prescribed before/after qualification on a
+  quiet host. Do not mark Done unless `bandwidth-stream` has zero deadline
+  misses and ping-to-pong well under 8 s without regressing the `bandwidth` leg.
 
 #### F-3 review round 1 · 2026-09-29
 

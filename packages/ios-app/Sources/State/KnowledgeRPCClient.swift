@@ -165,14 +165,14 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let recordId: String; let expectedRevision: String; let record: KnowledgeRecordDraft; let confirmedByUser: Bool }
         return try await mutate("knowledge.note.update", parameters: Params(recordId: id, expectedRevision: expectedRevision, record: record, confirmedByUser: confirmedByUser))
     }
-    func curate(sourceID: String, expectedRevision: String, operation: String, verdict: KnowledgeSourceVerdict? = nil, supersededBy: String? = nil, scope: KnowledgeScope? = nil, admission: KnowledgeSourceAdmission? = nil, commandID: String) async throws -> KnowledgeCurationResponse {
+    func curate(sourceID: String, expectedRevision: String, operation: String, verdict: KnowledgeSourceVerdict? = nil, clearVerdict: Bool = false, supersededBy: String? = nil, scope: KnowledgeScope? = nil, admission: KnowledgeSourceAdmission? = nil, commandID: String) async throws -> KnowledgeCurationResponse {
         struct Item: Encodable { let recordId: String; let expectedRevision: String; let verdict: Verdict?; let placement: Placement? }
-        struct Verdict: Encodable { let verdict: KnowledgeSourceVerdict; let supersededBy: String? }
+        struct Verdict: Encodable { let verdict: KnowledgeSourceVerdict?; let clear: Bool?; let supersededBy: String? }
         struct Placement: Encodable { let scope: KnowledgeScope?; let admission: KnowledgeSourceAdmission? }
         struct Params: Encodable { let operation: String; let producer: Producer; let items: [Item] }
         struct Producer: Encodable { let actor: String }
         let item = Item(recordId: sourceID, expectedRevision: expectedRevision,
-                        verdict: verdict.map { Verdict(verdict: $0, supersededBy: supersededBy) },
+                        verdict: clearVerdict ? Verdict(verdict: nil, clear: true, supersededBy: nil) : verdict.map { Verdict(verdict: $0, clear: nil, supersededBy: supersededBy) },
                         placement: scope != nil || admission != nil ? Placement(scope: scope, admission: admission) : nil)
         let response: KnowledgeCurationResponse = try await mutate("knowledge.source.curate", parameters: Params(operation: operation, producer: Producer(actor: "user"), items: [item]), commandID: commandID)
         guard response.outcomes.count == 1, response.outcomes[0].recordId == sourceID,
@@ -211,9 +211,12 @@ final class KnowledgeRPCClient {
               value.jobs.allSatisfy({ $0.sourceId == sourceID && ["summary", "tags"].contains($0.operation) && ["running", "done", "failed"].contains($0.status) }) else { throw invalidResponse() }
         return value
     }
-    func triage(sourceID: String, expectedRevision: String) async throws -> KnowledgeTriageResult {
-        struct Params: Encodable { let sourceId: String; let expectedRevision: String }
-        return try await mutate("knowledge.source.triage", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision))
+    func assess(sourceID: String, expectedRevision: String, assessor: KnowledgeSourceAssessor) async throws -> KnowledgeSourceAssessmentResult {
+        struct Params: Encodable { let sourceId: String; let expectedRevision: String; let assessor: KnowledgeSourceAssessor }
+        let value: KnowledgeSourceAssessmentResult = try await mutate("knowledge.source.assess", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision, assessor: assessor))
+        guard value.source.id == sourceID, value.source.revisionId != expectedRevision,
+              value.assessment.recommendation.map({ [.pending, .retained, .archived].contains($0) }) ?? true else { throw invalidResponse() }
+        return value
     }
     func correct(id: String, expectedRevision: String, replacement: KnowledgeRecordDraft, relation: KnowledgeRelation, confirmedByUser: Bool) async throws -> KnowledgeMutationResult {
         struct Params: Encodable { let recordId: String; let expectedRevision: String; let replacement: KnowledgeRecordDraft; let relation: KnowledgeRelation; let confirmedByUser: Bool }

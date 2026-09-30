@@ -93,13 +93,16 @@ revision fails with `conflict` so the client reloads the first page.
 `curate`) writes **interpretation** onto an exact source revision: `summary`
 (text the caller produced, with its declared `full`/`sampled` coverage), `tags`
 (a selection of active vocabulary IDs), `verdict` (`evergreen`, `dated`,
-`superseded` with the entry that replaces it, or `archive`), `placement`
+`superseded` with the entry that replaces it, or an explicit clear), `placement`
 (scope and/or admission) and `relation` (add or remove an edge to another
 entry). One batch carries one operation and 1..25 items. The owner derives every
 evidence binding itself: a summary's `sourceRevisionId` and `evidenceDigest` are
 computed from the committed record, so a caller can never stamp its own
 provenance onto stored text, and interpretation never replaces captured
-evidence, the original link, or a retained object.
+evidence, the original link, or a retained object. Archiving is admission
+(`archived`), never a verdict; the legacy `archive` verdict remains decodable but
+curation refuses new writes. Clearing a verdict removes it as a new source
+revision.
 
 A batch is not a transaction. Each item is its own receipted mutation whose
 command ID is derived from the batch command and the entry, so:
@@ -244,18 +247,21 @@ owned background work, not a request that waits for a model: the call accepts a
 job and returns its state plus the source's current revision, the model runs
 outside the store lock, and the commit revalidates the exact source revision,
 configuration revision and privacy state before publishing. It uses only
-`KnowledgeConfig.enrichment.model`, a separate `provider/model` setting from
-`observation.model`; unset enrichment is the typed job refusal
-`model-not-configured`, with an actionable `knowledge.config` instruction, and
-never falls back to observation. The enrichment setting round-trips through the
-whole-config `knowledge.config` RPC (the iOS settings sheet preserves it) and
-can be changed by the agent tool action `setEnrichmentModel`. For example, after
-the user-initiated K9 Gateway update, read `knowledge.status.config.revision`,
-then call the agent `knowledge` tool with
-`{action:"setEnrichmentModel", commandId:"knowledge-enrichment-2026-09-29",
+`KnowledgeConfig.knowledgeModel.model`, a separate `provider/model` setting from
+`observation.model`; `knowledgeModel.maxInputChars` and `maxOutputChars` bound
+Knowledge interpretation independently of observation. Unset model configuration
+refuses summary work as `model-not-configured` and never falls back to observation.
+The full `knowledgeModel` object round-trips through the whole-config
+`knowledge.config` RPC. The model can be changed by the agent tool action
+`setKnowledgeModel`. For example, read `knowledge.status.config.revision`, then
+call the agent `knowledge` tool with
+`{action:"setKnowledgeModel", commandId:"knowledge-model-2026-09-29",
 expectedConfigRevision:<current revision>,
-enrichmentModel:"opencode-go/deepseek-v4.1-flash"}`. This plan value is not
-written into the live config by source changes or tests. The job survives a
+knowledgeModel:"opencode-go/deepseek-v4.1-flash"}`. The action retains the
+current limits (or initializes them to 48,000 input and 8,000 output characters).
+This plan value is not written into the live config by source changes or tests.
+The same configured model and limits govern summaries, triage, synthesis,
+reflection, and manual-capture assessment. The job survives a
 dismissed sheet, a backgrounded app and a reconnect, and
 `knowledge.curation.jobs` (agent tool `curationJob`) reports `running`, `done`
 or `failed` with a typed code for one command ID or for one entry. A duplicate
@@ -425,7 +431,7 @@ qualified evidence and a pinned `knowledge.read` continuation (`id`,
 `revisionId`, and `offset`) whenever the evidence section is incomplete; the
 complete record is never available only through tool details. Observation
 defaults to disabled and the store never chooses a provider or model silently. Connector DTOs are operation shapes implemented by the installed connector
-extension. Connection setup owns the selected account, its Raindrop collection-to-scope mapping, and opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it. Raindrop collection routes are edited through the connection's revision-fenced setup/policy command, not duplicated in connector progress state.
+extension. Connection setup owns the selected account, its Raindrop collection-role mapping, and opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it. Raindrop collection routes are edited through the connection's revision-fenced setup/policy command, not duplicated in connector progress state.
 Once `ConnectionOwner` is active, connector actions require an exact
 `connectionId` and Knowledge persists provider progress under that instance
 key, without copying the generic account envelope. Tokens never enter
@@ -445,10 +451,18 @@ reads or sweeps, including a credential disappearing between attempts, clear the
 observation under the captured setup revision rather than leaving a stale ready label.
 `allowWrites`, `paidAccessApproved`, and `recurringApproved` remain
 independent controls and default to false. The Gateway registers `knowledge.v1` typed RPC
-handlers and a bounded first-party `knowledge` retrieval tool. The tool performs explicit
-search/recall/read/list plus typed `connectorSweep` and `synthesis` actions for existing
-Automations; it does not create a scheduler or run journal. Retrieved text is evidence, not
-authorization. A prospective
+handlers and a bounded first-party `knowledge` tool. Connector actions are primitives:
+`connectorDiscover` discovers into the selected connection queue, `connectorQueue` reads a
+bounded metadata page, `ingestItem` saves one identity as an undecided source,
+`connectorAck` moves it to the processed set with a reason, and `raindropMove` uses the
+write-authorized reconciled move owner. They make no admission or scope decisions.
+Automation discovery preserves the recurring-approved gate; X attempts remain bounded and
+paid-gated. Search/recall/read/list and synthesis are also explicit actions; the tool does
+not create a scheduler or run journal. Search, recall, and list hide
+personal-scope sources unless the caller explicitly requests a scope; personal notes and
+observations are unaffected. Search/recall age, freshness, verdict, save-time, and take
+metadata are projected from the returned source record, including archived or pending hits.
+Retrieved text is evidence, not authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
 pinned `ModelRuntime` adapter (the configured model is an explicit
@@ -564,23 +578,35 @@ payload may supply those bytes, which are accepted only when they hash to the
 representation that revision lists. Callers exposing this to an agent must
 translate `conflict` into a typed conflict.
 
-`knowledge.source.triage` reads persisted current interests and publishes a
-separate source derivative only after the retained source is available.
-Generated `summary` text, the `tags` selection and the `verdict` are
-interpretations written through the curation operations above; each carries the
-producer that claimed it and the revision it was bound to, and none of them is
-evidence.
+`knowledge.source.assess` / agent action `assessSource` assesses one exact source
+revision with `assessor: "model"` (the explicitly configured Knowledge model)
+or `assessor: "jev"` (the bounded Jev intake rubric/profile and persisted current
+interests). Both record a revisioned assessment derivative and return its
+recommendation, confidence, and classification; assessment never changes source
+admission. Jev refuses personal-scope sources before reserving the shared monthly
+ledger. It reserves against the same ledger as tagging and legacy intake
+immediately before dispatch, marks the reservation dispatched at the HTTP
+boundary, then settles provider usage or leaves an uncertain dispatch reserved.
+If Jev responds but source persistence fails, known usage settles the attempt. A
+committed source-write receipt is replayed before Jev reservation; a settled
+attempt whose record was not committed requires a new command ID.
+An optional `maxChargeCents` is checked against Jev's conservative per-request
+ceiling; a value below that supported bound is refused before reservation or
+dispatch. Assessing one source does not require Raindrop's legacy batch pilot
+approval. Generated
+`summary` text, `tags` selection, `verdict`, and assessment are interpretations,
+not evidence.
 
 `NoteContent` supports structured field values with exact evidence revisions,
 validity, explicit confirmation, privacy scope, freshness, corrections,
 supersession, and preserved contrary evidence. Personal/research scope remains
 the sharing authority; `privacyScope` is descriptive metadata, not a second
-sharing system. Assessment/triage is an optional derivative against persisted
-editable `KnowledgeConfig.currentInterests` and uses an injected adapter owned
-by the existing model boundary. The `knowledge.source.triage` action names an
-exact source revision; it does not accept an unpersisted interest list. Capture
-is durable even when that adapter fails. Exact source-object reads resolve a
-source record and revision before reading its object; orphan and suppressed
+sharing system. Source assessment uses persisted editable
+`KnowledgeConfig.currentInterests`; neither assessor accepts an unpersisted
+interest list. The assessed source's evidence and configuration are revalidated
+before its derivative is committed. Capture is durable even when an adapter
+fails. Exact source-object reads resolve a source record and revision before
+reading its object; orphan and suppressed
 object hashes are not an object browsing API. Object reads return typed,
 512,000-byte base64 chunks directly through the Gateway boundary rather than
 the ordinary 100,000-character presentation sanitizer; callers must use the
@@ -680,14 +706,12 @@ partial/reference-only (and other transport failures remain failed). Each linked
 Source keeps exact referring POST/REPLY evidence, and synthesis must cite that
 Source separately from X author commentary.
 
-Private bookmark discovery remains separate and supervised through the approved
-`agent_browser` profile. The global `tron-x` skill provides bounded enumeration,
-top-level bookmark membership, page checkpoints, identity/coverage validation,
-and signed-in browser fallback when installed in Tron's user-level skills directory. There is no new
-cookie store, background sync, automatic browser login, or remote mutation.
-Never send known protected content to a public mirror without approval.
-The existing paid `connectorSweep` X path is not selected by this free reader;
-its existing explicit spending gates are unchanged.
+Private X bookmarks are discovered only through the explicitly invoked,
+paid-gated OAuth X connector. The global `tron-x` skill provides bounded
+newest-first queue discovery, page checkpoints, and identity/coverage
+validation. Browser state is never used to enumerate or sync private bookmarks;
+there is no cookie store, background sync, automatic browser login, or remote
+mutation. Never send known protected content to a public mirror without approval.
 
 Focused regressions: `x-public-post.test.ts` covers identity, URL isolation,
 malformed/mismatched/truncated responses, fallback, partial content, cancellation,
@@ -705,7 +729,7 @@ for sessions whose running tool schema has not yet been updated.
 
 ## Connector boundaries
 
-Raindrop reads the official `/rest/v1/raindrops/{collectionId}` endpoint in bounded pages; X reads
+Raindrop reads the official `/rest/v1/raindrops/{collectionId}` endpoint in bounded pages; OAuth X reads
 `/2/users/{userId}/bookmarks` with the provider pagination token. Discovered provider IDs
 and pending metadata are persisted before checkpoint advancement, preventing loss of
 an already-fetched page. Offset pagination can still shift under concurrent remote edits;
@@ -723,7 +747,7 @@ are shape failures, never empty pages. Credential references are admitted only i
 the exact `connector:<provider>:...` namespace; a legacy mismatch requires
 explicit reconfiguration and is never read as a different provider token. When the
 Keychain item for a connection's credential is missing, the connector failure names
-the Mac Keychain service and the exact account to add, never a token.
+the Mac Keychain service and the exact account to add, never a token. X uses OAuth 2.0 Authorization Code with PKCE as a public client: setup requests `tweet.read users.read bookmark.read offline.access`, accepts the exact HTTPS callback URI and a user-pasted redirect URL or code/state, and verifies one-time state before exchange. The client ID is public; no app secret is accepted. The verifier and state are short-lived in Gateway memory. Access and rotating refresh tokens are stored only in the Mac Keychain; refresh-token rotation is written before its access token is used. A refresh checks current connection authority before spending the single-use refresh token; if setup changes during the provider response, the rotated token is still persisted but its access token is not used. X refreshes once when a token is near expiry or an API call returns 401, even when the discovery transport attempt budget is one; failed refresh marks the connection `auth-error` only if its setup revision is still current and requires reconnection. Every actual X API discovery request, including retry/pagination attempts, debits the existing bounded paid-attempt budget immediately before dispatch. `knowledge.x.credits` is a connection-scoped read routed as a Gateway read and drain-allow-listed; it returns the API's `free_balance`, `prepaid_balance`, and `total_balance` as USD balances. The provider's reported `total_balance` is returned as-is after all three balances are validated as finite numbers and free/total are nonnegative; binary floating-point arithmetic is not used to recompute or compare its total. This read does not buy credits or authorize additional discovery spend.
 Paid budgets are rejected until a provider operation has an explicit maintained
 price; approval flags never imply unknown spend. X is not contacted unless both explicit paid-access approval and a positive
 bounded budget are present. Paid qualification is host-owned and requires
@@ -765,15 +789,69 @@ Provider JSON is preserved; HTTP/metadata responses over 2,000,000 bytes and
 agent text over 128,000 bytes fail rather than truncating fields. Narrow pages
 or fetch individual items; a single item over the agent bound is unsupported. Retries honor `Retry-After` and both common rate-limit
 header spellings. Redirects are not followed, and provider failures are
-redacted. This is metadata access, not full article capture, and the existing
-`connectorSweep` remains a lower-level capture helper rather than an assessed
-intake or complete sync. Its connector sources remain pending and inspectable
-through `includePending`; it cannot acknowledge or move a Raindrop item without
-an explicit retained/archived admission from `raindropIntake`. Agent sweeps use
-the same accepted-work owner as RPC runs, so disconnecting a presentation waiter
-does not replay or abandon admitted provider work. Connector identity reuse
+redacted. This is metadata access, not full article capture. `knowledge.connector.discover`
+verifies the provider and discovers bookmarks into the exact connection's queue; it does
+not capture linked pages, create Knowledge sources, decide admission, or move Raindrop
+items. `knowledge.x.credits` reads the OAuth connection's current X developer-platform balance without spending the bookmark-discovery allowance; it returns `freeBalance`, `prepaidBalance`, and `totalBalance` in USD from `GET /2/usage/credits`. The agent-visible `connectorStatus` action (`knowledge.connector.status`)
+reports the connector's remaining X `paidBudgetCents`, not the setup-time cap;
+read it before paid discovery. `knowledge.connector.queue` returns at most 25
+items with ID, URL, title, collection, save time, existing-source indicator and
+admission/scope projection, plus exact source and revision IDs when a source
+exists; it never returns
+provider payload. `knowledge.source.ingest` / agent action `ingestItem` saves one explicitly
+scoped queued item as a source, retaining provider identity/payload and Raindrop
+collection/note provenance, recovering Raindrop save time from that payload, and applying
+the linked-capture safety downgrade. It leaves admission pending and does not acknowledge,
+assess, or decide. `knowledge.connector.ack` requires processed/skipped plus a bounded
+reason, removes the item from pending, persists bounded processed history, and is
+idempotent. Personal scope remains excluded from work retrieval. `raindropIntake` still owns its
+legacy decision and move workflow until C23, but uses the same ingest primitive
+for source capture. Agent sweeps use the same accepted-work owner as RPC runs, so
+disconnecting a presentation waiter does not replay or abandon admitted provider
+work. Connector identity reuse
 resolves through a canonical Knowledge catalog index keyed by
 provider/account/item rather than scanning source pages.
+
+## Ingestion layers and agent routine
+
+Knowledge ingestion has four distinct owners:
+
+- **Connector:** authenticated, bounded provider discovery populates a connection's
+  queue; queue reads expose bounded identity metadata; acknowledgment removes a
+  processed/skipped identity; Raindrop movement is a separate provider effect
+  gated by the current connection's write policy and derived from the source's
+  current admission/scope and mapped collection roles. The move verifies the
+  provider's live collection and accepts any currently mapped non-destination
+  collection as the starting point; unmapped live collections are refused. Connectors do not assess
+  or decide admission/scope.
+- **Ingest:** `knowledge.source.ingest` / `ingestItem` retains one queued identity
+  as a canonical source with provider identity and evidence, save-time recovery,
+  and unsafe-link handling. It is idempotent and leaves admission pending; it
+  neither acknowledges nor decides.
+- **Assessment:** `knowledge.source.assess` / `assessSource` evaluates one exact
+  source revision with Jev or the explicitly configured Knowledge model. It
+  stores a revisioned recommendation, confidence and classification only; it
+  never decides admission. Jev uses the single shared monthly ledger.
+- **Routine:** the editable Tron agent skill `tron-knowledge-ingest` orders
+  discovery, queue inspection, ingest, optional assessment, `curate` admission,
+  authorized Raindrop movement, acknowledgment and reporting. Its collection
+  scope map and workflow are routine configuration, not connector policy or a
+  second ingestion pipeline. It is bounded and manually invoked; it creates no
+  scheduler or run journal.
+
+The store remains authoritative: connector/system writes cannot override a user
+or agent admission or scope decision; connector writer identity is explicit at
+the connector-owned capture call and is never inferred from copied source
+provenance. Mutations remain revision-fenced and receipted; personal sources
+never appear in work retrieval; Jev assessment refuses a source whose current
+scope is personal, before any reservation, and legacy intake routes by the
+source's own scope; provider
+movement requires write permission and an explicit collection destination. The routine's dry run performs no source/admission,
+acknowledgment, remote-move, or paid-assessment effects. It may refresh Raindrop
+queue bookkeeping through free read-only provider discovery, but must not invoke
+paid X discovery; it reports X from its existing queue. Until C23, the legacy
+`knowledge.raindrop.intake` operation remains available and continues using the
+same ingestion primitive.
 
 ## Bounded Raindrop intake
 
@@ -786,10 +864,10 @@ collection cannot reuse the allowance. The selected numeric collection must be
 present in the connection's explicit mapping; an unmapped collection fails
 before credential lookup/provider I/O. Discovery retains no more than the
 selected limit per collection, so shifted provider pages are revisited rather
-than silently skipped. Remote destinations are configured per source collection
-and still require the connection's independent `allowWrites` approval.
+than silently skipped. Remote destinations derive from collection roles and
+still require the connection's independent `allowWrites` approval.
 
-After each Raindrop item's capture, K2 save-time recovery, and existing inline
+After each Raindrop item's shared source ingestion and existing inline
 assessment/admission/move processing settles (a single step on every exit path
 of the item), its latest committed revision enqueues one Gateway-owned summary
 job without waiting for the model when it has readable text. Partial captures —
@@ -801,7 +879,23 @@ derived from the exact source revision; an existing summary with the same
 source-evidence digest and current tag input digest is reused on rerun. Summary
 or tag failure is recorded on that job without rewriting a committed admission;
 an item left pending by its existing assessment remains pending. Other cohort
-items continue. The order differs from the initial K5 draft: K8's existing Jev
+items continue. Intake-owned admission state records a connector producer. The
+Knowledge store is the decision authority: connector/system admission writes and
+placements that would replace a user/agent decision fail with the typed
+`decision-authority` refusal. Connector re-capture and generic record correction
+writes are fenced at the same store boundary. Legacy non-pending admissions
+without connector ownership are conservatively treated as prior decisions; legacy
+scope changes without producer metadata cannot be distinguished from prior
+intake placement. Intake relies on those store refusals to retain an existing
+decision and continues processing an undecided admission in an agent-decided
+scope. A refusal does not turn into a silent no-op; intake reports the preserved
+admission and completes the queue identity when it can establish the authoritative
+record. Focused KnowledgeStore coverage exercises admission writes,
+curation placement, recapture/correction, permitted agent overrides, and
+connector decisions on undecided records. Intake reserves its shared
+monthly Jev attempt before dispatch and marks it dispatched only at the HTTP
+transport boundary; cancellation before that boundary releases the reservation
+so tagging can use the shared budget. The order differs from the initial K5 draft: K8's existing Jev
 admission does not consume summary/tags, and its receipt/budget/move authority
 remains independent of queued enrichment.
 
@@ -820,9 +914,14 @@ It consumes Pi's `ModelRuntime.classify()` over the `typesafe` provider, also
 exposed as the first-party `jev` tool for caller-supplied choice, bool, and score
 questions. This is not chat completion. Pi's provider credential store owns the
 TypeSafe key; there is no connector Keychain copy. Core Knowledge capture and
-retrieval do not require Jev. Each workflow separately owns its disclosure,
-budget, and admission authority; the generic tool cannot inherit the Resources
-pilot allowance.
+retrieval do not require Jev. Tagging, standalone Jev source assessment, and
+Raindrop intake assessment reserve and settle against the same monthly Knowledge
+ledger, keyed by the `typesafe` provider identity. A configured TypeSafe key is
+the consent for this paid work, and the ledger's cap is fixed (user decision,
+2026-09-30); without the key, paid work is refused before provider dispatch.
+Raindrop cohort approvals remain additional per-run item/cent caps and cannot
+enlarge the monthly budget; the generic Jev tool cannot inherit that cohort
+allowance.
 
 The tool requires `maxChargeCents`, checked before Pi classifier dispatch
 against the qualified per-call ceiling of 0.2688 cents: 64k input tokens at
@@ -832,7 +931,7 @@ pricing may differ and can change without a Tron release. Responses include
 actual token usage and fractional-cent estimated cost at Tron's qualified rate,
 not rounded-up workflow reservations. New Knowledge assessments persist that usage and
 published-price estimate on the immutable assessment derivative and attempt
-receipt. Intake reports the approved ceiling, conservative reserved allowance,
+receipt. Intake reports its per-run approved ceiling and conservative allowance,
 selected cohort cap, settled count, known estimated usage cost, and unknown
 usage separately. These are cohort totals; `captured`, `retained`, `archived`,
 `pending`, and `moved` describe this invocation, while `budget` describes the
@@ -842,13 +941,15 @@ known costs are a subtotal when other attempts remain unknown. Pending identitie
 outside the selected cohort are reported separately, not labeled as assessed or
 necessarily metadata-only. An old assessment without usage remains unknown and is
 never backfilled as zero or claimed as provider billing. This is a local estimate guard, not a provider billing
-cap or a durable workflow allowance. The client snapshots and bounds validated
-input before awaits, checks provider credentials before admitting dispatch,
-tracks not-sent versus uncertain outcomes, and never retries a paid request.
-Tron follows Pi's catalog model `jev-latest`; the wire protocol uses `noul` for
-bool questions, while tool answers expose Pi's bool probability and score
-without legacy score legends/probabilities. Knowledge assessments retain their
-existing recorded shape and record fixed local labels plus interest-bound
+cap. Successful calls without usage remain charged at the reserved ceiling, and
+uncertain dispatches keep their shared monthly reservation until reconciled; no
+workflow can refund or bypass that ledger. The client snapshots and bounds
+validated input before awaits, checks provider credentials before admitting
+dispatch, tracks not-sent versus uncertain outcomes, and never retries a paid
+request. Tron follows Pi's catalog model `jev-latest`; the wire protocol uses
+`noul` for bool questions, while tool answers expose Pi's bool probability and
+score without legacy score legends/probabilities. Knowledge assessments retain
+their existing recorded shape and record fixed local labels plus interest-bound
 profile/rubric versions, a digest of the complete captured
 input, a digest of the exact bounded model state, and `full` versus `sampled`
 coverage. Complete readable evidence is sent when it fits. Oversized evidence is
@@ -901,18 +1002,21 @@ receives a durable
 are absent from normal retrieval but can be explicitly listed/read/restored
 without using privacy suppression. Connector captures awaiting admission are
 also absent from normal retrieval; inspection requires the separate
-`includePending` audit/intake flag. Generic `connectorSweep` cannot move a
-pending source. Only after the local revision commits and the exact source head,
-admission, identity, retained object, and provider collection are revalidated
-does the existing Raindrop preflight/receipt/PUT/read-back path attempt the
-configured Agent Sorted move. Uncertain provider effects remain pending for
-reconciliation. Offset pages are not treated as an atomic snapshot: each
+`includePending` audit/intake flag. Generic connector discovery only queues provider identities; it cannot capture or move a
+source. The independent `raindropMove` primitive requires current connection write
+permission, a mapped home consistent with the source decision, and an exact retained/archived
+captured source revision; it reuses the durable remote-effect receipt and reconciliation
+path. Only intake,
+after the local revision commits and the exact source head, admission, identity,
+retained object, and provider collection are revalidated, can use the existing
+Raindrop preflight/receipt/PUT/read-back path to attempt the configured Agent
+Sorted move. Uncertain provider effects remain pending for reconciliation. Offset pages are not treated as an atomic snapshot: each
 bounded run revisits page zero and uses durable IDs, so moved items shrinking
 earlier pages cannot silently skip later entries. Malformed read envelopes are
 rejected locally before credential lookup or provider HTTP; provider failures
 remain sanitized.
-For Raindrop, `ConnectionInstance.raindropCollections` is the sole routing configuration: 1..64 unique numeric collection IDs map to `research` or `personal`, with an optional destination per source collection. Setup completion installs the mappings; `connections.policy.update` can replace them only against the exact `setupRevision`. Raindrop no longer needs a single selected collection in the generic connector scope. Intake requires a mapped collection, and when several are configured the caller must select one; an unmapped ID is rejected before discovery. Dry-run and pending results filter to that collection. Provider page receipts include the collection ID; offset discovery restarts at page zero because moving bookmarks shifts Raindrop's pages, while durable pending/captured identities are tracked by their last collection. The returned item's collection, when present, must match the requested collection; if absent, the exact collection endpoint is the provenance.
+For Raindrop, `ConnectionInstance.raindropCollections` is the sole routing configuration: 1..64 unique numeric collection IDs carry `research`, `personal`, `archive`, or `triage` roles. There may be at most one home for each of research, personal, and archive; triage may have multiple inboxes. Setup completion installs the mappings; `connections.policy.update` replaces them only against the exact `setupRevision`. An unmapped collection is rejected before provider discovery. Provider page receipts include the collection ID; offset discovery restarts at page zero because moving bookmarks shifts Raindrop's pages, while durable pending/captured identities are tracked by their last collection. The returned item's collection, when present, must match the requested collection; if absent, the exact collection endpoint is the provenance. Queue projections include the collection role and, for an existing source, its authoritative scope/admission.
 
-Research retains the existing complete-capture → Jev assessment → admission path, with its pilot/receipt budget isolated by collection. Personal uses the original link, title, best-effort preview, and saved Raindrop note; failed or partial page fetches do not block `retained` admission and do not call Jev. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
+Research and personal homes ingest with their role as Knowledge scope. Triage inboxes require the routine to choose and pass a scope explicitly; archive-role collections are never ingested. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope only when there is no authoritative user/agent admission or placement; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
 
-A remote move is authorized only by the existing connection `allowWrites` policy and the selected source collection's optional mapped destination, revalidated against the current setup revision at preflight and effect admission. No destination on a mapping means no move; another collection's destination cannot authorize it. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.
+`raindropMove` accepts no destination from its caller. It derives archive-role home for an archived source and otherwise the home matching the source's Knowledge scope, refusing when that home is unmapped. If the source already resides in that home it returns typed `already-home` success without provider mutation. Remote moves still require `allowWrites`, exact source/object authority, the current setup revision, a durable effect receipt, and provider read-back reconciliation. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.

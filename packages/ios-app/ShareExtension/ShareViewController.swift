@@ -1,5 +1,6 @@
 import UIKit
 import UniformTypeIdentifiers
+import TronMobileCore
 
 @MainActor
 protocol ShareAppOpening {

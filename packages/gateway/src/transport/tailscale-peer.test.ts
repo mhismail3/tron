@@ -63,6 +63,13 @@ describe("Tailscale peer path lookup", () => {
     expect(await paths.lookup("100.64.0.77")).toEqual({ peerPath: "offline", peerRelay: "" });
   });
 
+  it.each([undefined, null, "false", 0])("keeps a peer with an unknown Online value unknown (%s)", async (online) => {
+    const status = JSON.stringify({ Peer: { peer: { TailscaleIPs: ["100.64.0.88"], Online: online } } });
+    const run = vi.fn(async (): Promise<TailscaleStatusResult> => ({ code: 0, timedOut: false, output: status }));
+    expect(await new TailscalePeerPaths(run, () => 0).lookup("100.64.0.88"))
+      .toEqual({ peerPath: "unknown", peerRelay: "" });
+  });
+
   it("reads loopback and LAN addresses, which are not Tailscale peers, as unknown without a CLI run", async () => {
     const run = ok();
     const paths = new TailscalePeerPaths(run, () => 0);

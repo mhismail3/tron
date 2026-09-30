@@ -5,6 +5,9 @@ import SwiftUI
 /// chrome so native text readers cannot inherit an opaque toolbar or bottom bar.
 struct TronDocumentSheet<Content: View>: View {
     let title: String
+    /// File previews read at full height; nested instruction readers follow
+    /// their parent sheets and start at medium.
+    var detents: Set<PresentationDetent> = [.large]
     @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
@@ -39,7 +42,7 @@ struct TronDocumentSheet<Content: View>: View {
                 .tint(resolvedAccent)
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.large])
+        .presentationDetents(detents)
         .presentationDragIndicator(.hidden)
         .tronPresentation()
     }

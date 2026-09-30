@@ -209,7 +209,8 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   grace and runtime disposal behavior, and unresolved runs recover as interrupted
   or `outcomeUnknown` rather than a successful terminal receipt. Drain logs include
   blocker session, category, state and age. Persistence diagnostics are logged to
-  the Gateway log, whose active/rotated files remain bounded to one MiB each.
+  the Gateway log, whose eight active/rotated segments are bounded to 5 MiB
+  each (40 MiB total).
 
 ## Frame compression
 
@@ -356,7 +357,7 @@ keeps today's uncompressed frames.
 | `http.upgrade` with `outcome=rejected` | The Gateway refused the upgrade; `reason` names which bound or phase did. `phaseReached=request` means before credentials (`warming_up`, `shutting_down`, `request_capacity`, `unexpected_path`, `unreadable_request`), `auth` means the credential or the readiness recheck (`unauthenticated`, `warming_up`, `shutting_down`, `authentication_timeout`) or capacity (`connection_capacity`), `handshake` means the WebSocket handshake itself was refused, `hello` means a hello arrived and was refused (`hello_required`, `protocol_mismatch`) or a frame was (`invalid_frame`: a first frame that is not JSON, or one the WebSocket library itself refuses as oversized or malformed). |
 | `http.upgrade` with `outcome=abandoned` and `phaseReached=auth` | The attempt ended while the credential was still being read: `reason=peer_closed` means the peer left, `shutting_down` means a Gateway shutdown destroyed the socket. A peer that left is not a refusal: check the phone's records at that instant before the Gateway's readiness. |
 | `http.upgrade` with `outcome=opened` and `authMs` or `helloMs` near or over `UPGRADE_SLOW_WARNING_MS` (1,000 ms) | The connection needed a second or more to become usable. The record is a warning whenever the attempt took at least 1,000 ms from the TCP accept (`acceptToUpgradeMs + authMs + handshakeMs + helloMs`), whatever the phase that was slow. `authMs` is the credential read (device-store mutex); `helloMs` runs from handshake completion to the Gateway processing the hello frame, so it includes the peer's own send delay and the network path, not only the Gateway's handling. Check `gateway.event-loop-delay` and `gateway.resources` around the same instant; the peer's hello key joins this record to its phone records. |
-| `connection.inbound-silent` | The socket stayed open, received no frame for at least 12 s, and liveness was expected: either a ping the Gateway sent went unanswered or the client pings on its own and went quiet. `peerPath=relay` or `offline` points at the Tailscale path (`peerRelay` names the relay carrying it, empty for a direct or offline peer); `direct` with a silent socket points at the phone or its process; `unknown` means there is no Tailscale answer for that address (loopback/LAN, no CLI, or a status timeout) and says nothing about the path. The paired `connection.inbound-resumed`, when the socket survives the episode, gives its `silentMs`. Repeated silences at `peerPath=relay`/`offline` are a Tailscale flap (see "Tailscale flaps"). |
+| `connection.inbound-silent` | The socket stayed open, received no frame for at least 12 s, and liveness was expected: either a ping the Gateway sent went unanswered or the client pings on its own and went quiet. `peerPath=relay` or `offline` points at the Tailscale path (`peerRelay` names the relay carrying it, empty for a direct or offline peer); `direct` with a silent socket points at the phone or its process; `unknown` means there is no usable Tailscale answer for that address (loopback/LAN, no CLI, a status timeout, or a missing/malformed `Online` value) and says nothing about the path. The paired `connection.inbound-resumed`, when the socket survives the episode, gives its `silentMs`. Repeated silences at `peerPath=relay`/`offline` are a Tailscale flap (see "Tailscale flaps"). |
 | `http.upgrade` with `reason=authentication_timeout` | A pending upgrade exceeded its authentication deadline, so the Gateway refused it (`outcome=rejected`, `phaseReached=auth`). The callback is fenced and its cancellable credential wait is retired. |
 | `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
 | `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |
@@ -535,7 +536,13 @@ rekey, fork, delete) apply the row at the same boundary that commits the change.
 A recursive `fs.watch` on the sessions root treats each event as a hint and
 re-reads that path once per `CATALOG_EVENT_DEBOUNCE_MS` (250 ms) quiet spell,
 capped at `CATALOG_EVENT_MAX_WAIT_MS` (1 s) so a writer that never goes quiet
-still reaches its row. A whole-folder reconcile every
+still reaches its row. Pending per-path timers are capped at
+`CATALOG_EVENT_PENDING_PATH_LIMIT` (256); a burst beyond that bound clears the
+individual hints and runs one whole-folder reconcile. Events arriving during
+that overflow pass use the unnamed-event debounce (250 ms quiet spell, capped at
+1 s), rather than triggering another pass per event. Overflow reconciles are
+marked `trigger=watcher-overflow` in `catalog.reconciled`; rows covered by that
+cut produce no per-row `catalog.changed` records. A whole-folder reconcile every
 `CATALOG_RECONCILE_INTERVAL_MS` (30 minutes) is the backstop for what the
 watcher cannot see — a dropped event, a watcher that had stopped, a root that
 moved back — and runs in bounded batches that yield to the background-work

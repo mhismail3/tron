@@ -94,6 +94,23 @@ describe("session transcript paging", () => {
       expect(JSON.stringify(replay)).not.toContain("private fixture");
     } finally { await workspace.dispose(); await rm(root, { recursive: true, force: true }); }
   });
+  // Failure mode: a read-only case label inserted inside the mutating Knowledge
+  // group silently routed every app edit around the Gateway receipt, so a
+  // retried command ran twice and was invisible to the restart drain.
+  it("routes Knowledge edits through the Gateway command receipt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-service-knowledge-receipts-"));
+    try {
+      const invoke = vi.fn(async (action: { operation: string }) => ({ operation: action.operation }));
+      const service = new GatewayService({ config: { tronHome: root }, sessions: {}, receipts: new CommandReceiptStore(root), knowledge: { invoke }, updateService: {}, iosDeviceInstallService: {}, gitWorktrees: {}, workspaceInspector: {}, providerUsage: {} } as unknown as GatewayServiceDependencies);
+      const edits = ["knowledge.config", "knowledge.source.take", "knowledge.source.curate", "knowledge.source.admission", "knowledge.source.assess", "knowledge.note.create", "knowledge.correction", "knowledge.forget", "knowledge.exclusion", "knowledge.source.ingest", "knowledge.connector.ack"];
+      for (const method of edits) {
+        const params = { commandId: `receipt-${method}` };
+        await service.invoke(client, method, params);
+        await service.invoke(client, method, params);
+        expect(invoke.mock.calls.filter(([action]) => action.operation === method), method).toHaveLength(1);
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("publishes durable self-revocation before install cleanup and preserves idempotence", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-service-revoke-"));
     let releaseCleanup: (() => void) | undefined;

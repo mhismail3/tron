@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 struct GatewayRuntimeIdentity: Codable, Hashable, Sendable {
     let sourceRevision: String?

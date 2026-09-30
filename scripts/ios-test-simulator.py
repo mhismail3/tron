@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Own the repository's iOS test resources: simulators, lanes, runs and products.
 
-Provisioning, releasing and sweeping own the simulators a test command uses;
+`lane` selects the one lane a command of any iOS test tool uses;
+provisioning, releasing and sweeping own the simulators a test command uses;
 memory admission refuses a boot the Mac cannot afford before it happens; the
-`simulators` view reports everything that holds memory; and pruning reclaims the
-runs and products finished commands leave behind.
+`simulators` view reports everything that holds memory; pruning reclaims the
+runs and products finished commands leave behind; and `latest-run` names one
+worktree's and lane's newest run in the shared results root.
 """
 
 from __future__ import annotations
@@ -460,6 +462,105 @@ def lane_label(directory: Path, default_state_dir: Path | None = None) -> str:
 
 def same_path(first: Path, second: Path) -> bool:
     return os.path.realpath(first) == os.path.realpath(second)
+
+
+# The one lane selection every iOS test tool - the runner, the profiler and the
+# Gateway E2E harness - asks for, so one worktree and one selection name one
+# lane in all three. A lane name becomes `<lane root>/ios-test-NAME` and the
+# device `Tron iOS Tests (NAME)`, so it cannot start with a dot (see
+# ADMISSION_LOCK_NAME) or contain a path separator.
+DEFAULT_DEVICE_NAME = "Tron iOS Tests"
+LANE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+IDENTITY = Path(__file__).resolve().parent / "ios-test-build-identity.py"
+PRE_LANE_OVERRIDES = ("TRON_IOS_TEST_STATE_DIR", "TRON_IOS_TEST_DEVICE_NAME")
+
+
+class LaneSelectionError(RuntimeError):
+    """The requested lane is ambiguous, not a lane name, or cannot be derived."""
+
+
+class LaneSelection(NamedTuple):
+    label: str
+    state_dir: Path
+    device_name: str
+    lane_root: Path
+    default_state_dir: Path
+
+
+def worktree_lane(worktree: Path) -> str:
+    """The lane a checkout uses when nothing selects one.
+
+    The primary checkout keeps the default lane. A linked worktree gets the lane
+    named by its worktree key - the key that also names its test products and
+    its Gateway E2E fixture - so parallel worktrees never contend for one lease;
+    memory admission and the sweep's lane removal - idle for the TTL, or its
+    worktree deleted - bound how many such lanes exist.
+    """
+    located = subprocess.run(
+        ["git", "-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+    )
+    directories = located.stdout.splitlines()
+    if located.returncode != 0 or len(directories) != 2:
+        detail = located.stderr.strip().splitlines()
+        raise LaneSelectionError(
+            f"cannot tell whether {worktree} is the primary checkout or a linked worktree"
+            + (f": {detail[-1]}" if detail else "")
+        )
+    if same_path(Path(directories[0]), Path(directories[1])):
+        return "default"
+    keyed = subprocess.run(
+        [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(worktree)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+    )
+    if keyed.returncode != 0:
+        raise LaneSelectionError(f"cannot derive the worktree key of {worktree}: {keyed.stderr.strip()}")
+    return keyed.stdout.strip()
+
+
+def select_lane(worktree: Path, requested: str | None) -> LaneSelection:
+    """The lane a command in `worktree` uses.
+
+    In order: `--lane NAME` or TRON_IOS_TEST_LANE, which must agree; then the
+    pre-lane TRON_IOS_TEST_STATE_DIR and TRON_IOS_TEST_DEVICE_NAME, which
+    describe the default lane and so select it (CI and profiling lanes set
+    them); then this checkout's own lane. `default` names the default lane. A
+    named lane refuses the pre-lane overrides rather than guess which spelling
+    was meant.
+    """
+    environment_lane = os.environ.get("TRON_IOS_TEST_LANE") or None
+    if requested is not None and environment_lane is not None and requested != environment_lane:
+        raise LaneSelectionError(f"--lane {requested} conflicts with TRON_IOS_TEST_LANE={environment_lane}")
+    state_override = os.environ.get("TRON_IOS_TEST_STATE_DIR") or None
+    device_override = os.environ.get("TRON_IOS_TEST_DEVICE_NAME") or None
+    default_state_dir = Path(state_override) if state_override else Path.home() / ".tron/internal/ios-test"
+    lane_root = Path(os.environ.get("TRON_IOS_TEST_DISCOVERY_ROOT") or default_state_dir.parent)
+    name = requested or environment_lane
+    if name is None:
+        name = "default" if state_override or device_override else worktree_lane(worktree)
+    if name == "default":
+        return LaneSelection(
+            "default", default_state_dir, device_override or DEFAULT_DEVICE_NAME, lane_root, default_state_dir,
+        )
+    if not LANE_NAME_PATTERN.fullmatch(name):
+        raise LaneSelectionError(f"invalid lane name: {name}")
+    for variable in PRE_LANE_OVERRIDES:
+        if os.environ.get(variable):
+            raise LaneSelectionError(f"--lane {name} cannot be combined with {variable}")
+    return LaneSelection(
+        name, lane_root / f"{LANE_DIRECTORY_PREFIX}-{name}", f"{DEFAULT_DEVICE_NAME} ({name})",
+        lane_root, default_state_dir,
+    )
+
+
+def print_lane(arguments: argparse.Namespace) -> int:
+    """One field per line, in LaneSelection order, for the shell tools to read."""
+    selection = select_lane(arguments.worktree, arguments.lane)
+    fields = [str(value) for value in selection]
+    if any("\n" in field for field in fields):
+        raise LaneSelectionError("a lane path or device name contains a newline")
+    print("\n".join(fields))
+    return 0
 
 
 def human_size(size: int) -> str:
@@ -1025,18 +1126,29 @@ def sweep(arguments: argparse.Namespace) -> int:
     return DESTINATION_EXIT if failures else 0
 
 
-def expiry_of(marker_path: Path, now: float) -> str:
+def expiry_of(marker_path: Path, now: float, default_state_dir: Path) -> str:
     """Why a lane is or is not due for removal.
 
     "no-marker" means there is nothing that proves this directory is ours:
     marker-less state is never removed, and the default lane's directory exists
-    as soon as any command creates it, before it has a simulator. "undated"
-    means a marker written before lanes recorded their last use; it is kept
-    until a command uses the lane and dates it.
+    as soon as any command creates it, before it has a simulator.
+    "worktree-deleted" means the worktree that created the lane is gone: every
+    linked worktree has a lane of its own, so its simulator would otherwise
+    outlive it for the whole idle period. The default lane is exempt - its
+    marker names whichever checkout first created it - and a later command in a
+    named lane simply provisions it again. "undated" means a marker written
+    before lanes recorded their last use; it is kept until a command uses the
+    lane and dates it.
     """
     marker = load_marker(marker_path)
     if marker is None:
         return "no-marker"
+    worktree = marker.get("worktree")
+    if (
+        isinstance(worktree, str) and worktree and not Path(worktree).exists()
+        and lane_label(marker_path.parent, default_state_dir) != "default"
+    ):
+        return "worktree-deleted"
     last_used = marker.get("last_used_epoch_seconds")
     if not isinstance(last_used, (int, float)) or isinstance(last_used, bool):
         return "undated"
@@ -1072,21 +1184,25 @@ def remove_lane(directory: Path, arguments: argparse.Namespace) -> None:
     shutil.rmtree(directory)
 
 
-def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
-    """Remove a lane unused for longer than the TTL.
+REMOVABLE_EXPIRY = ("expired", "worktree-deleted")
 
-    Returns "expired", or why not: "fresh", "undated", "no-marker", "busy" (a
+
+def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
+    """Remove a lane unused for longer than the TTL, or whose worktree is gone.
+
+    Returns "expired" or "worktree-deleted", or why not: "fresh", "undated",
+    "no-marker", "busy" (a
     live process holds the lease), "skipped" (an unreadable marker or an unsafe
     directory) or "failed". A lane the file system refuses to remove is reported
     as "failed" and the sweep carries on with the other lanes: removal races a
     command that is provisioning the same lane, and the sweep must survive it.
     """
     try:
-        outcome = expiry_of(marker_path, time.time())
+        outcome = expiry_of(marker_path, time.time(), arguments.default_state_dir)
     except DestinationError as error:
         print(f"warning: skipping {marker_path}: {error}", file=sys.stderr)
         return "skipped"
-    if outcome != "expired":
+    if outcome not in REMOVABLE_EXPIRY:
         return outcome
     with lease_hold(marker_path.parent / LEASE_NAME) as held:
         if not held:
@@ -1094,8 +1210,8 @@ def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
         # Under the lease the lane cannot start a command that would refresh it,
         # so this second reading decides.
         try:
-            outcome = expiry_of(marker_path, time.time())
-            if outcome != "expired":
+            outcome = expiry_of(marker_path, time.time(), arguments.default_state_dir)
+            if outcome not in REMOVABLE_EXPIRY:
                 return outcome
             remove_lane(marker_path.parent, arguments)
         except (DestinationError, OSError) as error:
@@ -1103,8 +1219,9 @@ def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
             # file that vanished, or a state directory the sweep cannot delete.
             print(f"warning: could not remove lane {marker_path.parent}: {error}", file=sys.stderr)
             return "failed"
-    print(f"removed lane {lane_label(marker_path.parent)} ({marker_path.parent})")
-    return "expired"
+    reason = "its worktree no longer exists" if outcome == "worktree-deleted" else "unused for longer than the TTL"
+    print(f"removed lane {lane_label(marker_path.parent, arguments.default_state_dir)} ({marker_path.parent}): {reason}")
+    return outcome
 
 
 def remove_lane_command(arguments: argparse.Namespace) -> int:
@@ -1176,11 +1293,36 @@ def run_attribution(run: Path) -> tuple[str | None, str, float]:
     )
 
 
-def remove_dangling_latest(root: Path) -> None:
-    latest = root / "latest"
-    if latest.is_symlink() and not latest.exists():
-        latest.unlink()
-        print(f"removed the dangling results symlink {latest}")
+def latest_run(arguments: argparse.Namespace) -> int:
+    """Print the newest run this worktree started in this lane, or nothing.
+
+    The results root is shared by every worktree and lane, so the latest run
+    is resolved from each run's own owner rather than kept as one pointer in the
+    root, which named whichever run finished last anywhere (W-21, issue #101).
+    Runs in a lane never overlap - the lane's lease serializes them - so the
+    newest start is the newest run; the directory's modification time orders two
+    runs that started in the same second.
+    """
+    root = arguments.results_root
+    if not root.is_dir():
+        return 0
+    worktree = os.path.realpath(arguments.worktree)
+    newest: tuple[float, int, Path] | None = None
+    for run in root.iterdir():
+        if run.is_symlink() or not run.is_dir():
+            continue
+        owner, lane, started = run_attribution(run)
+        if owner is None or os.path.realpath(owner) != worktree or lane != arguments.lane:
+            continue
+        try:
+            changed = run.stat().st_mtime_ns
+        except OSError:
+            continue
+        if newest is None or (started, changed) > newest[:2]:
+            newest = (started, changed, run)
+    if newest is not None:
+        print(newest[2])
+    return 0
 
 
 def prune_runs(root: Path) -> int:
@@ -1218,7 +1360,6 @@ def prune_runs(root: Path) -> int:
                 f"removed result run {run.name} of {worktree} "
                 f"({human_duration(int(now - started))} old, beyond the newest {RUNS_KEPT_PER_WORKTREE})"
             )
-    remove_dangling_latest(root)
     return failures
 
 
@@ -1290,7 +1431,6 @@ def clean_runs(arguments: argparse.Namespace) -> int:
         except OSError as error:
             raise DestinationError(f"could not remove the result run {run}: {error}") from error
         removed += 1
-    remove_dangling_latest(root)
     print(f"removed {removed} result run(s) of {worktree} in lane {arguments.lane}")
     return 0
 
@@ -1393,8 +1533,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "command",
         choices=(
-            "provision", "validate", "status", "delete", "state", "shutdown", "sweep", "lanes", "lane-remove",
-            "simulators", "prune", "clean-runs", "development-uptime",
+            "provision", "validate", "status", "delete", "state", "shutdown", "sweep", "lane", "lanes",
+            "lane-remove", "simulators", "prune", "clean-runs", "latest-run", "development-uptime",
         ),
     )
     parser.add_argument("--marker", type=Path)
@@ -1405,7 +1545,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lane")
     parser.add_argument("--results-root", type=Path)
     parser.add_argument("--products-root", type=Path)
-    parser.add_argument("--development-state", required=True, type=Path)
+    parser.add_argument("--development-state", type=Path)
     parser.add_argument("--ephemeral", action="store_true")
     parser.add_argument("--discovery-root", type=Path)
     parser.add_argument("--default-state-dir", type=Path)
@@ -1427,6 +1567,19 @@ def parse_args() -> argparse.Namespace:
         default=float(os.environ.get("TRON_IOS_TEST_SWEEP_DEADLINE_SECONDS", "300")),
     )
     arguments = parser.parse_args()
+    if arguments.command == "lane":
+        # Selection only: it reads no simulator, so it needs no Development state.
+        if arguments.worktree is None:
+            parser.error("lane requires --worktree")
+        return arguments
+    if arguments.command == "latest-run":
+        # Read-only over the results root: no simulator, no Development state.
+        for required in ("results_root", "worktree", "lane"):
+            if getattr(arguments, required) is None:
+                parser.error(f"latest-run requires --{required.replace('_', '-')}")
+        return arguments
+    if arguments.development_state is None:
+        parser.error("the following arguments are required: --development-state")
     if arguments.shutdown_timeout_seconds <= 0 or arguments.sweep_deadline_seconds <= 0:
         parser.error("deadlines must be positive")
     if arguments.admission_wait_seconds <= 0:
@@ -1443,7 +1596,7 @@ def parse_args() -> argparse.Namespace:
             parser.error(f"{arguments.command} requires --discovery-root")
         if arguments.marker is not None:
             parser.error(f"{arguments.command} does not take --marker")
-        if arguments.command in ("lanes", "simulators") and arguments.default_state_dir is None:
+        if arguments.default_state_dir is None:
             parser.error(f"{arguments.command} requires --default-state-dir")
         return arguments
     if arguments.command == "lane-remove":
@@ -1489,6 +1642,8 @@ SHUTDOWN_OUTCOME = {
 def main() -> int:
     arguments = parse_args()
     try:
+        if arguments.command == "lane":
+            return print_lane(arguments)
         if arguments.command == "sweep":
             return sweep(arguments)
         if arguments.command == "lanes":
@@ -1501,6 +1656,8 @@ def main() -> int:
             return prune_command(arguments)
         if arguments.command == "clean-runs":
             return clean_runs(arguments)
+        if arguments.command == "latest-run":
+            return latest_run(arguments)
         if arguments.command == "development-uptime":
             return development_uptime(arguments)
         if arguments.command == "state":
@@ -1538,6 +1695,9 @@ def main() -> int:
         else:
             print(details["udid"])
         return 0
+    except LaneSelectionError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     except LaneBusyError as error:
         print(f"error: {error}", file=sys.stderr)
         return BUSY_EXIT

@@ -34,17 +34,19 @@ status=$?
 set -e
 
 mkdir -p "$(dirname "$metrics_path")"
-TRON_CI_STATUS="$status" TRON_CI_RESULTS="$TRON_IOS_TEST_RESULTS_DIR" TRON_CI_METRICS="$metrics_path" \
+# The checkpoint's run is this checkout's newest in the default lane, which the
+# TRON_IOS_TEST_STATE_DIR above selects.
+run="$(python3 "$ROOT/scripts/ios-test-simulator.py" latest-run \
+  --results-root "$TRON_IOS_TEST_RESULTS_DIR" --worktree "$ROOT" --lane default)" || run=""
+TRON_CI_STATUS="$status" TRON_CI_RUN="$run" TRON_CI_METRICS="$metrics_path" \
 python3 - <<'PY'
 import json, os
 from pathlib import Path
-results = Path(os.environ["TRON_CI_RESULTS"])
-latest = results / "latest"
 metadata = {}
 summary = {}
 processes = {}
-if latest.is_symlink():
-    run = latest.resolve()
+if os.environ["TRON_CI_RUN"]:
+    run = Path(os.environ["TRON_CI_RUN"])
     try: metadata = json.loads((run / "metadata.json").read_text())
     except (OSError, json.JSONDecodeError): pass
     try: summary = json.loads((run / "summary.json").read_text())

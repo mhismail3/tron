@@ -534,7 +534,7 @@ struct KnowledgeDashboardView: View {
             TronDashboardFilterOption(title: "All scopes", selected: scope == nil, accent: .tronKnowledge,
                                       inactiveAccent: .tronSlate) { setActiveScope(nil) }
             ForEach(KnowledgeScope.allCases, id: \.self) { value in
-                TronDashboardFilterOption(title: value == .personal ? "Moose's Corner" : value.label, selected: scope == value, accent: .tronKnowledge,
+                TronDashboardFilterOption(title: value.label, selected: scope == value, accent: .tronKnowledge,
                                           inactiveAccent: .tronSlate) { setActiveScope(value) }
             }
         }
@@ -1314,6 +1314,7 @@ struct KnowledgeDetailView: View {
     @State private var scopeSaving = false
     @State private var verdictError: String?
     @State private var retryVerdict: KnowledgeSourceVerdict?
+    @State private var retryClearVerdict = false
     @State private var retryReplacementID: String?
     @State private var retryScope: KnowledgeScope?
     @State private var retryAdmission: KnowledgeSourceAdmission?
@@ -1463,7 +1464,7 @@ struct KnowledgeDetailView: View {
                             if editing, case .note(let note) = currentRecord.content { noteBody = note.body ?? "" }
                         }
                     }
-                    if currentRecord.kind == .source { Button("Assess with current interests", systemImage: "sparkles") { triage() } }
+                    if currentRecord.kind == .source { Button("Assess with current interests", systemImage: "sparkles") { assessSource() } }
                     if let observation = observationPresentation {
                         Button("Reflect bounded handoff", systemImage: "sparkles") { reflect(observation.observation) }
                             .disabled(mutationInFlight)
@@ -1675,95 +1676,126 @@ struct KnowledgeDetailView: View {
                 }
             }.padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
         }
-        TronSettingsGroup("Tags and verdict", accent: .tronKnowledge) {
-            VStack(alignment: .leading, spacing: TronSpacing.md) {
-                if taggingJob?.status == "running" {
-                    Label("Updating tags", systemImage: "arrow.triangle.2.circlepath")
-                        .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-                } else if taggingJob?.status == "failed" || retagError != nil {
-                    HStack {
-                        Text(retagError ?? taggingJob?.reason ?? "Re-tagging failed; your current tags are unchanged.")
-                            .font(TronTypography.caption).foregroundStyle(Color.tronAmber)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                        Button("Retry tagging") { startRetag() }
-                            .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
-                            .disabled(!admitsOrigin)
-                    }
-                } else if tagsStale {
-                    Text("Needs re-tagging").font(TronTypography.caption).foregroundStyle(Color.tronAmber)
-                }
-                sourceTagLabels(source)
-                Menu {
-                    ForEach(KnowledgeSourceVerdict.allCases, id: \.self) { verdict in
-                        Button(verdict.label) {
-                            if verdict == .superseded { choosingReplacement = true }
-                            else { choosingReplacement = false; setVerdict(verdict) }
+        TronSettingsGroup("Tags", accent: .tronKnowledge) {
+            VStack(spacing: 0) {
+                TronValueRow(icon: "tag", title: "Tags", detail: tagStatus(source), accent: .tronKnowledge) {
+                    if taggingJob?.status == "running" {
+                        TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14)
+                    } else if taggingJob?.status == "failed" || retagError != nil || tagsStale {
+                        Button { startRetag() } label: {
+                            TronInlineActionLabel(taggingJob?.status == "failed" || retagError != nil ? "Retry tagging" : "Re-tag", accent: .tronKnowledge)
                         }
+                        .buttonStyle(.plain)
+                        .disabled(!admitsOrigin)
                     }
-                } label: {
-                    TronSettingsRow(icon: "checkmark.seal", title: "Verdict", subtitle: source.verdict?.verdict.label ?? "Not judged yet", accent: .tronKnowledge) {
-                        if verdictSaving { TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14) }
+                }
+                let labels = sourceTagLabelTexts(source)
+                if !labels.isEmpty {
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    KnowledgeTagChips(labels: labels)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                        .padding(.vertical, TronSpacing.lg)
+                }
+            }
+        }
+        TronSettingsGroup("Verdict and scope", accent: .tronKnowledge) {
+            VStack(spacing: 0) {
+                TronValueRow(icon: "checkmark.seal", title: "Verdict", accent: .tronKnowledge) {
+                    Menu {
+                        ForEach(KnowledgeSourceVerdict.allCases.filter { $0 != .archive }, id: \.self) { verdict in
+                            Button(verdict.label) {
+                                if verdict == .superseded { choosingReplacement = true }
+                                else { choosingReplacement = false; setVerdict(verdict) }
+                            }
+                        }
+                        if source.verdict != nil {
+                            Button("Clear verdict") { choosingReplacement = false; setVerdict(clear: true) }
+                        }
+                    } label: {
+                        TronInlineActionLabel(source.verdict?.verdict == .archive ? "Legacy archive verdict" : (source.verdict?.verdict.label ?? "Not judged"), isWorking: verdictSaving, accent: .tronKnowledge)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
-                }.disabled(verdictSaving || !admitsOrigin)
+                    .disabled(verdictSaving || !admitsOrigin)
+                    .accessibilityLabel("Verdict, \(source.verdict?.verdict.label ?? "not judged")")
+                }
                 if source.verdict?.verdict == .superseded, let replacement = supersededReplacementRow {
-                    Button { openLinkedRecord(id: replacement.id, revisionID: replacement.revisionId) } label: {
-                        TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", subtitle: replacement.id, accent: .tronKnowledge) {
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    Button { openLinkedRecord(id: replacement.id, revisionID: replacement.revisionId,
+                                                 includeArchived: replacement.admission == .archived,
+                                                 includePending: replacement.admission == .pending) } label: {
+                        TronSettingsRow(icon: "arrow.turn.down.right", title: "Replaced by: \(replacement.title)", accent: .tronKnowledge) {
                             Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronKnowledge)
                         }
                     }.buttonStyle(.plain)
                 }
                 if choosingReplacement || source.verdict?.verdict == .superseded {
-                    TextField("Search replacement", text: $replacementQuery)
-                        .tronField()
-                        .task(id: replacementQuery) { await searchReplacement() }
-                    ForEach(replacementRows.filter { $0.id != currentRecord.id }, id: \.id) { row in
-                        Button("Replaced by: \(row.title)") { choosingReplacement = false; setVerdict(.superseded, replacementID: row.id) }
-                            .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
-                    }
-                }
-                Menu {
-                    ForEach(KnowledgeScope.allCases, id: \.self) { target in
-                        Button(target == .personal ? "Moose's Corner" : target.label) { setScope(target) }
-                    }
-                    if source.admission?.status != .archived {
-                        Button("Archive entry", role: .destructive) { setVerdict(.archive) }
-                    } else {
-                        Button("Unarchive entry") { setAdmission(.retained) }
-                    }
-                } label: {
-                    TronSettingsRow(icon: "folder", title: "Scope and archive", subtitle: currentRecord.scope == .personal ? "Moose's Corner" : "Research", accent: .tronKnowledge) {
-                        if scopeSaving { TronPulseLoadingIndicator(accent: .tronKnowledge, size: 14) }
-                    }
-                }.disabled(scopeSaving || !admitsOrigin)
-                if let verdictError {
+                    TronSettingsDivider(accent: .tronKnowledge)
                     VStack(alignment: .leading, spacing: TronSpacing.sm) {
-                        TronSettingsCaption(verdictError)
-                        Button("Retry") {
-                            if let retryVerdict { setVerdict(retryVerdict, replacementID: retryReplacementID) }
+                        TextField(source.verdict?.verdict == .superseded ? "Change replacement" : "Search for the replacement", text: $replacementQuery)
+                            .tronField()
+                            .task(id: replacementQuery) { await searchReplacement() }
+                        ForEach(replacementRows.filter { $0.id != currentRecord.id }, id: \.id) { row in
+                            Button { choosingReplacement = false; setVerdict(.superseded, replacementID: row.id) } label: {
+                                TronSettingsRow(icon: "doc.text", title: row.title, accent: .tronKnowledge) {
+                                    TronInlineActionLabel("Choose", accent: .tronKnowledge)
+                                }
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    .padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
+                }
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronValueRow(icon: "folder", title: "Scope", detail: currentRecord.scope == .personal ? "Only surfaces when asked about you" : "Surfaces in agent work", accent: .tronKnowledge) {
+                    Menu {
+                        ForEach(KnowledgeScope.allCases, id: \.self) { target in
+                            Button(target.label) { setScope(target) }
+                        }
+                    } label: {
+                        TronInlineActionLabel(currentRecord.scope.label, isWorking: scopeSaving, accent: .tronKnowledge)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .disabled(scopeSaving || !admitsOrigin)
+                    .accessibilityLabel("Scope, \(currentRecord.scope.label)")
+                }
+                TronSettingsDivider(accent: .tronKnowledge)
+                let archived = source.admission?.status == .archived
+                TronValueRow(icon: "archivebox", title: archived ? "Archived" : "Archive", detail: archived ? "Hidden from the Library and agents" : "Hide from the Library and agents; recoverable", accent: .tronKnowledge) {
+                    Button { if archived { setAdmission(.retained) } else { setAdmission(.archived) } } label: {
+                        TronInlineActionLabel(archived ? "Unarchive" : "Archive", isWorking: scopeSaving, accent: .tronKnowledge)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(scopeSaving || verdictSaving || !admitsOrigin)
+                }
+                if let verdictError {
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    TronSettingsRow(icon: "exclamationmark.triangle", title: "Change not saved", subtitle: verdictError, subtitleLineLimit: 3, accent: .tronAmber) {
+                        Button {
+                            if retryClearVerdict { setVerdict(clear: true) }
+                            else if let retryVerdict { setVerdict(retryVerdict, replacementID: retryReplacementID) }
                             else if let retryScope { setScope(retryScope) }
                             else if let retryAdmission { setAdmission(retryAdmission) }
-                        }.buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+                        } label: { TronInlineActionLabel("Retry change", accent: .tronKnowledge) }
+                        .buttonStyle(.plain)
                     }
                 }
-            }.padding(TronSettingsLayoutPolicy.rowHorizontalPadding)
+            }
         }
     }
 
-    @ViewBuilder private func sourceTagLabels(_ source: KnowledgeSourceContent) -> some View {
-        let labels = sourceRow?.tags?.map(\.label) ?? source.tags?.tagIds.compactMap { id in sourceConfig?.tagVocabulary.tags.first(where: { $0.id == id })?.label } ?? []
-        if !labels.isEmpty {
-            ToolChipFlowLayout(spacing: TronSpacing.sm) {
-                ForEach(Array(labels.enumerated()), id: \.offset) { _, label in
-                    Text(label).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronKnowledgeText)
-                        .padding(.horizontal, 10).padding(.vertical, 5).background(Color.tronKnowledge.opacity(0.12), in: Capsule())
-                }
-            }
-        } else if let tagIds = source.tags?.tagIds, !tagIds.isEmpty {
-            Text(tagIds.joined(separator: " · ")).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-        } else if source.tags == nil {
-            Text("Tags not assigned yet").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-        }
+    private func tagStatus(_ source: KnowledgeSourceContent) -> String {
+        if taggingJob?.status == "running" { return "Updating tags" }
+        if let retagError { return retagError }
+        if taggingJob?.status == "failed" { return taggingJob?.reason ?? "Re-tagging failed; your current tags are unchanged." }
+        if tagsStale { return "Needs re-tagging" }
+        let count = sourceTagLabelTexts(source).count
+        return count == 0 ? "Not tagged yet" : "\(count) tag\(count == 1 ? "" : "s")"
+    }
+
+    private func sourceTagLabelTexts(_ source: KnowledgeSourceContent) -> [String] {
+        if let rowTags = sourceRow?.tags { return rowTags.map(\.label) }
+        // Unresolved IDs stay visible rather than disappearing behind a spinner.
+        return source.tags?.tagIds.map { id in sourceConfig?.tagVocabulary.tags.first(where: { $0.id == id })?.label ?? id } ?? []
     }
 
     @ViewBuilder private func sourceDetails(_ source: KnowledgeSourceContent) -> some View {
@@ -1946,14 +1978,17 @@ struct KnowledgeDetailView: View {
         }
     }
 
-    private func openLinkedRecord(id: String, revisionID: String?) {
+    private func openLinkedRecord(id: String, revisionID: String?, includeArchived: Bool = false, includePending: Bool = false) {
         guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
         guard !navigationAncestors.contains(id) else { evidenceMessage = "This source is already open. Use Back to return to it."; return }
         guard navigationAncestors.count < 32 else { evidenceMessage = "Return to the library to open another source."; return }
         let requestIdentity = origin
         Task { @MainActor in
             await linkedReader.load(id: id, revisionID: revisionID,
-                request: { id, revision in try await model.knowledge.read(id: id, revisionID: revision) },
+                request: { id, revision in
+                    try await model.knowledge.read(id: id, revisionID: revision,
+                                                   includeArchived: includeArchived, includePending: includePending)
+                },
                 isCurrent: { model.knowledgePresentationIdentity == requestIdentity && activity.allowsPresentationPublication })
         }
     }
@@ -2149,18 +2184,19 @@ struct KnowledgeDetailView: View {
         } catch { return }
     }
 
-    private func setVerdict(_ verdict: KnowledgeSourceVerdict, replacementID: String? = nil) {
+    private func setVerdict(_ verdict: KnowledgeSourceVerdict? = nil, clear: Bool = false, replacementID: String? = nil) {
         guard admitsOrigin, !verdictSaving else { return }
-        retryVerdict = verdict; retryReplacementID = replacementID; retryScope = nil; retryAdmission = nil
+        retryVerdict = verdict; retryClearVerdict = clear; retryReplacementID = replacementID; retryScope = nil; retryAdmission = nil
         verdictSaving = true; verdictError = nil
         let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
         Task { @MainActor in
             do {
-                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "verdict", verdict: verdict, supersededBy: replacementID, commandID: UUID().uuidString.lowercased())
+                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "verdict", verdict: verdict, clearVerdict: clear, supersededBy: replacementID, commandID: UUID().uuidString.lowercased())
                 guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication,
                       let newRevision = response.outcomes.first?.revisionId else { return }
-                if let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision, includeArchived: verdict == .archive) { currentRecord = updated }
-                verdictSaving = false; verdictError = nil; retryVerdict = nil; await onChanged(); await refreshSourceRow()
+                if case .source(let currentSource) = currentRecord.content,
+                   let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision, includeArchived: currentSource.admission?.status == .archived) { currentRecord = updated }
+                verdictSaving = false; verdictError = nil; retryVerdict = nil; retryClearVerdict = false; await onChanged(); await refreshSourceRow()
             } catch {
                 guard model.knowledgePresentationIdentity == identity else { return }
                 verdictSaving = false
@@ -2174,7 +2210,7 @@ struct KnowledgeDetailView: View {
 
     private func setScope(_ scope: KnowledgeScope) {
         guard admitsOrigin, scope != currentRecord.scope, !scopeSaving else { return }
-        retryScope = scope; retryVerdict = nil; retryAdmission = nil
+        retryScope = scope; retryVerdict = nil; retryClearVerdict = false; retryAdmission = nil
         scopeSaving = true; verdictError = nil
         let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
         Task { @MainActor in
@@ -2197,7 +2233,7 @@ struct KnowledgeDetailView: View {
 
     private func setAdmission(_ admission: KnowledgeSourceAdmission) {
         guard admitsOrigin, !scopeSaving else { return }
-        retryAdmission = admission; retryVerdict = nil; retryScope = nil
+        retryAdmission = admission; retryVerdict = nil; retryClearVerdict = false; retryScope = nil
         scopeSaving = true; verdictError = nil
         let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
         Task { @MainActor in
@@ -2227,10 +2263,27 @@ struct KnowledgeDetailView: View {
             replacementRows = page.rows.filter { $0.id != currentRecord.id }
         } catch { guard !Task.isCancelled else { return }; replacementRows = [] }
     }
-    private func triage() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.triage(sourceID: currentRecord.id, expectedRevision: currentRecord.revisionId); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.source; mutationInFlight = false; message = "Assessment updated (\(result.assessment.freshness.rawValue))." } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
+    private func assessSource() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.assess(sourceID: currentRecord.id, expectedRevision: currentRecord.revisionId, assessor: .model); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.source; mutationInFlight = false; message = "Assessment updated: \(result.assessment.recommendation?.rawValue.capitalized ?? "pending") · \(result.assessment.freshness.rawValue)." } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func saveNote(_ note: KnowledgeNoteContent) { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.updateNote(id: currentRecord.id, expectedRevision: currentRecord.revisionId, record: KnowledgeRecordDraft(id: currentRecord.id, createdAt: currentRecord.createdAt, updatedAt: nil, kind: .note, scope: currentRecord.scope, provenance: currentRecord.provenance, temporal: currentRecord.temporal, relations: currentRecord.relations, content: .note(KnowledgeNoteContent(title: note.title, body: noteBody, fields: note.fields, role: note.role, confirmed: note.confirmed, contraryEvidence: note.contraryEvidence, freshness: note.freshness, privacyScope: note.privacyScope, usageConstraint: note.usageConstraint))), confirmedByUser: note.confirmed); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.record; mutationInFlight = false; message = "Saved"; await onChanged() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func exclude() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.setExclusion(recordID: currentRecord.id, expectedRevision: currentRecord.revisionId, excluded: true); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func forget() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.forget(id: currentRecord.id, expectedRevision: currentRecord.revisionId, reason: "Forgotten from iOS"); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
+}
+
+/// Controlled-vocabulary tag labels as wrapping chips.
+private struct KnowledgeTagChips: View {
+    let labels: [String]
+
+    var body: some View {
+        ToolChipFlowLayout(spacing: TronSpacing.sm) {
+            ForEach(Array(labels.enumerated()), id: \.offset) { _, label in
+                Text(label)
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronKnowledgeText)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Color.tronKnowledge.opacity(0.12), in: Capsule())
+            }
+        }
+    }
 }
 
 struct KnowledgeConfigurationView: View {
@@ -2239,39 +2292,50 @@ struct KnowledgeConfigurationView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var config: KnowledgeConfig?
     @State private var chosenModel: ModelRef?
-    @State private var chosenEnrichmentModel: ModelRef?
-    @State private var enrichmentModelChanged = false
+    @State private var chosenKnowledgeModel: ModelRef?
+    @State private var knowledgeModelChanged = false
     @State private var interestsText = ""
     @State private var saving = false
     @State private var error: String?
     @State private var identity: KnowledgePresentationIdentity?
     private var supportsGlobalObservation: Bool { model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.globalObservationCapability) == true }
+    private var catalogModels: [ModelSummary] { model.providerCatalog(for: .global)?.models ?? [] }
 
     var body: some View {
         KnowledgeFormSheet(title: "Observation", isWorking: saving, actionDisabled: config == nil, onAction: save) {
             if config == nil && error == nil { TronLoadingState(label: "Loading configuration…") }
             TronSettingsGroup("Observer", accent: .tronKnowledge) {
-                TronSelectionSheetRow(icon: "cpu", title: "Model", value: chosenModel?.id ?? "Choose", accent: .tronKnowledge) {
-                    ModelPicker(selection: $chosenModel, models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? [])
+                TronSelectionSheetRow(icon: "cpu", title: "Model", value: SessionModelSelectionPresentation.modelName(chosenModel, catalog: catalogModels), accent: .tronKnowledge) {
+                    ModelPicker(selection: $chosenModel, models: catalogModels.filter(\.available))
                         .tronNavigationTitle("Observation model", accent: .tronKnowledge)
                         .presentationDetents([.large])
                 }
             }
             .disabled(config == nil)
             .tronSettingsCaption("The model is used for future eligible turns; earlier turns are not backfilled.")
-            TronSettingsGroup("Source enrichment", accent: .tronKnowledge) {
-                TronSelectionSheetRow(icon: "sparkles", title: "Summary model", value: chosenEnrichmentModel?.id ?? config?.enrichment?.model ?? "Choose", accent: .tronKnowledge) {
-                    ModelPicker(selection: Binding(get: { chosenEnrichmentModel }, set: { chosenEnrichmentModel = $0; enrichmentModelChanged = true }), models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? [])
-                        .tronNavigationTitle("Summary model", accent: .tronKnowledge)
-                        .presentationDetents([.large])
-                }
-                if chosenEnrichmentModel != nil || config?.enrichment?.model != nil {
-                    Button("Clear summary model", role: .destructive) { chosenEnrichmentModel = nil; enrichmentModelChanged = true }
-                        .accessibilityIdentifier("knowledge.clearSummaryModel")
+            TronSettingsGroup("Knowledge model", accent: .tronKnowledge) {
+                VStack(spacing: 0) {
+                    TronSelectionSheetRow(icon: "sparkles", title: "Knowledge model", value: SessionModelSelectionPresentation.modelName(chosenKnowledgeModel, catalog: catalogModels), accent: .tronKnowledge) {
+                        ModelPicker(selection: Binding(get: { chosenKnowledgeModel }, set: { chosenKnowledgeModel = $0; knowledgeModelChanged = true }), models: catalogModels.filter(\.available))
+                            .tronNavigationTitle("Knowledge model", accent: .tronKnowledge)
+                            .presentationDetents([.large])
+                    }
+                    if chosenKnowledgeModel != nil {
+                        TronSettingsDivider(accent: .tronKnowledge)
+                        TronSettingsRow(icon: "xmark.circle", title: "Clear Knowledge model",
+                                        subtitle: "Knowledge generation stays off until you choose a model again", accent: .tronKnowledge) {
+                            Button { chosenKnowledgeModel = nil; knowledgeModelChanged = true } label: {
+                                TronInlineActionLabel("Clear", accent: .tronKnowledge)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Clear Knowledge model")
+                            .accessibilityIdentifier("knowledge.clearKnowledgeModel")
+                        }
+                    }
                 }
             }
             .disabled(config == nil)
-            .tronSettingsCaption("Summaries use only this model and saved readable source text; they never fall back to the observation model.")
+            .tronSettingsCaption("Summaries, source assessment, synthesis, reflection, and manual-capture assessment use this model and its own input/output limits. It never falls back to the observer model.")
             TronSettingsGroup("Observation", accent: .tronKnowledge) {
                 TronToggleRow(icon: "globe", title: "Observe all Tron sessions",
                               detail: "When enabled, save future observations from every Tron conversation. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
@@ -2286,7 +2350,7 @@ struct KnowledgeConfigurationView: View {
                 TextEditor(text: $interestsText).frame(minHeight: 120).tronTextEditor()
                     .accessibilityLabel("Current interests")
             }
-            .tronSettingsCaption("One interest per line, up to 50. Interests guide source triage and do not enable observation.")
+            .tronSettingsCaption("One interest per line, up to 50. Interests guide source assessment and do not enable observation.")
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
         .task { await load() }
@@ -2304,9 +2368,9 @@ struct KnowledgeConfigurationView: View {
                 let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
                 if parts.count == 2 { chosenModel = ModelRef(provider: parts[0], id: parts[1]) }
             }
-            if let value = loaded.config.enrichment?.model {
+            if let value = loaded.config.knowledgeModel?.model {
                 let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
-                if parts.count == 2 { chosenEnrichmentModel = ModelRef(provider: parts[0], id: parts[1]) }
+                if parts.count == 2 { chosenKnowledgeModel = ModelRef(provider: parts[0], id: parts[1]) }
             }
         } catch {
             guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
@@ -2319,7 +2383,7 @@ struct KnowledgeConfigurationView: View {
         let requestIdentity = identity ?? model.knowledgePresentationIdentity
         guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { error = "Gateway changed; reopen configuration."; return }
         if let chosenModel { config.observation.model = chosenModel.contextWindowKey }
-        if enrichmentModelChanged { config.enrichment = chosenEnrichmentModel.map { KnowledgeEnrichment(model: $0.contextWindowKey) } }
+        if knowledgeModelChanged { config.knowledgeModel = chosenKnowledgeModel.map { KnowledgeModel(model: $0.contextWindowKey, maxInputChars: config.knowledgeModel?.maxInputChars ?? 48_000, maxOutputChars: config.knowledgeModel?.maxOutputChars ?? 8_000) } }
         if config.observation.enabled && !KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: config.observation.model != nil, supportsGlobalObservation: supportsGlobalObservation) {
             error = config.observation.model == nil ? "Choose a model before enabling observation." : "Update this Gateway before enabling all-session observation."
             return

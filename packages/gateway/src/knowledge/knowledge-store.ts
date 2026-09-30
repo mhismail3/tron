@@ -30,6 +30,28 @@ import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
 import type { ConnectionInstance } from "../integrations/connection-contract.js";
 
+function isDecisionProducer(producer: SourceCurationProducer | undefined): boolean {
+  return producer?.actor === "user" || producer?.actor === "agent";
+}
+
+function isConnectorProducer(producer: { actor: string } | string | undefined): boolean {
+  const actor = typeof producer === "string" ? producer : producer?.actor;
+  return actor === "connector" || actor === "system";
+}
+
+export function sourceAdmissionIsDecided(source: Pick<KnowledgeRecord & { kind: "source" }, "content">): boolean {
+  const admission = source.content.admission;
+  if (!admission) return false;
+  if (isDecisionProducer(admission.producer)) return true;
+  // A non-pending legacy admission without connector ownership is a prior
+  // decision; do not infer permission from missing historical metadata.
+  return admission.status !== "pending" && admission.producer?.actor !== "connector";
+}
+
+function decisionAuthorityRefusal(field: "admission" | "scope", currentRevision: string): KnowledgeCurationRefusal {
+  return new KnowledgeCurationRefusal("decision-authority", `Connector/system cannot replace the current authoritative ${field} decision`, currentRevision);
+}
+
 const STATE_MAX_BYTES = 4 * 1_048_576;
 // One-time rescue also admits legacy states that outgrew their old read ceiling.
 const LEGACY_MIGRATION_MAX_BYTES = 64 * 1_048_576;
@@ -84,7 +106,7 @@ type RecordHead = LegacyRecordHead & {
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
 type PendingRecordCleanup = { recordId: string; revisionId: string };
-type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; canonicalUri?: string; record: KnowledgeRecordDraft & { kind: "source" }; signal?: AbortSignal };
+type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; canonicalUri?: string; writer?: "connector"; record: KnowledgeRecordDraft & { kind: "source" }; signal?: AbortSignal };
 type SourcePreviewWriteRequest = { commandId: string; recordId: string; expectedRevision: string; preview: KnowledgeObjectRef; signal?: AbortSignal };
 type StoredReceipt = { operation: string; requestHash: string; createdAt: string; result: ReceiptResult; recordIds: string[]; invalidated?: boolean };
 type ReceiptResult =
@@ -292,8 +314,8 @@ function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: 
 }
 /** Cursor identity for one page of Library rows. Every input that changes which
  * rows a page contains belongs to it. */
-function sourceRowScope(request: Pick<KnowledgeListRequest, "scope" | "includeArchived" | "includePending" | "sourceAdmission">): string {
-  return JSON.stringify(["sourceRow", request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
+function sourceRowScope(request: Pick<KnowledgeListRequest, "scope" | "includeArchived" | "includePending" | "sourceAdmission" | "excludePersonalSources">): string {
+  return JSON.stringify(["sourceRow", request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null, request.excludePersonalSources === true]);
 }
 type SearchPosition = { score: number; freshnessRank: number; sortAt: number; id: string; freshnessNowMs: number };
 function searchScope(request: KnowledgeSearchRequest): string {
@@ -318,7 +340,7 @@ function searchFreshnessRankSQL(nowMs = Date.now()): string {
   const now = new Date(nowMs).toISOString();
   const ageDays = `CAST(julianday('${now}') - julianday(json_extract(value, '$.sourceRow.ageSince')) + 0.00000002 AS INTEGER)`;
   return `(CASE WHEN json_extract(value, '$.sourceRow.verdict') = 'evergreen' THEN 3
-    WHEN json_extract(value, '$.sourceRow.verdict') IN ('superseded', 'archive') THEN 0
+    WHEN json_extract(value, '$.sourceRow.verdict') = 'superseded' THEN 0
     WHEN json_extract(value, '$.sourceRow.verdict') = 'dated' THEN CASE WHEN ${ageDays} >= 180 THEN 0 ELSE 2 END
     WHEN json_extract(value, '$.sourceRow.decayClass') = 'does-not-age' THEN 3
     WHEN json_extract(value, '$.sourceRow.decayClass') = 'ages' THEN CASE WHEN ${ageDays} >= 180 THEN 0 WHEN ${ageDays} >= 120 THEN 2 ELSE 3 END
@@ -364,7 +386,7 @@ function projectFreshness(source: SourceRowFields, nowMs = Date.now()): { freshn
   const age: SourceFreshness = ageDays >= 180 ? "stale" : ageDays >= 120 ? "aging" : "fresh";
   let freshness: SourceFreshness;
   if (source.verdict === "evergreen") freshness = "fresh";
-  else if (source.verdict === "superseded" || source.verdict === "archive") freshness = "stale";
+  else if (source.verdict === "superseded") freshness = "stale";
   else if (source.verdict === "dated") freshness = age === "fresh" ? "aging" : age;
   else if (source.decayClass === "unknown") freshness = "unknown";
   else if (source.decayClass === "does-not-age") freshness = "fresh";
@@ -441,6 +463,13 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x" | "j
     if (!Array.isArray(state.assessmentApprovals) || state.assessmentApprovals.length > 32 || new Set(state.assessmentApprovals.map(item => (item as Record<string, unknown>)?.id)).size !== state.assessmentApprovals.length) throw new KnowledgeStoreError("invalid", "Invalid connector assessment approvals");
     state.assessmentApprovals.forEach(item => validateAssessmentAuthority(item, "assessment approval"));
   }
+  if (state.processedItems !== undefined) {
+    if (!Array.isArray(state.processedItems) || state.processedItems.length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector processed items");
+    for (const item of state.processedItems) {
+      const processed = item as Record<string, unknown>;
+      if (!processed || typeof processed.id !== "string" || processed.id.length < 1 || processed.id.length > 512 || !["processed", "skipped"].includes(processed.disposition as string) || typeof processed.reason !== "string" || processed.reason.length < 1 || processed.reason.length > 500 || typeof processed.processedAt !== "string" || (processed.collectionId !== undefined && (typeof processed.collectionId !== "string" || !/^-?\d{1,18}$/.test(processed.collectionId)))) throw new KnowledgeStoreError("invalid", "Invalid connector processed item");
+    }
+  }
   for (const id of state.capturedIds) if (typeof id !== "string" || id.length > 512) throw new KnowledgeStoreError("invalid", "Invalid connector captured ID");
   if (state.capturedCollections !== undefined) {
     if (!state.capturedCollections || typeof state.capturedCollections !== "object" || Array.isArray(state.capturedCollections) || Object.keys(state.capturedCollections).length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector collection progress");
@@ -460,7 +489,7 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x" | "j
       if (!id || id.length > 200 || !attempt || !/^[0-9]{4}-[0-9]{2}$/.test(attempt.month as string) || !["reserved", "settled", "uncertain"].includes(attempt.status as string) || !Number.isFinite(attempt.reservedCents) || (attempt.reservedCents as number) <= 0 || ((attempt.actualCostCents !== undefined) && (!Number.isFinite(attempt.actualCostCents) || (attempt.actualCostCents as number) < 0)) || ((attempt.inputTokens !== undefined) && (!Number.isSafeInteger(attempt.inputTokens) || (attempt.inputTokens as number) < 0)) || ((attempt.outputTokens !== undefined) && (!Number.isSafeInteger(attempt.outputTokens) || (attempt.outputTokens as number) < 0))) throw new KnowledgeStoreError("invalid", "Invalid Jev tagging reservation");
     }
   }
-  for (const key of ["accountId", "scope", "destination", "credentialRef", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
+  for (const key of ["accountId", "scope", "credentialRef", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
   if (state.checkpoints !== undefined) {
     if (!state.checkpoints || typeof state.checkpoints !== "object" || Array.isArray(state.checkpoints) || Object.keys(state.checkpoints).length > 32) throw new KnowledgeStoreError("invalid", "Invalid connector checkpoints");
     for (const [key, value] of Object.entries(state.checkpoints as Record<string, unknown>)) if (key.length < 1 || key.length > 256 || typeof value !== "string" || value.length > 4_096) throw new KnowledgeStoreError("invalid", "Invalid connector checkpoint");
@@ -974,6 +1003,14 @@ export class KnowledgeStore {
     }
   }
   async config(): Promise<KnowledgeConfig> { return this.readState(state => state.config); }
+  /** Derive tool metadata from the exact record retrieval already returned, not
+   * from a second row query whose admission filter could omit that record. */
+  async sourceRowForRecord(record: KnowledgeRecord): Promise<KnowledgeSourceRow | undefined> {
+    if (record.kind !== "source") return undefined;
+    const config = await this.config();
+    const head = headFor(record, [record.revisionId], [], config);
+    return sourceRow(record.id, head as RecordHead & { sourceRow: SourceRowFields });
+  }
   async configureTags(request: KnowledgeTagEditRequest): Promise<KnowledgeConfig> {
     return this.mutate("knowledge.tags.configure", request.commandId, request, async state => {
       if (!Number.isSafeInteger(request.expectedConfigRevision) || request.expectedConfigRevision !== state.config.revision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
@@ -1080,12 +1117,12 @@ export class KnowledgeStore {
     try { validateKnowledgeConfig(config); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge config"); }
     return this.mutate("knowledge.config", commandId, config, async state => { if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale"); if (JSON.stringify(config.tagVocabulary) !== JSON.stringify(state.config.tagVocabulary)) throw invalid("Tag taxonomy changes require the typed knowledge.tags.configure operation"); const next = structuredClone(config); next.tagVocabulary = structuredClone(state.config.tagVocabulary); next.revision += 1; state.config = next; return next; });
   }
-  async setEnrichmentModel(commandId: string, expectedConfigRevision: number, model?: string): Promise<KnowledgeConfig> {
-    if (!Number.isSafeInteger(expectedConfigRevision) || expectedConfigRevision < 0 || (model !== undefined && (typeof model !== "string" || model.length === 0 || model.length > 200))) throw invalid("Knowledge enrichment model requires an exact config revision and a bounded provider/model string");
-    return this.mutate("knowledge.config", commandId, { expectedConfigRevision, enrichmentModel: model ?? null }, async state => {
+  async setKnowledgeModel(commandId: string, expectedConfigRevision: number, model?: string): Promise<KnowledgeConfig> {
+    if (!Number.isSafeInteger(expectedConfigRevision) || expectedConfigRevision < 0 || (model !== undefined && (typeof model !== "string" || model.length === 0 || model.length > 200))) throw invalid("Knowledge model requires an exact config revision and a bounded provider/model string");
+    return this.mutate("knowledge.config", commandId, { expectedConfigRevision, knowledgeModel: model ?? null }, async state => {
       if (state.config.revision !== expectedConfigRevision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
-      const { enrichment: _previous, ...withoutEnrichment } = state.config;
-      const next = { ...withoutEnrichment, ...(model ? { enrichment: { model } } : {}), revision: state.config.revision + 1 };
+      const { knowledgeModel: _previous, ...withoutKnowledgeModel } = state.config;
+      const next = { ...withoutKnowledgeModel, ...(model ? { knowledgeModel: { model, maxInputChars: state.config.knowledgeModel?.maxInputChars ?? 48_000, maxOutputChars: state.config.knowledgeModel?.maxOutputChars ?? 8_000 } } : {}), revision: state.config.revision + 1 };
       validateKnowledgeConfig(next);
       state.config = next;
       return next;
@@ -1105,8 +1142,7 @@ export class KnowledgeStore {
       const value = state.connectors?.[stateKey];
       if (!value) return undefined;
       const next = structuredClone(value);
-      const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
-      if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
+      const envelope = await this.connectorAuthority(connector, key);
       if (envelope) Object.assign(next, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
       return next;
     });
@@ -1130,6 +1166,17 @@ export class KnowledgeStore {
     });
   }
 
+  /** Raindrop and X state belongs to a ConnectionOwner account envelope. The
+   * Jev ledger is keyed by the `typesafe` provider identity and its authority
+   * (configured key, fixed monthly cap) is checked by KnowledgeTaggingBudget,
+   * so it has no connection envelope to resolve. */
+  private async connectorAuthority(connector: "raindrop" | "x" | "jev", key: string | undefined) {
+    if (!this.connectorEnvelope || connector === "jev") return undefined;
+    const envelope = key ? await this.connectorEnvelope(key) : undefined;
+    if (!envelope) throw conflict("Connector connection authority is unavailable");
+    return envelope;
+  }
+
   /** Connector operational state shares the knowledge owner’s serialized state;
    * this update never accepts or persists a credential value. */
   async updateConnectorState(commandId: string, connector: "raindrop" | "x" | "jev", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }, connectionId?: string): Promise<KnowledgeConnectorState> {
@@ -1144,9 +1191,7 @@ export class KnowledgeStore {
     const receiptPayload = { ...(payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : { payload }), connectionId: stateKey };
     return this.mutate(receiptOperation, commandId, receiptPayload, async state => {
       let current = state.connectors?.[stateKey] ? structuredClone(state.connectors[stateKey]) : undefined;
-      const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
-      if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
-      if (envelope && !current && connector === "jev") current = { connector: "jev", ...(key ? { connectionId: key } : {}), enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved, pending: [], capturedIds: [], health: "setup-required", remaining: 0 };
+      const envelope = await this.connectorAuthority(connector, key);
       if (current && envelope) Object.assign(current, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
       const next = update(current);
       if (key) next.connectionId = key;
@@ -1165,7 +1210,7 @@ export class KnowledgeStore {
       // retained view must never be replayed against pending or archived
       // projection state, where skipped rows can otherwise make pagination
       // appear stalled or omit the first admitted row.
-      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
+      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null, request.excludePersonalSources === true]);
       const filter = this.pageFilter(request);
       if (request.cursor) {
         const cursor = readListCursor(request.cursor, scope);
@@ -1197,6 +1242,16 @@ export class KnowledgeStore {
     if (request.kind) { clauses.push("json_extract(value, '$.kind') = ?"); parameters.push(request.kind); }
     if (request.scope) { clauses.push("json_extract(value, '$.scope') = ?"); parameters.push(request.scope); }
     return { clauses, parameters };
+  }
+  async sourceAssessmentReceipt(commandId: string): Promise<KnowledgeMutationResult | undefined> {
+    return this.readState(async (state, paths) => {
+      const receipt = state.receipts.get(`knowledge.source.record-write\0${commandId}`);
+      if (!receipt) return undefined;
+      if (receipt.operation !== "knowledge.source.record-write" || receipt.invalidated) throw conflict("Source assessment receipt is unavailable");
+      const result = await this.receiptResult(paths, state, receipt.result);
+      if (!result || typeof result !== "object" || !("record" in result) || !result.record || typeof result.record !== "object" || (result.record as KnowledgeRecord).kind !== "source") throw conflict("Command ID belongs to a different Knowledge mutation");
+      return result as KnowledgeMutationResult;
+    });
   }
   async read(id: string, revision?: string, includeSuppressed = false, includeArchived = false, includePending = false): Promise<KnowledgeRecord | null> {
     safeId(id, "record id"); if (revision !== undefined) safeId(revision, "knowledge revision");
@@ -1264,11 +1319,10 @@ export class KnowledgeStore {
   /** The page's kind/scope/admission partition. Admission lives in the head, so
    * this is the same predicate the body checks apply, evaluated before a body is
    * read; the body remains the authority for the rows it admits. */
-  private pageFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission"> & { excludePersonalSources?: boolean }): { clauses: string[]; parameters: SQLInputValue[] } {
+  private pageFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission" | "excludePersonalSources">): { clauses: string[]; parameters: SQLInputValue[] } {
     const base = this.catalogFilter(request); const admission = admissionFilter(request);
     const privacy = request.excludePersonalSources ? ["NOT (json_extract(value, '$.kind') = 'source' AND json_extract(value, '$.scope') = 'personal')"] : [];
-    const archive = request.includeArchived ? [] : ["NOT (json_extract(value, '$.kind') = 'source' AND coalesce(json_extract(value, '$.sourceRow.verdict'), '') = 'archive')"];
-    return { clauses: [...base.clauses, ...admission.clauses, ...privacy, ...archive], parameters: [...base.parameters, ...admission.parameters] };
+    return { clauses: [...base.clauses, ...admission.clauses, ...privacy], parameters: [...base.parameters, ...admission.parameters] };
   }
   private headVisible(state: KnowledgeState, id: string, head: RecordHead, includeSuppressed = false): boolean {
     const suppression = state.suppressions.get(id);
@@ -1476,13 +1530,16 @@ export class KnowledgeStore {
   }
 
   /** Internal source/import owner write. The transport action accepts URLs only. */
-  async setSourceAdmission(request: { commandId: string; recordId: string; expectedRevision: string; status: import("./knowledge-contract.js").SourceAdmission; reason?: string; profileVersion?: string; rubricVersion?: string }): Promise<KnowledgeMutationResult> {
+  async setSourceAdmission(request: { commandId: string; recordId: string; expectedRevision: string; status: import("./knowledge-contract.js").SourceAdmission; reason?: string; producer?: SourceCurationProducer; profileVersion?: string; rubricVersion?: string }): Promise<KnowledgeMutationResult> {
     return this.mutate("knowledge.source.admission", request.commandId, request, async (state, paths) => {
       const head = state.records.get(request.recordId);
       if (!head || head.latestRevisionId !== request.expectedRevision) throw conflict("Source revision is stale or unavailable");
       const current = await this.readRecord(paths, request.recordId, head.latestRevisionId);
       if (current.kind !== "source") throw conflict("Source revision is unavailable");
-      const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
+      if (isConnectorProducer(request.producer) && sourceAdmissionIsDecided(current)) {
+        throw decisionAuthorityRefusal("admission", current.revisionId);
+      }
+      const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.producer ? { producer: request.producer } : {}), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, admission } }, request.expectedRevision);
     });
   }
@@ -1529,6 +1586,11 @@ export class KnowledgeStore {
         const current = await this.readRecord(paths, input.item.recordId, head.latestRevisionId);
         if (current.kind !== "source") throw new KnowledgeCurationRefusal("invalid-input", "Knowledge curation applies to source records only");
         if (this.recordExcluded(state, current)) throw new KnowledgeCurationRefusal("excluded", "Knowledge record is excluded from retrieval");
+        if (input.operation === "placement" && isConnectorProducer(input.producer)) {
+          const placement = input.item.placement;
+          if (placement?.scope !== undefined && current.content.scopeProducer && isDecisionProducer(current.content.scopeProducer)) throw decisionAuthorityRefusal("scope", current.revisionId);
+          if (placement?.admission !== undefined && sourceAdmissionIsDecided(current)) throw decisionAuthorityRefusal("admission", current.revisionId);
+        }
         const next = this.curatedSource(state, input.operation, input.producer, input.item, current);
         if (next.scope === current.scope && JSON.stringify(next.content) === JSON.stringify(current.content) && JSON.stringify(next.relations) === JSON.stringify(current.relations)) {
           return { record: current, stateRevision: state.stateRevision } satisfies KnowledgeMutationResult;
@@ -1588,7 +1650,14 @@ export class KnowledgeStore {
       case "verdict": {
         only("verdict");
         const input = item.verdict;
-        if (!input || !["evergreen", "dated", "superseded", "archive"].includes(input.verdict as string)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict operation requires evergreen, dated, superseded, or archive");
+        if (!input || (input.clear !== true && input.verdict === undefined)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict operation requires a verdict or explicit clear");
+        if (input.clear === true) {
+          if (input.verdict !== undefined || input.supersededBy !== undefined || input.reason !== undefined) throw new KnowledgeCurationRefusal("invalid-input", "A clear verdict operation accepts no verdict, replacement, or reason");
+          const { verdict: _verdict, ...withoutVerdict } = content;
+          return { scope: current.scope, relations: current.relations, content: withoutVerdict };
+        }
+        if (input.verdict === "archive") throw new KnowledgeCurationRefusal("invalid-input", "Archive is source admission; use placement with admission archived");
+        if (!input.verdict || !["evergreen", "dated", "superseded"].includes(input.verdict)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict operation requires evergreen, dated, superseded, or explicit clear");
         if (input.reason !== undefined && (typeof input.reason !== "string" || input.reason.length > 2_000)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict reason is at most 2000 characters");
         let supersededBy: string | undefined;
         if (input.supersededBy !== undefined) {
@@ -1611,7 +1680,7 @@ export class KnowledgeStore {
         if (input.reason !== undefined && (typeof input.reason !== "string" || input.reason.length > 2_000)) throw new KnowledgeCurationRefusal("invalid-input", "A placement reason is at most 2000 characters");
         return {
           scope: input.scope ?? current.scope, relations: current.relations,
-          content: { ...content, ...(input.admission === undefined ? {} : { admission: { status: input.admission, ...(input.reason ? { reason: input.reason } : {}), decidedAt: decided } }) },
+          content: { ...content, ...(input.scope === undefined ? {} : { scopeProducer: producer }), ...(input.admission === undefined ? {} : { admission: { status: input.admission, ...(input.reason ? { reason: input.reason } : {}), decidedAt: decided, producer } }) },
         };
       }
       case "relation": {
@@ -1655,6 +1724,8 @@ export class KnowledgeStore {
           throw conflict("Redirect target changed while source capture was publishing");
         }
       }
+      const current = request.record.id ? await this.currentRecord(state, paths, request.record.id) : null;
+      if (request.writer === "connector" && current?.kind === "source" && request.record.kind === "source") this.assertSourceDecisionAuthority(current, request.record, "connector");
       return this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision);
     }, undefined, signal);
   }
@@ -1672,6 +1743,11 @@ export class KnowledgeStore {
   }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
+  private assertSourceDecisionAuthority(current: KnowledgeRecord & { kind: "source" }, next: KnowledgeRecordDraft & { kind: "source" }, producer: string | undefined): void {
+    if (!isConnectorProducer(producer)) return;
+    if (next.scope !== current.scope && current.content.scopeProducer && isDecisionProducer(current.content.scopeProducer)) throw decisionAuthorityRefusal("scope", current.revisionId);
+    if (JSON.stringify(next.content.admission) !== JSON.stringify(current.content.admission) && sourceAdmissionIsDecided(current)) throw decisionAuthorityRefusal("admission", current.revisionId);
+  }
   private async currentRecord(state: KnowledgeState, paths: StorePaths, id: string): Promise<KnowledgeRecord | null> { const head = state.records.get(id); return head ? this.readRecord(paths, id, head.latestRevisionId) : null; }
   private async currentRecordForRead(state: KnowledgeState, paths: StorePaths, id: string): Promise<KnowledgeRecord | null> { const head = state.records.get(id); return head ? await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId) ?? null : null; }
   private async putRecord(state: KnowledgeState, paths: StorePaths, draft: KnowledgeRecordDraft, expectedRevision?: string): Promise<KnowledgeMutationResult> {
@@ -1880,7 +1956,7 @@ export class KnowledgeStore {
       return this.putRecord(state, paths, record, existing?.revisionId);
     });
   }
-  async correct(commandId: string, recordId: string, expectedRevision: string, replacement: KnowledgeRecordDraft, relation: KnowledgeRecord["relations"][number]): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); return this.putRecord(state, paths, { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }, expectedRevision); }); }
+  async correct(commandId: string, recordId: string, expectedRevision: string, replacement: KnowledgeRecordDraft, relation: KnowledgeRecord["relations"][number]): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); const next = { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }; if (current.kind === "source" && next.kind === "source") this.assertSourceDecisionAuthority(current, next, next.provenance.actor); return this.putRecord(state, paths, next, expectedRevision); }); }
   async setScopeExclusion(commandId: string, scope: { sessionId?: string; branchId?: string; projectId?: string }, excluded: boolean, reason?: string): Promise<{ excluded: boolean; stateRevision: number }> {
     if (!scope.sessionId && !scope.projectId) throw invalid("Scope exclusion requires a session or project"); return this.mutate("knowledge.scope-exclusion", commandId, { scope, excluded, reason }, async state => { const key = scope.sessionId ? (scope.branchId ? `branch:${scope.sessionId}:${scope.branchId}` : `session:${scope.sessionId}`) : `project:${scope.projectId}`; state.scopeExclusions.set(key, { ...scope, excluded, ...(reason === undefined ? {} : { reason }), updatedAt: now() }); return { excluded, stateRevision: state.stateRevision + 1 }; });
   }

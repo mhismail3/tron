@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 package enum ModelDisplayFormatting {
     private static let providerAliases: [String: String] = [

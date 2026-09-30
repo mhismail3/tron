@@ -382,14 +382,16 @@ report `.notFound`; successful uninstall/refresh for that first-install case is
 an open availability gate, not evidence that native work has retired. Do not
 register a helper or infer absence just to bypass the refusal.
 
-Prepare a Release app with an explicit derived-data directory:
+Prepare a Release app with an explicit derived-data directory inside the
+worktree, so concurrent worktrees never share a build database or hand over each
+other's `.app`, and macOS temporary-directory cleanup cannot remove it:
 
 ```bash
 scripts/tron mac generate
 cd packages/mac-app
 xcodebuild -project TronMac.xcodeproj -scheme TronMac \
   -configuration Release -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath /tmp/tron-mac-release build
+  -derivedDataPath build/DerivedData-Release build
 ```
 
 `TRON_CI_XCODE_VERSION` remains the deterministic CI reference, not an upper
@@ -480,10 +482,11 @@ Keep retired payloads through the observation window and any version-specific
 rollback review. This command is not a replacement for native retirement or
 for the pre-migration protected backup.
 
-After preparing the signed Release artifact above, the user/maintainer can use:
+After preparing the signed Release artifact above, the user/maintainer can use,
+from the root of the same worktree:
 
 ```bash
-scripts/tron mac reinstall --app /tmp/tron-mac-release/Build/Products/Release/Tron.app
+scripts/tron mac reinstall --app packages/mac-app/build/DerivedData-Release/Build/Products/Release/Tron.app
 # After successful old-helper retirement, Pause/quit, and stopping all writers:
 scripts/tron mac reinstall --confirm-offline
 # After the user replaces the app in Finder, launches it and chooses Resume:
@@ -700,6 +703,13 @@ After an edit, rerun the incremental `build-for-testing`, then keep using
 repeatedly paying for unrelated suites. `TronMacTests` is hosted by the app and
 must inherit the app's signing team; forcing the bundle to an ad-hoc identity
 causes macOS to reject it before tests bootstrap.
+
+CI holds no signing certificate, so its Mac job builds the same
+`build-for-testing` products with `CODE_SIGNING_ALLOWED=NO`. That catches compile
+and link breaks in the app, its helpers and `TronMacTests`, but runs nothing. On
+a Mac that has the team's Mac Development certificate, run the hosted tests
+above. Then run `packages/mac-app/scripts/test-signed-pi-payload-smoke.sh` on
+the built `TronMac.app`.
 
 ## Pairing checks
 

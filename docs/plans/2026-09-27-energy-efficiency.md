@@ -36,8 +36,10 @@ What must not change, overriding any agent's judgment:
   Transcript container work belongs to the
   [chat transcript stability plan](2026-09-26-chat-transcript-stability.md);
   this plan only reduces work inside today's container and must pass its CT-12
-  visual and CT-14 motion parity gates. Rebase over the
-  [iOS module split](2026-09-23-ios-module-split.md) if MS-3 starts.
+  visual and CT-14 motion parity gates. The
+  [iOS module split](2026-09-23-ios-module-split.md) moved Models, Gateway and
+  Support into `packages/ios-app/Core/` (MS-3b, 2026-09-28); new iOS work
+  follows that layout.
 - **Operational safety.** Never rebuild, restart or update the running Gateway;
   Gateway changes take effect only when the user does. Profiling runs an
   isolated fixture Gateway, never the user's. Agents never install on a

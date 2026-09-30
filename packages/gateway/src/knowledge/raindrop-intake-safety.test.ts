@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { jevProfileVersion } from "./jev-assessment.js";
+import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -14,11 +16,15 @@ const response = (value: unknown, status = 200): ConnectorHTTPResponse => ({ sta
 
 async function fixture(options: { failFirstMove?: boolean; initialScope?: string; links?: Record<string, string>; sourceFetch?: (url: string) => Promise<Response> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-intake-safety-")); roots.push(root);
+  const owner = new ConnectionOwner(root);
+  const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]]));
   const store = new KnowledgeStore(new TronWorkspace(root));
+  const jevBudget = new KnowledgeTaggingBudget(store, () => true);
   const observed = { assessmentCalls: 0, moves: [] as string[] };
   const remote = new Map([["1", options.initialScope ?? "111"], ["2", options.initialScope ?? "111"]]);
   const extension = new KnowledgeConnectorExtension(store, {
-    credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]])),
+    credentials,
+    jevBudget,
     resolveHost: async () => ["93.184.216.34"],
     sourceFetch: options.sourceFetch ?? (async url => new Response(`Distinct complete source evidence for ${url}`, { headers: { "content-type": "text/plain" } })),
     sleep: async () => {},
@@ -39,18 +45,18 @@ async function fixture(options: { failFirstMove?: boolean; initialScope?: string
       throw new Error("Unexpected synthetic endpoint");
     },
   });
-  const configure = (scope: string, commandId: string, allowWrites = false) => extension.invoke({ operation: "knowledge.connector.configure", request: { commandId, connector: "raindrop", enabled: true, accountId: "42", scope, credentialRef: "connector:raindrop:synthetic", destination: "333", allowWrites } });
+  const configure = (scope: string, commandId: string, allowWrites = false) => extension.invoke({ operation: "knowledge.connector.configure", request: { commandId, connector: "raindrop", enabled: true, accountId: "42", scope, credentialRef: "connector:raindrop:synthetic", allowWrites } });
   await configure(options.initialScope ?? "111", "safety-initial-config", options.failFirstMove === true);
   const intake = (commandId: string, maxItems = 2) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId, dryRun: false, limit: 2, pilot: { id: "safety-pilot", maxItems, budgetCents: 100 } } });
   return { store, observed, remote, configure, intake };
 }
 
 describe("Raindrop intake safety boundaries", () => {
-  it("does not overwrite an unresolved remote receipt by moving a second item", async () => {
+  it("does not authorize remote effects from legacy source/destination connector state", async () => {
     const { store, observed, intake } = await fixture({ failFirstMove: true });
     await intake("safety-uncertain-run");
-    expect(observed.moves).toEqual(["1"]);
-    expect((await store.connectorState("raindrop"))?.pendingRemote?.itemId).toBe("1");
+    expect(observed.moves).toEqual([]);
+    expect((await store.connectorState("raindrop"))?.pendingRemote).toBeUndefined();
   });
 
   it("cannot reset an exhausted pilot by reconfiguring the same connector account", async () => {

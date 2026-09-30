@@ -228,11 +228,12 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(sheet.waitForExistence(timeout: 2))
     }
 
-    /// Failure modes: attributed sections are dropped or reordered, a collapsed
-    /// section leaks its entries, opening a section does not reveal its purpose
-    /// and attributed sources, or an instruction file cannot be read in full.
+    /// Failure modes: attributed sections are dropped or reordered, the overview
+    /// leaks section entries, the overview or a section sheet opens beyond its
+    /// medium detent, a section sheet omits its purpose or attributed sources,
+    /// or an instruction file cannot be read in full.
     @MainActor
-    func testAgentInstructionsSectionsExpandWithTheirSources() {
+    func testAgentInstructionsSectionsOpenSheetsWithTheirSources() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-agent-instructions-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
@@ -241,42 +242,63 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(headers[0].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(headers.allSatisfy(\.exists), app.debugDescription)
         XCTAssertEqual(headers.map(\.frame.minY), headers.map(\.frame.minY).sorted(), "Sections must keep the model's reading order")
-        XCTAssertFalse(app.buttons["agent-instructions-entry-tools.1"].exists, "A collapsed section must not show its entries")
         XCTAssertTrue(headers[7].label.contains("Each turn"), "The per-turn Tron context must be marked: \(headers[7].label)")
-        keepScreenshot(named: "agent-instructions-collapsed")
+        XCTAssertFalse(entry(app, "tools.1").exists, "The overview must not show section entries")
+        let screenHeight = app.windows.firstMatch.frame.height
+        XCTAssertGreaterThan(headers[0].frame.minY, screenHeight * 0.35, "The overview must open at its medium detent")
+        keepScreenshot(named: "agent-instructions-overview")
 
-        app.buttons["agent-instructions-section-tools"].tap()
-        let subagent = app.buttons["agent-instructions-entry-tools.1"]
+        headers[1].tap()
+        let subagent = entry(app, "tools.1")
         XCTAssertTrue(subagent.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(subagent.label.contains("subagent") && subagent.label.contains("Package"), subagent.label)
-        XCTAssertTrue(app.buttons["agent-instructions-entry-tools.2"].label.contains("Tron"))
-        app.buttons["agent-instructions-section-rules"].tap()
-        XCTAssertTrue(app.buttons["agent-instructions-entry-rules.1"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["agent-instructions-entry-rules.1"].label.contains("from subagent"))
-        keepScreenshot(named: "agent-instructions-tools-rules")
+        XCTAssertTrue(entry(app, "tools.2").label.contains("Tron"))
+        let purpose = app.descendants(matching: .any)["agent-instructions-purpose"]
+        XCTAssertGreaterThan(purpose.frame.minY, screenHeight * 0.35, "A section sheet must open at its medium detent")
+        keepScreenshot(named: "agent-instructions-tools-sheet")
+        dismissTopSheet(app, revealing: headers[2])
 
-        for id in ["tools", "rules"] {
-            app.buttons["agent-instructions-section-\(id)"].tap()
-            let gone = expectation(for: NSPredicate(format: "exists == false"),
-                                   evaluatedWith: app.buttons["agent-instructions-entry-\(id).1"])
-            wait(for: [gone], timeout: 3)
-        }
-        app.buttons["agent-instructions-section-tron"].tap()
+        headers[2].tap()
+        XCTAssertTrue(entry(app, "rules.1").waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(entry(app, "rules.1").label.contains("from subagent"), entry(app, "rules.1").label)
+        dismissTopSheet(app, revealing: headers[7])
+
+        headers[7].tap()
         let tronPurpose = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Added by Tron at the start of every turn")).firstMatch
         XCTAssertTrue(tronPurpose.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Tron module tron-core"].exists, app.debugDescription)
-        app.buttons["agent-instructions-section-project_context"].tap()
+        XCTAssertTrue(labelled(app, "Tron module tron-core").exists, app.debugDescription)
+        XCTAssertTrue(labelled(app, "Added each turn").exists, app.debugDescription)
+        keepScreenshot(named: "agent-instructions-tron-sheet")
+        dismissTopSheet(app, revealing: headers[4])
+
+        headers[4].tap()
         let agents = app.buttons["agent-instructions-entry-project_context.0"]
         XCTAssertTrue(agents.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(agents.label.contains("~/Workspace/project/AGENTS.md"), agents.label)
-        keepScreenshot(named: "agent-instructions-tron-project")
-
         agents.tap()
         let fileBody = app.descendants(matching: .any).matching(NSPredicate(
             format: "label CONTAINS %@ OR value CONTAINS %@", "Code, tests, and docs ship together.", "Code, tests, and docs ship together."
         )).firstMatch
         XCTAssertTrue(fileBody.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "agent-instructions-file-reader")
+    }
+
+    private func entry(_ app: XCUIApplication, _ id: String) -> XCUIElement {
+        app.descendants(matching: .any)["agent-instructions-entry-\(id)"]
+    }
+
+    private func labelled(_ app: XCUIApplication, _ text: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+    }
+
+    /// Done on the frontmost sheet; the covered overview's Done stays in the tree.
+    private func dismissTopSheet(_ app: XCUIApplication, revealing element: XCUIElement) {
+        let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
+        done.element(boundBy: done.count - 1).tap()
+        let closed = expectation(for: NSPredicate(format: "exists == false"),
+                                 evaluatedWith: app.descendants(matching: .any)["agent-instructions-purpose"])
+        wait(for: [closed], timeout: 3)
+        XCTAssertTrue(element.exists, app.debugDescription)
     }
 
     @MainActor
@@ -580,6 +602,31 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         app.buttons["Close form and keep answers"].tap()
         XCTAssertTrue(app.staticTexts["Mutation count: 0"].waitForExistence(timeout: 3))
+    }
+
+    /// Failure mode: Send on a paged single-choice form while the last page's
+    /// Other editor holds the keyboard hangs the app before the answer is sent.
+    @MainActor
+    func testAskUserSendWithFocusedOtherEditorOnLastPageSubmits() {
+        let app = launchAskUser(styled: true, multiple: true)
+        let staging = app.buttons["Staging, A pre-release environment for validation."]
+        XCTAssertTrue(staging.waitForExistence(timeout: 5), app.debugDescription)
+        staging.tap()
+        app.staticTexts["Which environments should receive the change?"].swipeLeft()
+        XCTAssertTrue(app.staticTexts["When should the change happen?"].waitForExistence(timeout: 3), app.debugDescription)
+        let other = app.buttons.matching(NSPredicate(format: "label == %@", "Other"))
+            .allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(other, app.debugDescription)
+        other?.tap()
+        let editor = app.textViews["Other response for When should the change happen?"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
+        editor.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        editor.typeText("After the review")
+        keepScreenshot(named: "ask-user-last-page-other-focused")
+        app.buttons["Submit all answers"].tap()
+        XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 10), app.debugDescription)
+        keepScreenshot(named: "ask-user-last-page-other-submitted")
     }
 
     @MainActor

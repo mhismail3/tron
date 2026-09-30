@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""Run one command under the exclusive repository-owned iOS test lease.
+"""Run one command under an exclusive, host-wide iOS lease.
 
-The holder owns the lane's simulator for the whole command: it records the
-intent that will keep or release the simulator in the lease metadata, and when
-the command ends - after success, failure, timeout or a signal - it releases
-the simulator unless the lease was taken with --keep-booted. A release that
+Every exclusive iOS resource on this Mac is leased here: each test lane's
+simulator (scripts/tron-ios-test, the profiler, the Gateway E2E harness), the
+remembered Development simulator (scripts/tron-ios-simulator) and each physical
+device (scripts/tron-ios-device). The lease is taken without waiting; a
+contended one exits 73 naming its holder (with --worktree, its worktree), PID
+and start time. The lease is a flock, so the kernel drops it when the holder and
+the command tree it started have ended: a killed holder leaves no stale lease,
+only stale metadata the next holder overwrites.
+
+With --marker, the holder owns the lane's simulator for the whole command: it
+records the intent that will keep or release the simulator in the lease
+metadata, and when the command ends - after success, failure, timeout or a
+signal - it releases the simulator unless the lease was taken with --keep-booted. A release that
 fails is reported; it never replaces the command's own exit status.
 
 The command runs in its own process group, and the holder passes it the lease's
@@ -45,6 +54,42 @@ def write_metadata(handle: IO[str], metadata: dict[str, object]) -> None:
     json.dump(metadata, handle, sort_keys=True)
     handle.write("\n")
     handle.flush()
+
+
+def process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def describe_holder(text: str) -> str:
+    """Who holds a contended lease, from the metadata its holder wrote."""
+    try:
+        metadata = json.loads(text)
+    except ValueError:
+        return text or "unknown owner"
+    if not isinstance(metadata, dict):
+        return text
+    parts: list[str] = []
+    worktree = metadata.get("worktree")
+    if isinstance(worktree, str):
+        parts.append(f"worktree {worktree}")
+    pid = metadata.get("pid")
+    if isinstance(pid, int):
+        # A holder killed outright leaves its command tree holding the lease
+        # (it inherits the descriptor); say so rather than name a dead PID alone.
+        parts.append(f"PID {pid}" if process_exists(pid) else f"PID {pid}, which has exited while the command it started still runs")
+    started = metadata.get("started_at_epoch_seconds")
+    if isinstance(started, int):
+        parts.append("started " + time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(started)))
+    command = metadata.get("command")
+    if isinstance(command, str):
+        parts.append(f"command {command}")
+    return ", ".join(parts) or text
 
 
 def process_group_exists(process_group: int) -> bool:
@@ -133,6 +178,8 @@ def main() -> int:
     parser.add_argument("--marker", type=Path)
     parser.add_argument("--development-state", type=Path)
     parser.add_argument("--keep-booted", action="store_true")
+    parser.add_argument("--resource", default="iOS test simulator", help="what the lease protects, named when it is contended")
+    parser.add_argument("--worktree", help="the worktree whose command holds the lease, named when it is contended")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args()
     if arguments.marker is not None and arguments.development_state is None:
@@ -173,8 +220,8 @@ def main() -> int:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 handle.seek(0)
-                owner = handle.read().strip() or "unknown owner"
-                print(f"error: iOS test simulator is already leased ({owner})", file=sys.stderr)
+                owner = describe_holder(handle.read().strip())
+                print(f"error: {arguments.resource} is already leased ({owner})", file=sys.stderr)
                 return LOCKED_EXIT
             held = True
             if interrupted is not None:
@@ -188,6 +235,8 @@ def main() -> int:
                 "lock_path": str(arguments.lock.resolve()),
                 "uid": os.getuid(),
             }
+            if arguments.worktree is not None:
+                metadata["worktree"] = arguments.worktree
             # The holder's own identity goes in first: `lanes` and `status --all`
             # read it instead of taking the lease, so it has to be readable as
             # soon as the lease is held, before the simulator below is probed.

@@ -122,6 +122,9 @@ struct ExtensionFormSheet: View {
             focusedQuestionID = nil
             persistDraft()
         }
+        .onChange(of: expired) { _, expired in
+            if expired { focusedQuestionID = nil }
+        }
         .onChange(of: focusedQuestionID) { _, questionID in
             guard questionID != nil else { return }
             // Give the paged form room before keyboard avoidance compresses
@@ -324,6 +327,9 @@ struct ExtensionFormSheet: View {
                 TextEditor(text: Binding(
                     get: { draft.value(for: question.id).other },
                     set: { text in
+                        // The editor is never disabled (see below), so a late
+                        // keystroke during submission or after expiry is refused here.
+                        guard !submitting, !expired else { return }
                         // A fading-out editor may finish an IME/autocorrection
                         // callback after deselection. It cannot restore Other.
                         guard activeOtherQuestionIDs.contains(question.id)
@@ -352,7 +358,12 @@ struct ExtensionFormSheet: View {
                     .tronSettingsVisualTheme(accent: .tronAmber)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 14)
-                    .disabled(submitting || expired)
+                    // Never `.disabled` here. Disabling the focused editor flips
+                    // UITextView interaction off inside a layout pass, which
+                    // resigns the keyboard re-entrantly while FocusState still
+                    // names it; on device that fight hung the main thread when
+                    // Send was tapped mid-typing. Submission and expiry release
+                    // focus first and the binding refuses edits instead.
                     .accessibilityLabel("Other response for \(question.header ?? question.question)")
                     .transition(.opacity)
             }
@@ -446,6 +457,9 @@ struct ExtensionFormSheet: View {
     }
 
     private func respond(value: JSONValue?, cancelled: Bool) {
+        // Release the keyboard through SwiftUI's focus owner before any
+        // submission state changes, so UIKit and FocusState agree.
+        focusedQuestionID = nil
         submitting = true
         errorMessage = nil
         let expectedToken = presentationSurfaceToken

@@ -5,13 +5,14 @@ import { execFileSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
 import { isIP } from "node:net";
 import { mkdir, readFile, rename, writeFile, readdir, rm, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 const MAX_BYTES = 64 * 1024;
 const MAX_TEXT = 512;
 const STATE_LOCK_WAIT_MS = 5_000;
 const STATE_LOCK_RETRY_MS = 25;
 const STATE_LOCK_STALE_MS = 30_000;
+const MAX_CANDIDATE_SOURCES = 8;
 const STATES = new Set(["starting", "ready", "stopping", "restarting", "failed", "stopped"]);
 // Lifecycle writes are deliberately transitions, not arbitrary patches. A
 // failed supervisor may be recovered by a new start; a stopped/ready state may
@@ -249,6 +250,59 @@ async function writeFields(path, fields, lifecycle) {
   });
 }
 
+function currentBranch(worktree) {
+  try {
+    const branch = execFileSync("git", ["-C", worktree, "symbolic-ref", "--short", "-q", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return branch === "" ? null : text(branch);
+  } catch { return null; }
+}
+
+// The stage arguments `scripts/tron dev` builds a candidate with. The payload
+// manifest requires the full commit (gateway-payload-deploy.mjs
+// `payloadManifest`), so uncommitted work never alters the revision: it is
+// measured apart, before the build, as any non-ignored change including
+// untracked files the build may compile in. The version label is free-form.
+// `--no-optional-locks` keeps `git status` from rewriting (and locking) the
+// index of a checkout other sessions may be using.
+function candidateSource(worktree) {
+  const root = text(worktree, "");
+  if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
+  const gitOutput = (...argumentsList) => execFileSync("git", ["-C", root, ...argumentsList], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 16 * 1024 * 1024 });
+  const revision = gitOutput("rev-parse", "--verify", "HEAD").trim();
+  const dirty = gitOutput("--no-optional-locks", "status", "--porcelain", "--untracked-files=normal").trim() !== "";
+  const stamp = new Date().toISOString().replace(/[-:T]/gu, "").slice(0, 14);
+  return { revision, dirty, version: `debug-${revision.slice(0, 12)}${dirty ? "-dirty" : ""}-${stamp}` };
+}
+
+// Only the command that built a candidate knows its source, and only the
+// supervisor's ready transition knows which candidate runs. The builder
+// records source by the staged manifest's runtime epoch (fresh per stage;
+// the payload fingerprint is shared by Gateway-identical checkouts); status
+// resolves it from the ready epoch, so a failed restart never relabels the
+// running Gateway. Trimming keeps the running record.
+async function recordCandidateSource(path, runtimeEpoch, worktree, dirtyArgument) {
+  if (typeof runtimeEpoch !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(runtimeEpoch)) throw new Error("candidate source requires a runtime epoch");
+  const root = text(worktree, "");
+  if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
+  if (dirtyArgument !== "true" && dirtyArgument !== "false") throw new Error("candidate source dirty flag must be true or false");
+  const dirty = dirtyArgument === "true";
+  const branch = currentBranch(root);
+  await withStateLock(path, async () => {
+    const current = await readState(path);
+    const previous = Array.isArray(current.candidateSources) ? current.candidateSources : [];
+    const retained = previous.filter((entry) => entry?.runtimeEpoch !== runtimeEpoch);
+    const running = runningCandidateSource({ ...current, candidateSources: retained });
+    const older = retained.filter((entry) => entry !== running).slice(-(MAX_CANDIDATE_SOURCES - (running ? 2 : 1)));
+    const candidateSources = [...(running ? [running] : []), ...older, { runtimeEpoch, worktree: root, branch, dirty }];
+    await atomicWrite(path, { ...current, candidateSources, updatedAt: new Date().toISOString() });
+  });
+}
+
+function runningCandidateSource(state) {
+  if (typeof state.epoch !== "string" || !Array.isArray(state.candidateSources)) return undefined;
+  return state.candidateSources.find((entry) => entry?.runtimeEpoch === state.epoch);
+}
+
 const [command, ...args] = process.argv.slice(2);
 if (!command) throw new Error("missing lifecycle command");
 if (command === "transition") {
@@ -259,6 +313,12 @@ if (command === "transition") {
   const path = args[0];
   if (!path) throw new Error("write requires path");
   await writeFields(path, parseFields(args.slice(1)));
+} else if (command === "record-source") {
+  if (!args[0]) throw new Error("record-source requires path");
+  await recordCandidateSource(args[0], args[1], args[2], args[3]);
+} else if (command === "candidate-source") {
+  const { revision, dirty, version } = candidateSource(args[0]);
+  process.stdout.write(`${revision} ${dirty} ${version}\n`);
 } else if (command === "read") {
   process.stdout.write(`${JSON.stringify(await readState(args[0]))}\n`);
 } else if (command === "get") {
@@ -293,9 +353,9 @@ if (command === "transition") {
   process.stdout.write(`${manifest.runtimeEpoch} ${manifest.sourceRevision} ${manifest.payloadFingerprint}\n`);
 } else if (command === "validate-build-identity") {
   const value = args[0] ?? "";
-  const match = /^([A-Za-z0-9._-]{1,128}) ([a-f0-9]{64})$/u.exec(value);
+  const match = /^([A-Za-z0-9._-]{1,128}) ([a-f0-9]{64}) ([A-Za-z0-9._-]{1,128})$/u.exec(value);
   if (!match) throw new Error("Debug candidate build returned an invalid identity");
-  process.stdout.write(`${match[1]} ${match[2]}\n`);
+  process.stdout.write(`${match[1]} ${match[2]} ${match[3]}\n`);
 } else if (command === "resolve-host-fixture") {
   const fixture = JSON.parse(args[0] ?? "{}");
   process.stdout.write(`${selectTailscaleAddress(fixture) ?? ""}\n`);
@@ -344,12 +404,16 @@ if (command === "transition") {
   const recordedLifecycle = state.lifecycle ?? (supervisorLive ? "starting" : "stopped");
   const activeLifecycle = new Set(["starting", "ready", "stopping", "restarting"]);
   const lifecycle = !supervisorLive && activeLifecycle.has(recordedLifecycle) ? "failed" : recordedLifecycle;
+  const source = runningCandidateSource(state);
   process.stdout.write(`${JSON.stringify({
     expected: { host, port, home: state.expectedHome ?? join(process.env.HOME ?? "", ".tron-dev") },
     lifecycle, epoch: state.epoch ?? null,
     supervisor: { pid: state.supervisorPid ?? null, startIdentity: state.supervisorStartIdentity ?? null, live: Boolean(supervisorLive) },
     child: { pid: state.childPid ?? null, startIdentity: state.childStartIdentity ?? null, live: Boolean(childLive) },
     sourceRevision: state.sourceRevision ?? null, buildFingerprint: state.buildFingerprint ?? null,
+    sourceWorktree: typeof source?.worktree === "string" ? source.worktree : null,
+    sourceBranch: typeof source?.branch === "string" ? source.branch : null,
+    sourceDirty: typeof source?.dirty === "boolean" ? source.dirty : null,
     health: healthResult, intentionalExit: state.intentionalExit ?? false, exitCode: state.exitCode ?? null,
     restartCount: state.restartCount ?? 0, commandId: state.commandId ?? null,
   })}\n`);

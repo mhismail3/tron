@@ -112,9 +112,12 @@ reclaim simulators yourself.
 - A lane is one state directory and one device name: `--lane NAME` (or
   `TRON_IOS_TEST_LANE`) uses `$HOME/.tron/internal/ios-test-NAME` and the device
   `Tron iOS Tests (NAME)`, while the default lane keeps
-  `$HOME/.tron/internal/ios-test` and `Tron iOS Tests`. Lanes do not serialize
-  against each other; lanes of one worktree share its single products directory,
-  so build in one lane per worktree at a time.
+  `$HOME/.tron/internal/ios-test` and `Tron iOS Tests`. With no lane selected, a
+  linked worktree runs in its own lane, named by its worktree key, and the
+  primary checkout in the default lane, so parallel worktrees need no `--lane`;
+  the runner, the profiler and the Gateway E2E harness take the same selection.
+  Lanes do not serialize against each other; lanes of one worktree share its
+  single products directory, so build in one lane per worktree at a time.
 - Every command that provisions a lane's simulator releases it when the command
   ends - success, failure, timeout, SIGINT, SIGTERM or SIGHUP - unless
   `--keep-booted` asks to reuse it for a tight test-fix loop. A signal reaches
@@ -124,7 +127,7 @@ reclaim simulators yourself.
   process leases is never disturbed, by the tooling or by an agent.
 - Every command that provisions a lane's simulator first sweeps: orphaned owned
   lanes (booted with no live lease) are shut down, and lanes unused for 7 days
-  are removed. The runner's sweep also prunes runs beyond the retention windows
+  or whose creating worktree was deleted (never the default lane) are removed. The runner's sweep also prunes runs beyond the retention windows
   and the products of worktrees that no longer exist. `scripts/tron-ios-test
   reap` runs that same sweep on demand, and `prune` reclaims disk alone.
 - A boot is admitted on the Mac's memory. Below 8 GB free the command fails
@@ -166,6 +169,10 @@ reclaim simulators yourself.
   (`scripts/tron-ios-simulator stop` for the Development simulator).
 - Never force a boot past memory admission (exit 73) by booting the device
   another way; free memory first, or report the shortage.
+- Never work around a held Development simulator or physical-device lease
+  (exit 73 from `scripts/tron-ios-simulator` or `scripts/tron-ios-device`,
+  naming the holder) with raw `xcodebuild`, `simctl` or `devicectl`; wait for
+  the holder's command to finish.
 - Never install a production Release artifact through the ordinary device
   helper or automate signing, archive delivery, upload, or deployment.
 - Never modify `.codex/environments/environment.toml`; old names may appear only

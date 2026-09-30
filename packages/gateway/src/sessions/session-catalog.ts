@@ -3,6 +3,7 @@ import { lstat, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { backgroundWork, type BackgroundWorkRegistration } from "../background-work.js";
 import { isIgnoredCatalogDirectory } from "./catalog-discovery.js";
+import { offLoop } from "../transport/request-span.js";
 import type {
   CatalogMetadataIndex,
   CatalogMetadataIndexRow,
@@ -65,6 +66,10 @@ export const CATALOG_EVENT_MAX_WAIT_MS = 1_000;
  * per-path debounce map and the work a single event can name. */
 export const CATALOG_EVENT_DIRECTORY_LIMIT = 64;
 
+/** Keep arbitrary watcher paths bounded; beyond this, a whole-catalog cut is
+ * cheaper and safer than retaining another timer per transient filename. */
+export const CATALOG_EVENT_PENDING_PATH_LIMIT = 256;
+
 /** The backstop for every change the watcher cannot see: an event the platform
  * coalesced, dropped or reported while the watcher was restarting is repaired
  * by reading the folder's own cut this often. */
@@ -102,6 +107,9 @@ export interface SessionCatalogReconcileOutcome {
    * already published, if any, so a file left out is visible here. */
   unproven: number;
   durationMs: number;
+  /** Why this whole-folder cut ran, when it was not a scheduled or ordinary
+   * watcher backstop. */
+  trigger?: "watcher-overflow";
 }
 
 /** One canonical session file. `CatalogMetadataIndexRow` owns everything read
@@ -221,7 +229,7 @@ export interface SessionCatalogSource {
   scan(): Promise<SessionCatalogScan>;
   /** Canonical metadata for one file, or undefined when it cannot be read as a
    * canonical session right now. */
-  summaryFor(path: string): Promise<CatalogMetadataIndexSummary | undefined>;
+  summaryFor(path: string, yieldToLoop?: () => Promise<void>): Promise<CatalogMetadataIndexSummary | undefined>;
 }
 
 export interface SessionCatalogOptions {
@@ -308,6 +316,7 @@ export class SessionCatalog {
   /** The unnamed event's ceiling window, so an unnameable event that never stops
    * arriving still reaches one whole-folder pass. */
   private unnamedEventWindowStartedAt: number | undefined;
+  private watcherOverflowReconcilePending = false;
   private watchRetryTimer: NodeJS.Timeout | undefined;
   private watchOutageClearTimer: NodeJS.Timeout | undefined;
   /** One record per outage rather than per retry: while the watcher is down,
@@ -388,7 +397,9 @@ export class SessionCatalog {
    * for a named session waits for that change to land instead of answering from
    * a cut that predates it. Nothing queued settles immediately. */
   awaitQueuedChanges(): Promise<void> {
-    return this.lane;
+    // Waiting for catalog work uses no event-loop time. Do not let this request
+    // hold the scheduler paused while the queued refresh tries to yield.
+    return offLoop(() => this.lane);
   }
 
   /** Session IDs a pass could read a header for but could not publish a row or
@@ -437,7 +448,7 @@ export class SessionCatalog {
   async searchIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
     // The startup durable load and its reconcile are already in this lane, so
     // one await is a completed cut rather than a second pass.
-    await this.lane;
+    await offLoop(() => this.lane);
     if (this.closed || !this.reconciledCut) return undefined;
     const duplicates = this.duplicateSessionIds();
     const identities = new Map<string, SessionCatalogIdentity>();
@@ -585,6 +596,7 @@ export class SessionCatalog {
     if (filename === null) return this.debounceUnnamedEvent();
     const path = resolve(root, filename);
     if (ignoredCatalogPath(path, root)) return;
+    if (this.watcherOverflowReconcilePending) return this.debounceUnnamedEvent();
     if (path.endsWith(".jsonl")) return this.debounceEvent(path);
     void this.resolveFolderEvent(path, root);
   }
@@ -689,6 +701,10 @@ export class SessionCatalog {
   }
 
   private debounceEvent(path: string): void {
+    if (!this.eventTimers.has(path) && this.eventTimers.size >= CATALOG_EVENT_PENDING_PATH_LIMIT) {
+      this.reconcileWatcherOverflow();
+      return;
+    }
     const armed = this.eventTimers.get(path);
     if (armed) clearTimeout(armed);
     const now = this.now();
@@ -704,6 +720,25 @@ export class SessionCatalog {
     }, Math.max(0, Math.min(CATALOG_EVENT_DEBOUNCE_MS, untilCeiling)));
     timer.unref();
     this.eventTimers.set(path, timer);
+  }
+
+  /** A storm of distinct names is not a useful per-file queue. Drop its hints
+   * and reconcile once; events during the pass use the bounded unnamed-event
+   * debounce rather than immediately starting another full-folder pass. */
+  private reconcileWatcherOverflow(): void {
+    if (this.watcherOverflowReconcilePending || this.closed) return;
+    this.watcherOverflowReconcilePending = true;
+    for (const timer of this.eventTimers.values()) clearTimeout(timer);
+    this.eventTimers.clear();
+    this.eventWindowStartedAt.clear();
+    if (this.unnamedEventTimer) {
+      clearTimeout(this.unnamedEventTimer);
+      this.unnamedEventTimer = undefined;
+      this.unnamedEventWindowStartedAt = undefined;
+    }
+    void this.enqueue(() => this.reconcileIndex("watcher-overflow")).finally(() => {
+      this.watcherOverflowReconcilePending = false;
+    });
   }
 
   /** Keep one live watcher on the canonical folder. False means the index is the
@@ -862,7 +897,7 @@ export class SessionCatalog {
     }
   }
 
-  private async reconcileIndex(): Promise<void> {
+  private async reconcileIndex(trigger?: SessionCatalogReconcileOutcome["trigger"]): Promise<void> {
     if (this.closed) return;
     const startedAt = this.now();
     // This pass's read epoch, captured before its first read. Every later
@@ -880,6 +915,7 @@ export class SessionCatalog {
         modified: diff?.modified ?? 0,
         unproven,
         durationMs: this.now() - startedAt,
+        ...(trigger ? { trigger } : {}),
       });
     };
     let scan: SessionCatalogScan;
@@ -974,7 +1010,7 @@ export class SessionCatalog {
     const reconciled = await this.options.index.reconcile(
       this.options.catalogRoot(),
       scan.candidates,
-      (candidate) => this.options.source.summaryFor(candidate.path),
+      (candidate) => this.options.source.summaryFor(candidate.path, () => this.backgroundWork.yieldToLoop()),
       // Asked between batches and before each parse: shutdown stops the pass
       // there, and that is also where the pass hands the loop back to the
       // scheduler, which pauses it while a request competes for the loop or the
@@ -1014,8 +1050,9 @@ export class SessionCatalog {
     // Rows are keyed by the walk's realpath form, and a caller may name the same
     // file through a symlinked root (macOS `/var`), so the fallback resolves it
     // once per miss rather than rebuilding the row from the body every time.
-    const existing = this.indexed(canonicalPath)
-      ?? this.rowsByPath.get(await realpath(canonicalPath).catch(() => canonicalPath));
+    const lookupPath = resolve(canonicalPath);
+    const existing = this.rowsByPath.get(lookupPath)
+      ?? this.rowsByPath.get(await realpath(canonicalPath).catch(() => lookupPath));
     // An exact path that is gone is removal evidence for the row it published:
     // the Gateway deletes the files it rolls back (a failed import, an
     // uncommitted fork artifact) without announcing a removal, and an external
@@ -1046,7 +1083,7 @@ export class SessionCatalog {
         }
       }
     }
-    const summary = await this.options.source.summaryFor(canonicalPath);
+    const summary = await this.options.source.summaryFor(canonicalPath, () => this.backgroundWork.yieldToLoop());
     if (!summary) return false;
     const rebuilt = await this.options.index.entryFromSummary(summary);
     if (!rebuilt) return false;
@@ -1081,7 +1118,7 @@ export class SessionCatalog {
       // next: a first cut that has no durable rows to reuse parses every body at
       // scale, and none of that may hold the loop while a request waits.
       await this.backgroundWork.yieldToLoop();
-      const summary = await this.options.source.summaryFor(candidate.path);
+      const summary = await this.options.source.summaryFor(candidate.path, () => this.backgroundWork.yieldToLoop());
       const row = summary ? await this.options.index.entryFromSummary(summary) : undefined;
       if (!row || row.id !== candidate.id || row.cwd !== candidate.cwd) {
         const key = resolve(candidate.path);
@@ -1156,13 +1193,10 @@ export class SessionCatalog {
     return true;
   }
 
-  /** Rows are keyed by the walk's realpath form. A caller may hold the same file
-   * as an equivalent but differently spelled path (a symlinked temp root), so a
-   * miss falls back to the exact file the row names. */
+  /** Rows and callers are keyed by their resolved path form, so lookup stays
+   * proportional to one map access rather than scanning the catalog on a miss. */
   private indexed(canonicalPath: string): SessionCatalogRow | undefined {
-    const direct = this.rowsByPath.get(canonicalPath);
-    if (direct) return direct;
-    return [...this.rowsByPath.values()].find((row) => resolve(row.path) === canonicalPath);
+    return this.rowsByPath.get(resolve(canonicalPath));
   }
 
   /** One change is owed a write. The write waits for a quiet spell, capped so a

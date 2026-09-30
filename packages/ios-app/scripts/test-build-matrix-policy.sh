@@ -19,8 +19,8 @@ for scheme in schemes:
     assert source.count(f"  {scheme}:\n") == 1, scheme
 assert "  Tron:\n" not in source
 assert '"${CONFIGURATION:-}" == "Release"' in source
-assert 'TRON_GATEWAY_PROTOCOL_VERSION: "6"' in source
-assert 'TRON_GATEWAY_MIN_PROTOCOL_VERSION: "6"' in source
+# The protocol values themselves are owned by verify-gateway-protocol-contract.py;
+# a literal here went stale at each lockstep bump (#113).
 assert 'verify-gateway-protocol-contract.py' in source
 assert 'config: LocalDevice\n      debugEnabled: false' in source
 # Release is the sole archive/analyze scheme. The physical-device run scheme
@@ -36,7 +36,7 @@ for scheme in schemes[:-1]:
 expected = {
     "Development": ("com.tron.mobile.beta", "beta", "development", "development", "NO", "DEBUG TRON_DEVELOPMENT"),
     "Test": ("com.tron.mobile.testhost", "beta", "none", "none", "NO", "DEBUG HOSTED_TEST"),
-    "LocalDevice": ("com.tron.mobile", "production-sandbox", "development", "development", "YES", "TRON_PRIVATE_VARIABLE_BLUR"),
+    "LocalDevice": ("com.tron.mobile", "production-sandbox", "development", "development", "YES", "TRON_PRIVATE_VARIABLE_BLUR TRON_TRANSCRIPT_ORIENTATION_EVALUATION"),
     "DevicePerformance": ("com.tron.mobile", "production-sandbox", "development", "development", "NO", "HOSTED_TEST"),
     "Release": ("com.tron.mobile", "production", "production", "production", "NO", None),
 }
@@ -48,7 +48,9 @@ for name, (bundle, route, apns, attest, blur, flags) in expected.items():
     assert f"TRON_APP_ATTEST_ENVIRONMENT = {attest}" in text, name
     assert f"TRON_PRIVATE_BLUR_ENABLED = {blur}" in text, name
     if flags:
-        assert f"SWIFT_ACTIVE_COMPILATION_CONDITIONS = {flags}" in text, name
+        # The whole line: a prefix match let a changed condition set pass here
+        # and fail only in the effective-settings check below (#113).
+        assert re.search(rf"^SWIFT_ACTIVE_COMPILATION_CONDITIONS = {re.escape(flags)}$", text, re.M), name
     else:
         assert "SWIFT_ACTIVE_COMPILATION_CONDITIONS" not in text and "TRON_PRIVATE_VARIABLE_BLUR" not in text, name
     if name in ("LocalDevice", "Release"):
@@ -191,7 +193,11 @@ for block in blocks:
     seen.add(target)
     for key, value in required.items():
         assert re.search(rf"^    {re.escape(key)} = {re.escape(value)}$", block, re.M), (target, key)
-    assert re.search(r"^    SWIFT_ACTIVE_COMPILATION_CONDITIONS = TRON_PRIVATE_VARIABLE_BLUR$", block, re.M), target
+    # CT-23's evaluation condition is LocalDevice-only; development.md owns it.
+    assert re.search(
+        r"^    SWIFT_ACTIVE_COMPILATION_CONDITIONS = TRON_PRIVATE_VARIABLE_BLUR TRON_TRANSCRIPT_ORIENTATION_EVALUATION$",
+        block, re.M,
+    ), target
 assert seen == {"TronMobile", "TronShareExtension"}, seen
 print("effective LocalDevice app and extension settings policy passed")
 PY

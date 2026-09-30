@@ -644,6 +644,7 @@ struct TronReadOnlyTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: TronDocumentTextView, context: Context) {
+        view.scrollsToTop = !context.environment.chatOwnsStatusBar
         if view.text != text { view.text = text }
         let size = style == .code ? TronTypography.sizeBody3 : TronTypography.sizeBody
         let base = TronFontLoader.createUIFont(
@@ -1249,7 +1250,6 @@ struct TronSettingsGroup<Content: View>: View {
     let surfaceStyle: TronSettingsGroupSurfaceStyle
     let content: Content
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
-    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
     init(
         _ title: String,
@@ -1272,12 +1272,7 @@ struct TronSettingsGroup<Content: View>: View {
                     .font(TronTypography.sheetSectionHeader)
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
-                if let detail {
-                    Text(detail)
-                        .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
-                        .foregroundStyle(Color.tronTextMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                if let detail { TronSettingsDetailText(detail) }
             }
             switch surfaceStyle {
             case .uncontained:
@@ -1291,6 +1286,22 @@ struct TronSettingsGroup<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The explanatory line under a settings section title. Sheets that build
+/// their own header or intro use this so the size tracks the settings groups.
+struct TronSettingsDetailText: View {
+    let text: String
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+            .foregroundStyle(Color.tronTextMuted)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

@@ -12,6 +12,8 @@ source contracts, but not as a second user-facing product.
 - `packages/mac-app` — macOS installer/menu bar and gateway packaging
 - `packages/push-relay` — closed product-operated App Attest/APNs transport
 - `scripts/tron` — contributor command entry point
+- `tools/work` — repository-agnostic GitHub work tracking for parallel agents,
+  configured by `.github/work.json`
 
 The custom Rust backend, Engine/Activity protocol, agent workers, event
 journals and the SQLite session mirror, browser operator, and legacy notification delivery subsystem were
@@ -69,13 +71,18 @@ and nonignored untracked file, so new packages, configuration and agent guidance
 need no parallel scan-root list. Ignored generated output is skipped only when
 untracked; tracked files remain in scope. Only the guard's own needle definitions
 are exempt. Pre-commit `--staged` checks changed index blobs, not later working-tree
-edits. Install that hook once per clone with `scripts/install-hooks.sh`; it runs
-`personal-info-guard.sh --staged` and the Gateway build for staged gateway
-TypeScript. Run `python3 scripts/test-personal-info-guard.py` for disposable-repository
-regressions covering those boundaries, literal filenames and fail-closed Git
-errors. Fixtures isolate Git's environment/configuration so an inherited
-alternate index cannot redirect their writes. CI runs them on Linux and macOS;
-pattern syntax must work with both Git regex implementations.
+edits. `--stdin` applies the same needles to text about to be published, such as
+the evidence `scripts/tron work verify --post` writes to GitHub, and exits 1 on
+a finding. Install that hook once per clone with `scripts/install-hooks.sh`, run from
+the main checkout or any linked worktree; Git's hooks directory is shared, so one
+install guards every worktree. The hook runs `personal-info-guard.sh --staged`
+and the Gateway build for staged gateway TypeScript. Run
+`python3 scripts/test-personal-info-guard.py` for disposable-repository
+regressions covering those boundaries, literal filenames, fail-closed Git errors
+and hook installation from linked worktrees. Fixtures isolate Git's
+environment/configuration so an inherited alternate index cannot redirect their
+writes. CI runs them on Linux and macOS; pattern syntax must work with both Git
+regex implementations.
 
 ### Toolchain
 
@@ -83,7 +90,11 @@ Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
 Use `scripts/verify-ci-toolchain.sh node` to verify the current executable and
 reject duplicated version mirrors. Install native project generation with
 `scripts/install-ci-tools.sh xcodegen`; both `scripts/tron ios generate` and
-`scripts/tron mac generate` reject a mismatched XcodeGen. Xcode version literals
+`scripts/tron mac generate` reject a mismatched XcodeGen. `TRON_CI_TOOLS_DIR`
+relocates that cache (default `.ci-tools`) for the installer, project
+generation, the Mac bundle script, `scripts/tron-ios-test`,
+`scripts/ios-gateway-e2e-test` and `scripts/tron-profile-ios`; the iOS runner fixtures use it to serve a
+synthetic XcodeGen on every host. Xcode version literals
 remain intentional Apple-toolchain pins. Run
 `python3 scripts/check-documentation-policy.py` after changing documentation
 navigation, commands, repository paths, or backticked paths in source
@@ -111,7 +122,20 @@ JSONL simultaneously in a separate Pi process.
 `~/.tron-dev/gateway` on port `9848` is the only routine agent-development
 surface. `scripts/tron dev status` (or `preflight`) is read-only and never
 builds; it reports the expected endpoint/home, PID start identities, lifecycle
-epoch, source revision, payload fingerprint, and health readiness.
+epoch, source revision, payload fingerprint, health readiness, and the source
+worktree, branch and dirtiness (`sourceWorktree`, `sourceBranch`,
+`sourceDirty`) of the running candidate. `start`/`restart` build from a dirty
+tree too: the candidate's `sourceRevision` is always the full 40-hex `HEAD` the
+payload manifest requires, and uncommitted work (tracked edits or untracked,
+non-ignored files, measured before the build) is recorded only as `sourceDirty`
+and a `-dirty` marker in the free-form version label, never in the revision.
+`start`/`restart` record the worktree, branch and dirtiness they built from against the
+staged candidate's runtime epoch (eight records, always keeping the running
+one); status resolves them from the epoch that reached readiness, so a failed
+restart from another worktree never relabels the running Gateway, even when
+both checkouts build the same payload fingerprint. Unknown values report
+`null`: all three for an unrecorded epoch, dirtiness for a record written
+before it was recorded, and the branch of a detached checkout.
 `scripts/tron dev stop` is also build-free and refuses to trust a stale or
 reused PID based on `kill -0` alone. The supervisor atomically publishes bounded lifecycle state:
 `starting`, `ready`, `stopping`, `restarting`, `failed`, or `stopped`. Lifecycle writes use the explicit transition table in `scripts/tron-dev-state.mjs`; illegal regressions fail closed. Exit 75
@@ -167,6 +191,8 @@ scripts/tron mac generate
 
 The TronMac build and test commands are in the
 [Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests).
+CI only compiles the Mac app and test sources, unsigned. Run the app-hosted
+`TronMacTests` locally, because they need the team's signing certificate.
 
 The Release app packages only `Tron Agent.app` under the stable
 `com.tron.server` label. Developer tooling reuses that installed signed launcher

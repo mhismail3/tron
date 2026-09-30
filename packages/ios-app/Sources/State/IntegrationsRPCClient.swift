@@ -43,6 +43,34 @@ final class IntegrationsRPCClient {
         return value
     }
 
+    func beginXOAuth(instanceID: String, clientID: String, redirectURI: String, policy: IntegrationPolicy) async throws -> IntegrationXOAuthStarted {
+        struct Params: Encodable { let instanceId: String; let clientId: String; let redirectUri: String; let policy: IntegrationPolicy }
+        let value: IntegrationXOAuthStarted = try await mutate("knowledge.x.oauth.begin", parameters: Params(instanceId: instanceID, clientId: clientID, redirectUri: redirectURI, policy: policy))
+        guard value.instanceId == instanceID, !value.operationId.isEmpty, !value.state.isEmpty,
+              let url = URL(string: value.authorizationUrl), url.scheme == "https", url.host == "twitter.com", url.path == "/i/oauth2/authorize" else {
+            throw invalidResponse()
+        }
+        return value
+    }
+
+    func xCredits(connectionID: String) async throws -> IntegrationXCredits {
+        struct Params: Encodable { let connectionId: String }
+        let value: IntegrationXCredits = try await request("knowledge.x.credits", Params(connectionId: connectionID))
+        guard !connectionID.isEmpty, value.freeBalance.isFinite, value.freeBalance >= 0,
+              value.prepaidBalance.isFinite, value.totalBalance.isFinite, value.totalBalance >= 0 else {
+            throw invalidResponse()
+        }
+        return value
+    }
+
+    func completeXOAuth(operationID: String, callbackURL: String? = nil, code: String? = nil, state: String? = nil) async throws -> IntegrationSetupCompleted {
+        struct Params: Encodable { let operationId: String; let callbackUrl: String?; let code: String?; let state: String? }
+        guard callbackURL != nil || (code != nil && state != nil) else { throw invalidResponse() }
+        let value: IntegrationSetupCompleted = try await mutate("knowledge.x.oauth.complete", parameters: Params(operationId: operationID, callbackUrl: callbackURL, code: code, state: state))
+        guard value.id != "", value.definitionId == "knowledge.x", value.setupRevision >= 1 else { throw invalidResponse() }
+        return value
+    }
+
     func completeSetup(
         operationID: String,
         instanceID: String,
