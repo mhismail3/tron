@@ -81,7 +81,7 @@ query($owner: String!, $name: String!, $verify: String!, $cursor: String) {
     pullRequests(states: OPEN, first: 100, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title url isDraft headRefName
+        number title url isDraft headRefName isCrossRepository
         comments(last: 1) { nodes { createdAt } }
         commits(last: 1) {
           nodes { commit { oid statusCheckRollup { state } status { context(name: $verify) { state } } } }
@@ -126,6 +126,7 @@ def _issue_states(gh: Gh, owner: str, name: str, numbers: List[int]) -> Dict[int
 
 
 def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Iterable[int]) -> dict:
+    """GitHub's side of the snapshot; claim_numbers are the issues named by every claim-style branch."""
     board, rules = config["dashboard"], config["claim"]
     repository = f"{owner}/{name}"
     title = config["project"]["title"]
@@ -292,7 +293,9 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
 
     pulls = {}
     for node in sorted(snapshot["pull_requests"], key=lambda p: -p["number"]):
-        pulls[node["headRefName"]] = _pull(node)  # the oldest PR for a head wins
+        # Claim branch names are public; a fork can open a PR with the same head name.
+        if not node["isCrossRepository"]:
+            pulls[node["headRefName"]] = _pull(node)  # the oldest PR for a head wins
 
     open_issues = sorted((i for i in issues.values() if i["state"] == "OPEN"), key=lambda i: i["number"])
     excluded = set(rules["excludeLabels"])
@@ -624,14 +627,17 @@ def run(gh: Gh, cwd: Path, config: dict, html_path: Optional[Path], json_path: O
     owner, name = gh.run("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip().split("/")
     primary = start.primary_checkout(cwd).resolve()
     remote_claims = claims.all_claims(cwd, rules["remote"], rules["baseBranch"])
+    worktrees = start.list_worktrees(cwd)
     times = _commit_times(cwd, sorted({c.sha for c in remote_claims}))
-    github = fetch_github(gh, owner, name, config, [claims.claimed_issue(c.branch) for c in remote_claims])
+    # Worktree branches too: an orphan worktree's reason states its issue's real state.
+    branches = [c.branch for c in remote_claims] + [b for b in worktrees.values() if b]
+    numbers = {n for n in map(claims.claimed_issue, branches) if n is not None}
+    github = fetch_github(gh, owner, name, config, numbers)
     snapshot = {
         **github,
         "claims": [{"branch": c.branch, "sha": c.sha, "session": c.session, "committed_at": times.get(c.sha)}
                    for c in remote_claims],
-        "worktrees": [{"path": str(path), "branch": branch or None}
-                      for path, branch in start.list_worktrees(cwd).items()],
+        "worktrees": [{"path": str(path), "branch": branch or None} for path, branch in worktrees.items()],
         "worktree_root": str((primary / rules["worktreeRoot"]).resolve()),
         "checkout_parent": str(primary.parent),
     }

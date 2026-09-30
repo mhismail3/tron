@@ -274,10 +274,11 @@ It reads, in a bounded number of calls:
   comment;
 - open issues carrying a `dashboard.needsYouLabels` label or the
   `dashboard.regressionLabel`, whether or not they are in the Project;
-- open pull requests with their head branch, the combined check state of the
-  head commit, and the `dashboard.verifyContext` commit status;
-- the state of any issue named by a claim branch that the reads above did not
-  return (one aliased query);
+- open pull requests whose head branch is in this repository, with the
+  combined check state of the head commit and the `dashboard.verifyContext`
+  commit status;
+- the state of any issue named by a remote claim branch or a local worktree's
+  claim-style branch that the reads above did not return (one aliased query);
 - remote branches (`git ls-remote`), the claim owner from each claim branch's
   claim commit (the same code as `start`), and local worktrees
   (`git worktree list`).
@@ -341,3 +342,15 @@ The names it reads (statuses, labels, fields, the verify context) come from the
 20. **Pagination drops items.** Every page of Project items, pull requests and
     labeled issues is read, and the number of calls grows with pages, not with
     issues.
+21. **A fork's pull request is taken for the claim's pull request.** Claim
+    branch names are public, so anyone can open a pull request from a fork with
+    the same head name. Only pull requests whose head is in this repository
+    count toward a claim's PR, checks and activity.
+22. **An orphan worktree misstates its issue.** A local worktree on a
+    claim-style branch with no remote branch is reported with its issue's real
+    state, not as "does not exist", even when the issue is outside the Project.
+    `RunTests` drives `run` against real Git and a stand-in `gh` executable.
+23. **A missing issue fails the run, or a missing repository reads as missing
+    issues.** GitHub answers a lookup of a missing number with a `NOT_FOUND`
+    error and exit status 1; that issue is reported as missing. A `NOT_FOUND`
+    on the repository itself still fails the run.

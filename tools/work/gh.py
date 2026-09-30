@@ -48,7 +48,10 @@ class Gh:
         return completed.stdout
 
     def graphql(self, query: str, missing_ok: bool = False, **variables: Any) -> dict:
-        """Run a query; with missing_ok, NOT_FOUND errors leave their fields null instead of failing."""
+        """Run a query; with missing_ok, NOT_FOUND errors below a top-level field leave that field null.
+
+        A NOT_FOUND top-level field (the repository itself) still fails.
+        """
         body = json.dumps({"query": query, "variables": variables})
         completed = self._exec("api", "graphql", "--input", "-", stdin=body)
         # gh exits non-zero whenever the response carries errors, but still
@@ -60,7 +63,8 @@ class Gh:
         if not isinstance(response, dict) or response.get("data") is None:
             detail = completed.stderr.strip() or completed.stdout.strip()
             raise GhError(f"gh api graphql failed: {detail}")
-        errors = [e for e in response.get("errors") or [] if not (missing_ok and e.get("type") == "NOT_FOUND")]
+        errors = [e for e in response.get("errors") or []
+                  if not (missing_ok and e.get("type") == "NOT_FOUND" and len(e.get("path") or []) > 1)]
         if errors:
             raise GhError("GraphQL: " + "; ".join(e.get("message", "?") for e in errors))
         return response["data"]

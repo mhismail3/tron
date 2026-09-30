@@ -1,19 +1,31 @@
-"""Isolated checks for dashboard failure modes 12-20 in README.md.
+"""Isolated checks for dashboard failure modes 12-23 in README.md.
 
 Inputs are GitHub-shaped responses in the form the dashboard's queries return
-them (recorded from the live API, including a deleted-content Project item),
-plus the Git facts the dashboard reads. The GitHub boundary is a recording
-stand-in for `gh`, never a stand-in for the dashboard's own functions.
+them (recorded from the live API, including a deleted-content Project item and
+`gh`'s NOT_FOUND output), plus the Git facts the dashboard reads. The GitHub
+boundary is a recording stand-in for `gh`, never a stand-in for the
+dashboard's own functions. `RunTests` drives `run` end to end against real
+local Git and a stand-in `gh` executable.
 Run: python3 -m unittest discover -s tools/work
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import re
+import subprocess
+import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest import mock
 
-from dashboard import build, fetch_github, render_html, render_text
+from claim import create_claim
+from dashboard import build, fetch_github, render_html, render_text, run
+from gh import Gh, GhError
 
 REPO = "owner/repo"
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
@@ -86,10 +98,10 @@ GHOST = {"id": "PVTI_lAHOAM0rvM4BlL66zg9sR80", "type": "REDACTED", "status": Non
          "rank": None, "content": None}
 
 
-def pull(number, head, rollup="SUCCESS", verify=None, comment_hours_ago=None):
+def pull(number, head, rollup="SUCCESS", verify=None, comment_hours_ago=None, fork=False):
     return {
         "number": number, "title": f"PR {number}", "url": f"https://github.com/{REPO}/pull/{number}",
-        "isDraft": False, "headRefName": head,
+        "isDraft": False, "headRefName": head, "isCrossRepository": fork,
         "comments": {"nodes": [{"createdAt": iso(comment_hours_ago)}] if comment_hours_ago is not None else []},
         "commits": {"nodes": [{"commit": {
             "oid": "a" * 40,
@@ -183,6 +195,26 @@ class StaleTests(unittest.TestCase):
         model = model_of(items=[item(issue(3), status="In progress")], claims=[claim("feat/3-x", pushed_hours_ago=200)])
         self.assertEqual([entry["number"] for entry in model["in_progress"]], [3])
         self.assertTrue(model["in_progress"][0]["stale"])
+
+
+class ForkPullTests(unittest.TestCase):
+    # Failure mode 21.
+    def test_fork_pull_request_with_the_claim_branch_name_is_ignored(self):
+        model = model_of(
+            items=[item(issue(3), status="In progress")],
+            claims=[claim("feat/3-x", pushed_hours_ago=100)],
+            # The fork's PR is older (wins by number) and freshly commented.
+            pulls=[pull(4, "feat/3-x", rollup="FAILURE", comment_hours_ago=1, fork=True),
+                   pull(6, "feat/3-x", rollup="SUCCESS", comment_hours_ago=90)],
+        )
+        row = model["in_progress"][0]
+        self.assertEqual((row["pr"]["number"], row["pr"]["checks"]), (6, "SUCCESS"))
+        self.assertEqual([entry["number"] for entry in model["stale"]], [3])
+
+    def test_fork_pull_request_alone_is_no_pull_request(self):
+        model = model_of(items=[item(issue(3), status="In progress")], claims=[claim("feat/3-x")],
+                         pulls=[pull(4, "feat/3-x", fork=True)])
+        self.assertIsNone(model["in_progress"][0]["pr"])
 
 
 class DisagreementTests(unittest.TestCase):
@@ -320,6 +352,109 @@ class PaginationTests(unittest.TestCase):
         self.assertEqual(github["issue_states"], {900: "CLOSED", 901: "CLOSED"})
         # Project lookup, 2 item pages, 2 label pages, 2 PR pages, 1 state query.
         self.assertEqual(len(gh.calls), 8)
+
+
+# A stand-in `gh` executable answering like the real CLI: `api graphql` prints
+# the response and exits 1 when it carries errors, with NOT_FOUND paths as
+# recorded from the live API.
+FAKE_GH = """
+import json, os, re, sys
+fixture = json.load(open(os.environ["FAKE_GH_FIXTURE"]))
+if sys.argv[1:3] == ["repo", "view"]:
+    print("owner/repo")
+    sys.exit(0)
+query = json.load(sys.stdin)["query"]
+def page(nodes):
+    return {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}
+errors = []
+if "projectsV2(" in query:
+    data = {"repository": {"projectsV2": {"nodes": [{"id": "P1", "title": "Work"}]}}}
+elif "issueOrPullRequest" in query:
+    if fixture["repository_missing"]:
+        data = {"repository": None}
+        errors.append({"type": "NOT_FOUND", "path": ["repository"],
+                       "message": "Could not resolve to a Repository with the name 'owner/repo'."})
+    else:
+        data = {"repository": {}}
+        for alias in re.findall(r"(n\\d+): issueOrPullRequest", query):
+            state = fixture["states"].get(alias[1:])
+            data["repository"][alias] = {"__typename": "Issue", "state": state} if state else None
+            if not state:
+                errors.append({"type": "NOT_FOUND", "path": ["repository", alias],
+                               "message": "Could not resolve to an issue or pull request."})
+elif "items(" in query:
+    data = {"node": {"items": page(fixture["items"])}}
+elif "pullRequests(" in query:
+    data = {"repository": {"pullRequests": page([])}}
+else:
+    data = {"repository": {"issues": page([])}}
+print(json.dumps(dict(data=data, **({"errors": errors} if errors else {}))))
+if errors:
+    print("gh: " + errors[0]["message"], file=sys.stderr)
+    sys.exit(1)
+"""
+
+
+def git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+
+class RunTests(unittest.TestCase):
+    """Failure modes 22 and 23, through `run` with real Git and a stand-in `gh`."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+        remote = self.root / "remote.git"
+        git(self.root, "init", "-q", "--bare", "-b", "main", str(remote))
+        self.repo = self.root / "repo"
+        git(self.root, "clone", "-q", str(remote), str(self.repo))
+        git(self.repo, "config", "user.name", "Agent")
+        git(self.repo, "config", "user.email", "agent@example.invalid")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "base")
+        git(self.repo, "push", "-q", "origin", "HEAD:main")
+        create_claim(self.repo, "origin", "main", "feat/1-live", 1, "session-a")
+        # Worktrees on claim-style branches; only feat/1-live has a remote branch.
+        for branch in ("feat/1-live", "feat/3-local", "feat/4-gone", "feat/5-closed"):
+            path = self.root / "repo-worktrees" / branch.split("/")[1]
+            git(self.repo, "worktree", "add", "-q", "-b", branch, str(path), "main")
+        self.script = self.root / "gh"
+        self.script.write_text(f"#!{sys.executable}\n" + FAKE_GH)
+        self.script.chmod(0o755)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_dashboard(self, repository_missing=False):
+        fixture = self.root / "fixture.json"
+        fixture.write_text(json.dumps({
+            "repository_missing": repository_missing,
+            # Issue 3 exists but is not in the Project; issue 4 does not exist.
+            "states": {"3": "OPEN", "5": "CLOSED"},
+            "items": [item(issue(1), status="In progress")],
+        }))
+        out = self.root / "out.json"
+        env = {"WORK_GH": str(self.script), "FAKE_GH_FIXTURE": str(fixture)}
+        with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()):
+            run(Gh(self.repo), self.repo, CONFIG, None, out)
+        return out.read_text()
+
+    def test_orphan_worktree_reasons_use_the_real_issue_state(self):
+        output = self.run_dashboard()
+        model = json.loads(output)
+        self.assertEqual(sorted((o["path"], o["reason"]) for o in model["orphans"]["worktrees"]), [
+            ("repo-worktrees/3-local", "no remote claim branch for #3"),
+            ("repo-worktrees/4-gone", "issue #4 does not exist"),
+            ("repo-worktrees/5-closed", "issue #5 is closed"),
+        ])
+        row = model["in_progress"][0]
+        self.assertEqual((row["branch"], row["session"], row["worktree"]),
+                         ("feat/1-live", "session-a", "repo-worktrees/1-live"))
+        self.assertNotIn(str(self.root), output)
+
+    def test_missing_repository_fails_the_run(self):
+        with self.assertRaises(GhError):
+            self.run_dashboard(repository_missing=True)
 
 
 if __name__ == "__main__":
