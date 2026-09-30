@@ -2489,3 +2489,9 @@ resources, catalog, horizontal Markdown and card rails opt out without geometry
 or delegate changes. The native composer text view sets its own public property.
 This also fixes today's previously competing empty attachment rail; sheets and
 settings do not inherit a global scroll-view sweep.
+
+Both managed-sheet content boundaries explicitly reset `chatOwnsStatusBar` to
+false. A resource sheet presented by a composer chip/catalog must regain its own
+primary scroll eligibility rather than inherit the covered chat's exclusion.
+`managedSheetRestoresStatusBarOwnership` exercises actual bool/item presentations
+and their native document scrolls; without the reset both variants fail.
