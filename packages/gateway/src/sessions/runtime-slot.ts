@@ -2096,6 +2096,28 @@ export class RuntimeSlot {
     return { calls, complete };
   }
 
+  private updateNestedExtensionActivity(
+    event: { toolCallId: string; toolName: string },
+    status: "running" | "completed" | "failed",
+    value?: unknown,
+  ): void {
+    const now = new Date().toISOString();
+    const startedAt = this.extensionActivities.get(event.toolCallId)?.startedAt ?? now;
+    const activity = this.updateExtensionActivity(
+      event.toolCallId,
+      event.toolName,
+      this.extensionToolOrigin(event.toolName),
+      status,
+      startedAt,
+      now,
+      value,
+      status === "running" ? undefined : now,
+      undefined,
+      false,
+    );
+    if (activity) this.publishProcessesForToolCall(event.toolCallId);
+  }
+
   private projectNestedToolExecution(
     event: { toolCallId: string; toolName: string; args?: unknown; parentToolCallId?: string },
     status: NestedToolExecutionState["status"],
@@ -3835,6 +3857,7 @@ export class RuntimeSlot {
       case "tool_execution_start": {
         if (!this.hasActiveAgentRun) break;
         if ("parentToolCallId" in event && event.parentToolCallId) {
+          this.updateNestedExtensionActivity(event, "running");
           this.projectNestedToolExecution(event, "running");
           break;
         }
@@ -3895,6 +3918,7 @@ export class RuntimeSlot {
       case "tool_execution_update": {
         if (!this.hasActiveAgentRun) break;
         if ("parentToolCallId" in event && event.parentToolCallId) {
+          this.updateNestedExtensionActivity(event, "running", event.partialResult);
           this.projectNestedToolExecution(event, "running");
           break;
         }
@@ -3950,6 +3974,7 @@ export class RuntimeSlot {
       case "tool_execution_end": {
         if (!this.hasActiveAgentRun) break;
         if ("parentToolCallId" in event && event.parentToolCallId) {
+          this.updateNestedExtensionActivity(event, event.isError ? "failed" : "completed", event.result);
           this.projectNestedToolExecution(event, event.isError ? "failed" : "completed");
           break;
         }
@@ -5366,6 +5391,7 @@ export class RuntimeSlot {
     value: unknown,
     completedAt?: string,
     durationMs?: number,
+    persistReceipt = true,
   ): ExtensionRunActivity | undefined {
     // The native supervisor is ordinary control-tool activity, not a new
     // delegated execution, even when its receipt includes the target runId.
@@ -5386,7 +5412,7 @@ export class RuntimeSlot {
       if (status === "running") return current;
       const requestedTerminal = status === "failed" ? "failed" : "completed";
       if (requestedTerminal !== current.lifecycle.state) return current;
-      void this.appendExtensionActivityReceipt(current).catch(() => {});
+      if (persistReceipt) void this.appendExtensionActivityReceipt(current).catch(() => {});
       return current;
     }
     const sequence = (this.extensionActivitySequences.get(activityKey) ?? current?.lifecycle?.sequence ?? 0) + 1;
@@ -5429,8 +5455,8 @@ export class RuntimeSlot {
       childIdentityStrategy,
     }), value, childIdentityStrategy);
     if (admitExtensionRunActivity(current, activity) === current) return current;
-    const terminalReceiptOwner = terminal ? this.claimExtensionReceiptOwnership(activityKey) : undefined;
-    if (terminal && !terminalReceiptOwner) return current;
+    const terminalReceiptOwner = terminal && persistReceipt ? this.claimExtensionReceiptOwnership(activityKey) : undefined;
+    if (terminal && persistReceipt && !terminalReceiptOwner) return current;
     if (activity.runId && !this.bindExtensionRunOwnership(activity.runId, {
       toolCallId,
       ...(asyncDir === undefined ? {} : { asyncDir }),
@@ -5489,7 +5515,7 @@ export class RuntimeSlot {
     if (asyncDir && retainedActivity.status === "running") this.startExtensionActivityWatcher(toolCallId, asyncDir);
     if (retainedActivity.status !== "running") {
       this.stopExtensionActivityWatcher(toolCallId);
-      void this.appendExtensionActivityReceipt(retainedActivity).catch((error) => this.emit("session.extensionError", safeJson(error)));
+      if (persistReceipt) void this.appendExtensionActivityReceipt(retainedActivity).catch((error) => this.emit("session.extensionError", safeJson(error)));
     }
     return retainedActivity;
   }

@@ -19,7 +19,7 @@ export function createJevExtension(client: JevDecisionClient): ExtensionFactory 
       description: "Evaluate explicitly supplied bounded JSON with typed Jev choice, noul, or score questions. Jev is a decision adapter, not chat completion; callers must supply their own rubric, disclosure, and budget authority.",
       promptSnippet: "Use jev only for an explicit bounded typed decision; never send secrets or unrequested source data.",
       parameters,
-      executionMode: "sequential",
+      executionMode: "parallel",
       execute: async (_toolCallId, request: JevToolParameters, signal) => {
         if (!Number.isFinite(request.maxChargeCents) || request.maxChargeCents <= 0 || request.maxChargeCents > 100) throw new Error("Jev requires an explicit per-call maxChargeCents");
         const result = await client.evaluate(request as unknown as JevDecisionRequest, signal ?? new AbortController().signal, { maxChargeCents: request.maxChargeCents });
