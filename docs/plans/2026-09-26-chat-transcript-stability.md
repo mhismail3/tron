@@ -3932,3 +3932,23 @@ Approved final checks, without repeating unchanged main parity/bottom journeys:
   no ct23d lane or running simulator. Final policy/guard/diff checks pass and the
   index is empty. Existing main parity/top-matrix and device-only risks above
   remain open; the environment fix does not claim to resolve them.
+
+### CT-23 subagent sheet content scrolling · worker lane ct23e
+
+Claimed on `ct-23-sheet-scroll`, 2026-09-30. Failure modes before code:
+
+- Content drags at medium resize instead of revealing history; the same drag at
+  large can collapse the sheet. Assert sheet window minY/height and actual row motion.
+- At newest under the flip, a visual upward drag hands the native top-edge pull
+  to sheet dismissal. At either end, repeated rubber-band drags must stay content-only
+  in both orientations and both detents.
+- Separating content gestures must not disable header resize or header swipe-down
+  dismissal; the check button must still dismiss. No new visible affordance.
+- Scroll ownership must not replace SwiftUI's delegate, change status-bar eligibility,
+  freeze/catch-up policy, or row identity. VoiceOver scroll actions must retain native
+  ownership (real assistive-technology direction remains a device check). Keyboard
+  handling is not applicable to this read-only sheet.
+
+User accepted the flipped path's navigation-bar top-edge appearance on device,
+2026-09-30: the navigation-bar fade item is closed. This does not close other
+previously recorded device-only or detent-animation limitations.
