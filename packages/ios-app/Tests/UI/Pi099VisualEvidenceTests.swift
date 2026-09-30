@@ -17,8 +17,15 @@ struct Pi099VisualEvidenceTests {
     }
 
     @Test("capture settings, MCP and tool presentations in light/dark and standard/accessibility type")
-    func captureConformanceFixtures() throws {
-        let scenes = fixtures()
+    func captureConformanceFixtures() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let model = AppModel(client: client, cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"0.99.1","protocolVersion":6,"minProtocolVersion":6,"machineId":"fixture-machine","machineName":"Fixture Mac","gatewayChannel":"stable","capabilities":["sessions.v1","modules.v1"]}"#.utf8))
+        try await model.connectHostedGateway(profile: GatewayProfile(id: "fixture", label: "Fixture", host: "gateway.test", port: 9847, machineId: "fixture-machine", deviceId: "fixture-device"), token: "fixture-token")
+        let responder = Task { await respondToHostedFixtures(socket) }
+        defer { responder.cancel(); Task { await model.teardown(); await client.close() } }
+        let scenes = fixtures(model: model)
         try FileManager.default.createDirectory(at: Self.captureDirectory, withIntermediateDirectories: true)
         var artifacts: [String] = []
         for scene in scenes {
@@ -31,7 +38,7 @@ struct Pi099VisualEvidenceTests {
                         .background(Color.tronBackground)
                         .environment(\.colorScheme, scheme)
                         .environment(\.dynamicTypeSize, size)
-                    let image = try renderHosted(view, size: CGSize(width: 390, height: 844), dynamicTypeSize: size, scrollToBottom: scene.id == "tool-codemode-continuation")
+                    let image = try await renderHosted(view, size: CGSize(width: 390, height: 844), dynamicTypeSize: size, scrollToBottom: scene.id == "tool-codemode-continuation")
                     let data = try #require(image.pngData())
                     let url = Self.captureDirectory.appendingPathComponent("\(name).png")
                     try data.write(to: url, options: .atomic)
@@ -46,7 +53,7 @@ struct Pi099VisualEvidenceTests {
         #expect(scenes.map(\.id).contains("tool-codemode"))
     }
 
-    private func renderHosted<V: View>(_ view: V, size: CGSize, dynamicTypeSize: DynamicTypeSize, scrollToBottom: Bool = false) throws -> UIImage {
+    private func renderHosted<V: View>(_ view: V, size: CGSize, dynamicTypeSize: DynamicTypeSize, scrollToBottom: Bool = false) async throws -> UIImage {
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(origin: .zero, size: size)
@@ -56,6 +63,8 @@ struct Pi099VisualEvidenceTests {
         window.makeKeyAndVisible()
         controller.view.frame = window.bounds
         controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(120))
         controller.view.layoutIfNeeded()
         if scrollToBottom {
             let scrollViews = descendants(of: controller.view).compactMap { $0 as? UIScrollView }
@@ -77,7 +86,7 @@ struct Pi099VisualEvidenceTests {
         return package.appendingPathComponent("build/p99-captures", isDirectory: true)
     }
 
-    private func fixtures() -> [Scene] {
+    private func fixtures(model: AppModel) -> [Scene] {
         let nested = JSONValue.object(["complete": .bool(false), "calls": .array([
             .object(["id": .string("call-01"), "toolName": .string("mcp__calendar__find_events"), "status": .string("completed"), "durationMs": .number(480), "arguments": .object(["query": .string("today")])]),
             .object(["id": .string("call-02"), "toolName": .string("read_mcp_resource"), "status": .string("failed"), "durationMs": .number(82), "arguments": .object(["uri": .string("file:///notes/today")])]),
@@ -89,38 +98,10 @@ struct Pi099VisualEvidenceTests {
         let codemode = tool("codemode", request: .object(["code": .string("const events = await tools.calendar.find_events({ query: 'today' });\nconsole.log(events);\nawait tools.display({ title: 'Schedule' });")]), response: nil, content: "Found 3 events for today.\n• Design review · 10:00\n• Planning · 13:30\n• Demo · 16:00", nestedCalls: nested, details: display, usage: .object(["cost": .object(["total": .number(0.0125)])]))
 
         let views: [Scene] = [
-            scene("mcp-servers-global", settingsGroup("MCP Servers · Global", accent: .tronCyan) {
-                serverRow("calendar", state: "Connected · 5 tools · codemode", icon: "checkmark.circle.fill", detail: "Global configuration")
-                serverRow("linear", state: "Needs sign-in · 3 tools", icon: "person.crop.circle.badge.exclamationmark", detail: "OAuth required")
-                serverRow("weather", state: "Failed · 0 tools", icon: "exclamationmark.triangle.fill", detail: "stderr: spawn weather-mcp ENOENT")
-                serverRow("local-files", state: "Disabled · 4 tools", icon: "pause.circle.fill", detail: "Exposure: hidden")
-            }),
-            scene("mcp-servers-project", settingsGroup("MCP Servers · Trusted Project", accent: .tronCyan) {
-                Text("Project scope · ~/Projects/atlas").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                serverRow("docs", state: "Connected · 2 tools · codemode", icon: "checkmark.circle.fill", detail: "Project configuration")
-            }),
-            scene("mcp-server-detail", settingsGroup("calendar", accent: .tronCyan) {
-                serverRow("Status", state: "Connected", icon: "checkmark.circle.fill", detail: "5 tools · codemode exposure")
-                serverRow("Transport", state: "Streamable HTTP", icon: "network", detail: "https://mcp.example.test")
-                serverRow("Scope", state: "Global", icon: "globe", detail: "Pi mcp.json")
-            }),
-            scene("mcp-add-server", settingsGroup("Add MCP Server", accent: .tronCyan) {
-                fixtureField("Server name", "calendar")
-                fixtureField("Transport", "HTTP")
-                fixtureField("Endpoint", "https://mcp.example.test")
-                action("Add Server", accent: .tronCyan)
-            }),
-            scene("extensions-codemode-tools", settingsGroup("Pi Built-ins", accent: .tronCyan) {
-                serverRow("codemode", state: "Enabled", icon: "chevron.left.forwardslash.chevron.right", detail: "Execute bounded tool scripts")
-                serverRow("tool_search", state: "Enabled", icon: "magnifyingglass", detail: "Find additional tools")
-                serverRow("mcp", state: "Enabled", icon: "server.rack", detail: "MCP servers are available")
-                serverRow("Default tools", state: "+codemode · +tool_search", icon: "wrench.and.screwdriver", detail: "Codemode: On")
-            }),
-            scene("provider-typesafe", settingsGroup("TypeSafe (classifier)", accent: .tronCyan) {
-                Text("Classifier provider · no chat models").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                fixtureField("API key", "••••••••••••••••")
-                action("Save API Key", accent: .tronCyan)
-            }),
+            scene("mcp-servers-global", MCPServersSettingsView(projectCWD: nil).environment(model)),
+            scene("mcp-servers-project", MCPServersSettingsView(projectCWD: "/fixture/trusted-project").environment(model)),
+            scene("extensions-codemode-tools", ExtensionsSettingsView(projectCWD: nil).environment(model)),
+            scene("provider-typesafe", ProvidersSettingsView(sessionID: nil).environment(model)),
             scene("tool-codemode", ToolDetailSheet(tool: codemode, density: .expanded)),
             scene("tool-codemode-continuation", ToolDetailSheet(tool: codemode, density: .expanded)),
             scene("tool-mcp-text", ToolDetailSheet(tool: tool("mcp__calendar__find_events", request: .object(["query": .string("today")]), response: .object(["content": .string("Found 3 events for today.")]), content: "Found 3 events for today."), density: .expanded)),
@@ -133,11 +114,11 @@ struct Pi099VisualEvidenceTests {
             scene("tool-picker", pickerFixture()),
             scene("tool-chips", VStack(alignment: .leading, spacing: 10) {
                 Text("Recent tools").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
-                chip("chevron.left.forwardslash.chevron.right", "Codemode", "3 calls · completed", summary: "Found 3 events")
-                chip("network", "calendar/find_events", "Completed · 930ms", summary: "today")
-                chip("magnifyingglass", "Search tools", "Completed · 210ms", summary: "calendar events")
-                chip("doc.text", "Read MCP resource", "Completed · 120ms", summary: "Team notes")
-            }.padding(18)),
+                ToolCard(data: codemode, onOpenDetails: { _ in })
+                ToolCard(data: tool("mcp__calendar__find_events", request: .object(["query": .string("today")]), response: .object(["content": .string("Found 3 events")]), content: "Found 3 events"), onOpenDetails: { _ in })
+                ToolCard(data: tool("tool_search", request: .object(["query": .string("calendar events")]), response: .object(["content": .string("Loaded tools")]), content: "Loaded tools"), onOpenDetails: { _ in })
+                ToolCard(data: tool("read_mcp_resource", request: .object(["uri": .string("file:///notes/today")]), response: .object(["contents": .array([])]), content: "Team notes"), onOpenDetails: { _ in })
+            }.padding(18).environment(model)),
             scene("routed-physical-model", settingsGroup("Assistant · GPT-6.1 Sol", accent: .tronCyan) {
                 serverRow("Selected model", state: "Atlas Router · Virtual model", icon: "arrow.trianglehead.branch", detail: "Routed this response to openai/gpt-6.1-sol")
                 serverRow("Response model", state: "GPT-6.1 Sol", icon: "cpu", detail: "OpenAI · 272K context")
@@ -163,28 +144,49 @@ struct Pi099VisualEvidenceTests {
 
     private func scene<V: View>(_ id: String, _ view: V) -> Scene { Scene(id: id, content: AnyView(view)) }
     private func settingsGroup<Content: View>(_ title: String, accent: Color, @ViewBuilder content: () -> Content) -> some View {
-        ScrollView { VStack(alignment: .leading, spacing: 16) { TronSettingsGroup(title, detail: "Tron · Tools & Extensions", accent: accent, surfaceStyle: .glass, content: content) }.padding(20) }.tronScrollEdgeChrome().tronSettingsVisualTheme(accent: accent)
+        ScrollView { VStack(alignment: .leading, spacing: 16) { TronSettingsGroup(title, accent: accent, surfaceStyle: .glass, content: content) }.padding(20) }.tronScrollEdgeChrome().tronSettingsVisualTheme(accent: accent)
     }
     private func serverRow(_ title: String, state: String, icon: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).foregroundStyle(icon.contains("exclamation") ? Color.tronError : Color.tronCyan).frame(width: 22)
-            VStack(alignment: .leading, spacing: 3) { Text(title).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary); Text(state).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary); Text(detail).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted).fixedSize(horizontal: false, vertical: true) }
-            Spacer(minLength: 4)
-            Image(systemName: "ellipsis.circle").foregroundStyle(Color.tronTextSecondary)
+        HStack(spacing: 10) {
+            Image(systemName: icon).foregroundStyle(Color.tronCyan).frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) { Text(title).font(TronTypography.bodySM); Text(state).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary); Text(detail).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted) }
         }.padding(12)
     }
-    private func chip(_ icon: String, _ title: String, _ detail: String, summary: String) -> some View {
-        ChatCompactPillSurface(tone: ChatSemanticPillRole.tool.tone, material: .glass, interactive: true) {
-            ChatCompactPillLabel(icon: icon, title: title, detail: detail, tone: ChatSemanticPillRole.tool.tone, iconSize: ChatCompactPillLayoutPolicy.toolIconSize) {
-                Text(summary).font(TronTypography.sans(size: TronTypography.sizeSecondary)).foregroundStyle(Color.tronTextSecondary).lineLimit(1)
+
+    private func respondToHostedFixtures(_ socket: ScriptedGatewaySocket) async {
+        var handled = Set<String>()
+        while !Task.isCancelled {
+            for frame in await socket.sentFrames() {
+                guard let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: frame),
+                      let object = value.objectValue,
+                      let method = object["method"]?.stringValue,
+                      let id = object["id"]?.stringValue,
+                      handled.insert(id).inserted else { continue }
+                let result: JSONValue
+                switch method {
+                case "mcp.list":
+                    result = .object(["servers": .array([
+                        .object(["name": .string("calendar"), "status": .string("connected"), "toolCount": .number(5), "exposure": .string("codemode")]),
+                        .object(["name": .string("linear"), "status": .string("needs sign-in"), "toolCount": .number(3), "exposure": .string("direct")]),
+                        .object(["name": .string("weather"), "status": .string("failed"), "toolCount": .number(0), "error": .string("Fixture server unavailable")]),
+                    ]), "errors": .array([])])
+                case "provider.list":
+                    result = .object(["providers": .array([.object(["id": .string("openai"), "name": .string("OpenAI"), "configured": .bool(false), "usageSupported": .bool(false), "localOnly": .bool(false), "authMethods": .array([.string("api-key")]), "modelCount": .number(0)])])])
+                case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
+                case "packages.list":
+                    result = .object(["packages": .array([]), "resources": .object(["extensions": .array([]), "skills": .array([]), "prompts": .array([]), "themes": .array([])])])
+                case "packages.checkUpdates": result = .object(["updates": .array([])])
+                case "modules.list": result = .object(["modules": .array([])])
+                case "settings.get":
+                    result = .object(["documents": .object(["global": .object(["extensions": .array([])])]), "effective": .object(["defaultTools": .array([.string("+codemode"), .string("+tool_search")]), "codemode": .object(["mode": .string("on")])])])
+                default: continue
+                }
+                let response = JSONValue.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result])
+                if let data = try? JSONEncoder.gateway.encode(response) { await socket.enqueue(data) }
             }
+            try? await Task.sleep(for: .milliseconds(5))
         }
     }
-
-    private func fixtureField(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) { Text(label).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary); Text(value).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).frame(maxWidth: .infinity, alignment: .leading).padding(11).tronGlassSurface(accent: .tronCyan, tintOpacity: 0.07) }
-    }
-    private func action(_ label: String, accent: Color) -> some View { Text(label).font(TronTypography.buttonSM).foregroundStyle(accent).frame(maxWidth: .infinity).padding(12).tronGlassSurface(accent: accent, tintOpacity: 0.10) }
     private func tool(_ name: String, request: JSONValue?, response: JSONValue?, content: String, nestedCalls: JSONValue? = nil, details: JSONValue? = nil, usage: JSONValue? = nil, error: Bool = false, subtitle: String = "Completed") -> ChatToolPresentation {
         ChatToolPresentation(id: "fixture-\(name)", title: name, toolName: name, subtitle: subtitle, request: request, response: response, content: content, fallbackContent: nil, nestedCalls: nestedCalls, details: details, usage: usage, error: error, startedAt: "2026-09-30T10:00:00Z", completedAt: "2026-09-30T10:00:01Z", durationMs: 930, lastProgressAt: "2026-09-30T10:00:01Z", progressSequence: 2)
     }

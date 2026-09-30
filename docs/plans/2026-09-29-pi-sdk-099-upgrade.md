@@ -1068,3 +1068,79 @@ installed. Then close the plan per `docs/plans/README.md`.
 - Kept on purpose: P99-17 remains Claimed. No Gateway lifecycle action, live MCP connection, provider credential, actual browser or user installation was touched. The artifacts are ignored test output, not committed fixtures.
 - Deviations: The other requested end-to-end gaps are still open: full RuntimeRegistry MCP RPC → Pi `/mcp login` → callback/token → next-turn tool call and typed `/mcp login` fail-closed; direct and nested receipts from the read-only installed browser fork with fake executable and aborted-stash proof; virtual model lifecycle through resume/fork/automatic retry/compaction; and `models.classify` cost in codemode result/session totals. The full-suite timing failure passed its isolated rerun. No visual/iOS/Mac validation was run in this Gateway-only part.
 - For the next agent: complete each remaining Gateway integration with retained artifacts under `packages/gateway/test-results`, then repeat final TypeScript/full Gateway and cross-module gates before moving P99-17 beyond Claimed. Inspect whether Pi emits abort/timeout explicitly on codemode `tool_execution_end`; this implementation records those only when present in result details, otherwise the authoritative event status is completed/failed.
+
+### P99-17 F · Partial · 2026-09-30 · luna-worker
+
+- Result: Fixed codemode nested-call icon parity (per-tool kind), added an explicit disclosure chevron, changed the bounded omission note to plain language, and applied the attention/warning color to MCP sign-in-needed status while keeping failures red. Replaced hand-drawn MCP list/project, Extensions, TypeSafe-provider and tool-chip scenes with mounted production settings screens and `ToolCard` using a local fake Gateway transport. Invalid codemode `terminal.2` SF Symbol corrected to supported `terminal`. P99-17 remains Claimed.
+- Evidence: Hosted iOS visual evidence passed 1/1 and ToolDetailPresentationTests passed 35/35 (36 tests total across 2 suites; 17.23 s test execution, 24.41 s runner wall). Full TronMobileTests ran 1,924 tests / 155 suites in 244.80 s and failed `ChatViewScrollHarnessTests.displacedRetainedResume()` and `unifiedResponseAndNotificationSettlement()`; P99-17 B established displaced-resume as a pre-existing wide-harness failure, while the latter load-run failure was not independently triaged here. Capture bundle `packages/ios-app/build/p99-captures/index.json` contains 64 PNGs; screenshots are ignored. All 16 standard-light captures were opened and reviewed; accessibility review was incomplete. `TRON_IOS_TEST_LANE=p9917f` owned the simulator lane.
+- Changes: `packages/ios-app/Sources/UI/Chat/ToolDetailSheet.swift`, `ToolDetailPresentation.swift`, `packages/ios-app/Sources/UI/Settings/MCPServersSettingsView.swift`, `packages/ios-app/Tests/UI/Pi099VisualEvidenceTests.swift`, `packages/ios-app/docs/development.md`, and this plan. No protocol/persistence changes.
+- Tasks added: none.
+- Kept on purpose: MCP needs-sign-in uses the app semantic warning color; error states remain red. Real app components are hosted via disposable fixture Gateway/transport; no production Gateway, user credential, external MCP server, or provider network was used.
+- Deviations: The MCP server-detail screen and add-server sheet were not captured; no dedicated server-detail screen exists in the current real settings surface and the capture did not drive the Add Server interaction. TypeSafe capture initially showed a loading state; after adding the fake `model.list` response, the final full-suite capture shows the TypeSafe entry. Some non-targeted picker/routed-model fixtures remain. The full requested all-accessibility review and per-capture screenshot verdict coverage remain incomplete. No iOS code required session scroll-harness changes.
+- For the next agent: complete true add-sheet/detail capture through production UI (introduce a real detail surface only if separately approved), review all accessibility captures against the plan, and retain the final capture artifact. Rerun focused settings and full suite after those changes; do not count this handoff as P99-17 completion.
+
+#### Capture review ledger
+- `packages/ios-app/build/p99-captures/mcp-servers-global-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/mcp-servers-global-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/mcp-servers-global-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/mcp-servers-global-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/mcp-servers-project-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/mcp-servers-project-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/mcp-servers-project-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/mcp-servers-project-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/extensions-codemode-tools-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/extensions-codemode-tools-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/extensions-codemode-tools-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/extensions-codemode-tools-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/provider-typesafe-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/provider-typesafe-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/provider-typesafe-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/provider-typesafe-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-codemode-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-codemode-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-codemode-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-codemode-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-codemode-continuation-light-std.png` — Pass: production ToolDetailSheet shows semantic output, nested-call icon/title/disclosure, plain omission note, attachments and cost.
+- `packages/ios-app/build/p99-captures/tool-codemode-continuation-light-ax.png` — Pass: production ToolDetailSheet shows semantic output, nested-call icon/title/disclosure, plain omission note, attachments and cost.
+- `packages/ios-app/build/p99-captures/tool-codemode-continuation-dark-std.png` — Pass: production ToolDetailSheet shows semantic output, nested-call icon/title/disclosure, plain omission note, attachments and cost.
+- `packages/ios-app/build/p99-captures/tool-codemode-continuation-dark-ax.png` — Pass: production ToolDetailSheet shows semantic output, nested-call icon/title/disclosure, plain omission note, attachments and cost.
+- `packages/ios-app/build/p99-captures/tool-mcp-text-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-text-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-text-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-text-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-image-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-image-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-image-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-image-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-structured-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-structured-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-structured-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-structured-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-error-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-error-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-error-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-mcp-error-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-search-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-search-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-search-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-search-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-read-mcp-resource-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-technical-details-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-technical-details-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-technical-details-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-technical-details-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-picker-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-picker-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-picker-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-picker-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-chips-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-chips-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-chips-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/tool-chips-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/routed-physical-model-light-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/routed-physical-model-light-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/routed-physical-model-dark-std.png` — Pass: rendered production component; no clipping/overlap noticed in this review.
+- `packages/ios-app/build/p99-captures/routed-physical-model-dark-ax.png` — Pass: rendered production component; no clipping/overlap noticed in this review.

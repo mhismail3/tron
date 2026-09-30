@@ -126,7 +126,7 @@ struct MCPServersSettingsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(server.name).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
                     Text("\(server.status ?? "configured") · \(server.toolCount ?? server.tools?.count ?? 0) tools · \(server.exposure ?? "codemode")")
-                        .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                        .font(TronTypography.caption).foregroundStyle(statusColor(server))
                 }
                 Spacer()
                 Menu {
@@ -146,6 +146,14 @@ struct MCPServersSettingsView: View {
             if let error = server.error { Text(error).font(TronTypography.caption).foregroundStyle(Color.tronError).textSelection(.enabled) }
             if let stderr = server.stderr, !stderr.isEmpty { Text(stderr).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).lineLimit(4).textSelection(.enabled) }
         }.padding(12)
+    }
+
+    private func statusColor(_ server: MCPServerList.Server) -> Color {
+        let status = server.status?.lowercased() ?? ""
+        if status.contains("sign") || status.contains("auth") { return .tronWarning }
+        if status.contains("fail") || server.error != nil { return .tronError }
+        if status.contains("connect") { return .tronEmerald }
+        return .tronTextSecondary
     }
 
     private func reload() { generation &+= 1 }

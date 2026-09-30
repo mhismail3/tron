@@ -779,7 +779,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
     static func icon(for title: String) -> String {
         if title.hasPrefix("mcp__") { return "network" }
         return switch title {
-        case "codemode": "terminal.2"
+        case "codemode": "terminal"
         case "tool_search": "magnifyingglass"
         case "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource": "externaldrive"
         case "read": "doc.text"

@@ -721,6 +721,8 @@ same interaction under matched conditions. An export is evidence for diagnosis,
 not proof of a physical-device speedup; retain the focused regression and
 matched device measurements for that claim.
 
+`Pi099VisualEvidenceTests` hosts the actual MCP Servers, Extensions, and Provider settings screens with a fake Gateway transport, and mounts the production `ToolCard` for Pi 0.99 tool chips. Its ignored capture bundle is generated at `packages/ios-app/build/p99-captures` with standard/accessibility text sizes and light/dark appearances; the JSON index names each PNG. The capture test is evidence of mounted shipped components, not a substitute for UI interaction acceptance.
+
 Hosted tests define `HOSTED_TEST` and expose test-only helpers. A green test build
 does not prove the shipping app compiles. Changes to app views or their model APIs
 also require a non-hosted compile using the canonical device configuration:

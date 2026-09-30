@@ -255,7 +255,7 @@ struct ToolDetailSheet: View {
             ForEach(presentation.nestedCalls) { call in
                 Button { selectedNestedCall = call } label: {
                     HStack(spacing: 9) {
-                        Image(systemName: call.status == .failed ? "exclamationmark.triangle.fill" : "wrench.and.screwdriver")
+                        Image(systemName: ToolDetailPresentation.icon(for: call.toolName))
                             .foregroundStyle(call.status == .failed ? Color.tronError : accent)
                         Text(ToolDetailPresentation.displayTitle(for: call.toolName))
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -264,6 +264,9 @@ struct ToolDetailSheet: View {
                         Text([call.status.rawValue.capitalized, call.durationMs.map(ToolTiming.format(milliseconds:))].compactMap { $0 }.joined(separator: " · "))
                             .font(TronTypography.code(size: TronTypography.sizeSecondary))
                             .foregroundStyle(Color.tronTextSecondary)
+                        Image(systemName: "chevron.right")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(Color.tronTextMuted)
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -272,7 +275,7 @@ struct ToolDetailSheet: View {
                 .buttonStyle(.plain)
             }
             if !presentation.nestedCallsComplete {
-                boundedPreviewNote("Some nested-call details were omitted by the Gateway.")
+                boundedPreviewNote("Some calls weren't fully recorded.")
             }
         }
         }
