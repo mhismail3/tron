@@ -94,6 +94,7 @@ const toolParameters = Type.Object({
     coverage: Type.Optional(Type.Union([Type.Literal("full"), Type.Literal("sampled")])),
     tagIds: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 24 })),
     verdict: Type.Optional(Type.Union([Type.Literal("evergreen"), Type.Literal("dated"), Type.Literal("superseded"), Type.Literal("archive")])),
+    clearVerdict: Type.Optional(Type.Boolean()),
     supersededBy: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
     reason: Type.Optional(Type.String({ maxLength: 2_000 })),
     scope: Type.Optional(Type.Union([Type.Literal("personal"), Type.Literal("research")])),
@@ -144,7 +145,7 @@ function curationToolRequest(parameters: KnowledgeToolParameters): KnowledgeCura
     switch (operation) {
       case "summary": return item.summary ? { ...base, summary: { text: item.summary, coverage: item.coverage ?? "sampled" as const } } : base;
       case "tags": return item.tagIds ? { ...base, tagIds: item.tagIds } : base;
-      case "verdict": return item.verdict ? { ...base, verdict: { verdict: item.verdict, ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}), ...(item.reason ? { reason: item.reason } : {}) } } : base;
+      case "verdict": return item.clearVerdict ? { ...base, verdict: { clear: true as const, ...(item.verdict ? { verdict: item.verdict } : {}), ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}), ...(item.reason ? { reason: item.reason } : {}) } } : item.verdict ? { ...base, verdict: { verdict: item.verdict, ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}), ...(item.reason ? { reason: item.reason } : {}) } } : base;
       case "placement": return item.scope || item.admission ? { ...base, placement: { ...(item.scope ? { scope: item.scope } : {}), ...(item.admission ? { admission: item.admission } : {}), ...(item.reason ? { reason: item.reason } : {}) } } : base;
       case "relation": return item.relationType && item.relationId ? { ...base, relation: { type: item.relationType, recordId: item.relationId, action: item.relationAction ?? "add" as const } } : base;
     }
@@ -883,8 +884,8 @@ export class KnowledgeService {
       }
       case "restoreSource": {
         if (!parameters.commandId || !parameters.id || !parameters.revisionId) throw new GatewayError("invalid_request", "Source restore requires commandId, id, and revisionId");
-        const result = await this.invoke({ operation: "knowledge.source.admission", request: { commandId: parameters.commandId, recordId: parameters.id, expectedRevision: parameters.revisionId, status: "retained", reason: "explicit source restore requested" } }, signal);
-        return { text: `Source restored: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+        const result = await this.invoke({ operation: "knowledge.source.admission", request: { commandId: parameters.commandId, recordId: parameters.id, expectedRevision: parameters.revisionId, status: "retained", reason: "explicit source restore requested from admission archive" } }, signal);
+        return { text: `Source restored to retained admission: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
       case "createNote": {
         if (!parameters.commandId || !parameters.title || !parameters.scope) throw new GatewayError("invalid_request", "Note creation requires commandId, title, and scope");

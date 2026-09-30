@@ -1314,6 +1314,7 @@ struct KnowledgeDetailView: View {
     @State private var scopeSaving = false
     @State private var verdictError: String?
     @State private var retryVerdict: KnowledgeSourceVerdict?
+    @State private var retryClearVerdict = false
     @State private var retryReplacementID: String?
     @State private var retryScope: KnowledgeScope?
     @State private var retryAdmission: KnowledgeSourceAdmission?
@@ -1702,14 +1703,17 @@ struct KnowledgeDetailView: View {
             VStack(spacing: 0) {
                 TronValueRow(icon: "checkmark.seal", title: "Verdict", accent: .tronKnowledge) {
                     Menu {
-                        ForEach(KnowledgeSourceVerdict.allCases, id: \.self) { verdict in
+                        ForEach(KnowledgeSourceVerdict.allCases.filter { $0 != .archive }, id: \.self) { verdict in
                             Button(verdict.label) {
                                 if verdict == .superseded { choosingReplacement = true }
                                 else { choosingReplacement = false; setVerdict(verdict) }
                             }
                         }
+                        if source.verdict != nil {
+                            Button("Clear verdict") { choosingReplacement = false; setVerdict(clear: true) }
+                        }
                     } label: {
-                        TronInlineActionLabel(source.verdict?.verdict.label ?? "Not judged", isWorking: verdictSaving, accent: .tronKnowledge)
+                        TronInlineActionLabel(source.verdict?.verdict == .archive ? "Legacy archive verdict" : (source.verdict?.verdict.label ?? "Not judged"), isWorking: verdictSaving, accent: .tronKnowledge)
                             .fixedSize(horizontal: true, vertical: false)
                     }
                     .disabled(verdictSaving || !admitsOrigin)
@@ -1755,7 +1759,7 @@ struct KnowledgeDetailView: View {
                 TronSettingsDivider(accent: .tronKnowledge)
                 let archived = source.admission?.status == .archived
                 TronValueRow(icon: "archivebox", title: archived ? "Archived" : "Archive", detail: archived ? "Hidden from the Library and agents" : "Hide from the Library and agents; recoverable", accent: .tronKnowledge) {
-                    Button { if archived { setAdmission(.retained) } else { setVerdict(.archive) } } label: {
+                    Button { if archived { setAdmission(.retained) } else { setAdmission(.archived) } } label: {
                         TronInlineActionLabel(archived ? "Unarchive" : "Archive", isWorking: scopeSaving, accent: .tronKnowledge)
                     }
                     .buttonStyle(.plain)
@@ -1765,7 +1769,8 @@ struct KnowledgeDetailView: View {
                     TronSettingsDivider(accent: .tronKnowledge)
                     TronSettingsRow(icon: "exclamationmark.triangle", title: "Change not saved", subtitle: verdictError, subtitleLineLimit: 3, accent: .tronAmber) {
                         Button {
-                            if let retryVerdict { setVerdict(retryVerdict, replacementID: retryReplacementID) }
+                            if retryClearVerdict { setVerdict(clear: true) }
+                            else if let retryVerdict { setVerdict(retryVerdict, replacementID: retryReplacementID) }
                             else if let retryScope { setScope(retryScope) }
                             else if let retryAdmission { setAdmission(retryAdmission) }
                         } label: { TronInlineActionLabel("Retry change", accent: .tronKnowledge) }
@@ -2174,18 +2179,19 @@ struct KnowledgeDetailView: View {
         } catch { return }
     }
 
-    private func setVerdict(_ verdict: KnowledgeSourceVerdict, replacementID: String? = nil) {
+    private func setVerdict(_ verdict: KnowledgeSourceVerdict? = nil, clear: Bool = false, replacementID: String? = nil) {
         guard admitsOrigin, !verdictSaving else { return }
-        retryVerdict = verdict; retryReplacementID = replacementID; retryScope = nil; retryAdmission = nil
+        retryVerdict = verdict; retryClearVerdict = clear; retryReplacementID = replacementID; retryScope = nil; retryAdmission = nil
         verdictSaving = true; verdictError = nil
         let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
         Task { @MainActor in
             do {
-                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "verdict", verdict: verdict, supersededBy: replacementID, commandID: UUID().uuidString.lowercased())
+                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "verdict", verdict: verdict, clearVerdict: clear, supersededBy: replacementID, commandID: UUID().uuidString.lowercased())
                 guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication,
                       let newRevision = response.outcomes.first?.revisionId else { return }
-                if let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision, includeArchived: verdict == .archive) { currentRecord = updated }
-                verdictSaving = false; verdictError = nil; retryVerdict = nil; await onChanged(); await refreshSourceRow()
+                if case .source(let currentSource) = currentRecord.content,
+                   let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision, includeArchived: currentSource.admission?.status == .archived) { currentRecord = updated }
+                verdictSaving = false; verdictError = nil; retryVerdict = nil; retryClearVerdict = false; await onChanged(); await refreshSourceRow()
             } catch {
                 guard model.knowledgePresentationIdentity == identity else { return }
                 verdictSaving = false
@@ -2199,7 +2205,7 @@ struct KnowledgeDetailView: View {
 
     private func setScope(_ scope: KnowledgeScope) {
         guard admitsOrigin, scope != currentRecord.scope, !scopeSaving else { return }
-        retryScope = scope; retryVerdict = nil; retryAdmission = nil
+        retryScope = scope; retryVerdict = nil; retryClearVerdict = false; retryAdmission = nil
         scopeSaving = true; verdictError = nil
         let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
         Task { @MainActor in
@@ -2222,7 +2228,7 @@ struct KnowledgeDetailView: View {
 
     private func setAdmission(_ admission: KnowledgeSourceAdmission) {
         guard admitsOrigin, !scopeSaving else { return }
-        retryAdmission = admission; retryVerdict = nil; retryScope = nil
+        retryAdmission = admission; retryVerdict = nil; retryClearVerdict = false; retryScope = nil
         scopeSaving = true; verdictError = nil
         let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
         Task { @MainActor in

@@ -93,13 +93,16 @@ revision fails with `conflict` so the client reloads the first page.
 `curate`) writes **interpretation** onto an exact source revision: `summary`
 (text the caller produced, with its declared `full`/`sampled` coverage), `tags`
 (a selection of active vocabulary IDs), `verdict` (`evergreen`, `dated`,
-`superseded` with the entry that replaces it, or `archive`), `placement`
+`superseded` with the entry that replaces it, or an explicit clear), `placement`
 (scope and/or admission) and `relation` (add or remove an edge to another
 entry). One batch carries one operation and 1..25 items. The owner derives every
 evidence binding itself: a summary's `sourceRevisionId` and `evidenceDigest` are
 computed from the committed record, so a caller can never stamp its own
 provenance onto stored text, and interpretation never replaces captured
-evidence, the original link, or a retained object.
+evidence, the original link, or a retained object. Archiving is admission
+(`archived`), never a verdict; the legacy `archive` verdict remains decodable but
+curation refuses new writes. Clearing a verdict removes it as a new source
+revision.
 
 A batch is not a transaction. Each item is its own receipted mutation whose
 command ID is derived from the batch command and the entry, so:

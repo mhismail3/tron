@@ -165,14 +165,14 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let recordId: String; let expectedRevision: String; let record: KnowledgeRecordDraft; let confirmedByUser: Bool }
         return try await mutate("knowledge.note.update", parameters: Params(recordId: id, expectedRevision: expectedRevision, record: record, confirmedByUser: confirmedByUser))
     }
-    func curate(sourceID: String, expectedRevision: String, operation: String, verdict: KnowledgeSourceVerdict? = nil, supersededBy: String? = nil, scope: KnowledgeScope? = nil, admission: KnowledgeSourceAdmission? = nil, commandID: String) async throws -> KnowledgeCurationResponse {
+    func curate(sourceID: String, expectedRevision: String, operation: String, verdict: KnowledgeSourceVerdict? = nil, clearVerdict: Bool = false, supersededBy: String? = nil, scope: KnowledgeScope? = nil, admission: KnowledgeSourceAdmission? = nil, commandID: String) async throws -> KnowledgeCurationResponse {
         struct Item: Encodable { let recordId: String; let expectedRevision: String; let verdict: Verdict?; let placement: Placement? }
-        struct Verdict: Encodable { let verdict: KnowledgeSourceVerdict; let supersededBy: String? }
+        struct Verdict: Encodable { let verdict: KnowledgeSourceVerdict?; let clear: Bool?; let supersededBy: String? }
         struct Placement: Encodable { let scope: KnowledgeScope?; let admission: KnowledgeSourceAdmission? }
         struct Params: Encodable { let operation: String; let producer: Producer; let items: [Item] }
         struct Producer: Encodable { let actor: String }
         let item = Item(recordId: sourceID, expectedRevision: expectedRevision,
-                        verdict: verdict.map { Verdict(verdict: $0, supersededBy: supersededBy) },
+                        verdict: clearVerdict ? Verdict(verdict: nil, clear: true, supersededBy: nil) : verdict.map { Verdict(verdict: $0, clear: nil, supersededBy: supersededBy) },
                         placement: scope != nil || admission != nil ? Placement(scope: scope, admission: admission) : nil)
         let response: KnowledgeCurationResponse = try await mutate("knowledge.source.curate", parameters: Params(operation: operation, producer: Producer(actor: "user"), items: [item]), commandID: commandID)
         guard response.outcomes.count == 1, response.outcomes[0].recordId == sourceID,

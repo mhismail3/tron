@@ -19,6 +19,23 @@ import XCTest
 /// `KnowledgeDetailInteractionTests`.
 final class TronKnowledgeDetailUITests: XCTestCase {
     @MainActor
+    func testArchiveAndUnarchiveRoundTripUsesAdmissionLabels() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        let archive = app.buttons["Archive"]
+        scrollTo(archive, in: app)
+        XCTAssertTrue(archive.waitForExistence(timeout: 10), app.debugDescription)
+        archive.tap()
+        let unarchive = app.buttons["Unarchive"]
+        XCTAssertTrue(unarchive.waitForExistence(timeout: 10), "Archiving changes the row action to Unarchive: \(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts["Archived"].exists, "The admission row is labeled Archived")
+        unarchive.tap()
+        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 10), "Restoring changes the row action back to Archive: \(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts["Archive"].exists)
+    }
+
+    @MainActor
     func testSummaryRunsInBackgroundAcrossCloseAndReconnect() {
         continueAfterFailure = false
         let app = launch()

@@ -767,8 +767,8 @@ export interface KnowledgeCurationItem {
   tagIds?: string[];
   /** Optional tager fence: rejects publication if the taxonomy edition changed while Jev ran. */
   vocabularyRevision?: number;
-  /** `verdict` only. */
-  verdict?: { verdict: SourceVerdict; supersededBy?: string; reason?: string };
+  /** `verdict` only. `clear` removes the current verdict as a revisioned curation. */
+  verdict?: { verdict?: SourceVerdict; clear?: true; supersededBy?: string; reason?: string };
   /** `placement` only; at least one of scope or admission. */
   placement?: { scope?: KnowledgeScope; admission?: SourceAdmission; reason?: string };
   /** `relation` only. */

@@ -318,7 +318,7 @@ function searchFreshnessRankSQL(nowMs = Date.now()): string {
   const now = new Date(nowMs).toISOString();
   const ageDays = `CAST(julianday('${now}') - julianday(json_extract(value, '$.sourceRow.ageSince')) + 0.00000002 AS INTEGER)`;
   return `(CASE WHEN json_extract(value, '$.sourceRow.verdict') = 'evergreen' THEN 3
-    WHEN json_extract(value, '$.sourceRow.verdict') IN ('superseded', 'archive') THEN 0
+    WHEN json_extract(value, '$.sourceRow.verdict') = 'superseded' THEN 0
     WHEN json_extract(value, '$.sourceRow.verdict') = 'dated' THEN CASE WHEN ${ageDays} >= 180 THEN 0 ELSE 2 END
     WHEN json_extract(value, '$.sourceRow.decayClass') = 'does-not-age' THEN 3
     WHEN json_extract(value, '$.sourceRow.decayClass') = 'ages' THEN CASE WHEN ${ageDays} >= 180 THEN 0 WHEN ${ageDays} >= 120 THEN 2 ELSE 3 END
@@ -364,7 +364,7 @@ function projectFreshness(source: SourceRowFields, nowMs = Date.now()): { freshn
   const age: SourceFreshness = ageDays >= 180 ? "stale" : ageDays >= 120 ? "aging" : "fresh";
   let freshness: SourceFreshness;
   if (source.verdict === "evergreen") freshness = "fresh";
-  else if (source.verdict === "superseded" || source.verdict === "archive") freshness = "stale";
+  else if (source.verdict === "superseded") freshness = "stale";
   else if (source.verdict === "dated") freshness = age === "fresh" ? "aging" : age;
   else if (source.decayClass === "unknown") freshness = "unknown";
   else if (source.decayClass === "does-not-age") freshness = "fresh";
@@ -1267,8 +1267,7 @@ export class KnowledgeStore {
   private pageFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission"> & { excludePersonalSources?: boolean }): { clauses: string[]; parameters: SQLInputValue[] } {
     const base = this.catalogFilter(request); const admission = admissionFilter(request);
     const privacy = request.excludePersonalSources ? ["NOT (json_extract(value, '$.kind') = 'source' AND json_extract(value, '$.scope') = 'personal')"] : [];
-    const archive = request.includeArchived ? [] : ["NOT (json_extract(value, '$.kind') = 'source' AND coalesce(json_extract(value, '$.sourceRow.verdict'), '') = 'archive')"];
-    return { clauses: [...base.clauses, ...admission.clauses, ...privacy, ...archive], parameters: [...base.parameters, ...admission.parameters] };
+    return { clauses: [...base.clauses, ...admission.clauses, ...privacy], parameters: [...base.parameters, ...admission.parameters] };
   }
   private headVisible(state: KnowledgeState, id: string, head: RecordHead, includeSuppressed = false): boolean {
     const suppression = state.suppressions.get(id);
@@ -1588,7 +1587,14 @@ export class KnowledgeStore {
       case "verdict": {
         only("verdict");
         const input = item.verdict;
-        if (!input || !["evergreen", "dated", "superseded", "archive"].includes(input.verdict as string)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict operation requires evergreen, dated, superseded, or archive");
+        if (!input || (input.clear !== true && input.verdict === undefined)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict operation requires a verdict or explicit clear");
+        if (input.clear === true) {
+          if (input.verdict !== undefined || input.supersededBy !== undefined || input.reason !== undefined) throw new KnowledgeCurationRefusal("invalid-input", "A clear verdict operation accepts no verdict, replacement, or reason");
+          const { verdict: _verdict, ...withoutVerdict } = content;
+          return { scope: current.scope, relations: current.relations, content: withoutVerdict };
+        }
+        if (input.verdict === "archive") throw new KnowledgeCurationRefusal("invalid-input", "Archive is source admission; use placement with admission archived");
+        if (!input.verdict || !["evergreen", "dated", "superseded"].includes(input.verdict)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict operation requires evergreen, dated, superseded, or explicit clear");
         if (input.reason !== undefined && (typeof input.reason !== "string" || input.reason.length > 2_000)) throw new KnowledgeCurationRefusal("invalid-input", "A verdict reason is at most 2000 characters");
         let supersededBy: string | undefined;
         if (input.supersededBy !== undefined) {

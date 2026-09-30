@@ -65,7 +65,7 @@ only on the user's word) apply to every task.
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| C1 | Claimed | Archive is one state: Archive/Unarchive write admission; verdict gains Clear; Archived view, reads and restore agree | none | knowledge-consolidation session, 2026-09-29 |
+| C1 | Done | Archive is one state: Archive/Unarchive write admission; verdict gains Clear; Archived view, reads and restore agree | none | knowledge-consolidation session, 2026-09-29 |
 | C2 | Blocked | Remove `archive` from the verdict type after live data holds none | C1, user Gateway update, STORM rewrite | — |
 | C3 | Claimed | Intake never overrides a decided scope or admission; decided-but-unmoved bookmarks leave the queue | none | knowledge-consolidation session, 2026-09-29 |
 | C4 | Claimed | Sweep is discovery-only; intake is the only capture-and-decide path | C3 | knowledge-consolidation session, 2026-09-29 |
@@ -220,3 +220,13 @@ save time and recovered save time; unreachable iOS `.sources` branch in
   `knowledge-store.ts`, `connectors.ts` and the Entry Detail view and cannot run
   as parallel writers. Each task still ships as its own commit with its row.
 - Deviations: batch claim instead of one task at a time, for the reason above.
+
+### C1 · Done · 2026-09-29 · luna-worker
+
+- Result: archive is admission-only in storage filtering, curation, and Entry Detail; legacy archive verdicts remain readable but cannot be written.
+- Evidence: `cd packages/gateway && npm run build` (passed); `npx vitest run src/knowledge/knowledge-store.test.ts` (29 passed); `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build` (passed); `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run --only-testing TronMobileUITests/TronKnowledgeDetailUITests/testArchiveAndUnarchiveRoundTripUsesAdmissionLabels` (1 passed).
+- Changes: this commit
+- Tasks added: none
+- Kept on purpose: `archive` stays in Gateway and iOS verdict decoding for persisted legacy data; curation explicitly refuses new archive verdict writes.
+- Deviations: an initial default-tier UI test invocation was rejected because the suite belongs to UIValidation; reran with the UI-validation tier. The first iOS build found and corrected an out-of-scope local variable reference before passing.
+- For the next agent: C2 may remove the verdict value only after the live record is cleared and archived by admission; do not infer live-data cleanup from these fixture tests.

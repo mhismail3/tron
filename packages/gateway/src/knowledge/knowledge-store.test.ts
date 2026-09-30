@@ -96,6 +96,23 @@ describe("KnowledgeStore", () => {
     await expect(store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "item-2" })).resolves.toMatchObject({ id: updated.record.id, revisionId: updated.record.revisionId });
   });
 
+  it("uses admission as the sole archive state and clears legacy verdicts by revision", async () => {
+    const { store } = await fixture();
+    const captured = await store.captureSource({ commandId: command("single-archive-capture"), record: source("Archive lifecycle") });
+    const verdict = await store.curateSource({ commandId: command("single-archive-verdict"), operation: "verdict", producer: { actor: "user" }, item: { recordId: captured.record.id, expectedRevision: captured.record.revisionId, verdict: { verdict: "evergreen" } } });
+    const archived = await store.setSourceAdmission({ commandId: command("single-archive-admission"), recordId: captured.record.id, expectedRevision: verdict.record.revisionId, status: "archived" });
+    expect((await store.list({ kind: "source" })).records.map(record => record.id)).not.toContain(captured.record.id);
+    expect((await store.list({ kind: "source", includeArchived: true, sourceAdmission: "archived" })).records.find(record => record.id === captured.record.id)?.content).toMatchObject({ admission: { status: "archived" } });
+    expect(await store.read(captured.record.id)).toBeNull();
+    expect(await store.read(captured.record.id, archived.record.revisionId, false, true)).toMatchObject({ revisionId: archived.record.revisionId });
+    const restored = await store.setSourceAdmission({ commandId: command("single-archive-restore"), recordId: captured.record.id, expectedRevision: archived.record.revisionId, status: "retained" });
+    expect((await store.list({ kind: "source" })).records.map(record => record.id)).toContain(captured.record.id);
+    await expect(store.curateSource({ commandId: command("single-archive-verdict-refusal"), operation: "verdict", producer: { actor: "user" }, item: { recordId: captured.record.id, expectedRevision: restored.record.revisionId, verdict: { verdict: "archive" } } })).rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "invalid-input" });
+    const cleared = await store.curateSource({ commandId: command("single-archive-verdict-clear"), operation: "verdict", producer: { actor: "user" }, item: { recordId: captured.record.id, expectedRevision: restored.record.revisionId, verdict: { clear: true } } });
+    expect(cleared.record.revisionId).not.toBe(restored.record.revisionId);
+    expect(cleared.record.content).not.toHaveProperty("verdict");
+  });
+
   it("keeps archived pagination cursors scoped to visibility and returns archived heads", async () => {
     const { store } = await fixture();
     const first = await store.captureSource({ commandId: command("archive-page-first"), record: source("First") });

@@ -69,8 +69,9 @@ reading surfaces: a raw HTML object is not readable, and page extraction
 includes site chrome. Everything else is inline in the same sheet, with no secondary details sheet:
 the **Summary** group (generated summary or Generate/Regenerate action), a
 permanent **Your take** editor, vocabulary-backed tags and their updating
-state, a verdict control, a replacement picker (bounded source search including
-archived entries), Research / Personal scope and archive controls, and
+state, a verdict control (Evergreen, Dated but useful, Superseded, or Clear
+verdict), a replacement picker (bounded source search including archived entries),
+Research / Personal scope and Archive/Unarchive admission controls, and
 a **Details** table with type, publication/save/capture dates, current freshness
 and age basis, capture state, origin, media type, and revision. Saved notes,
 related entries, links and incomplete-capture coverage remain below. Related
@@ -107,8 +108,10 @@ canonical `tagsStale` projection intact. The **Updating tags** indicator is show
 only while the Gateway-owned K4 tag-job query reports that source's job as
 running; the refreshed row projection then reports the new vocabulary selections.
 If no job can start or the job fails, the sheet shows the stale/re-tagging state
-instead of a timer-based progress claim. Verdict, placement and admission use
-receipted `knowledge.source.curate` operations; free-form tags and client-side summary
+instead of a timer-based progress claim. Verdict (including explicit clear),
+placement and admission use receipted `knowledge.source.curate` operations;
+Archive/Unarchive changes admission rather than verdict. Legacy archive verdicts
+decode but are never offered or written. Free-form tags and client-side summary
 writes are not supported. Each async presentation read is fenced by its
 presentation activity and Gateway identity, while accepted mutations remain
 owned by the Gateway receipt/job authority.
