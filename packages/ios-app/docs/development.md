@@ -2532,3 +2532,11 @@ frame, row movement, edge rubber-band, header resize/dismiss and check-button
 assertions. Run with `scripts/tron-ios-test run --only-testing
 TronMobileUITests/TronSubagentSheetScrollUITests` after a build, with
 `TRON_IOS_TEST_TIER=ui-validation`.
+
+Read-only child sheets prefer transcript scrolling at the medium detent via
+`.presentationContentInteraction(.scrolls)`. This does **not** prevent UIKit's
+edge-pull collapse/dismissal: the content-only gesture contract is still blocked
+in CT-23. The gesture matrix retains before/after frame evidence and the full
+journey intentionally fails on that boundary; it is not a green acceptance gate.
+Header drag and the check button retain native behavior. No scroll-tracking proxy,
+gesture delegate replacement or scroll repair is installed.

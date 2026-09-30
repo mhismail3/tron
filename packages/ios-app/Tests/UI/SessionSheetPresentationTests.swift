@@ -690,6 +690,8 @@ final class SessionSheetPresentationTests: XCTestCase {
                     // without sending a scroll command or dragging the sheet.
                     for _ in 0..<12 { try await DisplayFrameScheduler.displayLink.nextFrame() }
                     let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                    XCTAssertEqual(self.views(of: UIScrollView.self, in: controller.view).filter(\.scrollsToTop).count, 1,
+                                   "The child sheet retains its own native status-bar scroll recipient")
                     self.capture(controller, name: "worker-initial-\(texts.count)-messages")
                     self.assertSubagentOpeningOffset(scroll, isLong: texts.count > 1)
                     let visibility = SubagentPresentedFrameRecorder(controller: controller)
