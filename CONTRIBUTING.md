@@ -113,7 +113,13 @@ JSONL simultaneously in a separate Pi process.
 `~/.tron-dev/gateway` on port `9848` is the only routine agent-development
 surface. `scripts/tron dev status` (or `preflight`) is read-only and never
 builds; it reports the expected endpoint/home, PID start identities, lifecycle
-epoch, source revision, payload fingerprint, and health readiness.
+epoch, source revision, payload fingerprint, health readiness, and the source
+worktree and branch (`sourceWorktree`, `sourceBranch`) of the running candidate.
+`start`/`restart` record the worktree and branch they built from against the
+staged payload fingerprint (last eight builds); status resolves them from the
+fingerprint that reached readiness, so a failed restart from another worktree
+never relabels the running Gateway. An unrecorded fingerprint reports `null`,
+as does the branch of a detached checkout.
 `scripts/tron dev stop` is also build-free and refuses to trust a stale or
 reused PID based on `kill -0` alone. The supervisor atomically publishes bounded lifecycle state:
 `starting`, `ready`, `stopping`, `restarting`, `failed`, or `stopped`. Lifecycle writes use the explicit transition table in `scripts/tron-dev-state.mjs`; illegal regressions fail closed. Exit 75

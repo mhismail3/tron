@@ -84,6 +84,77 @@ test("Debug start admission recovers only an exact owned orphan", () => {
   assert.equal(admission("failed", false, false, false), "start");
 });
 
+// Running-candidate source (worktree + branch) failure modes:
+// 1. A restart staged from another worktree fails before readiness, and status
+//    names that worktree although the previous candidate is still running.
+// 2. Status reads the worktree's branch live, so a later checkout there
+//    rewrites which branch the running Gateway claims to come from.
+// 3. A running fingerprint with no recorded source (pre-existing state or
+//    evicted record) is reported as the latest build instead of unknown.
+// 4. Source records grow with every restart until the bounded lifecycle state
+//    becomes unwritable, or a rebuilt fingerprint leaves a stale duplicate.
+const git = (cwd, ...argumentsList) => execFileSync("git", ["-C", cwd, ...argumentsList], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const sourceFixture = (root, name, branch) => {
+  const worktree = join(root, name);
+  mkdirSync(worktree, { recursive: true });
+  git(worktree, "init", "-q", "-b", branch);
+  git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "--allow-empty", "-m", "fixture");
+  return worktree;
+};
+const fingerprintFor = (index) => index.toString(16).padStart(64, "0");
+const runningSource = (state, buildFingerprint) => {
+  const value = JSON.parse(run(state, "read"));
+  writeFileSync(state, `${JSON.stringify({ ...value, lifecycle: "ready", buildFingerprint })}\n`);
+  const output = JSON.parse(execFileSync(process.execPath, [helper, "status", state, "127.0.0.1", "1"], { encoding: "utf8" }));
+  return { worktree: output.sourceWorktree, branch: output.sourceBranch };
+};
+
+test("Debug status names the worktree and branch of the running candidate, not the latest build", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-source-"));
+  try {
+    const state = join(root, "lifecycle.json");
+    const first = sourceFixture(root, "first", "feat/first");
+    const second = sourceFixture(root, "second", "feat/second");
+    run(state, "record-source", fingerprintFor(1), first);
+    run(state, "record-source", fingerprintFor(2), second);
+    // Failure mode 1: the second build was recorded but never became ready.
+    assert.deepEqual(runningSource(state, fingerprintFor(1)), { worktree: first, branch: "feat/first" });
+    assert.deepEqual(runningSource(state, fingerprintFor(2)), { worktree: second, branch: "feat/second" });
+    // Failure mode 2: a later checkout in the source worktree does not rewrite history.
+    git(second, "checkout", "-q", "-b", "feat/later");
+    assert.deepEqual(runningSource(state, fingerprintFor(2)), { worktree: second, branch: "feat/second" });
+    // Failure mode 3: an unrecorded running fingerprint is unknown, not the latest build.
+    assert.deepEqual(runningSource(state, fingerprintFor(3)), { worktree: null, branch: null });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Debug status reports a detached source worktree without inventing a branch", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-source-"));
+  try {
+    const state = join(root, "lifecycle.json");
+    const worktree = sourceFixture(root, "detached", "main");
+    git(worktree, "checkout", "-q", "--detach");
+    run(state, "record-source", fingerprintFor(1), worktree);
+    assert.deepEqual(runningSource(state, fingerprintFor(1)), { worktree, branch: null });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Debug source records stay bounded and keep the newest record per fingerprint", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-source-"));
+  try {
+    const state = join(root, "lifecycle.json");
+    const first = sourceFixture(root, "first", "feat/first");
+    const second = sourceFixture(root, "second", "feat/second");
+    for (let index = 1; index <= 12; index += 1) run(state, "record-source", fingerprintFor(index), first);
+    run(state, "record-source", fingerprintFor(12), second);
+    const recorded = JSON.parse(run(state, "read")).candidateSources;
+    assert.ok(recorded.length <= 8, `retained ${recorded.length} source records`);
+    assert.equal(recorded.filter((entry) => entry.payloadFingerprint === fingerprintFor(12)).length, 1);
+    assert.deepEqual(runningSource(state, fingerprintFor(12)), { worktree: second, branch: "feat/second" });
+    assert.deepEqual(runningSource(state, fingerprintFor(1)), { worktree: null, branch: null });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 const stopFixture = ({ child, identity, childIsOwned }) => {
   const root = mkdtempSync(join(tmpdir(), "tron-dev-stop-"));
   const home = join(root, "home");

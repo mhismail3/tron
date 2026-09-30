@@ -5,13 +5,14 @@ import { execFileSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
 import { isIP } from "node:net";
 import { mkdir, readFile, rename, writeFile, readdir, rm, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 const MAX_BYTES = 64 * 1024;
 const MAX_TEXT = 512;
 const STATE_LOCK_WAIT_MS = 5_000;
 const STATE_LOCK_RETRY_MS = 25;
 const STATE_LOCK_STALE_MS = 30_000;
+const MAX_CANDIDATE_SOURCES = 8;
 const STATES = new Set(["starting", "ready", "stopping", "restarting", "failed", "stopped"]);
 // Lifecycle writes are deliberately transitions, not arbitrary patches. A
 // failed supervisor may be recovered by a new start; a stopped/ready state may
@@ -249,6 +250,38 @@ async function writeFields(path, fields, lifecycle) {
   });
 }
 
+function currentBranch(worktree) {
+  try {
+    const branch = execFileSync("git", ["-C", worktree, "symbolic-ref", "--short", "-q", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return branch === "" ? null : text(branch);
+  } catch { return null; }
+}
+
+// Only the command that built a candidate knows its source, and only the
+// supervisor's ready transition knows which fingerprint runs. The builder
+// records source by payload fingerprint; status resolves it from the ready
+// buildFingerprint, so a failed restart never relabels the running Gateway.
+async function recordCandidateSource(path, payloadFingerprint, worktree) {
+  if (typeof payloadFingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(payloadFingerprint)) throw new Error("candidate source requires a payload fingerprint");
+  const root = text(worktree, "");
+  if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
+  const branch = currentBranch(root);
+  await withStateLock(path, async () => {
+    const current = await readState(path);
+    const previous = Array.isArray(current.candidateSources) ? current.candidateSources : [];
+    const candidateSources = [
+      ...previous.filter((entry) => entry?.payloadFingerprint !== payloadFingerprint),
+      { payloadFingerprint, worktree: root, branch },
+    ].slice(-MAX_CANDIDATE_SOURCES);
+    await atomicWrite(path, { ...current, candidateSources, updatedAt: new Date().toISOString() });
+  });
+}
+
+function runningCandidateSource(state) {
+  if (typeof state.buildFingerprint !== "string" || !Array.isArray(state.candidateSources)) return undefined;
+  return state.candidateSources.find((entry) => entry?.payloadFingerprint === state.buildFingerprint);
+}
+
 const [command, ...args] = process.argv.slice(2);
 if (!command) throw new Error("missing lifecycle command");
 if (command === "transition") {
@@ -259,6 +292,9 @@ if (command === "transition") {
   const path = args[0];
   if (!path) throw new Error("write requires path");
   await writeFields(path, parseFields(args.slice(1)));
+} else if (command === "record-source") {
+  if (!args[0]) throw new Error("record-source requires path");
+  await recordCandidateSource(args[0], args[1], args[2]);
 } else if (command === "read") {
   process.stdout.write(`${JSON.stringify(await readState(args[0]))}\n`);
 } else if (command === "get") {
@@ -344,12 +380,15 @@ if (command === "transition") {
   const recordedLifecycle = state.lifecycle ?? (supervisorLive ? "starting" : "stopped");
   const activeLifecycle = new Set(["starting", "ready", "stopping", "restarting"]);
   const lifecycle = !supervisorLive && activeLifecycle.has(recordedLifecycle) ? "failed" : recordedLifecycle;
+  const source = runningCandidateSource(state);
   process.stdout.write(`${JSON.stringify({
     expected: { host, port, home: state.expectedHome ?? join(process.env.HOME ?? "", ".tron-dev") },
     lifecycle, epoch: state.epoch ?? null,
     supervisor: { pid: state.supervisorPid ?? null, startIdentity: state.supervisorStartIdentity ?? null, live: Boolean(supervisorLive) },
     child: { pid: state.childPid ?? null, startIdentity: state.childStartIdentity ?? null, live: Boolean(childLive) },
     sourceRevision: state.sourceRevision ?? null, buildFingerprint: state.buildFingerprint ?? null,
+    sourceWorktree: typeof source?.worktree === "string" ? source.worktree : null,
+    sourceBranch: typeof source?.branch === "string" ? source.branch : null,
     health: healthResult, intentionalExit: state.intentionalExit ?? false, exitCode: state.exitCode ?? null,
     restartCount: state.restartCount ?? 0, commandId: state.commandId ?? null,
   })}\n`);

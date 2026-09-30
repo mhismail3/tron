@@ -251,6 +251,7 @@ case "$command" in
     identity_line="$(build_candidate)"
     identity_line="$("$NODE_BIN" "$STATE_HELPER" validate-build-identity "$identity_line")" || exit 78
     read -r version payload_fingerprint <<<"$identity_line"
+    "$NODE_BIN" "$STATE_HELPER" record-source "$STATE_FILE" "$payload_fingerprint" "$ROOT"
     if supervisor_live; then
       token_args=(--channel dev --home "$HOME/.tron-dev" --version "$version" --fingerprint "$payload_fingerprint" --host "$HOST" --port 9848 --command-id "debug-update-$(date +%s)-$$")
       TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 "$NODE_BIN" "$DEPLOY" promote "${token_args[@]}" >&2
