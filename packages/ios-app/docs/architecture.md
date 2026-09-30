@@ -2132,17 +2132,19 @@ Gateway produces that audit from a newline-terminated canonical byte cut capture
 The bounded file copy and HTML rendering continue outside that lane, so running, retrying, compacting, and Bash-active
 sessions remain exportable while later appends are deterministically excluded. JSONL does not linearize only the active branch.
 Agent Instructions presents the Gateway's attributed `instructions` projection from the existing
-subscription-scoped context projection (`AgentInstructionsProjection`). Sections appear collapsed,
-numbered in the order the model reads them; opening one explains its purpose and names its source,
-and lists its attributed entries (tools, rules with their contributing tools, skills, and whole
-instruction files). The per-turn Tron operating context is marked **Each turn**. The splitting and
+subscription-scoped context projection (`AgentInstructionsProjection`). Sections appear as
+standard settings rows on individual Liquid Glass surfaces, numbered in the order the model reads
+them; tapping one opens a section sheet that explains its purpose, names its source, and lists its
+attributed entries (tools, rules with their contributing tools, skills, and whole instruction files)
+or its body. The per-turn Tron operating context is marked **Each turn**. The overview, each section
+sheet, and every nested reader open at the medium detent and can expand to large. The splitting and
 attribution belong to the Gateway; the app only decodes and words them. Instruction files, long
 section bodies, and View Full Prompt open a nested document reader rendered with the shared
 `TronMarkdownView` block renderer (headings, lists, tables, quotes, and code) in a selectable scroll
 surface. That document is prepared by the shared detached detail-preparation owner, keyed to the exact
 source, so a covered or reopened reader reuses the completed document instead of re-parsing it on the
 main thread. Text a model provider adds to each request is outside the projection and is not shown. It shares `TronDocumentSheet`
-with file previews: large-only presentation, blue title and icon-only Done, hidden native
+with file previews: large-only presentation by default (the instructions reader opts into medium and large), blue title and icon-only Done, hidden native
 navigation background and bottom toolbar, a continuous document background, and the custom
 top blur supplied by the scroll owner. Plain file-preview native document viewports extend through the bottom
 safe area rather than ending at a blank strip; their internal insets protect the last line.
