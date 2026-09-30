@@ -825,6 +825,17 @@ async function makeImmutable(root) {
   await visit(root);
 }
 
+// Moves a validated staging tree into versions/ as a sealed version. macOS 15
+// refuses to rename a directory its owner cannot write (EACCES; macOS 26
+// permits it), so the root stays writable across the rename and is sealed in
+// place before any caller records the version as a candidate or selection.
+async function publishImmutablePayload(temporary, target) {
+  await makeImmutable(temporary);
+  await chmod(temporary, 0o755);
+  await rename(temporary, target);
+  await chmod(target, 0o555);
+}
+
 async function assertStoreRoots(paths) {
   // Never let mkdir/read/lock follow an attacker-created projection link. The
   // updater is not a sandbox, but its owned roots must not silently redirect
@@ -1545,8 +1556,7 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
       payloadManifest(manifest, { channel, version: targetVersion });
       await atomicJson(join(temporary, "manifest.json"), manifest);
       await validatePayload(temporary, { channel, version: targetVersion, payloadFingerprint: stagedFingerprint }, true);
-      await makeImmutable(temporary);
-      await rename(temporary, target);
+      await publishImmutablePayload(temporary, target);
       return markCandidateResult({ root: target, manifest, reused: false });
     } catch (error) {
       await makeMutable(temporary).catch(() => {});
@@ -2399,16 +2409,10 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
             if (error?.code !== "ENOENT") throw error;
           }
           await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
-          await makeImmutable(temporary);
-          // The rename removes the entry from its private parent; keep the tree
-          // root writable until it has reached versions/, then seal it there.
-          await chmod(temporary, 0o755);
-          await chmod(stagingParent, 0o700);
-          try { await rename(temporary, target); } catch (error) {
+          try { await publishImmutablePayload(temporary, target); } catch (error) {
             if (error?.code === "EEXIST") throw new Error(`version ${version} already exists`);
             throw error;
           }
-          await chmod(target, 0o555);
           await writeState(paths, {
             state: "prepared", channel: paths.channel, version, payloadFingerprint: fingerprint,
             sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
