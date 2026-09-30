@@ -1092,6 +1092,7 @@ exit 0
         environment.update(self.reader_environment())
         environment.update({
             "PATH": f"{self.bin}:{environment['PATH']}",
+            **self.tools_environment,
             "TRON_IOS_XCRUN": str(self.xcrun),
             "FAKE_SIMULATOR_INVENTORY": str(self.simulator_inventory),
             "TRON_IOS_SIMULATOR_STATE_DIR": str(self.root / "development-state"),
