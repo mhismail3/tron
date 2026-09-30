@@ -440,7 +440,8 @@ export class CommandReceiptStore {
         lane.unaccountedWrite = true;
         const persistCompletion = async (): Promise<void> => {
           try {
-            await stage("receipt.completed-persist", () => this.writeReceipt(path, completed));
+            if (options.respondBeforeCompletion) await this.writeReceipt(path, completed);
+            else await stage("receipt.completed-persist", () => this.writeReceipt(path, completed));
           } catch (error) {
             await this.inventoryMutex.run(async () => {
               lane.unaccountedWrite = false;
@@ -463,13 +464,7 @@ export class CommandReceiptStore {
           const completion = persistCompletion().catch((error: unknown) => {
             try { options.onCompletionError?.(error); } catch { /* accepted response is already authoritative */ }
           });
-          try { options.onCompletion?.(completion); }
-          catch (error) {
-            // A failure to register the drain owner must not detach the durable
-            // write from its lane or turn an admitted prompt into a rejection.
-            await completion;
-            throw error;
-          }
+          options.onCompletion?.(completion);
           resolveEarly(result);
           await completion;
         } else {

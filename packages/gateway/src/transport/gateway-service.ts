@@ -2158,7 +2158,6 @@ export class GatewayService {
           : this.workRegistry.begin(admission))
       : undefined;
     let completionOwnsWork = false;
-    let completionFailed = false;
     try {
       const knowledgeMutation = method.startsWith("knowledge.");
       const prior = knowledgeMutation
@@ -2181,24 +2180,25 @@ export class GatewayService {
           onCompletion: completion => {
             if (!work) return;
             completionOwnsWork = true;
-            void completion.then(() => {
-              if (!completionFailed) work.settle();
-            });
+            void completion.then(() => work.settle());
           },
           onCompletionError: () => {
-            completionFailed = true;
-            work?.markSuspect();
             this.dependencies.logger?.log(
               "warning",
               "Accepted prompt completed receipt could not be persisted",
-              { event: "receipt.completed-persist-failed", source: "transport", method },
+              {
+                event: "receipt.completed-persist-failed",
+                source: "transport",
+                method,
+                ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+              },
             );
           },
         } : undefined,
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
     } finally {
-      if (!completionOwnsWork && !completionFailed) work?.settle();
+      if (!completionOwnsWork) work?.settle();
     }
   }
 

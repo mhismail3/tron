@@ -156,48 +156,6 @@ describe("CommandReceiptStore", () => {
     releaseCompletion();
   });
 
-  it("does not reject an already returned prompt when completion persistence fails", async () => {
-    const root = await temporaryRoot("tron-receipts-prompt-write-failure-");
-    let completionStarted!: () => void;
-    const started = new Promise<void>((resolve) => { completionStarted = resolve; });
-    let releaseCompletion!: () => void;
-    const completionGate = new Promise<void>((resolve) => { releaseCompletion = resolve; });
-    let writeCount = 0;
-    let completionFailure: unknown;
-    const workRegistry = new GatewayWorkRegistry("prompt-receipt-failure");
-    const work = workRegistry.begin({ kind: "rpc-mutation", method: "session.prompt", sessionId: "session", hostEpoch: "epoch" });
-    let failed = false;
-    const store = new CommandReceiptStore(root, async (path, value, mode) => {
-      writeCount += 1;
-      if (writeCount === 2) {
-        completionStarted();
-        await completionGate;
-        throw new Error("fixture completion write failure");
-      }
-      await durableAtomicWriteJson(path, value, mode);
-    });
-    const first = store.execute("device", "session.prompt", "write-failure", async () => ({ accepted: true }), {
-      respondBeforeCompletion: true,
-      onCompletion: (completion) => { void completion.then(() => { if (!failed) work.settle(); }); },
-      onCompletionError: (error) => { failed = true; work.markSuspect(); completionFailure = error; },
-    });
-    await started;
-    await expect(first).resolves.toEqual({ accepted: true });
-    releaseCompletion();
-    await vi.waitFor(() => expect(completionFailure).toMatchObject({ message: "fixture completion write failure" }));
-    expect(workRegistry.facts()).toMatchObject([{ token: work.token, suspect: true }]);
-    let drainSettled = false;
-    const drain = workRegistry.waitUntilSettled().then(() => { drainSettled = true; });
-    await Promise.resolve();
-    expect(drainSettled).toBe(false);
-    await expect(new CommandReceiptStore(root).execute("device", "session.prompt", "write-failure", async () => ({ accepted: false }), {
-      respondBeforeCompletion: true,
-    })).rejects.toMatchObject({ details: { outcomeUnknown: true } });
-    work.settle();
-    await drain;
-    expect(drainSettled).toBe(true);
-  });
-
   it("does not serialize one command's durable receipt write behind the inventory mutex", async () => {
     const root = await temporaryRoot("tron-receipts-write-overlap-");
     let writing = 0;

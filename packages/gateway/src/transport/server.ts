@@ -59,6 +59,7 @@ function rpcFailureLevel(error: unknown): "warning" | "error" {
 
 /** Per-RPC completions under this bound are debug detail; slower ones warn. */
 const SLOW_RPC_WARNING_MS = 1_000;
+// Prompt acknowledgement has a 250 ms qualification target; warn at that boundary to retain actionable latency evidence.
 const SLOW_PROMPT_WARNING_MS = 250;
 /**
  * The only methods a `cancel` frame may end (`C-6`). A disposable read computes
