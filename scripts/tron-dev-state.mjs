@@ -257,16 +257,33 @@ function currentBranch(worktree) {
   } catch { return null; }
 }
 
+// The stage arguments `scripts/tron dev` builds a candidate with. The payload
+// manifest requires the full commit (gateway-payload-deploy.mjs
+// `payloadManifest`), so uncommitted work never alters the revision: it is
+// measured apart, before the build, as any non-ignored change including
+// untracked files the build may compile in. The version label is free-form.
+function candidateSource(worktree) {
+  const root = text(worktree, "");
+  if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
+  const gitOutput = (...argumentsList) => execFileSync("git", ["-C", root, ...argumentsList], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 16 * 1024 * 1024 });
+  const revision = gitOutput("rev-parse", "--verify", "HEAD").trim();
+  const dirty = gitOutput("status", "--porcelain", "--untracked-files=normal").trim() !== "";
+  const stamp = new Date().toISOString().replace(/[-:T]/gu, "").slice(0, 14);
+  return { revision, dirty, version: `debug-${revision.slice(0, 12)}${dirty ? "-dirty" : ""}-${stamp}` };
+}
+
 // Only the command that built a candidate knows its source, and only the
 // supervisor's ready transition knows which candidate runs. The builder
 // records source by the staged manifest's runtime epoch (fresh per stage;
 // the payload fingerprint is shared by Gateway-identical checkouts); status
 // resolves it from the ready epoch, so a failed restart never relabels the
 // running Gateway. Trimming keeps the running record.
-async function recordCandidateSource(path, runtimeEpoch, worktree) {
+async function recordCandidateSource(path, runtimeEpoch, worktree, dirtyArgument) {
   if (typeof runtimeEpoch !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(runtimeEpoch)) throw new Error("candidate source requires a runtime epoch");
   const root = text(worktree, "");
   if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
+  if (dirtyArgument !== "true" && dirtyArgument !== "false") throw new Error("candidate source dirty flag must be true or false");
+  const dirty = dirtyArgument === "true";
   const branch = currentBranch(root);
   await withStateLock(path, async () => {
     const current = await readState(path);
@@ -274,7 +291,7 @@ async function recordCandidateSource(path, runtimeEpoch, worktree) {
     const retained = previous.filter((entry) => entry?.runtimeEpoch !== runtimeEpoch);
     const running = runningCandidateSource({ ...current, candidateSources: retained });
     const older = retained.filter((entry) => entry !== running).slice(-(MAX_CANDIDATE_SOURCES - (running ? 2 : 1)));
-    const candidateSources = [...(running ? [running] : []), ...older, { runtimeEpoch, worktree: root, branch }];
+    const candidateSources = [...(running ? [running] : []), ...older, { runtimeEpoch, worktree: root, branch, dirty }];
     await atomicWrite(path, { ...current, candidateSources, updatedAt: new Date().toISOString() });
   });
 }
@@ -296,7 +313,10 @@ if (command === "transition") {
   await writeFields(path, parseFields(args.slice(1)));
 } else if (command === "record-source") {
   if (!args[0]) throw new Error("record-source requires path");
-  await recordCandidateSource(args[0], args[1], args[2]);
+  await recordCandidateSource(args[0], args[1], args[2], args[3]);
+} else if (command === "candidate-source") {
+  const { revision, dirty, version } = candidateSource(args[0]);
+  process.stdout.write(`${revision} ${dirty} ${version}\n`);
 } else if (command === "read") {
   process.stdout.write(`${JSON.stringify(await readState(args[0]))}\n`);
 } else if (command === "get") {
@@ -391,6 +411,7 @@ if (command === "transition") {
     sourceRevision: state.sourceRevision ?? null, buildFingerprint: state.buildFingerprint ?? null,
     sourceWorktree: typeof source?.worktree === "string" ? source.worktree : null,
     sourceBranch: typeof source?.branch === "string" ? source.branch : null,
+    sourceDirty: typeof source?.dirty === "boolean" ? source.dirty : null,
     health: healthResult, intentionalExit: state.intentionalExit ?? false, exitCode: state.exitCode ?? null,
     restartCount: state.restartCount ?? 0, commandId: state.commandId ?? null,
   })}\n`);
