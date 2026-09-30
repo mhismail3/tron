@@ -51,9 +51,12 @@ export interface SourceAssessmentModelInput {
   source: { uri?: string; mediaType?: string; capturedAt: string; collectionId?: string; captureDisposition?: SourceContent["captureDisposition"] };
 }
 
-/** The paid adapter must invoke beforeDispatch only after its own request
- * validation and credential lookup, immediately before its one POST. */
-export interface SourceAssessmentDispatchContext { beforeDispatch?: () => Promise<void>; }
+/** The paid adapter reserves in beforeDispatch and marks dispatch in onDispatch,
+ * after validation/credential lookup and immediately before handing off its POST. */
+export interface SourceAssessmentDispatchContext {
+  beforeDispatch?: () => Promise<void>;
+  onDispatch?: () => Promise<void> | void;
+}
 export interface SourceAssessmentModel {
   assess(input: SourceAssessmentModelInput, signal: AbortSignal, context?: SourceAssessmentDispatchContext): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }>;
 }

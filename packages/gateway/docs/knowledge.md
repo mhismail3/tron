@@ -823,9 +823,14 @@ explicit user/agent admission or scope placement remains authoritative on rerun.
 Legacy admissions without producer metadata are conservatively treated as prior
 decisions. Scope producer metadata is recorded for new explicit placements;
 legacy scope changes without it cannot be distinguished from prior intake
-placement. Decided bookmarks leave the connector pending queue even when no
+placement. A decided scope alone does not stop intake: it keeps that scope while
+intake processes an undecided admission, and connector mapping never replaces a
+decided scope. Decided bookmarks leave the connector pending queue even when no
 remote move is requested, and the invocation `pending` counter excludes retained
-or archived bookmarks that simply were not moved. The order differs from the initial K5 draft: K8's existing Jev
+or archived bookmarks that simply were not moved. Intake reserves its shared
+monthly Jev attempt before dispatch and marks it dispatched only at the HTTP
+transport boundary; cancellation before that boundary releases the reservation
+so tagging can use the shared budget. The order differs from the initial K5 draft: K8's existing Jev
 admission does not consume summary/tags, and its receipt/budget/move authority
 remains independent of queued enrichment.
 

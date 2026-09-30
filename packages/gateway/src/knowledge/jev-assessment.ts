@@ -67,7 +67,7 @@ export class JevSourceAssessmentModel implements SourceAssessmentModel {
     if (signal.aborted) throw new Error("Jev assessment cancelled");
     const interests = input.interests.slice(0, 50).map(value => bounded(value, 500));
     const prepared = prepareJevAssessmentInput(input, interests);
-    const result = await this.client.evaluate({ model: JEV_DEFAULT_MODEL, state: prepared.state, questions: prepared.questions }, signal, ...(context?.beforeDispatch ? [{ beforeDispatch: context.beforeDispatch }] : []));
+    const result = await this.client.evaluate({ model: JEV_DEFAULT_MODEL, state: prepared.state, questions: prepared.questions }, signal, ...(context?.beforeDispatch || context?.onDispatch ? [{ ...(context.beforeDispatch ? { beforeDispatch: context.beforeDispatch } : {}), ...(context.onDispatch ? { onDispatch: context.onDispatch } : {}) }] : []));
     const admission = result.answers.admission as JevChoiceAnswer; const topic = result.answers.topic as JevChoiceAnswer; const usefulness = result.answers.score as JevScoreAnswer;
     // A sampled excerpt cannot support a destructive archive decision. It is
     // still useful for classification, but uncertainty favors retention.

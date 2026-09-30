@@ -293,3 +293,13 @@ save time and recovered save time; unreachable iOS `.sources` branch in
 - Kept on purpose: `archive` stays in Gateway and iOS verdict decoding for persisted legacy data; curation explicitly refuses new archive verdict writes.
 - Deviations: an initial default-tier UI test invocation was rejected because the suite belongs to UIValidation; reran with the UI-validation tier. The first iOS build found and corrected an out-of-scope local variable reference before passing.
 - For the next agent: C2 may remove the verdict value only after the live record is cleared and archived by admission; do not infer live-data cleanup from these fixture tests.
+
+### C3/C5 review fixes · Done · 2026-09-29 · luna-worker
+
+- Result: intake now processes scope-only decisions without changing their scope, decides pending admission normally, and only short-circuits for a decided admission. Jev intake reserves before dispatch and marks the shared monthly attempt dispatched at the transport boundary; cancellation before dispatch releases it. The agent curation input no longer accepts `archive`; persisted decoding remains unchanged for C2.
+- Evidence: the C3 scope-only test failed against the old admission-or-scope short-circuit (`pending` stayed pending); the Jev cancellation test failed with dispatch marking in `beforeDispatch` (the shared reservation remained held). Revert proofs: restoring the old admission-or-scope guard failed the scope-only test; deleting the admission guard failed the rediscovery test (agent-retained became archived); restoring the old unconditional mapped-scope write failed the scope-only test (Personal became Research). Moving `markDispatch` back to `beforeDispatch`, or omitting pre-dispatch release, each failed the cancellation regression (`reservedCents` increased by the reserved attempt). Final validation: `npm run build` passed; `npx vitest run src/knowledge` passed (26 files, 375 tests); documentation policy passed (48 authored files); personal-info guard passed.
+- Changes: this commit
+- Tasks added: none.
+- Kept on purpose: legacy stored `archive` values remain readable pending C2's live-data and update gate.
+- Deviations: none.
+- For the next agent: C2 remains gated on explicit live-data cleanup and a maintainer Gateway update; no Gateway lifecycle action was performed.

@@ -656,16 +656,16 @@ export class KnowledgeConnectorExtension {
           const admission = existing?.content.admission;
           const decidedAdmission = admission && ((admission.producer?.actor === "user" || admission.producer?.actor === "agent") || (admission.status !== "pending" && admission.producer?.actor !== "connector"));
           const decidedScope = existing && (existing.content.scopeProducer?.actor === "user" || existing.content.scopeProducer?.actor === "agent");
-          if (existing && (decidedAdmission || decidedScope)) {
+          if (existing && decidedAdmission) {
             const status = admission?.status === "archived" ? "archived" : "retained";
             if (status === "archived") archived += 1; else retained += 1;
             setOutcome(item, { sourceId: existing.id, sourceRevision: existing.revisionId, disposition: status, assessment: existing.content.assessment ? "reused" : "not-run", move: "not-attempted", reason: "Existing admission or user/agent placement is authoritative; intake left it unchanged" });
             await markDone(item.id);
             continue;
           }
-          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: existing && !decidedScope ? existing.scope : mappedScope, title: item.title, origin: "connector", ...(isPublicXPost(item.url) ? { publicPostLookup: true } : {}), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
+          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: existing ? existing.scope : mappedScope, title: item.title, origin: "connector", ...(isPublicXPost(item.url) ? { publicPostLookup: true } : {}), ...(item.collectionId ? { collectionId: item.collectionId } : {}), ...(item.savedAt ? { sourceSavedAt: item.savedAt } : {}), identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
           let source = result.record;
-          if (source.scope !== mappedScope) {
+          if (!decidedScope && source.scope !== mappedScope) {
             const placed = await this.store.curateSource({ commandId: command(request.commandId, `scope-${item.id}-${mappedScope}`), operation: "placement", producer: { actor: "connector" }, item: { recordId: source.id, expectedRevision: source.revisionId, placement: { scope: mappedScope } } });
             source = placed.record as KnowledgeRecord & { kind: "source" };
           }
@@ -711,19 +711,28 @@ export class KnowledgeConnectorExtension {
           if (!assessmentCurrent) {
             if (!this.options.assessment) { pending += 1; lastError = "Jev source assessment is not configured"; setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: "not-run", move: "not-attempted" }); continue; }
             let dispatched = false;
+            let reservationReleased = false;
+            let monthlyAttempt: string | undefined;
+            const releaseReservation = async () => {
+              if (monthlyAttempt && !dispatched && !reservationReleased) {
+                await this.options.jevBudget!.releaseUndispatched(jevConnectionId!, monthlyAttempt);
+                reservationReleased = true;
+              }
+            };
             try {
-              if (!jevConnectionId) throw new GatewayError("unsupported", "Jev intake assessment requires exactly one enabled knowledge.jev connection with approved paid access");
-              let monthlyAttempt: string | undefined;
+              const assessmentConnectionId = jevConnectionId;
+              if (!assessmentConnectionId) throw new GatewayError("unsupported", "Jev intake assessment requires exactly one enabled knowledge.jev connection with approved paid access");
               const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => {
-                monthlyAttempt = await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, jevConnectionId, cohortId);
-                try { await this.options.jevBudget!.markDispatch(jevConnectionId, monthlyAttempt); dispatched = true; }
-                catch (error) { await this.options.jevBudget!.releaseUndispatched(jevConnectionId, monthlyAttempt); throw error; }
+                monthlyAttempt = await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, assessmentConnectionId, cohortId);
+              }, onDispatch: async () => {
+                try { await this.options.jevBudget!.markDispatch(assessmentConnectionId, monthlyAttempt!); dispatched = true; }
+                catch (error) { await releaseReservation(); throw error; }
               } }, this.options.assessment);
               assessment = triaged.assessment; source = triaged.source; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId }; assessmentOutcome = assessment.coverage === "sampled" ? "dispatched-settled-sampled" : "dispatched-settled";
               setOutcome(item, { ...sourceRef, assessment: assessmentOutcome });
               const usage = assessment?.usage ? { inputTokens: assessment.usage.inputTokens, outputTokens: assessment.usage.outputTokens, estimatedCostCents: assessment.usage.estimatedCostCents } : undefined;
               await this.settleAssessment(command(request.commandId, `assess-${item.id}`), item.id, cohortId, jevConnectionId, monthlyAttempt!, usage);
-            } catch (error) { assessmentFailed += 1; pending += 1; lastError = dispatched ? "Jev assessment outcome is uncertain; reconcile before retrying" : (error instanceof Error ? error.message : "Jev assessment failed"); setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: dispatched ? "dispatched-uncertain" : "preflight-failed", move: "not-attempted" }); continue; }
+            } catch (error) { if (!dispatched) await releaseReservation(); assessmentFailed += 1; pending += 1; lastError = dispatched ? "Jev assessment outcome is uncertain; reconcile before retrying" : (error instanceof Error ? error.message : "Jev assessment failed"); setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: dispatched ? "dispatched-uncertain" : "preflight-failed", move: "not-attempted" }); continue; }
           }
           const finalInterests = (await this.store.config()).currentInterests ?? [];
           if (!assessment || (assessment.model === JEV_DEFAULT_MODEL && assessment.coverage !== undefined && (assessment.coverage !== "full" && assessment.coverage !== "sampled")) || (assessment.model === JEV_DEFAULT_MODEL && assessment.inputDigest !== undefined && (assessment.profileVersion !== jevProfileVersion(finalInterests) || assessment.inputDigest !== jevInputDigest({ title: source.content.title, text: source.content.text ?? "", interests: finalInterests, source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt } }, finalInterests)))) throw new GatewayError("conflict", "Source assessment authority changed before admission");

@@ -110,37 +110,53 @@ describe("knowledge connectors", () => {
     expect(sources[0]).toMatchObject({ scope: "personal", content: { identity: { provider: "raindrop", itemId: "77" }, collectionId: "8", admission: { status: "retained" } } });
   });
 
-  // Failure modes: a restored Jev archive must not be overwritten by intake;
-  // a user/agent scope placement must not be reset to the collection mapping;
-  // already-decided items must leave pending even when no remote move is made.
-  it("preserves decided admission and scope on rerun and drains decided bookmarks", async () => {
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+  // Failure modes: the same identity is rediscovered from another mapped
+  // collection, and scope-only decisions do not block admission processing.
+  it("preserves decided admission and scope when a bookmark is rediscovered", async () => {
+    let recommendArchive = false;
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: recommendArchive ? "archived" : "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
     const { store, extension } = await mappedRaindropFixture(async url => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
-      if (url.includes("/raindrops/7?")) return response({ items: [
-        { _id: 701, title: "Archived by Jev", link: "https://example.com/701", collection: { $id: 7 } },
-        { _id: 702, title: "Placed by agent", link: "https://example.com/702", collection: { $id: 7 } },
-        { _id: 703, title: "Undecided source", link: "https://example.com/703", collection: { $id: 7 } },
-      ] });
+      if (url.includes("/raindrops/7?") || url.includes("/raindrops/9?")) { const collection = Number(/raindrops\/(\d+)/.exec(url)?.[1]); return response({ items: [{ _id: 701, title: "Decided source", link: "https://example.com/701", collection: { $id: collection } }] }); }
       throw new Error("unexpected provider request");
     }, async () => new Response("Complete, useful article text for intake.", { headers: { "content-type": "text/plain" } }), assessment);
-    const first = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("decision-first"), connectionId: "mapped", sourceCollection: "7", dryRun: false, limit: 3, pilot: { id: "decision-pilot", maxItems: 3, budgetCents: 3 } } }) as any;
-    expect(first).toMatchObject({ retained: 3, pending: 0 });
-    const byIdentity = async (itemId: string) => await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId });
-    const archived = await byIdentity("701");
-    const jevArchived = await store.setSourceAdmission({ commandId: command("decision-jev-archive"), recordId: archived!.id, expectedRevision: archived!.revisionId, status: "archived", producer: { actor: "connector" }, reason: "Jev archive" });
-    await store.curateSource({ commandId: command("decision-restore-archive"), operation: "placement", producer: { actor: "agent" }, item: { recordId: archived!.id, expectedRevision: jevArchived.record.revisionId, placement: { admission: "retained", reason: "Restored after Jev archive" } } });
-    const placed = await byIdentity("702");
-    await store.curateSource({ commandId: command("decision-place-personal"), operation: "placement", producer: { actor: "agent" }, item: { recordId: placed!.id, expectedRevision: placed!.revisionId, placement: { scope: "personal" } } });
-    const rerun = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("decision-rerun"), connectionId: "mapped", sourceCollection: "7", dryRun: false, limit: 3, pilot: { id: "decision-pilot", maxItems: 3, budgetCents: 3 } } }) as any;
-    const restored = await byIdentity("701");
-    const personal = await byIdentity("702");
-    const stillUndecided = await byIdentity("703");
-    expect(restored?.content.admission).toMatchObject({ status: "retained" });
-    expect(personal?.scope).toBe("personal");
-    expect(stillUndecided?.content.admission).toMatchObject({ status: "retained" });
-    expect(rerun).toMatchObject({ retained: 0, pending: 0 });
-    expect((await store.connectorState("raindrop", "mapped"))?.pending).toHaveLength(0);
+    const intake = (id: string, sourceCollection: string) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command(id), connectionId: "mapped", sourceCollection, dryRun: false, limit: 1, pilot: { id: `pilot-${sourceCollection}`, maxItems: 1, budgetCents: 1 } } });
+    const first = await intake("decision-first", "7") as any;
+    expect(first).toMatchObject({ retained: 1, pending: 0 });
+    const source = await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "701" });
+    const archived = await store.setSourceAdmission({ commandId: command("decision-archive"), recordId: source!.id, expectedRevision: source!.revisionId, status: "archived", producer: { actor: "connector" }, reason: "Jev archive" });
+    const restored = await store.curateSource({ commandId: command("decision-restore"), operation: "placement", producer: { actor: "agent" }, item: { recordId: source!.id, expectedRevision: archived.record.revisionId, placement: { admission: "retained", reason: "Restored by agent" } } });
+    const placed = await store.curateSource({ commandId: command("decision-scope"), operation: "placement", producer: { actor: "agent" }, item: { recordId: source!.id, expectedRevision: restored.record.revisionId, placement: { scope: "personal" } } });
+    expect((placed.record as any).content.admission).toMatchObject({ status: "retained", producer: { actor: "agent" } });
+    recommendArchive = true;
+    const rerun = await intake("decision-rerun", "9") as any;
+    const current = await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "701" });
+    expect(current?.scope).toBe("personal");
+    expect(current?.content.admission).toMatchObject({ status: "retained", producer: { actor: "agent" } });
+    expect(rerun).toMatchObject({ retained: 1, pending: 0 });
+    expect(rerun.outcomes).toHaveLength(1);
+  });
+
+  it("decides a connector-pending admission while preserving an agent scope", async () => {
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Research source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric" }; } };
+    let captureCount = 0;
+    const { store, extension } = await mappedRaindropFixture(async url => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      if (url.includes("/raindrops/7?") || url.includes("/raindrops/9?")) { const collection = Number(/raindrops\/(\d+)/.exec(url)?.[1]); return response({ items: [{ _id: 703, title: "Scope decided, admission pending", link: "https://example.com/703", collection: { $id: collection } }] }); }
+      throw new Error("unexpected provider request");
+    }, async () => { const partial = captureCount++ === 0; return new Response(partial ? "Partial evidence for retry." : "Complete, useful article text for intake.", { headers: { "content-type": "text/plain", ...(partial ? { "x-tron-source-capture-quality": "partial" } : {}) } }); }, assessment);
+    const intake = (id: string, sourceCollection: string) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command(id), connectionId: "mapped", sourceCollection, dryRun: false, limit: 1, pilot: { id: `scope-pilot-${sourceCollection}`, maxItems: 1, budgetCents: 1 } } });
+    await intake("scope-first", "7");
+    expect(captureCount).toBe(1);
+    const source = await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "703" });
+    const pending = await store.setSourceAdmission({ commandId: command("scope-reset-admission"), recordId: source!.id, expectedRevision: source!.revisionId, status: "pending", producer: { actor: "connector" }, reason: "Awaiting intake" });
+    await store.curateSource({ commandId: command("scope-agent-placement"), operation: "placement", producer: { actor: "agent" }, item: { recordId: source!.id, expectedRevision: pending.record.revisionId, placement: { scope: "personal" } } });
+    const rerun = await intake("scope-rerun", "9") as any;
+    expect(captureCount).toBe(2);
+    const current = await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "703" });
+    expect(current?.scope).toBe("personal");
+    expect(current?.content.admission).toMatchObject({ status: "retained", producer: { actor: "connector" } });
+    expect(rerun).toMatchObject({ retained: 1, pending: 0 });
   });
 
   it("keeps an intake admission behind a connection-configuration revision race", async () => {
@@ -570,7 +586,7 @@ describe("knowledge connectors", () => {
 
   it("captures, assesses, preserves collection provenance, and moves one bounded intake item", async () => {
     let collection = "111";
-    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Synthetic retained source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 4, estimatedCostCents: 0.00042, pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" } }; } };
+    const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); await context?.onDispatch?.(); return { summary: "Synthetic retained source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 4, estimatedCostCents: 0.00042, pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" } }; } };
     const { store, extension, jevBudget } = await fixture(async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "Synthetic item", link: "https://example.test/item", created: "2025-12-30T12:00:00Z", collection: { $id: 111 }, custom: { preserved: true } }] });
@@ -690,6 +706,7 @@ describe("knowledge connectors", () => {
     const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) {
       if (preflight) { preflight = false; throw new Error("synthetic preflight rejection"); }
       await context?.beforeDispatch?.();
+      await context?.onDispatch?.();
       calls += 1;
       throw new Error("synthetic response uncertainty");
     } };
@@ -721,6 +738,28 @@ describe("knowledge connectors", () => {
     expect(state?.assessmentApprovals?.[0]).toMatchObject({ itemIds: ["1"], reservedCents: 0 });
     expect(state?.assessmentAttempts?.["1"]).toMatchObject({ status: "dispatched", chargeCents: 1 });
     expect(state?.assessmentAttempts?.["explicit-retry:1"]).toBeUndefined();
+  });
+
+  it("releases a reserved Jev attempt cancelled before dispatch so tagging can reserve", async () => {
+    const controller = new AbortController();
+    const assessment: SourceAssessmentModel = { async assess(_input, signal, context) {
+      await context?.beforeDispatch?.();
+      controller.abort(new Error("cancelled before POST"));
+      if (signal.aborted) throw new Error("cancelled before POST");
+      await context?.onDispatch?.();
+      return { summary: "unreachable", evidenceQuality: "none", freshness: "unknown", model: "jev-1.13.0", recommendation: "retained" };
+    } };
+    const { store, extension, jevBudget } = await fixture(async url => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "One", link: "https://example.test/one", collection: { $id: 111 } }] });
+      throw new Error(`unexpected endpoint ${url}`);
+    }, undefined, { assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("cancel-reservation-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:test-account" } });
+    const reservedBefore = (await jevBudget.status("jev-budget")).reservedCents;
+    await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("cancel-reservation-intake"), sourceCollection: "111", dryRun: false, limit: 1, pilot: { id: "cancel-reservation", maxItems: 1, budgetCents: 1 } } }, controller.signal);
+    expect(await jevBudget.status("jev-budget")).toMatchObject({ reservedCents: reservedBefore });
+    const taggingAttempt = await jevBudget.reserve("jev-budget", "tag-after-cancelled-intake", 0);
+    await jevBudget.releaseUndispatched("jev-budget", taggingAttempt);
   });
 
   it.each(["completion", "admission"])("preserves the settled assessment when %s fails afterward", async failure => {

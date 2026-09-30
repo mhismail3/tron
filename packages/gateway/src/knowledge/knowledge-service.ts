@@ -93,7 +93,7 @@ const toolParameters = Type.Object({
     summary: Type.Optional(Type.String({ minLength: 1, maxLength: 8_000 })),
     coverage: Type.Optional(Type.Union([Type.Literal("full"), Type.Literal("sampled")])),
     tagIds: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 24 })),
-    verdict: Type.Optional(Type.Union([Type.Literal("evergreen"), Type.Literal("dated"), Type.Literal("superseded"), Type.Literal("archive")])),
+    verdict: Type.Optional(Type.Union([Type.Literal("evergreen"), Type.Literal("dated"), Type.Literal("superseded")])),
     clearVerdict: Type.Optional(Type.Boolean()),
     supersededBy: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
     reason: Type.Optional(Type.String({ maxLength: 2_000 })),
