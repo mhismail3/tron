@@ -19,8 +19,8 @@ for scheme in schemes:
     assert source.count(f"  {scheme}:\n") == 1, scheme
 assert "  Tron:\n" not in source
 assert '"${CONFIGURATION:-}" == "Release"' in source
-assert 'TRON_GATEWAY_PROTOCOL_VERSION: "6"' in source
-assert 'TRON_GATEWAY_MIN_PROTOCOL_VERSION: "6"' in source
+# The protocol values themselves are owned by verify-gateway-protocol-contract.py;
+# a literal here went stale at each lockstep bump (#113).
 assert 'verify-gateway-protocol-contract.py' in source
 assert 'config: LocalDevice\n      debugEnabled: false' in source
 # Release is the sole archive/analyze scheme. The physical-device run scheme

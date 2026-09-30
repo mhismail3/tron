@@ -92,8 +92,8 @@ reject duplicated version mirrors. Install native project generation with
 `scripts/install-ci-tools.sh xcodegen`; both `scripts/tron ios generate` and
 `scripts/tron mac generate` reject a mismatched XcodeGen. `TRON_CI_TOOLS_DIR`
 relocates that cache (default `.ci-tools`) for the installer, project
-generation, the Mac bundle script, `scripts/tron-ios-test` and
-`scripts/ios-gateway-e2e-test`; the iOS runner fixtures use it to serve a
+generation, the Mac bundle script, `scripts/tron-ios-test`,
+`scripts/ios-gateway-e2e-test` and `scripts/tron-profile-ios`; the iOS runner fixtures use it to serve a
 synthetic XcodeGen on every host. Xcode version literals
 remain intentional Apple-toolchain pins. Run
 `python3 scripts/check-documentation-policy.py` after changing documentation
