@@ -81,14 +81,8 @@ jobs:
       - name: Test iOS runner infrastructure without hardware
         run: |
           python3 scripts/test-ios-test-infrastructure.py
-      # The profiler's stub Gateway serves its WebSocket with the Gateway's own
-      # `ws` dependency (#113).
-      - name: Install Gateway dependencies for the profiler fixtures
-        run: npm ci
-        working-directory: packages/gateway
       - name: Test profiler report and comparison policy
         run: |
-          python3 scripts/test-tron-profile.py
           python3 scripts/test-tron-profile-ios.py
           python3 scripts/test-tron-profile-attribution.py
       - name: Test the incident triage tool
@@ -147,6 +141,11 @@ jobs:
         working-directory: packages/gateway
       - name: Test macOS development lifecycle state tooling
         run: node --test scripts/tron-dev-state.test.mjs
+      # The Gateway profiler samples the Gateway through macOS libproc, and its
+      # stub Gateway loads the Gateway's own `ws` dependency, so its fixtures
+      # run here rather than on the Linux policy runner (#113).
+      - name: Test the Gateway profiler
+        run: python3 scripts/test-tron-profile.py
       - run: node --test scripts/gateway-payload-deploy.test.mjs
       - run: npm test
         working-directory: packages/gateway
