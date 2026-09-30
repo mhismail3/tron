@@ -13,6 +13,7 @@ struct HostedChatDisplayFixture: View {
         """#.utf8)
     @State private var model: AppModel
     @State private var ready = false
+    @State private var diagnostic = ""
     @State private var error: String?
     private let profile: GatewayProfile
     private let snapshot: SessionSnapshot
@@ -64,10 +65,26 @@ struct HostedChatDisplayFixture: View {
         self.snapshot = snapshot
     }
 
+    private func inspectRecipients() {
+        var lines: [String] = []
+        func walk(_ view: UIView) {
+            if let scroll = view as? UIScrollView {
+                lines.append("\(type(of: scroll)) top=\(scroll.scrollsToTop) hidden=\(scroll.isHidden) alpha=\(scroll.alpha) enabled=\(scroll.isScrollEnabled) interaction=\(scroll.isUserInteractionEnabled) offset=\(scroll.contentOffset) inset=\(scroll.adjustedContentInset) frame=\(scroll.convert(scroll.bounds, to: nil)) window=\(String(describing: scroll.window))")
+            }
+            view.subviews.forEach(walk)
+        }
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            scene.windows.forEach(walk)
+        }
+        diagnostic = lines.joined(separator: "\n")
+    }
+
     var body: some View {
         NavigationStack {
             if ready {
                 ChatView(sessionID: snapshot.sessionId, hostedProbe: probe)
+                    .toolbar { Button("Inspect recipients") { inspectRecipients() } }
+                    .overlay(alignment: .top) { Text(diagnostic).font(.system(size: 1)).accessibilityIdentifier("fixture-scroll-owners") }
             } else if let error { Text(error) }
         }
         .environment(model)

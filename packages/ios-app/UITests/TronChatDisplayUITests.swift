@@ -48,6 +48,8 @@ final class TronChatDisplayUITests: XCTestCase {
           for accessories in [false, true] {
             let app = launch(orientation, accessories: accessories)
             if accessories { XCTAssertTrue(app.buttons["Remove Photo"].waitForExistence(timeout: 5)) }
+            app.buttons["Inspect recipients"].tap()
+            print("REAL-RECIPIENTS \(app.staticTexts["fixture-scroll-owners"].label)")
             let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
             system.statusBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).tap()
             let oldest = app.staticTexts["Oldest loaded history"].firstMatch
