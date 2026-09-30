@@ -60,7 +60,7 @@ describe("Raindrop intake pagination and cohort accounting", () => {
       },
     };
     let extension = new KnowledgeConnectorExtension(store, options);
-    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", destination: "900", allowWrites: true, credentialRef: "connector:raindrop:synthetic" } });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", allowWrites: true, credentialRef: "connector:raindrop:synthetic" } });
     const intake = (id: string, pilot: string) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command(id), sourceCollection: "111", dryRun: false, limit: 10, pilot: { id: pilot, maxItems: 10, budgetCents: 10 } } });
     async function completeCohort(commandId: string, cohort: string, expectedMoves: number): Promise<void> {
       const first = await intake(commandId, cohort);

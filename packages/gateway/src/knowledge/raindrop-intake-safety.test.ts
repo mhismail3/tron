@@ -47,18 +47,18 @@ async function fixture(options: { failFirstMove?: boolean; initialScope?: string
       throw new Error("Unexpected synthetic endpoint");
     },
   });
-  const configure = (scope: string, commandId: string, allowWrites = false) => extension.invoke({ operation: "knowledge.connector.configure", request: { commandId, connector: "raindrop", enabled: true, accountId: "42", scope, credentialRef: "connector:raindrop:synthetic", destination: "333", allowWrites } });
+  const configure = (scope: string, commandId: string, allowWrites = false) => extension.invoke({ operation: "knowledge.connector.configure", request: { commandId, connector: "raindrop", enabled: true, accountId: "42", scope, credentialRef: "connector:raindrop:synthetic", allowWrites } });
   await configure(options.initialScope ?? "111", "safety-initial-config", options.failFirstMove === true);
   const intake = (commandId: string, maxItems = 2) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId, dryRun: false, limit: 2, pilot: { id: "safety-pilot", maxItems, budgetCents: 100 } } });
   return { store, observed, remote, configure, intake };
 }
 
 describe("Raindrop intake safety boundaries", () => {
-  it("does not overwrite an unresolved remote receipt by moving a second item", async () => {
+  it("does not authorize remote effects from legacy source/destination connector state", async () => {
     const { store, observed, intake } = await fixture({ failFirstMove: true });
     await intake("safety-uncertain-run");
-    expect(observed.moves).toEqual(["1"]);
-    expect((await store.connectorState("raindrop"))?.pendingRemote?.itemId).toBe("1");
+    expect(observed.moves).toEqual([]);
+    expect((await store.connectorState("raindrop"))?.pendingRemote).toBeUndefined();
   });
 
   it("cannot reset an exhausted pilot by reconfiguring the same connector account", async () => {

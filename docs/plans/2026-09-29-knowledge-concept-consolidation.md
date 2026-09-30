@@ -90,8 +90,8 @@ only on the user's word) apply to every task.
 | C23 | Blocked | Dry-run parity with Raindrop intake on live data, then delete the intake pipeline and its batch machinery | C22, user Gateway update | — |
 | C24 | Done | Migrate iOS manual source assessment from `knowledge.source.triage` to `knowledge.source.assess` with `assessor: model` | C21 | knowledge-consolidation session, 2026-09-29 |
 | C25 | Needs scoping | Expose Jev admission choice, confidence, usefulness score and coverage so the archive threshold can be owned by the editable routine, not the assessment adapter | C21 | — |
-| C26 | Claimed | Raindrop collection roles: one home per scope, triage inboxes, an archive home; moves must agree with Tron's decision | C20 | knowledge-consolidation session, 2026-09-30 |
-| C27 | Claimed | Free X bookmarks: browser-discovered items enter the X queue through a connector primitive; no paid API needed | C20 | knowledge-consolidation session, 2026-09-30 |
+| C26 | Done | Raindrop collection roles: one home per scope, triage inboxes, an archive home; moves must agree with Tron's decision | C20 | knowledge-consolidation session, 2026-09-30 |
+| C27 | Claimed | X bookmarks through the official X API: OAuth 2.0 PKCE connection with refresh, discovery under the paid cap, credit balance | C20 | knowledge-consolidation session, 2026-09-30 |
 
 ## Task details
 
@@ -290,17 +290,31 @@ it into Resources through the same decided-item path without new assessment.
 The live connection's current mapping (`scope` 63441068, destination 75296735)
 is replaced by the user's mapping after the Gateway update.
 
-### C27 — Free X bookmarks
+### C27 — X bookmarks through the official API
 
-X lists bookmarks only through its paid API. The user wants a free path: an
-agent reads the bookmarks page in the user's signed-in browser and hands the
-posts to Tron. Add a `browser` setup method for `knowledge.x` (no API
-credential; the account is the X handle) and a connector primitive that
-enqueues browser-discovered X post permalinks into that connection's queue,
-deduplicated by post ID and bounded per call. Bookmark save time is unknown on
-this path, so age falls back to capture time. From the queue the normal ingest,
-assess and routine path applies. The paid API discovery stays for a token
-connection.
+User decision (2026-09-30), superseding the earlier browser design: use the
+official X API. Owned reads (your own bookmarks) cost $0.001 per returned
+resource since 2026-04-20, so a daily newest-page check is about $0.02. THIS
+SECTION SUPERSEDES ANY TASK BRIEF THAT DESCRIBES A BROWSER SETUP METHOD OR AN
+ENQUEUE PRIMITIVE: build neither.
+
+Today discovery sends a static bearer token from the credential store, but X
+user access tokens expire after two hours. Build an OAuth 2.0 Authorization
+Code with PKCE connection for `knowledge.x`: the user supplies their own X app
+client ID (public client, no secret), scopes `tweet.read users.read
+bookmark.read offline.access`, and completes consent by pasting the redirected
+URL (or code) back into Tron, since the phone cannot reach a Mac loopback
+callback. The Gateway exchanges the code, stores access and refresh tokens only
+in the Mac credential store, rotates the refresh token on every refresh
+(refresh-token rotation is single-use; persist the new one before using the new
+access token), refreshes on 401 or expiry once, and marks the connection
+`auth-error` when refresh fails. The account (`providerAccountId`) is the X
+user ID from `GET /2/users/me`. Discovery keeps its existing paid-attempt cap.
+Also read `GET /2/usage/credits` (USD balance) for the connection so the app
+can show remaining credits (C29).
+
+The user does the X developer-console steps (create app, set a callback URL,
+buy credits) and the consent; agents never do them.
 
 ## Handoff log
 
@@ -538,3 +552,16 @@ connection.
   connection `jev` was set up live with a 500¢ monthly cap and paid access
   approved; STORM's retired archive verdict was cleared (C2 data step for the
   only affected record). Work on branch `knowledge/collection-roles`.
+
+### C26 · Done · 2026-09-30 · luna-worker
+
+- Result: Replaced scope/destination mappings with unique role mappings; triage ingestion requires explicit scope, legacy intake refuses triage/archive roles, and moves derive their home from current admission/scope with typed already-home success.
+- Evidence: `npm run build` passed; focused C26 connection/connector, multipage-intake and intake-safety tests passed (4 files, 68 tests); documentation policy and personal-info guard passed. Required full `src/knowledge src/integrations src/transport` run completed with 810/814 passing; 4 failures were unrelated timing/cleanup sensitivities (Knowledge intake ENOTEMPTY, logger timeout, request-span timing); the intake failure passed isolated, while the cold-open request-span test continued to miss its >100 ms threshold in isolation. Revert proof: disabling duplicate-home validation made the ConnectionOwner role-validation regression fail because setup accepted two research homes; restoring validation made it pass.
+- Changes: this commit.
+- Tasks added: none.
+- Deviations: none; iOS has no `raindropCollections` decoder. Routine draft updated in the runtime workspace outside the repository.
+- For the next agent: C27 remains available on this branch under the revised official-X-API OAuth/PKCE design. No live Gateway calls or lifecycle actions were performed.
+- Changes: this commit.
+- Tasks added: none.
+- Deviations: none; no iOS mapping decoder exists.
+- For the next agent: C27 remains available on this branch; live mapping installation requires the maintainer's Gateway update and is not performed by this task.

@@ -53,8 +53,7 @@ export interface McpConnectionConfiguration {
 
 export interface RaindropCollectionMapping {
   collectionId: string;
-  scope: "research" | "personal";
-  destination?: string;
+  role: "research" | "personal" | "archive" | "triage";
 }
 
 export interface ConnectionInstance {
@@ -238,12 +237,17 @@ export function validateConnectionInstance(value: unknown): asserts value is Con
 export function validateRaindropCollectionMappings(value: unknown): asserts value is RaindropCollectionMapping[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 64) throw new Error("Raindrop collection mappings must contain 1..64 entries");
   const ids = new Set<string>();
+  const homes = new Set<string>();
   for (const mapping of value) {
     if (!mapping || typeof mapping !== "object" || Array.isArray(mapping)) throw new Error("Raindrop collection mapping is invalid");
     const item = mapping as Record<string, unknown>;
     if (typeof item.collectionId !== "string" || !/^-?\d{1,18}$/.test(item.collectionId) || ids.has(item.collectionId)) throw new Error("Raindrop collection IDs must be unique numeric IDs");
-    if (item.scope !== "research" && item.scope !== "personal") throw new Error("Raindrop collection scope must be research or personal");
-    if (item.destination !== undefined && (typeof item.destination !== "string" || !/^-?\d{1,18}$/.test(item.destination))) throw new Error("Raindrop destination must be a numeric collection ID");
+    if (!["research", "personal", "archive", "triage"].includes(item.role as string)) throw new Error("Raindrop collection role is invalid");
+    if (item.role !== "triage") {
+      if (homes.has(item.role as string)) throw new Error(`Raindrop may have at most one ${item.role} home`);
+      homes.add(item.role as string);
+    }
+    if ("scope" in item || "destination" in item) throw new Error("Raindrop collection mappings use roles only");
     ids.add(item.collectionId);
   }
 }

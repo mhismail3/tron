@@ -45,7 +45,6 @@ const toolParameters = Type.Object({
   sourceCollectionId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   disposition: Type.Optional(Type.Union([Type.Literal("processed"), Type.Literal("skipped")])),
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
-  destination: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   includeArchived: Type.Optional(Type.Boolean()),
   includePending: Type.Optional(Type.Boolean()),
   sourceRevisionIds: Type.Optional(Type.Array(Type.String({ minLength: 16, maxLength: 80 }), { minItems: 1, maxItems: 32 })),
@@ -1016,9 +1015,9 @@ export class KnowledgeService {
         return { text: `Connector item ${parameters.itemId} ${parameters.disposition}: ${parameters.reason.slice(0, 500)}`, details: result };
       }
       case "raindropMove": {
-        if (!this.extensions.connector || !parameters.commandId || !parameters.connectionId || !parameters.itemId || !parameters.sourceId || !parameters.expectedRevision || !parameters.sourceCollectionId || !parameters.destination) throw new GatewayError("invalid_request", "raindropMove requires commandId, connectionId, itemId, sourceId, expectedRevision, sourceCollectionId, and destination");
-        const result = await this.invoke({ operation: "knowledge.raindrop.move", request: { commandId: parameters.commandId, connectionId: parameters.connectionId, itemId: parameters.itemId, sourceId: parameters.sourceId, expectedRevision: parameters.expectedRevision, sourceCollection: parameters.sourceCollectionId, destination: parameters.destination } }, signal) as { status: string };
-        return { text: `Raindrop move ${result.status}; provider writes require current connection write permission and exact captured source authority.`, details: result };
+        if (!this.extensions.connector || !parameters.commandId || !parameters.connectionId || !parameters.itemId || !parameters.sourceId || !parameters.expectedRevision) throw new GatewayError("invalid_request", "raindropMove requires commandId, connectionId, itemId, sourceId, and expectedRevision");
+        const result = await this.invoke({ operation: "knowledge.raindrop.move", request: { commandId: parameters.commandId, connectionId: parameters.connectionId, itemId: parameters.itemId, sourceId: parameters.sourceId, expectedRevision: parameters.expectedRevision } }, signal) as { status: string };
+        return { text: `Raindrop move ${result.status}; the destination is derived from Tron's current admission and scope.`, details: result };
       }
       case "curate": {
         const response = await this.curate(curationToolRequest(parameters));

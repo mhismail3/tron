@@ -16,7 +16,7 @@ it("derives readiness from the current owner across policy reset, disconnect, an
   const root = await mkdtemp(join(tmpdir(), "tron-knowledge-readiness-")); roots.push(root);
   const owner = new ConnectionOwner(root);
   const setup = await owner.execute({ kind: "setup.begin", commandId: "begin-readiness-0001", instanceId: "account", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
-  await owner.execute({ kind: "setup.complete", commandId: "complete-readiness-0001", operationId: setup.operationId, instanceId: "account", providerAccountId: "101", credentialRef: "connector:raindrop:one", raindropCollections: [{ collectionId: "0", scope: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+  await owner.execute({ kind: "setup.complete", commandId: "complete-readiness-0001", operationId: setup.operationId, instanceId: "account", providerAccountId: "101", credentialRef: "connector:raindrop:one", raindropCollections: [{ collectionId: "0", role: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
   const store = new KnowledgeStore(new TronWorkspace(root));
   let calls = 0;
   const extension = new KnowledgeConnectorExtension(store, {
@@ -38,7 +38,7 @@ it("derives readiness from the current owner across policy reset, disconnect, an
   await expect(extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: "blocked-disconnect-0001", connector: "raindrop", connectionId: "account", limit: 1 } })).rejects.toThrow();
   expect(calls).toBe(callsBeforeBlockedRun);
   const reSetup = await owner.execute({ kind: "setup.begin", commandId: "begin-resetup-0001", instanceId: "account", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
-  await owner.execute({ kind: "setup.complete", commandId: "complete-resetup-0001", operationId: reSetup.operationId, instanceId: "account", providerAccountId: "202", credentialRef: "connector:raindrop:two", raindropCollections: [{ collectionId: "0", scope: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+  await owner.execute({ kind: "setup.complete", commandId: "complete-resetup-0001", operationId: reSetup.operationId, instanceId: "account", providerAccountId: "202", credentialRef: "connector:raindrop:two", raindropCollections: [{ collectionId: "0", role: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
   await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: "configure-resetup-0001", connector: "raindrop", connectionId: "account", enabled: true } });
   await expect(extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "account" } })).resolves.toMatchObject({ accountId: "202", health: "setup-required", credentialAvailability: "unknown", providerIdentity: "unknown" });
 });
@@ -47,7 +47,7 @@ it.each(["alias-only", "401-user", "403-discovery", "missing-token"])("clears ve
   const root = await mkdtemp(join(tmpdir(), "tron-account-label-")); roots.push(root);
   const owner = new ConnectionOwner(root);
   const setup = await owner.execute({ kind: "setup.begin", commandId: "begin-display-0001", instanceId: "account", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
-  await owner.execute({ kind: "setup.complete", commandId: "complete-display-0001", operationId: setup.operationId, instanceId: "account", providerAccountId: "101", credentialRef: "connector:raindrop:display", raindropCollections: [{ collectionId: "0", scope: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+  await owner.execute({ kind: "setup.complete", commandId: "complete-display-0001", operationId: setup.operationId, instanceId: "account", providerAccountId: "101", credentialRef: "connector:raindrop:display", raindropCollections: [{ collectionId: "0", role: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
   let broken = false, credentialReads = 0;
   const extension = new KnowledgeConnectorExtension(new KnowledgeStore(new TronWorkspace(root)), {
     connections: owner,
@@ -82,8 +82,8 @@ it("runs same-provider accounts against separate refs, identity fences, checkpoi
   const owner = new ConnectionOwner(root);
   const first = await owner.execute({ kind: "setup.begin", commandId: "begin-first-0001", instanceId: "first", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
   const second = await owner.execute({ kind: "setup.begin", commandId: "begin-second-0001", instanceId: "second", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
-  await owner.execute({ kind: "setup.complete", commandId: "complete-first-0001", operationId: first.operationId, instanceId: "first", providerAccountId: "101", credentialRef: "connector:raindrop:first", raindropCollections: [{ collectionId: "0", scope: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
-  await owner.execute({ kind: "setup.complete", commandId: "complete-second-0001", operationId: second.operationId, instanceId: "second", providerAccountId: "202", credentialRef: "connector:raindrop:second", raindropCollections: [{ collectionId: "0", scope: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+  await owner.execute({ kind: "setup.complete", commandId: "complete-first-0001", operationId: first.operationId, instanceId: "first", providerAccountId: "101", credentialRef: "connector:raindrop:first", raindropCollections: [{ collectionId: "0", role: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+  await owner.execute({ kind: "setup.complete", commandId: "complete-second-0001", operationId: second.operationId, instanceId: "second", providerAccountId: "202", credentialRef: "connector:raindrop:second", raindropCollections: [{ collectionId: "0", role: "research" }], policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
   const store = new KnowledgeStore(new TronWorkspace(root));
   const calls: string[] = [];
   let mismatchFirstIdentity = false;

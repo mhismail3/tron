@@ -19,16 +19,17 @@ describe("ConnectionOwner", () => {
     expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "available" }));
     } finally { await rm(home, { recursive: true, force: true }); }
   });
-  it("validates and revision-fences Raindrop collection-to-scope mappings in connection configuration", async () => {
+  it("validates unique Raindrop collection roles and revision-fences their configuration", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-raindrop-mappings-"));
     try {
       const owner = new ConnectionOwner(home);
       const policy = { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false };
       const setup = await owner.execute({ kind: "setup.begin", commandId: "mapping-begin-001", instanceId: "raindrop", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
-      const mappings = [{ collectionId: "1", scope: "research" as const, destination: "9" }, { collectionId: "2", scope: "personal" as const }];
-      await expect(owner.execute({ kind: "setup.complete", commandId: "mapping-invalid-001", operationId: setup.operationId, instanceId: "raindrop", providerAccountId: "42", credentialRef: "connector:raindrop:test", policy, raindropCollections: [{ collectionId: "1", scope: "research" }, { collectionId: "1", scope: "personal" }] })).rejects.toThrow(/unique numeric IDs/);
+      const mappings = [{ collectionId: "1", role: "research" as const }, { collectionId: "2", role: "personal" as const }];
+      await expect(owner.execute({ kind: "setup.complete", commandId: "mapping-invalid-001", operationId: setup.operationId, instanceId: "raindrop", providerAccountId: "42", credentialRef: "connector:raindrop:test", policy, raindropCollections: [{ collectionId: "1", role: "research" }, { collectionId: "1", role: "personal" }] })).rejects.toThrow(/unique numeric IDs/);
+      await expect(owner.execute({ kind: "setup.complete", commandId: "mapping-duplicate-home", operationId: setup.operationId, instanceId: "raindrop", providerAccountId: "42", credentialRef: "connector:raindrop:test", policy, raindropCollections: [{ collectionId: "1", role: "research" }, { collectionId: "2", role: "research" }] })).rejects.toThrow(/at most one research home/);
       const added = await owner.execute({ kind: "setup.complete", commandId: "mapping-complete-01", operationId: setup.operationId, instanceId: "raindrop", providerAccountId: "42", credentialRef: "connector:raindrop:test", policy, raindropCollections: mappings }) as { setupRevision: number };
-      const next = [{ collectionId: "1", scope: "personal" as const }, mappings[1]!];
+      const next = [{ collectionId: "1", role: "triage" as const }, mappings[1]!];
       await owner.execute({ kind: "policy.update", commandId: "mapping-update-01", instanceId: "raindrop", expectedSetupRevision: added.setupRevision, policy, raindropCollections: next });
       await expect(owner.execute({ kind: "policy.update", commandId: "mapping-stale-001", instanceId: "raindrop", expectedSetupRevision: added.setupRevision, policy, raindropCollections: mappings })).rejects.toThrow(/Connection changed/);
       expect((await owner.resolveInstance("raindrop")).raindropCollections).toEqual(next);

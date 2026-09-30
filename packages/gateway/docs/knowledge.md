@@ -439,7 +439,7 @@ qualified evidence and a pinned `knowledge.read` continuation (`id`,
 `revisionId`, and `offset`) whenever the evidence section is incomplete; the
 complete record is never available only through tool details. Observation
 defaults to disabled and the store never chooses a provider or model silently. Connector DTOs are operation shapes implemented by the installed connector
-extension. Connection setup owns the selected account, its Raindrop collection-to-scope mapping, and opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it. Raindrop collection routes are edited through the connection's revision-fenced setup/policy command, not duplicated in connector progress state.
+extension. Connection setup owns the selected account, its Raindrop collection-role mapping, and opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it. Raindrop collection routes are edited through the connection's revision-fenced setup/policy command, not duplicated in connector progress state.
 Once `ConnectionOwner` is active, connector actions require an exact
 `connectionId` and Knowledge persists provider progress under that instance
 key, without copying the generic account envelope. Tokens never enter
@@ -825,8 +825,9 @@ Knowledge ingestion has four distinct owners:
 - **Connector:** authenticated, bounded provider discovery populates a connection's
   queue; queue reads expose bounded identity metadata; acknowledgment removes a
   processed/skipped identity; Raindrop movement is a separate provider effect
-  gated by the current connection's write policy and that source collection's
-  configured destination. Connectors do not assess or decide admission/scope.
+  gated by the current connection's write policy and derived from the source's
+  current admission/scope and mapped collection roles. Connectors do not assess
+  or decide admission/scope.
 - **Ingest:** `knowledge.source.ingest` / `ingestItem` retains one queued identity
   as a canonical source with provider identity and evidence, save-time recovery,
   and unsafe-link handling. It is idempotent and leaves admission pending; it
@@ -867,8 +868,8 @@ collection cannot reuse the allowance. The selected numeric collection must be
 present in the connection's explicit mapping; an unmapped collection fails
 before credential lookup/provider I/O. Discovery retains no more than the
 selected limit per collection, so shifted provider pages are revisited rather
-than silently skipped. Remote destinations are configured per source collection
-and still require the connection's independent `allowWrites` approval.
+than silently skipped. Remote destinations derive from collection roles and
+still require the connection's independent `allowWrites` approval.
 
 After each Raindrop item's shared source ingestion and existing inline
 assessment/admission/move processing settles (a single step on every exit path
@@ -1003,7 +1004,7 @@ without using privacy suppression. Connector captures awaiting admission are
 also absent from normal retrieval; inspection requires the separate
 `includePending` audit/intake flag. Generic connector discovery only queues provider identities; it cannot capture or move a
 source. The independent `raindropMove` primitive requires current connection write
-permission, a configured source-to-destination mapping, and an exact retained/archived
+permission, a mapped home consistent with the source decision, and an exact retained/archived
 captured source revision; it reuses the durable remote-effect receipt and reconciliation
 path. Only intake,
 after the local revision commits and the exact source head, admission, identity,
@@ -1014,8 +1015,8 @@ bounded run revisits page zero and uses durable IDs, so moved items shrinking
 earlier pages cannot silently skip later entries. Malformed read envelopes are
 rejected locally before credential lookup or provider HTTP; provider failures
 remain sanitized.
-For Raindrop, `ConnectionInstance.raindropCollections` is the sole routing configuration: 1..64 unique numeric collection IDs map to `research` or `personal`, with an optional destination per source collection. Setup completion installs the mappings; `connections.policy.update` can replace them only against the exact `setupRevision`. Raindrop no longer needs a single selected collection in the generic connector scope. Intake requires a mapped collection, and when several are configured the caller must select one; an unmapped ID is rejected before discovery. Dry-run and pending results filter to that collection. Provider page receipts include the collection ID; offset discovery restarts at page zero because moving bookmarks shifts Raindrop's pages, while durable pending/captured identities are tracked by their last collection. The returned item's collection, when present, must match the requested collection; if absent, the exact collection endpoint is the provenance.
+For Raindrop, `ConnectionInstance.raindropCollections` is the sole routing configuration: 1..64 unique numeric collection IDs carry `research`, `personal`, `archive`, or `triage` roles. There may be at most one home for each of research, personal, and archive; triage may have multiple inboxes. Setup completion installs the mappings; `connections.policy.update` replaces them only against the exact `setupRevision`. An unmapped collection is rejected before provider discovery. Provider page receipts include the collection ID; offset discovery restarts at page zero because moving bookmarks shifts Raindrop's pages, while durable pending/captured identities are tracked by their last collection. The returned item's collection, when present, must match the requested collection; if absent, the exact collection endpoint is the provenance. Queue projections include the collection role and, for an existing source, its authoritative scope/admission.
 
-Research retains the existing complete-capture → Jev assessment → admission path, with its pilot/receipt budget isolated by collection. Personal uses the original link, title, best-effort preview, and saved Raindrop note; failed or partial page fetches do not block `retained` admission and do not call Jev. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope only when there is no authoritative user/agent admission or placement; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
+Research and personal homes ingest with their role as Knowledge scope. Triage inboxes require the routine to choose and pass a scope explicitly; archive-role collections are never ingested. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope only when there is no authoritative user/agent admission or placement; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
 
-A remote move is authorized only by the existing connection `allowWrites` policy and the selected source collection's optional mapped destination, revalidated against the current setup revision at preflight and effect admission. No destination on a mapping means no move; another collection's destination cannot authorize it. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.
+`raindropMove` accepts no destination from its caller. It derives archive-role home for an archived source and otherwise the home matching the source's Knowledge scope, refusing when that home is unmapped. If the source already resides in that home it returns typed `already-home` success without provider mutation. Remote moves still require `allowWrites`, exact source/object authority, the current setup revision, a durable effect receipt, and provider read-back reconciliation. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.

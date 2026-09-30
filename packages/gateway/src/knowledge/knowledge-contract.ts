@@ -871,8 +871,8 @@ export interface KnowledgeSourceIngestRequest {
   connector: "raindrop" | "x";
   connectionId: string;
   itemId: string;
-  /** Explicit scope chosen by the caller; ingestion has no provider-based default. */
-  scope: KnowledgeScope;
+  /** Triage items require explicit caller scope; home roles supply their own scope. */
+  scope?: KnowledgeScope;
 }
 
 export interface KnowledgeRaindropIntakeRequest {
@@ -911,8 +911,6 @@ export interface KnowledgeConnectorConfigurationRequest {
   accountId?: string;
   /** Provider-owned collection/user scope; never a token or URL with credentials. */
   scope?: string;
-  /** Optional Raindrop destination collection. Writes remain disabled unless explicitly approved. */
-  destination?: string;
   /** Opaque reference resolved only by the Mac-owned credential adapter. */
   credentialRef?: string;
   allowWrites?: boolean;
@@ -926,7 +924,7 @@ export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; 
 export interface KnowledgeConnectorDiscoverRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; limit?: number; sourceCollection?: string; }
 export interface KnowledgeConnectorQueueRequest { connector: "raindrop" | "x"; connectionId: string; limit?: number; sourceCollection?: string; }
 export interface KnowledgeConnectorAckRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; itemId: string; disposition: "processed" | "skipped"; reason: string; }
-export interface KnowledgeRaindropMoveRequest { commandId: string; connectionId: string; itemId: string; sourceId: string; expectedRevision: string; sourceCollection: string; destination: string; }
+export interface KnowledgeRaindropMoveRequest { commandId: string; connectionId: string; itemId: string; sourceId: string; expectedRevision: string; }
 
 /** Read-only Raindrop API access. Every request revalidates the authenticated
  * user against the configured accountId; returned provider objects are raw
@@ -960,7 +958,6 @@ export interface KnowledgeConnectorState {
   enabled: boolean;
   accountId?: string;
   scope?: string;
-  destination?: string;
   credentialRef?: string;
   allowWrites: boolean;
   paidAccessApproved: boolean;
@@ -1013,8 +1010,7 @@ export interface KnowledgeConnectorStatus {
   providerIdentity: "admitted" | "mismatch" | "unknown";
   accountId?: string;
   scope?: string;
-  raindropCollections?: Array<{ collectionId: string; scope: "research" | "personal"; destination?: string }>;
-  destination?: string;
+  raindropCollections?: Array<{ collectionId: string; role: "research" | "personal" | "archive" | "triage" }>;
   lastRunAt?: string;
   lastError?: string;
   remaining: number;
