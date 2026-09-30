@@ -723,7 +723,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 terminalPhysicalID: terminalPhysicalID,
                 terminalMaterializationID: terminalMaterializationID,
                 terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance,
-                obstruction: orientation.layoutClearance(for: safeAreaInsets).top
+                clearance: orientation.layoutClearance(for: safeAreaInsets)
             )
         }
         // The flip belongs on the scroll view itself, outside the sheet host and
@@ -951,7 +951,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         terminalPhysicalID: String?,
         terminalMaterializationID: String?,
         terminalRowOwnsTailAffordance: Bool,
-        obstruction: CGFloat
+        clearance: EdgeInsets
     ) -> some View {
         let hasEarlierMessages = (installed?.sourceWindow.originalStart ?? 0) > 0
         let newestFirst = orientation.presentsNewestRowFirst
@@ -965,7 +965,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if newestFirst {
-                    ChatTranscriptOriginClearance(height: obstruction)
+                    ChatTranscriptClearance(height: clearance.top)
+                        #if HOSTED_TEST
+                        .background { ChatHostedObstructionProbe() }
+                        #endif
                         .id("transcript-obstruction")
                     tailMarker(terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance)
                 }
@@ -1007,6 +1010,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             spinePosition: physicalRows.count
                         )
                     }
+                }
+                if newestFirst {
+                    ChatTranscriptClearance(height: clearance.bottom)
+                        .id("transcript-oldest-obstruction")
                 }
             }
             if !newestFirst {

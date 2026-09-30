@@ -692,11 +692,15 @@ final class SessionSheetPresentationTests: XCTestCase {
                     let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
                     self.capture(controller, name: "worker-initial-\(texts.count)-messages")
                     self.assertSubagentOpeningOffset(scroll, isLong: texts.count > 1)
+                    let visibility = SubagentPresentedFrameRecorder(controller: controller)
+                    print("CT23-SHEET-OPEN count=\(texts.count) rows=\(visibility.presentedRows()) scroll=\(scroll.frame) content=\(scroll.contentSize) adjusted=\(scroll.adjustedContentInset)")
+                    if !texts.isEmpty { XCTAssertNotNil(visibility.visibleAnchor(), "Opening must present an actual row, not merely a legal offset") }
                     controller.sheetPresentationController?.selectedDetentIdentifier = .large
                     controller.presentationController?.containerView?.layoutIfNeeded()
                     for _ in 0..<6 { try await DisplayFrameScheduler.displayLink.nextFrame() }
                     self.assertSubagentOpeningOffset(scroll, isLong: texts.count > 1)
                     self.capture(controller, name: "worker-expanded-\(texts.count)-messages")
+                    if !texts.isEmpty { XCTAssertNotNil(visibility.visibleAnchor()) }
                     if texts.count > 1 {
                         scroll.setContentOffset(CGPoint(x: 0, y: 200), animated: false)
                         for _ in 0..<6 { try await DisplayFrameScheduler.displayLink.nextFrame() }
@@ -1352,9 +1356,20 @@ private final class SubagentPresentedFrameRecorder: NSObject {
         guard let layer = view.layer.presentation(), let window = view.window?.layer.presentation() else { return nil }
         return layer.convert(layer.bounds, to: window).standardized
     }
+    func presentedRows() -> [String: CGRect] {
+        guard let root = controller.view else { return [:] }
+        return Dictionary(markers(in: root).compactMap { marker in
+            frame(marker).map { (marker.physicalID, $0) }
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
     func visibleAnchor() -> (id: String, instance: UUID, top: CGFloat)? {
         guard let sheet = frame(controller.view) else { return nil }
-        let top = sheet.minY + controller.view.safeAreaInsets.top
+        func navigationBar(in view: UIView) -> UINavigationBar? {
+            (view as? UINavigationBar) ?? view.subviews.lazy.compactMap { navigationBar(in: $0) }.first
+        }
+        let top = navigationBar(in: controller.view).flatMap(frame)?.maxY
+            ?? sheet.minY + controller.view.safeAreaInsets.top
         return markers(in: controller.view).compactMap { marker -> (String, UUID, CGFloat)? in
             guard marker.physicalID != "read-only-subagent-status", let rect = frame(marker), rect.maxY > top, rect.minY < sheet.maxY else { return nil }
             return (marker.physicalID, marker.hostIdentity, rect.minY)

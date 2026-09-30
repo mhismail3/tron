@@ -746,7 +746,7 @@ struct ReadOnlySubagentSessionSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if orientation.presentsNewestRowFirst {
-                        ChatTranscriptOriginClearance(height: orientation.layoutClearance(for: insets).top)
+                        ChatTranscriptClearance(height: orientation.layoutClearance(for: insets).top)
                             .id("read-only-subagent-obstruction")
                         tail
                         transcriptStatus(store).chatTranscriptOrientation(orientation)
@@ -785,6 +785,8 @@ struct ReadOnlySubagentSessionSheet: View {
                     }
                     if orientation.presentsNewestRowFirst {
                         earlierMessages(store).chatTranscriptOrientation(orientation)
+                        ChatTranscriptClearance(height: orientation.layoutClearance(for: insets).bottom)
+                            .id("read-only-subagent-oldest-obstruction")
                     } else {
                         transcriptStatus(store)
                         tail
@@ -854,7 +856,7 @@ struct ReadOnlySubagentSessionSheet: View {
 
     @ViewBuilder
     private func transcriptStatus(_ store: ReadOnlySubagentSessionStore) -> some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             if case .failed(let message) = store.status {
                 Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
                 Button("Retry", action: store.retry)

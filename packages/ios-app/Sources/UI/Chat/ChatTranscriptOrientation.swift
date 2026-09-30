@@ -184,8 +184,8 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     }
 
     /// Safe-area obstructions read before the flip, mapped to layout ends. The
-    /// newest clearance is a lazy-layout spacer; the oldest clearance and scroll
-    /// indicators use margins. No component supplies a second height or curve.
+    /// two content clearances are lazy-layout items; only scroll indicators use
+    /// margins. No component supplies a second height or curve.
     func layoutClearance(for safeAreaInsets: EdgeInsets) -> EdgeInsets {
         guard self == .newestAtOrigin else { return .init() }
         return EdgeInsets(
@@ -326,17 +326,15 @@ struct ChatTranscriptViewport<Content: View>: View {
     }
 }
 
-/// Must be the first element INSIDE the lazy stack, not padding around it:
-/// SwiftUI's lazy item anchor then absorbs changes before a detached reader.
-/// An outer spacer moves that reader; a margin jumps ahead of closing animation.
-struct ChatTranscriptOriginClearance: View {
+/// Clearance belongs INSIDE the lazy stack: newest first, oldest last. Native
+/// underflow alignment then includes both obstructions in the content extent.
+/// An outer newest spacer moves a detached reader; a margin runs ahead of closing
+/// animation, and oldest margins can place short content behind navigation.
+struct ChatTranscriptClearance: View {
     let height: CGFloat
 
     var body: some View {
         Color.clear.frame(height: height)
-            #if HOSTED_TEST
-            .background { ChatHostedObstructionProbe() }
-            #endif
             .accessibilityHidden(true)
     }
 }
@@ -380,8 +378,8 @@ private struct ChatTranscriptVoiceOverOrderModifier: ViewModifier {
     }
 }
 
-/// Viewport render transform and remaining margins. Newest clearance belongs
-/// inside the lazy content (see ChatTranscriptOriginClearance), so its animation
+/// Viewport render transform and indicator margins. Both clearances belong
+/// inside the lazy content (see ChatTranscriptClearance), so their animation
 /// uses the same renderer/transaction as the obstructing component.
 private struct ChatTranscriptViewportModifier: ViewModifier {
     let orientation: ChatTranscriptOrientation
@@ -395,7 +393,7 @@ private struct ChatTranscriptViewportModifier: ViewModifier {
                 .ignoresSafeArea(.container, edges: .vertical)
                 .ignoresSafeArea(.keyboard, edges: .vertical)
                 .contentMargins(.top, 0, for: .scrollContent)
-                .contentMargins(.bottom, margins.bottom, for: .scrollContent)
+                .contentMargins(.bottom, 0, for: .scrollContent)
                 .contentMargins(.top, margins.top, for: .scrollIndicators)
                 .contentMargins(.bottom, margins.bottom, for: .scrollIndicators)
                 .chatTranscriptOrientation(orientation)

@@ -3602,3 +3602,10 @@ with per-frame artifacts; every non-detent pinned phase retains the strict gap
 and no-blank gate. No compensation was added. Device checklist: confirm frozen
 history/catch-up behaviour and inspect the still-visible collapse band (13 blank
 frames in that run), because hosted improvement is not device acceptance.
+
+Short-sheet screenshot review caught an additional failure the native-offset gate
+missed: the row was behind navigation chrome. The hosted opening gate now requires
+a presented row below the actual navigation bar. Supervisor approved moving both
+origin obstructions into lazy clearance items (first/newest, last/oldest), shared
+by main and child; scroll indicators retain margins. Re-gate main underflow and
+all follow owners after this correction, without a sheet-specific layout flag.
