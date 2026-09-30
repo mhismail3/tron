@@ -47,7 +47,9 @@ struct IntegrationsSettingsView: View {
                 if let snapshot {
                     let definitions = snapshot.definitions.filter(surface.includes)
                     let configured = snapshot.instances.filter { instance in definitions.contains { $0.id == instance.definitionId } }
-                    let available = definitions.filter { definition in !configured.contains { $0.definitionId == definition.id } }
+                    let available = definitions.filter { definition in
+                        !configured.contains { $0.definitionId == definition.id } || definition.implementation == "mcp"
+                    }
                     if !configured.isEmpty {
                         TronSettingsGroup("Configured", accent: .tronCyan, surfaceStyle: .glass) {
                             ForEach(Array(configured.enumerated()), id: \.element.id) { index, instance in
@@ -61,9 +63,11 @@ struct IntegrationsSettingsView: View {
                     if !available.isEmpty {
                         TronSettingsGroup("Available", accent: .tronCyan, surfaceStyle: .glass) {
                             ForEach(Array(available.enumerated()), id: \.element.id) { index, definition in
+                                let adding = configured.contains { $0.definitionId == definition.id }
+                                let action = definition.implementation == "mcp" && adding ? "Add another server" : "Connect"
                                 IntegrationConfiguredRow(title: definition.displayName, account: "", status: "Setup required", usage: nil,
-                                                         isLoadingUsage: false, configured: false, actionTitle: "Connect",
-                                                         accessibilityAction: "Connect \(definition.displayName)", accent: .tronCyan) {
+                                                         isLoadingUsage: false, configured: false, actionTitle: action,
+                                                         accessibilityAction: "\(action) for \(definition.displayName)", accent: .tronCyan) {
                                     setupDefinition = definition
                                 }
                                 if index < available.count - 1 { TronSettingsDivider(accent: .tronCyan) }
@@ -130,10 +134,16 @@ struct IntegrationsSettingsView: View {
     }
 
     private func addAccount(for instance: IntegrationInstance) {
-        guard let definition = snapshot?.definitions.first(where: { $0.id == instance.definitionId }) else { return }
+        guard let definition = snapshot?.definitions.first(where: { $0.id == instance.definitionId }),
+              activity.allowsPresentationPublication else { return }
+        let identity = model.knowledgePresentationIdentity
+        let ticket = loadGeneration
         selectedInstance = nil
         Task { @MainActor in
             await Task.yield()
+            guard activity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == identity,
+                  loadGeneration == ticket else { return }
             setupDefinition = definition
         }
     }
@@ -161,14 +171,9 @@ struct IntegrationsSettingsView: View {
                     requestedRequest: ticket
                 ) else { return }
                 snapshot = loaded; isLoading = false
-                credits.begin(clear: true)
-                Task { @MainActor in
-                    for instance in loaded.instances where instance.definitionId == "knowledge.x" && instance.health == "ready" {
-                        await credits.read(instance: instance, identity: requestIdentity, client: model.integrations,
-                                           presentationActive: { activity.allowsPresentationPublication },
-                                           currentIdentity: { model.knowledgePresentationIdentity })
-                    }
-                }
+                credits.start(instances: loaded.instances, identity: requestIdentity, client: model.integrations,
+                              presentationActive: { activity.allowsPresentationPublication },
+                              currentIdentity: { model.knowledgePresentationIdentity })
             } catch {
                 guard IntegrationPresentationAdmission.admits(
                     presentationActive: activity.allowsPresentationPublication,
@@ -259,16 +264,17 @@ private struct IntegrationInstanceView: View {
                 TronSettingsGroup("Raindrop collections", accent: .tronCyan) {
                     ForEach(Array(mappings.enumerated()), id: \.offset) { index, mapping in
                         if index > 0 { TronSettingsDivider(accent: .tronCyan) }
-                        TronSettingsRow(icon: "folder", title: mapping.role.capitalized, subtitle: mapping.collectionId)
+                        TronSettingsRow(icon: "folder", title: "\(mapping.role.capitalized) home", subtitle: "Collection \(mapping.collectionId)")
                     }
                 }
             }
             capabilitiesSection
             TronTechnicalMetadataSection(title: "Technical details", items: technicalMetadata, accent: .tronSlate)
-            if definition?.implementation != "mcp" {
-                Button { addAccount() } label: { TronInlineActionLabel("Add another account", accent: .tronCyan) }
+            if let definition {
+                let isMCP = definition.implementation == "mcp"
+                Button { addAccount() } label: { TronInlineActionLabel(isMCP ? "Add another server" : "Add another account", accent: .tronCyan) }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Add another account for \(definition?.displayName ?? "service")")
+                    .accessibilityLabel("\(isMCP ? "Add another server" : "Add another account") for \(definition.displayName)")
             }
             TronSettingsGroup("Policy", accent: .tronPurple) {
                 TronToggleRow(icon: "power", title: "Enabled", isOn: $policy.enabled)

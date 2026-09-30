@@ -630,3 +630,12 @@ loading and nothing on failure.
 - Kept on purpose: configured-but-setup-required instances stay in Configured; available definitions require no instance, and every non-MCP integration keeps its add-account action in detail.
 - Deviations: Gateway definition labels were simplified to plain Jev and X so the native client does not need a second display-name registry.
 - For the next agent: screenshots are retained under `~/.tron/workspace/files/c29-screenshots/`; no live Gateway request or runtime transition was performed.
+
+### C29 review fixes · Done · 2026-09-30 · luna-worker
+
+- Result: MCP remains addable after setup; X credit reads are controller-owned and identity/generation fenced; setup-sheet handoff is fenced; screenshots and fixture assertions cover the reviewed behavior. Raindrop collection IDs are explicit and opaque account IDs stay out of row titles.
+- Evidence: iOS generation passed; native model tests 7/7; UI validation build passed; integration-sheet UI tests 3/3; documentation policy and personal-info guard passed. Revert checks were not run.
+- Changes: this commit.
+- Tasks added: none.
+- Deviations: Gateway lifecycle untouched. No live Gateway request was made.
+- For the next agent: eight current light/dark captures are under the workspace `files/c29-screenshots/` directory.

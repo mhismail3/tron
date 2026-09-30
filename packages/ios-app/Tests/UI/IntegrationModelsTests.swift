@@ -27,7 +27,7 @@ final class IntegrationModelsTests: XCTestCase {
         let withMetadata = try JSONDecoder.gateway.decode(IntegrationInstance.self, from: data)
         XCTAssertEqual(withMetadata.displayTitle, "person@example.test")
         let withoutMetadata = IntegrationInstance(id: "account-b", definitionId: "knowledge.raindrop", implementation: "knowledge-connector", providerAccountId: "67890", scope: nil, credentialConfigured: true, credentialAvailability: nil, providerIdentity: nil, providerDisplayName: nil, raindropCollections: nil, policy: withMetadata.policy, health: "ready", createdAt: "fixture", updatedAt: "fixture", setupRevision: 1, lastError: nil)
-        XCTAssertEqual(withoutMetadata.displayTitle, "67890")
+        XCTAssertEqual(withoutMetadata.displayTitle, "Account")
     }
 
     func testPresentationAdmissionDropsRetiredOrOutOfOrderReads() {

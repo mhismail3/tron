@@ -1946,8 +1946,7 @@ bounded delay to prove the list remains populated, then checks both successful a
 balance reads and confirms MCP servers never show X credit state. Light/dark captures
 are retained in the UI-validation `.xcresult`; export them with
 `xcrun xcresulttool export attachments --path <TestResults.xcresult> --output-path <temporary-directory>`
-and copy the `c29-*.png` files to `~/.tron/workspace/files/c29-screenshots/`.
-This fixture never calls the selected live Gateway or a provider.
+and inspect the exported captures. This fixture never calls the selected live Gateway or a provider.
 `SettingsLayoutStyleTests.testIntegrationMutationSettlementRejoinsAfterPresentationSuspension`
 checks that accepted success/failure settles while covered, publishes only when active again,
 and never replays the command. Global default trust retains the standard autosave error/retry notice.

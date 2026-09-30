@@ -8,6 +8,7 @@ struct HostedIntegrationsFixtureView: View {
     @State private var model: AppModel
     @State private var ready = false
     @State private var error: String?
+    private let gateway: HostedIntegrationsGateway
     private let surface: IntegrationsSettingsView.Surface
     private let dark: Bool
 
@@ -18,6 +19,7 @@ struct HostedIntegrationsFixtureView: View {
         surface = surfaceName == "mcp" ? .mcpServers : .connectedServices
         dark = arguments.contains("-ui-dark-mode")
         let gateway = HostedIntegrationsGateway(scenario: scenario)
+        self.gateway = gateway
         let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in HostedIntegrationsSocket(gateway: gateway) })
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -29,7 +31,21 @@ struct HostedIntegrationsFixtureView: View {
     var body: some View {
         Group {
             if ready {
-                NavigationStack { IntegrationsSettingsView(surface: surface) }
+                NavigationStack {
+                    VStack {
+                        if ProcessInfo.processInfo.arguments.contains("-integrations-scenario") &&
+                            ProcessInfo.processInfo.arguments.contains("identity-switch") {
+                            Button("Switch profile identity") {
+                                let alternate = GatewayProfile(id: "integration-fixture-alternate", label: "Alternate server", host: "localhost", port: 9847, machineId: "fixture-integrations")
+                                Task {
+                                    await gateway.suppressCreditsForIdentitySwitch()
+                                    try? await model.connectHostedGateway(profile: alternate, token: "fixture-token")
+                                }
+                            }
+                        }
+                        IntegrationsSettingsView(surface: surface)
+                    }
+                }
                     .environment(model)
                     .tronPresentation()
                     .tronSettingsLayout()
@@ -51,8 +67,10 @@ struct HostedIntegrationsFixtureView: View {
 actor HostedIntegrationsGateway {
     private let scenario: String
     private var sockets: [HostedIntegrationsSocket] = []
+    private var suppressCredits = false
     init(scenario: String) { self.scenario = scenario }
     func attach(_ socket: HostedIntegrationsSocket) { sockets.append(socket) }
+    func suppressCreditsForIdentitySwitch() { suppressCredits = true }
 
     func handle(method: String, params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
         if method == "connections.list" { return (snapshot(), nil) }
@@ -70,12 +88,11 @@ actor HostedIntegrationsGateway {
         let definitions: [JSONValue] = [definition("knowledge.raindrop", "Raindrop", "knowledge-connector", [capability("read", "Read bookmarks")]),
                                         definition("knowledge.jev", "Jev", "knowledge-connector", [capability("tag", "Tag sources")]),
                                         definition("knowledge.x", "X", "knowledge-connector", [capability("read", "Read bookmarks")]),
-                                        definition("mcp.remote-http", "MCP server", "mcp", [capability("tools", "Tools")]),
-                                        definition("mcp.available", "Remote MCP", "mcp", [capability("tools", "Tools")])]
-        let instances: [JSONValue] = [instance("raindrop-1", "knowledge.raindrop", "knowledge-connector", "raindrop-account", "ready", "Mira", collections: [.object(["collectionId": .string("11"), "role": .string("research")])]),
+                                        definition("mcp.remote-http", "MCP server", "mcp", [capability("tools", "Tools")])]
+        let instances: [JSONValue] = [instance("raindrop-1", "knowledge.raindrop", "knowledge-connector", "raindrop-account", "ready", "Mira", collections: [.object(["collectionId": .string("63441068"), "role": .string("research")])]),
                                       instance("jev-1", "knowledge.jev", "knowledge-connector", "jev-account", "setup-required", nil),
                                       instance("x-1", "knowledge.x", "knowledge-connector", "x-account", "ready", "@luna"),
-                                      instance("mcp-1", "mcp.remote-http", "mcp", "local-search", "ready", nil)]
+                                      instance("mcp-1", "mcp.remote-http", "mcp", "local-search", "ready", "local-search")].filter { !suppressCredits || $0.objectValue?["definitionId"]?.stringValue != "knowledge.x" }
         let capabilities = instances.compactMap { item -> JSONValue? in
             guard let id = item.objectValue?["id"]?.stringValue, let definitionId = item.objectValue?["definitionId"]?.stringValue else { return nil }
             let capabilityID = definitionId == "knowledge.jev" ? "tag" : (definitionId == "mcp.remote-http" ? "tools" : "read")
@@ -114,7 +131,7 @@ actor HostedIntegrationsGateway {
 
 actor HostedIntegrationsSocket: GatewaySocketConnection {
     private let gateway: HostedIntegrationsGateway
-    private var inbound = [Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":6,"minProtocolVersion":6,"machineId":"fixture-integrations","machineName":"Studio server","gatewayChannel":"stable","capabilities":["connections.v1","knowledge.x.credits.v1"]}"#.utf8)]
+    private var inbound = [Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":6,"minProtocolVersion":6,"machineId":"fixture-integrations","machineName":"Studio server","gatewayChannel":"stable","capabilities":["connections.v1"]}"#.utf8)]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
     init(gateway: HostedIntegrationsGateway) { self.gateway = gateway; Task { await gateway.attach(self) } }

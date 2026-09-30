@@ -70,13 +70,12 @@ package struct IntegrationInstance: Codable, Hashable, Sendable, Identifiable {
     package let setupRevision: Int
     package let lastError: String?
 
-    /// Provider metadata is a verified display projection; the canonical ID
-    /// remains the technical identity and is the honest fallback.
+    /// Provider metadata is a verified display projection; opaque IDs stay in Technical details.
     package var displayTitle: String {
         if let providerDisplayName, !providerDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return providerDisplayName
         }
-        return providerAccountId
+        return "Account"
     }
 }
 
