@@ -19,14 +19,15 @@ Commands:
                           named physical device (user-owned; never installs or launches).
   compare BASE CANDIDATE  Compare two reports (run directories or report.json files).
                           Options: --floor FRACTION (default 0.03), --json, --allow-mismatch.
-  status                  Show the latest report of each tool.
+  status                  Show this worktree's newest report of each tool.
   environment             Print the host conditions recorded with every report.
 
 Run 'scripts/tron-profile ios --help', 'scripts/tron-profile gateway --help' or
 'scripts/tron-profile device --help' for scenarios and options; 'ios --trace' adds an
 Instruments attribution summary of a scenario's measured windows. Reports live under
 $HOME/Library/Developer/Tron/profiles/<tool>/<run>/ (override with
-TRON_PROFILE_RESULTS_DIR); each tool keeps a 'latest' link.
+TRON_PROFILE_RESULTS_DIR), shared by every worktree; each report records the
+worktree that measured it, which is how status finds this worktree's.
 
 Exit status: 0 success, 2 invalid usage or input, 3 compare found a regression
 beyond the noise bound; tool commands document their own failure codes.
@@ -42,7 +43,7 @@ case "$command" in
     exec "$tool" "$@"
     ;;
   compare) exec python3 "$REPORT" compare "$@" ;;
-  status) exec python3 "$REPORT" status ;;
+  status) exec python3 "$REPORT" status --worktree "$ROOT" ;;
   environment) exec python3 "$REPORT" environment ;;
   -h|--help|help) usage ;;
   "") usage >&2; exit 2 ;;

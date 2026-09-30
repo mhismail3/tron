@@ -1027,8 +1027,52 @@ exit 0
         """A booted owned simulator in another lane, with no process holding it."""
         return self.write_lane(directory, udid, name=name)
 
+    def latest_run(self) -> Path:
+        """The run `status` names as this worktree's and lane's latest run."""
+        status = self.invoke(command="status")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        prefix = "Latest run: "
+        for line in status.stdout.splitlines():
+            if line.startswith(prefix) and line != f"{prefix}none":
+                return Path(line[len(prefix):])
+        raise AssertionError(f"no latest run in:\n{status.stdout}")
+
     def latest_metadata(self) -> dict[str, object]:
-        return json.loads(((self.results / "latest").resolve() / "metadata.json").read_text())
+        return json.loads((self.latest_run() / "metadata.json").read_text())
+
+    def test_ci_metrics_report_the_checkpoint_run(self) -> None:
+        """W-21 (issue #101): the CI adapter's metrics name the run its checkpoint made.
+
+        Failure mode: the adapter finds its run through a pointer the runner no
+        longer keeps, or through another lane's or worktree's run, and uploads
+        metrics with no run metadata or test summary - a green job whose
+        artifact says nothing.
+        """
+        metrics = self.root / "ios-ci-metrics.json"
+        environment = self.contained_environment(self.root)
+        environment.update(self.reader_environment())
+        environment.update({
+            "PATH": f"{self.bin}:{environment['PATH']}",
+            "TRON_IOS_XCRUN": str(self.xcrun),
+            "FAKE_SIMULATOR_INVENTORY": str(self.simulator_inventory),
+            "TRON_IOS_SIMULATOR_STATE_DIR": str(self.root / "development-state"),
+            "RUNNER_TEMP": str(self.root),
+            "TRON_IOS_CI_DERIVED_DATA": str(self.derived),
+            "TRON_IOS_CI_RESULTS_DIR": str(self.results),
+            "TRON_IOS_CI_METRICS": str(metrics),
+            "FAKE_SUMMARY": '{"passedTests":3,"failedTests":0,"skippedTests":0,"totalTestCount":3}',
+        })
+        result = subprocess.run(
+            [str(ROOT / "scripts/ios-ci-test.sh")], env=environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(metrics.read_text())
+        self.assertEqual(value["exit_code"], 0)
+        self.assertEqual(value["run"].get("command"), "checkpoint", value)
+        self.assertEqual(value["run"].get("phase"), "complete", value)
+        self.assertEqual(value["test_summary"].get("passedTests"), 3, value)
+        self.assertEqual(sorted(value["processes"]), ["build", "test"], value)
 
     def test_summary_validation_requires_real_passing_count(self) -> None:
         result = self.invoke()
@@ -1045,13 +1089,13 @@ exit 0
     def test_summary_extraction_failure_is_not_success(self) -> None:
         result = self.invoke(mode="extract-failure")
         self.assertEqual(result.returncode, 65, result.stderr)
-        latest = (self.results / "latest").resolve()
+        latest = self.latest_run()
         summary = json.loads((latest / "summary.json").read_text())
         self.assertEqual(summary["error"], "xcresult summary extraction failed")
         self.assertTrue((latest / "summary-extraction.log").exists())
         result = self.invoke(mode="missing-bundle")
         self.assertEqual(result.returncode, 65, result.stderr)
-        latest = (self.results / "latest").resolve()
+        latest = self.latest_run()
         self.assertEqual(json.loads((latest / "summary.json").read_text())["error"], "xcresult result bundle is missing")
 
     def test_process_failure_and_timeout_take_precedence(self) -> None:
@@ -2575,7 +2619,6 @@ class ReclaimFixture(LaneHarness, unittest.TestCase):
         other_worktree = self.root / "other-worktree"
         other_worktree.mkdir()
         foreign = self.write_run(worktree=other_worktree)
-        (self.results_root / "latest").symlink_to(mine[0])
         products = self.write_products(ROOT)
         foreign_products = self.write_products(other_worktree)
         self.owned_lane("ios-test", UDID_A)
@@ -2588,7 +2631,6 @@ class ReclaimFixture(LaneHarness, unittest.TestCase):
             self.assertFalse(run.exists(), f"{run} should have been removed")
         self.assertTrue(other_lane.exists())
         self.assertTrue(foreign.exists())
-        self.assertFalse((self.results_root / "latest").is_symlink())
         self.assertFalse(products.exists())
         self.assertTrue(foreign_products.exists())
         self.assertFalse(self.present(UDID_A))
@@ -3390,6 +3432,10 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
     8. A read-only command (`help`, `status`) in a linked worktree creates that
        worktree's lane directory, which holds no ownership marker, so no sweep
        ever reclaims it.
+    9. W-21 (issue #101): `status` names another worktree's or another lane's
+       run as this worktree's latest run - one `latest` link in the shared
+       results root followed whichever run finished last anywhere - or names an
+       older run of this worktree and lane instead of its newest.
     """
 
     def setUp(self) -> None:
@@ -3468,8 +3514,26 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
             env=self.environment, check=True, text=True, input=identity,
         )
 
-    def focused_run(self, worktree: Path) -> subprocess.CompletedProcess[str]:
-        return self.tool(worktree, "tron-ios-test", "run", "--only-testing", "TronMobileTests/StubTests")
+    def focused_run(self, worktree: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+        return self.tool(worktree, "tron-ios-test", "run", *arguments, "--only-testing", "TronMobileTests/StubTests")
+
+    def completed_run(self, result: subprocess.CompletedProcess[str]) -> Path:
+        """The run directory a successful runner command announced."""
+        prefix = "iOS test run complete: "
+        for line in result.stdout.splitlines():
+            if line.startswith(prefix):
+                return Path(line[len(prefix):])
+        raise AssertionError(f"no completed run in:\n{result.stdout}")
+
+    def reported_latest(self, worktree: Path, *arguments: str) -> str:
+        """What `status` in a worktree names as its latest run."""
+        status = self.tool(worktree, "tron-ios-test", "status", *arguments)
+        self.assertEqual(status.returncode, 0, status.stderr)
+        prefix = "Latest run: "
+        for line in status.stdout.splitlines():
+            if line.startswith(prefix):
+                return line[len(prefix):]
+        raise AssertionError(f"no latest run in:\n{status.stdout}")
 
     def lane_marker(self, lane: Path) -> dict[str, object]:
         return json.loads((lane / "simulator.json").read_text())
@@ -3504,8 +3568,7 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
         self.assertEqual(marker["worktree"], os.path.realpath(second))
         self.assertEqual(marker["name"], f"Tron iOS Tests ({second_key})")
         self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
-        results = self.home / "Library/Developer/Tron/ios/test-runs"
-        owner = json.loads(((results / "latest").resolve() / "owner.json").read_text())
+        owner = json.loads((self.completed_run(second_run) / "owner.json").read_text())
         self.assertEqual(owner["lane"], second_key)
 
         # The first worktree's own default is the lane its in-flight run holds.
@@ -3633,6 +3696,28 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
             with self.subTest(kept=lane.name):
                 self.assertEqual(self.lane_marker(lane)["worktree"], os.path.realpath(worktree))
                 self.assertTrue(self.present(str(self.lane_marker(lane)["udid"])))
+
+    def test_status_names_the_newest_run_of_this_worktree_and_lane(self) -> None:
+        """Failure mode 9: the latest run is this worktree's and lane's own."""
+        first, second = self.linked("first-worktree"), self.linked("second-worktree")
+        for worktree in (first, second):
+            self.stamp_products(worktree)
+            self.assertEqual(self.reported_latest(worktree), "none")
+        runs: dict[str, Path] = {}
+        # Every later run is another worktree's or another lane's, so a latest
+        # result that follows the newest run anywhere names the wrong one.
+        for label, worktree, arguments in (
+            ("first-older", first, ()), ("first-newer", first, ()),
+            ("second", second, ()), ("first-alpha", first, ("--lane", "alpha")),
+        ):
+            result = self.focused_run(worktree, *arguments)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            runs[label] = self.completed_run(result)
+
+        self.assertEqual(self.reported_latest(first), str(runs["first-newer"]))
+        self.assertEqual(self.reported_latest(second), str(runs["second"]))
+        self.assertEqual(self.reported_latest(first, "--lane", "alpha"), str(runs["first-alpha"]))
+        self.assertEqual(self.reported_latest(second, "--lane", "alpha"), "none")
 
     def test_a_read_only_command_creates_no_lane_state(self) -> None:
         """Failure mode 8: only a command that leases the lane creates its directory."""

@@ -7,6 +7,11 @@ or relabeled metric being read as zero, a malformed/truncated report being
 accepted, or a run recorded under an Instruments trace (whose metrics carry
 tracing overhead) deciding a comparison. The profiler lanes' own self-tests cover measurement end to end.
 
+`status` must name this worktree's newest report of each tool: one `latest`
+link per tool in the shared profiles root followed whichever worktree wrote
+last (W-21, issue #101), so it could name another worktree's run, and an
+ordering bug would name an older run of this one.
+
 The Gateway multi-session scenario adds failure modes its own run cannot
 reveal: a catalog generator whose output drifts between runs or misplaces
 forks and subagent runs relative to the Gateway's delegated-session layout; a
@@ -75,13 +80,13 @@ class ReportFixture(unittest.TestCase):
             timeout=60,
         )
 
-    def write(self, name: str, document: dict, scenario: str = "idle-chat") -> Path:
+    def write(self, name: str, document: dict, scenario: str = "idle-chat", worktree: Path = ROOT) -> Path:
         source = self.root / f"{name}.samples.json"
         source.write_text(json.dumps(document))
         run_dir = self.root / "profiles/ios" / name
         result = self.run_report(
             "write", "--tool", "ios", "--scenario", scenario,
-            "--samples", str(source), "--run-dir", str(run_dir), "--worktree", str(ROOT),
+            "--samples", str(source), "--run-dir", str(run_dir), "--worktree", str(worktree),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return run_dir
@@ -191,14 +196,21 @@ class InputAdmission(ReportFixture):
         (broken / "report.json").write_text('{"schema": "tron.profile-report.v1", "metr')
         self.assertEqual(self.compare(base, broken).returncode, 2)
 
-    def test_latest_link_names_the_newest_complete_run(self) -> None:
+    def test_status_names_this_worktrees_newest_report(self) -> None:
+        other = self.root / "other-worktree"
+        other.mkdir()
         self.write("first", samples({"cpu.time": ("ns", "lower", [1, 1, 1])}))
         second = self.write("second", samples({"cpu.time": ("ns", "lower", [2, 2, 2])}))
-        latest = self.root / "profiles/ios/latest"
-        self.assertEqual(latest.resolve(), second.resolve())
+        # Written last, by another worktree sharing the profiles root.
+        foreign = self.write("foreign", samples({"cpu.time": ("ns", "lower", [3, 3, 3])}), worktree=other)
         result = subprocess.run([str(FRONT_DOOR), "status"], capture_output=True, text=True, env=self.environment, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("ios: latest idle-chat run second", result.stdout)
+        self.assertIn("ios: latest idle-chat run second at ", result.stdout)
+        self.assertIn(f"-> {second.resolve()}\n", result.stdout)
+        self.assertIn("gateway: no runs from this worktree", result.stdout)
+        there = self.run_report("status", "--worktree", str(other))
+        self.assertEqual(there.returncode, 0, there.stderr)
+        self.assertIn(f"-> {foreign.resolve()}\n", there.stdout)
 
 
 def load_gateway_profiler():

@@ -418,7 +418,9 @@ launch and a launch from the device itself are not debugger sessions.
 Agent-runnable measurements go through `scripts/tron-profile`. Every tool it
 fronts writes one `tron.profile-report.v1` report (source revision and dirty
 state, host load and power conditions, per-metric unit, direction, samples,
-median and spread) under `~/Library/Developer/Tron/profiles/<tool>/`, and
+median and spread) under `~/Library/Developer/Tron/profiles/<tool>/`, a root
+every worktree shares; `scripts/tron-profile status` names this worktree's newest
+report of each tool from the worktree each report records, and
 `scripts/tron-profile compare BASE CANDIDATE` gives the only regression verdict:
 a delta counts only beyond a 3% floor, three robust standard deviations and, for
 integer-valued metrics such as frame counts, one unit; the command exits 3 on a
@@ -1057,7 +1059,10 @@ always use diagnostics `Never` plus `-collect-test-diagnostics never`. Use
 `diagnose --only-testing …` only when verbose collection is explicitly needed;
 it has a larger finite bound and never runs as an automatic retry. Every attempt
 retains a full log, metadata, process evidence, and a unique xcresult under
-`$HOME/Library/Developer/Tron/ios/test-runs`, with `latest` outside the bundle.
+`$HOME/Library/Developer/Tron/ios/test-runs`; `status` reports the newest run
+this worktree started in its lane as `Latest run` (it may still be in progress),
+resolved from each run's `owner.json`, because the root is shared and a single
+pointer in it would name whichever worktree finished last.
 The shared per-user iOS build root is `$HOME/Library/Developer/Tron/ios`: test
 runs use its `test-runs` folder, each worktree's test products use its own
 `test-derived-data/<worktree-key>` folder (its directory name plus a hash of its
