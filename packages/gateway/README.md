@@ -974,7 +974,10 @@ and its retention scan. Full payload copies use `/bin/cp -c -R` to request APFS
 clone-on-write; macOS `cp` falls back to a byte copy when cloning is unavailable.
 Post-copy fingerprints remain the integrity check. A per-channel source-build lock keeps cleanup of crash-left
 staging directories from touching a live build; validated staging is atomically
-renamed into `versions/` inside the store-locked publication transaction. The trusted
+renamed into `versions/` inside the store-locked publication transaction. Every
+publication seals the staged tree but keeps its root writable across that rename,
+because macOS 15 refuses to rename a directory its owner cannot write; the root is
+sealed in `versions/` before any candidate state names the version. The trusted
 source checkout must already have its lockfile-pinned Gateway development dependencies
 installed (prepare them with `cd packages/gateway && npm ci`
 before requesting a source rebuild); the helper never installs dependencies or contacts the
