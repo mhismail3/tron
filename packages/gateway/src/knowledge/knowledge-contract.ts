@@ -863,6 +863,15 @@ export interface KnowledgeSourceSummaryStart {
   record: KnowledgeRecord;
 }
 
+export interface KnowledgeSourceIngestRequest {
+  commandId: string;
+  connector: "raindrop" | "x";
+  connectionId: string;
+  itemId: string;
+  /** Explicit scope chosen by the caller; ingestion has no provider-based default. */
+  scope: KnowledgeScope;
+}
+
 export interface KnowledgeRaindropIntakeRequest {
   commandId: string;
   connectionId?: string;
@@ -1078,6 +1087,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.connector.status"; request: KnowledgeConnectorStatusRequest }
   | { operation: "knowledge.connector.run"; request: KnowledgeConnectorRunRequest }
   | { operation: "knowledge.raindrop.intake"; request: KnowledgeRaindropIntakeRequest }
+  | { operation: "knowledge.source.ingest"; request: KnowledgeSourceIngestRequest }
   | { operation: "knowledge.raindrop.read"; request: KnowledgeRaindropRequest };
 
 const ID = /^[A-Za-z0-9._:-]{1,200}$/;

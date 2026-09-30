@@ -83,7 +83,7 @@ only on the user's word) apply to every task.
 | C16 | Needs scoping | Audit live Knowledge data for sources left pending by historical connector sweeps and determine safe intake recovery | C4, user Gateway access | — |
 | C17 | Needs scoping | Superseded by C18–C23 (user decision 2026-09-29): X gets connector primitives and the ingestion routine, not its own intake pipeline | C3, C4, C5 | — |
 | C18 | Done | Decision authority in the store: connector/system writes never override a user or agent admission or scope | none | knowledge-consolidation session, 2026-09-29 |
-| C19 | Claimed | Ingest primitive: save one queued provider item with identity, save date, note, collection and payload, undecided and idempotent | C18 | knowledge-consolidation session, 2026-09-29 |
+| C19 | Done | Ingest primitive: save one queued provider item with identity, save date, note, collection and payload, undecided and idempotent | C18 | knowledge-consolidation session, 2026-09-29 |
 | C20 | Claimed | Connector primitives as agent actions: discover, read queue, acknowledge/skip, Raindrop move under write permission | C19 | knowledge-consolidation session, 2026-09-29 |
 | C21 | Claimed | Assessment primitive: assess a source with Jev (one budget) or the Knowledge model; returns a recommendation, decides nothing | C18 | knowledge-consolidation session, 2026-09-29 |
 | C22 | Claimed | Ingestion routine as an editable agent skill, plus owning docs | C19, C20, C21 | knowledge-consolidation session, 2026-09-29 |
@@ -387,3 +387,13 @@ deletes it only after a dry-run of the routine matches it on live data.
 - Deviations: none.
 - For the next agent: C19 can build ingest primitives on the store-owned
   decision boundary; C23's live dry-run remains a maintainer/Gateway gate.
+
+### C19 · Done · 2026-09-29 · luna-worker
+
+- Result: Added provider-neutral `knowledge.source.ingest` and agent `ingestItem`; ingestion accepts an explicit scope, stores queued Raindrop/X evidence as a pending source, recovers Raindrop save time solely from retained provider payload, and leaves queue acknowledgment, assessment, and decisions to their owning tasks. Legacy Raindrop intake now uses the same capture path.
+- Evidence: `npm run build` passed; full `npx vitest run src/knowledge` passed (27 files, 377 tests); documentation policy and personal-info guard passed. Revert proof: making the ingest RPC reject at its boundary caused `source-ingest.test.ts` to fail with the explicit unsupported error; restoring the implementation made it pass.
+- Changes: this commit
+- Tasks added: none.
+- Kept on purpose: `knowledge.raindrop.intake` remains until C23 and continues its current assessment/admission/move workflow; ingestion never acknowledges queued work.
+- Deviations: none.
+- For the next agent: C20 owns queue acknowledgment/skip and other connector primitives; C23 remains gated on user-approved live dry-run and Gateway update.

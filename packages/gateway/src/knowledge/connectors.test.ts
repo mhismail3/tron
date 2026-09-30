@@ -609,7 +609,7 @@ describe("knowledge connectors", () => {
     const sources = (await store.list({ kind: "source", includeArchived: true })).records;
     expect(sources).toHaveLength(1);
     expect(sources[0]?.content.collectionId).toBe("111");
-    expect(sources[0]?.content.sourceSavedAt).toBe("2025-12-30T12:00:00Z");
+    expect(sources[0]?.content.sourceSavedAt).toBe("2025-12-30T12:00:00.000Z");
     expect(sources[0]?.content.sourcePublishedAt).toBeUndefined();
     expect(sources[0]?.content.representations?.[0]?.kind).toBe("provider-api");
     expect(sources[0]?.content.admission?.status).toBe("retained");

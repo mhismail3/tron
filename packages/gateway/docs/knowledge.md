@@ -785,8 +785,14 @@ header spellings. Redirects are not followed, and provider failures are
 redacted. This is metadata access, not full article capture. `connectorSweep` only
 verifies the provider and discovers bookmarks into the connector queue; it does
 not capture linked pages, create Knowledge sources, decide admission, or move
-Raindrop items. `raindropIntake` is the only connector path that captures and
-decides bookmarks. Agent sweeps use the same accepted-work owner as RPC runs, so
+Raindrop items. `knowledge.source.ingest` / agent action `ingestItem` saves one
+explicitly scoped queued item as a source, retaining provider identity/payload
+and Raindrop collection/note provenance, recovering Raindrop save time from that
+payload, and applying the linked-capture safety downgrade. It leaves admission
+pending and does not acknowledge the queue item, assess, or decide. Personal
+scope remains excluded from work retrieval. `raindropIntake` still owns its
+legacy decision and move workflow until C23, but uses the same ingest primitive
+for source capture. Agent sweeps use the same accepted-work owner as RPC runs, so
 disconnecting a presentation waiter does not replay or abandon admitted provider
 work. Connector identity reuse
 resolves through a canonical Knowledge catalog index keyed by
@@ -806,7 +812,7 @@ selected limit per collection, so shifted provider pages are revisited rather
 than silently skipped. Remote destinations are configured per source collection
 and still require the connection's independent `allowWrites` approval.
 
-After each Raindrop item's capture, K2 save-time recovery, and existing inline
+After each Raindrop item's shared source ingestion and existing inline
 assessment/admission/move processing settles (a single step on every exit path
 of the item), its latest committed revision enqueues one Gateway-owned summary
 job without waiting for the model when it has readable text. Partial captures —

@@ -24,7 +24,7 @@ import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESE
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -773,8 +773,9 @@ export class KnowledgeService {
         return this.extensions.connector(action, signal);
       case "knowledge.connector.run":
       case "knowledge.raindrop.intake":
+      case "knowledge.source.ingest":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
-        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : "knowledge connector run", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
+        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : "knowledge connector run", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
     }
   }
 
@@ -924,6 +925,11 @@ export class KnowledgeService {
         const request = { commandId: parameters.commandId, ...(parameters.connectionId ? { connectionId: parameters.connectionId } : {}), dryRun: parameters.dryRun ?? true, ...(parameters.limit ? { limit: Math.min(10, parameters.limit) } : {}), ...(parameters.sourceCollectionId ? { sourceCollection: parameters.sourceCollectionId } : {}), ...(parameters.pilotId ? { pilot: { id: parameters.pilotId, maxItems: parameters.pilotMaxItems ?? 10, budgetCents: parameters.pilotBudgetCents ?? 100 } } : {}) };
         const result = await this.invoke({ operation: "knowledge.raindrop.intake", request } as KnowledgeAction, signal);
         return { text: `Raindrop intake completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+      }
+      case "ingestItem": {
+        if (!this.extensions.connector || !parameters.commandId || !parameters.connector || !parameters.connectionId || !parameters.itemId || !parameters.scope) throw new GatewayError("invalid_request", "ingestItem requires commandId, connector, connectionId, itemId, and explicit scope");
+        const result = await this.invoke({ operation: "knowledge.source.ingest", request: { commandId: parameters.commandId, connector: parameters.connector, connectionId: parameters.connectionId, itemId: parameters.itemId, scope: parameters.scope } }, signal);
+        return { text: `Queued ${parameters.connector} item ingested as source ${JSON.stringify(result).slice(0, 4_000)}. The queue item remains unacknowledged; admission remains pending.`, details: result };
       }
       case "connectorSweep": {
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
