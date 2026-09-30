@@ -169,12 +169,14 @@ branch and writes a receipt for that exact commit.
 
 1. It refuses unless the current branch exists on the remote at exactly the
    head.
-2. It sets the commit status `verify.statusContext` to `pending` on the head.
+2. It sets the commit status `verify.statusContext` to `pending` on the head,
+   replacing any earlier status there before any other lookup can fail.
 3. The target is the open pull request for the branch, otherwise the issue
    whose number is in the branch name (`<type>/<issue>-<slug>`).
-4. Full logs and the receipt go only to the private evidence repository
+4. Full logs and the receipt go only to the evidence repository
    `<owner>/<repo><verify.evidenceRepositorySuffix>`, derived at run time,
-   under `<issue>/<head>/`.
+   under `<issue>/<head>/`. They are not scrubbed and hold local paths, so
+   verify uploads nothing unless GitHub reports that repository as private.
 5. The public comment has a table of checks, commands, results, wall times and
    carried-from commits, plus the last `verify.excerptLines` lines of each
    failed log. The repository root and home directory are replaced by `<repo>`
@@ -196,18 +198,27 @@ Tron's `verify` section in `.github/work.json` follows the validation commands
 in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
 `.node-version` from nvm first on `PATH`. Its limits are deliberate:
 
-- **Gateway** source runs `npm run build` plus `vitest related` on the changed
-  TypeScript files. A change that no test imports runs only the build.
-  Dependency, configuration, script, fixture and protocol-fixture changes run the
-  full Gateway suite.
-- **iOS** runs the source policy, `scripts/tron-ios-test build` and the complete
-  unit target. Focused owners cannot be derived from paths: suite names are not
+- **Gateway** is one check whose globs cover every build and test input:
+  sources, dependencies, TypeScript and Vitest configuration, scripts, fixtures,
+  protocol fixtures and the pinned Node version. A lockfile change merged from
+  the base branch therefore reruns it. It runs `npm ci`, the Pi SDK cohort check
+  and the build, then `vitest related` when every changed Gateway path is
+  existing source or test support. A change that no test imports runs only the
+  build. Any other changed input, or a deleted or renamed Gateway file, runs the
+  full suite instead, because `vitest related` cannot select a test that still
+  imports a deleted module and the build excludes tests.
+- **iOS** runs the source, build-matrix and archive-privacy policy scripts,
+  `scripts/tron-ios-test build` and the complete unit target. Focused owners cannot be derived from paths: suite names are not
   file names, and an `--only-testing` selector that names no suite runs zero
   tests and passes. The simulator admission and lease rules of
   `scripts/tron-ios-test` still apply, so a busy Mac fails the check with exit
   73; verify again once memory is free.
-- **Mac** regenerates the project and runs `build-for-testing` and
+- **Mac** regenerates the project with `scripts/generate-xcode-project mac`
+  (what `scripts/tron mac generate` runs) and runs `build-for-testing` and
   `test-without-building` for `TronMacTests`, as in the Mac development guide.
+  Checks call the owning script directly rather than the `scripts/tron`
+  dispatcher, so a dispatcher edit does not rebuild the Mac app. The isolated
+  Mac script fixtures that need no staged payload run as their own check.
   Packaging checks that need a staged Gateway payload stay with the macOS CI job.
 - **Scripts** run their owning `scripts/test-*` suite where one exists. Scripts
   without an owner (`scripts/tron`, `scripts/tron-dev`, the hook installer and a
@@ -231,11 +242,11 @@ covers the GitHub side.
     commits since the last receipt. Carried checks stay in the required set,
     and `always` checks are never carried.
 14. **A crash or partial post leaves a success status.** The status is
-    `pending` before anything else is posted, `success` is set only after the
+    `pending` before any lookup or upload, `success` is set only after the
     comment exists and only for a passing receipt, and any error sets `failure`.
 15. **Evidence leaks personal data.** Every public comment passes the scrub
-    command first; excerpts are redacted; full logs go only to the private
-    evidence repository.
+    command first; excerpts are redacted; full logs go only to the evidence
+    repository, and only when GitHub reports it as private.
 16. **An incoming base-branch change is missed by carry-over.** Carry-over
     compares the globs against every path changed between `P` and the head,
     including merged base-branch changes, and carries nothing across a rebase.

@@ -33,6 +33,9 @@ FAKE_GH = textwrap.dedent(
     with open(os.environ["FAKE_GH_LOG"], "a") as log:
         log.write(json.dumps({"args": args, "stdin": stdin}) + "\\n")
     fail = os.environ.get("FAKE_GH_FAIL")
+    if fail and fail == " ".join(args[:2]):
+        print("gh: injected failure", file=sys.stderr)
+        sys.exit(1)
     if args[0] == "repo":
         print("acme/widget")
     elif args[0] == "pr":
@@ -45,6 +48,9 @@ FAKE_GH = textwrap.dedent(
         if method == "GET" and "/contents/" in path:
             print("gh: Not Found (HTTP 404)", file=sys.stderr)
             sys.exit(1)
+        if method == "GET" and path == "repos/acme/widget-evidence":
+            print(json.dumps({"private": not os.environ.get("FAKE_GH_EVIDENCE_PUBLIC")}))
+            sys.exit(0)
         if method == "POST" and path.endswith("/comments"):
             print(json.dumps({"html_url": "https://example.invalid/comment/1"}))
         else:
@@ -202,10 +208,11 @@ class PostFixture(VerifyFixture):
         fake = self.tmp / "gh"
         fake.write_text(FAKE_GH.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
         fake.chmod(0o755)
-        self._env = {k: os.environ.get(k) for k in ("WORK_GH", "FAKE_GH_LOG", "FAKE_GH_FAIL", "FAKE_GH_PR")}
+        self._env = {k: os.environ.get(k) for k in ("WORK_GH", "FAKE_GH_LOG", "FAKE_GH_FAIL", "FAKE_GH_PR",
+                                                 "FAKE_GH_EVIDENCE_PUBLIC")}
         os.environ.update(WORK_GH=str(fake), FAKE_GH_LOG=str(self.gh_log))
-        os.environ.pop("FAKE_GH_FAIL", None)
-        os.environ.pop("FAKE_GH_PR", None)
+        for key in ("FAKE_GH_FAIL", "FAKE_GH_PR", "FAKE_GH_EVIDENCE_PUBLIC"):
+            os.environ.pop(key, None)
 
     def tearDown(self):
         for key, value in self._env.items():
@@ -295,7 +302,7 @@ class PostStatusTests(PostFixture):
         self.assertEqual(self.statuses(), ["pending", "failure"])
 
     def test_error_while_posting_never_leaves_success(self):
-        for failing in ("/comments", "/contents/"):
+        for failing in ("pr list", "/comments", "/contents/"):
             with self.subTest(failing=failing):
                 self.gh_log.unlink(missing_ok=True)
                 self.commit(self.repo, "app/a.txt", failing)
@@ -323,6 +330,17 @@ class EvidencePrivacyTests(PostFixture):
         self.push()
         with self.assertRaises(verify.VerifyError):
             self.post(self.verify())
+        self.assertEqual(self.comment_bodies(), [])
+        self.assertEqual(self.statuses(), ["pending", "failure"])
+
+    def test_public_evidence_repository_is_refused(self):
+        self.commit(self.repo, "app/a.txt", "two\n")
+        self.push()
+        receipt = self.verify()
+        os.environ["FAKE_GH_EVIDENCE_PUBLIC"] = "1"
+        with self.assertRaises(verify.VerifyError):
+            self.post(receipt)
+        self.assertEqual([path for method, path, _ in self.api_calls() if method == "PUT"], [])
         self.assertEqual(self.comment_bodies(), [])
         self.assertEqual(self.statuses(), ["pending", "failure"])
 

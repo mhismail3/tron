@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -142,11 +143,14 @@ def _run_check(root: Path, check: Check, prelude: str, command: str, log_path: P
             code = process.wait()
         except BaseException:
             # The check owns a process group; an interrupted verify leaves nothing running.
-            os.killpg(process.pid, signal.SIGTERM)
+            # The group may already be gone; the interrupt stays the reported error.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
             raise
     return code, round(time.monotonic() - started, 1)
@@ -306,16 +310,6 @@ def post(gh: Gh, repo: Path, config: dict, receipt: dict) -> str:
         raise VerifyError(f"{claim['remote']}/{branch} is not at {head[:12]}; push the head first")
 
     repository = gh.run("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip()
-    pulls = gh.run("pr", "list", "--head", branch, "--state", "open", "--json", "number",
-                   "--jq", ".[].number").split()
-    issue_match = _BRANCH_ISSUE.match(branch)
-    if not pulls and not issue_match:
-        raise VerifyError(f"no open pull request for {branch} and no issue number in the branch name")
-    target = int(pulls[0]) if pulls else int(issue_match.group(1))
-    evidence_issue = int(issue_match.group(1)) if issue_match else target
-    evidence_repository = repository + settings["evidenceRepositorySuffix"]
-    evidence_dir = f"{evidence_issue}/{head}"
-
     status_api = f"repos/{repository}/statuses/{head}"
     context = settings["statusContext"]
 
@@ -325,8 +319,21 @@ def post(gh: Gh, repo: Path, config: dict, receipt: dict) -> str:
             body["target_url"] = url
         gh.rest("POST", status_api, body)
 
+    # Pending replaces any earlier status on this head before a lookup can fail.
     set_status("pending", "posting verify evidence")
     try:
+        pulls = gh.run("pr", "list", "--head", branch, "--state", "open", "--json", "number",
+                       "--jq", ".[].number").split()
+        issue_match = _BRANCH_ISSUE.match(branch)
+        if not pulls and not issue_match:
+            raise VerifyError(f"no open pull request for {branch} and no issue number in the branch name")
+        target = int(pulls[0]) if pulls else int(issue_match.group(1))
+        evidence_issue = int(issue_match.group(1)) if issue_match else target
+        evidence_repository = repository + settings["evidenceRepositorySuffix"]
+        evidence_dir = f"{evidence_issue}/{head}"
+        # Full logs and the receipt are unscrubbed and hold local paths.
+        if (gh.rest("GET", f"repos/{evidence_repository}") or {}).get("private") is not True:
+            raise VerifyError(f"evidence repository {evidence_repository} is not private; nothing was uploaded")
         # Relative to the issue or pull request page, so no owner is written.
         link = f"../../{evidence_repository.split('/', 1)[1]}/tree/HEAD/{evidence_dir}"
         body = comment_body(receipt, settings, root, link)

@@ -264,13 +264,7 @@
         "name": "gateway",
         "paths": [
           "packages/gateway/src/**/*.ts",
-          "packages/gateway/test-support/**"
-        ],
-        "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run build && npx vitest related --run {paths}"
-      },
-      {
-        "name": "gateway-full",
-        "paths": [
+          "packages/gateway/test-support/**",
           "packages/gateway/package.json",
           "packages/gateway/package-lock.json",
           "packages/gateway/tsconfig.json",
@@ -286,9 +280,10 @@
           "config/GatewayProtocol.json",
           ".node-version",
           "scripts/tron-ios-device-bind.mjs",
-          "scripts/tron-ios-device-bind.test.mjs"
+          "scripts/tron-ios-device-bind.test.mjs",
+          "config/PushService.xcconfig"
         ],
-        "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && npm test"
+        "command": "cd packages/gateway && npm ci --no-audit --no-fund && npm run check:pi-sdk && npm run build && set -- {paths} && related=$# && for p in \"$@\"; do case \"$p\" in */packages/gateway/src/*.ts|*/packages/gateway/test-support/*) ;; *) related=0 ;; esac; done && if [ \"$related\" != 0 ] && git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD -- . ../protocol-fixtures ../../config/GatewayProtocol.json ../../config/PushService.xcconfig ../../.node-version ../../scripts/tron-ios-device-bind.mjs ../../scripts/tron-ios-device-bind.test.mjs; then npx vitest related --run \"$@\"; else npm test; fi"
       },
       {
         "name": "push-relay",
@@ -318,9 +313,11 @@
           "config/ci-toolchain.env",
           "scripts/generate-xcode-project",
           "scripts/tron-ios-test",
-          "scripts/ios-test-*.py"
+          "scripts/ios-test-*.py",
+          "scripts/verify-ci-toolchain.sh",
+          "scripts/install-ci-tools.sh"
         ],
-        "command": "packages/ios-app/scripts/test-source-policy.sh && scripts/tron-ios-test build && scripts/tron-ios-test run"
+        "command": "packages/ios-app/scripts/test-source-policy.sh && packages/ios-app/scripts/test-build-matrix-policy.sh && packages/ios-app/scripts/test-verify-archive-privacy.sh && scripts/tron-ios-test build && scripts/tron-ios-test run"
       },
       {
         "name": "mac",
@@ -334,18 +331,22 @@
           "packages/mac-app/cua-driver-release.json",
           "config/PushService.xcconfig",
           "config/ci-toolchain.env",
-          "scripts/generate-xcode-project"
+          "scripts/generate-xcode-project",
+          "scripts/verify-ci-toolchain.sh",
+          "scripts/install-ci-tools.sh"
         ],
-        "command": "scripts/tron mac generate && cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData && xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData -only-testing:TronMacTests"
+        "command": "scripts/generate-xcode-project mac && cd packages/mac-app && xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData && xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData -only-testing:TronMacTests"
       },
       {
         "name": "mac-scripts",
         "paths": [
           "packages/mac-app/scripts/**",
           "scripts/validate-push-service-config.sh",
-          "config/PushService.xcconfig"
+          "config/PushService.xcconfig",
+          "scripts/gateway-payload-deploy.mjs",
+          ".node-version"
         ],
-        "command": "packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh"
+        "command": "packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh"
       },
       {
         "name": "mac-native-computer-control",
@@ -366,7 +367,8 @@
         "paths": [
           "scripts/test-cua-assets.sh",
           "packages/mac-app/cua-driver-release.json",
-          "packages/mac-app/scripts/ensure-cua-driver.sh"
+          "packages/mac-app/scripts/ensure-cua-driver.sh",
+          "packages/mac-app/scripts/verify-macho-architectures.sh"
         ],
         "command": "scripts/test-cua-assets.sh"
       },
@@ -397,7 +399,8 @@
           "scripts/tron-ios-simulator",
           "scripts/patch-ios-gateway-e2e-xctestrun.py",
           "scripts/ios-gateway-e2e-test",
-          "scripts/test-ios-test-infrastructure.py"
+          "scripts/test-ios-test-infrastructure.py",
+          "scripts/tron-profile-ios"
         ],
         "command": "python3 scripts/test-ios-test-infrastructure.py"
       },
@@ -430,7 +433,8 @@
         "name": "mac-reinstall",
         "paths": [
           "scripts/tron_mac_reinstall.py",
-          "scripts/test-mac-reinstall.py"
+          "scripts/test-mac-reinstall.py",
+          "scripts/verify-mac-install.sh"
         ],
         "command": "python3 scripts/test-mac-reinstall.py"
       },
@@ -482,7 +486,7 @@
           "VERSION.env",
           "scripts/tron-version"
         ],
-        "command": "scripts/tron version check && scripts/tron version test"
+        "command": "scripts/tron-version check && scripts/tron-version test"
       },
       {
         "name": "toolchain",
