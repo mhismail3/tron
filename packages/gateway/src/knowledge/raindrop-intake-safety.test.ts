@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { jevProfileVersion } from "./jev-assessment.js";
+import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -14,11 +16,17 @@ const response = (value: unknown, status = 200): ConnectorHTTPResponse => ({ sta
 
 async function fixture(options: { failFirstMove?: boolean; initialScope?: string; links?: Record<string, string>; sourceFetch?: (url: string) => Promise<Response> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-intake-safety-")); roots.push(root);
+  const owner = new ConnectionOwner(root);
+  const setup = await owner.execute({ kind: "setup.begin", commandId: "safety-jev-begin", instanceId: "safety-jev", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
+  await owner.execute({ kind: "setup.complete", commandId: "safety-jev-complete", operationId: setup.operationId, instanceId: "safety-jev", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
+  const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"], ["connector:jev:personal", "synthetic-jev"]]));
   const store = new KnowledgeStore(new TronWorkspace(root));
+  const jevBudget = new KnowledgeTaggingBudget(store, owner, credentials);
   const observed = { assessmentCalls: 0, moves: [] as string[] };
   const remote = new Map([["1", options.initialScope ?? "111"], ["2", options.initialScope ?? "111"]]);
   const extension = new KnowledgeConnectorExtension(store, {
-    credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]])),
+    credentials,
+    jevBudget,
     resolveHost: async () => ["93.184.216.34"],
     sourceFetch: options.sourceFetch ?? (async url => new Response(`Distinct complete source evidence for ${url}`, { headers: { "content-type": "text/plain" } })),
     sleep: async () => {},

@@ -86,6 +86,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
 
     /// The scroll view's layout edge that holds the newest row.
     var newestEdge: Edge { layoutEdge(.bottom) }
+    var oldestEdge: Edge { layoutEdge(.top) }
 
     /// The anchor that puts a target's newest side at the transcript's pinned
     /// bottom: the `initialOffset`, `alignment` and pinned `sizeChanges` roles,
@@ -126,7 +127,8 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// `containerHeight` is the model's own visible height; before the first
     /// geometry sample there is no space to reflect into and the frame is
     /// returned unchanged.
-    func transcriptFrame(_ frame: CGRect, containerHeight: CGFloat) -> CGRect {
+    func transcriptFrame(_ frame: CGRect, geometry: ChatTranscriptGeometry) -> CGRect {
+        let containerHeight = geometry.containerHeight + geometry.bottomInset
         guard self == .newestAtOrigin, containerHeight > 0 else { return frame }
         return CGRect(
             x: frame.minX,
@@ -171,22 +173,21 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// The model's own `distanceFromBottom` is the reverse of its offset, so the
     /// two share one anchor — the model offset at the pinned end — and a target's
     /// distance from that end is what a native offset is built from. The
-    /// composer/keyboard inset is the model's bottom inset and sits at the
-    /// scroll view's own origin on this path, so that distance is measured from
-    /// `-bottomInset`.
+    /// obstruction is content layout on this path, so that distance is measured
+    /// from the exact native content origin, not an adjusted inset.
     func scrollOffsetY(
         forModelOffsetY modelOffsetY: CGFloat,
         geometry: ChatTranscriptGeometry
     ) -> CGFloat {
         guard self == .newestAtOrigin, geometry.isValid else { return modelOffsetY }
         let pinnedModelOffsetY = geometry.offsetY + geometry.distanceFromBottom
-        return (pinnedModelOffsetY - modelOffsetY) - geometry.bottomInset
+        return (pinnedModelOffsetY - modelOffsetY)
     }
 
-    /// Insets read by the unflipped transcript container are re-applied as
-    /// margins only on the origin-anchored path. The flipped scroll view ignores
-    /// these safe areas, so UIKit never receives a changing overlay inset.
-    func scrollMargins(for safeAreaInsets: EdgeInsets) -> EdgeInsets {
+    /// Safe-area obstructions read before the flip, mapped to layout ends. The
+    /// two content clearances are lazy-layout items; only scroll indicators use
+    /// margins. No component supplies a second height or curve.
+    func layoutClearance(for safeAreaInsets: EdgeInsets) -> EdgeInsets {
         guard self == .newestAtOrigin else { return .init() }
         return EdgeInsets(
             top: safeAreaInsets.bottom,
@@ -226,22 +227,16 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
         return count - 1 - position
     }
 
-    /// The geometry the coordinator reads. Every field is derived from this one
-    /// ScrollGeometry sample, so container size and applied insets are coherent
-    /// even when successive callbacks in one frame differ. Both orientations report one model:
-    /// `distanceFromBottom` is the distance from the newest row. The flipped
-    /// scroll view's content origin is its visual bottom, so the visible rect is
-    /// mirrored and the composer/keyboard inset, which the flip moves to the
-    /// layout top, becomes the model's bottom inset.
+    /// Native geometry plus the declared newest-edge spacer. The native sample
+    /// remains authoritative until UIKit changes it; the declared input can
+    /// change without altering the lazy stack's current content-size estimate.
+    /// ChatTranscriptViewportGeometry republishes when either input changes.
     ///
-    /// Container size and insets in this adapter come from the same native
-    /// `ScrollGeometry` value: its `contentInsets` are the margins actually
-    /// applied by the scroll view, not the safe-area values that sourced them.
-    ///
-    /// `visibleTopY` and `visibleBottomY` are the exact native rect: at the
-    /// pinned origin the visible top is the inset above the content start, which
-    /// is why the distance is exact rather than estimate-derived.
-    func coordinatorGeometry(_ geometry: ScrollGeometry) -> ChatTranscriptGeometry {
+    /// The spacer is layout, not scroll-content inset. Remove it from the model's
+    /// content and usable viewport heights, report it as bottom obstruction, and
+    /// reflect the native visible rect. Thus distanceFromBottom is exactly the
+    /// native distance from content origin, independent of every lazy estimate.
+    func coordinatorGeometry(_ geometry: ScrollGeometry, obstruction: CGFloat = 0) -> ChatTranscriptGeometry {
         let contentHeight = geometry.contentSize.height
         guard self == .newestAtOrigin else {
             return ChatTranscriptGeometry(
@@ -257,9 +252,9 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
         let visibleBottom = geometry.visibleRect.maxY
         return ChatTranscriptGeometry(
             offsetY: contentHeight - visibleBottom,
-            contentHeight: contentHeight,
-            containerHeight: geometry.containerSize.height,
-            bottomInset: geometry.contentInsets.top,
+            contentHeight: contentHeight - obstruction,
+            containerHeight: geometry.containerSize.height - obstruction,
+            bottomInset: obstruction,
             visibleTopY: contentHeight - visibleBottom,
             visibleBottomY: contentHeight - visibleTop
         )
@@ -284,6 +279,95 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     }
 }
 
+/// A zero-copy spine over the same canonical items, carrying stable item IDs and
+/// their layout positions for the owner's accessibility ordering.
+struct ChatTranscriptOrderedElements<Base: RandomAccessCollection>: RandomAccessCollection
+where Base.Element: Identifiable {
+    struct Element: Identifiable {
+        let item: Base.Element
+        let spinePosition: Int
+        var id: Base.Element.ID { item.id }
+    }
+    let base: Base
+    let orientation: ChatTranscriptOrientation
+    var startIndex: Int { 0 }
+    var endIndex: Int { base.count }
+    subscript(position: Int) -> Element {
+        let source = orientation.visualPosition(ofSpinePosition: position, count: base.count)
+        return Element(item: base[base.index(base.startIndex, offsetBy: source)], spinePosition: position)
+    }
+}
+
+extension ChatTranscriptOrientation {
+    func ordered<Base: RandomAccessCollection>(_ items: Base) -> ChatTranscriptOrderedElements<Base>
+    where Base.Element: Identifiable {
+        ChatTranscriptOrderedElements(base: items, orientation: self)
+    }
+}
+
+/// Read obstructions in the unflipped space, but propose the entire viewport to
+/// the transformed scroll view. Merely ignoring safe areas on the flip can still
+/// shrink its native clip when keyboard + accessories cross the viewport center.
+struct ChatTranscriptViewport<Content: View>: View {
+    let orientation: ChatTranscriptOrientation
+    @ViewBuilder let content: (EdgeInsets) -> Content
+
+    @ViewBuilder var body: some View {
+        if orientation.presentsNewestRowFirst {
+            GeometryReader { insets in
+                GeometryReader { viewport in
+                    content(insets.safeAreaInsets)
+                        .frame(width: viewport.size.width, height: viewport.size.height)
+                }
+                .ignoresSafeArea(.all, edges: .vertical)
+            }
+        } else {
+            content(.init())
+        }
+    }
+}
+
+/// Clearance belongs INSIDE the lazy stack: newest first, oldest last. Native
+/// underflow alignment then includes both obstructions in the content extent.
+/// An outer newest spacer moves a detached reader; a margin runs ahead of closing
+/// animation, and oldest margins can place short content behind navigation.
+struct ChatTranscriptClearance: View {
+    let height: CGFloat
+
+    var body: some View {
+        Color.clear.frame(height: height)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Applied native geometry and declared layout clearance have one owner. SwiftUI
+/// may keep its lazy estimate unchanged when the spacer changes, so either input
+/// republishes the model. These fields are deliberately not observable: geometry
+/// publication must not schedule another view/layout pass.
+@MainActor
+final class ChatTranscriptViewportGeometry {
+    private var native: ScrollGeometry?
+    private var obstruction: CGFloat = 0
+    private var published: ChatTranscriptGeometry = .zero
+
+    func update(
+        native: ScrollGeometry? = nil,
+        previousNative: ScrollGeometry? = nil,
+        obstruction: CGFloat,
+        orientation: ChatTranscriptOrientation
+    ) -> (previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry)? {
+        if let native { self.native = native }
+        self.obstruction = obstruction
+        guard let applied = self.native else { return nil }
+        let previous = previousNative.flatMap { sample in
+            orientation.pinsToEstimatedOrigin ? orientation.coordinatorGeometry(sample) : nil
+        } ?? published
+        let current = orientation.coordinatorGeometry(applied, obstruction: self.obstruction)
+        published = current
+        return (previous, current)
+    }
+}
+
 /// The CT-23 accessibility order applies in both orientations. Today's owner
 /// returns priority zero, preserving the default ordering, while the
 /// origin-anchored owner supplies the reversed spine's visual order.
@@ -295,12 +379,9 @@ private struct ChatTranscriptVoiceOverOrderModifier: ViewModifier {
     }
 }
 
-/// The origin-anchored inset adapter reads safe areas before the render flip,
-/// ignores the scroll view's vertical container and keyboard safe areas, and
-/// applies swapped values as scroll-content and indicator margins. Exclusion
-/// inside the flip prevents UIKit overlay-inset adjustment; exclusion outside
-/// keeps the transformed viewport from shrinking and clipping a detached row
-/// when the keyboard crosses its center. Today's path bypasses both.
+/// Viewport render transform and indicator margins. Both clearances belong
+/// inside the lazy content (see ChatTranscriptClearance), so their animation
+/// uses the same renderer/transaction as the obstructing component.
 private struct ChatTranscriptViewportModifier: ViewModifier {
     let orientation: ChatTranscriptOrientation
     let safeAreaInsets: EdgeInsets
@@ -308,12 +389,12 @@ private struct ChatTranscriptViewportModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if orientation.presentsNewestRowFirst {
-            let margins = orientation.scrollMargins(for: safeAreaInsets)
+            let margins = orientation.layoutClearance(for: safeAreaInsets)
             content
                 .ignoresSafeArea(.container, edges: .vertical)
                 .ignoresSafeArea(.keyboard, edges: .vertical)
-                .contentMargins(.top, margins.top, for: .scrollContent)
-                .contentMargins(.bottom, margins.bottom, for: .scrollContent)
+                .contentMargins(.top, 0, for: .scrollContent)
+                .contentMargins(.bottom, 0, for: .scrollContent)
                 .contentMargins(.top, margins.top, for: .scrollIndicators)
                 .contentMargins(.bottom, margins.bottom, for: .scrollIndicators)
                 .chatTranscriptOrientation(orientation)
@@ -339,6 +420,36 @@ private struct ChatTranscriptOrientationModifier: ViewModifier {
 }
 
 extension View {
+    /// Today's UIKit behavior stays untouched; only the reflected viewport needs
+    /// a separate system-tap recipient. Mount inside its content for exact ancestry.
+    func chatTranscriptStatusBar(
+        _ orientation: ChatTranscriptOrientation,
+        active: Bool,
+        scrollToOldest: @escaping () -> Void
+    ) -> some View {
+        background {
+            if orientation.presentsNewestRowFirst {
+                ChatTranscriptStatusBar(active: active, scrollToOldest: scrollToOldest)
+                    .frame(width: 0, height: 0)
+            }
+        }
+    }
+
+    /// Native anchoring and edge effects are shared by main and child transcripts.
+    /// The sheet retains its visual-top underflow alignment; chat uses newest.
+    func chatTranscriptScrollBehavior(
+        _ orientation: ChatTranscriptOrientation,
+        sizeChangesPinned: Bool,
+        position: Binding<ScrollPosition>,
+        underflowAt edge: Edge = .bottom
+    ) -> some View {
+        defaultScrollAnchor(orientation.newestEndAnchor, for: .initialOffset)
+            .defaultScrollAnchor(edge == .bottom ? orientation.newestEndAnchor : orientation.oldestEndAnchor, for: .alignment)
+            .defaultScrollAnchor(sizeChangesPinned ? orientation.newestEndAnchor : orientation.oldestEndAnchor, for: .sizeChanges)
+            .scrollPosition(position)
+            .scrollEdgeEffectHidden(orientation.suppressesPinnedEndScrollEdgeEffect, for: Edge.Set(orientation.newestEdge))
+    }
+
     /// Renders this view in the transcript's orientation. The transcript applies
     /// it to its scroll view and each row applies it to its own element.
     func chatTranscriptOrientation(_ orientation: ChatTranscriptOrientation) -> some View {

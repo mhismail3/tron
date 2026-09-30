@@ -94,6 +94,7 @@ struct HostedKnowledgeDetailFixtureView: View {
             HStack(spacing: 4) {
                 control("Take conflict", id: "fixture.next-take-conflict") { Task { await gateway.setNextTake(.conflict) } }
                 control("Take fail", id: "fixture.next-take-failure") { Task { await gateway.setNextTake(.failure) } }
+                control("Curate conflict", id: "fixture.next-curation-conflict") { Task { await gateway.setNextCurationConflict() } }
                 control("Type", id: "fixture.type-take") { typedChunks += 1; Self.insertIntoTake("chunk\(typedChunks) ") }
             }
         }
@@ -127,10 +128,12 @@ actor HostedKnowledgeGateway {
     private var verdict: String?
     private var supersededBy: String?
     private var scope = "research"
+    private var admission = "retained"
     private var jobs: [JSONValue] = []
     private var pendingSummary: String?
     private var pendingTags: String?
     private var nextTake = TakeMode.success
+    private var nextCurationConflict = false
     private var summarizeCount = 0
     private var takeCount = 0
     private var tagCount = 0
@@ -167,6 +170,7 @@ actor HostedKnowledgeGateway {
         for socket in current { await socket.drop() }
     }
     func setNextTake(_ mode: TakeMode) { nextTake = mode }
+    func setNextCurationConflict() { nextCurationConflict = true }
 
     func completeSummary() async {
         guard let command = pendingSummary else { return }
@@ -288,11 +292,33 @@ actor HostedKnowledgeGateway {
             }
         case "knowledge.source.curate":
             let item = params["items"]?.arrayValue?.first?.objectValue ?? [:]
+            if nextCurationConflict {
+                nextCurationConflict = false
+                revision += 1
+                await publishChange()
+                return (.object(["commandId": params["commandId"] ?? .string("curate"),
+                                 "operation": params["operation"] ?? .string("verdict"), "applied": .number(0), "unchanged": .number(0),
+                                 "outcomes": .array([.object(["recordId": .string(Self.sourceID), "status": .string("conflict"),
+                                                               "code": .string("stale-revision"), "reason": .string("Another edit changed this source."),
+                                                               "currentRevision": .string(revisionID)])]),
+                                 "stateRevision": .number(Double(stateRevision))]), nil)
+            }
+            if item["expectedRevision"]?.stringValue != revisionID {
+                return (.object(["commandId": params["commandId"] ?? .string("curate"),
+                                 "operation": params["operation"] ?? .string("verdict"), "applied": .number(0), "unchanged": .number(0),
+                                 "outcomes": .array([.object(["recordId": .string(Self.sourceID), "status": .string("conflict"),
+                                                               "code": .string("stale-revision"), "reason": .string("Source revision is stale."),
+                                                               "currentRevision": .string(revisionID)])]),
+                                 "stateRevision": .number(Double(stateRevision))]), nil)
+            }
             if let value = item["verdict"]?.objectValue {
                 verdict = value["verdict"]?.stringValue
                 supersededBy = value["supersededBy"]?.stringValue
             }
-            if let placement = item["placement"]?.objectValue, let next = placement["scope"]?.stringValue { scope = next }
+            if let placement = item["placement"]?.objectValue {
+                if let next = placement["scope"]?.stringValue { scope = next }
+                if let next = placement["admission"]?.stringValue { admission = next }
+            }
             revision += 1
             let result = JSONValue.object(["commandId": params["commandId"] ?? .string("curate"), "operation": params["operation"] ?? .string("verdict"), "applied": .number(1),
                                            "outcomes": .array([.object(["recordId": .string(Self.sourceID), "status": .string("applied"), "revisionId": .string(revisionID)])]),
@@ -327,16 +353,16 @@ actor HostedKnowledgeGateway {
 
     private func currentRow() -> JSONValue {
         Self.row(id: Self.sourceID, revision: revision, title: Self.title, scope: scope, verdict: verdict, supersededBy: supersededBy,
-                 hasTake: take != nil, tags: tagIDs, summary: summary, tagsStale: pendingTags != nil)
+                 hasTake: take != nil, tags: tagIDs, summary: summary, tagsStale: pendingTags != nil, admission: admission)
     }
 
-    private static func row(id: String, revision: Int, title: String, scope: String, verdict: String?, supersededBy: String?, hasTake: Bool, tags: [String], summary: String?, tagsStale: Bool = false) -> JSONValue {
+    private static func row(id: String, revision: Int, title: String, scope: String, verdict: String?, supersededBy: String?, hasTake: Bool, tags: [String], summary: String?, tagsStale: Bool = false, admission: String = "retained") -> JSONValue {
         let labels = ["workflows": "Workflows", "agent-harness": "Agent harness", "evaluation": "Evaluation"]
         var fields: [String: JSONValue] = [
             "schemaVersion": .number(1), "id": .string(id), "revisionId": .string("revision-\(revision)"), "scope": .string(scope),
             "createdAt": .string("2026-06-01T00:00:00Z"), "updatedAt": .string("2026-09-29T00:00:00Z"), "title": .string(title),
             "uri": .string("https://example.test/\(id)"), "mediaType": .string("text/html"), "captureDisposition": .string("complete"),
-            "admission": .string("retained"), "sourceSavedAt": .string("2026-06-01T00:00:00Z"), "ageBasis": .string("sourceSavedAt"),
+            "admission": .string(admission), "sourceSavedAt": .string("2026-06-01T00:00:00Z"), "ageBasis": .string("sourceSavedAt"),
             "ageDays": .number(120), "freshness": .string("aging"), "hasTake": .bool(hasTake), "tagsStale": .bool(tagsStale),
             "tags": .array(tags.map { .object(["id": .string($0), "label": .string(labels[$0] ?? $0)]) }),
         ]
@@ -351,7 +377,7 @@ actor HostedKnowledgeGateway {
             "title": .string(Self.title), "uri": .string("https://example.test/\(Self.sourceID)"), "text": .string(Self.text),
             "mediaType": .string("text/html"), "captureDisposition": .string("complete"), "capturedAt": .string("2026-06-01T00:00:00Z"),
             "sourceSavedAt": .string("2026-06-01T00:00:00Z"), "origin": .string("connector"),
-            "admission": .object(["status": .string("retained"), "decidedAt": .string("2026-06-01T00:00:00Z")]),
+            "admission": .object(["status": .string(admission), "decidedAt": .string("2026-06-01T00:00:00Z")]),
             "tags": .object(["tagIds": .array(tagIDs.map(JSONValue.string)), "vocabularyRevision": .number(1),
                              "inputsDigest": .string(String(repeating: "a", count: 64)), "assignedAt": .string("2026-09-29T00:00:00Z")]),
         ]

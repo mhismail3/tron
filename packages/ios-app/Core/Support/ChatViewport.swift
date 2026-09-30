@@ -15,6 +15,7 @@ package struct ChatScrollCommand: Equatable, Sendable {
     package enum Origin: Equatable, Sendable {
         case presentation
         case catchUp
+        case oldestHistory
         case layout
         case prepend
         case tailMaterialization
@@ -30,6 +31,7 @@ package struct ChatScrollCommand: Equatable, Sendable {
 
     package enum Destination: Equatable, Sendable {
         case tail
+        case oldestHistory
         /// Exact lazy row realization target. The coordinator retains the
         /// lease until both this row and the physical tail publish evidence.
         case materialize(String)

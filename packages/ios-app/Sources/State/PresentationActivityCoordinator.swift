@@ -339,6 +339,9 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
             .sheet(isPresented: $isPresented, onDismiss: didDismiss) {
                 TronPresentationSurface(token: lease.contentToken(identity: identity), parent: parent) {
                     sheetContent()
+                        // A sheet owns its own scrolls; the covered chat's
+                        // secondary-scroll exclusion must not cross this boundary.
+                        .environment(\.chatOwnsStatusBar, false)
                 }
             }
             .onChange(of: isPresented, initial: true) { _, presented in
@@ -390,6 +393,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
             .sheet(item: $item, onDismiss: didDismiss) { value in
                 TronPresentationSurface(token: lease.contentToken(identity: identity(value)), parent: parent) {
                     sheetContent(value)
+                        .environment(\.chatOwnsStatusBar, false)
                 }
             }
             .onChange(of: item.map(identity), initial: true) { _, _ in itemChanged() }

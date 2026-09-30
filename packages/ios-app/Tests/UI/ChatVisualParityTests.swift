@@ -288,6 +288,8 @@ struct ChatVisualParityManifest: Codable, Equatable {
 enum ChatVisualParityReference {
     /// One entry per reviewed recording session.
     static let recordedRevisions: Set<String> = [
+        // CT-23 image card, today path, clean source before card changes.
+        "433b9c340b56d6c7342f11de52b26175e6215ec5",
         // CT-12's reference, re-recorded per display frame by CT-14 on the
         // unchanged chat before any container change.
         "eed1e15a5de1a4ef0f66e338f89e9be7508e266c",
@@ -542,6 +544,7 @@ struct ChatVisualParityScenario {
             ChatVisualParityScenario(id: "keyboard-safe-area-inset", run: keyboardSafeAreaInset),
             ChatVisualParityScenario(id: "short-transcript-at-rest", run: shortTranscriptAtRest),
             ChatVisualParityScenario(id: "oldest-row-at-visual-top", run: oldestRowAtVisualTop),
+            ChatVisualParityScenario(id: "inline-image-display-at-rest", run: inlineImageDisplayAtRest),
         ]
     }
 }
@@ -1022,6 +1025,25 @@ private func oldestRowAtVisualTop() async throws -> ChatVisualParityRunner {
         try await run.advance("oldest", boundaries: 6)
         #expect(!run.harness.isPinnedToBottom(), "the reader left the pinned bottom")
     }
+}
+
+/// A loaded image card catches native/glass render paths absent from text fixtures.
+@MainActor
+private func inlineImageDisplayAtRest() async throws -> ChatVisualParityRunner {
+    let harness = try await ChatDisplayOrientationFixture.harness()
+    let run = ChatVisualParityRunner(id: "inline-image-display-at-rest", harness: harness,
+        recordsArtifacts: !ChatVisualParityStore.holdsReference(for: "inline-image-display-at-rest"))
+    do {
+        _ = try await ChatDisplayOrientationFixture.waitForLoadedImage(harness)
+        try await run.settle()
+        try await run.advance("rest", boundaries: 8)
+        try run.writeArtifacts()
+    } catch {
+        await harness.close()
+        throw error
+    }
+    await harness.close()
+    return run
 }
 
 @MainActor

@@ -51,14 +51,21 @@ export interface SourceAssessmentModelInput {
   source: { uri?: string; mediaType?: string; capturedAt: string; collectionId?: string; captureDisposition?: SourceContent["captureDisposition"] };
 }
 
-/** The paid adapter must invoke beforeDispatch only after its own request
- * validation and credential lookup, immediately before its one POST. */
-export interface SourceAssessmentDispatchContext { beforeDispatch?: () => Promise<void>; }
+/** The paid adapter reserves in beforeDispatch and marks dispatch in onDispatch,
+ * after validation/credential lookup and immediately before handing off its POST. */
+export interface SourceAssessmentDispatchContext {
+  /** Jev's independently enforced per-request upper bound, in cents. */
+  maxChargeCents?: number;
+  beforeDispatch?: () => Promise<void>;
+  onDispatch?: () => Promise<void> | void;
+}
 export interface SourceAssessmentModel {
   assess(input: SourceAssessmentModelInput, signal: AbortSignal, context?: SourceAssessmentDispatchContext): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }>;
 }
 
 export interface SourceCaptureOptions {
+  /** Identifies connector-owned recapture independently of copied provenance. */
+  writer?: "connector";
   fetcher?: SourceFetch;
   resolveHost?: ResolveHost;
   model?: SourceAssessmentModel;
@@ -839,7 +846,7 @@ async function captureLinkedPublicSources(
       const rootRelation = { type: "related" as const, recordId: targetRecord.id, revisionId: targetRecord.revisionId };
       const rootRelations = mergeRelation(currentRoot.relations, rootRelation);
       if (rootRelations !== currentRoot.relations) {
-        const rootUpdate = await store.captureSource({
+        const rootUpdate = await store.captureSource({ ...(options.writer ? { writer: options.writer } : {}),
           commandId: childCommand(input.commandId, `linked-root:${index}`), expectedRevision: currentRoot.revisionId, ...(options.signal ? { signal: options.signal } : {}),
           record: { kind: "source", id: currentRoot.id, createdAt: currentRoot.createdAt, scope: currentRoot.scope, provenance: currentRoot.provenance, relations: rootRelations, ...(currentRoot.temporal ? { temporal: currentRoot.temporal } : {}), content: currentRoot.content },
         });
@@ -862,7 +869,7 @@ async function captureLinkedPublicSources(
         ...(targetCaptureReason ? { captureReason: targetCaptureReason } : {}),
       };
       if (JSON.stringify(targetProvenance) !== JSON.stringify(targetRecord.provenance) || JSON.stringify(targetRelations) !== JSON.stringify(targetRecord.relations) || JSON.stringify(targetContent) !== JSON.stringify(targetRecord.content)) {
-        const targetUpdate = await store.captureSource({
+        const targetUpdate = await store.captureSource({ ...(options.writer ? { writer: options.writer } : {}),
           commandId: childCommand(input.commandId, `linked-target:${index}`), expectedRevision: targetRecord.revisionId, ...(options.signal ? { signal: options.signal } : {}),
           record: {
             kind: "source", id: targetRecord.id, createdAt: targetRecord.createdAt, scope: targetRecord.scope,
@@ -932,7 +939,7 @@ function raindropSaveTimeFromPayload(bytes: Uint8Array, itemId: string): string 
  * never derives one from capture time or `lastUpdate`, and is idempotent per
  * command ID. Callers that expose this to an agent must translate `conflict`
  * into a typed conflict. */
-export async function recoverProviderSaveTime(store: KnowledgeStore, request: { commandId: string; sourceId: string; expectedRevision?: string; evidence?: { objectHash: string; bytes: Uint8Array } }): Promise<SourceSaveTimeRecovery> {
+export async function recoverProviderSaveTime(store: KnowledgeStore, request: { commandId: string; sourceId: string; expectedRevision?: string; writer?: "connector"; evidence?: { objectHash: string; bytes: Uint8Array } }): Promise<SourceSaveTimeRecovery> {
   const sourceId = request.sourceId;
   const record = await store.read(sourceId, undefined, false, true, true);
   if (!record || record.kind !== "source") return { sourceId, status: "absent", reason: "Source is unavailable, excluded, or forgotten." };
@@ -966,7 +973,7 @@ export async function recoverProviderSaveTime(store: KnowledgeStore, request: { 
     // Provenance for the value is the retained provider representation on this
     // same revision plus the reason below; a self-citation in `evidence` would
     // claim a citation the record does not have.
-    const updated = await store.captureSource({ commandId: request.commandId, expectedRevision: record.revisionId, record: {
+    const updated = await store.captureSource({ ...(request.writer ? { writer: request.writer } : {}), commandId: request.commandId, expectedRevision: record.revisionId, record: {
       kind: "source", id: record.id, createdAt: record.createdAt, scope: record.scope,
       provenance: record.provenance, relations: record.relations, ...(record.temporal ? { temporal: record.temporal } : {}),
       content: { ...record.content, sourceSavedAt: saveTime, captureReason: appendCaptureReason(record.content.captureReason, SAVE_TIME_RECOVERY_REASON) },
@@ -1014,7 +1021,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     const collectionChanged = input.origin === "connector" && input.collectionId !== undefined && duplicate.content.collectionId !== input.collectionId;
     if (nextOrigins.length !== origins.length || annotations?.length !== duplicate.content.annotations?.length || collectionChanged) {
       const mergedContent: SourceContent = { ...duplicate.content, origins: nextOrigins, ...(annotations ? { annotations } : {}), ...(collectionChanged ? { collectionId: input.collectionId } : {}) };
-      const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: duplicate.revisionId, ...(options.signal ? { signal: options.signal } : {}), record: { kind: "source", id: duplicate.id, createdAt: duplicate.createdAt, scope: duplicate.scope, provenance: duplicate.provenance, relations: duplicate.relations, ...(duplicate.temporal ? { temporal: duplicate.temporal } : {}), content: mergedContent } });
+      const merged = await store.captureSource({ ...(options.writer ? { writer: options.writer } : {}), commandId: input.commandId, expectedRevision: duplicate.revisionId, ...(options.signal ? { signal: options.signal } : {}), record: { kind: "source", id: duplicate.id, createdAt: duplicate.createdAt, scope: duplicate.scope, provenance: duplicate.provenance, relations: duplicate.relations, ...(duplicate.temporal ? { temporal: duplicate.temporal } : {}), content: mergedContent } });
       if (merged.record.kind !== "source") throw new Error("Source deduplication returned a non-source record");
       return { record: merged.record, duplicate: true, fetched: false };
     }
@@ -1053,14 +1060,14 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
         record: retryTarget ? retrySourceDraft(retryTarget, blockedContent) : sourceDraft(input, blockedContent),
       };
       try {
-        const blocked = await store.captureSource(blockedRequest);
+        const blocked = await store.captureSource({ ...blockedRequest, ...(options.writer ? { writer: options.writer } : {}) });
         if (blocked.record.kind !== "source") throw new Error("Blocked source capture returned a non-source record");
         return { record: blocked.record, duplicate: Boolean(retryTarget), fetched: error.fetchAttempted };
       } finally { cleanup(); }
     }
     const failedContent: SourceContent = { title: input.title?.trim() || sourceUrl.hostname, uri: sourceUrl.toString(), captureDisposition: "failed", capturedAt, origin: input.origin ?? "manual", origins: sourceOrigin(input.origin ?? "manual", capturedAt, { uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }), ...(input.annotations ? { annotations: input.annotations } : {}), ...(input.identity ? { identity: input.identity } : {}), ...(input.collectionId ? { collectionId: input.collectionId } : {}), ...(input.sourcePublishedAt ? { sourcePublishedAt: input.sourcePublishedAt } : {}), ...(input.sourceSavedAt ? { sourceSavedAt: input.sourceSavedAt } : {}) };
     try {
-      const failed = await store.captureSource({ commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), signal: operationController.signal, record: retryTarget ? retrySourceDraft(retryTarget, failedContent) : sourceDraft(input, failedContent) });
+      const failed = await store.captureSource({ ...(options.writer ? { writer: options.writer } : {}), commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), signal: operationController.signal, record: retryTarget ? retrySourceDraft(retryTarget, failedContent) : sourceDraft(input, failedContent) });
       if (failed.record.kind !== "source") throw new Error("Source capture returned a non-source record");
       return { record: failed.record, duplicate: false, fetched: false };
     } finally { cleanup(); }
@@ -1101,7 +1108,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
       const annotations = input.annotations ? [...(contentDuplicate.content.annotations ?? []), ...input.annotations.filter(annotation => !(contentDuplicate.content.annotations ?? []).some(previous => previous.text === annotation.text && previous.locator === annotation.locator))] : contentDuplicate.content.annotations;
       const mergedContent: SourceContent = { ...contentDuplicate.content, origins: origins.some(origin => origin.uri === incomingOrigin.uri && JSON.stringify(origin.identity) === JSON.stringify(incomingOrigin.identity)) ? origins : [...origins, incomingOrigin], ...(annotations ? { annotations } : {}) };
       try {
-        const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: contentDuplicate.revisionId, signal: operationController.signal, record: { kind: "source", id: contentDuplicate.id, createdAt: contentDuplicate.createdAt, scope: contentDuplicate.scope, provenance: contentDuplicate.provenance, relations: contentDuplicate.relations, content: mergedContent } });
+        const merged = await store.captureSource({ ...(options.writer ? { writer: options.writer } : {}), commandId: input.commandId, expectedRevision: contentDuplicate.revisionId, signal: operationController.signal, record: { kind: "source", id: contentDuplicate.id, createdAt: contentDuplicate.createdAt, scope: contentDuplicate.scope, provenance: contentDuplicate.provenance, relations: contentDuplicate.relations, content: mergedContent } });
         if (merged.record.kind !== "source") throw new Error("Source deduplication returned a non-source record");
         return { record: merged.record, duplicate: true, fetched: true };
       } finally { cleanup(); }
@@ -1125,7 +1132,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   };
   const request = { commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), record: retryTarget ? retrySourceDraft(retryTarget, content) : { ...sourceDraft(input, content), id: randomUUID() } };
   publicationDraftId = request.record.id;
-  try { result = await store.captureSource({ ...request, canonicalUri: fetched.finalUrl, signal: operationController.signal }); }
+  try { result = await store.captureSource({ ...request, ...(options.writer ? { writer: options.writer } : {}), canonicalUri: fetched.finalUrl, signal: operationController.signal }); }
   catch (error) { cleanup(); throw error; }
   if (result.record.kind !== "source") { cleanup(); throw new Error("Source capture returned a non-source record"); }
   sourceRecord = result.record;
@@ -1134,7 +1141,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
       const linked = await captureLinkedPublicSources(store, sourceRecord, input, publicPost, { ...options, signal: operationController.signal });
       sourceRecord = linked.record;
       if (linked.failures.length > 0) {
-        const updated = await store.captureSource({
+        const updated = await store.captureSource({ ...(options.writer ? { writer: options.writer } : {}),
           commandId: childCommand(input.commandId, "linked-failures"), expectedRevision: sourceRecord.revisionId, ...(options.signal ? { signal: options.signal } : {}),
           record: { kind: "source", id: sourceRecord.id, createdAt: sourceRecord.createdAt, scope: sourceRecord.scope, provenance: sourceRecord.provenance, relations: sourceRecord.relations, ...(sourceRecord.temporal ? { temporal: sourceRecord.temporal } : {}), content: { ...sourceRecord.content, captureReason: appendCaptureReason(sourceRecord.content.captureReason, `Linked target limitations: ${linked.failures.join(", ")}.`) } },
         });
@@ -1172,7 +1179,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
       if (latestConfig.revision !== initialConfig.revision || !latest || latest.kind !== "source" || excluded) throw new Error("Source changed or became unavailable during assessment");
       const assessed: SourceContent = { ...latest.content, assessment: { ...assessment, generatedAt: assessment.generatedAt ?? now(), evidenceDigest: sourceEvidenceDigest(latest.content.title, latest.content.text ?? "") } };
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
-      result = await store.captureSource({ commandId: `${input.commandId}:assessment`, expectedRevision: sourceRecord.revisionId, signal: operationController.signal, record: retryTarget ? retrySourceDraft(sourceRecord, assessed) : { ...sourceDraft(input, assessed), id: sourceRecord.id, createdAt: sourceRecord.createdAt } });
+      result = await store.captureSource({ ...(options.writer ? { writer: options.writer } : {}), commandId: `${input.commandId}:assessment`, expectedRevision: sourceRecord.revisionId, signal: operationController.signal, record: retryTarget ? retrySourceDraft(sourceRecord, assessed) : { ...sourceDraft(input, assessed), id: sourceRecord.id, createdAt: sourceRecord.createdAt } });
       if (result.record.kind !== "source") throw new Error("Source assessment returned a non-source record");
       sourceRecord = result.record;
     } catch (error) { assessmentError = error instanceof Error ? error.message : "Source assessment failed"; }

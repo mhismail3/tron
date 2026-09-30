@@ -218,6 +218,10 @@ struct DisplayToolView: View {
         // contract.
         DisclosureLayout(progress: disclosure.rendersInlineContainer ? 1 : 0) {
             inlineExpandedSurface(display)
+                .modifier(ChatMessageCopyMenu(text: "", mutationIdentity: display.presentationIdentity, actions: [
+                    ChatMessageMenuAction(id: .toolDetails, title: "Tool Details", icon: "info.circle",
+                        perform: { onOpenTechnicalDetails() })
+                ]))
                 .fixedSize(horizontal: false, vertical: true)
                 .opacity(disclosure.inlineOpacity)
                 .scaleEffect(disclosure.isCollapsed ? 0.985 : 1, anchor: .topLeading)
@@ -232,9 +236,6 @@ struct DisplayToolView: View {
                 .accessibilityHidden(disclosure.phase != .collapsed)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contextMenu {
-            Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
-        }
     }
 
     @ViewBuilder

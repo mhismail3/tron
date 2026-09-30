@@ -590,6 +590,7 @@ struct ComposerResourcePicker: View {
                             resourceRow(entry)
                         }
                     }
+                    .chatSecondaryScrollContent()
                 }
                 .frame(
                     maxHeight: CGFloat(ComposerResourcePanelPolicy.visibleRows(

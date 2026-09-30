@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 package struct AppLogRecord: Codable, Equatable, Sendable {
     package let timestamp: String

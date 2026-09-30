@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 extension GatewayClient {
     /// A disposable viewer owns its original request/credential and transport.

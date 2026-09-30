@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 private final class GatewayHandshakeStage: @unchecked Sendable {
     private let lock = NSLock()

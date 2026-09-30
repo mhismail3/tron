@@ -69,8 +69,9 @@ reading surfaces: a raw HTML object is not readable, and page extraction
 includes site chrome. Everything else is inline in the same sheet, with no secondary details sheet:
 the **Summary** group (generated summary or Generate/Regenerate action), a
 permanent **Your take** editor, vocabulary-backed tags and their updating
-state, a verdict control, a replacement picker (bounded source search including
-archived entries), Research / Moose's Corner placement and archive controls, and
+state, a verdict control (Evergreen, Dated but useful, Superseded, or Clear
+verdict), a replacement picker (bounded source search including archived entries),
+Research / Personal scope and Archive/Unarchive admission controls, and
 a **Details** table with type, publication/save/capture dates, current freshness
 and age basis, capture state, origin, media type, and revision. Saved notes,
 related entries, links and incomplete-capture coverage remain below. Related
@@ -107,15 +108,26 @@ canonical `tagsStale` projection intact. The **Updating tags** indicator is show
 only while the Gateway-owned K4 tag-job query reports that source's job as
 running; the refreshed row projection then reports the new vocabulary selections.
 If no job can start or the job fails, the sheet shows the stale/re-tagging state
-instead of a timer-based progress claim. Verdict, placement and admission use
-receipted `knowledge.source.curate` operations; free-form tags and client-side summary
-writes are not supported. Each async presentation read is fenced by its
+instead of a timer-based progress claim. Verdict (including explicit clear),
+placement and admission use receipted `knowledge.source.curate` operations;
+Archive/Unarchive changes admission rather than verdict. Legacy archive verdicts
+decode but are never offered or written. Free-form tags and client-side summary
+writes are not supported. Every per-entry outcome other than `applied` or
+`unchanged` is shown as a failed edit, releases its saving indicator, and keeps
+retry available. A conflict reloads the exact `currentRevision` with archived
+and pending read authority so the detail reflects the Gateway's current record.
+Opening a "Replaced by" row carries that row's archived/pending authority into
+its exact-revision read. Each async presentation read is fenced by its
 presentation activity and Gateway identity, while accepted mutations remain
 owned by the Gateway receipt/job authority.
 
 Assessment usage prices are fractional cents (`Double`), matching the Gateway's
-numeric contract; token counts remain integers. The native RPC regression decodes
-a full source page containing both a preview and sub-cent assessment usage.
+numeric contract; token counts remain integers. Intake assessment and tagging
+spend share the monthly cap from the `knowledge.jev` connection; Raindrop cohort
+approvals are additional per-run limits, not another Jev budget. Turning paid
+access off on that connection disables both paid workflows. The native RPC
+regression decodes a full source page containing both a preview and sub-cent
+assessment usage.
 New assessments carry an `evidenceDigest` of Gateway `JSON.stringify({title, text})`.
 iOS reproduces those UTF-8 bytes without Foundation's default slash escaping.
 A mismatch with the current title/text withholds the obsolete summary; metadata
@@ -127,8 +139,13 @@ Entry Detail's background work and autosave are validated out of process by
 `TronKnowledgeDetailUITests` against the hosted scripted Gateway; see
 [iOS development](development.md).
 
-Knowledge Configuration stores the source-summary provider/model in
-`KnowledgeConfig.enrichment.model`, separate from the observer model. Its
-Summary model picker can clear the value; the iOS config codec round-trips it
-because `knowledge.config` replaces the whole KnowledgeConfig. Summary jobs
-refuse when it is unset and never fall back to the observation model.
+Knowledge Configuration stores the provider/model and independent input/output
+character limits in `KnowledgeConfig.knowledgeModel`, separate from the observer
+model. The **Knowledge model** row shows the catalog display name; its divided
+Clear row clears the setting. The iOS config codec round-trips the model and its
+limits because `knowledge.config` replaces the whole KnowledgeConfig. Summary,
+synthesis, reflection, and manual source assessment share this model and its
+bounds. The manual Entry Detail action calls `knowledge.source.assess` with
+`assessor: "model"`; its returned recommendation is displayed but does not
+change admission. Summary jobs refuse when it is unset and never fall back to the
+observer model.

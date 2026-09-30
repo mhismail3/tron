@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 package enum GatewayRecoveryFailurePolicy {
     package static let nonRetryableCodes: Set<String> = [

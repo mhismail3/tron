@@ -233,6 +233,17 @@ struct ChatScrollCoordinatorTests {
         #expect(viewport.userScrolledAway)
     }
 
+    @Test("explicit status-bar oldest-history request detaches before publishing its edge command")
+    func originStatusBarRequestDetaches() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        coordinator.requestOldestHistory(reduceMotion: false)
+        #expect(coordinator.viewportMode == .anchored)
+        #expect(!coordinator.isAtBottom)
+        #expect(coordinator.command?.destination == .oldestHistory)
+        #expect(coordinator.command?.origin == .oldestHistory)
+    }
+
     @Test("composer layout changes cannot impersonate a status-bar retreat")
     func composerLayoutChangePreservesPinnedIntent() {
         let underflow = ChatScrollCoordinator()

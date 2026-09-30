@@ -100,6 +100,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> LayoutAwareTextView {
         let view = LayoutAwareTextView()
+        view.scrollsToTop = !context.environment.chatOwnsStatusBar
         view.delegate = context.coordinator
         view.onPasteImages = onPasteImages == nil ? nil : { [weak coordinator = context.coordinator] providers in
             coordinator?.pasteImages(providers)
@@ -128,6 +129,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: LayoutAwareTextView, context: Context) {
+        view.scrollsToTop = !context.environment.chatOwnsStatusBar
         context.coordinator.parent.responder?.detach(view)
         context.coordinator.parent = self
         view.onPasteImages = onPasteImages == nil ? nil : { [weak coordinator = context.coordinator] providers in

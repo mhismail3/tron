@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 /// Owns one authoritative synchronization attempt per session, including its
 /// intent, shared outcome, and quarantined event suffix. This replaces token

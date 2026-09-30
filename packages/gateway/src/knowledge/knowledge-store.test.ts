@@ -34,6 +34,51 @@ const observation = (sessionId: string, fromEntryId: string): KnowledgeRecordDra
 function command(suffix: string): string { return `knowledge-test-${suffix}`; }
 
 describe("KnowledgeStore", () => {
+  it("refuses connector admission and scope overrides of user and agent decisions at every store write boundary", async () => {
+    const { store } = await fixture();
+    const capture = (suffix: string, content: Record<string, unknown> = {}, scope: "personal" | "research" = "research", actor: "user" | "connector" = "user") => store.captureSource({
+      commandId: command(`${suffix}-capture`),
+      record: { ...source(suffix), scope, provenance: { actor, evidence: [] }, content: { ...source(suffix).content, ...content } },
+    });
+    const decidedAdmission = await capture("agent-admission", { admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "agent" } } });
+    await expect(store.setSourceAdmission({ commandId: command("connector-admission-overwrite"), recordId: decidedAdmission.record.id, expectedRevision: decidedAdmission.record.revisionId, status: "archived", producer: { actor: "connector" } }))
+      .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
+    const agentAdmission = await store.setSourceAdmission({ commandId: command("agent-admission-overwrite"), recordId: decidedAdmission.record.id, expectedRevision: decidedAdmission.record.revisionId, status: "archived", producer: { actor: "agent" } });
+    expect(agentAdmission.record.content).toMatchObject({ admission: { status: "archived", producer: { actor: "agent" } } });
+
+    const decidedScope = await capture("user-scope", { scopeProducer: { actor: "user" } });
+    await expect(store.curateSource({ commandId: command("connector-scope-overwrite"), operation: "placement", producer: { actor: "connector" }, item: { recordId: decidedScope.record.id, expectedRevision: decidedScope.record.revisionId, placement: { scope: "personal" } } }))
+      .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
+    const agentScope = await store.curateSource({ commandId: command("agent-scope-overwrite"), operation: "placement", producer: { actor: "agent" }, item: { recordId: decidedScope.record.id, expectedRevision: decidedScope.record.revisionId, placement: { scope: "personal" } } });
+    expect(agentScope.record).toMatchObject({ scope: "personal", content: { scopeProducer: { actor: "agent" } } });
+
+    const undecided = await capture("connector-undecided", {}, "research", "connector");
+    const connectorDecision = await store.setSourceAdmission({ commandId: command("connector-decides-undecided"), recordId: undecided.record.id, expectedRevision: undecided.record.revisionId, status: "retained", producer: { actor: "connector" } });
+    expect(connectorDecision.record.content).toMatchObject({ admission: { status: "retained", producer: { actor: "connector" } } });
+
+    const recaptured = await capture("connector-recapture", { admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "user" } }, scopeProducer: { actor: "user" } }, "research", "connector");
+    await expect(store.captureSource({ writer: "connector", commandId: command("connector-recapture-scope"), expectedRevision: recaptured.record.revisionId, record: { ...recaptured.record, scope: "personal", content: { ...recaptured.record.content, title: "Changed by recapture" } } }))
+      .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
+    await expect(store.captureSource({ writer: "connector", commandId: command("connector-recapture-admission"), expectedRevision: recaptured.record.revisionId, record: { ...recaptured.record, content: { ...recaptured.record.content, admission: { status: "archived", decidedAt: "2026-01-02T00:00:00Z", producer: { actor: "connector" } } } } }))
+      .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
+
+    const userProvenance = await capture("user-provenance-connector-recapture", { admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "user" } } }, "research", "user");
+    expect(userProvenance.record.provenance.actor).toBe("user");
+    await expect(store.captureSource({ writer: "connector", commandId: command("user-provenance-recapture"), expectedRevision: userProvenance.record.revisionId, record: { ...userProvenance.record, content: { ...userProvenance.record.content, admission: { status: "archived", decidedAt: "2026-01-02T00:00:00Z", producer: { actor: "connector" } } } } }))
+      .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
+
+    const correction = await capture("connector-correction", { admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "agent" } } }, "research", "connector");
+    await expect(store.correct(command("connector-correction-overwrite"), correction.record.id, correction.record.revisionId,
+      { ...correction.record, content: { ...correction.record.content, admission: { status: "archived", decidedAt: "2026-01-02T00:00:00Z", producer: { actor: "connector" } } } },
+      { type: "corrects", recordId: correction.record.id, revisionId: correction.record.revisionId }))
+      .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
+    const correctionScope = await capture("connector-correction-scope", { scopeProducer: { actor: "agent" } }, "research", "connector");
+    await expect(store.correct(command("connector-correction-scope-overwrite"), correctionScope.record.id, correctionScope.record.revisionId,
+      { ...correctionScope.record, scope: "personal" },
+      { type: "corrects", recordId: correctionScope.record.id, revisionId: correctionScope.record.revisionId }))
+      .rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "decision-authority" });
+  });
+
   it("finishes an admitted catalog transaction when cancellation follows its durable body write", async () => {
     const { store, workspace } = await fixture();
     const controller = new AbortController();
@@ -94,6 +139,23 @@ describe("KnowledgeStore", () => {
     const updated = await store.captureSource({ commandId: command("identity-update"), expectedRevision: first.record.revisionId, record: { ...first.record, content: { ...first.record.content, title: "Updated indexed source", identity: { provider: "raindrop", accountId: "42", itemId: "item-2" } } } });
     await expect(store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "item-1" })).resolves.toBeUndefined();
     await expect(store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "item-2" })).resolves.toMatchObject({ id: updated.record.id, revisionId: updated.record.revisionId });
+  });
+
+  it("uses admission as the sole archive state and clears legacy verdicts by revision", async () => {
+    const { store } = await fixture();
+    const captured = await store.captureSource({ commandId: command("single-archive-capture"), record: source("Archive lifecycle") });
+    const verdict = await store.curateSource({ commandId: command("single-archive-verdict"), operation: "verdict", producer: { actor: "user" }, item: { recordId: captured.record.id, expectedRevision: captured.record.revisionId, verdict: { verdict: "evergreen" } } });
+    const archived = await store.setSourceAdmission({ commandId: command("single-archive-admission"), recordId: captured.record.id, expectedRevision: verdict.record.revisionId, status: "archived" });
+    expect((await store.list({ kind: "source" })).records.map(record => record.id)).not.toContain(captured.record.id);
+    expect((await store.list({ kind: "source", includeArchived: true, sourceAdmission: "archived" })).records.find(record => record.id === captured.record.id)?.content).toMatchObject({ admission: { status: "archived" } });
+    expect(await store.read(captured.record.id)).toBeNull();
+    expect(await store.read(captured.record.id, archived.record.revisionId, false, true)).toMatchObject({ revisionId: archived.record.revisionId });
+    const restored = await store.setSourceAdmission({ commandId: command("single-archive-restore"), recordId: captured.record.id, expectedRevision: archived.record.revisionId, status: "retained" });
+    expect((await store.list({ kind: "source" })).records.map(record => record.id)).toContain(captured.record.id);
+    await expect(store.curateSource({ commandId: command("single-archive-verdict-refusal"), operation: "verdict", producer: { actor: "user" }, item: { recordId: captured.record.id, expectedRevision: restored.record.revisionId, verdict: { verdict: "archive" } } })).rejects.toMatchObject({ name: "KnowledgeCurationRefusal", code: "invalid-input" });
+    const cleared = await store.curateSource({ commandId: command("single-archive-verdict-clear"), operation: "verdict", producer: { actor: "user" }, item: { recordId: captured.record.id, expectedRevision: restored.record.revisionId, verdict: { clear: true } } });
+    expect(cleared.record.revisionId).not.toBe(restored.record.revisionId);
+    expect(cleared.record.content).not.toHaveProperty("verdict");
   });
 
   it("keeps archived pagination cursors scoped to visibility and returns archived heads", async () => {

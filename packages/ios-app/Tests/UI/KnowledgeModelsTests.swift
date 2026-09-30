@@ -93,7 +93,7 @@ final class KnowledgeModelsTests: XCTestCase {
         let record = KnowledgeObservationFixture.record()
         let presentation = try XCTUnwrap(KnowledgeObservationPresentation(record: record))
         XCTAssertEqual(presentation.statement, "The user prefers concise explanations.")
-        XCTAssertEqual(presentation.scope, "Moose's Corner")
+        XCTAssertEqual(presentation.scope, "Personal")
         XCTAssertEqual(presentation.date, GatewayTimestamp.parse("2026-01-01T09:30:00Z"))
         XCTAssertNotEqual(presentation.observedAt, record.updatedAt, "Correcting a record must not redate its observation")
         XCTAssertEqual(presentation.sessionID, "fixture-session")
@@ -158,15 +158,19 @@ final class KnowledgeModelsTests: XCTestCase {
     }
 
     /// Failure mode: the settings UI decodes and re-sends the whole config; if
-    /// enrichment is omitted from this model, saving any observation setting
-    /// silently clears the user's summary model.
-    func testKnowledgeConfigRoundTripPreservesEnrichmentModel() throws {
-        let input = #"{"schemaVersion":1,"revision":7,"eligibility":{"sessionIds":[],"projectIds":[],"excludedSessionIds":[],"excludedProjectIds":[]},"observation":{"enabled":false,"maxInputChars":48000,"maxOutputChars":8000,"timeoutMs":30000,"maxAttempts":1},"enrichment":{"model":"opencode-go/deepseek-v4.1-flash"},"maximumSearchResults":50,"currentInterests":[],"tagVocabulary":{"revision":0,"tags":[],"guidelines":""}}"#.data(using: .utf8)!
+    /// the Knowledge model or either of its independent limits is omitted,
+    /// saving an observation setting silently changes interpretation behavior.
+    func testKnowledgeConfigRoundTripPreservesKnowledgeModelAndLimits() throws {
+        let input = #"{"schemaVersion":1,"revision":7,"eligibility":{"sessionIds":[],"projectIds":[],"excludedSessionIds":[],"excludedProjectIds":[]},"observation":{"enabled":false,"maxInputChars":48000,"maxOutputChars":8000,"timeoutMs":30000,"maxAttempts":1},"knowledgeModel":{"model":"opencode-go/deepseek-v4.1-flash","maxInputChars":32000,"maxOutputChars":4000},"maximumSearchResults":50,"currentInterests":[],"tagVocabulary":{"revision":0,"tags":[],"guidelines":""}}"#.data(using: .utf8)!
         let config = try JSONDecoder().decode(KnowledgeConfig.self, from: input)
-        XCTAssertEqual(config.enrichment?.model, "opencode-go/deepseek-v4.1-flash")
+        XCTAssertEqual(config.knowledgeModel?.model, "opencode-go/deepseek-v4.1-flash")
+        XCTAssertEqual(config.knowledgeModel?.maxInputChars, 32_000)
+        XCTAssertEqual(config.knowledgeModel?.maxOutputChars, 4_000)
         let encoded = try JSONEncoder().encode(config)
         let roundTrip = try JSONDecoder().decode(KnowledgeConfig.self, from: encoded)
-        XCTAssertEqual(roundTrip.enrichment?.model, "opencode-go/deepseek-v4.1-flash")
+        XCTAssertEqual(roundTrip.knowledgeModel?.model, "opencode-go/deepseek-v4.1-flash")
+        XCTAssertEqual(roundTrip.knowledgeModel?.maxInputChars, 32_000)
+        XCTAssertEqual(roundTrip.knowledgeModel?.maxOutputChars, 4_000)
     }
 
     func testObservationRoundTripPreservesCanonicalInputIdentity() throws {
@@ -593,6 +597,14 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertNil(KnowledgeSourcePresentationPolicy.publishedAt(raindrop), "Historical Raindrop `created` values were saved times, not publish times")
         let xPost = KnowledgeSourceContent(title: "Post", uri: "https://x.com/example/status/1", text: "text", object: nil, mediaType: "text/plain", captureDisposition: .complete, annotations: nil, sourcePublishedAt: "2025-12-30T12:00:00Z", capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: nil, identity: KnowledgeSourceIdentity(provider: "x", accountId: "1", itemId: "2"), assessment: nil)
         XCTAssertEqual(KnowledgeSourcePresentationPolicy.publishedAt(xPost), "2025-12-30T12:00:00Z")
+    }
+
+    func testSourceAssessmentResponseDecodesTheAssessmentPrimitiveEnvelope() throws {
+        let data = Data(#"{"source":{"schemaVersion":1,"id":"source-1","revisionId":"revision-2","kind":"source","scope":"research","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z","provenance":{"actor":"user","evidence":[]},"relations":[],"content":{"title":"Assessment result","uri":"https://example.test/source","text":"Evidence","captureDisposition":"complete","capturedAt":"2026-01-01T00:00:00Z","assessment":{"summary":"Useful source","evidenceQuality":"high","freshness":"current","generatedAt":"2026-01-02T00:00:00Z","recommendation":"retained","confidence":0.9,"classification":"reference"}}},"assessment":{"summary":"Useful source","evidenceQuality":"high","freshness":"current","generatedAt":"2026-01-02T00:00:00Z","recommendation":"retained","confidence":0.9,"classification":"reference"}}"#.utf8)
+        let result = try JSONDecoder().decode(KnowledgeSourceAssessmentResult.self, from: data)
+        XCTAssertEqual(result.source.revisionId, "revision-2")
+        XCTAssertEqual(result.assessment.recommendation, .retained)
+        XCTAssertEqual(result.assessment.classification, "reference")
     }
 
     func testSourceWireShapeDecodesCaptureReasonAndAssessmentMetadataWithoutInventingConfidence() throws {

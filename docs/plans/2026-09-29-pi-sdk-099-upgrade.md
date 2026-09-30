@@ -1,8 +1,8 @@
 # Pi SDK 0.99 integration and built-in MCP adoption
 
 - **Started:** 2026-09-29
-- **Status:** Active
-- **Last updated:** 2026-09-29, approved
+- **Status:** Paused (user requested a pause after P99-20; resume on the user's instruction)
+- **Last updated:** 2026-09-30, checkpoint after P99-20
 - **Goal:** Move Tron's pinned Pi runtime from 0.87.1 to 0.99.1, disposition every upstream delta, replace Tron's custom MCP adapter with Pi's built-in MCP, codemode and tool-search extensions, and support the new capabilities end to end on the Gateway and iOS.
 
 ## Goal and constraints
@@ -246,25 +246,25 @@ Every 0.99.0 and 0.99.1 changelog entry, with Tron's disposition and owning task
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| P99-1 | Claimed | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | orchestrator session, 2026-09-29 |
-| P99-2 | Ready | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | Unassigned |
-| P99-3 | Ready | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | Unassigned |
-| P99-4 | Ready | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | Unassigned |
-| P99-5 | Ready | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | Unassigned |
-| P99-6 | Ready | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | Unassigned |
-| P99-7 | Ready | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | Unassigned |
+| P99-1 | Done | Verify npm latest, activate plan, claim, create isolated candidate worktree | none | orchestrator session, 2026-09-29 |
+| P99-2 | Claimed | Pin 0.99.1 with the helper; admit `pi-mcp`/`pi-codemode` in the SDK checker; rollback baseline 0.87.1; payload verification | P99-1 | luna-worker, 2026-09-29 |
+| P99-3 | Claimed | SDK API adaptations: manifest, tool context, prompt/steer/follow-up dispositions, attribution of `prepareLoadout`, `deviceId` redaction | P99-2 | luna-worker, 2026-09-29 |
+| P99-4 | Claimed | Session materialization at first user message (#10000): tests, ownership, durability docs | P99-2 | luna-worker, 2026-09-29 |
+| P99-5 | Claimed | Nested tool calls, `isError` and structured results through live and canonical projections and protocol | P99-3 | luna-worker, 2026-09-29 |
+| P99-6 | Claimed | Compose Pi built-ins (codemode, tool search, MCP) in sessions and admin loads; codemode reach policy; `defaultTools` | P99-3, P99-5 | luna-worker, 2026-09-29 |
+| P99-7 | Claimed | Delete Tron's MCP adapter, `@modelcontextprotocol/sdk`, ConnectionOwner MCP generality and protocol fields | P99-6 | luna-worker, 2026-09-29 |
 | P99-8 | Ready | Gateway MCP administration RPCs and OAuth sign-in relay | P99-6 | Unassigned |
-| P99-9 | Ready | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | Unassigned |
-| P99-10 | Ready | Virtual models on the Gateway (D-7) | P99-3 | Unassigned |
-| P99-11 | Ready | Theme default and remote extension host rendering | P99-3 | Unassigned |
-| P99-12 | Ready | Catalog, provider and classifier deltas; release dates; K3 policy | P99-2 | Unassigned |
-| P99-13 | Ready | `bash` structured output and empty-output change | P99-3 | Unassigned |
+| P99-9 | Claimed | Provider auth: Sign in with ChatGPT, device ID, Codex legacy, usage disposition | P99-3 | luna-worker, 2026-09-29 |
+| P99-10 | Claimed | Virtual models on the Gateway (D-7) | P99-3 | luna-worker, 2026-09-29 |
+| P99-11 | Claimed | Theme default and remote extension host rendering | P99-3 | luna-worker, 2026-09-29 |
+| P99-12 | Claimed | Catalog, provider and classifier deltas; release dates; K3 policy | P99-2 | luna-worker, 2026-09-29 |
+| P99-13 | Claimed | `bash` structured output and empty-output change | P99-3 | luna-worker, 2026-09-29 |
 | P99-14 | Ready | Qualify installed packages and subagent children against 0.99 | P99-6 | Unassigned |
 | P99-15 | Ready | iOS settings: MCP Servers screen, built-in toggles, default tools; remove old MCP UI and models | P99-7, P99-8 | Unassigned |
 | P99-16 | Ready | iOS chat: codemode, nested calls, MCP and tool-search cards, routed model display | P99-5, P99-10 | Unassigned |
 | P99-17 | Ready | Docs, observability, full validation, E2E artifacts, rollback matrix, payload | P99-2 … P99-16, P99-20 | Unassigned |
 | P99-18 | Ready | Integration to `main` (user approval), manual acceptance gates, close-out | P99-17 | Unassigned |
-| P99-20 | Ready | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | Unassigned |
+| P99-20 | Claimed | Migrate Tron's Jev client, tool, assessments and session-search ranking to `ModelRuntime.classify()` (D-6) | P99-12 | luna-worker, 2026-09-29 |
 | P99-19 | Needs scoping | Upstream requests: root-export MCP config helpers (retires the D-1 patch writer); structured per-session MCP status (user authorizes filing) | P99-8 | Unassigned |
 | P99-21 | Needs scoping | Image generation through `ModelRuntime.generateImages()` as a Tron capability | P99-12 | Unassigned |
 
@@ -630,6 +630,14 @@ from a session; Sign in with ChatGPT; select a virtual model if one is
 installed. Then close the plan per `docs/plans/README.md`.
 
 ## Handoff log
+
+### P99-1 · Done · 2026-09-29 · orchestrator session
+
+- Result: npm `latest` is still 0.99.1 (`gitHead` d86654abb8862e201933517d6f1fce9f88dd117f, Node `>=22.19.0`). Plan activated and P99-1 claimed on `main`; candidate branch `feat/pi-sdk-099-upgrade` created in the sibling worktree `tron-pi-sdk-099` beside the main checkout, from the claim commit.
+- Evidence: independent `npm ci` under Node 22.22.0 (nvm) in the candidate; `check:pi-sdk` coherent at 0.87.1; `tsc --noEmit` clean.
+- Changes: plan metadata only.
+- Deviations: Implementation is delegated to `luna-worker` subagents, one task per child, sequential on the single candidate worktree because most tasks share `runtime-slot.ts` and the protocol. Claims are committed on `main` per phase and cherry-picked onto the candidate so the plan copies stay aligned.
+- For the next agent: use Node 22.22.0 from nvm for Vitest; the app-bundled Node cannot load Rolldown's native binding and `npx`/`timeout` are not on the default PATH.
 
 ### Draft · Proposed · 2026-09-29 · planning session
 

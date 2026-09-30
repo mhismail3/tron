@@ -349,8 +349,8 @@ The application target `TronMobile` and the framework `TronMobileCore`
 (`Core/`) are separate Swift modules; [Modules](architecture.md#modules) owns
 their ownership and access rules. The framework is built and embedded for
 every configuration, so a configuration needs no framework entry of its own.
-Until MS-5, the share extension still compiles `Core/Support/SharedContent.swift`
-directly, so it shares `SWIFT_PACKAGE_NAME`.
+The share extension links `TronMobileCore` without embedding it; the app's copy
+is the only one in the bundle. No other target lists `Core/` sources.
 
 Where new code goes: a Foundation-only value type, wire model, Gateway client
 facility or logging/timing primitive belongs in `Core/<Layer>/`; anything that
@@ -2127,11 +2127,11 @@ catalog labels and existing compaction admission; `SessionPresentationStoreTests
 pending model selection and narrow authoritative projection. `SessionSettingPresentationTests`
 covers immediate pending choices, reset semantics, exact-request rollback, scope replacement,
 and shared Extra High labels without rewriting authored content. Project Resources must omit Context Files
-and `AGENTS.md` rows. Agent Instructions lists the Gateway's attributed sections collapsed in
-reading order (`TronSmokeUITests.testAgentInstructionsSectionsExpandWithTheirSources` taps sections open
-and closed on the `-tron-agent-instructions-fixture` host and retains screenshots),
-with View Full Prompt and instruction files opening the document reader, using the same large-only
-adaptive teal document chrome as the workspace sheet:
+and `AGENTS.md` rows. Agent Instructions lists the Gateway's attributed sections as glass rows in
+reading order (`TronSmokeUITests.testAgentInstructionsSectionsOpenSheetsWithTheirSources` opens and
+dismisses medium-detent section sheets on the `-tron-agent-instructions-fixture` host and retains
+screenshots), with View Full Prompt and instruction files opening the document reader at medium, using
+the adaptive teal document chrome of the workspace sheet:
 custom top blur, icon-only Done, and no opaque bottom bar. Project Resources, Session History, and
 Subagent History titles and toolbar actions must use the inherited teal accent. Resource
 categories are ordered Skills, Subagents, Prompts, Tools, then Commands; package Provides groups use the same order, followed by Themes. Resource detail sheets show only the description and bounded body content; their toolbar info action opens the complete metadata and technical JSON without a second content read. Titles, Done actions, icons, and cards explicitly use the chat resource theme for prompts and skills rather than inheriting the overview tint: prompts are purple and skills cyan; extension and tool categories retain their existing colors. Project Resources and chat share the body renderer and info sheet. Completed empty reads show an empty-content message; unavailable session reads settle with a retry instead of an indefinite loading state. Tools and extensions without supported body reads retain their metadata behind Info. Skill chips use the same cyan as their picker, not the general information-blue palette. Subagent pills use their card accent for icons and text, with compact vertical padding. Started timestamps and terminal timestamps (history, immediately before elapsed duration with a small middle-dot separator on the same line) share monospace styling; missing terminal times stay absent. Session History toolbar and older/newer paging actions explicitly use the sheet teal for icons and text in both appearances. Session History entry details have no end-of-content or metadata footer; navigation controls appear only for multipart content. Verify package/inline extension names
@@ -2491,3 +2491,25 @@ lazy fixture. Phase-height comparisons read the probe's settled records and
 wait for the entrance owner's settlement, not a guessed number of display
 frames. Thinking-row mount/measurement and the unchanged 0.5 pt phase bound
 remain gates in both orientations.
+
+### Inline display orientation evidence (CT-23)
+
+`ChatDisplayOrientationTests` renders a fully loaded asymmetric image through the
+real transcript/media owner in both orientations and reads window pixels. The
+`inline-image-display-at-rest` parity reference is recorded on today's path at
+clean `433b9c340`; the prior ten references are unchanged. The hosted-only
+`-tron-chat-display-fixture` drives the same card in dark mode for
+`TronChatDisplayUITests`: long-press/dismiss/lazy-return screenshots and rendered
+pixel checks are retained in the xcresult. Run hosted owners with the `ui-validation` tier;
+XCUITest selects each orientation through the app's launch environment. These
+checks do not substitute for the user's device compositor/animation review.
+
+Status-bar simulator acceptance is `ChatDisplayOrientationTests`' one-recipient
+matrix and public delegate journey, not a synthetic status-bar tap: even the plain
+SwiftUI control did not receive SpringBoard coordinate taps on this simulator.
+The origin callback must return false, detach, and make oldest loaded history
+visible; today's sole recipient must remain its native transcript. Coverage must
+remove the proxy and restore the native setting. **Device check still required:**
+tap the real status bar with empty composer and with attachments/chips/catalog in
+both orientations. Upright-at-rest device inversion remains open: hosted and
+XCUITest pixels do not reproduce the user's intermittent image/badge flip.

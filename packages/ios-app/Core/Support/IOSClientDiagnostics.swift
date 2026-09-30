@@ -1,5 +1,4 @@
 import Foundation
-import TronMobileCore
 
 // The iOS client's diagnostic log records and their bounded retention: the
 // buffer the client fills, the incident store it drains into, and the duration

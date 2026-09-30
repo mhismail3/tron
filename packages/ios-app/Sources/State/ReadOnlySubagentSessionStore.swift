@@ -180,6 +180,10 @@ final class ReadOnlySubagentSessionStore {
     private(set) var canAbort = false
     private(set) var revision: String?
     private(set) var items: [TranscriptItem] = []
+    // Bounded render inputs belong to the installed projection. Canonical reads
+    // keep advancing while the shared viewport policy freezes this installation.
+    private var installedItems: [TranscriptItem] = []
+    private var viewportMode: ChatViewportMode = .pinned
     private(set) var presentation: ChatReadOnlyTranscriptProjection = .empty
     private(set) var preparedText: ChatTextPreparationSnapshot = .empty
     private(set) var transcriptStart = 0
@@ -191,7 +195,21 @@ final class ReadOnlySubagentSessionStore {
 
     init(client: GatewayClient) { self.client = client }
 
-    var canLoadEarlier: Bool { status == .open && recoveryTask == nil && transcriptStart > 0 }
+    var canLoadEarlier: Bool {
+        status == .open && recoveryTask == nil && transcriptStart > 0
+            && (!viewportMode.defersAutomaticProjectionIntake() || installedItems.first?.id == items.first?.id)
+    }
+
+    func updateViewportMode(_ mode: ChatViewportMode) {
+        guard viewportMode != mode else { return }
+        viewportMode = mode
+        if mode.defersAutomaticProjectionIntake() {
+            textPreparationTask?.cancel(); textPreparationTask = nil
+            textPreparationGeneration &+= 1
+        } else if !rebuildPresentation() {
+            status = .failed("The canonical subagent transcript is inconsistent.")
+        }
+    }
 
     /// The trace an open thinking detail follows, resolved from the projection
     /// this child transcript's own rows render from. Its rows are never
@@ -368,7 +386,7 @@ final class ReadOnlySubagentSessionStore {
     }
 
     func loadEarlier() {
-        guard pageTask == nil, recoveryTask == nil, status == .open, let leaseID, let revision, transcriptStart > 0 else { return }
+        guard pageTask == nil, canLoadEarlier, let leaseID, let revision else { return }
         let ownedGeneration = generation
         guard let connectionAdmission = viewerConnectionAdmission else { return }
         let before = transcriptStart
@@ -414,11 +432,10 @@ final class ReadOnlySubagentSessionStore {
                     self.transcriptStart = page.start
                     self.nextEntryID = page.nextEntryId
                     self.forkBoundary = page.forkBoundary
-                    guard self.rebuildPresentation() else {
+                    guard self.rebuildPresentation(prepending: page.items) else {
                         self.status = .failed("The canonical subagent transcript is inconsistent.")
                         return
                     }
-                    self.prepareText()
                     self.recoveryAttempts = 0
                     self.status = .open
                 }
@@ -565,7 +582,6 @@ final class ReadOnlySubagentSessionStore {
                         self.refreshTask = nil
                         return
                     }
-                    self.prepareText()
                     self.recoveryAttempts = 0
                     if self.pendingRefreshRevision == targetRevision
                         || self.pendingRefreshRevision == response.revision {
@@ -689,7 +705,8 @@ final class ReadOnlySubagentSessionStore {
         leaseID = nil; openingViewerID = nil; viewerConnectionAdmission = nil; parentSubscriptionToken = nil; canAbort = false; revision = nil
         if !preserveTranscript {
             childSessionRef = nil
-            items.removeAll(); presentation = .empty; preparedText = .empty
+            items.removeAll(); installedItems.removeAll(); viewportMode = .pinned
+            presentation = .empty; preparedText = .empty
             transcriptStart = 0; transcriptTotal = 0
             nextEntryID = nil; leafEntryID = nil; forkBoundary = nil
         }
@@ -704,17 +721,24 @@ final class ReadOnlySubagentSessionStore {
     private func install(_ page: ProcessTranscriptPage) -> Bool {
         items = page.items; transcriptStart = page.start; transcriptTotal = page.total
         nextEntryID = page.nextEntryId; leafEntryID = page.leafEntryId; forkBoundary = page.forkBoundary
-        guard rebuildPresentation() else { return false }
-        prepareText()
-        return true
+        return rebuildPresentation()
     }
 
     @discardableResult
-    private func rebuildPresentation() -> Bool {
+    private func rebuildPresentation(prepending earlierItems: [TranscriptItem]? = nil) -> Bool {
+        let deferred = viewportMode.defersAutomaticProjectionIntake()
+        if deferred {
+            guard let earlierItems else { return true }
+            // Explicit history extends the installed cut; it must not admit a
+            // pending live tail or changed retained row text as a side effect.
+            installedItems = earlierItems + installedItems
+        } else {
+            installedItems = items
+        }
         let next = ChatTranscriptProjectionKernel.readOnlyTranscript(
-            items,
+            installedItems,
             transcriptStart: transcriptStart,
-            transcriptTotal: transcriptTotal,
+            transcriptTotal: deferred ? transcriptStart + installedItems.count : transcriptTotal,
             isActive: liveActivity?.lifecycle.isActiveWork == true,
             forkBoundary: forkBoundary
         )
@@ -723,6 +747,7 @@ final class ReadOnlySubagentSessionStore {
             return false
         }
         presentation = next
+        prepareText()
         return true
     }
 
@@ -730,7 +755,7 @@ final class ReadOnlySubagentSessionStore {
         textPreparationGeneration &+= 1
         let ownedPreparationGeneration = textPreparationGeneration
         textPreparationTask?.cancel()
-        let sources = ChatTextPreparationPolicy.sources(in: items)
+        let sources = ChatTextPreparationPolicy.sources(in: installedItems)
         guard !sources.isEmpty else {
             textPreparationTask = nil
             preparedText = .empty

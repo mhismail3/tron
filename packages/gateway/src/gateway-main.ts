@@ -345,15 +345,17 @@ const knowledgeStore = new KnowledgeStore(
   async (connectionId) => connections.resolveInstance(connectionId).catch(() => undefined),
 );
 let queueKnowledgeSummary: (source: KnowledgeRecord & { kind: "source" }) => void = () => {};
+const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, connections, knowledgeCredentials);
+const jevSourceAssessment = new JevSourceAssessmentModel(knowledgeCredentials);
 const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   credentials: knowledgeCredentials,
   queueSummary: source => queueKnowledgeSummary(source),
-  assessment: new JevSourceAssessmentModel(knowledgeCredentials),
+  assessment: jevSourceAssessment,
+  jevBudget: knowledgeTaggingBudget,
   ...(xPricing ? { xPricing } : {}),
   connections,
 });
-const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, connections, knowledgeCredentials);
-const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(knowledgeCredentials), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections };
+const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(knowledgeCredentials), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections, assessment: jevSourceAssessment };
 const knowledge = new KnowledgeService(
   knowledgeStore,
   new KnowledgeObservationService(
@@ -373,8 +375,9 @@ const knowledge = new KnowledgeService(
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),
   },
   (knowledgeConfig) => {
-    const model = modelForConfig(modelRuntime, knowledgeConfig.enrichment?.model);
-    return model ? new ModelRuntimeKnowledgeModel(modelRuntime, model) : undefined;
+    const config = knowledgeConfig.knowledgeModel;
+    const model = modelForConfig(modelRuntime, config?.model);
+    return model && config ? new ModelRuntimeKnowledgeModel(modelRuntime, model, config) : undefined;
   },
   workRegistry,
   async operation => {

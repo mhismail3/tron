@@ -1,6 +1,5 @@
 import Foundation
 import CryptoKit
-import TronMobileCore
 
 // These projections intentionally mirror packages/gateway/src/knowledge/
 // knowledge-contract.ts. The Gateway owns all bytes and revisions; iOS only
@@ -17,8 +16,9 @@ package struct KnowledgePresentationIdentity: Equatable, Sendable {
     }
 }
 
+package enum KnowledgeSourceAssessor: String, Codable, Sendable { case jev, model }
 package enum KnowledgeScope: String, Codable, CaseIterable, Sendable { case personal, research
-    package var label: String { self == .personal ? "Moose's Corner" : "Research" }
+    package var label: String { self == .personal ? "Personal" : "Research" }
 }
 package enum KnowledgeRecordKind: String, Codable, CaseIterable, Sendable { case source, observation, note
     package var label: String { rawValue.capitalized }
@@ -118,7 +118,7 @@ struct KnowledgeSourceAssessmentUsage: Codable, Hashable, Sendable {
     let inputTokens: Int; let outputTokens: Int; let estimatedCostCents: Double; let pricing: String
 }
 package struct KnowledgeSourceAssessment: Codable, Hashable, Sendable {
-    let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; package let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String?; let recommendation: KnowledgeSourceAdmission?; let confidence: Double?; let profileVersion: String?; let rubricVersion: String?
+    let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; package let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String?; package let recommendation: KnowledgeSourceAdmission?; let confidence: Double?; let profileVersion: String?; let rubricVersion: String?
     // These fields are provider assessment metadata, not capture completeness or epistemic confidence.
     let inputDigest: String?; let evidenceDigest: String?; let assessmentInputDigest: String?; let coverage: String?; package let classification: String?; let usage: KnowledgeSourceAssessmentUsage?
     init(summary: String, contribution: String?, whyItMatters: String?, evidenceQuality: KnowledgeEvidenceQuality, freshness: KnowledgeFreshness, possibleUse: String?, generatedAt: String, model: String?, recommendation: KnowledgeSourceAdmission? = nil, confidence: Double? = nil, profileVersion: String? = nil, rubricVersion: String? = nil, inputDigest: String? = nil, evidenceDigest: String? = nil, assessmentInputDigest: String? = nil, coverage: String? = nil, classification: String? = nil, usage: KnowledgeSourceAssessmentUsage? = nil) {
@@ -221,12 +221,16 @@ package enum KnowledgeObservationConfigurationPolicy {
     }
 }
 
-package struct KnowledgeEnrichment: Codable, Hashable, Sendable {
+package struct KnowledgeModel: Codable, Hashable, Sendable {
     package var model: String?
-    package init(model: String?) { self.model = model }
+    package var maxInputChars: Int
+    package var maxOutputChars: Int
+    package init(model: String?, maxInputChars: Int = 48_000, maxOutputChars: Int = 8_000) {
+        self.model = model; self.maxInputChars = maxInputChars; self.maxOutputChars = maxOutputChars
+    }
 }
 package struct KnowledgeConfig: Codable, Hashable, Sendable {
-    let schemaVersion: Int; var revision: Int; package var eligibility: KnowledgeEligibility; package var observation: KnowledgeObservationLimits; package var enrichment: KnowledgeEnrichment? = nil; var maximumSearchResults: Int; package var currentInterests: [String]; package var tagVocabulary: KnowledgeTagVocabulary
+    let schemaVersion: Int; var revision: Int; package var eligibility: KnowledgeEligibility; package var observation: KnowledgeObservationLimits; package var knowledgeModel: KnowledgeModel? = nil; var maximumSearchResults: Int; package var currentInterests: [String]; package var tagVocabulary: KnowledgeTagVocabulary
 }
 package struct KnowledgeStatus: Codable, Hashable, Sendable {
     let available: Bool; let state: String; package let stateRevision: Int?; package let recordCount: Int; package let coverageCount: Int; package let coverage: KnowledgeCoverageSummary; package let suppressedCount: Int; package let pendingCleanupCount: Int; package let config: KnowledgeConfig; let observationConfigured: Bool; let detail: String?
@@ -272,7 +276,7 @@ package struct KnowledgeMutationResult: Codable, Hashable, Sendable { package le
 package struct KnowledgeSourceCaptureResult: Codable, Hashable, Sendable { let record: KnowledgeRecord; let duplicate: Bool; let fetched: Bool; let assessmentError: String? }
 package struct KnowledgeForgetResult: Codable, Hashable, Sendable { let forgotten: Bool; let recordId: String; let stateRevision: Int }
 package struct KnowledgeExclusionResult: Codable, Hashable, Sendable { let recordId: String; let excluded: Bool; let stateRevision: Int }
-package struct KnowledgeTriageResult: Codable, Hashable, Sendable { package let source: KnowledgeRecord; package let assessment: KnowledgeSourceAssessment }
+package struct KnowledgeSourceAssessmentResult: Codable, Hashable, Sendable { package let source: KnowledgeRecord; package let assessment: KnowledgeSourceAssessment }
 
 package struct KnowledgeListRequest: Encodable, Sendable {
     let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let includeSuppressed: Bool; let includeArchived: Bool?; let includePending: Bool?; let sourceAdmission: KnowledgeSourceAdmission?; let cursor: String?; let limit: Int

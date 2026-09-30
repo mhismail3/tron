@@ -24,7 +24,7 @@ import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESE
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setEnrichmentModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("assessSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorDiscover"), Type.Literal("connectorQueue"), Type.Literal("connectorAck"), Type.Literal("raindropMove"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -43,6 +43,9 @@ const toolParameters = Type.Object({
   pilotMaxItems: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
   pilotBudgetCents: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
   sourceCollectionId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  disposition: Type.Optional(Type.Union([Type.Literal("processed"), Type.Literal("skipped")])),
+  reason: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+  destination: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   includeArchived: Type.Optional(Type.Boolean()),
   includePending: Type.Optional(Type.Boolean()),
   sourceRevisionIds: Type.Optional(Type.Array(Type.String({ minLength: 16, maxLength: 80 }), { minItems: 1, maxItems: 32 })),
@@ -71,12 +74,14 @@ const toolParameters = Type.Object({
   producerModel: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   curationStatus: Type.Optional(Type.Union([Type.Literal("running"), Type.Literal("done"), Type.Literal("failed")])),
   expectedConfigRevision: Type.Optional(Type.Integer({ minimum: 0 })),
-  enrichmentModel: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
-  clearEnrichmentModel: Type.Optional(Type.Boolean()),
+  knowledgeModel: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  clearKnowledgeModel: Type.Optional(Type.Boolean()),
   vocabularyRevision: Type.Optional(Type.Integer({ minimum: 0 })),
   expectedRevision: Type.Optional(Type.String({ minLength: 16, maxLength: 80 })),
   budgetCents: Type.Optional(Type.Number({ minimum: 0, maximum: 1_000_000 })),
   attemptId: Type.Optional(Type.String({ minLength: 16, maxLength: 64 })),
+  assessor: Type.Optional(Type.Union([Type.Literal("jev"), Type.Literal("model")])),
+  maxChargeCents: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 100 })),
   tagCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   tagEdit: Type.Optional(Type.Union([
     Type.Object({ kind: Type.Literal("add"), tag: Type.Object({ id: Type.String({ minLength: 1, maxLength: 48 }), label: Type.String({ minLength: 1, maxLength: 80 }), definition: Type.String({ minLength: 1, maxLength: 512 }), category: Type.String({ minLength: 1, maxLength: 48 }), decayClass: Type.Union([Type.Literal("ages"), Type.Literal("stable")]), state: Type.Literal("active") }, { additionalProperties: false }) }, { additionalProperties: false }),
@@ -93,7 +98,8 @@ const toolParameters = Type.Object({
     summary: Type.Optional(Type.String({ minLength: 1, maxLength: 8_000 })),
     coverage: Type.Optional(Type.Union([Type.Literal("full"), Type.Literal("sampled")])),
     tagIds: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 24 })),
-    verdict: Type.Optional(Type.Union([Type.Literal("evergreen"), Type.Literal("dated"), Type.Literal("superseded"), Type.Literal("archive")])),
+    verdict: Type.Optional(Type.Union([Type.Literal("evergreen"), Type.Literal("dated"), Type.Literal("superseded")])),
+    clearVerdict: Type.Optional(Type.Boolean()),
     supersededBy: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
     reason: Type.Optional(Type.String({ maxLength: 2_000 })),
     scope: Type.Optional(Type.Union([Type.Literal("personal"), Type.Literal("research")])),
@@ -144,7 +150,7 @@ function curationToolRequest(parameters: KnowledgeToolParameters): KnowledgeCura
     switch (operation) {
       case "summary": return item.summary ? { ...base, summary: { text: item.summary, coverage: item.coverage ?? "sampled" as const } } : base;
       case "tags": return item.tagIds ? { ...base, tagIds: item.tagIds } : base;
-      case "verdict": return item.verdict ? { ...base, verdict: { verdict: item.verdict, ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}), ...(item.reason ? { reason: item.reason } : {}) } } : base;
+      case "verdict": return item.clearVerdict ? { ...base, verdict: { clear: true as const, ...(item.verdict ? { verdict: item.verdict } : {}), ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}), ...(item.reason ? { reason: item.reason } : {}) } } : item.verdict ? { ...base, verdict: { verdict: item.verdict, ...(item.supersededBy ? { supersededBy: item.supersededBy } : {}), ...(item.reason ? { reason: item.reason } : {}) } } : base;
       case "placement": return item.scope || item.admission ? { ...base, placement: { ...(item.scope ? { scope: item.scope } : {}), ...(item.admission ? { admission: item.admission } : {}), ...(item.reason ? { reason: item.reason } : {}) } } : base;
       case "relation": return item.relationType && item.relationId ? { ...base, relation: { type: item.relationType, recordId: item.relationId, action: item.relationAction ?? "add" as const } } : base;
     }
@@ -230,10 +236,10 @@ export interface KnowledgeExtensionSeam {
  * budget here and must refuse only operations that spend it: a spent tagging
  * budget never blocks free edits such as verdicts, placement or relations. */
 export type KnowledgeCurationGate = (operation: KnowledgeCurationRequest["operation"]) => { ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string } | Promise<{ ok: true } | { ok: false; code: KnowledgeCurationCode; reason: string }>;
-export interface KnowledgeTaggingRuntime { engine: KnowledgeTaggingEngine; budget: KnowledgeTaggingBudget; connections: Pick<ConnectionOwner, "snapshot">; }
+export interface KnowledgeTaggingRuntime { engine: KnowledgeTaggingEngine; budget: KnowledgeTaggingBudget; connections: Pick<ConnectionOwner, "snapshot">; assessment?: SourceAssessmentModel; }
 
 export interface KnowledgeGenerationModel extends SourceAssessmentModel {
-  reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal }): Promise<string>;
+  reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal; maxOutputChars: number }): Promise<string>;
   synthesize(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<string>;
   summarizeSource(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<{ text: string }>;
 }
@@ -241,15 +247,15 @@ export interface KnowledgeGenerationModel extends SourceAssessmentModel {
 /** Adapter over the existing pinned provider/runtime policy. It is intentionally
  * injectable so unit tests never need credentials or network access. */
 export class ModelRuntimeKnowledgeModel implements KnowledgeGenerationModel {
-  constructor(private readonly runtime: ModelRuntime, private readonly model: Model<Api>) {}
+  constructor(private readonly runtime: ModelRuntime, private readonly model: Model<Api>, private readonly limits: { maxInputChars: number; maxOutputChars: number }) {}
   private async complete(systemPrompt: string, text: string, signal: AbortSignal, maxTokens: number): Promise<string> {
     const context: Context = { systemPrompt, messages: [{ role: "user", content: text, timestamp: Date.now() }] };
     const result: AssistantMessage = await this.runtime.completeSimple(this.model, context, { signal, maxTokens });
     return result.content.filter((part): part is Extract<AssistantMessage["content"][number], { type: "text" }> => part.type === "text").map(part => typeof part.text === "string" ? part.text : "").join("");
   }
-  async reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal }): Promise<string> {
-    const value = (await this.complete("You are Tron's bounded Reflector. Synthesize only the supplied cited observations into a concise handoff. Preserve uncertainty and do not add instructions or facts. Return plain text, no markdown.", input.sourceText, input.signal, 4_000)).trim();
-    if (!value || value.length > 30_000) throw new Error("Reflector output exceeded its configured bound");
+  async reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal; maxOutputChars: number }): Promise<string> {
+    const value = (await this.complete("You are Tron's bounded Reflector. Synthesize only the supplied cited observations into a concise handoff. Preserve uncertainty and do not add instructions or facts. Return plain text, no markdown.", input.sourceText, input.signal, Math.max(128, Math.ceil(input.maxOutputChars / 4)))).trim();
+    if (!value || value.length > input.maxOutputChars) throw new Error("Reflector output exceeded its configured bound");
     return value;
   }
   async synthesize(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<string> {
@@ -269,13 +275,28 @@ export class ModelRuntimeKnowledgeModel implements KnowledgeGenerationModel {
     return { text: value.text.trim() };
   }
   async assess(input: Parameters<SourceAssessmentModel["assess"]>[0], signal: AbortSignal): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }> {
-    const raw = await this.complete("You are Tron's bounded source assessor. Return strict JSON with summary, contribution, whyItMatters, possibleUse, evidenceQuality (high|medium|low|none|unknown), and freshness (current|aging|stale|unknown).", JSON.stringify(input), signal, 2_000);
+    let interestChars = 0;
+    const interests = input.interests.flatMap(value => {
+      const remaining = Math.max(0, Math.floor(this.limits.maxInputChars / 4) - interestChars);
+      const bounded = value.slice(0, Math.min(500, remaining));
+      interestChars += bounded.length;
+      return bounded ? [bounded] : [];
+    });
+    const bounded: typeof input = { ...input, interests, text: "" };
+    const inputOverhead = JSON.stringify(bounded).length - 2;
+    bounded.text = input.text.slice(0, Math.max(0, this.limits.maxInputChars - inputOverhead));
+    const request = JSON.stringify(bounded);
+    if (request.length > this.limits.maxInputChars) throw new Error("Source assessment input exceeded its configured bound");
+    const raw = await this.complete("You are Tron's bounded source assessor. Use only the supplied source evidence and persisted interests. Return strict JSON with summary, contribution, whyItMatters, possibleUse, evidenceQuality (high|medium|low|none|unknown), freshness (current|aging|stale|unknown), recommendation (retained|archived|pending), confidence (number from 0 to 1), and classification (a short primary useful category). This is a recommendation only and never changes admission.", request, signal, Math.max(128, Math.ceil(this.limits.maxOutputChars / 4)));
     let value: unknown; try { value = JSON.parse(raw); } catch { throw new Error("Source assessor returned non-JSON output"); }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Source assessment is invalid");
     const result = value as Record<string, unknown>;
-    for (const key of ["summary", "evidenceQuality", "freshness"]) if (typeof result[key] !== "string" || !result[key]) throw new Error("Source assessment is incomplete");
+    for (const key of ["summary", "evidenceQuality", "freshness", "recommendation", "classification"]) if (typeof result[key] !== "string" || !result[key]) throw new Error("Source assessment is incomplete");
+    if (!Number.isFinite(result.confidence) || (result.confidence as number) < 0 || (result.confidence as number) > 1) throw new Error("Source assessment confidence is invalid");
+    if (!["retained", "archived", "pending"].includes(result.recommendation as string) || (result.classification as string).length > 80) throw new Error("Source assessment recommendation or classification is invalid");
+    if (["summary", "contribution", "whyItMatters", "possibleUse"].some(key => typeof result[key] === "string" && (result[key] as string).length > this.limits.maxOutputChars)) throw new Error("Source assessment output exceeded its configured bound");
     if (!["high", "medium", "low", "none", "unknown"].includes(result.evidenceQuality as string) || !["current", "aging", "stale", "unknown"].includes(result.freshness as string)) throw new Error("Source assessment has invalid quality");
-    return { summary: result.summary as string, ...(typeof result.contribution === "string" ? { contribution: result.contribution } : {}), ...(typeof result.whyItMatters === "string" ? { whyItMatters: result.whyItMatters } : {}), ...(typeof result.possibleUse === "string" ? { possibleUse: result.possibleUse } : {}), evidenceQuality: result.evidenceQuality as SourceAssessment["evidenceQuality"], freshness: result.freshness as SourceAssessment["freshness"] };
+    return { summary: result.summary as string, ...(typeof result.contribution === "string" ? { contribution: result.contribution } : {}), ...(typeof result.whyItMatters === "string" ? { whyItMatters: result.whyItMatters } : {}), ...(typeof result.possibleUse === "string" ? { possibleUse: result.possibleUse } : {}), evidenceQuality: result.evidenceQuality as SourceAssessment["evidenceQuality"], freshness: result.freshness as SourceAssessment["freshness"], recommendation: result.recommendation as NonNullable<SourceAssessment["recommendation"]>, confidence: result.confidence as number, classification: result.classification as string };
   }
 }
 
@@ -295,6 +316,12 @@ export class KnowledgeService {
     private readonly tagging?: KnowledgeTaggingRuntime,
   ) { this.observer = observer; }
 
+  private async assertJevAssessable(sourceId: string, expectedRevision: string): Promise<void> {
+    const current = await this.store.read(sourceId, undefined, false, true, true);
+    if (!current || current.kind !== "source") throw new GatewayError("not_found", "Source is unavailable");
+    if (current.scope === "personal") throw new GatewayError("unsupported", "Jev source assessment is unavailable for personal sources");
+    if (current.revisionId !== expectedRevision) throw new GatewayError("conflict", "Source changed before Jev assessment; re-read the current revision");
+  }
   private async runOwned<T>(operation: string, task: (signal: AbortSignal, retirements: Promise<void>[]) => Promise<T>, parentSignal?: AbortSignal): Promise<T> {
     const controller = new AbortController();
     const relay = () => controller.abort(parentSignal?.reason);
@@ -558,18 +585,19 @@ export class KnowledgeService {
     const work = this.workRegistry?.begin({ kind: "knowledge-curation", hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => cancel(new Error("Knowledge summary was cancelled by the Gateway")) });
     try {
       const config = await this.store.config();
-      if (!config.enrichment?.model) throw new KnowledgeCurationRefusal("model-not-configured", "Source summary requires Knowledge enrichment.model; set it in knowledge.config (it never falls back to observation.model)");
+      if (!config.knowledgeModel?.model) throw new KnowledgeCurationRefusal("model-not-configured", "Source summary requires knowledgeModel.model; set it in knowledge.config (it never falls back to observation.model)");
       const model = this.modelForConfig?.(config);
-      if (!model) throw new KnowledgeCurationRefusal("unavailable", `Configured Knowledge enrichment model '${config.enrichment.model}' is unavailable in the model runtime`);
-      const producer: SourceCurationProducer = { actor: "agent", model: config.enrichment.model };
+      if (!model) throw new KnowledgeCurationRefusal("unavailable", `Configured Knowledge model '${config.knowledgeModel.model}' is unavailable in the model runtime`);
+      const producer: SourceCurationProducer = { actor: "agent", model: config.knowledgeModel.model };
       const result = await this.store.generateSourceSummary(request.commandId, request.sourceId, request.expectedRevision, config.revision, async source => {
         const text = source.content.text!;
         // A source marked partial remains partial even when its saved excerpt fits the request.
-        const maxInputChars = Math.min(config.observation.maxInputChars, 48_000);
+        const maxInputChars = config.knowledgeModel!.maxInputChars;
         const evidenceLimit = Math.max(1, maxInputChars - 2_000);
         const coverage = source.content.captureDisposition === "complete" && text.length <= evidenceLimit ? "full" as const : "sampled" as const;
-        const sourceText = `SOURCE revision=${source.revisionId} disposition=${source.content.captureDisposition} coverage=${coverage}${coverage === "sampled" ? " (bounded excerpt; beginning only)" : ""}\ntitle=${source.content.title}\nuri=${source.content.uri?.slice(0, 512) ?? "[unknown]"}\ntext=${text.slice(0, evidenceLimit)}`;
-        const generated = await model.summarizeSource({ sessionId: source.id, sourceText, sourceRevisionIds: [source.revisionId], signal, maxOutputChars: Math.min(config.observation.maxOutputChars, 8_000) });
+        const prefix = `SOURCE revision=${source.revisionId} disposition=${source.content.captureDisposition} coverage=${coverage}${coverage === "sampled" ? " (bounded excerpt; beginning only)" : ""}\ntitle=${source.content.title}\nuri=${source.content.uri?.slice(0, 256) ?? "[unknown]"}\ntext=`;
+        const sourceText = `${prefix}${text.slice(0, Math.max(0, maxInputChars - prefix.length))}`;
+        const generated = await model.summarizeSource({ sessionId: source.id, sourceText, sourceRevisionIds: [source.revisionId], signal, maxOutputChars: config.knowledgeModel!.maxOutputChars });
         return { ...generated, generatedAt: new Date().toISOString(), sourceRevisionId: source.revisionId, evidenceDigest: sourceEvidenceDigest(source.content.title, text), coverage, producer };
       }, signal);
       void this.autoRetag(result.record.id, result.record.revisionId);
@@ -606,9 +634,9 @@ export class KnowledgeService {
       if (sources.length !== sourceRevisionIds.length) throw new GatewayError("conflict", "Synthesis sources are unavailable or excluded");
       if (new Set(sources.map(record => record.scope)).size !== 1) throw new GatewayError("conflict", "Synthesis sources must share one privacy scope");
       const sourceText = sources.map(record => synthesisEvidencePack(record)).join("\n\n");
-      if (sourceText.length > Math.min(config.observation.maxInputChars, 48_000)) throw new GatewayError("invalid_request", "Knowledge synthesis source pack exceeds its bounded input; select fewer revisions");
+      if (!config.knowledgeModel || sourceText.length > config.knowledgeModel.maxInputChars) throw new GatewayError("invalid_request", "Knowledge synthesis requires a configured Knowledge model and source pack within its input bound; select fewer revisions");
       if (ownedSignal.aborted) throw new GatewayError("busy", "Knowledge synthesis was cancelled", true);
-      const text = await model.synthesize({ sessionId, sourceText, sourceRevisionIds, signal: ownedSignal, maxOutputChars: Math.min(config.observation.maxOutputChars, 30_000) });
+      const text = await model.synthesize({ sessionId, sourceText, sourceRevisionIds, signal: ownedSignal, maxOutputChars: config.knowledgeModel.maxOutputChars });
       if (ownedSignal.aborted) throw new GatewayError("busy", "Knowledge synthesis was cancelled", true);
       const after = await this.store.config();
       if (after.revision !== config.revision) throw new GatewayError("conflict", "Knowledge configuration changed while synthesis was running");
@@ -705,11 +733,55 @@ export class KnowledgeService {
       }
       case "knowledge.tags.estimate": return this.estimateTaggingCost(action.request);
       case "knowledge.curation.jobs": return this.summaryJobs(action.request);
-      case "knowledge.source.triage": {
-        const config = await this.store.config();
-        const model = this.modelForConfig?.(config);
-        if (!model) throw new GatewayError("unsupported", "Knowledge assessment requires an explicitly configured model");
-        return this.runOwned("source triage", (signal, retirements) => triageSource(this.store, { ...action.request, signal, retirements }, model), signal);
+      case "knowledge.source.assess": {
+        const request = action.request;
+        if (request.assessor === "model") {
+          const config = await this.store.config();
+          const model = this.modelForConfig?.(config);
+          if (!model) throw new GatewayError("unsupported", "Source assessment requires an explicitly configured Knowledge model");
+          return this.runOwned("source assessment", (signal, retirements) => triageSource(this.store, { commandId: request.commandId, sourceId: request.sourceId, expectedRevision: request.expectedRevision, signal, retirements }, model), signal);
+        }
+        const tagging = this.tagging;
+        const assessmentModel = tagging?.assessment;
+        if (!tagging || !assessmentModel) throw new GatewayError("unsupported", "Jev source assessment is not installed");
+        if (request.maxChargeCents !== undefined && (!Number.isFinite(request.maxChargeCents) || request.maxChargeCents <= 0 || request.maxChargeCents > 100)) throw new GatewayError("invalid_request", "Jev assessment maxChargeCents must be greater than zero and at most 100 cents");
+        const connectionId = await tagging.budget.connectionId();
+        if (!connectionId) throw new GatewayError("unsupported", "Jev assessment needs exactly one enabled Jev connection with approved paid access");
+        return this.runOwned("Jev source assessment", async (signal, retirements) => {
+          let attemptId: string | undefined;
+          let dispatched = false;
+          let receivedUsage: { inputTokens: number; outputTokens: number; estimatedCostCents: number } | undefined;
+          const trackingAssessment: SourceAssessmentModel = { async assess(input, assessmentSignal, context) {
+            const result = await assessmentModel.assess(input, assessmentSignal, context);
+            if (result.usage) receivedUsage = { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, estimatedCostCents: result.usage.estimatedCostCents };
+            return result;
+          } };
+          try {
+            const result = await triageSource(this.store, {
+              commandId: request.commandId, sourceId: request.sourceId, expectedRevision: request.expectedRevision, signal, retirements,
+              ...(request.maxChargeCents !== undefined ? { maxChargeCents: request.maxChargeCents } : {}),
+              beforeDispatch: async () => {
+                // Personal text never reaches Jev. Checked here, after the
+                // committed-replay lookup and before any reservation, against
+                // the current head: an older research revision of a source
+                // since moved to personal must not pass.
+                await this.assertJevAssessable(request.sourceId, request.expectedRevision);
+                attemptId = await tagging.budget.reserveAssessment(connectionId, request.commandId);
+              },
+              onDispatch: async () => { if (!attemptId) throw new GatewayError("conflict", "Jev assessment has no monthly reservation"); await tagging.budget.markDispatch(connectionId, attemptId); dispatched = true; },
+            }, trackingAssessment);
+            if (attemptId) {
+              const usage = result.assessment.usage;
+              if (usage) await tagging.budget.settle(connectionId, attemptId, { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, estimatedCostCents: usage.estimatedCostCents });
+              else await tagging.budget.reconcileUncertain(connectionId, attemptId);
+            }
+            return result;
+          } catch (error) {
+            if (attemptId && !dispatched) await tagging.budget.releaseUndispatched(connectionId, attemptId);
+            else if (attemptId && dispatched && receivedUsage) await tagging.budget.settle(connectionId, attemptId, receivedUsage);
+            throw error;
+          }
+        }, signal);
       }
       case "knowledge.reflect": {
         const config = await this.store.config();
@@ -727,9 +799,9 @@ export class KnowledgeService {
           throw new GatewayError("conflict", "Reflection sources must share a branch");
         }
         const sourceText = sources.map(record => synthesisEvidencePack(record)).join("\n\n");
-        if (sourceText.length > Math.min(config.observation.maxInputChars, 48_000)) throw new GatewayError("invalid_request", "Knowledge reflection source pack exceeds its bounded input; select fewer revisions");
+        if (!config.knowledgeModel || sourceText.length > config.knowledgeModel.maxInputChars) throw new GatewayError("invalid_request", "Knowledge reflection requires a configured Knowledge model and source pack within its input bound; select fewer revisions");
         if (signal.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
-        const text = await model.reflect({ sessionId: action.request.sessionId, sourceText, signal, });
+        const text = await model.reflect({ sessionId: action.request.sessionId, sourceText, signal, maxOutputChars: config.knowledgeModel!.maxOutputChars });
         if (signal.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
         const after = await this.store.config();
         if (after.revision !== config.revision) throw new GatewayError("conflict", "Knowledge configuration changed while reflection was running");
@@ -756,10 +828,14 @@ export class KnowledgeService {
       case "knowledge.raindrop.read":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
         return this.extensions.connector(action, signal);
-      case "knowledge.connector.run":
+      case "knowledge.connector.discover":
+      case "knowledge.connector.queue":
+      case "knowledge.connector.ack":
+      case "knowledge.raindrop.move":
       case "knowledge.raindrop.intake":
+      case "knowledge.source.ingest":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
-        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : "knowledge connector run", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
+        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : action.operation === "knowledge.source.ingest" ? "source ingestion" : action.operation === "knowledge.raindrop.move" ? "Raindrop move" : "Knowledge connector action", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
     }
   }
 
@@ -796,36 +872,32 @@ export class KnowledgeService {
         if (!parameters.query) throw new GatewayError("invalid_request", "Knowledge search requires a query");
         const explicitScope = parameters.scope !== undefined;
         const result = await this.store.search({ query: parameters.query, ...(parameters.kind ? { kind: parameters.kind } : {}), ...(explicitScope ? { scope: parameters.scope! } : { excludePersonalSources: true }), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit });
-        const sources = result.hits.filter(hit => hit.record.kind === "source").map(hit => hit.record.id);
-        const rows = sources.length ? (await this.store.listSourceRows({ kind: "source", ids: sources })).rows : [];
-        const rowById = new Map(rows.map(row => [row.id, row]));
-        const describe = (record: import("./knowledge-contract.js").KnowledgeRecord) => {
-          const row = record.kind === "source" ? rowById.get(record.id) : undefined;
+        const describe = async (record: import("./knowledge-contract.js").KnowledgeRecord) => {
+          const row = await this.store.sourceRowForRecord(record);
           return { ...recordSummary(record), ...(row && record.kind === "source" ? { sourceSavedAt: row.sourceSavedAt ?? null, ageDate: row.ageBasis === "sourceSavedAt" ? row.sourceSavedAt : record.content.capturedAt, ageBasis: row.ageBasis, ageDays: row.ageDays, freshness: row.freshness, verdict: row.verdict ?? null, supersededBy: row.supersededBy ?? null, take: record.content.take?.text.slice(0, 2_000) ?? null } : {}) };
         };
-        return { text: `Cite each source's save date and age; prefer the user's take over source text.\n${result.hits.map(hit => { const summary = describe(hit.record); return `${hit.record.id} (${hit.record.kind})${hit.record.kind === "source" ? ` saved=${summary.sourceSavedAt ?? "unknown"} ageDate=${summary.ageDate} ageBasis=${summary.ageBasis} age=${summary.ageDays}d freshness=${summary.freshness} verdict=${summary.verdict ?? "none"}${summary.supersededBy ? ` supersededBy=${summary.supersededBy}` : ""} take=${summary.take ? `user: ${summary.take}` : "none"}` : ""}: ${recordLabel(hit.record).slice(0, 1_000)}`; }).join("\n") || "No knowledge match."}`, details: { stateRevision: result.stateRevision, indexState: result.indexState, hits: result.hits.map(hit => ({ ...describe(hit.record), score: hit.score, matchedFields: hit.matchedFields })) } };
+        const summaries = await Promise.all(result.hits.map(hit => describe(hit.record)));
+        return { text: `Cite each source's save date and age; prefer the user's take over source text.\n${result.hits.map((hit, index) => { const summary = summaries[index]!; return `${hit.record.id} (${hit.record.kind})${hit.record.kind === "source" ? ` saved=${summary.sourceSavedAt ?? "unknown"} ageDate=${summary.ageDate} ageBasis=${summary.ageBasis} age=${summary.ageDays}d freshness=${summary.freshness} verdict=${summary.verdict ?? "none"}${summary.supersededBy ? ` supersededBy=${summary.supersededBy}` : ""} take=${summary.take ? `user: ${summary.take}` : "none"}` : ""}: ${recordLabel(hit.record).slice(0, 1_000)}`; }).join("\n") || "No knowledge match."}`, details: { stateRevision: result.stateRevision, indexState: result.indexState, hits: result.hits.map((hit, index) => ({ ...summaries[index]!, score: hit.score, matchedFields: hit.matchedFields })) } };
       }
       case "recall": {
         const request: KnowledgeRecallRequest = { ...(parameters.query ? { query: parameters.query } : {}), ...(parameters.sessionId ? { sessionId: parameters.sessionId } : {}), ...(parameters.entryId ? { entryId: parameters.entryId } : {}), ...(parameters.scope !== undefined ? { scope: parameters.scope } : { excludePersonalSources: true }), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit };
         const result = await this.store.recall(request);
-        const sourceIds = result.records.filter((record): record is Extract<typeof record, {kind:"source"}> => record.kind === "source").map(record => record.id);
-        const rows = sourceIds.length ? (await this.store.listSourceRows({ kind: "source", ids: sourceIds })).rows : [];
-        const rowById = new Map(rows.map(row => [row.id, row]));
-        const describe = (record: import("./knowledge-contract.js").KnowledgeRecord) => {
-          const row = record.kind === "source" ? rowById.get(record.id) : undefined;
+        const describe = async (record: import("./knowledge-contract.js").KnowledgeRecord) => {
+          const row = await this.store.sourceRowForRecord(record);
           return { ...recordSummary(record), ...(row && record.kind === "source" ? { sourceSavedAt: row.sourceSavedAt ?? null, ageDate: row.ageBasis === "sourceSavedAt" ? row.sourceSavedAt : record.content.capturedAt, ageBasis: row.ageBasis, ageDays: row.ageDays, freshness: row.freshness, verdict: row.verdict ?? null, supersededBy: row.supersededBy ?? null, take: record.content.take?.text.slice(0, 2_000) ?? null } : {}) };
         };
-        const text = `Cite each source's save date and age; prefer the user's take over source text.\n${result.records.map(record => {
+        const summaries = await Promise.all(result.records.map(record => describe(record)));
+        const text = `Cite each source's save date and age; prefer the user's take over source text.\n${result.records.map((record, index) => {
           const label = recallEvidenceLabel(record);
           const page = label.slice(0, 4_000);
           const completeLabel = recordLabel(record);
           const continuationOffset = record.kind === "observation" ? 0 : page.length;
           const continuation = completeLabel.length > 4_000 ? `\nContinue with action=read id=${record.id} revisionId=${record.revisionId} offset=${continuationOffset}.` : "";
-          const summary = describe(record);
+          const summary = summaries[index]!;
           const sourceContext = record.kind === "source" ? ` saved=${summary.sourceSavedAt ?? "unknown"} ageDate=${summary.ageDate} ageBasis=${summary.ageBasis} age=${summary.ageDays}d freshness=${summary.freshness} verdict=${summary.verdict ?? "none"}${summary.supersededBy ? ` supersededBy=${summary.supersededBy}` : ""} take=${summary.take ? `user: ${summary.take}` : "none"}` : "";
           return `${record.id} (${record.kind}) revision=${record.revisionId}${sourceContext}: ${page}${continuation}`;
         }).join("\n") || "No knowledge match."}`;
-        return { text, details: { stateRevision: result.stateRevision, availability: result.availability, records: result.records.map(describe), citations: result.citations.slice(0, 32) } };
+        return { text, details: { stateRevision: result.stateRevision, availability: result.availability, records: summaries, citations: result.citations.slice(0, 32) } };
       }
       case "read": {
         if (!parameters.id) throw new GatewayError("invalid_request", "Knowledge read requires an id");
@@ -852,7 +924,7 @@ export class KnowledgeService {
         return { text: result ? objectToolText(result) : "Retained object is unavailable.", details: result };
       }
       case "list": {
-        const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), ...(parameters.cursor ? { cursor: parameters.cursor } : {}), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit };
+        const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), ...(parameters.scope !== undefined ? { scope: parameters.scope } : { excludePersonalSources: true }), ...(parameters.cursor ? { cursor: parameters.cursor } : {}), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit };
         const result = await this.store.list(request);
         return { text: `${result.records.map(record => `${record.id} (${record.kind}): ${recordLabel(record).slice(0, 1_000)}`).join("\n") || "No knowledge records."}${result.nextCursor ? `\nContinue with cursor=${result.nextCursor}.` : ""}${result.incomplete ? "\nThe bounded canonical scan is incomplete; results are not exhaustive." : ""}`, details: { stateRevision: result.stateRevision, records: result.records.map(recordSummary), ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), ...(result.incomplete ? { incomplete: true } : {}) } };
       }
@@ -876,15 +948,15 @@ export class KnowledgeService {
         const record = result && typeof result === "object" && "record" in result ? (result as { record?: import("./knowledge-contract.js").KnowledgeRecord }).record : undefined;
         return { text: record ? `${record.id} (source): ${recordLabel(record).slice(0, 4_000)}` : "Source capture completed.", details: result };
       }
-      case "triageSource": {
-        if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId) throw new GatewayError("invalid_request", "Source triage requires commandId, sourceId, and revisionId");
-        const result = await this.invoke({ operation: "knowledge.source.triage", request: { commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId } }, signal);
-        return { text: `Source triage completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+      case "assessSource": {
+        if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId || !parameters.assessor) throw new GatewayError("invalid_request", "assessSource requires commandId, sourceId, revisionId and assessor (jev or model)");
+        const result = await this.invoke({ operation: "knowledge.source.assess", request: { commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId, assessor: parameters.assessor, ...(parameters.maxChargeCents !== undefined ? { maxChargeCents: parameters.maxChargeCents } : {}) } }, signal);
+        return { text: `Source assessment completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
       case "restoreSource": {
         if (!parameters.commandId || !parameters.id || !parameters.revisionId) throw new GatewayError("invalid_request", "Source restore requires commandId, id, and revisionId");
-        const result = await this.invoke({ operation: "knowledge.source.admission", request: { commandId: parameters.commandId, recordId: parameters.id, expectedRevision: parameters.revisionId, status: "retained", reason: "explicit source restore requested" } }, signal);
-        return { text: `Source restored: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+        const result = await this.invoke({ operation: "knowledge.source.admission", request: { commandId: parameters.commandId, recordId: parameters.id, expectedRevision: parameters.revisionId, status: "retained", reason: "explicit source restore requested from admission archive" } }, signal);
+        return { text: `Source restored to retained admission: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
       case "createNote": {
         if (!parameters.commandId || !parameters.title || !parameters.scope) throw new GatewayError("invalid_request", "Note creation requires commandId, title, and scope");
@@ -914,27 +986,48 @@ export class KnowledgeService {
         const result = await this.invoke({ operation: "knowledge.raindrop.intake", request } as KnowledgeAction, signal);
         return { text: `Raindrop intake completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
-      case "connectorSweep": {
+      case "ingestItem": {
+        if (!this.extensions.connector || !parameters.commandId || !parameters.connector || !parameters.connectionId || !parameters.itemId || !parameters.scope) throw new GatewayError("invalid_request", "ingestItem requires commandId, connector, connectionId, itemId, and explicit scope");
+        const result = await this.invoke({ operation: "knowledge.source.ingest", request: { commandId: parameters.commandId, connector: parameters.connector, connectionId: parameters.connectionId, itemId: parameters.itemId, scope: parameters.scope } }, signal);
+        return { text: `Queued ${parameters.connector} item ingested as source ${JSON.stringify(result).slice(0, 4_000)}. The queue item remains unacknowledged; admission remains pending.`, details: result };
+      }
+      case "connectorDiscover": {
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
-        if (!parameters.commandId || !parameters.connector) throw new GatewayError("invalid_request", "Connector sweeps require commandId and connector");
-        if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
+        if (!parameters.commandId || !parameters.connector || !parameters.connectionId) throw new GatewayError("invalid_request", "connectorDiscover requires commandId, connector, and connectionId");
+        if (signal?.aborted) throw new GatewayError("busy", "Connector discovery was cancelled", true);
         const invocation = currentInvocationContext();
         if (invocation?.operationId?.startsWith("automation:")) {
           const connectorState = await this.store.connectorState(parameters.connector, parameters.connectionId);
           if (!connectorState?.recurringApproved) throw new GatewayError("unsupported", "Connector recurrence is not approved");
         }
-        const result = await this.runOwned("connector sweep", ownedSignal => this.extensions.connector!({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId!, connector: parameters.connector!, ...(parameters.connectionId ? { connectionId: parameters.connectionId } : {}), dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } }, ownedSignal), signal);
-        if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
-        return { text: `${parameters.connector} connector sweep completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+        const result = await this.runOwned("connector discovery", ownedSignal => this.extensions.connector!({ operation: "knowledge.connector.discover", request: { commandId: parameters.commandId!, connector: parameters.connector!, connectionId: parameters.connectionId!, ...(parameters.sourceCollectionId ? { sourceCollection: parameters.sourceCollectionId } : {}), ...(parameters.limit ? { limit: parameters.limit } : {}) } }, ownedSignal), signal);
+        return { text: `${parameters.connector} discovery finished. Items are queued only; no source was ingested, admitted, or moved. ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+      }
+      case "connectorQueue": {
+        if (!this.extensions.connector || !parameters.connector || !parameters.connectionId) throw new GatewayError("invalid_request", "connectorQueue requires connector and connectionId");
+        const result = await this.invoke({ operation: "knowledge.connector.queue", request: { connector: parameters.connector, connectionId: parameters.connectionId, ...(parameters.sourceCollectionId ? { sourceCollection: parameters.sourceCollectionId } : {}), limit: Math.min(parameters.limit ?? 25, 25) } }, signal);
+        const text = JSON.stringify(result);
+        if (Buffer.byteLength(text, "utf8") > 128_000) throw new GatewayError("invalid_request", "Connector queue page exceeds the agent output bound");
+        return { text, details: result };
+      }
+      case "connectorAck": {
+        if (!this.extensions.connector || !parameters.commandId || !parameters.connector || !parameters.connectionId || !parameters.itemId || !parameters.disposition || !parameters.reason) throw new GatewayError("invalid_request", "connectorAck requires commandId, connector, connectionId, itemId, disposition, and reason");
+        const result = await this.invoke({ operation: "knowledge.connector.ack", request: { commandId: parameters.commandId, connector: parameters.connector, connectionId: parameters.connectionId, itemId: parameters.itemId, disposition: parameters.disposition, reason: parameters.reason } }, signal);
+        return { text: `Connector item ${parameters.itemId} ${parameters.disposition}: ${parameters.reason.slice(0, 500)}`, details: result };
+      }
+      case "raindropMove": {
+        if (!this.extensions.connector || !parameters.commandId || !parameters.connectionId || !parameters.itemId || !parameters.sourceId || !parameters.expectedRevision || !parameters.sourceCollectionId || !parameters.destination) throw new GatewayError("invalid_request", "raindropMove requires commandId, connectionId, itemId, sourceId, expectedRevision, sourceCollectionId, and destination");
+        const result = await this.invoke({ operation: "knowledge.raindrop.move", request: { commandId: parameters.commandId, connectionId: parameters.connectionId, itemId: parameters.itemId, sourceId: parameters.sourceId, expectedRevision: parameters.expectedRevision, sourceCollection: parameters.sourceCollectionId, destination: parameters.destination } }, signal) as { status: string };
+        return { text: `Raindrop move ${result.status}; provider writes require current connection write permission and exact captured source authority.`, details: result };
       }
       case "curate": {
         const response = await this.curate(curationToolRequest(parameters));
         return { text: curationToolText(response), details: response };
       }
-      case "setEnrichmentModel": {
-        if (!parameters.commandId || parameters.expectedConfigRevision === undefined || (!parameters.clearEnrichmentModel && !parameters.enrichmentModel) || (parameters.clearEnrichmentModel && parameters.enrichmentModel)) throw new GatewayError("invalid_request", "setEnrichmentModel requires commandId, expectedConfigRevision, and enrichmentModel or clearEnrichmentModel=true");
-        const config = await this.store.setEnrichmentModel(parameters.commandId, parameters.expectedConfigRevision, parameters.clearEnrichmentModel ? undefined : parameters.enrichmentModel!);
-        return { text: `Summary model ${config.enrichment?.model ?? "cleared"} saved at Knowledge config revision ${config.revision}; Gateway summaries never use observation.model as fallback.`, details: config };
+      case "setKnowledgeModel": {
+        if (!parameters.commandId || parameters.expectedConfigRevision === undefined || (!parameters.clearKnowledgeModel && !parameters.knowledgeModel) || (parameters.clearKnowledgeModel && parameters.knowledgeModel)) throw new GatewayError("invalid_request", "setKnowledgeModel requires commandId, expectedConfigRevision, and knowledgeModel or clearKnowledgeModel=true");
+        const config = await this.store.setKnowledgeModel(parameters.commandId, parameters.expectedConfigRevision, parameters.clearKnowledgeModel ? undefined : parameters.knowledgeModel!);
+        return { text: `Knowledge model ${config.knowledgeModel?.model ?? "cleared"} saved at Knowledge config revision ${config.revision}; Knowledge generation never uses observation.model as fallback.`, details: config };
       }
       case "configureTags": {
         if (!parameters.commandId || parameters.expectedConfigRevision === undefined || !parameters.tagEdit) throw new GatewayError("invalid_request", "Tag configuration requires commandId, expectedConfigRevision and tagEdit");

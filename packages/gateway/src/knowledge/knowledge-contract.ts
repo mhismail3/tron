@@ -134,6 +134,8 @@ export interface SourceAdmissionState {
   status: SourceAdmission;
   reason?: string;
   decidedAt: string;
+  /** Missing on older records; treated as a prior decision, never as intake-owned. */
+  producer?: SourceCurationProducer;
   profileVersion?: string;
   rubricVersion?: string;
 }
@@ -200,6 +202,8 @@ export interface SourceContent {
   uri?: string;
   /** Provider collection at capture time; provenance, not an admission authority. */
   collectionId?: string;
+  /** Producer of an explicit scope placement, distinct from capture's initial scope. */
+  scopeProducer?: SourceCurationProducer;
   /** Readable extraction, not a substitute for the original object. */
   text?: string;
   /** Immutable original bytes, when captured. */
@@ -402,8 +406,8 @@ export interface KnowledgeConfig {
   /** Monotonically increasing revision for optimistic UI/runtime updates. */
   revision: number;
   eligibility: KnowledgeEligibility;
-  /** Provider used only for saved-source summaries; never inherits observation.model. */
-  enrichment?: { model?: string };
+  /** Explicit model and independent bounds for Knowledge interpretation; never inherits the observer model. */
+  knowledgeModel?: { model?: string; maxInputChars: number; maxOutputChars: number };
   observation: {
     enabled: boolean;
     model?: string;
@@ -490,6 +494,8 @@ export interface KnowledgeListRequest {
   includeArchived?: boolean;
   /** Explicit intake/audit visibility for connector sources awaiting admission. */
   includePending?: boolean;
+  /** Agent retrieval may hide personal sources without hiding personal notes or observations. */
+  excludePersonalSources?: boolean;
   /** Optional server-side partition for source catalogue projections. */
   sourceAdmission?: SourceAdmission;
   cursor?: string;
@@ -709,10 +715,13 @@ export interface KnowledgeSourceSummaryRequest {
   expectedRevision: string;
 }
 
-export interface KnowledgeTriageRequest {
+export interface KnowledgeSourceAssessmentRequest {
   commandId: string;
   sourceId: string;
   expectedRevision: string;
+  assessor: "jev" | "model";
+  /** Optional stricter cap than Jev's conservative monthly reservation. */
+  maxChargeCents?: number;
 }
 
 export interface KnowledgeSourceAdmissionRequest {
@@ -739,6 +748,7 @@ export type KnowledgeCurationCode =
   | "invalid-input"
   | "unknown-tag"
   | "command-id-reuse"
+  | "decision-authority"
   | "budget-exhausted"
   | "model-not-configured"
   | "unavailable"
@@ -767,8 +777,8 @@ export interface KnowledgeCurationItem {
   tagIds?: string[];
   /** Optional tager fence: rejects publication if the taxonomy edition changed while Jev ran. */
   vocabularyRevision?: number;
-  /** `verdict` only. */
-  verdict?: { verdict: SourceVerdict; supersededBy?: string; reason?: string };
+  /** `verdict` only. `clear` removes the current verdict as a revisioned curation. */
+  verdict?: { verdict?: SourceVerdict; clear?: true; supersededBy?: string; reason?: string };
   /** `placement` only; at least one of scope or admission. */
   placement?: { scope?: KnowledgeScope; admission?: SourceAdmission; reason?: string };
   /** `relation` only. */
@@ -856,6 +866,15 @@ export interface KnowledgeSourceSummaryStart {
   record: KnowledgeRecord;
 }
 
+export interface KnowledgeSourceIngestRequest {
+  commandId: string;
+  connector: "raindrop" | "x";
+  connectionId: string;
+  itemId: string;
+  /** Explicit scope chosen by the caller; ingestion has no provider-based default. */
+  scope: KnowledgeScope;
+}
+
 export interface KnowledgeRaindropIntakeRequest {
   commandId: string;
   connectionId?: string;
@@ -904,7 +923,10 @@ export interface KnowledgeConnectorConfigurationRequest {
 }
 
 export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; connectionId?: string; }
-export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; dryRun: boolean; limit?: number; sourceCollection?: string; }
+export interface KnowledgeConnectorDiscoverRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; limit?: number; sourceCollection?: string; }
+export interface KnowledgeConnectorQueueRequest { connector: "raindrop" | "x"; connectionId: string; limit?: number; sourceCollection?: string; }
+export interface KnowledgeConnectorAckRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; itemId: string; disposition: "processed" | "skipped"; reason: string; }
+export interface KnowledgeRaindropMoveRequest { commandId: string; connectionId: string; itemId: string; sourceId: string; expectedRevision: string; sourceCollection: string; destination: string; }
 
 /** Read-only Raindrop API access. Every request revalidates the authenticated
  * user against the configured accountId; returned provider objects are raw
@@ -947,6 +969,7 @@ export interface KnowledgeConnectorState {
   /** Per-provider-collection pagination checkpoints; never a complete remote snapshot. */
   checkpoints?: Record<string, string>;
   pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; savedAt?: string; collectionId?: string; apiPayload?: string; metadataComplete?: boolean }>;
+  processedItems?: Array<{ id: string; disposition: "processed" | "skipped"; reason: string; collectionId?: string; processedAt: string }>;
   capturedIds: string[];
   /** Last mapped collection observed for processed Raindrop item identities. */
   capturedCollections?: Record<string, string>;
@@ -1051,7 +1074,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.note.create"; request: KnowledgeNoteMutationRequest & { recordId?: never } }
   | { operation: "knowledge.note.update"; request: KnowledgeNoteMutationRequest & { recordId: string } }
   | { operation: "knowledge.reflect"; request: KnowledgeReflectRequest }
-  | { operation: "knowledge.source.triage"; request: KnowledgeTriageRequest }
+  | { operation: "knowledge.source.assess"; request: KnowledgeSourceAssessmentRequest }
   | { operation: "knowledge.source.summarize"; request: KnowledgeSourceSummaryRequest }
   | { operation: "knowledge.source.reextract"; request: KnowledgeSourceReextractRequest }
   | { operation: "knowledge.source.admission"; request: KnowledgeSourceAdmissionRequest }
@@ -1069,8 +1092,12 @@ export type KnowledgeAction =
   | { operation: "knowledge.connector.configure"; request: KnowledgeConnectorConfigurationRequest }
   | { operation: "knowledge.connector.assessment.approve"; request: KnowledgeAssessmentApprovalRequest }
   | { operation: "knowledge.connector.status"; request: KnowledgeConnectorStatusRequest }
-  | { operation: "knowledge.connector.run"; request: KnowledgeConnectorRunRequest }
+  | { operation: "knowledge.connector.discover"; request: KnowledgeConnectorDiscoverRequest }
+  | { operation: "knowledge.connector.queue"; request: KnowledgeConnectorQueueRequest }
+  | { operation: "knowledge.connector.ack"; request: KnowledgeConnectorAckRequest }
+  | { operation: "knowledge.raindrop.move"; request: KnowledgeRaindropMoveRequest }
   | { operation: "knowledge.raindrop.intake"; request: KnowledgeRaindropIntakeRequest }
+  | { operation: "knowledge.source.ingest"; request: KnowledgeSourceIngestRequest }
   | { operation: "knowledge.raindrop.read"; request: KnowledgeRaindropRequest };
 
 const ID = /^[A-Za-z0-9._:-]{1,200}$/;
@@ -1298,8 +1325,10 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       if (!admission || typeof admission !== "object" || Array.isArray(admission) || !["pending", "retained", "archived"].includes(admission.status as string)) throw new Error("Invalid source admission");
       assertTimestamp(admission.decidedAt, "source admission decidedAt");
       if (admission.reason !== undefined) boundedString(admission.reason, "source admission reason", 2_000);
+      if (admission.producer !== undefined) assertCurationProducer(admission.producer);
       for (const key of ["profileVersion", "rubricVersion"] as const) if (admission[key] !== undefined) boundedString(admission[key], `source admission ${key}`, 200);
     }
+    if (content.scopeProducer !== undefined) assertCurationProducer(content.scopeProducer);
     if (content.retention !== undefined) {
       const retention = content.retention as Record<string, unknown>;
       if (!retention || typeof retention !== "object" || Array.isArray(retention) || !["public", "restricted", "private"].includes(retention.sensitivity as string) || typeof retention.evidenceAvailable !== "boolean") throw new Error("Invalid source retention");
@@ -1361,13 +1390,12 @@ export function validateKnowledgeConfig(value: unknown): KnowledgeConfig {
   const maxAttempts = observation?.maxAttempts;
   const maximumSearchResults = config.maximumSearchResults;
   const eligibility = config.eligibility as Record<string, unknown>;
+  const knowledgeModel = config.knowledgeModel as Record<string, unknown> | undefined;
+  if (Object.keys(config).some(key => !["schemaVersion", "revision", "eligibility", "knowledgeModel", "observation", "maximumSearchResults", "currentInterests", "tagVocabulary"].includes(key))) throw new Error("Invalid knowledge configuration");
   if (config.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof config.revision !== "number" || !Number.isSafeInteger(config.revision) || config.revision < 0 || !eligibility || typeof eligibility !== "object" || !Array.isArray(eligibility.sessionIds) || !Array.isArray(eligibility.projectIds) || !Array.isArray(eligibility.excludedSessionIds) || !Array.isArray(eligibility.excludedProjectIds) || !eligibility.sessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.projectIds.every(item => { try { assertKnowledgeProjectId(item, "project id"); return true; } catch { return false; } }) || !eligibility.excludedSessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.excludedProjectIds.every(item => { try { assertKnowledgeProjectId(item, "excluded project id"); return true; } catch { return false; } }) || !observation || typeof observation !== "object" || typeof observation.enabled !== "boolean" || typeof maxInputChars !== "number" || !Number.isSafeInteger(maxInputChars) || maxInputChars < 1_000 || maxInputChars > 200_000 || typeof maxOutputChars !== "number" || !Number.isSafeInteger(maxOutputChars) || maxOutputChars < 100 || maxOutputChars > 50_000 || typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000 || typeof maxAttempts !== "number" || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3 || typeof maximumSearchResults !== "number" || !Number.isSafeInteger(maximumSearchResults) || maximumSearchResults < 1 || maximumSearchResults > 100) throw new Error("Invalid knowledge configuration");
   if (eligibility.allSessions !== undefined && eligibility.allSessions !== true) throw new Error("Invalid global observation grant");
   if (observation.model !== undefined && (typeof observation.model !== "string" || observation.model.length === 0 || observation.model.length > 200)) throw new Error("Invalid observation model");
-  if (config.enrichment !== undefined) {
-    const enrichment = config.enrichment as Record<string, unknown>;
-    if (!enrichment || typeof enrichment !== "object" || Array.isArray(enrichment) || Object.keys(enrichment).some(key => key !== "model") || (enrichment.model !== undefined && (typeof enrichment.model !== "string" || enrichment.model.length === 0 || enrichment.model.length > 200))) throw new Error("Invalid Knowledge enrichment model");
-  }
+  if (knowledgeModel !== undefined && (!knowledgeModel || typeof knowledgeModel !== "object" || Array.isArray(knowledgeModel) || Object.keys(knowledgeModel).some(key => !["model", "maxInputChars", "maxOutputChars"].includes(key)) || (knowledgeModel.model !== undefined && (typeof knowledgeModel.model !== "string" || knowledgeModel.model.length === 0 || knowledgeModel.model.length > 200)) || typeof knowledgeModel.maxInputChars !== "number" || !Number.isSafeInteger(knowledgeModel.maxInputChars) || knowledgeModel.maxInputChars < 1_000 || knowledgeModel.maxInputChars > 200_000 || typeof knowledgeModel.maxOutputChars !== "number" || !Number.isSafeInteger(knowledgeModel.maxOutputChars) || knowledgeModel.maxOutputChars < 100 || knowledgeModel.maxOutputChars > 50_000)) throw new Error("Invalid Knowledge model configuration");
   if (config.currentInterests !== undefined && (!Array.isArray(config.currentInterests) || config.currentInterests.length > 50 || !config.currentInterests.every(item => typeof item === "string" && item.length > 0 && item.length <= 500))) throw new Error("Invalid current interests");
   const tagVocabulary = config.tagVocabulary ?? { revision: 0, tags: [], guidelines: "" };
   validateKnowledgeTagVocabulary(tagVocabulary);
