@@ -45,6 +45,7 @@ export interface InvocationExecutionContext {
 }
 const invocationStorage = new AsyncLocalStorage<InvocationExecutionContext>();
 const attributedCommandOwners = new WeakMap<RegisteredCommand["handler"], Extension>();
+const builtinMcpCommandHandlers = new WeakSet<RegisteredCommand["handler"]>();
 const attributedToolOwners = new WeakMap<ToolDefinition["execute"], Extension>();
 /** Every callback admitted at this boundary, keyed by its owning extension, so
  * repeat registration of the same function by one extension cannot double-wrap
@@ -56,6 +57,9 @@ export function currentExtensionOwner(): ExtensionOwner | undefined { return own
 export function currentInvocationContext(): InvocationExecutionContext | undefined { return invocationStorage.getStore(); }
 export function withInvocationContext<T>(context: InvocationExecutionContext, operation: () => T): T {
   return invocationStorage.run(context, operation);
+}
+export function isBuiltinMcpCommand(command: RegisteredCommand | undefined): boolean {
+  return command !== undefined && builtinMcpCommandHandlers.has(command.handler);
 }
 export function attributedCommandOwner(command: RegisteredCommand | undefined): ExtensionOwner | undefined {
   const extension = command ? attributedCommandOwners.get(command.handler) : undefined;
@@ -257,6 +261,7 @@ function admitCommand(state: RegistrationAdmission, name: string, command: Regis
     : command.handler;
   const handler = ownCallback(callback, state.extension);
   attributedCommandOwners.set(handler, state.extension);
+  if (state.extension.sourceInfo.path === "builtin:mcp" && name === "mcp") builtinMcpCommandHandlers.add(handler);
   return { ...command, handler };
 }
 

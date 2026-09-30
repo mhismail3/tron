@@ -251,9 +251,11 @@ export class AuthBroker {
   }
 
   /** Publish Pi's provider-authored authorization URL through the operation. */
-  openMcpAuthorizationUrl(operationId: string, url: string): void {
+  openMcpAuthorizationUrl(operationId: string, url: string, sessionId: string, server: string): void {
     const operation = this.operations.get(operationId);
-    if (!operation || operation.target === undefined || operation.providerId !== "mcp") {
+    const target = operation?.target as { kind?: unknown; sessionId?: unknown; server?: unknown } | undefined;
+    if (!operation || operation.providerId !== "mcp" || target?.kind !== "mcp"
+      || target.sessionId !== sessionId || target.server !== server) {
       throw new GatewayError("conflict", "MCP sign-in has no active Tron authorization operation");
     }
     operation.notify?.({ type: "auth_url", url });

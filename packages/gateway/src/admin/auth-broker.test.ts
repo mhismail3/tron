@@ -88,8 +88,10 @@ describe("AuthBroker", () => {
       log: (_level, _message, event) => lifecycle.push(event),
     });
     const admission = broker.startMcp("phone", "device-identity", "mcp-command-0001", "session-1", "fixture", async (_interaction, operationId) => {
+      expect(() => broker.openMcpAuthorizationUrl(operationId, "https://oauth.invalid/authorize", "other-session", "fixture")).toThrow(/no active Tron/u);
+      expect(() => broker.openMcpAuthorizationUrl(operationId, "https://oauth.invalid/authorize", "session-1", "other-server")).toThrow(/no active Tron/u);
       broker.openMcpAuthorizationUrl(operationId,
-        `https://oauth.invalid/authorize?client_id=fixture&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${address.port}/callback`)}&state=state-1`);
+        `https://oauth.invalid/authorize?client_id=fixture&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${address.port}/callback`)}&state=state-1`, "session-1", "fixture");
       await callbackReceived;
     });
     try {
@@ -122,7 +124,7 @@ describe("AuthBroker", () => {
       log: (_level, message, event) => logs.push({ message, event }),
     });
     const admission = broker.startMcp("phone", "owner", "mcp-command-failure", "session-fail", "fixture", async (_interaction, operationId) => {
-      broker.openMcpAuthorizationUrl(operationId, `https://oauth.invalid/authorize?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${address.port}/callback`)}&state=state`);
+      broker.openMcpAuthorizationUrl(operationId, `https://oauth.invalid/authorize?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${address.port}/callback`)}&state=state`, "session-fail", "fixture");
       await new Promise<void>((resolve) => _interaction.signal?.addEventListener("abort", () => resolve(), { once: true }));
     });
     await waitFor(() => events.some((event) => event.topic === "auth.event"));
@@ -142,7 +144,7 @@ describe("AuthBroker", () => {
     await waitFor(() => events.some((event) => event.topic === "auth.prompt"));
     broker.cancelSession("session-2");
     expect(broker.activeOperationCount).toBe(0);
-    expect(() => broker.openMcpAuthorizationUrl(admission.operationId, "https://oauth.invalid/authorize")).toThrow(/no active Tron/);
+    expect(() => broker.openMcpAuthorizationUrl(admission.operationId, "https://oauth.invalid/authorize", "session-2", "fixture")).toThrow(/no active Tron/);
   });
   it("uses the shared operation timeout for a waiting MCP pasted-redirect prompt", async () => {
     vi.useFakeTimers();

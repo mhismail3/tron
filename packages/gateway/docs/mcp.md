@@ -10,8 +10,12 @@ trust decision admits it. Session runtimes and session-free extension discovery 
 MCP logs remain under the Pi agent directory; OAuth credentials are managed by
 Pi's built-in credential store. Static bearer tokens entered through Tron are
 stored by the Mac Keychain owner, with only a `!command` lookup reference in
-`mcp.json`; their values never enter RPC results. Each loaded runtime maintains
-its own MCP connections, including one stdio server process per configured
+`mcp.json`; their values never enter RPC results. The command resolves the
+complete `Bearer <token>` header value. This design has an accepted local-user
+residual risk: any process running as the macOS user can invoke `/usr/bin/security`
+to read a stored bearer token without a prompt. Keychain storage protects the
+secret from files and projections, not from other processes running as that user.
+Each loaded runtime maintains its own MCP connections, including one stdio server process per configured
 active stdio server in that runtime; this is not a process shared across session
 runtimes.
 
@@ -37,7 +41,12 @@ and per-tool exposure. MCP uses Pi's `mcp.json` and `mcp-auth.json` for server a
 Tron does not maintain a second server schema. Runtime fixture coverage for
 stdio/HTTP exposure, resource reads, `list_changed`, lazy reconnect, and process
 group cleanup lives in `src/sessions/runtime-registry.integration.test.ts`.
-The explicit admin status command's bounded startup/config diagnostics are
+The explicit admin status command accepts Pi's valid JSON output for CLI exit
+codes 0 and 1 (the latter reports unhealthy servers) and projects a bounded
+wire shape: at most 128 servers, each with `name`, `state`, `scope`, `enabled`,
+`transport`, and at most 128 tool names; each string is capped at 256 characters
+(except `state`, capped at 64). `errors` is a count, not a copy of Pi diagnostic
+objects. The captured pinned CLI payload fixture and startup/config behavior are
 covered by `src/admin/mcp-admin-service.test.ts`; sign-in relay outcomes and
 callback safety are covered by `src/admin/auth-broker.test.ts` and the local
 OAuth fixture in `src/admin/mcp-auth.integration.test.ts`.

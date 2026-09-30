@@ -37,7 +37,7 @@ import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
-import { currentMcpAuthOperationId } from "../extensions/extension-adapters.js";
+import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
   ChatOrigin,
   CommandDetail,
@@ -102,7 +102,7 @@ import {
 } from "./projection.js";
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
-import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
+import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
@@ -399,7 +399,7 @@ export interface RuntimeSlotDependencies {
   agentDir: string;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
-  mcpAuth?: { openUrl(operationId: string, url: string): void };
+  mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
   trust: TrustService;
   blobs: BlobStore;
@@ -960,6 +960,9 @@ export class RuntimeSlot {
 
   get id(): string {
     return this.sessionManager.getSessionId();
+  }
+  hasBuiltinMcpCommand(): boolean {
+    return isBuiltinMcpCommand(this.runtime.session.extensionRunner.getCommand("mcp"));
   }
 
   /** Read-only owner seam for bounded derived projections; callers never
@@ -1536,7 +1539,11 @@ export class RuntimeSlot {
               if (!operationId || !this.dependencies.mcpAuth) {
                 throw new Error("MCP authorization URL has no active Tron sign-in operation");
               }
-              this.dependencies.mcpAuth.openUrl(operationId, url);
+              const target = currentMcpAuthTarget();
+              if (!target?.sessionId || !target.server || target.sessionId !== this.id) {
+                throw new Error("MCP authorization URL does not match the active session operation");
+              }
+              this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
             ...tronModuleFactories({
               sessionId: () => this.id,

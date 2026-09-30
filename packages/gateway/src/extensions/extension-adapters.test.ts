@@ -99,6 +99,35 @@ const single = {
 };
 
 describe("MCP auth command adapter", () => {
+  it("settles the auth command as failed when Pi reports an error notification", async () => {
+    const settled: unknown[] = [];
+    const notices: unknown[] = [];
+    const handler = adaptMcpAuthCommandHandler(async (_args: string, context: any) => {
+      context.ui.notify('Server "missing" does not use OAuth', "error");
+      return "normal return";
+    });
+    await withMcpAuthInteraction("operation-failed", { prompt: async () => undefined, notify: event => notices.push(event) },
+      () => handler("login missing", { ui: { notify: () => {} } }), error => { settled.push(error); });
+    expect(notices).toHaveLength(1);
+    expect(settled[0]).toBeInstanceOf(Error);
+    expect((settled[0] as Error).message).toContain("does not use OAuth");
+  });
+
+  it.each([
+    ["Pi cancellation", "Sign-in cancelled.", "info"],
+    ["non-OAuth server", "No enabled MCP server uses OAuth. Only HTTP servers without an Authorization header do.", "info"],
+  ] as const)("settles MCP auth failure for %s", async (_name, message, level) => {
+    const settled: unknown[] = [];
+    const handler = adaptMcpAuthCommandHandler(async (_args: string, context: any) => {
+      context.ui.notify(message, level);
+      return "normal return";
+    });
+    await withMcpAuthInteraction("operation-failed", { prompt: async () => undefined, notify: () => {} },
+      () => handler("login fixture", { ui: { notify: () => {} } }), error => { settled.push(error); });
+    expect(settled[0]).toBeInstanceOf(Error);
+    expect((settled[0] as Error).message).toBe(message);
+  });
+
   it("routes operation-scoped input and notifications while preserving ordinary command UI", async () => {
     const prompts: unknown[] = [];
     const notices: unknown[] = [];

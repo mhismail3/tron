@@ -11,6 +11,8 @@ import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js"
 const ASK_USER_MARKER = "\0XYZ_ASK_USER";
 const mcpAuthContext = new AsyncLocalStorage<{
   operationId: string;
+  sessionId?: string;
+  server?: string;
   interaction: AuthInteraction;
   commandFinished?: (error?: unknown) => void;
 }>();
@@ -20,12 +22,17 @@ export function withMcpAuthInteraction<T>(
   interaction: AuthInteraction,
   action: () => T,
   commandFinished?: (error?: unknown) => void,
+  target?: { sessionId: string; server: string },
 ): T {
-  return mcpAuthContext.run({ operationId, interaction, ...(commandFinished ? { commandFinished } : {}) }, action);
+  return mcpAuthContext.run({ operationId, interaction, ...(target ?? {}), ...(commandFinished ? { commandFinished } : {}) }, action);
 }
 
 export function currentMcpAuthOperationId(): string | undefined {
   return mcpAuthContext.getStore()?.operationId;
+}
+export function currentMcpAuthTarget(): { sessionId?: string; server?: string } | undefined {
+  const active = mcpAuthContext.getStore();
+  return active ? { ...(active.sessionId ? { sessionId: active.sessionId } : {}), ...(active.server ? { server: active.server } : {}) } : undefined;
 }
 
 export function currentMcpAuthInteraction(): AuthInteraction | undefined {
@@ -51,6 +58,10 @@ export function adaptMcpAuthCommandHandler<T extends (...args: any[]) => any>(ha
           return active.interaction.prompt({ type: "manual_code", message, ...(placeholder ? { placeholder } : {}), ...(signal ? { signal } : {}) });
         };
         if (property === "notify") return (message: string, level?: "info" | "warning" | "error") => {
+          if (level === "error" || message === "Sign-in cancelled."
+            || message.startsWith("No enabled MCP server uses OAuth.")) {
+            active.commandFinished?.(new Error(message));
+          }
           active.interaction.notify({ type: "info", message: `[${level ?? "info"}] ${message}` });
         };
         return Reflect.get(target, property, receiver);

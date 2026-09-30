@@ -529,8 +529,10 @@ export class GatewayService {
         });
       case "mcp.token.set":
         return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "token"], method);
           const scope = await this.mcpScope(params);
           const server = string(params.server, "server", { min: 1, max: 128 });
+          if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
           const token = string(params.token, "token", { min: 1, max: 16_384 });
           return safeJson(await this.requireMcpAdmin().storeBearer(scope, server, token));
         });
@@ -1727,6 +1729,7 @@ export class GatewayService {
         const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
         if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
         const slot = await this.openedSlot(client, { sessionId });
+        if (!slot.hasBuiltinMcpCommand()) throw new GatewayError("unsupported", "This session does not own Pi's built-in MCP login command");
         const start = () => this.dependencies.auth.startMcp(
           client.id,
           client.identity,
@@ -1743,7 +1746,7 @@ export class GatewayService {
               };
               withMcpAuthInteraction(operationId, interaction, () => {
                 void slot.prompt(`/mcp login ${server}`).catch(finish);
-              }, finish);
+              }, finish, { sessionId, server });
             });
           },
         );

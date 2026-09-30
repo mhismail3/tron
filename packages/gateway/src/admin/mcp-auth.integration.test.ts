@@ -141,7 +141,7 @@ describe("MCP auth relay integration", () => {
         settings: {},
         challenge,
         prompt: {
-          showAuthorizationUrl: (url) => broker.openMcpAuthorizationUrl(operationId, url.href),
+          showAuthorizationUrl: (url) => broker.openMcpAuthorizationUrl(operationId, url.href, "session-1", "fixture"),
           promptForRedirectUrl: async (signal) => {
             await new Promise<void>((resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
             return undefined;

@@ -107,7 +107,7 @@ describe("MCP auth through a live Gateway session", () => {
     const registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
       modelRuntimeFactory: async () => runtime,
-      mcpAuth: { openUrl: (operationId, url) => auth.openMcpAuthorizationUrl(operationId, url) },
+      mcpAuth: { openUrl: (operationId, url, targetSession, server) => auth.openMcpAuthorizationUrl(operationId, url, targetSession, server) },
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry); await registry.initialize();
@@ -120,7 +120,22 @@ describe("MCP auth through a live Gateway session", () => {
     } as unknown as GatewayServiceDependencies);
     await waitFor(() => requests.includes("POST /mcp"));
     await new Promise((resolve) => setTimeout(resolve, 500));
+    await expect(service.invoke(client, "mcp.token.set", {
+      commandId: "mcp-token-invalid-1", scope: "global", server: "invalid/name", token: "secret", unexpected: true,
+    })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.invoke(client, "mcp.token.set", {
+      commandId: "mcp-token-invalid-2", scope: "global", server: "invalid/name", token: "secret",
+    })).rejects.toMatchObject({ code: "invalid_request" });
     const sessionId = slot.id;
+    expect(slot.hasBuiltinMcpCommand()).toBe(true);
+    const admittedBuiltinCommand = slot.hasBuiltinMcpCommand.bind(slot);
+    slot.hasBuiltinMcpCommand = () => false;
+    const transcriptBeforeRejectedAuth = slot.snapshot().transcript;
+    await expect(service.invoke(client, "mcp.auth.start", { sessionId, server: "fixture", commandId: "mcp-auth-command-rejected" }))
+      .rejects.toMatchObject({ code: "unsupported" });
+    expect(slot.snapshot().transcript).toEqual(transcriptBeforeRejectedAuth);
+    expect(auth.activeOperationCount).toBe(0);
+    slot.hasBuiltinMcpCommand = admittedBuiltinCommand;
     faux.setResponses([async () => fauxAssistantMessage("login command handled")]);
     await service.invoke(client, "mcp.auth.start", { sessionId, server: "fixture", commandId: "mcp-auth-command-001" });
     await vi.waitFor(() => expect(events.some((event) => event.topic === "auth.event" && (event.payload as any).event?.type === "auth_url")).toBe(true), { timeout: 10_000, interval: 10 }).catch((error) => { throw new Error(`no auth URL event; events=${JSON.stringify(events)} authLog=${JSON.stringify(authLog)} active=${auth.activeOperationCount} requests=${JSON.stringify(requests)}`, { cause: error }); });
@@ -171,7 +186,7 @@ describe("MCP auth through a live Gateway session", () => {
     const auth = new AuthBroker(runtime, (_client, topic, payload) => authEvents.push({ topic, payload }));
     const registry = new RuntimeRegistry({ agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
       modelRuntimeFactory: async () => runtime,
-      mcpAuth: { openUrl: (operationId, url) => { browserOpenCount += 1; auth.openMcpAuthorizationUrl(operationId, url); } }, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      mcpAuth: { openUrl: (operationId, url, targetSession, server) => { browserOpenCount += 1; auth.openMcpAuthorizationUrl(operationId, url, targetSession, server); } }, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry); await registry.initialize();
     const slot = await registry.create(cwd), model = faux.getModel(); await slot.setModel(model.provider, model.id);

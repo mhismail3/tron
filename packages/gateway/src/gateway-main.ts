@@ -217,7 +217,7 @@ const sessions = new RuntimeRegistry({
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
-  mcpAuth: { openUrl: (operationId, url) => auth.openMcpAuthorizationUrl(operationId, url) },
+  mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
   trust,
