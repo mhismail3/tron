@@ -262,12 +262,14 @@ function currentBranch(worktree) {
 // `payloadManifest`), so uncommitted work never alters the revision: it is
 // measured apart, before the build, as any non-ignored change including
 // untracked files the build may compile in. The version label is free-form.
+// `--no-optional-locks` keeps `git status` from rewriting (and locking) the
+// index of a checkout other sessions may be using.
 function candidateSource(worktree) {
   const root = text(worktree, "");
   if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
   const gitOutput = (...argumentsList) => execFileSync("git", ["-C", root, ...argumentsList], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 16 * 1024 * 1024 });
   const revision = gitOutput("rev-parse", "--verify", "HEAD").trim();
-  const dirty = gitOutput("status", "--porcelain", "--untracked-files=normal").trim() !== "";
+  const dirty = gitOutput("--no-optional-locks", "status", "--porcelain", "--untracked-files=normal").trim() !== "";
   const stamp = new Date().toISOString().replace(/[-:T]/gu, "").slice(0, 14);
   return { revision, dirty, version: `debug-${revision.slice(0, 12)}${dirty ? "-dirty" : ""}-${stamp}` };
 }

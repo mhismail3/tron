@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -193,6 +193,8 @@ test("Debug source records keep the running candidate while later builds never r
 // 10. Status reports the dirtiness of the latest build rather than of the
 //     running candidate, or reports an unrecorded one as clean.
 // 11. A malformed dirty value is recorded instead of failing closed.
+// 12. Measuring dirtiness rewrites the source checkout's index (taking its
+//     index.lock), so a concurrent git command there fails.
 const candidateSource = (worktree) => {
   const [revision, dirty, version, ...rest] = execFileSync(process.execPath, [helper, "candidate-source", worktree], { encoding: "utf8" }).trim().split(" ");
   assert.deepEqual(rest, []);
@@ -227,6 +229,24 @@ test("Debug candidate source is the full HEAD with dirtiness measured apart", ()
     writeFileSync(join(worktree, "new-module.ts"), "export {};\n");
     git(worktree, "config", "status.showUntrackedFiles", "no");
     assert.deepEqual(candidateSource(worktree).dirty, "true");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Debug candidate source leaves the source checkout's index untouched", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-source-"));
+  try {
+    const worktree = sourceFixture(root, "source", "feat/source");
+    writeFileSync(join(worktree, "tracked.ts"), "export {};\n");
+    git(worktree, "add", ".");
+    git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "tracked");
+    // Failure mode 12: stale cached stat data is what a refreshing `git status`
+    // would write back; the measurement must not.
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(join(worktree, "tracked.ts"), later, later);
+    const index = join(worktree, ".git", "index");
+    const before = readFileSync(index);
+    assert.equal(candidateSource(worktree).dirty, "false");
+    assert.ok(readFileSync(index).equals(before), "candidate-source rewrote the source index");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

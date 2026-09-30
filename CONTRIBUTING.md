@@ -128,7 +128,8 @@ staged candidate's runtime epoch (eight records, always keeping the running
 one); status resolves them from the epoch that reached readiness, so a failed
 restart from another worktree never relabels the running Gateway, even when
 both checkouts build the same payload fingerprint. Unknown values report
-`null`: all three for an unrecorded epoch, and the branch of a detached checkout.
+`null`: all three for an unrecorded epoch, dirtiness for a record written
+before it was recorded, and the branch of a detached checkout.
 `scripts/tron dev stop` is also build-free and refuses to trust a stale or
 reused PID based on `kill -0` alone. The supervisor atomically publishes bounded lifecycle state:
 `starting`, `ready`, `stopping`, `restarting`, `failed`, or `stopped`. Lifecycle writes use the explicit transition table in `scripts/tron-dev-state.mjs`; illegal regressions fail closed. Exit 75
