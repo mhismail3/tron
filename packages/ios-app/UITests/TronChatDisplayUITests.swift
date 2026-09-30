@@ -48,7 +48,9 @@ final class TronChatDisplayUITests: XCTestCase {
           for accessories in [false, true] {
             let app = launch(orientation, accessories: accessories)
             if accessories { XCTAssertTrue(app.buttons["Remove Photo"].waitForExistence(timeout: 5)) }
-            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 60, dy: 30)).tap()
+            let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            print("STATUS-BAR system=\(system.statusBars.debugDescription) app=\(app.statusBars.debugDescription)")
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 60, dy: 2)).tap()
             let oldest = app.staticTexts["Oldest loaded history"].firstMatch
             let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: oldest)
             let result = XCTWaiter.wait(for: [reached], timeout: 8)
