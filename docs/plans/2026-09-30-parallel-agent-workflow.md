@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, W-4 Done
+- **Last updated:** 2026-09-30, wave 1 claimed (W-5, W-8, W-16 to W-21)
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -200,10 +200,10 @@ Dated 2026-09-30:
 | W-2 | Done | GitHub bootstrap: labels, Project and fields, Epic/Task issue forms, ruleset spec; the user applies the settings and ruleset changes | W-1 | session 01a0f183, 2026-09-30 |
 | W-3 | Done | Shared-resource isolation audit so any two worktrees can validate concurrently; each fix becomes a sub-issue | none | session 01a0f183, 2026-09-30 |
 | W-4 | Done | Core: `start`/claim, naming, soft cap (the config file and `gh` resolution exist since W-2) | W-2 | session 01a0f183, 2026-09-30 |
-| W-5 | Ready | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | Unassigned |
+| W-5 | Claimed | Core: `verify` (diff → check set → run → evidence → receipt) and the incremental re-verify after a `main` update | W-4, W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-6 | Ready | Core: `finish` and `land` (PR with `Closes`, evidence comment, auto-merge, update-and-reverify loop, Needs-you handoff) and a recurring steward for orphaned PRs | W-5 | Unassigned |
 | W-7 | Ready | Core: automatic cleanup of provably done resources; update the housekeeping skill to match | W-6 | Unassigned |
-| W-8 | Ready | Dashboard skill and HTML card | W-4 | Unassigned |
+| W-8 | Claimed | Dashboard skill and HTML card | W-4 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-9 | Ready | CI: required Linux policy job and `tron/verify` status; path-scoped, non-blocking macOS jobs whose failures reach the dashboard (D-4) | W-5 | Unassigned |
 | W-10 | Ready | Scheduled local heavy run on `main` that files `regression` issues | W-5 | Unassigned |
 | W-11 | Ready | Rewrite the guidance: `AGENTS.md` work section, a `tron-work` skill (take a task, dashboard), `CONTRIBUTING.md`, `.agents/README.md`, PR template, retirement notice in `docs/plans/README.md` | W-6, W-8 | Unassigned |
@@ -211,12 +211,12 @@ Dated 2026-09-30:
 | W-13 | Ready | Dependabot intake: each PR becomes an agent-owned `deps` task; the Pi SDK family and Node follow their runbooks | W-6 | Unassigned |
 | W-14 | Ready | One audited legacy sweep of the existing worktrees and branches, with the user approving the exact list | W-7 | Unassigned |
 | W-15 | Ready | Migrate every remaining plan to an epic in the three groups under Task details; retire `docs/plans/` and `docs/plans/HISTORY.md` once empty | W-11, W-12 | Unassigned |
-| W-16 | Ready | #98 iOS Gateway E2E fixture and DerivedData keyed by worktree, with a build-identity check (P1) | W-3 | Unassigned |
-| W-17 | Ready | #99 Default iOS test lane per worktree; E2E and profiler accept lanes; concurrent two-worktree iOS proof (P1) | W-3 | Unassigned |
-| W-18 | Ready | #100 Lease the Development simulator and the physical iPhone (P2) | W-3 | Unassigned |
-| W-19 | Ready | #102 Worktree-relative Mac Release DerivedData; hook installer works from linked worktrees (P2) | W-3 | Unassigned |
-| W-20 | Ready | #103 Dev Gateway status names the worktree and branch it runs (P2) | W-3 | Unassigned |
-| W-21 | Ready | #101 Scope retained test/profile artifacts and `latest` pointers to the worktree (P3) | W-3 | Unassigned |
+| W-16 | Claimed | #98 iOS Gateway E2E fixture and DerivedData keyed by worktree, with a build-identity check (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-17 | Claimed | #99 Default iOS test lane per worktree; E2E and profiler accept lanes; concurrent two-worktree iOS proof (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-18 | Claimed | #100 Lease the Development simulator and the physical iPhone (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-19 | Claimed | #102 Worktree-relative Mac Release DerivedData; hook installer works from linked worktrees (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-20 | Claimed | #103 Dev Gateway status names the worktree and branch it runs (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-21 | Claimed | #101 Scope retained test/profile artifacts and `latest` pointers to the worktree (P3) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 
 ## Task details
 
