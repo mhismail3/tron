@@ -1067,8 +1067,7 @@ export class KnowledgeConnectorExtension {
     const state = await this.store.connectorState("raindrop", request.connectionId);
     const authority = await this.connectionFor(request.connectionId, "raindrop", Boolean(this.options.connections));
     const mappings = authority?.raindropCollections ?? [];
-    const sourceCollection = source.content.collectionId;
-    if (!state?.allowWrites || !authority?.policy.enabled || !authority.policy.allowWrites || authority.providerAccountId !== state.accountId || !sourceCollection) return { status: "unsupported" };
+    if (!state?.allowWrites || !authority?.policy.enabled || !authority.policy.allowWrites || authority.providerAccountId !== state.accountId) return { status: "unsupported" };
     const admission = source.content.admission?.status;
     const role = admission === "archived" ? "archive" : source.scope;
     const home = mappings.find(item => item.role === role);
@@ -1286,16 +1285,14 @@ export class KnowledgeConnectorExtension {
     // JS record cannot bypass forget/exclusion or a source correction.
     let source: KnowledgeRecord | null;
     try { source = await this.store.read(input.source.id, input.expectedRevision, false, true); } catch { return { status: "conflict" }; }
-    if (!source || source.kind !== "source" || !isVerifiedSourceCapture(source) || !["retained", "archived"].includes(source.content.admission?.status ?? "")) return { status: "unsupported" };
-    const sourceCollection = source.content.collectionId;
+    if (!source || source.kind !== "source" || !["retained", "archived"].includes(source.content.admission?.status ?? "")) return { status: "unsupported" };
     const targetRole = source.content.admission?.status === "archived" ? "archive" : source.scope;
     const initialAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
     const destination = initialAuthority?.raindropCollections?.find(mapping => mapping.role === targetRole)?.collectionId;
-    if (!sourceCollection || !destination) return { status: "unsupported" };
-    // The source head's object reference is part of movement authority; a
-    // dangling object must never be acknowledged as a successfully captured
-    // item merely because readable text remains in the revision.
-    if (!source.content.object || !(await this.store.readObject(source.content.object, { recordId: source.id, revisionId: source.revisionId, includeArchived: true }))) return { status: "conflict" };
+    if (!destination) return { status: "unsupported" };
+    // Captured content may be partial or absent: admission plus the live
+    // provider item establish movement authority. Object authorization is
+    // checked below only when a remote move is actually needed.
     const moveAuthorityCurrent = async (): Promise<boolean> => {
       if (this.options.connections) {
         const instance = await this.connectionFor(input.connectionId, "raindrop", true);
@@ -1323,7 +1320,7 @@ export class KnowledgeConnectorExtension {
     // source forget/correction must win over the preflight snapshot.
     const latestState = await this.store.connectorState("raindrop");
     const latestSource = await this.store.read(source.id, undefined, false, true).catch(() => null);
-    if (!latestState?.enabled || !latestState.allowWrites || latestState.accountId !== input.identity.accountId || latestState.credentialRef !== state.credentialRef || !(await moveAuthorityCurrent()) || latestState.paidBudgetCents > 0 || !latestSource || latestSource.kind !== "source" || latestSource.revisionId !== input.expectedRevision || !isVerifiedSourceCapture(latestSource)) return { status: "conflict" };
+    if (!latestState?.enabled || !latestState.allowWrites || latestState.accountId !== input.identity.accountId || latestState.credentialRef !== state.credentialRef || !(await moveAuthorityCurrent()) || latestState.paidBudgetCents > 0 || !latestSource || latestSource.kind !== "source" || latestSource.revisionId !== input.expectedRevision || !["retained", "archived"].includes(latestSource.content.admission?.status ?? "")) return { status: "conflict" };
     await this.verifyRaindropAccount(latestState, token, signal);
     const remoteItemId = id(preflight.value?.item?._id ?? preflight.value?._id, "Raindrop item");
     const originalCollectionId = String(preflight.value?.item?.collection?.$id ?? preflight.value?.collection?.$id ?? "");
@@ -1334,6 +1331,10 @@ export class KnowledgeConnectorExtension {
     // home is "already-home", except when this same operation's move is the
     // durable pending effect (a crash after the PUT): that is its completion.
     if (originalCollectionId === destination) return { status: latestState.pendingRemote?.operationId === input.commandId ? "moved" : "already-home" };
+    // A remote mutation may rely on captured object evidence; if it exists,
+    // verify that the exact source revision owns it. Already-home is a no-op
+    // determined from live provider state and needs no captured object.
+    if (latestSource.content.object && !(await this.store.readObject(latestSource.content.object, { recordId: latestSource.id, revisionId: latestSource.revisionId, includeArchived: true }))) return { status: "conflict" };
     const liveAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
     if (!liveAuthority?.raindropCollections?.some(mapping => mapping.collectionId === originalCollectionId)) return { status: "conflict" };
     const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: latestSource.id, basisRevisionId: latestSource.revisionId, provider: input.identity.provider, accountId: input.identity.accountId, originalCollectionId, destination, createdAt: this.now() };

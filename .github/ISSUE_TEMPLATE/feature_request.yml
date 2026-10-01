@@ -1,7 +1,7 @@
 name: Feature request
 description: Suggest a new tool or improvement.
 title: "[Feature]: "
-labels: ["enhancement", "needs-triage"]
+labels: ["kind:idea", "needs-triage"]
 body:
   - type: markdown
     attributes:
