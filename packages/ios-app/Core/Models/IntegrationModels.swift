@@ -163,21 +163,3 @@ package struct IntegrationSetupCompleted: Codable, Hashable, Sendable {
     package let setupRevision: Int
     let lastError: String?
 }
-
-package struct IntegrationSetupConfiguration: Codable, Hashable, Sendable {
-    let transport: String
-    let endpoint: String?
-    let command: String?
-    let args: [String]?
-    let cwd: String?
-    let env: [String: String]?
-
-    package init(transport: String, endpoint: String?, command: String?, args: [String]?, cwd: String?, env: [String: String]?) {
-        self.transport = transport
-        self.endpoint = endpoint
-        self.command = command
-        self.args = args
-        self.cwd = cwd
-        self.env = env
-    }
-}

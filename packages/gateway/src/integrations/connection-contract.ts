@@ -34,6 +34,7 @@ export interface ConnectionPolicy {
   enabled: boolean;
   allowWrites: boolean;
   paidAccessApproved: boolean;
+  /** User-approved monthly paid-spend cap; consumers own usage ledgers separately. */
   paidBudgetCents: number;
   recurringApproved: boolean;
 }

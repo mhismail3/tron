@@ -77,8 +77,7 @@ final class IntegrationsRPCClient {
         providerAccountID: String,
         scope: String?,
         credentialRef: String,
-        policy: IntegrationPolicy,
-        configuration: IntegrationSetupConfiguration?
+        policy: IntegrationPolicy
     ) async throws -> IntegrationSetupCompleted {
         struct Params: Encodable {
             let operationId: String
@@ -87,11 +86,10 @@ final class IntegrationsRPCClient {
             let scope: String?
             let credentialRef: String
             let policy: IntegrationPolicy
-            let configuration: IntegrationSetupConfiguration?
         }
         let value: IntegrationSetupCompleted = try await mutate(
             "connections.setup.complete",
-            parameters: Params(operationId: operationID, instanceId: instanceID, providerAccountId: providerAccountID, scope: scope, credentialRef: credentialRef, policy: policy, configuration: configuration)
+            parameters: Params(operationId: operationID, instanceId: instanceID, providerAccountId: providerAccountID, scope: scope, credentialRef: credentialRef, policy: policy)
         )
         guard value.id == instanceID, !value.definitionId.isEmpty, value.setupRevision >= 1 else { throw invalidResponse() }
         return value

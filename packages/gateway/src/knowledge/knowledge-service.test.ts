@@ -96,6 +96,19 @@ describe("KnowledgeService integration", () => {
     expect((await store.read(source.record.id))?.content.summary).toBeUndefined();
   });
 
+  it("refuses a configured but unresolved model by ID before source summary generation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-source-summary-unresolved-model-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const config = await store.config();
+    await store.configure("unresolved-model-config", { ...config, knowledgeModel: { model: "openai-codex/gpt-6-luna", maxInputChars: 48_000, maxOutputChars: 8_000 } });
+    const source = await store.captureSource({ commandId: "unresolved-model-source", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Evidence", text: "bounded evidence", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
+    let modelLookups = 0;
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => { modelLookups += 1; return undefined; });
+    await service.invoke({ operation: "knowledge.source.summarize", request: { commandId: "unresolved-model-job", sourceId: source.record.id, expectedRevision: source.record.revisionId } });
+    expect(await waitForJob(service, "unresolved-model-job")).toMatchObject({ status: "failed", reason: "model not available: openai-codex/gpt-6-luna" });
+    expect(modelLookups).toBe(1);
+  });
+
   it("generates an explicit source-content summary against the exact saved revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-source-summary-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

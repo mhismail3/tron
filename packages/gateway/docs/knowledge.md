@@ -750,19 +750,18 @@ are shape failures, never empty pages. Credential references are admitted only i
 the exact `connector:<provider>:...` namespace; a legacy mismatch requires
 explicit reconfiguration and is never read as a different provider token. When the
 Keychain item for a connection's credential is missing, the connector failure names
-the Mac Keychain service and the exact account to add, never a token. X uses OAuth 2.0 Authorization Code with PKCE as a public client: setup requests `tweet.read users.read bookmark.read offline.access`, accepts the exact HTTPS callback URI and a user-pasted redirect URL or code/state, and verifies one-time state before exchange. The client ID is public; no app secret is accepted. The verifier and state are short-lived in Gateway memory. Access and rotating refresh tokens are stored only in the Mac Keychain; refresh-token rotation is written before its access token is used. A refresh checks current connection authority before spending the single-use refresh token; if setup changes during the provider response, the rotated token is still persisted but its access token is not used. X refreshes once when a token is near expiry or an API call returns 401, even when the discovery transport attempt budget is one; failed refresh marks the connection `auth-error` only if its setup revision is still current and requires reconnection. Every actual X API discovery request, including retry/pagination attempts, debits the existing bounded paid-attempt budget immediately before dispatch. `knowledge.x.credits` is a connection-scoped read routed as a Gateway read and drain-allow-listed; it returns the API's `free_balance`, `prepaid_balance`, and `total_balance` as USD balances. The provider's reported `total_balance` is returned as-is after all three balances are validated as finite numbers and free/total are nonnegative; binary floating-point arithmetic is not used to recompute or compare its total. This read does not buy credits or authorize additional discovery spend.
+the Mac Keychain service and the exact account to add, never a token. X uses OAuth 2.0 Authorization Code with PKCE as a public client: setup requests `tweet.read users.read bookmark.read offline.access`, accepts the exact HTTPS callback URI and a user-pasted redirect URL or code/state, and verifies one-time state before exchange. The client ID is public; no app secret is accepted. The verifier and state are short-lived in Gateway memory. Access and rotating refresh tokens are stored only in the Mac Keychain; refresh-token rotation is written before its access token is used. A refresh checks current connection authority before spending the single-use refresh token; if setup changes during the provider response, the rotated token is still persisted but its access token is not used. X refreshes once when a token is near expiry or an API call returns 401, even when the discovery transport attempt budget is one; failed refresh marks the connection `auth-error` only if its setup revision is still current and requires reconnection. Every X bookmark page uses the OAuth connection's signed-in `providerAccountId` and existing bounded paid budget; no host account or price variables are required. The owned-read rate is $0.001 per returned resource. Before each possible API request (including pagination and safe GET retries), the connector reserves the page's requested maximum at that rate. The budget is integer cents, so both reservation and settlement round up: `ceil(requestedResources / 10)` cents is reserved before dispatch, and a valid successful response settles `ceil(returnedResources / 10)` cents. The unused reservation is returned. A received 4xx response has no returned resources and settles at zero; server errors, malformed success envelopes, and network uncertainty keep the reservation because provider dispatch may have incurred spend. Pages request no more resources than the caller's remaining bounded limit. An unapproved or insufficient budget refuses before X API discovery; each retry/page rechecks current account, approval, and available budget. `knowledge.x.credits` is a connection-scoped read routed as a Gateway read and drain-allow-listed; it returns the API's `free_balance`, `prepaid_balance`, and `total_balance` as USD balances. The provider's reported `total_balance` is returned as-is after all three balances are validated as finite numbers and free/total are nonnegative; binary floating-point arithmetic is not used to recompute or compare its total. This read does not buy credits or authorize additional discovery spend.
 Paid budgets are rejected until a provider operation has an explicit maintained
-price; approval flags never imply unknown spend. X is not contacted unless both explicit paid-access approval and a positive
-bounded budget are present. Paid qualification is host-owned and requires
-`TRON_X_ACCOUNT_ID`, `TRON_X_COST_CENTS_PER_ATTEMPT`, and
-`TRON_X_MAX_ATTEMPTS` (1–3); missing or malformed values leave X unsupported.
-Each possible X API attempt, including pagination and safe GET retries, debits
-that budget immediately before the request, after resolving the current
-credential. A missing or rotated credential therefore cannot debit a request.
-A new operation uses a distinct attempt receipt, so replay cannot reuse an old
-reservation. Discovery page receipts derive from the top-level command,
-connector, scope, cursor, and page, making crash/replay of one page exact while
-distinct commands remain distinct. Uncertain remote
+price; approval flags never imply unknown spend. Raindrop operations with no
+priced read remain unavailable when a paid budget is configured. X page
+reservations are made after resolving the current credential and immediately
+before each API request, so a missing or rotated credential cannot debit a
+request. Each retry and each page has a distinct reservation; replay cannot reuse
+an old reservation. Successful page settlement is recorded before the page is
+persisted, while malformed success shapes retain the reservation as uncertain.
+Discovery page receipts derive from the top-level command, connector, scope,
+cursor, and page, making crash/replay of one page exact while distinct commands
+remain distinct. Uncertain remote
 PUTs are not retried; the persisted receipt is reconciled before another
 connector effect. Connector status derives configured/disabled state from its
 current credential, account, scope, and enabled authority; stale health markers
@@ -796,8 +795,12 @@ redacted. This is metadata access, not full article capture. `knowledge.connecto
 verifies the provider and discovers bookmarks into the exact connection's queue; it does
 not capture linked pages, create Knowledge sources, decide admission, or move Raindrop
 items. `knowledge.x.credits` reads the OAuth connection's current X developer-platform balance without spending the bookmark-discovery allowance; it returns `freeBalance`, `prepaidBalance`, and `totalBalance` in USD from `GET /2/usage/credits`. The agent-visible `connectorStatus` action (`knowledge.connector.status`)
-reports the connector's remaining X `paidBudgetCents`, not the setup-time cap;
-read it before paid discovery. `knowledge.connector.queue` returns at most 25
+reports the X connection's monthly `capCents` separately from the Knowledge-owned
+usage ledger (`spentCents`, `reservedCents`, `availableCents`, UTC `month`, and
+open `uncertain` attempts); read `availableCents` before paid discovery. An open
+reservation/uncertain dispatch blocks another paid request until the user
+explicitly reconciles that attempt with `reconcileConnectorBudget`; reconciliation
+charges its full reserved page ceiling and never happens automatically. `knowledge.connector.queue` returns at most 25
 items with ID, URL, title, collection, save time, existing-source indicator and
 admission/scope projection, plus exact source and revision IDs when a source
 exists; it never returns
@@ -808,8 +811,8 @@ the linked-capture safety downgrade. It leaves admission pending and does not ac
 assess, or decide. `knowledge.connector.ack` requires processed/skipped plus a bounded
 reason, removes the item from pending, persists bounded processed history, and is
 idempotent. Personal scope remains excluded from work retrieval. `raindropIntake` still owns its
-legacy decision and move workflow until C23, but uses the same ingest primitive
-for source capture. Agent sweeps use the same accepted-work owner as RPC runs, so
+legacy decision and move workflow remains available, but uses the same ingest
+primitive for source capture. Agent sweeps use the same accepted-work owner as RPC runs, so
 disconnecting a presentation waiter does not replay or abandon admitted provider
 work. Connector identity reuse
 resolves through a canonical Knowledge catalog index keyed by
@@ -839,8 +842,12 @@ Knowledge ingestion has four distinct owners:
   discovery, queue inspection, ingest, optional assessment, `curate` admission,
   authorized Raindrop movement, acknowledgment and reporting. Its collection
   scope map and workflow are routine configuration, not connector policy or a
-  second ingestion pipeline. It is bounded and manually invoked; it creates no
-  scheduler or run journal.
+  second ingestion pipeline. Before paid X discovery it checks
+  `connectorStatus.availableCents` against the next page reservation and stops
+  when that amount is insufficient. If `uncertain` is nonempty, it reports the
+  attempt and stops X discovery until the user explicitly approves
+  `reconcileConnectorBudget` (which charges the full reserved page ceiling).
+  It is bounded and manually invoked; it creates no scheduler or run journal.
 
 The store remains authoritative: connector/system writes cannot override a user
 or agent admission or scope decision; connector writer identity is explicit at
@@ -849,12 +856,13 @@ provenance. Mutations remain revision-fenced and receipted; personal sources
 never appear in work retrieval; Jev assessment refuses a source whose current
 scope is personal, before any reservation, and legacy intake routes by the
 source's own scope; provider
-movement requires write permission and an explicit collection destination. The routine's dry run performs no source/admission,
-acknowledgment, remote-move, or paid-assessment effects. It may refresh Raindrop
-queue bookkeeping through free read-only provider discovery, but must not invoke
-paid X discovery; it reports X from its existing queue. Until C23, the legacy
-`knowledge.raindrop.intake` operation remains available and continues using the
-same ingestion primitive.
+movement requires write permission; its destination is derived from the current
+admission and scope and cannot be selected by the caller. The routine's dry run
+performs no source/admission, acknowledgment, remote-move, or paid-assessment
+effects. It may refresh Raindrop queue bookkeeping through free read-only provider
+discovery, but must not invoke paid X discovery; it reports X from its existing
+queue. The `knowledge.raindrop.intake` operation remains available and continues
+using the same ingestion primitive.
 
 ## Bounded Raindrop intake
 
@@ -1022,4 +1030,4 @@ For Raindrop, `ConnectionInstance.raindropCollections` is the sole routing confi
 
 Research and personal homes ingest with their role as Knowledge scope. Triage inboxes require the routine to choose and pass a scope explicitly; archive-role collections are never ingested. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope only when there is no authoritative user/agent admission or placement; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
 
-`raindropMove` accepts no destination from its caller. It derives archive-role home for an archived source and otherwise the home matching the source's Knowledge scope, refusing when that home is unmapped. If the source already resides in that home it returns typed `already-home` success without provider mutation. Remote moves still require `allowWrites`, exact source/object authority, the current setup revision, a durable effect receipt, and provider read-back reconciliation. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.
+`raindropMove` accepts no destination from its caller. It derives archive-role home for an archived source and otherwise the home matching the source's Knowledge scope, refusing when that home is unmapped. The admission decision authorizes movement even for partial captures and records without a captured `collectionId`: captured collection metadata is not authoritative for the bookmark's current location. The operation verifies the exact source revision and provider identity, queries Raindrop for the live item and its mapped collection, and returns typed `already-home` success without a provider mutation when it is already at its derived home. Otherwise, remote moves still require `allowWrites`, current setup and mapping authority, object authorization when captured object evidence exists, a durable effect receipt, and provider read-back reconciliation. Pending admission and unmapped live collections remain refused. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.
