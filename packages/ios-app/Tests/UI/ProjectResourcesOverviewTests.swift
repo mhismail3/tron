@@ -102,13 +102,13 @@ struct ProjectResourcesOverviewTests {
     @Test("the overview groups every available resource once, in plan order")
     func groupOrderAndCompleteness() {
         let content = ProjectResourceOverviewPresentation.content(from: resources)
-        #expect(content.sections.map(\.kind) == [.skills, .subagents, .prompts, .tools, .commands])
-        #expect(content.sections.map(\.kind.rawValue) == ["Skills", "Subagents", "Prompts", "Tools", "Commands"])
+        // Tools are listed once, in Available Tools, not here.
+        #expect(content.sections.map(\.kind) == [.skills, .subagents, .prompts, .commands])
         // The Extensions section left this sheet; its wire field stays decoded
         // by the Hooks views, and no group may claim those rows here.
         #expect(!content.sections.contains { $0.kind.key == "extensions" })
         let counts = Dictionary(uniqueKeysWithValues: content.sections.map { ($0.kind, $0.rows.count) })
-        #expect(counts == [.skills: 1, .prompts: 1, .commands: 1, .tools: 2, .subagents: 2])
+        #expect(counts == [.skills: 1, .prompts: 1, .commands: 1, .subagents: 2])
     }
 
     @Test("only extension commands appear in the Commands group")
@@ -128,16 +128,15 @@ struct ProjectResourcesOverviewTests {
         let content = ProjectResourceOverviewPresentation.content(from: resources)
         let rows = content.sections.flatMap(\.rows)
         let byTitle = Dictionary(uniqueKeysWithValues: rows.map { ($0.title, $0) })
-        #expect(byTitle["Subagent"]?.distribution == .external)
+        // The builtin-sourced subagent is distributed by its package: the tag
+        // follows the distribution field, not the source.
+        #expect(rows.first { $0.value.objectValue?["name"]?.stringValue == "worker" }?.distribution == .external)
         #expect(byTitle["Repo Optimizer"]?.distribution == .local)
         #expect(byTitle["Robust Change"]?.distribution == .local)
         #expect(byTitle["Tron Review"]?.distribution == .module)
-        // Pi built-ins carry no distribution and keep no tag.
-        #expect(byTitle["Read File"]?.distribution == nil)
         // A local top-level resource keeps Pi's origin on the scope badge while
         // its distribution stays local.
         #expect(byTitle["Robust Change"]?.resourceOrigin == .topLevel)
-        #expect(byTitle["Subagent"]?.resourceOrigin == .package)
     }
 
     @Test("unknown or malformed distribution values render no tag")

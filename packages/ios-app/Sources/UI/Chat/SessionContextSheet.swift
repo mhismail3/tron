@@ -641,15 +641,15 @@ struct SessionContextSheet: View {
                 divider()
                 manageRow(
                     icon: "wrench.and.screwdriver",
-                    title: "Tools",
-                    subtitle: "Choose available tools by namespace and exposure",
+                    title: "Available Tools",
+                    subtitle: "Turn tools on or off for this chat",
                     accent: sessionRowAccent
                 ) { destination = .tools }
                 divider()
                 manageRow(
                     icon: "shippingbox",
                     title: "Project Resources",
-                    subtitle: "Skills, subagents, prompts, tools, and commands",
+                    subtitle: "Skills, subagents, prompts, and commands",
                     accent: sessionRowAccent
                 ) { destination = .projectResources }
                 divider()
