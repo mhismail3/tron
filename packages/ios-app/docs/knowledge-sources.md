@@ -123,11 +123,12 @@ owned by the Gateway receipt/job authority.
 
 Assessment usage prices are fractional cents (`Double`), matching the Gateway's
 numeric contract; token counts remain integers. Intake assessment and tagging
-spend share the monthly cap from the `knowledge.jev` connection; Raindrop cohort
-approvals are additional per-run limits, not another Jev budget. Turning paid
-access off on that connection disables both paid workflows. The native RPC
-regression decodes a full source page containing both a preview and sub-cent
-assessment usage.
+spend share one fixed monthly Knowledge budget of 500 cents. The TypeSafe provider
+key is configured in Pi's provider settings; a configured key is consent to use
+the shared budget. There is no Jev connection, per-connection paid-access switch,
+or separate intake budget. Raindrop cohort approvals remain additional per-run
+limits, not another monthly budget. The native RPC regression decodes a full
+source page containing both a preview and sub-cent assessment usage.
 New assessments carry an `evidenceDigest` of Gateway `JSON.stringify({title, text})`.
 iOS reproduces those UTF-8 bytes without Foundation's default slash escaping.
 A mismatch with the current title/text withholds the obsolete summary; metadata

@@ -808,8 +808,8 @@ the linked-capture safety downgrade. It leaves admission pending and does not ac
 assess, or decide. `knowledge.connector.ack` requires processed/skipped plus a bounded
 reason, removes the item from pending, persists bounded processed history, and is
 idempotent. Personal scope remains excluded from work retrieval. `raindropIntake` still owns its
-legacy decision and move workflow until C23, but uses the same ingest primitive
-for source capture. Agent sweeps use the same accepted-work owner as RPC runs, so
+legacy decision and move workflow remains available, but uses the same ingest
+primitive for source capture. Agent sweeps use the same accepted-work owner as RPC runs, so
 disconnecting a presentation waiter does not replay or abandon admitted provider
 work. Connector identity reuse
 resolves through a canonical Knowledge catalog index keyed by
@@ -849,12 +849,13 @@ provenance. Mutations remain revision-fenced and receipted; personal sources
 never appear in work retrieval; Jev assessment refuses a source whose current
 scope is personal, before any reservation, and legacy intake routes by the
 source's own scope; provider
-movement requires write permission and an explicit collection destination. The routine's dry run performs no source/admission,
-acknowledgment, remote-move, or paid-assessment effects. It may refresh Raindrop
-queue bookkeeping through free read-only provider discovery, but must not invoke
-paid X discovery; it reports X from its existing queue. Until C23, the legacy
-`knowledge.raindrop.intake` operation remains available and continues using the
-same ingestion primitive.
+movement requires write permission; its destination is derived from the current
+admission and scope and cannot be selected by the caller. The routine's dry run
+performs no source/admission, acknowledgment, remote-move, or paid-assessment
+effects. It may refresh Raindrop queue bookkeeping through free read-only provider
+discovery, but must not invoke paid X discovery; it reports X from its existing
+queue. The `knowledge.raindrop.intake` operation remains available and continues
+using the same ingestion primitive.
 
 ## Bounded Raindrop intake
 
