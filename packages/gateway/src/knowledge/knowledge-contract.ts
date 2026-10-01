@@ -100,7 +100,7 @@ export interface SourceAssessmentUsage {
   inputTokens: number;
   outputTokens: number;
   estimatedCostCents: number;
-  pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free";
+  pricing: "typesafe-jev-latest-input-0.042-usd-per-million-output-free-estimate";
 }
 
 export interface SourceAssessment {
@@ -838,10 +838,10 @@ export interface KnowledgeCurationJob {
   reason?: string;
 }
 
-/** `connectionId` names the Jev connection that pays; when omitted the single
- * enabled, approved Jev connection is used, and none or several is refused. */
+/** Tagging uses the single configured TypeSafe provider; the wire field is
+ * retained for the existing multi-connector Knowledge request envelope. */
 export interface KnowledgeTagRequest { commandId: string; sourceId: string; expectedRevision: string; connectionId?: string; }
-export interface KnowledgeTagRunRequest { commandId: string; connectionId: string; limit?: number; }
+export interface KnowledgeTagRunRequest { commandId: string; connectionId?: string; limit?: number; }
 export interface KnowledgeTagBudgetRequest { connectionId: string; }
 export interface KnowledgeTagBudgetReconcileRequest { connectionId: string; attemptId: string; }
 export interface KnowledgeTagCostEstimateRequest { connectionId: string; limit?: number; }

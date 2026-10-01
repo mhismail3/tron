@@ -14,7 +14,7 @@ facts in the owning source and package docs, not copied into skills.
 | [tron-performance](skills/tron-performance/SKILL.md) | Profiling a demonstrated bottleneck or comparing alternatives under a frozen experiment |
 | [tron-ios](skills/tron-ios/SKILL.md) | Required routing for iOS build, test, simulator, device, signing, archive, and artifact work |
 | [tron-workspace-housekeeping](skills/tron-workspace-housekeeping/SKILL.md) | Evidence-based post-merge cleanup of branches, inactive worktrees, and stale Git metadata; protect active agents and unmerged work |
-| [tron-work](skills/tron-work/SKILL.md) | Live read-only work dashboard: the board, needs-you items, claims, queue, and work status |
+| [tron-work](skills/tron-work/SKILL.md) | The work board, and taking a tracked task end to end (claim, isolated worktree, verify, land, clean up); filing discovered work and epics |
 
 For a broad investigation, start with code health and its coverage ledger. Use
 test confidence to evaluate the evidence, then performance only where a cost or

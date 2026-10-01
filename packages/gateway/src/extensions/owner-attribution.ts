@@ -11,7 +11,7 @@ import type {
   RegisteredTool,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE } from "./extension-adapters.js";
+import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE, adaptMcpAuthCommandHandler } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
@@ -45,6 +45,7 @@ export interface InvocationExecutionContext {
 }
 const invocationStorage = new AsyncLocalStorage<InvocationExecutionContext>();
 const attributedCommandOwners = new WeakMap<RegisteredCommand["handler"], Extension>();
+const builtinMcpCommandHandlers = new WeakSet<RegisteredCommand["handler"]>();
 const attributedToolOwners = new WeakMap<ToolDefinition["execute"], Extension>();
 /** Every callback admitted at this boundary, keyed by its owning extension, so
  * repeat registration of the same function by one extension cannot double-wrap
@@ -56,6 +57,9 @@ export function currentExtensionOwner(): ExtensionOwner | undefined { return own
 export function currentInvocationContext(): InvocationExecutionContext | undefined { return invocationStorage.getStore(); }
 export function withInvocationContext<T>(context: InvocationExecutionContext, operation: () => T): T {
   return invocationStorage.run(context, operation);
+}
+export function isBuiltinMcpCommand(command: RegisteredCommand | undefined): boolean {
+  return command !== undefined && builtinMcpCommandHandlers.has(command.handler);
 }
 export function attributedCommandOwner(command: RegisteredCommand | undefined): ExtensionOwner | undefined {
   const extension = command ? attributedCommandOwners.get(command.handler) : undefined;
@@ -234,6 +238,7 @@ function admitTool(state: RegistrationAdmission, name: string, registered: Regis
       ...definition,
       execute,
       ...(definition.prepareArguments ? { prepareArguments: ownCallback(definition.prepareArguments, state.extension) } : {}),
+      ...(definition.prepareLoadout ? { prepareLoadout: ownCallback(definition.prepareLoadout, state.extension) } : {}),
       ...(definition.renderCall ? { renderCall: ownCallback(definition.renderCall, state.extension) } : {}),
       ...(definition.renderResult ? { renderResult: ownCallback(definition.renderResult, state.extension) } : {}),
     } as ToolDefinition,
@@ -248,12 +253,19 @@ function admitHandlers(state: RegistrationAdmission, _event: string, handlers: E
     : ownCallback(adaptedExtensionEventHandler(state.extension, handler), state.extension));
 }
 
-function admitCommand(state: RegistrationAdmission, _name: string, command: RegisteredCommand): RegisteredCommand {
+function admitCommand(state: RegistrationAdmission, name: string, command: RegisteredCommand): RegisteredCommand {
   if (admittedCallbackOwners.get(command.handler) === state.extension) return command;
-  const handler = ownCallback(command.handler, state.extension);
+  // Pi separates a synthetic built-in's source (`builtin`) from its path (`builtin:mcp`).
+  const callback = state.extension.sourceInfo.path === "builtin:mcp" && name === "mcp"
+    ? adaptMcpAuthCommandHandler(command.handler)
+    : command.handler;
+  const handler = ownCallback(callback, state.extension);
   attributedCommandOwners.set(handler, state.extension);
+  if (state.extension.sourceInfo.path === "builtin:mcp" && name === "mcp") builtinMcpCommandHandlers.add(handler);
   return { ...command, handler };
 }
+
+
 
 function admitShortcut(state: RegistrationAdmission, _key: ExtensionShortcutKey, shortcut: ExtensionShortcut): ExtensionShortcut {
   if (admittedCallbackOwners.get(shortcut.handler) === state.extension) return shortcut;

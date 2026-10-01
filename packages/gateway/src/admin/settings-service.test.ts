@@ -81,6 +81,8 @@ describe("SettingsService", () => {
       branchSummary: { reserveTokens: 8_000 },
       retry: { enabled: true, maxRetries: 4, provider: { timeoutMs: 90_000, maxRetries: 2, maxRetryDelayMs: 10_000 } },
       thinkingBudgets: { minimal: 512, high: 8_192 },
+      defaultTools: ["+codemode", "-bash"],
+      codemode: { mode: "only", inlineBudget: 4_000 },
       transport: "websocket",
       steeringMode: "one-at-a-time",
       followUpMode: "all",
@@ -100,7 +102,11 @@ describe("SettingsService", () => {
     });
     expect(document.effective.branchSummary).toEqual({ reserveTokens: 8_000 });
     expect(document.effective.transport).toBe("websocket");
+    expect(document.effective.defaultTools).toEqual(["read", "edit", "write", "codemode"]);
+    expect(document.effective.codemode).toEqual({ mode: "only", inlineBudget: 4_000 });
     expect(document.effective.sessionDir).toBe("/tmp/sessions");
+    await expect(service.update({ defaultTools: ["+" ] }, { cwd, scope: "global", projectTrusted: false })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.update({ codemode: { mode: "disabled" } }, { cwd, scope: "global", projectTrusted: false })).rejects.toMatchObject({ code: "invalid_request" });
     expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).toMatchObject({
       extensions: ["/tmp/extension.ts"],
       packages: [{ source: "npm:test", autoload: false, skills: ["**"] }],
@@ -254,6 +260,10 @@ describe("SettingsService", () => {
       { httpProxy: "http://project-proxy.invalid" },
       { cwd, scope: "project", projectTrusted: true },
     );
+    const globalSettingsPath = join(agentDir, "settings.json");
+    const globalSettings = JSON.parse(await readFile(globalSettingsPath, "utf8")) as Record<string, unknown>;
+    globalSettings.deviceId = "provider-device-id";
+    await writeFile(globalSettingsPath, JSON.stringify(globalSettings));
     const fetched = service.get(cwd, true) as {
       effective: Record<string, unknown>;
       documents: { global: Record<string, unknown>; project: Record<string, unknown> };
@@ -263,6 +273,7 @@ describe("SettingsService", () => {
     expect(updated.effective).not.toHaveProperty("httpProxy");
     expect(updated.effective.httpProxyConfigured).toBe(true);
     expect(fetched.documents.global).not.toHaveProperty("httpProxy");
+    expect(fetched.documents.global).not.toHaveProperty("deviceId");
     expect(fetched.documents.project).not.toHaveProperty("httpProxy");
     expect(fetched.effective).not.toHaveProperty("httpProxy");
     expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).toMatchObject({

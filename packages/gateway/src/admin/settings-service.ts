@@ -87,6 +87,7 @@ function rawString(value: unknown, name: string, maximum: number): string {
 function redactSettingsDocument(document: Record<string, unknown>): Record<string, unknown> {
   const redacted = structuredClone(document);
   delete redacted.httpProxy;
+  delete redacted.deviceId;
   return redacted;
 }
 
@@ -138,6 +139,8 @@ export class SettingsService {
       effective: {
         defaultModel: defaultProvider && defaultModel ? { provider: defaultProvider, id: defaultModel } : null,
         defaultThinkingLevel: manager.getDefaultThinkingLevel() ?? null,
+        defaultTools: manager.getDefaultTools() ?? null,
+        codemode: effective.codemode ?? null,
         modelContextWindows: contextWindowPreferences(effective, MAX_CONTEXT_PREFERENCES * 2),
         contextWindowMinimum: contextWindowMinimum(manager.getCompactionSettings()),
         thinkingBudgets: manager.getThinkingBudgets() ?? null,
@@ -271,6 +274,20 @@ export class SettingsService {
       if (patch.defaultThinkingLevel === null) delete next.defaultThinkingLevel;
       else next.defaultThinkingLevel = oneOf(patch.defaultThinkingLevel, "defaultThinkingLevel", thinkingLevels);
     }
+    if ("defaultTools" in patch) {
+      if (patch.defaultTools === null) delete next.defaultTools;
+      else {
+        const tools = arrayOfStrings(patch.defaultTools, "defaultTools", 500);
+        if (tools.some((name) => !/^[+-]?[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(name))) {
+          throw new GatewayError("invalid_request", "defaultTools entries must be tool names or +name/-name modifiers");
+        }
+        next.defaultTools = tools;
+      }
+    }
+    if ("codemode" in patch) next.codemode = this.nested(next.codemode, patch.codemode, "codemode", {
+      mode: (value) => oneOf(value, "codemode.mode", ["on", "only"] as const),
+      inlineBudget: (value) => integer(value, "codemode.inlineBudget", 0, 1_000_000),
+    });
     if ("thinkingBudgets" in patch) {
       if (patch.thinkingBudgets === null) delete next.thinkingBudgets;
       else {

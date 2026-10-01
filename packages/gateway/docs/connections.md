@@ -1,27 +1,27 @@
 # Connection management owner
 
-`ConnectionOwner` owns only the generic account envelope for an integration
-instance under `state/integrations/connections.json`. It does not own provider
-credentials, Knowledge records/evidence, connector checkpoints, assessment
-cohorts/usage, or remote-effect receipts. Credential values never enter this
-state; the envelope contains only an opaque credential reference and the
-presentation projection omits that reference.
+`ConnectionOwner` owns only the generic account envelope for supported
+integration instances under `state/integrations/connections.json`. It does not
+own provider credentials, Knowledge records/evidence, connector checkpoints,
+assessment cohorts/usage, or remote-effect receipts. Credential values never
+enter this state; the envelope contains only an opaque credential reference and
+the presentation projection omits that reference. Pi's built-in MCP servers are
+not ConnectionOwner instances; their sole configuration authority is Pi's
+`mcp.json` (see [MCP servers](mcp.md)).
 
 A provider/account is represented by an opaque instance ID. Two instances of
 the same definition therefore have independent account identity, scope, policy,
-enablement, setup operation, and runtime admission. A configured instance is
-not automatically admitted into a session or child runtime: the runtime owner
-must supply an exact `RuntimeBinding` with integration, connection, capability,
-session, and generation identity. There is no generic `enable`/`disable` RPC.
+enablement, and setup operation. There is no generic `enable`/`disable` RPC.
+MCP server administration and OAuth sign-in use Pi's built-in MCP and the
+separate `mcp.*` RPCs; they do not create connection rows.
 
-Knowledge Jev tagging is the `knowledge.jev` definition and its paid `tag`
-capability. The existing generic ConnectionOwner policy (`enabled`,
-`paidAccessApproved`, and `paidBudgetCents`) governs admission; K4's monthly usage
-ledger remains in the Knowledge connector state keyed by that exact connection
-instance. The Jev reference is the existing `connector:jev:personal` Keychain
-item. Jev has no provider identity endpoint, so its capability readiness records
-Keychain availability without claiming a verified provider identity. Setup never
-enables paid access by itself.
+Jev is no longer a ConnectionOwner definition or Keychain connector. Knowledge,
+session search, and the first-party `jev` tool use Pi's `ModelRuntime.classify()`
+with the TypeSafe `jev-latest` classifier and Pi's provider credential store.
+Tron retains its qualified pre-dispatch estimate and monthly tagging ledger;
+provider credential readiness is owned by Pi and configured through Provider
+Settings. Existing persisted `knowledge.jev` connection state is rejected with
+an instance-specific setup error rather than migrated or silently reused.
 
 The accepted owner-typed commands are:
 
@@ -37,31 +37,29 @@ owner checks it under its mutation lock, after receipt replay, so stale account
 sheets cannot overwrite newer approvals or budgets. All native and Knowledge
 callers carry this precondition; an old client missing it fails closed rather
 than performing an unconditional write. No persisted-state migration is needed.
-Accepted writes
-have bounded command receipts and replay the exact result only for the same
-request hash. Disconnect disables future admission but does not claim that a
-provider credential was revoked; revocation remains the credential owner's
-contract. Capability status is derived per capability and per instance, so one
-unavailable capability does not become a successful empty list or hide another
-instance. Availability uses capability effects, not only overall account health:
-write capabilities require write approval, paid capabilities require approval
-and a positive budget, and MCP tools require write approval even when the server
-labels individual tools read-only. Knowledge credential/account observations and
-MCP handshake/discovery readiness remain adapter-owned evidence. An unadmitted
-capability whose credential observation is `unavailable` reports the Mac Keychain
-service that owns the missing or provider-rejected item and directs the user to the agent for the exact
-account, because the presentation projection never carries a credential reference.
-Availability is
-not a claim that tools are loaded into every existing conversation.
+Accepted writes have bounded command receipts and replay the exact result only
+for the same request hash. Disconnect disables future admission but does not
+claim that a provider credential was revoked; revocation remains the credential
+owner's contract. Capability status is derived per capability and per instance,
+so one unavailable capability does not become a successful empty list or hide
+another instance. Availability uses capability effects, not only overall account
+health: write capabilities require write approval, paid capabilities require
+approval and a positive budget. Knowledge credential/account observations remain
+adapter-owned evidence. An unadmitted capability whose credential observation is
+`unavailable` reports the Mac Keychain service that owns the missing or
+provider-rejected item and directs the user to the agent for the exact account,
+because the presentation projection never carries a credential reference.
+Availability is not a claim that tools are loaded into every existing
+conversation.
 
 ## Account envelope ownership
 
 Knowledge connector actions carry the exact `connectionId`; configuration rejects
-account/scope/credential fields and updates policy through `ConnectionOwner`. The
-provider state is keyed by that instance ID, while its persisted adapter document
-omits the generic envelope; `KnowledgeStore` resolves the private envelope only
-at the owning adapter boundary. Missing owner admission fails closed rather than
-falling back to a provider-keyed account.
+account/scope/credential fields and updates policy through `ConnectionOwner`.
+The provider state is keyed by that instance ID, while its persisted adapter
+document omits the generic envelope; `KnowledgeStore` resolves the private
+envelope only at the owning adapter boundary. Missing owner admission fails
+closed rather than falling back to a provider-keyed account.
 
 Provider-specific Knowledge behavior remains with `KnowledgeStore` and its
 connector adapter. Public X capture remains a credential-free source capability,

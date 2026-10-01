@@ -1060,7 +1060,15 @@ bounded semantic presentation only for that selected tool: exact lowercase built
 command, query, diff, and readable result. Extension-authored Pi tool labels are projected separately from canonical
 invocation names and become the native row/detail title (for example, `subagent_wait` displays as **Subagent Wait**),
 while arbitrary extension tools may foreground only the first
-trusted common string key and otherwise lead with their result. Bash commands wrap to the available width
+trusted common string key and otherwise lead with their result. Pi codemode uses that same tool-detail route:
+its readable result leads, the complete script is behind its dedicated source sheet, bounded nested invocations stay inside the parent detail with their own semantic status/duration and standard nested detail sheet. Recovered `unfinished` calls are terminally presented as “Didn't finish,” not as running work; bounded per-call errors remain visible in the detail sheet. `details.tronNested` attachments remain parent-owned.
+Admitted display descriptors use the existing session-bound display presentation route; no nested call becomes a
+canonical transcript row or independent receipt. MCP tool names use the projected server/tool identity, resource
+and search tools remain generic result cards. Manage Session → Available Tools turns tools on or off for one chat
+(`session.setTools`); it groups `session.resources` tools as Built-in, Tron, each package, local extensions and each
+MCP server (from the `namespace` object), omits hidden exposures, and is the only Manage Session list of tools. Routed assistant rows use physical provider/model attribution;
+virtual model names are marked in the model and session selectors without replacing physical attribution. Bash keeps
+Pi's empty result empty rather than inventing `(no output)`. Bash commands wrap to the available width
 using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
 and boolean metadata remains unchanged. The final Technical details sub-sheet starts with larger, compact selectable
@@ -1966,7 +1974,7 @@ and model/runtime replacement discards it. Reset-to-default remains distinct fro
 pending choice. Shared Thinking labels render `xhigh` and extra-high spelling/case variants
 as **Extra High** in settings, sliders, transcript notices, and typed history previews without
 rewriting wire values, canonical content, or authored labels.
-The blue Session container orders Current Branch, Agent Instructions,
+The blue Session container orders Current Branch, Agent Instructions, Available Tools,
 Project Resources, Session History, and Subagent History, followed by any diagnostics.
 Its Current Branch row is a button in every state and is backed only by the
 session-bound `workspace-inspector.v1` projection; it never reuses the path-based New Session
@@ -2029,7 +2037,7 @@ Compact Now action invokes Pi's canonical compaction through Gateway and can lea
 behind an active turn. Settings owns what is installed in or configured on the agent (Extensions,
 Tron Modules, Hooks, Connections); Project Resources owns what the agent can use. Resources a
 package brings in appear in both, in two forms: per package under Extensions and by kind here.
-Project Resources presents resolved skills, subagents, prompts, tools, and extension commands
+Project Resources presents resolved skills, subagents, prompts, and extension commands
 as named rows over the canonical projection. Every row carries the
 Gateway-derived distribution tag (External, Module, or Local) beside the existing User/Project
 scope badge, and Pi built-ins carry none; both tags are one shared capsule
@@ -2061,8 +2069,9 @@ while scrolling; large resource groups use the static scroll surface. Reload is 
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
 Extensions starts with resource scope and inventory counts (Project Trust is its sibling Settings row, not repeated inside),
 then the Installed container of third-party packages and a standalone Install Package action,
-then the read-only Tron Modules container (each module's name, purpose and tools, plus the MCP
-connections a session would admit tools from). Resolved extensions are not duplicated beneath the installed list, and
+then the read-only Tron Modules container (the shared built-in module names, purposes, and tools).
+MCP servers are managed separately through Pi's MCP configuration and do not appear as
+ConnectionOwner modules. Resolved extensions are not duplicated beneath the installed list, and
 resolved skills and prompts left this sheet for Manage Session → Project Resources.
 Every Installed row opens that package's detail sheet: its source and scope, the shared distribution tag labeled once
 because every installed package is external, then the names the package provides as Provides groups in Skills, Subagents,
@@ -2363,7 +2372,11 @@ The stack is never persisted and is not a second state authority.
 
 `IntegrationsRPCClient` and `IntegrationsSettingsView` expose the Gateway connection-owner contract as a native management surface. Connected Services and MCP Servers share the Providers-style Configured/Available row layout; each configured row shows its service, verified account display name (or plain account ID), connection status, and only a supported X balance, while capability names and effect-specific diagnostics remain in the selected connection sheet. Definitions, account instances, capability status, setup operations, and Raindrop collection-role mappings are redacted projections: the instance ID is the identity used by every action, never a provider name or account key. Same-provider accounts therefore retain independent policy, health, and disconnect state, and configured services keep their add-account action in instance details. Snapshot reads are fenced by the selected Gateway profile, lifecycle generation, connection epoch, presentation activity, and a latest-load ticket; X balance reads additionally fence each presentation result to the current profile identity and request. A balance read never blocks the list and a failed read leaves no balance line.
 
-Settings exposes separate Connected Services and tools-only MCP Servers surfaces, both backed by this owner and filtered from its advertised definitions. Setup is owner-typed (`oauth`, `token`, `endpoint`, or `local-command`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only opaque Mac Keychain credential references, never token values or generic agent-readable secret fields. X setup is a public-client OAuth 2.0 PKCE flow: the user enters their public client ID and registered HTTPS callback, opens X consent, and pastes the redirected URL or code; the Gateway owns state verification, code exchange, refresh-token rotation, and Keychain storage, while iOS never receives tokens. Endpoint and local-command configuration remain explicit; local commands are presented as trusted local code and are not shell-interpolated by the client. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped. Capability availability is effect-specific: write capabilities require write approval, paid capabilities require paid approval and a positive bounded budget, and every capability still requires admitted credentials/runtime health. Mixed-effect MCP tools remain unavailable without write approval because the adapter's runtime prerequisite is write-enabled; the adapter also rechecks policy before each call. The same checks run at runtime binding admission; explicit Knowledge intake/approval flows retain their separate bounded semantics. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it. Capability rows distinguish setup-required, disabled, unavailable, unsupported, and available states and surface owner-provided error detail.
+Connected Services presents definitions owned by `ConnectionOwner` and uses its instance-scoped setup, policy, and disconnect receipts. Setup is owner-typed (`oauth` or `token`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only opaque Mac Keychain credential references, never token values or generic agent-readable secret fields. X setup is a public-client OAuth 2.0 PKCE flow: the user enters their public client ID and registered HTTPS callback, opens X consent, and pastes the redirected URL or code; the Gateway owns state verification, code exchange, refresh-token rotation, and Keychain storage, while iOS never receives tokens. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped; capability availability is effect-specific. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it.
+
+MCP Servers is a separate surface over Pi's `mcp.json`: it reads global or trust-approved project configuration, decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields, and shows only project rows in project scope. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. The scope switch is the shared `TronSegmentedControl` (as in the Workspace sheet), Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows Built-in Extensions and Default Tools as standard toggle and selection rows; they read the active scope's document, write only on an explicit change, and keep `defaultTools` entries they do not manage. MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
+
+Knowledge Jev is not a ConnectionOwner capability. It uses the TypeSafe classifier credential in Provider Settings; a configured key is the consent for paid Jev work, bounded by a fixed monthly cap (user decision, 2026-09-30). MCP configuration and Jev credentials are not mirrored into connection rows.
 
 Policy writes include the instance's observed `expectedSetupRevision`; stale sheets fail closed rather than
 replacing newer approvals or budgets. Accepted mutation tasks remain with the receipt executor. Their

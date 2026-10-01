@@ -25,16 +25,12 @@ export function normalizeKimiK3Payload(payload: unknown): unknown {
   const source = record(payload);
   if (!source) return payload;
   const next = { ...source };
-  const legacyMaxTokens = next.max_tokens;
-  const completionTokens = next.max_completion_tokens;
-  const requested = typeof completionTokens === "number"
-    ? completionTokens
-    : typeof legacyMaxTokens === "number" ? legacyMaxTokens : undefined;
-  if (requested !== undefined) {
-    // max_completion_tokens is the documented K3 field. Keep an explicit lower
-    // caller limit, but never send the catalog's 131,072-token default.
-    next.max_completion_tokens = Math.min(requested, KIMI_K3_MAX_COMPLETION_TOKENS);
-    delete next.max_tokens;
+  // The 0.99 catalog advertises a 1,048,576-token maximum, but Moonshot's
+  // Chat Completions contract still names this request field `max_tokens`.
+  // Cap whichever supported limit the caller supplied without renaming it.
+  for (const key of ["max_tokens", "max_completion_tokens"] as const) {
+    const requested = next[key];
+    if (typeof requested === "number") next[key] = Math.min(requested, KIMI_K3_MAX_COMPLETION_TOKENS);
   }
   return next;
 }

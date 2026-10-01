@@ -41,8 +41,7 @@ export type AdministrativeDrainBlockerCategory =
   | "automation-dispatch"
   | "automation-terminal-persistence"
   | "knowledge-observation"
-  | "knowledge-curation"
-  | "mcp-tool-call";
+  | "knowledge-curation";
 
 export interface AdministrativeDrainBlockerSummary {
   /** Per-drain opaque identity. It is not a session, run, path, or token ID. */
@@ -167,6 +166,8 @@ export type TranscriptItem =
       content: ContentPart[];
       provider?: string;
       modelId?: string;
+      /** Pi thinking level used for this physical assistant response. */
+      thinkingLevel?: string;
       stopReason?: string;
       errorMessage?: string;
       toolCallId?: string;
@@ -174,6 +175,8 @@ export type TranscriptItem =
       /** Extension-authored human-readable label from the mounted runtime. */
       toolLabel?: string;
       isError?: boolean;
+      /** Bounded record of child executions, not their result payloads. */
+      nestedCalls?: NestedToolCallsProjection;
       details?: JsonValue;
       /** Strictly admitted first-party display descriptor. Raw tool details
        * remain available for technical inspection but never select a renderer. */
@@ -502,6 +505,22 @@ export interface ProcessTranscriptLease {
   };
 }
 
+export interface NestedToolExecutionState {
+  id: string;
+  parentToolCallId: string;
+  toolName: string;
+  status: "running" | "completed" | "failed" | "unfinished";
+  error?: string;
+  arguments?: JsonValue;
+  argumentsBytes?: number;
+  durationMs?: number;
+}
+
+export interface NestedToolCallsProjection {
+  calls: NestedToolExecutionState[];
+  complete: boolean;
+}
+
 export interface ToolExecutionState {
   toolCallId: string;
   toolName: string;
@@ -513,6 +532,8 @@ export interface ToolExecutionState {
   arguments: JsonValue;
   partialResult?: JsonValue;
   result?: JsonValue;
+  /** Bounded live children of this model-issued call; canonical `nestedCalls` is on its result. */
+  nestedCalls?: NestedToolCallsProjection;
   /** Bounded text extracted from Pi's current tool result for immediate audit. */
   output?: string;
   outputTruncated?: boolean;
@@ -976,20 +997,6 @@ export interface TronModuleSummary {
   purpose: string;
   tools: string[];
   commands: string[];
-}
-
-/** One MCP connection a session runtime would admit tools from. It names the
- * source only: individual MCP tool names require that session's runtime. */
-export interface McpToolSource {
-  id: string;
-  definitionId: string;
-  health: string;
-}
-
-/** `modules.list`: the installed Tron modules and the MCP tool sources. */
-export interface TronModuleList {
-  modules: TronModuleSummary[];
-  connections: McpToolSource[];
 }
 
 /** `packages.list`: the names one installed package provides, attributed from

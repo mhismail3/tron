@@ -2,7 +2,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { chooseKnowledgeTags, decideKnowledgeTags, KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, KNOWLEDGE_TAG_CONFIDENCE_THRESHOLD, KnowledgeTaggingBudget, KnowledgeTaggingEngine } from "./knowledge-tagger.js";
@@ -40,22 +39,17 @@ async function taggingFixture(options: { count?: number; monthlyCap?: number; cl
       const choice = Object.keys(criteria).find(option => option !== "none") ?? "none";
       return [key, { type: "choice" as const, choice, probabilities: Object.fromEntries(Object.keys(criteria).map(option => [option, option === choice ? 1 : 0])), confidence: 1 }];
     })) : Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.91 }]));
-    return { requestedModel: "jev-1.13.0", actualModel: "jev-1.13.0", answers, usage: { input_tokens: 100, output_tokens: 1 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
+    return { requestedModel: "jev-latest", actualModel: "jev-latest", answers, usage: { input_tokens: 100, output_tokens: 1 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
   } };
   const engine = new KnowledgeTaggingEngine(client, base.budget);
-  const service = new KnowledgeService(base.store, new KnowledgeObservationService(base.store, undefined), {}, undefined, undefined, undefined, undefined, { engine, budget: base.budget, connections: base.owner });
+  const service = new KnowledgeService(base.store, new KnowledgeObservationService(base.store, undefined), {}, undefined, undefined, undefined, undefined, { engine, budget: base.budget });
   return { ...base, service, records, get calls() { return calls; } };
 }
 afterEach(async () => { vi.useRealTimers(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function budgetFixture(monthlyCap = 500) {
   const root = await mkdtemp(join(tmpdir(), "tron-knowledge-tag-budget-")); roots.push(root);
-  const owner = new ConnectionOwner(root);
-  const begin = await owner.execute({ kind: "setup.begin", commandId: "tag-budget-begin-001", instanceId: "tagger", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
-  await owner.execute({ kind: "setup.complete", commandId: "tag-budget-complete-01", operationId: begin.operationId, instanceId: "tagger", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: monthlyCap, recurringApproved: false } });
-  await owner.recordProviderObservation("tagger", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
-  const store = new KnowledgeStore(new TronWorkspace(root), undefined, async id => owner.resolveInstance(id).catch(() => undefined));
-  const credentials = { async read(reference: string) { return reference === "connector:jev:personal" ? "synthetic" : undefined; } };
-  return { root, owner, store, credentials, budget: new KnowledgeTaggingBudget(store, owner, credentials) };
+  const store = new KnowledgeStore(new TronWorkspace(root));
+  return { root, store, budget: new KnowledgeTaggingBudget(store, () => true, monthlyCap) };
 }
 
 /* Failure modes protected by the K4 cases below:
@@ -72,27 +66,22 @@ async function budgetFixture(monthlyCap = 500) {
  * - queue pages must be bounded and stop cleanly at paid budget exhaustion.
  */
 describe("Knowledge Jev tagging", () => {
-  it("blocks only paid tag curation when approval is absent while free verdict writes continue", async () => {
+  it("blocks paid tagging when the TypeSafe provider credential is absent while free writes continue", async () => {
     const fixture = await taggingFixture();
-    await fixture.owner.execute({ kind: "policy.update", commandId: "tag-gate-unapprove", instanceId: "tagger", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 500, recurringApproved: false } });
     const source = fixture.records[0]!;
-    const service = new KnowledgeService(fixture.store, new KnowledgeObservationService(fixture.store, undefined), {}, undefined, undefined, async operation => operation === "tags" ? fixture.budget.gate("tagger") : { ok: true });
+    const service = new KnowledgeService(fixture.store, new KnowledgeObservationService(fixture.store, undefined), {}, undefined, undefined, async operation => operation === "tags" ? new KnowledgeTaggingBudget(fixture.store, () => false).gate("typesafe") : { ok: true });
     const tags = await service.invoke({ operation: "knowledge.source.curate", request: { commandId: "tag-gate-denied", operation: "tags", producer: { actor: "agent" }, items: [{ recordId: source.id, expectedRevision: source.revisionId, tagIds: ["tools"] }] } }) as { outcomes: Array<{ status: string; code?: string }> };
     expect(tags.outcomes[0]).toMatchObject({ status: "skipped", code: "unavailable" });
     const verdict = await service.invoke({ operation: "knowledge.source.curate", request: { commandId: "free-verdict-after-budget", operation: "verdict", producer: { actor: "user" }, items: [{ recordId: source.id, expectedRevision: source.revisionId, verdict: { verdict: "evergreen" } }] } }) as { outcomes: Array<{ status: string }> };
     expect(verdict.outcomes[0]?.status).toBe("applied");
   });
-  // Failure mode: the app has no Jev connection ID, so an explicit re-tag must
-  // resolve the single approved connection, and refuse clearly when none is.
-  it("re-tags one entry through the single approved Jev connection when none is named", async () => {
+  it("tags Knowledge through the TypeSafe provider budget without a Jev connection instance", async () => {
     const fixture = await taggingFixture();
     const source = fixture.records[0]!;
-    const started = await fixture.service.invoke({ operation: "knowledge.source.tag", request: { commandId: "tag-default-connection", sourceId: source.id, expectedRevision: source.revisionId } }) as { job: { status: string } };
+    const started = await fixture.service.invoke({ operation: "knowledge.source.tag", request: { commandId: "tag-typesafe-provider", sourceId: source.id, expectedRevision: source.revisionId } }) as { job: { status: string } };
     expect(started.job.status).toBe("running");
-    expect((await waitJob(fixture.service, "tag-default-connection")).status).toBe("done");
-    await fixture.owner.execute({ kind: "policy.update", commandId: "tag-default-unapprove", instanceId: "tagger", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 500, recurringApproved: false } });
-    const current = (await fixture.store.read(source.id))!;
-    await expect(fixture.service.invoke({ operation: "knowledge.source.tag", request: { commandId: "tag-default-refused", sourceId: source.id, expectedRevision: current.revisionId } })).rejects.toThrow(/exactly one enabled Jev connection with approved paid access/);
+    expect((await waitJob(fixture.service, "tag-typesafe-provider")).status).toBe("done");
+    expect(await fixture.budget.status("typesafe")).toMatchObject({ enabled: true, paidAccessApproved: true });
   });
   it("uses a strict confidence threshold and omits boundary ties", () => {
     expect(KNOWLEDGE_TAG_CONFIDENCE_THRESHOLD).toBe(0.65);
@@ -108,7 +97,7 @@ describe("Knowledge Jev tagging", () => {
       calls.push(request);
       const categoryKeys = Object.keys(request.questions).filter(key => key.startsWith("category_"));
       const answers = categoryKeys.length ? Object.fromEntries(categoryKeys.map(key => [key, { type: "choice" as const, choice: "one", probabilities: Object.fromEntries(Object.keys(request.questions[key]!.criteria as Record<string, unknown>).map(option => [option, option === "one" ? 1 : 0])), confidence: 1 }])) : Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }]));
-      return { requestedModel: "jev-1.13.0", actualModel: "jev-1.13.0", answers, usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
+      return { requestedModel: "jev-latest", actualModel: "jev-latest", answers, usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
     } };
     const callsReserved: number[] = [];
     const decision = await decideKnowledgeTags(client, record, vocabulary, new AbortController().signal, { async beforeDispatch(index) { callsReserved.push(index); }, async onDispatch() {}, async settle() {}, async uncertain() {} });
@@ -128,7 +117,7 @@ describe("Knowledge Jev tagging", () => {
         const choice = Object.keys(criteria).find(option => option !== "none")!;
         return [key, { type: "choice" as const, choice, probabilities: Object.fromEntries(Object.keys(criteria).map(option => [option, option === choice ? 1 : 0])), confidence: 1 }];
       })) : Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }]));
-      return { requestedModel: "jev-1.13.0", actualModel: "jev-1.13.0", answers, usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
+      return { requestedModel: "jev-latest", actualModel: "jev-latest", answers, usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
     } };
     const decision = await decideKnowledgeTags(client, record, { revision: 1, tags, guidelines: "Use definitions." }, new AbortController().signal, { async beforeDispatch() {}, async onDispatch() {}, async settle() {}, async uncertain() {} });
     expect(calls[0]?.questions).toHaveProperty("category_0"); expect(calls[0]?.questions).toHaveProperty("category_1");
@@ -136,47 +125,43 @@ describe("Knowledge Jev tagging", () => {
     expect(calls[1]!.questions).toHaveProperty("tag_tag-000");
     expect(decision.callCount).toBe(2); expect(decision.tagIds).toEqual(["tag-000", "tag-128"]);
   });
-  it("reserves only with paid approval, settles usage durably, and leaves dispatched uncertainty fenced", async () => {
-    const { budget, store, owner, root, credentials } = await budgetFixture();
-    await owner.execute({ kind: "policy.update", commandId: "tag-policy-disable-paid", instanceId: "tagger", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 500, recurringApproved: false } });
-    await expect(budget.reserve("tagger", "disabled-run-0001", 0)).rejects.toMatchObject({ code: "unsupported" });
-    await owner.execute({ kind: "policy.update", commandId: "tag-policy-enable-paid", instanceId: "tagger", expectedSetupRevision: 2, policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
-    await owner.recordProviderObservation("tagger", 3, { credentialAvailability: "available", providerIdentity: "admitted" });
-    const attempt = await budget.reserve("tagger", "dispatch-run-0001", 0);
-    await budget.markDispatch("tagger", attempt);
-    await budget.settle("tagger", attempt, { estimatedCostCents: 0.00042, inputTokens: 100, outputTokens: 2 });
-    expect(await budget.status("tagger")).toMatchObject({ spentCents: 0.00042, reservedCents: 0, uncertain: [] });
+  it("settles provider-budget usage durably and leaves dispatched uncertainty fenced", async () => {
+    const { budget, store, root } = await budgetFixture();
+    const attempt = await budget.reserve("typesafe", "dispatch-run-0001", 0);
+    await budget.markDispatch("typesafe", attempt);
+    await budget.settle("typesafe", attempt, { estimatedCostCents: 0.00042, inputTokens: 100, outputTokens: 2 });
+    expect(await budget.status("typesafe")).toMatchObject({ spentCents: 0.00042, reservedCents: 0, uncertain: [] });
     const heldWorkspace = (store as unknown as { workspace: TronWorkspace }).workspace as unknown as { release?: () => Promise<void> };
     await heldWorkspace.release?.();
-    const restartedStore = new KnowledgeStore(new TronWorkspace(root), undefined, async id => owner.resolveInstance(id).catch(() => undefined));
-    const restartedBudget = new KnowledgeTaggingBudget(restartedStore, owner, credentials);
-    expect(await restartedBudget.status("tagger")).toMatchObject({ spentCents: 0.00042 });
-    const uncertain = await restartedBudget.reserve("tagger", "uncertain-run-0001", 0);
-    await restartedBudget.markDispatch("tagger", uncertain);
+    const restartedStore = new KnowledgeStore(new TronWorkspace(root));
+    const restartedBudget = new KnowledgeTaggingBudget(restartedStore);
+    expect(await restartedBudget.status("typesafe")).toMatchObject({ spentCents: 0.00042 });
+    const uncertain = await restartedBudget.reserve("typesafe", "uncertain-run-0001", 0);
+    await restartedBudget.markDispatch("typesafe", uncertain);
     const restartedWorkspace = (restartedStore as unknown as { workspace: TronWorkspace }).workspace as unknown as { release?: () => Promise<void> };
     await restartedWorkspace.release?.();
-    const crashRecoveryStore = new KnowledgeStore(new TronWorkspace(root), undefined, async id => owner.resolveInstance(id).catch(() => undefined));
-    const crashRecoveryBudget = new KnowledgeTaggingBudget(crashRecoveryStore, owner, { async read(reference) { return reference === "connector:jev:personal" ? "synthetic" : undefined; } });
-    expect(await crashRecoveryBudget.status("tagger")).toMatchObject({ reservedCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, uncertain: [{ attemptId: uncertain }] });
-    await expect(crashRecoveryBudget.reserve("tagger", "uncertain-run-0001", 0)).rejects.toMatchObject({ code: "conflict" });
+    const crashRecoveryStore = new KnowledgeStore(new TronWorkspace(root));
+    const crashRecoveryBudget = new KnowledgeTaggingBudget(crashRecoveryStore);
+    expect(await crashRecoveryBudget.status("typesafe")).toMatchObject({ reservedCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, uncertain: [{ attemptId: uncertain }] });
+    await expect(crashRecoveryBudget.reserve("typesafe", "uncertain-run-0001", 0)).rejects.toMatchObject({ code: "conflict" });
     const crashWorkspace = (crashRecoveryStore as unknown as { workspace: TronWorkspace }).workspace as unknown as { release?: () => Promise<void> };
     await crashWorkspace.release?.();
   });
   it("rolls settled spend by UTC month but preserves unresolved dispatches", async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date("2026-01-31T23:59:00Z"));
     const { budget } = await budgetFixture();
-    const attempt = await budget.reserve("tagger", "rollover-run-0001", 0);
-    await budget.markDispatch("tagger", attempt);
+    const attempt = await budget.reserve("typesafe", "rollover-run-0001", 0);
+    await budget.markDispatch("typesafe", attempt);
     vi.setSystemTime(new Date("2026-02-01T00:01:00Z"));
-    expect(await budget.status("tagger")).toMatchObject({ month: "2026-02", spentCents: 0, reservedCents: 0, uncertain: [{ attemptId: attempt, month: "2026-01" }] });
+    expect(await budget.status("typesafe")).toMatchObject({ month: "2026-02", spentCents: 0, reservedCents: 0, uncertain: [{ attemptId: attempt, month: "2026-01" }] });
   });
   it("reconciles an uncertain attempt by settling the full reserved ceiling instead of retrying blindly", async () => {
     const { budget } = await budgetFixture();
-    const attemptId = await budget.reserve("tagger", "reconcile-run-0001", 0);
-    await budget.markDispatch("tagger", attemptId);
-    await expect(budget.reserve("tagger", "another-run-0001", 0)).rejects.toMatchObject({ code: "conflict" });
-    await expect(budget.reconcileUncertain("tagger", attemptId)).resolves.toEqual({ attemptId, reconciledCostCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS });
-    expect(await budget.status("tagger")).toMatchObject({ spentCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, reservedCents: 0, uncertain: [] });
+    const attemptId = await budget.reserve("typesafe", "reconcile-run-0001", 0);
+    await budget.markDispatch("typesafe", attemptId);
+    await expect(budget.reserve("typesafe", "another-run-0001", 0)).rejects.toMatchObject({ code: "conflict" });
+    await expect(budget.reconcileUncertain("typesafe", attemptId)).resolves.toEqual({ attemptId, reconciledCostCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS });
+    expect(await budget.status("typesafe")).toMatchObject({ spentCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, reservedCents: 0, uncertain: [] });
   });
   it("preserves a take revision written during Jev inference and leaves it queued", async () => {
     let release!: () => void; let started!: () => void;
@@ -184,10 +169,10 @@ describe("Knowledge Jev tagging", () => {
     const client: Pick<JevDecisionClient, "evaluate"> = { async evaluate(request, _signal, context) {
       await context.beforeDispatch?.(); await context.onDispatch?.("sent"); started(); await wait;
       const answers = Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }]));
-      return { requestedModel: "jev-1.13.0", actualModel: "jev-1.13.0", answers, usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
+      return { requestedModel: "jev-latest", actualModel: "jev-latest", answers, usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
     } };
     const fixture = await taggingFixture({ client }); const source = fixture.records[0]!;
-    const start = await fixture.service.invoke({ operation: "knowledge.source.tag", request: { commandId: "tag-concurrency-command", sourceId: source.id, expectedRevision: source.revisionId, connectionId: "tagger" } }) as { job: { status: string } };
+    const start = await fixture.service.invoke({ operation: "knowledge.source.tag", request: { commandId: "tag-concurrency-command", sourceId: source.id, expectedRevision: source.revisionId, connectionId: "typesafe" } }) as { job: { status: string } };
     expect(start.job.status).toBe("running"); await dispatched;
     const edited = await fixture.store.setSourceTake({ commandId: "user-take-during-tag", recordId: source.id, expectedRevision: source.revisionId, text: "Keep the design simple." });
     release();
@@ -225,12 +210,12 @@ describe("Knowledge Jev tagging", () => {
   });
   it("exposes explicit tagging through the agent knowledge tool", async () => {
     const fixture = await taggingFixture(); const source = fixture.records[0]!;
-    const result = await fixture.service.tool({ action: "tagSource", commandId: "agent-tag-tool", sourceId: source.id, expectedRevision: source.revisionId, connectionId: "tagger" });
+    const result = await fixture.service.tool({ action: "tagSource", commandId: "agent-tag-tool", sourceId: source.id, expectedRevision: source.revisionId, connectionId: "typesafe" });
     expect(result.text).toContain("Knowledge tag job");
     const details = result.details as { job: { commandId: string } };
     expect(await waitJob(fixture.service, details.job.commandId)).toMatchObject({ status: "done", operation: "tags" });
     const tagged = await fixture.store.read(source.id);
-    expect(tagged?.kind === "source" ? tagged.content.tags?.producer : undefined).toMatchObject({ actor: "agent", model: "jev-1.13.0" });
+    expect(tagged?.kind === "source" ? tagged.content.tags?.producer : undefined).toMatchObject({ actor: "agent", model: "jev-latest" });
   });
   it("automatically queues stale selections after a vocabulary edition change", async () => {
     const fixture = await taggingFixture(); const source = fixture.records[0]!;
@@ -251,10 +236,10 @@ describe("Knowledge Jev tagging", () => {
     const client: Pick<JevDecisionClient, "evaluate"> = { async evaluate(request, _signal, context) {
       await context.beforeDispatch?.(); await context.onDispatch?.("sent"); started(); await wait;
       const answers = Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }]));
-      return { requestedModel: "jev-1.13.0", actualModel: "jev-1.13.0", answers, usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
+      return { requestedModel: "jev-latest", actualModel: "jev-latest", answers, usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
     } };
     const fixture = await taggingFixture({ client }); const source = fixture.records[0]!;
-    await fixture.service.invoke({ operation: "knowledge.source.tag", request: { commandId: "tag-vocab-race", sourceId: source.id, expectedRevision: source.revisionId, connectionId: "tagger" } }); await dispatched;
+    await fixture.service.invoke({ operation: "knowledge.source.tag", request: { commandId: "tag-vocab-race", sourceId: source.id, expectedRevision: source.revisionId, connectionId: "typesafe" } }); await dispatched;
     const config = await fixture.store.config();
     await fixture.store.configureTags({ commandId: "vocabulary-edition-during-tag", expectedConfigRevision: config.revision, edit: { kind: "guidelines", guidelines: "Apply the new user rule." } });
     release();
@@ -264,40 +249,40 @@ describe("Knowledge Jev tagging", () => {
   });
   it("stops a queue at the monthly cap after keeping earlier entry commits", async () => {
     let jevCalls = 0;
-    const client: Pick<JevDecisionClient, "evaluate"> = { async evaluate(request, _signal, context) { await context.beforeDispatch?.(); await context.onDispatch?.("sent"); jevCalls += 1; return { requestedModel: "jev-1.13.0", actualModel: "jev-1.13.0", answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }])), usage: { input_tokens: 64_000, output_tokens: 0 }, estimatedCostCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS }; } };
+    const client: Pick<JevDecisionClient, "evaluate"> = { async evaluate(request, _signal, context) { await context.beforeDispatch?.(); await context.onDispatch?.("sent"); jevCalls += 1; return { requestedModel: "jev-latest", actualModel: "jev-latest", answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }])), usage: { input_tokens: 64_000, output_tokens: 0 }, estimatedCostCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS }; } };
     const fixture = await taggingFixture({ count: 4, monthlyCap: 1, client });
-    const result = await fixture.service.invoke({ operation: "knowledge.tags.run", request: { commandId: "retag-under-budget", connectionId: "tagger", limit: 4 } }) as { job: { commandId: string } };
+    const result = await fixture.service.invoke({ operation: "knowledge.tags.run", request: { commandId: "retag-under-budget", connectionId: "typesafe", limit: 4 } }) as { job: { commandId: string } };
     const queueJob = await waitJob(fixture.service, result.job.commandId);
     expect(queueJob).toMatchObject({ status: "failed", code: "budget-exhausted" });
     expect(jevCalls).toBe(3);
     const config = await fixture.store.config();
     expect((await fixture.store.tagsNeedingRetag({ vocabularyRevision: config.tagVocabulary.revision })).items).toHaveLength(1);
-    expect(await fixture.budget.status("tagger")).toMatchObject({ capCents: 1, availableCents: 1 - 3 * KNOWLEDGE_TAG_CALL_RESERVATION_CENTS });
+    expect(await fixture.budget.status("typesafe")).toMatchObject({ capCents: 1, availableCents: 1 - 3 * KNOWLEDGE_TAG_CALL_RESERVATION_CENTS });
   });
   it("shares duplicate in-flight starts so a retry does not make a second call", async () => {
     let calls = 0; let release!: () => void; let started!: () => void;
     const wait = new Promise<void>(resolve => { release = resolve; }); const dispatched = new Promise<void>(resolve => { started = resolve; });
     const client: Pick<JevDecisionClient, "evaluate"> = { async evaluate(request, _signal, context) {
       calls += 1; await context.beforeDispatch?.(); await context.onDispatch?.("sent"); started(); await wait;
-      return { requestedModel: "jev-1.13.0", actualModel: "jev-1.13.0", answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }])), usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
+      return { requestedModel: "jev-latest", actualModel: "jev-latest", answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }])), usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
     } };
     const fixture = await taggingFixture({ client }); const source = fixture.records[0]!;
-    const request = { operation: "knowledge.source.tag" as const, request: { commandId: "duplicate-tag-start", sourceId: source.id, expectedRevision: source.revisionId, connectionId: "tagger" } };
+    const request = { operation: "knowledge.source.tag" as const, request: { commandId: "duplicate-tag-start", sourceId: source.id, expectedRevision: source.revisionId, connectionId: "typesafe" } };
     const first = await fixture.service.invoke(request); await dispatched;
     const second = await fixture.service.invoke(request);
     expect((second as { job: { status: string } }).job.status).toBe("running"); expect(calls).toBe(1);
     release(); await waitJob(fixture.service, "duplicate-tag-start");
-    expect(await fixture.budget.status("tagger")).toMatchObject({ spentCents: 0.00042, reservedCents: 0 });
+    expect(await fixture.budget.status("typesafe")).toMatchObject({ spentCents: 0.00042, reservedCents: 0 });
     expect(first).toEqual(second);
   });
   it("estimates the bounded queue reservation without calling Jev", async () => {
     const fixture = await taggingFixture({ count: 4 });
-    const estimate = await fixture.service.invoke({ operation: "knowledge.tags.estimate", request: { connectionId: "tagger", limit: 4 } }) as { queuedSources: number; callsAtMost: number; reservationCentsAtMost: number; affordableByCurrentBudget: boolean };
+    const estimate = await fixture.service.invoke({ operation: "knowledge.tags.estimate", request: { connectionId: "typesafe", limit: 4 } }) as { queuedSources: number; callsAtMost: number; reservationCentsAtMost: number; affordableByCurrentBudget: boolean };
     expect(estimate).toMatchObject({ queuedSources: 4, callsAtMost: 4, affordableByCurrentBudget: true });
     expect(estimate.reservationCentsAtMost).toBeCloseTo(4 * KNOWLEDGE_TAG_CALL_RESERVATION_CENTS);
     let config = await fixture.store.config();
     for (let index = 0; index < 15; index += 1) config = await fixture.store.configureTags({ commandId: `estimate-tag-${index}`, expectedConfigRevision: config.revision, edit: { kind: "add", tag: { id: `extra-${index}`, label: `Extra ${index}`, definition: "A bounded synthetic category candidate.", category: "tools", decayClass: "ages", state: "active" } } });
-    const wider = await fixture.service.estimateTaggingCost({ connectionId: "tagger", limit: 4 });
+    const wider = await fixture.service.estimateTaggingCost({ connectionId: "typesafe", limit: 4 });
     expect(wider).toMatchObject({ queuedSources: 4, callsAtMost: 12 });
     expect(fixture.calls).toBe(0);
   });
@@ -306,10 +291,10 @@ describe("Knowledge Jev tagging", () => {
     const client: Pick<JevDecisionClient, "evaluate"> = { async evaluate(request, signal, context) {
       count += 1; await context.beforeDispatch?.(); await context.onDispatch?.("sent");
       if (count === 2) { secondStarted(); await new Promise<never>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true })); }
-      return { requestedModel: "jev-1.13.0", actualModel: "jev-1.13.0", answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }])), usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
+      return { requestedModel: "jev-latest", actualModel: "jev-latest", answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }])), usage: { input_tokens: 100, output_tokens: 0 }, estimatedCostCents: 0.00042, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
     } };
     const fixture = await taggingFixture({ count: 2, client });
-    const start = await fixture.service.invoke({ operation: "knowledge.tags.run", request: { commandId: "cancel-tag-queue", connectionId: "tagger", limit: 2 } }) as { job: { commandId: string } };
+    const start = await fixture.service.invoke({ operation: "knowledge.tags.run", request: { commandId: "cancel-tag-queue", connectionId: "typesafe", limit: 2 } }) as { job: { commandId: string } };
     await waiting; fixture.service.dispose();
     expect(await waitJob(fixture.service, start.job.commandId)).toMatchObject({ status: "failed", code: "cancelled" });
     const tagged = await Promise.all(fixture.records.map(async source => {

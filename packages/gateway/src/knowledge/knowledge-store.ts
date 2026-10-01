@@ -1142,8 +1142,7 @@ export class KnowledgeStore {
       const value = state.connectors?.[stateKey];
       if (!value) return undefined;
       const next = structuredClone(value);
-      const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
-      if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
+      const envelope = await this.connectorAuthority(connector, key);
       if (envelope) Object.assign(next, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
       return next;
     });
@@ -1167,6 +1166,17 @@ export class KnowledgeStore {
     });
   }
 
+  /** Raindrop and X state belongs to a ConnectionOwner account envelope. The
+   * Jev ledger is keyed by the `typesafe` provider identity and its authority
+   * (configured key, fixed monthly cap) is checked by KnowledgeTaggingBudget,
+   * so it has no connection envelope to resolve. */
+  private async connectorAuthority(connector: "raindrop" | "x" | "jev", key: string | undefined) {
+    if (!this.connectorEnvelope || connector === "jev") return undefined;
+    const envelope = key ? await this.connectorEnvelope(key) : undefined;
+    if (!envelope) throw conflict("Connector connection authority is unavailable");
+    return envelope;
+  }
+
   /** Connector operational state shares the knowledge owner’s serialized state;
    * this update never accepts or persists a credential value. */
   async updateConnectorState(commandId: string, connector: "raindrop" | "x" | "jev", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }, connectionId?: string): Promise<KnowledgeConnectorState> {
@@ -1181,9 +1191,7 @@ export class KnowledgeStore {
     const receiptPayload = { ...(payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : { payload }), connectionId: stateKey };
     return this.mutate(receiptOperation, commandId, receiptPayload, async state => {
       let current = state.connectors?.[stateKey] ? structuredClone(state.connectors[stateKey]) : undefined;
-      const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
-      if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
-      if (envelope && !current && connector === "jev") current = { connector: "jev", ...(key ? { connectionId: key } : {}), enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved, pending: [], capturedIds: [], health: "setup-required", remaining: 0 };
+      const envelope = await this.connectorAuthority(connector, key);
       if (current && envelope) Object.assign(current, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
       const next = update(current);
       if (key) next.connectionId = key;

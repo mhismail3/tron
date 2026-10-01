@@ -502,6 +502,53 @@ final class ProviderAuthCoordinator {
         }
     }
 
+    /// Holds early auth events while `mcp.auth.start` is awaiting its RPC result.
+    func beginMCPAuthAdmission() -> Int {
+        authBeginGeneration &+= 1
+        let generation = authBeginGeneration
+        inFlightAuthBeginGenerations.insert(generation)
+        return generation
+    }
+
+    /// Attaches the returned MCP OAuth operation to the same operation-keyed
+    /// presentation stream used by provider authentication.
+    func adoptMCPAuthOperation(operationID: String, target: ProviderCatalogTarget, admission: Int) {
+        authPresentationGeneration &+= 1
+        targetByAuthOperation[operationID] = target
+        activeAuthOperationID = operationID
+        recoveredAuthOperationID = nil
+        prompt = nil
+        let quarantined = takeQuarantinedPresentation(for: operationID)
+        event = quarantined?.event ?? ProviderAuthEventState(
+            operationId: operationID,
+            kind: .progress,
+            message: "Waiting for the MCP server's sign-in request…",
+            links: [],
+            url: nil,
+            instructions: nil,
+            userCode: nil,
+            verificationURL: nil,
+            intervalSeconds: nil,
+            expiresInSeconds: nil,
+            callbackCapture: nil
+        )
+        prompt = quarantined?.prompt
+        if let completion = quarantined?.completion {
+            Task { await processCompletion(completion) }
+        }
+        finishAuthBegin(admission)
+    }
+
+    func finishMCPAuthAdmission(_ admission: Int) {
+        finishAuthBegin(admission)
+    }
+
+    /// Releases local UI ownership after the MCP-specific cancel RPC has
+    /// already canceled the Gateway operation.
+    func finishMCPAuthOperation(operationID: String) {
+        retireAuthPresentation(operationID: operationID)
+    }
+
     /// Explicitly replaces the named active operation with the same provider
     /// method. The Gateway retires it (invalidating its authorization link)
     /// before starting the successor; a stale ID sends nothing.

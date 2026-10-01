@@ -2,7 +2,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
@@ -29,27 +28,22 @@ describe("Knowledge Jev tagging scale", () => {
   it("processes 440 sources in bounded queue batches with fake Jev", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-tagging-scale-")); roots.push(home);
     const workspace = new TronWorkspace(home); workspaces.push(workspace);
-    const owner = new ConnectionOwner(home);
-    const setup = await owner.execute({ kind: "setup.begin", commandId: "tag-scale-jev-begin", instanceId: "tagger", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
-    await owner.execute({ kind: "setup.complete", commandId: "tag-scale-jev-complete", operationId: setup.operationId, instanceId: "tagger", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
-    await owner.recordProviderObservation("tagger", 1, { credentialAvailability: "available", providerIdentity: "unknown" });
-    const store = new KnowledgeStore(workspace, undefined, async id => owner.resolveInstance(id).catch(() => undefined));
+    const store = new KnowledgeStore(workspace);
     let config = await store.config();
     config = await store.configureTags({ commandId: "tag-scale-vocabulary", expectedConfigRevision: config.revision, edit: { kind: "add", tag: { id: "useful", label: "Useful", definition: "Useful for future work.", category: "work", decayClass: "ages", state: "active" } } });
     for (let index = 0; index < 440; index += 1) await store.captureSource({ commandId: `tag-scale-source-${index}`, record: { kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: `Scale source ${index}`, uri: `https://scale.example/${index}`, text: "A bounded synthetic source useful for future work.", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z" } } } });
     let dispatched = 0;
     const fakeJev: Pick<JevDecisionClient, "evaluate"> = { async evaluate(request: JevDecisionRequest, _signal, context) {
       await context.beforeDispatch?.(); await context.onDispatch?.("sent"); dispatched += 1;
-      return { requestedModel: "jev-1.13.0", actualModel: "jev-1.13.0", answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }])), usage: { input_tokens: 120, output_tokens: 1 }, estimatedCostCents: 120 * 42 / 10_000_000, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
+      return { requestedModel: "jev-latest", actualModel: "jev-latest", answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { type: "noul" as const, noul: 0.9 }])), usage: { input_tokens: 120, output_tokens: 1 }, estimatedCostCents: 120 * 42 / 10_000_000, maxEstimatedChargeCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS };
     } };
-    const credentials = { async read(reference: string) { return reference === "connector:jev:personal" ? "synthetic" : undefined; } };
-    const budget = new KnowledgeTaggingBudget(store, owner, credentials);
-    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, undefined, undefined, undefined, undefined, { engine: new KnowledgeTaggingEngine(fakeJev, budget), budget, connections: owner });
+    const budget = new KnowledgeTaggingBudget(store);
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, undefined, undefined, undefined, undefined, { engine: new KnowledgeTaggingEngine(fakeJev, budget), budget });
     const started = performance.now();
     let processed = 0;
     for (let batch = 0; batch < 18; batch += 1) {
       const commandId = `tag-scale-queue-${batch}`;
-      const startedJob = await service.invoke({ operation: "knowledge.tags.run", request: { commandId, connectionId: "tagger", limit: 25 } }) as { job: { commandId: string } };
+      const startedJob = await service.invoke({ operation: "knowledge.tags.run", request: { commandId, connectionId: "typesafe", limit: 25 } }) as { job: { commandId: string } };
       const job = await waitJob(service, startedJob.job.commandId);
       expect(job.status).toBe("done");
       const configNow = await store.config();

@@ -253,11 +253,21 @@ export function displayArtifactIDs(entries: readonly unknown[]): string[] {
     if (!entry || typeof entry !== "object") continue;
     const value = entry as { type?: unknown; message?: { role?: unknown; toolName?: unknown; details?: unknown } };
     if (value.type !== "message" || value.message?.role !== "toolResult") continue;
+    const details = value.message.details;
     const display = admitDisplayProjection(
       typeof value.message.toolName === "string" ? value.message.toolName : undefined,
-      value.message.details,
+      details,
     );
     if (display?.artifact) ids.add(display.artifact.id);
+    const nested = details && typeof details === "object" && !Array.isArray(details)
+      ? (details as Record<string, unknown>).tronNested : undefined;
+    const nestedDisplays = nested && typeof nested === "object" && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>).display : undefined;
+    if (Array.isArray(nestedDisplays)) for (const item of nestedDisplays) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const nestedDisplay = admitDisplayProjection("display", { display: (item as Record<string, unknown>).display });
+      if (nestedDisplay?.artifact) ids.add(nestedDisplay.artifact.id);
+    }
   }
   return [...ids];
 }

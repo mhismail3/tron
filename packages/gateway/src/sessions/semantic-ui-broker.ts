@@ -55,9 +55,10 @@ interface InteractionRequestOptions {
 }
 
 // Pi exposes Theme and initTheme at its package root, but not its mutable global
-// theme singleton. Keep RPC sessions isolated with a host-owned baseline while
-// initializing Pi's public process-global markdown helpers exactly once.
-initTheme(undefined, false);
+// theme singleton. The former RPC default was Pi's dark theme; explicitly pin
+// process-global markdown helpers to it instead of the new terminal-dependent
+// system default. Session callbacks continue to receive the host-owned baseline.
+initTheme("dark", false);
 const THEME_COLORS: Record<ThemeColor, string | number> = {
   accent: 6, border: 8, borderAccent: 6, borderMuted: 8,
   success: 2, error: 1, warning: 3, muted: 8, dim: 8, text: 7,

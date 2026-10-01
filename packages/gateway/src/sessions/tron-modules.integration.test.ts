@@ -11,7 +11,7 @@ function inlineModuleNames(resources: Record<string, any>): string[] {
   return resources.extensions
     .filter((extension: any) => extension.source === "inline")
     .map((extension: any) => String(extension.name).replace(/^<inline:/, "").replace(/>$/, ""))
-    .filter((name: string) => !name.startsWith("tron-mcp-"));
+    .filter((extension: any) => extension.builtin !== true);
 }
 
 describe.sequential("RuntimeSlot Tron module registration", () => {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,17 +6,21 @@ import { drainDurableWriteStats } from "../util/durable-json.js";
 import { ConnectionOwner } from "./connection-owner.js";
 
 describe("ConnectionOwner", () => {
-  it("exposes paid Jev tagging only through the generic connection approval policy", async () => {
-    const home = await mkdtemp(join(tmpdir(), "tron-jev-tag-connection-"));
+  it("rejects only a persisted knowledge.jev instance while keeping other connections readable", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-legacy-jev-connection-"));
     try {
-    const owner = new ConnectionOwner(home);
-    const setup = await owner.execute({ kind: "setup.begin", commandId: "jev-tag-begin-0001", instanceId: "tagger", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
-    await owner.execute({ kind: "setup.complete", commandId: "jev-tag-complete-0001", operationId: setup.operationId, instanceId: "tagger", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 500, recurringApproved: false } });
-    await owner.recordProviderObservation("tagger", 1, { credentialAvailability: "available", providerIdentity: "unknown" });
-    expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "unavailable", detail: "Paid access approval is required for this capability" }));
-    await owner.execute({ kind: "policy.update", commandId: "jev-tag-approve-0001", instanceId: "tagger", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
-    await owner.recordProviderObservation("tagger", 2, { credentialAvailability: "available", providerIdentity: "unknown" });
-    expect((await owner.snapshot()).capabilities).toContainEqual(expect.objectContaining({ id: "tag", connectionId: "tagger", availability: "available" }));
+      const owner = new ConnectionOwner(home);
+      const setup = await owner.execute({ kind: "setup.begin", commandId: "setup-healthy-001", instanceId: "healthy", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+      await owner.execute({ kind: "setup.complete", commandId: "setup-healthy-002", operationId: setup.operationId, instanceId: "healthy", providerAccountId: "42", credentialRef: "connector:raindrop:test", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+      const path = join(home, "state", "integrations", "connections.json");
+      const persisted = JSON.parse(await readFile(path, "utf8")) as { instances: Record<string, unknown> };
+      persisted.instances.legacy = { ...persisted.instances.healthy as object, definitionId: "knowledge.jev" };
+      await writeFile(path, JSON.stringify(persisted), { mode: 0o600 });
+      const snapshot = await owner.snapshot();
+      expect(snapshot.instances.map((instance) => instance.id)).toEqual(["healthy"]);
+      await expect(owner.resolveInstance("legacy")).rejects.toThrow(/knowledge\.jev connection 'legacy'.*configure the typesafe provider credential/);
+      await expect(owner.execute({ kind: "disconnect", commandId: "legacy-disconnect-001", instanceId: "legacy" }))
+        .rejects.toThrow(/knowledge\.jev connection 'legacy'.*configure the typesafe provider credential/);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   it("validates unique Raindrop collection roles and revision-fences their configuration", async () => {
@@ -61,7 +65,6 @@ describe("ConnectionOwner", () => {
       expect(admitted.capabilities.find(item => item.id === "move" && item.connectionId === "account-one")).toMatchObject({ availability: "unavailable", detail: "Write approval is required for this capability" });
       expect(admitted.capabilities.find(item => item.id === "assess" && item.connectionId === "account-one")).toMatchObject({ availability: "unavailable", detail: "Paid access approval is required for this capability" });
       expect(admitted.capabilities.find(item => item.id === "move" && item.connectionId === "account-two")?.availability).toBe("available");
-      await expect(owner.admitRuntimeBinding({ schemaVersion: 1, integrationId: "knowledge.raindrop", connectionId: "account-one", capabilityId: "move", sessionId: "session-one", runtimeGeneration: 1, provider: { owner: "connection", definitionId: "knowledge.raindrop", connectionId: "account-one" } })).rejects.toThrow("Write approval is required");
       await owner.execute({ kind: "policy.update", commandId: "policy-approve-one-0001", instanceId: "account-one", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: true, paidAccessApproved: true, paidBudgetCents: 25, recurringApproved: false } });
       const latestPolicy = (await owner.resolveInstance("account-one")).policy;
       // A distinct stale command cannot revoke or restore fields from the old

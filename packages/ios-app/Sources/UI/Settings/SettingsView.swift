@@ -89,12 +89,12 @@ struct SettingsView: View {
                             ExtensionsSettingsView(projectCWD: projectCWD)
                         }
                         settingsDivider(accent: .tronCyan)
-                        settingsLink("MCP Servers", summary: "Tools-only local and remote MCP connections", icon: "server.rack", accent: .tronCyan) {
-                            IntegrationsSettingsView(surface: .mcpServers)
+                        settingsLink("MCP Servers", summary: "Global and trusted-project MCP servers", icon: "server.rack", accent: .tronCyan) {
+                            MCPServersSettingsView(projectCWD: projectCWD, sessionID: projectSessionID)
                         }
                         settingsDivider(accent: .tronCyan)
                         settingsLink("Connected Services", summary: "Accounts and service capabilities", icon: "link", accent: .tronCyan) {
-                            IntegrationsSettingsView(surface: .connectedServices)
+                            IntegrationsSettingsView()
                         }
                         settingsDivider(accent: .tronCyan)
                         if scope == .project {

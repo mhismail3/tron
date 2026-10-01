@@ -17,12 +17,9 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function fixture(monthlyCap = 500, paidAccessApproved = true) {
   const root = await mkdtemp(join(tmpdir(), "tron-source-assessment-")); roots.push(root);
   const owner = new ConnectionOwner(root);
-  const setup = await owner.execute({ kind: "setup.begin", commandId: "assessment-setup-begin", instanceId: "jev", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
-  await owner.execute({ kind: "setup.complete", commandId: "assessment-setup-done", operationId: setup.operationId, instanceId: "jev", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved, paidBudgetCents: monthlyCap, recurringApproved: false } });
-  await owner.recordProviderObservation("jev", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
   const store = new KnowledgeStore(new TronWorkspace(root), undefined, async id => owner.resolveInstance(id).catch(() => undefined));
-  const credentials = { async read(reference: string) { return reference === "connector:jev:personal" ? "synthetic" : undefined; } };
-  const budget = new KnowledgeTaggingBudget(store, owner, credentials);
+  // A configured TypeSafe key is the paid-work consent (user decision 2026-09-30).
+  const budget = new KnowledgeTaggingBudget(store, () => paidAccessApproved, monthlyCap);
   const source = (await store.captureSource({ commandId: "assessment-source", record: { kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: "Assessment source", uri: "https://example.test/source", text: "Useful evidence to assess.", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", admission: { status: "pending", decidedAt: "2026-01-01T00:00:00Z", producer: { actor: "connector" } } } } })).record as KnowledgeRecord & { kind: "source" };
   return { root, owner, store, budget, source };
 }
@@ -41,7 +38,7 @@ describe("source assessment primitive", () => {
     expect(result.assessment).toMatchObject({ recommendation: "retained", confidence: 0.91, classification: "research" });
     expect(result.source.content.admission).toMatchObject({ status: "pending" });
     expect(result.source.content.assessment).toMatchObject({ recommendation: "retained", confidence: 0.91 });
-    const budget = await f.budget.status("jev");
+    const budget = await f.budget.status("typesafe");
     expect(budget.spentCents).toBeCloseTo(0.00042);
     expect(budget.reservedCents).toBe(0);
   });
@@ -54,10 +51,10 @@ describe("source assessment primitive", () => {
     let sent = false;
     const model: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); sent = true; await context?.onDispatch?.(); return { summary: "must not assess", evidenceQuality: "unknown", freshness: "unknown" }; } };
     const service = new KnowledgeService(f.store, new KnowledgeObservationService(f.store, undefined), {}, undefined, undefined, undefined, undefined, { budget: f.budget, assessment: model });
-    const before = await f.budget.status("jev");
+    const before = await f.budget.status("typesafe");
     await expect(service.invoke({ operation: "knowledge.source.assess", request: { commandId: "jev-stale-personal", sourceId: f.source.id, expectedRevision: f.source.revisionId, assessor: "jev" } })).rejects.toMatchObject({ code: "unsupported" });
     expect(sent).toBe(false);
-    expect(await f.budget.status("jev")).toEqual(before);
+    expect(await f.budget.status("typesafe")).toEqual(before);
   });
 
   // Failure mode: every reservation conflict was reported as "paid and settled",
@@ -79,10 +76,10 @@ describe("source assessment primitive", () => {
     let dispatched = false;
     const model: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); dispatched = true; await context?.onDispatch?.(); return { summary: "must not assess", evidenceQuality: "unknown", freshness: "unknown" }; } };
     const service = new KnowledgeService(f.store, new KnowledgeObservationService(f.store, undefined), {}, undefined, undefined, undefined, undefined, { budget: f.budget, assessment: model });
-    const before = await f.budget.status("jev");
+    const before = await f.budget.status("typesafe");
     await expect(service.invoke({ operation: "knowledge.source.assess", request: { commandId: "jev-personal-refusal", sourceId: personal.id, expectedRevision: personal.revisionId, assessor: "jev" } })).rejects.toMatchObject({ code: "unsupported" });
     expect(dispatched).toBe(false);
-    expect(await f.budget.status("jev")).toEqual(before);
+    expect(await f.budget.status("typesafe")).toEqual(before);
   });
 
   it("replays a committed assessment receipt before touching the paid ledger", async () => {
@@ -97,7 +94,7 @@ describe("source assessment primitive", () => {
     const replay = await service.invoke(request);
     expect((replay as { source: KnowledgeRecord }).source).toEqual(await f.store.read(f.source.id, undefined, false, true, true));
     expect(calls).toBe(1);
-    expect(await f.budget.status("jev")).toMatchObject({ spentCents: 0.00042, reservedCents: 0 });
+    expect(await f.budget.status("typesafe")).toMatchObject({ spentCents: 0.00042, reservedCents: 0 });
   });
 
   it("settles a received Jev result when record persistence fails and requires a new command", async () => {
@@ -108,7 +105,7 @@ describe("source assessment primitive", () => {
     const write = vi.spyOn(f.store, "captureSource").mockRejectedValueOnce(new Error("injected record persistence failure"));
     const request = { operation: "knowledge.source.assess" as const, request: { commandId: "settled-write-failure-assessment", sourceId: f.source.id, expectedRevision: f.source.revisionId, assessor: "jev" as const } };
     await expect(service.invoke(request)).rejects.toThrow("injected record persistence failure");
-    const budget = await f.budget.status("jev");
+    const budget = await f.budget.status("typesafe");
     expect(budget).toMatchObject({ spentCents: 0.00042, reservedCents: 0 });
     await expect(service.invoke(request)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("retry with a new commandId") });
     expect(calls).toBe(1);
@@ -118,9 +115,9 @@ describe("source assessment primitive", () => {
   it("refuses Jev dispatch before assessment when the monthly ledger is exhausted", async () => {
     const f = await fixture(1);
     for (let index = 0; index < 3; index += 1) {
-      const occupied = await f.budget.reserveAssessment("jev", `existing-monthly-attempt-${index}`);
-      await f.budget.markDispatch("jev", occupied);
-      await f.budget.settle("jev", occupied, { inputTokens: 64_000, outputTokens: 0, estimatedCostCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS });
+      const occupied = await f.budget.reserveAssessment("typesafe", `existing-monthly-attempt-${index}`);
+      await f.budget.markDispatch("typesafe", occupied);
+      await f.budget.settle("typesafe", occupied, { inputTokens: 64_000, outputTokens: 0, estimatedCostCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS });
     }
     let dispatched = false;
     const model: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); dispatched = true; await context?.onDispatch?.(); return { summary: "no", evidenceQuality: "unknown", freshness: "unknown" }; } };
@@ -129,12 +126,12 @@ describe("source assessment primitive", () => {
     expect(dispatched).toBe(false);
   });
 
-  it("refuses Jev assessment when paid access is off before provider dispatch", async () => {
+  it("refuses Jev assessment without a configured TypeSafe key before provider dispatch", async () => {
     const f = await fixture(500, false);
     let dispatched = false;
     const model: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); dispatched = true; return { summary: "no", evidenceQuality: "unknown", freshness: "unknown" }; } };
     const service = new KnowledgeService(f.store, new KnowledgeObservationService(f.store, undefined), {}, undefined, undefined, undefined, undefined, { budget: f.budget, assessment: model });
-    await expect(service.invoke({ operation: "knowledge.source.assess", request: { commandId: "jev-paid-off", sourceId: f.source.id, expectedRevision: f.source.revisionId, assessor: "jev" } })).rejects.toThrow(/paid.access|approved|disabled/i);
+    await expect(service.invoke({ operation: "knowledge.source.assess", request: { commandId: "jev-paid-off", sourceId: f.source.id, expectedRevision: f.source.revisionId, assessor: "jev" } })).rejects.toThrow(/TypeSafe provider credential/i);
     expect(dispatched).toBe(false);
   });
 

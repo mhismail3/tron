@@ -26,16 +26,14 @@ describe("Raindrop intake pagination and cohort accounting", () => {
     let workspace = new TronWorkspace(root); workspaces.push(workspace);
     let store = new KnowledgeStore(workspace);
     const owner = new ConnectionOwner(root);
-    const setup = await owner.execute({ kind: "setup.begin", commandId: command("jev-begin"), instanceId: "jev", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
-    await owner.execute({ kind: "setup.complete", commandId: command("jev-complete"), operationId: setup.operationId, instanceId: "jev", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
-    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"], ["connector:jev:personal", "synthetic-jev"]]));
-    const budgetFor = (current: KnowledgeStore) => new KnowledgeTaggingBudget(current, owner, credentials);
+    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]]));
+    const budgetFor = (current: KnowledgeStore) => new KnowledgeTaggingBudget(current, () => true);
     const remote = new Map(Array.from({ length: total }, (_, index) => [String(index + 1), "111"]));
     const moved: string[] = []; const requestedPages: number[] = []; let failedMove = false;
     const assessment: SourceAssessmentModel = { async assess(input, _signal, context) {
       await context?.beforeDispatch?.();
       const interests: string[] = [];
-      return { summary: "synthetic assessment", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained" as const, profileVersion: jevProfileVersion(interests), rubricVersion: "tron-source-rubric-v2", inputDigest: jevInputDigest(input, interests) };
+      return { summary: "synthetic assessment", evidenceQuality: "high", freshness: "current", model: "jev-latest", recommendation: "retained" as const, profileVersion: jevProfileVersion(interests), rubricVersion: "tron-source-rubric-v2", inputDigest: jevInputDigest(input, interests) };
     } };
     const options: KnowledgeConnectorOptions = {
       credentials,

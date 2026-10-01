@@ -2,12 +2,14 @@ import { homedir } from "node:os";
 import { DefaultResourceLoader, SettingsManager, type Extension } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "./trust-service.js";
+import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 
 /** One session-free extension load: the extensions a scope would load, and the
  * modules that failed to load. */
 export interface SessionFreeExtensionLoad {
   extensions: Extension[];
   errors: Array<{ path: string; error: string }>;
+  warnings: Array<{ path: string; warning: string }>;
 }
 
 /** Loads the extensions of one scope (Global, or one project folder) without
@@ -40,12 +42,17 @@ export async function loadSessionFreeExtensions(
   if (settings.drainErrors().length > 0) {
     throw new GatewayError("conflict", "Canonical extension settings could not be loaded");
   }
-  const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings });
+  const loader = new DefaultResourceLoader({
+    cwd,
+    agentDir,
+    settingsManager: settings,
+    extensionFactories: piBuiltinExtensions(agentDir),
+  });
   await loader.reload({
     resolveProjectTrust: async () => inspection === undefined
       ? false
       : (await trust.inspect(cwd)).effectiveDecision === true,
   });
   const loaded = loader.getExtensions();
-  return { extensions: loaded.extensions, errors: loaded.errors };
+  return { extensions: loaded.extensions, errors: loaded.errors, warnings: loaded.warnings ?? [] };
 }

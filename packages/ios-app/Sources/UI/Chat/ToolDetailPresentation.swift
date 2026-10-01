@@ -5,6 +5,28 @@ enum ToolDetailKind: String, Sendable {
     case read, write, edit, bash, grep, find, list, generic
 }
 
+struct NestedToolCallPresentation: Hashable, Sendable, Identifiable {
+    enum Status: String, Hashable, Sendable {
+        case running, completed, failed, unfinished
+
+        var displayLabel: String {
+            switch self {
+            case .running: "Running"
+            case .completed: "Completed"
+            case .failed: "Failed"
+            case .unfinished: "Didn't finish"
+            }
+        }
+    }
+    let id: String
+    let toolName: String
+    let status: Status
+    let error: String?
+    let durationMs: Int?
+    let arguments: JSONValue?
+    let argumentsBytes: Int?
+}
+
 private struct BoundedCircularBuffer<Element> {
     private var storage: [Element?]
     private var nextReplacementIndex = 0
@@ -631,12 +653,16 @@ struct ToolDetailPresentation: Hashable, Sendable {
     let structuredResult: JSONValue?
     let prefersStructuredResult: Bool
     let diff: ToolDiffPresentation?
+    let nestedCalls: [NestedToolCallPresentation]
+    let nestedCallsComplete: Bool
+    let tronNestedComplete: Bool?
+    let classifyCostUSD: Double?
 
     init(tool: ChatToolPresentation) {
         let request = tool.request?.objectValue
         let rawToolName = tool.toolName ?? tool.title
         kind = Self.kind(for: rawToolName)
-        displayTitle = Self.displayTitle(for: tool.title)
+        displayTitle = Self.displayTitle(for: tool)
         icon = Self.icon(for: rawToolName)
         sheetTitleIcon = Self.sheetTitleIcon(for: rawToolName)
         let primary = Self.primary(kind: kind, request: request)
@@ -660,10 +686,21 @@ struct ToolDetailPresentation: Hashable, Sendable {
         // Actual JSON text still gets the compact structured presentation.
         prefersStructuredResult = kind == .generic && structuredResult != nil
             && (readableResult == nil || Self.parsedJSON(readableResult ?? "") != nil)
+        let nested = Self.nestedCalls(tool.nestedCalls)
+        nestedCalls = nested.calls
+        nestedCallsComplete = nested.complete
+        tronNestedComplete = tool.details?.objectValue?["tronNested"]?.objectValue?["complete"]?.boolValue
+        let usd: Double? = {
+            guard case .number(let value)? = tool.usage?.objectValue?["cost"]?.objectValue?["total"],
+                  value.isFinite, value >= 0 else { return nil }
+            return value
+        }()
+        classifyCostUSD = rawToolName == "codemode" ? usd : nil
     }
 
     static func kind(for title: String) -> ToolDetailKind {
-        switch title {
+        if title.hasPrefix("mcp__") { return .generic }
+        return switch title {
         case "read": .read
         case "write": .write
         case "edit": .edit
@@ -692,12 +729,32 @@ struct ToolDetailPresentation: Hashable, Sendable {
         case .list:
             ("Directory", firstString(in: request, keys: ["path"]) ?? ".")
         case .generic:
-            genericPrimary(in: request)
+            if let value = firstString(in: request, keys: ["uri", "url"]) {
+                (request?["uri"]?.stringValue == value ? "Resource" : "URL", value)
+            } else {
+                genericPrimary(in: request)
+            }
         }
     }
 
     static func displayTitle(for tool: ChatToolPresentation) -> String {
-        displayTitle(for: tool.title)
+        let name = tool.toolName ?? tool.title
+        if name.hasPrefix("mcp__") {
+            if !tool.title.isEmpty, tool.title != "Tool", tool.title != name { return tool.title }
+            let parts = name.components(separatedBy: "__")
+            if parts.count >= 3, !parts[1].isEmpty, !parts[2].isEmpty {
+                return "\(parts[1])/\(parts[2])"
+            }
+        }
+        switch name {
+        case "codemode": return "Codemode"
+        case "display": return "Display"
+        case "tool_search": return "Search tools"
+        case "list_mcp_resources": return "List MCP resources"
+        case "list_mcp_resource_templates": return "List MCP resource templates"
+        case "read_mcp_resource": return "Read MCP resource"
+        default: return displayTitle(for: tool.title)
+        }
     }
 
     static func contextualDisplayTitle(for tool: ChatToolPresentation) -> String {
@@ -711,7 +768,17 @@ struct ToolDetailPresentation: Hashable, Sendable {
     }
 
     static func displayTitle(for title: String) -> String {
-        switch title {
+        if title.hasPrefix("mcp__") {
+            let parts = title.components(separatedBy: "__")
+            if parts.count >= 3, !parts[1].isEmpty, !parts[2].isEmpty { return "\(parts[1])/\(parts[2])" }
+        }
+        return switch title {
+        case "codemode": "Codemode"
+        case "display": "Display"
+        case "tool_search": "Search tools"
+        case "list_mcp_resources": "List MCP resources"
+        case "list_mcp_resource_templates": "List MCP resource templates"
+        case "read_mcp_resource": "Read MCP resource"
         case "read": "Read file"
         case "write": "Write file"
         case "edit": "Edit file"
@@ -724,7 +791,12 @@ struct ToolDetailPresentation: Hashable, Sendable {
     }
 
     static func icon(for title: String) -> String {
-        switch title {
+        if title.hasPrefix("mcp__") { return "network" }
+        return switch title {
+        case "codemode": "terminal"
+        case "display": "rectangle.on.rectangle"
+        case "tool_search": "magnifyingglass"
+        case "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource": "externaldrive"
         case "read": "doc.text"
         case "write": "square.and.pencil"
         case "edit": "pencil.and.outline"
@@ -754,6 +826,10 @@ struct ToolDetailPresentation: Hashable, Sendable {
         for candidate in candidates {
             guard let value = object?[candidate.key]?.stringValue, !value.isEmpty else { continue }
             return (candidate.label, value)
+        }
+        if let (key, value) = object?.first(where: { $0.value.stringValue?.isEmpty == false }),
+           let value = value.stringValue {
+            return (key.replacingOccurrences(of: "_", with: " ").capitalized, value)
         }
         return nil
     }
@@ -853,10 +929,11 @@ struct ToolDetailPresentation: Hashable, Sendable {
     private static func readableString(in value: JSONValue?) -> String? {
         if let text = value?.stringValue, !text.isEmpty { return text }
         guard let object = value?.objectValue else { return nil }
-        if let blocks = object["content"]?.arrayValue {
+        if let blocks = object["content"]?.arrayValue ?? object["contents"]?.arrayValue {
             let text = blocks.compactMap { block -> String? in
-                guard block.objectValue?["type"]?.stringValue == "text" else { return nil }
-                return block.objectValue?["text"]?.stringValue
+                let values = block.objectValue
+                guard values?["type"]?.stringValue == "text" || values?["text"]?.stringValue != nil else { return nil }
+                return values?["text"]?.stringValue
             }.joined(separator: "\n")
             if !text.isEmpty { return text }
         }
@@ -893,6 +970,26 @@ struct ToolDetailPresentation: Hashable, Sendable {
 
     private static func isCollection(_ value: JSONValue) -> Bool {
         value.objectValue != nil || value.arrayValue != nil
+    }
+
+    private static func nestedCalls(_ value: JSONValue?) -> (calls: [NestedToolCallPresentation], complete: Bool) {
+        guard let object = value?.objectValue,
+              let rawCalls = object["calls"]?.arrayValue else { return ([], true) }
+        let complete = object["complete"]?.boolValue ?? false
+        let calls = rawCalls.prefix(32).compactMap { item -> NestedToolCallPresentation? in
+            guard let fields = item.objectValue,
+                  let id = fields["id"]?.stringValue, !id.isEmpty,
+                  let name = fields["toolName"]?.stringValue ?? fields["name"]?.stringValue else { return nil }
+            let status = NestedToolCallPresentation.Status(rawValue: fields["status"]?.stringValue ?? "") ?? .running
+            return NestedToolCallPresentation(
+                id: id, toolName: name, status: status,
+                error: fields["error"]?.stringValue,
+                durationMs: fields["durationMs"]?.intValue,
+                arguments: fields["arguments"],
+                argumentsBytes: fields["argumentsBytes"]?.intValue
+            )
+        }
+        return (calls, complete && rawCalls.count <= 32)
     }
 
     private static func parsedJSON(_ text: String) -> JSONValue? {

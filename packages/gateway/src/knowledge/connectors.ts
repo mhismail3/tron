@@ -947,7 +947,7 @@ export class KnowledgeConnectorExtension {
             };
             try {
               const assessmentConnectionId = jevConnectionId;
-              if (!assessmentConnectionId) throw new GatewayError("unsupported", "Jev intake assessment requires exactly one enabled knowledge.jev connection with approved paid access");
+              if (!assessmentConnectionId) throw new GatewayError("unsupported", "Jev intake assessment requires the configured TypeSafe provider credential");
               const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => {
                 monthlyAttempt = await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, assessmentConnectionId, cohortId);
               }, onDispatch: async () => {

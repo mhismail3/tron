@@ -42,9 +42,12 @@ describe("session-free hook listing", () => {
   it("lists only user-scope hooks while the project is untrusted", async () => {
     const value = await fixture();
     const projection = await value.hookResources.list(value.cwd);
-    expect(projection.extensions.map((extension: any) => extension.name)).toEqual(["global-probe.ts"]);
+    expect(projection.extensions.map((extension: any) => extension.name)).toEqual([
+      "global-probe.ts", "builtin:codemode", "builtin:tool-search", "builtin:mcp",
+    ]);
     expect(projection.extensions[0]).toMatchObject({ scope: "user", source: "auto", tools: ["global_probe"] });
-    expect(projection.hookInventory.extensions.total).toBe(1);
+    expect(projection.extensions.slice(1).map((extension: any) => extension.source)).toEqual(["builtin", "builtin", "builtin"]);
+    expect(projection.hookInventory.extensions.total).toBe(4);
     expect(value.marker).toBeDefined();
   });
 
@@ -72,13 +75,15 @@ describe("session-free hook listing", () => {
     const value = await fixture();
     await value.trust.set(value.cwd, true);
     const projection = await value.hookResources.list();
-    expect(projection.extensions.map((extension: any) => extension.name)).toEqual(["global-probe.ts"]);
+    expect(projection.extensions.map((extension: any) => extension.name)).toEqual([
+      "global-probe.ts", "builtin:codemode", "builtin:tool-search", "builtin:mcp",
+    ]);
   });
 
   it("returns exactly the session.resources hook fields within their envelope", async () => {
     const value = await fixture();
     const projection = await value.hookResources.list(value.cwd);
-    expect(Object.keys(projection).sort()).toEqual(["extensionLoadErrors", "extensions", "hookInventory"]);
+    expect(Object.keys(projection).sort()).toEqual(["extensionLoadErrors", "extensionLoadWarnings", "extensions", "hookInventory"]);
     expect(projection.hookInventory.encodedBytes).toBeLessThanOrEqual(projection.hookInventory.encodedBytesLimit);
     expect(projection.hookInventory.encodedBytes).toBeGreaterThan(0);
   });

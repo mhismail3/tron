@@ -72,7 +72,7 @@ export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe
       pi.registerTool({
         name: "connections",
         label: "Connections",
-        description: "Inspect Tron's configured integration definitions, account instances, capability availability, and setup status. This read-only projection contains no credential values or references; setup and policy changes remain exact owner-typed Gateway commands.",
+        description: "Inspect Tron-managed provider connection definitions, account instances, capability availability, and setup status. MCP servers are configured separately through Pi's agent-directory mcp.json. This read-only projection contains no credential values or references; setup and policy changes remain exact owner-typed Gateway commands.",
         promptSnippet: "Inspect connection status before using a provider capability. A configured account is not automatically admitted into this session.",
         parameters: CONNECTIONS_TOOL_PARAMETERS,
         executionMode: "sequential",

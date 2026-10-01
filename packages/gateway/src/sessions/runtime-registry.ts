@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
+import { applyJevModelPricing } from "../providers/jev-model-pricing.js";
 import type {
   AdministrativeDrainBlockerCategory,
   AdministrativeDrainBlockerSummary,
@@ -101,7 +102,6 @@ import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-bound
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
-import type { McpAdapter } from "../integrations/mcp-adapter.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
 import { validateSearchBranch } from "./session-search-text.js";
 import { observationEntriesDigest } from "../knowledge/knowledge-observation.js";
@@ -282,6 +282,16 @@ function assertProcessSessionRef(value: string): void {
   if (!value || Buffer.byteLength(value) > 256 || /[\\/\0]/u.test(value)) {
     throw new GatewayError("invalid_request", "Invalid subagent session reference");
   }
+}
+
+/** Pi stores the spelling of a parent path; macOS may surface the same path
+ * through its `/var` and `/private/var` aliases. Normalize lexically so catalog
+ * assembly does not add synchronous filesystem work per session. */
+function sessionCatalogPathKey(path: string): string {
+  const absolute = resolve(path);
+  return process.platform === "darwin" && absolute.startsWith("/private/var/")
+    ? absolute.slice("/private".length)
+    : absolute;
 }
 
 interface DashboardOrderableSession {
@@ -520,7 +530,7 @@ class RequestSpanLane extends AsyncMutex {
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
   /** Live-only generated sessions are bound to the exact Automation operation
-   * until Pi persists their first assistant entry. Weak ownership cannot outlive
+   * until Pi persists their first user or assistant message. Weak ownership cannot outlive
    * the RuntimeSlot and is never a second session catalog. */
   private readonly automationSessionOwners = new WeakMap<RuntimeSlot, {
     operationId: string;
@@ -663,6 +673,7 @@ export class RuntimeRegistry {
       tronHome: string;
       /** Exact provider-owned root under the resolved Tron home. */
       delegatedArtifactRoot?: string;
+      mcpAuth?: RuntimeSlotDependencies["mcpAuth"];
       idleRuntimeMs: number;
       maximumLiveRuntimes?: number;
       modelRuntimeFactory?: () => Promise<ModelRuntime>;
@@ -691,6 +702,7 @@ export class RuntimeRegistry {
        * reserved or already-running automation target. */
       sessionAutomationReserved?: (sessionId: string) => boolean;
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
+      codemodeDiagnostic?: RuntimeSlotDependencies["codemodeDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       /** Handled catalog-index write failures. The index write is fire-and-forget
        * outside any request span, so its owner records them. */
@@ -723,7 +735,6 @@ export class RuntimeRegistry {
       scheduleToolOperations?: ScheduleToolOperations;
       jev?: JevDecisionClient;
       connections?: ConnectionOwner;
-      mcp?: McpAdapter;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
@@ -1549,13 +1560,14 @@ export class RuntimeRegistry {
     return {
       agentDir: this.options.agentDir,
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
-      createModelRuntime: async () => installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
+      ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
+      createModelRuntime: async () => applyJevModelPricing(installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
         authPath: join(this.options.agentDir, "auth.json"),
         modelsPath: join(this.options.agentDir, "models.json"),
         modelsStorePath: join(this.options.agentDir, "models-store.json"),
         refreshOnCreate: true,
         allowModelNetwork: false,
-      })))()),
+      })))())),
       trust: this.options.trust,
       blobs: this.blobs,
       exports: this.exports,
@@ -1569,6 +1581,7 @@ export class RuntimeRegistry {
       noteModelUsed: (sessionId: string, model: { provider: string; id: string }) => { void this.noteModelUsed(sessionId, model); },
       ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
+      ...(this.options.codemodeDiagnostic ? { codemodeDiagnostic: this.options.codemodeDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
       sessionAudience: (sessionId: string) => this.subscribers.get(sessionId)?.size ?? 0,
       ...(this.options.resources ? { resources: this.options.resources } : {}),
@@ -1581,7 +1594,6 @@ export class RuntimeRegistry {
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),
       ...(this.options.connections ? { connections: this.options.connections } : {}),
-      ...(this.options.mcp ? { mcp: this.options.mcp } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.runtimeDisposeTimeout ? { runtimeDisposalTimedOut: this.options.runtimeDisposeTimeout } : {}),
     };
@@ -2370,8 +2382,7 @@ export class RuntimeRegistry {
     scope: "user" | "all",
     ambiguousIDs: ReadonlySet<string>,
   ): CatalogPageSeed[] {
-    const pathToId = new Map(sessions.map((session) => [resolve(session.path), session.id]));
-    const pathById = new Map(sessions.map((session) => [session.id, session.path]));
+    const pathToId = new Map(sessions.map((session) => [sessionCatalogPathKey(session.path), session.id]));
     const delegated = this.delegatedSessionTopologies(sessions);
     const persistedIDs = new Set(sessions.map((session) => session.id));
     const seeds: CatalogPageSeed[] = [];
@@ -2380,24 +2391,11 @@ export class RuntimeRegistry {
       if (topology?.contradictoryHeader) continue;
       const kind: SessionSummary["kind"] = topology ? "subagent" : "user";
       if (scope === "user" && kind === "subagent") continue;
-      const headerParentSessionId = session.parentSessionPath ? pathToId.get(resolve(session.parentSessionPath)) : undefined;
-      const slot = this.slots.get(session.id);
-      // During the exact live→persisted boundary, a warmed structural index can
-      // observe the new child file before its canonical parent header alias has
-      // joined the same normalized cut. The mutation-owned parent ID is the same
-      // canonical relationship and closes that one-cut gap; cold catalogs still
-      // derive it exclusively from JSONL topology/header evidence.
-      const liveParentSessionId = slot?.catalogParentSessionId;
-      const liveParentPath = liveParentSessionId ? pathById.get(liveParentSessionId) : undefined;
-      const headerMatchesLiveParent = session.parentSessionPath === undefined
-        || (liveParentPath !== undefined
-          && basename(session.parentSessionPath) === basename(liveParentPath));
-      const liveTransitionParentSessionId = headerMatchesLiveParent
-        ? liveParentSessionId
+      const headerParentSessionId = session.parentSessionPath
+        ? pathToId.get(sessionCatalogPathKey(session.parentSessionPath))
         : undefined;
-      const parentSessionId = topology?.parentSessionId
-        ?? headerParentSessionId
-        ?? liveTransitionParentSessionId;
+      const slot = this.slots.get(session.id);
+      const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
       const latest = this.latestSummaries.get(session.id);
       const name = latest?.name ?? session.name;
       const archivedAt = this.archivedAt(session.id);
@@ -2432,7 +2430,6 @@ export class RuntimeRegistry {
       for (const [id, slot] of this.slots) {
         if (slot.isDisposed || persistedIDs.has(id) || ambiguousIDs.has(id)) continue;
         const latest = this.latestSummaries.get(id);
-        const parentSessionId = slot.catalogParentSessionId;
         const automationOwner = this.automationSessionOwners.get(slot);
         const archivedAt = this.archivedAt(id);
         seeds.push({
@@ -2440,7 +2437,6 @@ export class RuntimeRegistry {
           ...(latest?.name ? { name: latest.name } : {}),
           cwd: slot.cwd,
           kind: "user",
-          ...(parentSessionId ? { parentSessionId } : {}),
           ...(automationOwner ? {
             creationOrigin: { kind: "automation", automationId: automationOwner.automationId },
           } as const : {}),

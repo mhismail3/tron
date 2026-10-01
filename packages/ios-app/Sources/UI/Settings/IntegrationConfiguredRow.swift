@@ -13,6 +13,7 @@ struct IntegrationConfiguredRow: View {
     let accessibilityAction: String
     let accent: Color
     let action: () -> Void
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
     private var connected: Bool { configured && status.hasPrefix("Connected ·") }
 
@@ -29,24 +30,24 @@ struct IntegrationConfiguredRow: View {
                     .foregroundStyle(Color.tronTextPrimary)
                 if !account.isEmpty {
                     Text(account)
-                        .font(TronTypography.sans(size: TronTypography.sizeSecondary))
+                        .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                         .foregroundStyle(Color.tronTextSecondary)
                         .lineLimit(1)
                 }
                 Text(status)
-                    .font(TronTypography.sans(size: TronTypography.sizeSecondary))
+                    .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                     // Like Providers: an unconfigured service is neutral; only a
                     // configured account that needs attention is amber.
                     .foregroundStyle(connected ? Color.tronEmerald : (configured ? Color.tronAmber : Color.tronTextMuted))
                     .fixedSize(horizontal: false, vertical: true)
                 if isLoadingUsage {
                     Text("Loading credits…")
-                        .font(TronTypography.sans(size: TronTypography.sizeSecondary))
+                        .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                         .foregroundStyle(Color.tronTextMuted)
                         .accessibilityIdentifier("integration-credit-pending")
                 } else if let usage {
                     Text(usage)
-                        .font(TronTypography.sans(size: TronTypography.sizeSecondary))
+                        .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                         .foregroundStyle(Color.tronEmerald)
                         .accessibilityLabel(usage)
                 }
@@ -60,7 +61,7 @@ struct IntegrationConfiguredRow: View {
             .accessibilityLabel(accessibilityAction)
         }
         .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-        .padding(.vertical, TronSpacing.sm)
+        .padding(.vertical, TronSpacing.xl)
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
     }
 }

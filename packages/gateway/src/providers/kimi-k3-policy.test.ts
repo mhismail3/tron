@@ -1,3 +1,4 @@
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import {
   KIMI_K3_MAX_COMPLETION_TOKENS,
@@ -7,12 +8,20 @@ import {
 } from "./kimi-k3-policy.js";
 
 describe("Kimi K3 request policy", () => {
-  it("uses the documented completion field and caps the TPM reservation", () => {
-    expect(normalizeKimiK3Payload({ model: "kimi-k3", max_tokens: 131_072 })).toMatchObject({
-      max_completion_tokens: KIMI_K3_MAX_COMPLETION_TOKENS,
+  it("keeps the 32K TPM cap when the 0.99 catalog exposes K3's 1M output limit", async () => {
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    expect(runtime.getModel("moonshotai", "kimi-k3")).toMatchObject({ contextWindow: 1_048_576, maxTokens: 1_048_576 });
+    expect(normalizeKimiK3Payload({ model: "kimi-k3", max_tokens: 1_048_576 })).toEqual({
+      model: "kimi-k3", max_tokens: KIMI_K3_MAX_COMPLETION_TOKENS,
+    });
+  });
+
+  it("caps request token reservations without renaming the provider's parameter", () => {
+    expect(normalizeKimiK3Payload({ model: "kimi-k3", max_tokens: 1_048_576 })).toEqual({
+      model: "kimi-k3", max_tokens: KIMI_K3_MAX_COMPLETION_TOKENS,
     });
     expect(normalizeKimiK3Payload({ max_completion_tokens: 4_096 })).toEqual({ max_completion_tokens: 4_096 });
-    expect(normalizeKimiK3Payload({ max_tokens: 1 })).toEqual({ max_completion_tokens: 1 });
+    expect(normalizeKimiK3Payload({ max_tokens: 1 })).toEqual({ max_tokens: 1 });
   });
 
   it("translates K3 requests at the runtime boundary without changing other models", async () => {
@@ -28,7 +37,7 @@ describe("Kimi K3 request policy", () => {
       onPayload: async (payload: any) => ({ ...payload, max_tokens: 131_072 }),
     })).toBe("stream");
     expect(await capturedOptions.onPayload({ max_tokens: 131_072 }, k3)).toEqual({
-      max_completion_tokens: KIMI_K3_MAX_COMPLETION_TOKENS,
+      max_tokens: KIMI_K3_MAX_COMPLETION_TOKENS,
     });
 
     expect(runtime.streamSimple({ provider: "other", id: "model" }, {}, {})).toBe("stream");

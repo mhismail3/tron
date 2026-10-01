@@ -22,9 +22,9 @@ describe("fixed-host transport", () => {
   });
 
   it("rejects an unknown-length body after the fixed bound", async () => {
-    await expect(requestFixedHost("https://api.typesafe.ai/v1/systemone", {
+    await expect(requestFixedHost("https://api.raindrop.io/rest/v1/user", {
       method: "POST", headers: {}, body: "{}", signal: signal(),
-      allowedHosts: ["api.typesafe.ai"], timeoutMs: 1_000, maxBodyBytes: 4,
+      allowedHosts: ["api.raindrop.io"], timeoutMs: 1_000, maxBodyBytes: 4,
     }, async () => response("12345"))).rejects.toThrow(/bounded body/);
   });
 });

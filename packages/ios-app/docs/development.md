@@ -723,6 +723,8 @@ same interaction under matched conditions. An export is evidence for diagnosis,
 not proof of a physical-device speedup; retain the focused regression and
 matched device measurements for that claim.
 
+`Pi099VisualEvidenceTests` hosts the actual MCP Servers, Extensions, and Provider settings screens with a fake Gateway transport, and mounts the production `ToolCard` for Pi 0.99 tool chips. Its ignored capture bundle is generated at `packages/ios-app/build/p99-captures` with standard/accessibility text sizes and light/dark appearances; the JSON index names each PNG. The capture test is evidence of mounted shipped components, not a substitute for UI interaction acceptance.
+
 Hosted tests define `HOSTED_TEST` and expose test-only helpers. A green test build
 does not prove the shipping app compiles. Changes to app views or their model APIs
 also require a non-hosted compile using the canonical device configuration:
@@ -1171,8 +1173,7 @@ command leaves none behind. A named lane refuses
 `TRON_IOS_TEST_STATE_DIR`
 and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
 those two overrides name - and, when set without a lane, select - the default
-lane until SIM-10 of
-[the simulator lifecycle plan](../../../docs/plans/2026-09-27-simulator-lifecycle.md)
+lane until SIM-10 (GitHub issue #227, in the simulator lifecycle epic)
 removes them, and they are what CI (`scripts/ios-ci-test.sh`) and the
 energy-efficiency profiling lanes still set. Lanes do not serialize against each other: each lane owns its own
 lease and simulator, so worktrees test in parallel until the Mac's memory runs

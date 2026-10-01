@@ -174,9 +174,8 @@ placement or relations.
 ### Jev tag decisions and paid-work ownership
 
 `knowledge.source.tag` (agent tool `tagSource`) accepts one source's exact
-`expectedRevision` and optionally a `knowledge.jev` `connectionId` (omitted, it
-uses the single enabled Jev connection with approved paid access and refuses
-none or several); it returns an owned
+`expectedRevision` and uses the `typesafe` provider credential configured in
+Pi's existing provider settings; there is no Jev connection instance. It returns an owned
 `tags` job instead of waiting for Jev. `knowledge.tags.run` (agent tool
 `retagQueue`) owns one bounded queue run of 1..25 entries from the canonical
 `knowledge.tags.retag-needed` query. Repeated command IDs observe the existing
@@ -207,48 +206,41 @@ omitted. At more than 16 active tags Jev first chooses applicable categories
 (one or two category-choice questions for the maximum 256-category vocabulary),
 then answers one noul question per remaining candidate, in groups of at most 16.
 
-The paid capability belongs to `knowledge.jev` in ConnectionOwner, not to a
-Raindrop account. It uses only the existing Keychain reference
-`connector:jev:personal`. A user must create/enable that connection and
-explicitly set `paidAccessApproved: true`; default paid approval remains false.
-Its generic `paidBudgetCents` is the configurable monthly ceiling (500 cents is
-the chosen default). No tagging code creates the connection or approves spend.
-Before each Jev POST, the tagger durably reserves the current connection's
-published 64,000-input-token maximum ($0.2688 cents); after a valid response it
-settles to Jev's actual usage cost. A process restart leaves reserved or
-uncertain dispatches visible in `knowledge.tags.budget` and blocks further paid
-tagging in that month. `knowledge.tags.budget.reconcile` explicitly reconciles
-one unknown result at its full reserved ceiling; it never makes the same Jev
-call again. The UTC month rollover resets only that month's settled/reserved
-counters and retains prior unresolved attempts. `knowledge.tags.estimate`
-(agent tool `estimateTaggingCost`) uses the current retag query and worst-case
-question batches to report maximum reservations without making a paid call.
+Tagging is keyed to the configured `typesafe` provider, not a ConnectionOwner
+instance. The durable monthly reservation ledger keeps its 500-cent default
+ceiling. Before dispatch, the tagger reserves the bounded 64,000-input-token
+maximum ($0.2688 cents at Tron's qualified $0.042/M input estimate); after a
+valid result it settles to Tron's estimate of actual input usage. Pi's current
+catalog price is zero and is deliberately not used for this ceiling or recorded
+cost. A process restart leaves reserved or uncertain dispatches visible in
+`knowledge.tags.budget` and blocks further tagging in that month.
+`knowledge.tags.budget.reconcile` explicitly reconciles one unknown result at
+its full reserved ceiling; it never makes the same classifier call again. The
+UTC month rollover resets only that month's settled/reserved counters and
+retains prior unresolved attempts. `knowledge.tags.estimate` (agent tool
+`estimateTaggingCost`) uses the current retag query and worst-case question
+batches to report maximum reservations without making a paid call.
 `knowledge.tags.budget` (agent tool `taggingBudget`) reports cap, spend,
 reservations, availability, and uncertain attempts. The standalone `jev` tool's
 per-call ceiling remains independent.
 
-K1's curation gate checks paid policy only for tag writes; free verdict, scope,
-relation, and other edits continue when Jev spend is disabled or exhausted.
-Paid reservations occur immediately before the Jev dispatch, not when the
+K1's curation gate checks TypeSafe availability and the monthly tagging
+budget only for tag writes; free verdict, scope, relation, and other edits
+continue when either bound is unavailable. Paid reservations occur immediately
+before classifier dispatch, not when the
 already-computed tag selection is published. Take and summary revisions
 invalidate the tag input digest; take edits and summary changes start an
-automatic single-source job when one enabled Jev connection exists. Vocabulary
+automatic single-source job when the TypeSafe credential is configured. Vocabulary
 or guideline edition changes run a cost estimate first, then start one bounded
 queue page only when its worst-case reservation is affordable. Otherwise all
 stale entries stay in the K3 query for an explicit later run. There is no
 recurring queue or scheduler.
 
-To configure paid tagging, the user explicitly calls `connections.setup.begin`
-with `{commandId, instanceId, definitionId:"knowledge.jev", method:"token"}`;
-then `connections.setup.complete` with the returned `operationId`, matching
-`instanceId`, `providerAccountId:"personal"`,
-`credentialRef:"connector:jev:personal"`, and policy
-`{enabled:true, allowWrites:false, paidAccessApproved:false, paidBudgetCents:500, recurringApproved:false}`.
-After adding the Jev value to the existing Mac Keychain service, the user
-explicitly updates that instance through `connections.policy.update` with its
-current `expectedSetupRevision` and the same policy except
-`paidAccessApproved:true`. These are ordinary existing connection-owner setup
-and policy actions; there is no second tagging approval store.
+The TypeSafe key is configured in Pi's existing provider settings. Knowledge
+tagging retains its durable monthly reservation ledger (the current default
+ceiling is 500 cents); there is no separate Jev connection setup, Keychain
+credential, or paid-approval flag. A persisted `knowledge.jev` connection is
+rejected at load with an error directing the operator to configure TypeSafe.
 
 Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
 owned background work, not a request that waits for a model: the call accepts a
@@ -918,23 +910,26 @@ article, and an incomplete capture leaves the bookmark pending without moving it
 It never revokes an admission already decided (`retained` or `archived`) for the
 same canonical source. Knowledge's Jev adapter owns
 its rubric, bounded text, relevant source metadata, and persisted interests.
-It consumes the shared typed `JevDecisionClient`, also exposed as the first-party
-`jev` tool for caller-supplied `choice`, `noul`, and `score` questions. This is not
-chat completion. Credentials remain in the Keychain-backed
-`connector:jev:personal` reference and are read only on explicit calls; core
-Knowledge capture/retrieval does not require Jev. Tagging, standalone Jev source
-assessment, and Raindrop intake assessment reserve and settle against the same
-monthly Knowledge ledger owned by the `knowledge.jev` connection's
-`paidBudgetCents`. Paid access disabled there blocks paid work before provider
-dispatch. Raindrop cohort approvals remain
-additional per-run item/cent caps and cannot enlarge the monthly budget; the
-generic Jev tool cannot inherit that cohort allowance.
+It consumes Pi's `ModelRuntime.classify()` over the `typesafe` provider, also
+exposed as the first-party `jev` tool for caller-supplied choice, bool, and score
+questions. This is not chat completion. Pi's provider credential store owns the
+TypeSafe key; there is no connector Keychain copy. Core Knowledge capture and
+retrieval do not require Jev. Tagging, standalone Jev source assessment, and
+Raindrop intake assessment reserve and settle against the same monthly Knowledge
+ledger, keyed by the `typesafe` provider identity. A configured TypeSafe key is
+the consent for this paid work, and the ledger's cap is fixed (user decision,
+2026-09-30); without the key, paid work is refused before provider dispatch.
+Raindrop cohort approvals remain additional per-run item/cent caps and cannot
+enlarge the monthly budget; the generic Jev tool cannot inherit that cohort
+allowance.
 
-The tool requires `maxChargeCents`, checked before credential lookup or HTTP
-against a conservative per-call ceiling of 0.2688 cents: the supported model's
-64k input ceiling at its published $0.042/M input rate (output free). Responses
-include actual token usage and fractional-cent estimated cost, not rounded-up
-workflow reservations. New Knowledge assessments persist that usage and
+The tool requires `maxChargeCents`, checked before Pi classifier dispatch
+against the qualified per-call ceiling of 0.2688 cents: 64k input tokens at
+Tron's $0.042/M input estimate (output estimated free). Pi's catalog currently
+reports zero cost, so it is not used for this safety estimate; TypeSafe's actual
+pricing may differ and can change without a Tron release. Responses include
+actual token usage and fractional-cent estimated cost at Tron's qualified rate,
+not rounded-up workflow reservations. New Knowledge assessments persist that usage and
 published-price estimate on the immutable assessment derivative and attempt
 receipt. Intake reports its per-run approved ceiling and conservative allowance,
 selected cohort cap, settled count, known estimated usage cost, and unknown
@@ -948,13 +943,14 @@ necessarily metadata-only. An old assessment without usage remains unknown and i
 never backfilled as zero or claimed as provider billing. This is a local estimate guard, not a provider billing
 cap. Successful calls without usage remain charged at the reserved ceiling, and
 uncertain dispatches keep their shared monthly reservation until reconciled; no
-workflow can refund or bypass that ledger. The client snapshots validated input before
-awaits, rejects unsupported models, bounds total input and state plus each
-question separately, rechecks cancellation after admission, redacts transport
-failures, and never retries a paid POST. The adapter sends the pinned
-`jev-1.13.0` typed contract to TypeSafe, validates the real choice/score
-probability maps, score legend and expectation, and records fixed local labels
-plus interest-bound profile/rubric versions, a digest of the complete captured
+workflow can refund or bypass that ledger. The client snapshots and bounds
+validated input before awaits, checks provider credentials before admitting
+dispatch, tracks not-sent versus uncertain outcomes, and never retries a paid
+request. Tron follows Pi's catalog model `jev-latest`; the wire protocol uses
+`noul` for bool questions, while tool answers expose Pi's bool probability and
+score without legacy score legends/probabilities. Knowledge assessments retain
+their existing recorded shape and record fixed local labels plus interest-bound
+profile/rubric versions, a digest of the complete captured
 input, a digest of the exact bounded model state, and `full` versus `sampled`
 coverage. Complete readable evidence is sent when it fits. Oversized evidence is
 represented by a UTF-8/code-point-safe, explicitly labelled bounded excerpt while
@@ -963,10 +959,10 @@ never archive. This is bounded sampling, not a hidden multi-call summary or
 provider fallback. It does not persist Jev prose as source truth. Novelty is intentionally omitted because
 this bounded item request has no corpus evidence. The intake supplies its
 reservation through the model adapter's `beforeDispatch` seam, after Jev
-preflight and credential lookup; validation or missing-key failures therefore
-consume no paid attempt. Fixed-host connector requests keep their own bounded,
-no-redirect transport contract; the arbitrary-URL DNS-pinned source fetcher and
-provider-specific disclosure/cost policy remain separate. Once admitted, a failed/malformed/timeout POST remains
+preflight and TypeSafe credential check; validation or missing-key failures
+therefore consume no paid attempt. Fixed-host Raindrop connector requests keep
+their own bounded, no-redirect transport contract; the arbitrary-URL DNS-pinned
+source fetcher and provider-specific disclosure/cost policy remain separate. Once admitted, a failed/malformed/timeout POST remains
 an uncertain dispatched receipt and is never retried automatically. Complete
 source capture remains durable and pending when Jev is unavailable. The first
 pilot is frozen; `knowledge.connector.assessment.approve` appends an explicit

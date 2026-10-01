@@ -82,7 +82,11 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
                     Text(SessionModelSelectionPresentation.modelName(selection, catalog: catalog))
                         .font(SessionSummaryTypography.headline)
                         .foregroundStyle(Color.tronTextPrimary)
-                    if let provider = selection?.displayProviderName {
+                    if selection.flatMap({ selected in catalog.first(where: { $0.ref == selected })?.virtual }) == true {
+                        Label("Virtual model", systemImage: "arrow.triangle.branch")
+                            .font(SessionSummaryTypography.detail)
+                            .foregroundStyle(Color.tronCyan)
+                    } else if let provider = selection?.displayProviderName {
                         Text(provider)
                             .font(SessionSummaryTypography.detail)
                             .foregroundStyle(Color.tronTextSecondary)

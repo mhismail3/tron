@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentInstructions, projectResources, history, processHistory, terminal, workspace
+    case agentInstructions, tools, projectResources, history, processHistory, terminal, workspace
     var id: String { rawValue }
 }
 
@@ -328,6 +328,8 @@ struct SessionContextSheet: View {
                     switch route {
                     case .agentInstructions:
                         AgentInstructionsSheet(sessionID: sessionID)
+                    case .tools:
+                        SessionToolPickerSheet(sessionID: sessionID)
                     case .projectResources:
                         ProjectResourcesView(sessionID: sessionID)
                     case .history:
@@ -638,9 +640,16 @@ struct SessionContextSheet: View {
                 ) { destination = .agentInstructions }
                 divider()
                 manageRow(
+                    icon: "wrench.and.screwdriver",
+                    title: "Available Tools",
+                    subtitle: "Turn tools on or off for this chat",
+                    accent: sessionRowAccent
+                ) { destination = .tools }
+                divider()
+                manageRow(
                     icon: "shippingbox",
                     title: "Project Resources",
-                    subtitle: "Skills, subagents, prompts, tools, and commands",
+                    subtitle: "Skills, subagents, prompts, and commands",
                     accent: sessionRowAccent
                 ) { destination = .projectResources }
                 divider()

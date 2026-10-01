@@ -8,6 +8,35 @@ import Testing
 @MainActor
 @Suite("Provider authentication coordinator")
 struct ProviderAuthCoordinatorTests {
+    @Test("MCP auth adoption routes events, prompts and terminal completion through the coordinator")
+    func mcpAuthAdoptionOwnsFullEventFlow() async throws {
+        let harness = try await makeHarness()
+        let target = ProviderCatalogTarget.session(id: "mcp-session")
+        let admission = harness.owner.beginMCPAuthAdmission()
+        harness.owner.handleEvent(.object([
+            "operationId": .string("mcp-auth"),
+            "event": .object(["type": .string("auth_url"), "url": .string("https://mcp.example.test/login")]),
+        ]))
+        harness.owner.adoptMCPAuthOperation(operationID: "mcp-auth", target: target, admission: admission)
+
+        harness.owner.handlePrompt(.object([
+            "operationId": .string("mcp-auth"),
+            "promptId": .string("mcp-prompt"),
+            "prompt": .object(["type": .string("text"), "message": .string("Paste the authorization code")]),
+        ]))
+
+        #expect(harness.owner.event?.operationId == "mcp-auth")
+        #expect(harness.owner.prompt?.id == "mcp-prompt")
+        #expect(harness.owner.hostedTarget(for: "mcp-auth") == target)
+        harness.owner.dispatchCompletion(.object([
+            "operationId": .string("mcp-auth"), "success": .bool(true),
+        ]))
+        #expect(harness.owner.hostedActiveAuthOperationID == nil)
+        #expect(harness.owner.hostedTarget(for: "mcp-auth") == nil)
+        harness.owner.clearProfile()
+        await harness.client.close()
+    }
+
     @Test("manual OAuth browser fallback is tied to the matching text prompt")
     func manualOAuthBrowserFallbackOwnership() {
         let event = ProviderAuthEventState(

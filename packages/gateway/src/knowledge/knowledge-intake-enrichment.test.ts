@@ -42,8 +42,8 @@ describe("K5 Raindrop intake enrichment", () => {
     const tagCalls: string[] = [];
     const unapprovedTagging = {
       engine: { async decide(record: { id: string }) { tagCalls.push(record.id); throw new Error("must not call Jev when approval is false"); } },
-      budget: {} as never,
-      connections: { async snapshot() { return { instances: [{ id: "jev-disabled", definitionId: "knowledge.jev", policy: { enabled: true, paidAccessApproved: false, paidBudgetCents: 500 } }] }; } } as never,
+      budget: { async gate() { return { ok: false, code: "unavailable", reason: "TypeSafe provider credential is not configured" }; } },
+
     };
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel, undefined, undefined, undefined, unapprovedTagging as never);
     const failing = await store.captureSource({ commandId: "k5-failed-item", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Failure item", text: "FAIL_MODEL readable text", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
@@ -85,21 +85,18 @@ describe("K5 Raindrop intake enrichment", () => {
       async summarizeSource(input) { sequence.push(`summary:${input.sessionId}`); await modelGate.promise; summariesSettled += 1; return { text: `Summary of ${input.sessionId}` }; },
       async assess() { return { summary: "assessment", evidenceQuality: "high", freshness: "current" }; },
     };
-    const jevConnection = { id: "fixture-jev", definitionId: "knowledge.jev", policy: { enabled: true, paidAccessApproved: true, paidBudgetCents: 500 } };
     const tagging = {
       engine: { async decide(record: { id: string }, vocabulary: { revision: number }) { sequence.push(`tags:${record.id}`); return { tagIds: ["workflow"], model: "fixture/jev", vocabularyRevision: vocabulary.revision, inputsDigest: "a".repeat(64), estimatedCostCents: 0, callCount: 1 }; } },
-      budget: {} as never,
-      connections: { async snapshot() { return { instances: [jevConnection] }; } } as never,
+      budget: { async gate() { return { ok: true }; } },
+
     };
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel, undefined, undefined, undefined, tagging as never);
     let userLookup = false;
     const items = Array.from({ length: 10 }, (_, index) => ({ _id: index + 1, title: `Saved source ${index + 1}`, link: `https://example.test/item-${index + 1}`, created: "2026-09-28T00:00:00Z", collection: { $id: 111 } }));
     const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); await context?.onDispatch?.(); return { summary: "Jev admission assessment", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 3, estimatedCostCents: 0.00042, pricing: "fixture" } }; } };
     const owner = new ConnectionOwner(root);
-    const jevSetup = await owner.execute({ kind: "setup.begin", commandId: command("jev-budget-begin"), instanceId: "jev-budget", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
-    await owner.execute({ kind: "setup.complete", commandId: command("jev-budget-complete"), operationId: jevSetup.operationId, instanceId: "jev-budget", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
-    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"], ["connector:jev:personal", "synthetic-jev"]]));
-    const jevBudget = new KnowledgeTaggingBudget(store, owner, credentials);
+    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]]));
+    const jevBudget = new KnowledgeTaggingBudget(store, () => true);
     const extension = new KnowledgeConnectorExtension(store, {
       credentials,
       jevBudget,

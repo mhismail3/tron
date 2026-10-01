@@ -21,7 +21,6 @@ import {
   type ConnectionSetupOperation,
   type ProviderAdmissionObservation,
   type IntegrationDefinition,
-  type RuntimeBinding,
   assertConnectionId,
   assertDefinitionId,
   assertCredentialReference,
@@ -31,9 +30,7 @@ import {
   validateConnectionInstance,
   validateConnectionPolicy,
   validateConnectionState,
-  validateMcpConnectionConfiguration,
   validateIntegrationDefinition,
-  validateRuntimeBinding,
 } from "./connection-contract.js";
 
 const MAX_RECEIPTS = 256;
@@ -56,27 +53,11 @@ const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] = [
   },
   {
     schemaVersion: 1,
-    id: "knowledge.jev",
-    implementation: "knowledge-connector",
-    displayName: "Jev",
-    setupMethods: ["token"],
-    capabilities: [{ id: "tag", displayName: "Tag Knowledge sources", effects: ["paid"], supported: true }],
-  },
-  {
-    schemaVersion: 1,
     id: "knowledge.x",
     implementation: "knowledge-connector",
     displayName: "X",
     setupMethods: ["oauth"],
     capabilities: [{ id: "read", displayName: "Read bookmarks", effects: ["read"], supported: true }],
-  },
-  {
-    schemaVersion: 1,
-    id: "mcp.remote-http",
-    implementation: "mcp",
-    displayName: "MCP server",
-    setupMethods: ["endpoint", "token", "local-command"],
-    capabilities: [{ id: "tools", displayName: "Tools", effects: ["read", "write", "disclosure"], supported: true }],
   },
 ];
 
@@ -106,9 +87,7 @@ function capabilityAvailability(
   if (!capability.supported) return { availability: "unsupported", detail: "Capability is not implemented by this adapter" };
   if (instance.health === "disconnected") return { availability: "unavailable", detail: "Connection is disconnected" };
   if (!instance.policy.enabled) return { availability: "disabled", detail: "Connection is disabled by policy" };
-  const providerPrerequisitesAdmitted = instance.implementation === "mcp"
-    ? true
-    : instance.credentialAvailability === "available" && (instance.providerIdentity === "admitted" || instance.definitionId === "knowledge.jev");
+  const providerPrerequisitesAdmitted = instance.credentialAvailability === "available" && instance.providerIdentity === "admitted";
   if (instance.health !== "ready" || !providerPrerequisitesAdmitted) {
     return { availability: "unavailable", detail: instance.lastError ?? prerequisiteDetail(instance) };
   }
@@ -127,12 +106,11 @@ function capabilityAvailability(
 function validateCommand(command: ConnectionCommand): void {
   if (!command || typeof command !== "object") throw invalid("Connection command is invalid");
   if (typeof command.commandId !== "string" || command.commandId.length < 8 || command.commandId.length > 160) throw invalid("Connection commandId is invalid");
-  if (command.kind === "setup.begin") { assertConnectionId(command.instanceId); assertDefinitionId(command.definitionId); if (!["oauth", "token", "local-command", "endpoint", "browser"].includes(command.method)) throw invalid("Connection setup method is invalid"); return; }
+  if (command.kind === "setup.begin") { assertConnectionId(command.instanceId); assertDefinitionId(command.definitionId); if (!["oauth", "token", "browser"].includes(command.method)) throw invalid("Connection setup method is invalid"); return; }
   if (command.kind === "setup.complete") {
     assertConnectionId(command.operationId, "setup operation id"); assertConnectionId(command.instanceId); if (typeof command.providerAccountId !== "string" || command.providerAccountId.length < 1 || command.providerAccountId.length > 256) throw invalid("Provider account is invalid");
     if (command.scope !== undefined && (typeof command.scope !== "string" || command.scope.length < 1 || command.scope.length > 512)) throw invalid("Connection scope is invalid");
     assertCredentialReference(command.credentialRef); validateConnectionPolicy(command.policy);
-    if (command.configuration !== undefined) validateMcpConnectionConfiguration(command.configuration);
     if (command.raindropCollections !== undefined) {
       if (command.scope !== undefined) throw invalid("Raindrop collection mappings replace the single connector scope");
       validateRaindropCollectionMappings(command.raindropCollections);
@@ -154,6 +132,7 @@ function resultForInstance(instance: ConnectionInstance): Record<string, unknown
 
 export class ConnectionOwner {
   private readonly mutex = new AsyncMutex();
+  private readonly rejectedLegacyJevIds = new Set<string>();
   private readonly definitions: IntegrationDefinition[];
   constructor(private readonly tronHome: string, definitions: readonly IntegrationDefinition[] = BUILTIN_INTEGRATION_DEFINITIONS) {
     this.definitions = definitions.map(definition => { validateIntegrationDefinition(definition); return copy(definition); });
@@ -187,6 +166,7 @@ export class ConnectionOwner {
     try { validateCommand(command); } catch (error) { if (error instanceof GatewayError) throw error; throw invalid(error instanceof Error ? error.message : "Connection command is invalid"); }
     return this.mutex.run(async () => {
       const state = await this.load(true);
+      this.rejectLegacyJevInstance(command.instanceId);
       const operation = command.kind;
       const hash = connectionRequestHash(operation, command);
       const prior = state.receipts[command.commandId];
@@ -221,8 +201,7 @@ export class ConnectionOwner {
         && observation.providerIdentity === "admitted"
         ? normalizeProviderDisplayName(observation.providerDisplayName)
         : undefined;
-      const localCredentialAdmission = instance.definitionId === "knowledge.jev" && observation.credentialAvailability === "available";
-      const health: ConnectionHealth = observation.credentialAvailability === "available" && (observation.providerIdentity === "admitted" || localCredentialAdmission) ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
+      const health: ConnectionHealth = observation.credentialAvailability === "available" && observation.providerIdentity === "admitted" ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
       // All four projected fields already hold these values (an absent
       // observation field projects as `unknown`, so it is compared that way),
       // so this is not a state transition: a read that re-observes the same
@@ -253,52 +232,17 @@ export class ConnectionOwner {
     return this.mutex.run(async () => {
       const state = await this.load(false);
       const instance = state.instances[instanceId];
-      if (!instance) throw conflict("Connection instance is unknown");
+      if (!instance) {
+        this.rejectLegacyJevInstance(instanceId);
+        throw conflict("Connection instance is unknown");
+      }
       return copy(instance);
     });
   }
 
-  /** A transport adapter calls this only after successful handshake and tool
-   * discovery. Setup alone must not project an MCP endpoint as available. */
-  async markRuntimeReady(instanceId: string, setupRevision: number): Promise<void> {
-    assertConnectionId(instanceId);
-    return this.mutex.run(async () => {
-      const state = await this.load(true);
-      const instance = state.instances[instanceId];
-      if (!instance || instance.setupRevision !== setupRevision || !instance.policy.enabled || instance.health === "disabled" || instance.health === "disconnected") throw conflict("Connection instance is no longer admitted");
-      if (instance.health === "ready") return;
-      if (instance.health !== "setup-required") throw conflict("Connection instance is not awaiting runtime admission");
-      instance.health = "ready";
-      instance.updatedAt = now();
-      state.stateRevision += 1;
-      validateConnectionState(state);
-      await this.save(state);
-    });
-  }
-
-  /** Runtime owners call this during admission; no binding is persisted and a
-   * disabled/disconnected account cannot be inherited by a child runtime. */
-  async admitRuntimeBinding(binding: RuntimeBinding): Promise<RuntimeBinding> {
-    validateRuntimeBinding(binding);
-    const snapshot = await this.snapshot();
-    const definition = snapshot.definitions.find(item => item.id === binding.integrationId);
-    if (!definition) throw unsupported("Integration definition is unavailable");
-    const capability = definition.capabilities.find(item => item.id === binding.capabilityId);
-    if (!capability || !capability.supported) throw unsupported("Integration capability is unavailable");
-    if (binding.connectionId === undefined) {
-      if (definition.implementation !== "knowledge-connector") throw conflict("This capability requires a connection instance");
-      return copy(binding);
-    }
-    const instance = snapshot.instances.find(item => item.id === binding.connectionId);
-    if (!instance || instance.definitionId !== binding.integrationId) throw conflict("Connection instance is not admitted for this runtime");
-    const availability = capabilityAvailability(capability, instance);
-    if (availability.availability !== "available") throw conflict(availability.detail ?? "Integration capability is not admitted for this runtime");
-    return copy(binding);
-  }
-
   private snapshotOf(state: ConnectionOwnerState): ConnectionOwnerSnapshot {
     const instances: ConnectionInstanceProjection[] = Object.values(state.instances).map(instance => {
-      const { credentialRef: _credentialRef, configuration: _configuration, ...projection } = copy(instance);
+      const { credentialRef: _credentialRef, ...projection } = copy(instance);
       return { ...projection, credentialConfigured: Boolean(instance.credentialRef), credentialAvailability: instance.credentialAvailability ?? "unknown", providerIdentity: instance.providerIdentity ?? "unknown" };
     });
     const capabilities: ConnectionCapabilityStatus[] = [];
@@ -336,12 +280,8 @@ export class ConnectionOwner {
       const definition = this.definitions.find(item => item.id === operation.definitionId); if (!definition) throw unsupported("Integration definition is unavailable");
       if (definition.implementation === "knowledge-connector" && !command.credentialRef.startsWith(`connector:${definition.id.slice("knowledge.".length)}:`)) throw invalid("Credential reference does not belong to this integration");
       const existing = state.instances[command.instanceId]; if (existing && existing.health !== "disconnected") throw conflict("Connection instance already exists");
-      if (definition.implementation === "mcp" && command.configuration === undefined) throw invalid("MCP setup requires transport configuration");
-      if (definition.implementation === "mcp" && operation.method === "endpoint" && command.configuration?.transport !== "http") throw invalid("Endpoint setup requires HTTP MCP configuration");
-      if (definition.implementation === "mcp" && operation.method === "local-command" && command.configuration?.transport !== "stdio") throw invalid("Local command setup requires stdio MCP configuration");
-      if (definition.implementation !== "mcp" && command.configuration !== undefined) throw invalid("Only MCP connections accept transport configuration");
       if (command.raindropCollections !== undefined && definition.id !== "knowledge.raindrop") throw invalid("Only Raindrop connections accept collection mappings");
-      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.configuration ? { configuration: copy(command.configuration) } : {}), ...(command.raindropCollections ? { raindropCollections: copy(command.raindropCollections) } : {}), policy: copy(command.policy), health: command.policy.enabled ? "setup-required" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1, credentialAvailability: "unknown", providerIdentity: "unknown" };
+      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.raindropCollections ? { raindropCollections: copy(command.raindropCollections) } : {}), policy: copy(command.policy), health: command.policy.enabled ? "setup-required" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1, credentialAvailability: "unknown", providerIdentity: "unknown" };
       state.instances[instance.id] = instance; operation.status = "completed"; operation.updatedAt = timestamp;
       return resultForInstance(instance);
     }
@@ -375,8 +315,22 @@ export class ConnectionOwner {
     try { read = await readSecureJson<unknown>(path, STATE_MAX_BYTES); }
     catch (error) { if (error instanceof SecureJsonFileError) throw new GatewayError("conflict", `Connection state is unavailable: ${error.message}`); throw error; }
     if (!read.present) return initialState();
-    try { validateConnectionState(read.value); return copy(read.value); }
-    catch (error) { throw new GatewayError("conflict", error instanceof Error ? `Connection state is unavailable: ${error.message}` : "Connection state is unavailable"); }
+    try {
+      const persisted = read.value as ConnectionOwnerState;
+      for (const [id, instance] of Object.entries(persisted.instances)) {
+        if (instance.definitionId === "knowledge.jev") this.rejectedLegacyJevIds.add(id);
+      }
+      const readable = copy(persisted);
+      for (const id of this.rejectedLegacyJevIds) delete readable.instances[id];
+      validateConnectionState(readable);
+      return readable;
+    } catch (error) { throw new GatewayError("conflict", error instanceof Error ? `Connection state is unavailable: ${error.message}` : "Connection state is unavailable"); }
+  }
+
+  private rejectLegacyJevInstance(instanceId: string): void {
+    if (this.rejectedLegacyJevIds.has(instanceId)) {
+      throw conflict(`Persisted knowledge.jev connection '${instanceId}' is no longer supported; configure the typesafe provider credential instead`);
+    }
   }
 
   private async save(state: ConnectionOwnerState): Promise<void> {

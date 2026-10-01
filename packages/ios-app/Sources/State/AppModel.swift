@@ -4197,6 +4197,22 @@ final class AppModel {
         await providerAuth.cancelAuth(operationID: operationID)
     }
 
+    func beginMCPAuthAdmission() -> Int {
+        providerAuth.beginMCPAuthAdmission()
+    }
+
+    func adoptMCPAuthOperation(operationID: String, target: ProviderCatalogTarget, admission: Int) {
+        providerAuth.adoptMCPAuthOperation(operationID: operationID, target: target, admission: admission)
+    }
+
+    func finishMCPAuthAdmission(_ admission: Int) {
+        providerAuth.finishMCPAuthAdmission(admission)
+    }
+
+    func finishMCPAuthOperation(operationID: String) {
+        providerAuth.finishMCPAuthOperation(operationID: operationID)
+    }
+
     func refreshModelCatalog(target: ProviderCatalogTarget, force: Bool = true) async throws {
         try await providerAuth.refreshModelCatalog(target: target, force: force)
     }
@@ -4212,6 +4228,19 @@ final class AppModel {
 
     func updateSettings(_ patch: JSONValue, target: SettingsTarget, sessionID: String? = nil) async throws {
         try await settingsTrust.updateSettings(patch, target: target, sessionID: sessionID)
+    }
+
+    func mutateMCPAdmin(_ method: String, parameters: [String: JSONValue]) async throws -> JSONValue {
+        let allowed = ["mcp.add", "mcp.remove", "mcp.update", "mcp.logout", "mcp.token.set", "mcp.auth.start", "mcp.auth.cancel"]
+        guard allowed.contains(method) else {
+            throw GatewayFailure(code: "invalid_request", message: "Unsupported MCP administration operation.", retryable: false, details: nil)
+        }
+        let commandID = UUID().uuidString.lowercased()
+        var request = parameters
+        if method != "mcp.auth.cancel" { request["commandId"] = .string(commandID) }
+        return try await mutationExecutor.performValue(method: method, commandID: commandID) {
+            try await self.client.requestValue(method, JSONValue.object(request))
+        }
     }
 
     func inspectTrust(target: TrustTarget) async throws -> JSONValue {

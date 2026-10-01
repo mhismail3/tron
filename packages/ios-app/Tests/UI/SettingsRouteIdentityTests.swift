@@ -41,28 +41,4 @@ struct SettingsRouteIdentityTests {
         #expect(AuthorizedDevicePresentationPolicy.selection(current: original, refreshedDevices: []) == original)
     }
 
-    @Test("integration routes keep connected services separate from MCP servers")
-    func integrationSurfaceFiltering() {
-        let service = IntegrationDefinition(
-            schemaVersion: 1,
-            id: "calendar",
-            implementation: "service",
-            displayName: "Calendar",
-            setupMethods: ["token"],
-            capabilities: []
-        )
-        let mcp = IntegrationDefinition(
-            schemaVersion: 1,
-            id: "tools",
-            implementation: "mcp",
-            displayName: "Tools",
-            setupMethods: ["local-command"],
-            capabilities: []
-        )
-
-        #expect(IntegrationsSettingsView.Surface.connectedServices.includes(service))
-        #expect(!IntegrationsSettingsView.Surface.connectedServices.includes(mcp))
-        #expect(IntegrationsSettingsView.Surface.mcpServers.includes(mcp))
-        #expect(!IntegrationsSettingsView.Surface.mcpServers.includes(service))
-    }
 }
