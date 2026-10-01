@@ -90,6 +90,7 @@ class WarmWorktreeTests(unittest.TestCase):
 
         self.assertEqual(calls, [destination])
         self.assertFalse((destination / "node_modules/partial").exists())
+        self.assertFalse(list(destination.glob(".tron-warm-*")))
         self.assertTrue((destination / "node_modules/installed.txt").is_file())
 
     def test_incomplete_primary_dependency_tree_uses_npm_ci(self) -> None:
@@ -135,22 +136,6 @@ class WarmWorktreeTests(unittest.TestCase):
         self.assertEqual(calls, [destination])
         self.assertTrue((destination / "node_modules/.package-lock.json").is_file())
 
-    def test_ios_cache_copies_only_supported_cache_directories(self) -> None:
-        primary_products = self.root / "ios" / "primary"
-        worktree_products = self.root / "ios" / "worktree"
-        (primary_products / "ModuleCache.noindex").mkdir(parents=True)
-        (primary_products / "ModuleCache.noindex/module.pcm").write_text("cache")
-        (primary_products / "SDKStatCaches.noindex").mkdir()
-        (primary_products / "Build/Products").mkdir(parents=True)
-        (primary_products / "Build/Products/Tron.app").write_text("must not share")
-
-        warm.seed_ios_build_cache(primary_products, worktree_products)
-
-        self.assertEqual((worktree_products / "ModuleCache.noindex/module.pcm").read_text(), "cache")
-        self.assertTrue((worktree_products / "SDKStatCaches.noindex").is_dir())
-        self.assertFalse((worktree_products / "Build").exists())
-        (worktree_products / "ModuleCache.noindex/module.pcm").write_text("worker cache")
-        self.assertEqual((primary_products / "ModuleCache.noindex/module.pcm").read_text(), "cache")
 
 
 if __name__ == "__main__":

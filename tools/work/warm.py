@@ -1,4 +1,4 @@
-"""Seed isolated build dependencies and compiler caches for a new worktree."""
+"""Seed isolated npm dependencies for a new worktree."""
 from __future__ import annotations
 
 import json
@@ -14,7 +14,6 @@ class WarmError(RuntimeError):
 
 
 _PACKAGE_PATHS = (Path("packages/gateway"), Path("packages/push-relay"))
-_IOS_CACHE_NAMES = ("ModuleCache.noindex", "SDKStatCaches.noindex")
 
 
 def _clone_tree(source: Path, destination: Path) -> None:
@@ -97,43 +96,3 @@ def seed_node_modules(primary: Path, worktree: Path, *,
                 install(target_package)
             except (OSError, subprocess.SubprocessError) as error:
                 raise WarmError(f"cannot install dependencies in {target_package}: {error}") from error
-
-
-def seed_ios_build_cache(primary_products: Path, worktree_products: Path) -> None:
-    """Copy only Xcode's compiler/SDK caches; never share worktree build products."""
-    marker = worktree_products / ".tron-ios-test-owned"
-    if worktree_products.is_symlink():
-        return
-    if worktree_products.exists():
-        try:
-            if marker.is_symlink() or not marker.is_file() or marker.read_text() != "tron.ios-test-owned.v1\n":
-                return
-        except OSError:
-            return
-    elif any((primary_products / name).is_dir() for name in _IOS_CACHE_NAMES):
-        worktree_products.mkdir(parents=True)
-        marker.write_text("tron.ios-test-owned.v1\n")
-    for name in _IOS_CACHE_NAMES:
-        source = primary_products / name
-        destination = worktree_products / name
-        if destination.exists() or destination.is_symlink():
-            continue
-        if source.is_dir() and not source.is_symlink():
-            _seed_directory(source, destination)
-
-
-def seed_worktree(primary: Path, worktree: Path) -> None:
-    seed_node_modules(primary, worktree)
-    home = Path.home()
-    identity_tool = worktree / "scripts/ios-test-build-identity.py"
-    if not identity_tool.is_file() or not (primary / "scripts/ios-test-build-identity.py").is_file():
-        return
-    try:
-        key = subprocess.run(["python3", str(identity_tool), "worktree-key", "--worktree", str(primary)],
-                             check=True, capture_output=True, text=True).stdout.strip()
-        target_key = subprocess.run(["python3", str(identity_tool), "worktree-key", "--worktree", str(worktree)],
-                                    check=True, capture_output=True, text=True).stdout.strip()
-    except (OSError, subprocess.SubprocessError) as error:
-        raise WarmError(f"cannot identify iOS build cache ownership: {error}") from error
-    products_root = home / "Library/Developer/Tron/ios/test-derived-data"
-    seed_ios_build_cache(products_root / key, products_root / target_key)

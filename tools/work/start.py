@@ -213,9 +213,9 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
         else:
             _git(cwd, "worktree", "add", "--track", "-b", branch, str(worktree), f"{remote}/{branch}")
 
-    # Warm only independently-owned dependency installs and Xcode compiler caches.
-    # Per-worktree test products retain their strict source identity boundary.
-    warm.seed_worktree(primary, worktree)
+    # Warm only independently-owned dependency installs; iOS products belong to
+    # scripts/tron-ios-test and are seeded only when that runner starts a build.
+    warm.seed_node_modules(primary, worktree)
 
     active = count_active(gh, item["project"]["id"], rules, f"{owner}/{name}")
     if active > rules["softCap"]:
