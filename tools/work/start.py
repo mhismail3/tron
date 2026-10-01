@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 
 import claim as claims
 from gh import Gh
+import warm
 
 _ISSUE = """
 query($owner: String!, $name: String!, $number: Int!) {
@@ -211,6 +212,10 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
             _git(cwd, "worktree", "add", str(worktree), branch)
         else:
             _git(cwd, "worktree", "add", "--track", "-b", branch, str(worktree), f"{remote}/{branch}")
+
+    # Warm only independently-owned dependency installs; iOS products belong to
+    # scripts/tron-ios-test and are seeded only when that runner starts a build.
+    warm.seed_node_modules(primary, worktree)
 
     active = count_active(gh, item["project"]["id"], rules, f"{owner}/{name}")
     if active > rules["softCap"]:

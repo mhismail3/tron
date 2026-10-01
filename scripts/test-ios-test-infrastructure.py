@@ -936,6 +936,22 @@ fi
 exit 0
 """)
         xcodebuild.chmod(0o755)
+        cp = self.bin / "cp"
+        cp.write_text("""#!/usr/bin/env python3
+import os, shutil, sys
+from pathlib import Path
+args = sys.argv[1:]
+if args[:1] == ['-cR']:
+    args = args[1:]
+source, destination = map(Path, args[-2:])
+clone = destination / source.name
+if os.environ.get('FAKE_CP_FAIL'):
+    clone.mkdir(parents=True, exist_ok=True)
+    (clone / 'partial').write_text('partial clone')
+    raise SystemExit(1)
+shutil.copytree(source, clone)
+""")
+        cp.chmod(0o755)
         self.tools_environment = self.install_synthetic_xcodegen(self.root)
         self.derived = self.root / "derived"
         self.results = self.root / "results"
@@ -974,6 +990,7 @@ exit 0
         extra_args: list[str] | None = None,
         lane: str | None = None, discovery_root: Path | None = None,
         override: dict[str, str] | None = None,
+        runner_root: Path = ROOT,
     ) -> subprocess.CompletedProcess[str]:
         environment = self.contained_environment(self.root)
         environment.update(self.reader_environment())
@@ -1011,7 +1028,7 @@ exit 0
             environment.pop("TRON_IOS_TEST_RESULTS_DIR", None)
             environment["HOME"] = str(home)
         return subprocess.run(
-            [str(RUNNER), command, *(extra_args or [])],
+            [str(runner_root / "scripts/tron-ios-test"), command, *(extra_args or [])],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
@@ -1172,6 +1189,101 @@ exit 0
         self.assertEqual(result.returncode, 74, result.stderr)
         self.assertIn("carry no build identity", result.stderr)
         self.assertIn("before running tests", result.stderr)
+
+    def primary_products(self) -> Path:
+        common_dir = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            env=self.contained_environment(self.root), check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+        primary = Path(common_dir).parent
+        key = subprocess.run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(primary)],
+            env=self.contained_environment(self.root), check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+        return self.root / "home/Library/Developer/Tron/ios/test-derived-data" / key
+
+    def add_runner_worktree(self) -> Path:
+        runner_root = self.root / "runner-worktree"
+        subprocess.run(
+            ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(runner_root), "HEAD"],
+            env=self.contained_environment(self.root), check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            [sys.executable, str(IDENTITY), "write", "--worktree", str(runner_root),
+             "--derived-data", str(self.derived)],
+            env=self.contained_environment(self.root), check=True,
+            input=json.dumps(self.source_identity(runner_root)), text=True,
+            stdout=subprocess.DEVNULL,
+        )
+        return runner_root
+
+    def remove_runner_worktree(self, runner_root: Path) -> None:
+        subprocess.run(
+            ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(runner_root)],
+            env=self.contained_environment(self.root), check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    def test_build_seeds_only_primary_compiler_caches_into_owned_products(self) -> None:
+        # A temporary linked checkout ensures the runner has a distinct primary
+        # checkout, even when this suite itself runs from an ordinary clone.
+        runner_root = self.add_runner_worktree()
+        try:
+            primary = self.primary_products()
+            primary.mkdir(parents=True)
+            (primary / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+            (primary / "ModuleCache.noindex").mkdir(parents=True)
+            (primary / "ModuleCache.noindex/module.pcm").write_text("primary module")
+            (primary / "SDKStatCaches.noindex").mkdir()
+            (primary / "SDKStatCaches.noindex/sdk.cache").write_text("primary SDK")
+            (primary / "Build/Products/Foreign.app").mkdir(parents=True)
+            result = self.invoke(command="build", runner_root=runner_root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((self.derived / "ModuleCache.noindex/module.pcm").read_text(), "primary module")
+            self.assertEqual((self.derived / "SDKStatCaches.noindex/sdk.cache").read_text(), "primary SDK")
+            self.assertFalse((self.derived / "Build/Products/Foreign.app").exists())
+            self.assertTrue((self.derived / "build-identity.json").is_file())
+            (self.derived / "ModuleCache.noindex/module.pcm").write_text("worktree module")
+            self.assertEqual((primary / "ModuleCache.noindex/module.pcm").read_text(), "primary module")
+
+            (primary / "ModuleCache.noindex/module.pcm").write_text("primary rebuilt")
+            result = self.invoke(command="build", runner_root=runner_root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((self.derived / "ModuleCache.noindex/module.pcm").read_text(), "worktree module")
+        finally:
+            self.remove_runner_worktree(runner_root)
+
+    def test_run_does_not_seed_compiler_caches(self) -> None:
+        primary = self.primary_products()
+        primary.mkdir(parents=True)
+        (primary / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+        (primary / "ModuleCache.noindex").mkdir(parents=True)
+        (primary / "ModuleCache.noindex/module.pcm").write_text("primary module")
+
+        result = self.invoke(command="run")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.derived / "ModuleCache.noindex").exists())
+
+    def test_build_stays_cold_when_cache_clone_fails_and_removes_staging(self) -> None:
+        runner_root = self.add_runner_worktree()
+        try:
+            primary = self.primary_products()
+            primary.mkdir(parents=True)
+            (primary / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+            (primary / "ModuleCache.noindex").mkdir(parents=True)
+            (primary / "ModuleCache.noindex/module.pcm").write_text("primary module")
+
+            result = self.invoke(command="build", override={"FAKE_CP_FAIL": "1"}, runner_root=runner_root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((self.derived / "ModuleCache.noindex").exists())
+            self.assertFalse(list(self.derived.glob(".tron-cache-seed.*")))
+            self.assertTrue((self.derived / "build-identity.json").is_file())
+        finally:
+            self.remove_runner_worktree(runner_root)
 
     def test_build_stamps_products_and_records_source_in_metadata(self) -> None:
         (self.derived / "build-identity.json").unlink()

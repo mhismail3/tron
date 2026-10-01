@@ -91,6 +91,14 @@ workspace:
 4. **Worktree.** `start` creates `<worktreeRoot>/<issue>-<slug>` on the branch.
    `worktreeRoot` is relative to the primary checkout, so `start` gives the
    same path when run from any worktree.
+5. **Warm local dependencies.** On a new or resumed worktree, `start` copy-on-write
+   clones `packages/gateway/node_modules` and `packages/push-relay/node_modules`
+   only when the corresponding lockfile bytes exactly match the primary
+   checkout and npm verifies that its dependency tree is complete. A missing or
+   incomplete source install, lock mismatch, or clone failure falls back to
+   `npm ci` in that worktree. iOS build caches are owned and seeded by
+   the build-bearing commands of `scripts/tron-ios-test` (`build`, `checkpoint`
+   and `prepare`), not by `start`.
 
 The session is `--session`, then `WORK_SESSION_ID`, then `PI_SESSION_ID`.
 
@@ -101,6 +109,15 @@ active claims exceeds `claim.softCap`; the claim still proceeds.
 Re-running `start` in the same session resumes a claim that is already made.
 It fills in whatever is missing (Status, comment, worktree) and never makes a
 second claim. A different session is refused, and the refusal names the owner.
+
+### Warm-worktree failure modes
+
+`test_warm.py` covers dependency seeding: exact lock match plus a complete npm
+hidden lock and dependency tree clones independent files; mismatch, missing or
+incomplete primary dependencies uses `npm ci`; and failed clones remove partial
+output before installing. `scripts/test-ios-test-infrastructure.py` covers
+runner-owned iOS cache seeding and cleanup of failed cache clones. Neither tool
+shares mutable build products or trusts an incomplete dependency tree.
 
 ### Claimed and active statuses
 

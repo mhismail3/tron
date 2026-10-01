@@ -169,6 +169,32 @@ owned_directory() {
   printf 'tron.ios-test-owned.v1\n' >"$directory/.tron-ios-test-owned"
 }
 
+seed_primary_compiler_caches() {
+  local common_git_dir primary_root primary_key primary_products name source destination staging clone
+  common_git_dir="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  primary_root="$(dirname "$common_git_dir")"
+  [[ "$primary_root" != "$ROOT" ]] || return 0
+  primary_key="$(python3 "$IDENTITY" worktree-key --worktree "$primary_root" 2>/dev/null)" || return 0
+  [[ -n "$primary_key" && "$primary_key" != "$WORKTREE_KEY" ]] || return 0
+  primary_products="$PRODUCTS_ROOT/$primary_key"
+  [[ -d "$primary_products" && ! -L "$primary_products" \
+    && -f "$primary_products/.tron-ios-test-owned" && ! -L "$primary_products/.tron-ios-test-owned" ]] || return 0
+
+  for name in ModuleCache.noindex SDKStatCaches.noindex; do
+    source="$primary_products/$name"
+    destination="$DERIVED_DATA/$name"
+    [[ -d "$source" && ! -L "$source" && ! -e "$destination" && ! -L "$destination" ]] || continue
+    staging="$(mktemp -d "$DERIVED_DATA/.tron-cache-seed.XXXXXX" 2>/dev/null)" || continue
+    if cp -cR "$source" "$staging" >/dev/null 2>&1; then
+      clone="$staging/$name"
+      if [[ -d "$clone" && ! -e "$destination" && ! -L "$destination" ]]; then
+        mv "$clone" "$destination" 2>/dev/null || true
+      fi
+    fi
+    rm -rf -- "$staging" || true
+  done
+}
+
 clean_owned_directory() {
   local directory="$1"
   [[ ! -e "$directory" ]] && return 0
@@ -482,6 +508,9 @@ simulator_id="$(python3 "$SIMULATOR" provision "${simulator_args[@]}")" || {
 destination="platform=iOS Simulator,id=$simulator_id"
 
 owned_directory "$DERIVED_DATA"
+case "$command" in
+  build|checkpoint|prepare) seed_primary_compiler_caches ;;
+esac
 owned_directory "$RESULTS_ROOT"
 # One measurement per command: the same identity stamps the products a build
 # produces and lands in every metadata record of that command.

@@ -1069,7 +1069,15 @@ The shared per-user iOS build root is `$HOME/Library/Developer/Tron/ios`: test
 runs use its `test-runs` folder, each worktree's test products use its own
 `test-derived-data/<worktree-key>` folder (its directory name plus a hash of its
 path), and `scripts/tron-ios-simulator install` builds into
-`simulator-derived-data/<worktree-key>`, keyed the same way.
+`simulator-derived-data/<worktree-key>`, keyed the same way. After installing
+its ownership marker, build-bearing commands (`build`, `checkpoint`, and
+`prepare`) seed missing `ModuleCache.noindex` and `SDKStatCaches.noindex`
+from the primary checkout's owned products using APFS copy-on-write clones.
+Missing sources or failed clones
+leave a cold build; build products and the source build-identity stamp are never
+copied. The runner owns this cache lifecycle, so `work start` creates no iOS
+products for worktrees that never build, and the successful build stamps the
+same per-worktree directory as usual.
 The lease serializes the one owned simulator and the retained runs, but products
 are never shared between worktrees: `build` stamps its products with the
 building worktree, its HEAD revision and a fingerprint of its dirty-tree content
