@@ -1173,8 +1173,7 @@ command leaves none behind. A named lane refuses
 `TRON_IOS_TEST_STATE_DIR`
 and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
 those two overrides name - and, when set without a lane, select - the default
-lane until SIM-10 of
-[the simulator lifecycle plan](../../../docs/plans/2026-09-27-simulator-lifecycle.md)
+lane until SIM-10 (GitHub issue #227, in the simulator lifecycle epic)
 removes them, and they are what CI (`scripts/ios-ci-test.sh`) and the
 energy-efficiency profiling lanes still set. Lanes do not serialize against each other: each lane owns its own
 lease and simulator, so worktrees test in parallel until the Mac's memory runs

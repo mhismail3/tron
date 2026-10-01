@@ -281,8 +281,8 @@ navigable parent. Imported entries remain self-contained for reopen and context.
 profile before attachments, `read` results and tool-result images enter history;
 Gateway must preserve the source upload and avoid pre-resizing prompt images a
 second time. Update focused owner tests and this boundary map when ownership
-changes. Keep a candidate's detailed version matrix in its active `docs/plans/`
-entry until closeout; do not turn this paragraph into a second change tracker.
+changes. Keep a candidate's detailed version matrix in its GitHub epic until
+closeout; do not turn this paragraph into a second change tracker.
 
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
