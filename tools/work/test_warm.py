@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,7 +44,8 @@ class WarmWorktreeTests(unittest.TestCase):
         destination = self.package(self.worktree)
         install = unittest.mock.Mock()
 
-        with patch.object(warm, "_npm_tree_valid", return_value=True):
+        with patch.object(warm, "_npm_tree_valid", return_value=True), \
+                patch.object(warm, "_clone_tree", side_effect=shutil.copytree):
             warm.seed_node_modules(self.primary, self.worktree, install=install)
 
         seeded = destination / "node_modules"
