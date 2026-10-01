@@ -161,6 +161,10 @@ struct GatewayUpdateControlPlaneTests {
         #expect(GatewayUpdateIntent.source.confirmationPresentation.confirmTitle == "Rebuild")
         #expect(GatewayUpdateIntent.source.confirmationPresentation.centersTitle)
         #expect(!GatewayUpdateIntent.debug(provenDebug).confirmationPresentation.centersTitle)
+        for intent in [GatewayUpdateIntent.source, .debug(provenDebug)] {
+            #expect(intent.confirmationPresentation.message.contains("interrupts active agents, shell commands and terminals"))
+            #expect(intent.confirmationPresentation.message.contains("Saved conversations and files are kept"))
+        }
         let unprovenDebug = GatewayUpdateStatus(
             state: "prepared", channel: "stable", currentIdentity: nil,
             candidateIdentity: available.candidateIdentity, candidateAvailable: true,
@@ -189,6 +193,7 @@ struct GatewayUpdateControlPlaneTests {
         let blockers = #"{"id":"opaque-private-id","category":"foreground-agent-operation","state":"active","admittedAt":"2026-01-01T00:00:00Z","ageMs":10}"#
         let snapshotJSON = #"{"drainId":"private-drain-id","revision":7,"phase":"waiting","startedAt":"2026-01-01T00:00:00Z","lastProgressAt":"2026-01-01T00:00:01Z","blockerCount":9,"blockerCounts":{"foreground-agent-operation":4,"queued-mutation":2,"detached-extension-run":1,"terminal-receipt-persistence":1,"administrative-provider-package-operation":1},"oldestAdmissionAt":"2026-01-01T00:00:00Z","oldestAdmissionAgeMs":1000,"blockers":[\#(blockers)],"omittedCount":5,"suspectProjectionCount":2}"#
         let snapshot = try JSONDecoder.gateway.decode(AdministrativeDrainSnapshot.self, from: Data(snapshotJSON.utf8))
+        #expect(try JSONDecoder.gateway.decode(AdministrativeDrainBlockerCategory.self, from: Data(#""native-process-lease""#.utf8)) == .nativeProcessLease)
         let summary = AdministrativeDrainPresentation.summary(snapshot)
         #expect(summary.contains("Waiting for 9 accepted operations"))
         #expect(summary.contains("2 other accepted operations"))

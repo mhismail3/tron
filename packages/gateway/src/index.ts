@@ -1,4 +1,7 @@
+import { createProcessLeaseHost } from "./lifecycle/process-lease-host.js";
 import { homedir } from "node:os";
+import { runtimeIdentity } from "./transport/runtime-identity.js";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
 import { ModelRuntime, SettingsManager, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
@@ -48,6 +51,8 @@ import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { createMcpAdapter } from "./integrations/mcp-adapter.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./sessions/delegated-root-migration.js";
+import { startRestartWatchdog } from "./lifecycle/restart-watchdog.js";
+import { GatewayUpdateService } from "./admin/gateway-update-service.js";
 
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
@@ -140,7 +145,10 @@ const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
 
+const restartWatchdog = await startRestartWatchdog();
 const workRegistry = new GatewayWorkRegistry();
+const processLeaseHost = await createProcessLeaseHost(workRegistry, restartWatchdog.leaseCapability);
+Object.assign(process.env, processLeaseHost.environment);
 const connections = new ConnectionOwner(config.tronHome);
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
 const jevClient = new JevDecisionClient(knowledgeCredentials);
@@ -303,32 +311,77 @@ let stopping = false;
 let sessionSearchWarmTask: Promise<void> | undefined;
 let storageMaintenanceTimer: NodeJS.Timeout | undefined;
 let uploadStoragePressure: "normal" | "low" | "exhausted" = "normal";
+// Native owners have one 2.5-second termination window; do not replace the
+// origin while that bounded window is still protecting old writers.
+const SHUTDOWN_CLEANUP_GRACE_MS = 3_000;
+const SHUTDOWN_FORCE_EXIT_MS = 15_000;
+let ownedCancellation: Promise<void> | undefined;
+
+function beginOwnedCancellation(): Promise<void> {
+  if (ownedCancellation) return ownedCancellation;
+  // Invoke all independent owners before joining any promise. An async wrapper
+  // also isolates a synchronous throw so it cannot skip the remaining owners.
+  ownedCancellation = Promise.allSettled([
+    () => processLeaseHost.terminate(),
+    () => terminal.dispose(),
+    () => sessions.requestShutdownCancellation(),
+    () => automations.requestShutdownCancellation(),
+    () => workRegistry.requestCancellation(),
+  ].map(async (cancel) => {
+    try { await cancel(); }
+    catch (error) {
+      logger.log("warning", error instanceof Error ? error.message : String(error), { event: "gateway.cancellation-failed", source: "lifecycle" });
+    }
+  })).then(() => {});
+  return ownedCancellation;
+}
+
+function boundedCleanup<T>(operation: Promise<T>, graceMs = SHUTDOWN_CLEANUP_GRACE_MS): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), graceMs);
+    timer.unref();
+  });
+  return Promise.race([operation, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 async function shutdown(reason: string, exitCode = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
   logger.log("info", `Stopping gateway (${reason})`, { event: "gateway.stopping", source: "lifecycle" });
-  const forced = setTimeout(() => process.exit(1), 15_000);
+  // The process boundary is the final owner. It must remain bounded even when
+  // a third-party callback or canonical receipt cannot settle.
+  const forced = setTimeout(() => process.exit(exitCode), SHUTDOWN_FORCE_EXIT_MS);
   forced.unref();
   try {
     automations.beginDrain();
     workRegistry.beginDrain();
     if (storageMaintenanceTimer) clearInterval(storageMaintenanceTimer);
     storageMaintenanceTimer = undefined;
-    await transport.close();
-    await Promise.allSettled([
-      automations.requestShutdownCancellation(),
-      workRegistry.requestCancellation(),
-    ]);
-    // Administrative restart already waited without a deadline. Signal/error
-    // shutdown gets only a short cleanup grace; failure cannot reopen admission.
-    let cleanupTimer!: NodeJS.Timeout;
-    const cleanupGrace = new Promise<void>((resolve) => {
-      cleanupTimer = setTimeout(resolve, 2_000);
-      cleanupTimer.unref();
+
+    // Start every owned cleanup before awaiting any one owner. In particular,
+    // a stuck session callback must not prevent PTY groups, subagents, or other
+    // runtimes from receiving their interruption request. These operations
+    // preserve outcome-unknown receipts; they are never replaced by success.
+    const cancellation = beginOwnedCancellation();
+    const automationDisposal = automations.dispose()
+      .catch((error) => {
+        logger.log("warning", error instanceof Error ? error.message : String(error), { event: "gateway.automation-cleanup-failed", source: "lifecycle" });
+      });
+    const sessionDisposal = sessions.dispose().catch((error) => {
+      logger.log("warning", error instanceof Error ? error.message : String(error), { event: "gateway.session-cleanup-failed", source: "lifecycle" });
     });
-    await Promise.race([workRegistry.waitUntilSettled(), cleanupGrace]);
-    clearTimeout(cleanupTimer);
-    if (workRegistry.size > 0) {
+
+    await transport.close();
+    // Cancellation acknowledgement is advisory. Owners above have already
+    // received the request; waiting for a non-settling callback here would make
+    // the process replacement deadline ineffective.
+    const workSettled = await boundedCleanup(Promise.all([
+      cancellation, workRegistry.waitUntilSettled(),
+    ]));
+    if (workSettled === undefined && workRegistry.size > 0) {
       logger.log(
         "warning",
         `Gateway shutdown cleanup grace expired with ${workRegistry.size} owned operation${workRegistry.size === 1 ? "" : "s"} still outstanding`,
@@ -338,51 +391,40 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     terminal.dispose();
     notifications.dispose();
     knowledge.dispose();
-    await automations.dispose();
-    await sessionSearchWarmTask?.catch(() => {});
+    await boundedCleanup(automationDisposal);
+    await boundedCleanup(sessionDisposal);
+    await boundedCleanup(sessionSearchWarmTask?.catch(() => {}) ?? Promise.resolve());
     sessionSearchWarmTask = undefined;
-    await sessionSearch?.close();
-    await sessions.dispose();
+    await boundedCleanup(sessionSearch?.close() ?? Promise.resolve());
     // The retained pi-coding-agent session exposes no disposal API on the
-    // administration resource loader/model runtime. Admission closure and exact
-    // operation settlement above are therefore its truthful teardown boundary.
+    // administration resource loader/model runtime. Admission closure and
+    // exact operation settlement above are therefore its truthful boundary.
     void administrationServices;
     await releaseRuntimeLock();
     clearTimeout(forced);
     process.exit(exitCode);
   } catch (error) {
     logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.shutdown-failed", source: "lifecycle" });
-    await releaseRuntimeLock();
-    process.exit(1);
+    await releaseRuntimeLock().catch(() => {});
+    // Preserve the caller's lifecycle contract even when one cleanup owner
+    // fails: a requested supervised restart must still use its relaunch code.
+    process.exit(exitCode);
   }
 }
 
 let requestedRestart: Promise<void> | undefined;
+async function armRestartWatchdog(): Promise<number> {
+  return restartWatchdog.arm();
+}
+
 function requestRestart(): void {
   if (requestedRestart) return;
-  logger.log("info", "Gateway restart scheduled after accepted agent runs settle", { event: "gateway.restart-drain", source: "lifecycle" });
-  requestedRestart = (async () => {
-    const waitingLog = setInterval(() => {
-      const snapshot = sessions.administrativeDrainSnapshot();
-      const categories = Object.entries(snapshot.blockerCounts)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([category, count]) => `${category}=${count}`)
-        .join(", ");
-      logger.log(
-        "info",
-        `Gateway restart is waiting for ${snapshot.blockerCount} admitted operation${snapshot.blockerCount === 1 ? "" : "s"} to settle${categories ? ` (${categories})` : ""}`,
-        { event: "gateway.restart-drain.waiting", source: "lifecycle" },
-      );
-    }, 15_000);
-    waitingLog.unref();
-    try {
-      await sessions.waitUntilIdle();
-    } finally {
-      clearInterval(waitingLog);
-    }
-    logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
-    await shutdown("requested restart", SUPERVISOR_RELAUNCH_EXIT_CODE);
-  })().catch((error) => {
+  logger.log("info", "Gateway restart scheduled with bounded cancellation of accepted work", { event: "gateway.restart-drain", source: "lifecycle" });
+  // The explicit restart contract differs from a caller asking for graceful
+  // idleness: accepted work is interrupted at its owning runtime boundary and
+  // the supervisor is reached even when a receipt or drain projection never
+  // settles. beginAdministrativeDrain already froze new admission atomically.
+  requestedRestart = shutdown("requested restart", SUPERVISOR_RELAUNCH_EXIT_CODE).catch((error) => {
     logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.restart-drain-failed", source: "lifecycle" });
     void shutdown("restart drain failed", 1);
   });
@@ -403,9 +445,15 @@ const service = new GatewayService({
   auth,
   logger,
   receipts,
-  // LaunchAgent/supervisor restarts unsuccessful exits. Administrative
-  // restart drains accepted agent work before using the deliberate restart code.
+  // LaunchAgent/supervisor owns replacement after the bounded explicit
+  // interruption; accepted work is cancelled with canonical uncertainty kept.
   requestRestart,
+  armRestartWatchdog,
+  updateService: new GatewayUpdateService({
+    tronHome: config.tronHome, runtimeIdentity: runtimeIdentity(),
+    environment: { ...process.env, ...restartWatchdog.environment },
+  }),
+  beginRestartCancellation: beginOwnedCancellation,
   sessionDeleted: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
   notifications,

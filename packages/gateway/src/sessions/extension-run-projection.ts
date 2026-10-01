@@ -485,10 +485,15 @@ export function hasObservedPausedProcessTerminal(
     || Buffer.byteLength(proof.runnerProcessInstanceId) > 256
     || number(proof.observedAt) === undefined || (proof.observedAt as number) < 0
     || !Array.isArray(proof.instances) || proof.instances.length < 1 || proof.instances.length > 128) return false;
+  const launchedExternalSteps = Array.isArray(artifact.steps) ? artifact.steps.filter((step) => {
+    const value = record(step);
+    return record(value?.runner)?.type === "external-cli" && number(record(value?.externalProcess)?.pid) !== undefined;
+  }).length : 0;
+  let externalWriterCount = 0;
   let matchingRunnerCount = 0;
   for (const candidate of proof.instances) {
     const instance = record(candidate);
-    if (!instance || (instance.kind !== "runner" && instance.kind !== "pi-writer")
+    if (!instance || (instance.kind !== "runner" && instance.kind !== "pi-writer" && instance.kind !== "external-cli-writer")
       || typeof instance.processInstanceId !== "string" || instance.processInstanceId.length < 1
       || Buffer.byteLength(instance.processInstanceId) > 256
       || number(instance.closeObservedAt) === undefined || (instance.closeObservedAt as number) < 0
@@ -499,13 +504,14 @@ export function hasObservedPausedProcessTerminal(
       matchingRunnerCount += 1;
       continue;
     }
+    if (instance.kind === "external-cli-writer") externalWriterCount += 1;
     const tree = record(instance.processTree);
     if (!Number.isSafeInteger(instance.attempt) || (instance.attempt as number) < 0
-      || !tree || tree.state !== "observed" || tree.mechanism !== "posix-process-group"
+      || !tree || tree.state !== "observed" || (tree.mechanism !== "posix-process-group" && tree.mechanism !== "native-session-owner")
       || !Number.isSafeInteger(tree.processGroupId) || (tree.processGroupId as number) < 1
       || number(tree.verifiedAt) === undefined || (tree.verifiedAt as number) < 0) return false;
   }
-  return matchingRunnerCount === 1;
+  return matchingRunnerCount === 1 && externalWriterCount >= launchedExternalSteps;
 }
 
 /** Gateway sequence admission used by every producer projection. Producer

@@ -643,8 +643,8 @@ export class RuntimeSlot {
   private suppressQueueEvents = false;
   /** Abort intent is recorded before SDK cancellation can synchronously settle. */
   private readonly abortedOperations = new Set<string>();
-  /** Exact process ownership for the built-in foreground bash tool only.
-   * Extension-managed detached subagents remain outside this stop boundary. */
+  /** Exact process ownership for the built-in foreground bash tool. Detached
+   * subagents use their separate trusted controller route during shutdown. */
   private directBashProcesses: DirectBashProcessOwner | undefined;
 
   private constructor(
@@ -1053,9 +1053,10 @@ export class RuntimeSlot {
     }
   }
 
-  /** Administrative drain repairs only proven-orphaned foreground ownership.
-   * Its exact durable marker is removed before the process-local token; active,
-   * queued, and terminal-receipt owners remain untouched without a deadline. */
+  /** Graceful administrative-drain reconciliation repairs only proven-orphaned
+   * foreground ownership. Its exact durable marker is removed before the
+   * process-local token; explicit process shutdown instead interrupts every
+   * owner through shutdown(), preserving uncertain terminal receipts. */
   private async reconcileOrphanedForegroundWorkForDrain(): Promise<void> {
     // Never synthesize or transfer identity during repair. Once Pi settles, its
     // sequenced callback or the next reconciliation pass can prove an orphan.
@@ -7051,7 +7052,7 @@ export class RuntimeSlot {
           this.publishSnapshot();
           const previousEntryIDs = new Set(this.sessionManager.getBranch().map((entry) => entry.id));
           const startedMonotonicMs = performance.now();
-          const result = await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId });
+          const result = await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId, operations: this.directBashProcesses!.operations() });
           const completedAt = new Date().toISOString();
           const bashEntries = this.sessionManager.getBranch().filter((entry) =>
             !previousEntryIDs.has(entry.id)
@@ -7597,6 +7598,45 @@ export class RuntimeSlot {
 
   get isDisposed(): boolean {
     return this.disposed;
+  }
+
+  /** Start interruption synchronously before registry disposal waits on an
+   * in-flight admission. This is cancellation intent only; performShutdown()
+   * still owns marker/receipt terminalization and retirement. */
+  async requestShutdownCancellation(): Promise<void> {
+    if (this.disposed) return;
+    const children: Promise<void>[] = [];
+    // Keep the exact foreground Stop route usable while its abort intent is
+    // captured; shutdown admission closes immediately after this synchronous
+    // fanout, before any later turn can admit work.
+    for (const process of [...this.processActivities.values()]) {
+      if (process.kind !== "subagent" || !process.runId) continue;
+      const expectedOperationId = this.processOperationIDs.get(process.processId) === this.operation?.id
+        ? this.processOperationIDs.get(process.processId)
+        : undefined;
+      children.push(this.abortSubagentProcess(process.processId, process.runId, expectedOperationId));
+    }
+    this.shuttingDown = true;
+    const cancellation = new GatewayError("cancelled", "Gateway shutdown cancelled queued compaction");
+    const pending = this.pendingManualCompaction;
+    if (pending) {
+      this.pendingManualCompaction = undefined;
+      pending.reject(cancellation);
+    }
+    const results = await Promise.allSettled([
+      ...children,
+      ...[
+        () => this.runtime.session.abortCompaction(),
+        () => this.runtime.session.abortRetry(),
+        () => this.runtime.session.abortBranchSummary(),
+        () => this.runtime.session.abortBash(),
+        () => this.runtime.session.abort(),
+        () => this.directBashProcesses?.abortAll(),
+        () => this.ui.cancelAll("Gateway shutdown interrupted extension interaction"),
+      ].map(async (cancel) => { await cancel(); }),
+    ]);
+    const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+    if (errors.length) throw new AggregateError(errors, "Runtime shutdown cancellation failed");
   }
 
   async shutdown(): Promise<void> {

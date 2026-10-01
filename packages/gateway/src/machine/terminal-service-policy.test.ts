@@ -1,20 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { GatewayError } from "../errors.js";
 
-const spawnState = vi.hoisted(() => ({ failNext: false, nextPid: 40_000 }));
+const spawnState = vi.hoisted(() => ({ failNext: false, nextPid: 40_000, terminate: (_pid: number) => {} }));
 const ptys = vi.hoisted(() => [] as Array<{
   emitData(data: string): void;
   emitExit(exitCode?: number): void;
 }>);
 
-vi.mock("node-pty", () => ({
-  spawn: vi.fn(() => {
+vi.mock("./terminal-owner.js", () => ({
+  spawnTerminalOwner: vi.fn(() => {
     if (spawnState.failNext) {
       spawnState.failNext = false;
       throw new Error("spawn failed");
     }
     let dataHandler: (data: string) => void = () => {};
     let exitHandler: (event: { exitCode: number; signal?: number }) => void = () => {};
+    let proveCleanup!: (value: "exited" | "unknown") => void;
+    const cleanup = new Promise<"exited" | "unknown">((resolve) => { proveCleanup = resolve; });
     const pty = {
       pid: spawnState.nextPid++,
       onData(handler: (data: string) => void) { dataHandler = handler; return { dispose() {} }; },
@@ -23,10 +25,10 @@ vi.mock("node-pty", () => ({
       resize() {},
       kill() {},
       emitData(data: string) { dataHandler(data); },
-      emitExit(exitCode = 0) { exitHandler({ exitCode }); },
+      emitExit(exitCode = 0) { proveCleanup("exited"); exitHandler({ exitCode }); },
     };
     ptys.push(pty);
-    return pty;
+    return { pty, cleanup, terminate: () => spawnState.terminate(pty.pid) };
   }),
 }));
 
@@ -55,13 +57,14 @@ describe("TerminalService hardening policy", () => {
     service.dispose();
   });
 
-  it("evicts only the oldest exited record and preserves retained insertion order", () => {
+  it("evicts only the oldest exited record and preserves retained insertion order", async () => {
     const service = new TerminalService(64_000, () => {});
     const ids: string[] = [];
     ids.push(service.open("session", "/tmp").id);
     for (let index = 1; index < MAX_RETAINED_TERMINALS; index += 1) {
       ids.push(service.open("session", "/tmp").id);
       ptys.at(-1)!.emitExit();
+      await Promise.resolve();
     }
 
     const newest = service.open("session", "/tmp").id;
@@ -74,11 +77,12 @@ describe("TerminalService hardening policy", () => {
     service.dispose();
   });
 
-  it("preserves retained history when PTY spawn fails", () => {
+  it("preserves retained history when PTY spawn fails", async () => {
     const service = new TerminalService(64_000, () => {});
     for (let index = 0; index < MAX_RETAINED_TERMINALS; index += 1) {
       service.open("session", "/tmp");
       if (index > 0) ptys.at(-1)!.emitExit();
+      await Promise.resolve();
     }
     const retained = service.list("session").map(({ id }) => id);
     spawnState.failNext = true;
@@ -88,13 +92,13 @@ describe("TerminalService hardening policy", () => {
     service.dispose();
   });
 
-  it("does not complete termination before the process group exits", async () => {
+  it("does not complete termination before the native cleanup and PTY exit are observed", async () => {
     const terminatedPids: number[] = [];
+    spawnState.terminate = (pid) => { terminatedPids.push(pid); };
     const events: string[] = [];
     const service = new TerminalService(
       64_000,
       (_id, topic) => events.push(topic),
-      (pty) => { terminatedPids.push(pty.pid); },
     );
     const terminal = service.open("session", "/tmp");
     const pty = ptys.at(-1)!;
@@ -115,13 +119,13 @@ describe("TerminalService hardening policy", () => {
     service.dispose();
   });
 
-  it("terminates active process groups and suppresses PTY callbacks after disposal", () => {
+  it("requests active session cleanup and suppresses PTY callbacks after disposal", () => {
     const events: string[] = [];
     const terminatedPids: number[] = [];
+    spawnState.terminate = (pid) => { terminatedPids.push(pid); };
     const service = new TerminalService(
       64_000,
       (_id, topic) => events.push(topic),
-      (pty) => { terminatedPids.push(pty.pid); },
     );
     service.open("session", "/tmp");
     const pty = ptys.at(-1)!;

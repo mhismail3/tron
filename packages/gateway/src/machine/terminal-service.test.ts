@@ -1,15 +1,22 @@
 import { access, chmod, mkdtemp } from "node:fs/promises";
 import { constants } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TerminalService } from "./terminal-service.js";
+import { nativeFixtureDirectory } from "../../test-fixtures/terminal-owner.js";
+
+vi.mock("node:url", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:url")>();
+  const { nativeFixtureExecutable } = await import("../../test-fixtures/terminal-owner.js");
+  return { ...original, fileURLToPath: (url: URL | string) => String(url).endsWith("/native/terminal-owner")
+    ? nativeFixtureExecutable : original.fileURLToPath(url) };
+});
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 describe("TerminalService", () => {
   it("opens a PTY and retains bounded replay", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "tron-terminal-"));
+    const cwd = await mkdtemp(join(nativeFixtureDirectory, "tron-terminal-"));
     const events: Array<{ topic: string; payload: unknown }> = [];
     const service = new TerminalService(64_000, (_id, topic, payload) => events.push({ topic, payload }));
     const terminal = service.open("session", cwd, 80, 24);
@@ -28,15 +35,16 @@ describe("TerminalService", () => {
     service.dispose();
   });
 
-  it("closes terminal admission atomically only when no PTY is active", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "tron-terminal-drain-"));
+  it("closes terminal admission and interrupts active PTYs for restart", async () => {
+    const cwd = await mkdtemp(join(nativeFixtureDirectory, "tron-terminal-drain-"));
     const active = new TerminalService(64_000, () => {});
     const first = active.open("session", cwd);
-    expect(active.beginRestartDrain()).toBe(false);
-    await active.terminate(first.id);
-    // A rejected restart did not leave the admission gate closed.
-    const second = active.open("session", cwd);
-    await active.terminate(second.id);
+    expect(active.beginRestartDrain()).toBe(true);
+    expect(() => active.open("session", cwd)).toThrow(/not accepting terminal/u);
+    for (let attempt = 0; attempt < 120 && active.activeTerminalIds().includes(first.id); attempt += 1) {
+      await wait(25);
+    }
+    expect(active.activeTerminalIds()).not.toContain(first.id);
     active.dispose();
 
     const draining = new TerminalService(64_000, () => {});

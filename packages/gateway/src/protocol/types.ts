@@ -23,6 +23,7 @@ export interface SessionCreationOrigin {
 export type AdministrativeDrainPhase = "idle" | "preparing" | "waiting" | "complete" | "failed";
 export type AdministrativeDrainBlockerCategory =
   | "slot-admission"
+  | "native-process-lease"
   | "prompt-preflight"
   | "foreground-agent-operation"
   | "queued-mutation"

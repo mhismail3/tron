@@ -74,6 +74,9 @@ async function makeTreeWritable(root) {
 }
 
 async function addRuntimeNodeAliases(root) {
+  await mkdir(join(root, "app", "native"), { recursive: true });
+  await writeFile(join(root, "app", "native", "terminal-owner"), "#!/bin/sh\nexit 125\n", { mode: 0o755 });
+  await writeFile(join(root, "app", "native", "terminal-owner.c"), "// fixture terminal owner\n");
   const piPackage = join(root, "app", "node_modules", "@earendil-works", "pi-coding-agent");
   const piCli = join(piPackage, "dist", "cli.js");
   await mkdir(dirname(piCli), { recursive: true });
@@ -372,6 +375,8 @@ test("source build failure leaves active selection and deployment state unchange
     await mkdir(join(root, "packages", "mac-app", "Sources", "Resources"), { recursive: true });
     await writeFile(join(root, "packages", "gateway", "package.json"), "{}\n");
     await writeFile(join(root, "packages", "gateway", "package-lock.json"), emptyLock);
+    await mkdir(join(root, "packages", "gateway", "native"), { recursive: true });
+    await writeFile(join(root, "packages", "gateway", "native", "terminal-owner.c"), "// fixture terminal owner\n");
     const before = `${JSON.stringify({ untouched: true })}\n`;
     await writeFile(store.state, before);
     await assert.rejects(buildSourcePayload({ paths: store, config: { sourceRoot: root }, runCommand: async () => { throw new Error("build failed"); } }), /build failed/);
@@ -449,6 +454,7 @@ test("source builds compile privately and leave the trusted source tree unchange
     const sourceRoot = join(root, "source");
     const gatewayRoot = join(sourceRoot, "packages", "gateway");
     await mkdir(join(gatewayRoot, "src"), { recursive: true });
+    await mkdir(join(gatewayRoot, "native"), { recursive: true });
     await mkdir(join(sourceRoot, "scripts"), { recursive: true });
     await mkdir(join(gatewayRoot, "scripts"), { recursive: true });
     await mkdir(join(sourceRoot, "packages", "mac-app", "Sources", "Resources"), { recursive: true });
@@ -459,6 +465,7 @@ test("source builds compile privately and leave the trusted source tree unchange
       "package-lock.json": `${JSON.stringify({ lockfileVersion: 3, packages: { "": { version: "1.0.0" } } })}\n`,
       "tsconfig.json": "{}\n",
       "src/index.ts": "export const source = true;\n",
+      "native/terminal-owner.c": "// fixture terminal owner\n",
     };
     for (const [path, content] of Object.entries(sourceFiles)) {
       await writeFile(join(gatewayRoot, path), content);
@@ -615,6 +622,10 @@ test("source rebuild reuses active dependencies only with unchanged lock and man
     await writeFile(join(gateway, "package.json"), packageText);
     await writeFile(join(gateway, "package-lock.json"), lock);
 
+    await mkdir(join(active, "app", "native"), { recursive: true });
+    await mkdir(join(gateway, "native"), { recursive: true });
+    await writeFile(join(active, "app", "native", "terminal-owner.c"), "// fixture terminal owner\n");
+    await writeFile(join(gateway, "native", "terminal-owner.c"), "// fixture terminal owner\n");
     const captured = await captureReusableSourcePackage(active, gateway);
     assert.equal(captured.sourcePackage.version, "1");
     assert.equal(captured.packageBytes.toString("utf8"), packageText);
@@ -802,6 +813,24 @@ test("planned drain polls the exact old PID after its listener disappears", asyn
   assert.equal(exitedReads, 5);
 });
 
+test("blocked Gateway observation ends at the native deadline without numeric signals", async () => {
+  const oldProcess = { pid: 77, startIdentity: "old" };
+  let clock = 0;
+  let reads = 0;
+  await assert.rejects(waitForDrainCompletion(oldProcess,
+    async () => { reads += 1; return oldProcess; },
+    async (delay) => { clock += delay; },
+    { now: () => clock, deadline: 1_000 },
+  ), /native restart deadline expired/);
+  assert.equal(clock, 1_000);
+  assert.ok(reads <= 6);
+  await waitForDrainCompletion(oldProcess,
+    async () => ({ pid: oldProcess.pid, startIdentity: "replacement" }),
+    async () => { throw new Error("successor must not be waited or signalled"); },
+    { now: () => clock, deadline: 1_000 },
+  );
+});
+
 test("startup timing and kickstart do not begin while the exact old process remains", async () => {
   const oldProcess = { pid: 10, startIdentity: "old" };
   const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "revision", runtimeEpoch: "new-epoch" };
@@ -826,7 +855,7 @@ test("startup timing and kickstart do not begin while the exact old process rema
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(clockReads, 0);
+  assert.equal(clockReads, 1);
   assert.equal(launches, 0);
   releaseDrain();
   await pending;
@@ -844,7 +873,7 @@ test("startup timing and kickstart do not begin while the exact old process rema
       sleep: async () => {},
     },
   }), /process probe failed/);
-  assert.equal(clockReads, 0);
+  assert.equal(clockReads, 1);
   assert.equal(launches, 0);
 });
 
@@ -1284,4 +1313,53 @@ test("deployment transitions reject skipping identity proof", () => {
   assert.equal(deploymentTransition("published", "restartRequested"), "restart-requested");
   assert.equal(deploymentTransition("restart-requested", "ready"), "ready");
   assert.throws(() => deploymentTransition("published", "ready"), /invalid deployment transition/);
+});
+
+test("terminal owner payload admission rejects missing or substituted helpers before candidate readiness", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-terminal-payload-admission-"));
+  try {
+    // Deliberately stop before npm/runtime probing: no lifecycle command, native
+    // executable, or candidate readiness may run with an invalid required owner.
+    for (const failure of ["missing", "symlink", "not-executable"]) {
+      const payload = join(root, failure);
+      for (const directory of ["app/dist", "app/scripts", "app/native", "runtime"]) await mkdir(join(payload, directory), { recursive: true });
+      for (const file of ["app/package.json", "app/package-lock.json", "app/PushService.xcconfig", "app/scripts/ensure-node-pty-helper.mjs", "app/scripts/gateway-payload-deploy.mjs", "app/native/terminal-owner.c"]) {
+        await writeFile(join(payload, file), "fixture\n");
+      }
+      await writeFile(join(payload, "app/dist/index.js"), "x".repeat(1024));
+      const owner = join(payload, "app/native/terminal-owner");
+      if (failure === "symlink") await symlink("terminal-owner.c", owner);
+      if (failure === "not-executable") await writeFile(owner, "not executable\n", { mode: 0o644 });
+      const manifest = {
+        schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "fixture", gatewayVersion: "1",
+        protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "fixture", runtimeEpoch: "fixture",
+        payloadFingerprint: "a".repeat(64), dependencyTreeCoverage: "app/** and runtime/** regular files",
+      };
+      await writeFile(join(payload, "manifest.json"), JSON.stringify(manifest));
+      let commands = 0;
+      await assert.rejects(preflightPayload(payload, async () => { commands++; }), /terminal-owner/);
+      assert.equal(commands, 0);
+      await assert.rejects(copyValidatedPayloadBase({ root: payload, manifest }, join(root, `${failure}-copy`)), /terminal-owner/);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("terminal owner native input cannot change during a source-only rebuild", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-terminal-source-boundary-"));
+  try {
+    const active = join(root, "active"), gateway = join(root, "gateway");
+    await mkdir(join(active, "app/native"), { recursive: true });
+    await mkdir(join(gateway, "native"), { recursive: true });
+    for (const directory of [join(active, "app"), gateway]) {
+      await writeFile(join(directory, "package.json"), JSON.stringify({ name: "fixture", version: "1" }));
+      await writeFile(join(directory, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: { "": { name: "fixture", version: "1" } } }));
+      await writeFile(join(directory, "native/terminal-owner.c"), "// exact native input\n");
+    }
+    await captureReusableSourcePackage(active, gateway);
+    await writeFile(join(gateway, "native/terminal-owner.c"), "// changed native implementation\n");
+    await assert.rejects(captureReusableSourcePackage(active, gateway), /Native terminal owner changed or is missing; install a newly signed Tron build/);
+    await rm(join(gateway, "native/terminal-owner.c"));
+    await symlink(join(active, "app/native/terminal-owner.c"), join(gateway, "native/terminal-owner.c"));
+    await assert.rejects(captureReusableSourcePackage(active, gateway), /Native terminal owner changed or is missing/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

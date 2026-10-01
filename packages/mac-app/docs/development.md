@@ -42,6 +42,20 @@ that projection before a replacement is ready. The completed app uses only those
 embedded runtimes for supervised work and does not consult Homebrew, NVM, or the
 destination checkout's `.ci-tools` cache.
 
+The Gateway payload also contains `app/native/terminal-owner`, compiled universally for
+macOS 15+ from `packages/gateway/native/terminal-owner.c`. The payload verifier requires
+it; the existing app/** fingerprint and generic Mach-O signing pass include it.
+The matching source input is included in the fingerprinted payload: source-only rebuilds
+reuse the validated binary and reject native source changes or missing owner resources.
+Prepare a newly signed Release build containing the matching native owner before a
+source-only update can use that base; an actual local reinstall remains the manual
+maintainer action described below. Candidate preflight exercises a private terminal owner
+with `/usr/bin/true` and requires its cleanup receipt, not Gateway health alone. This
+per-terminal SID owner outlives the interactive shell and cleans ordinary PTY job-control
+groups on Quit, shell exit, or Gateway control loss. It is not an agent/subagent process
+supervisor. See the Gateway README's PTY contract and `terminal-owner.test.ts` for bounded
+cleanup and explicit-unknown behavior.
+
 The Mac app build compiles the universal C Node-API8 capture client and places it
 beside the helper at `Contents/Library/Native/tron-native-capture.node`, with its
 production input manifest. `native-gateway-client/build.py` checks the four
@@ -251,9 +265,14 @@ scripts/gateway-payload-deploy.mjs rollback --channel stable --command-id <uniqu
 ```
 
 Promotion is serialized per channel, verifies the complete payload fingerprint,
-uses authenticated drain-aware `gateway.restart`, waits without a deadline for the
-exact old PID/start to disappear, and proves one different stable PID/start plus the
-exact candidate health identity. Normal candidate startup belongs exclusively to launchd;
+uses authenticated drain-aware `gateway.restart`, and waits for the exact old PID/start
+identity to disappear. The Gateway-started helper receives private native restart authority
+and obtains acknowledgement before waiting on the RPC; ordinary children do not receive
+that capability. Native authority freezes launches and interrupts registered session owners
+before signalling the exact old Gateway by kernel audit token, even with blocked JS.
+The helper then proves one different stable PID/start plus the exact candidate health
+identity. A standalone helper without that authority requires a responsive restart RPC;
+there is no historical-PID kill fallback. Unknown command results remain unknown. Normal candidate startup belongs exclusively to launchd;
 listener absence cannot authorize a kickstart because a live startup process may not have
 bound yet. On failure it restores and revalidates the prior selection. If the launcher
 already restored the exact healthy payload, recovery accepts it without another kill;
@@ -667,9 +686,12 @@ and never changes Stable `current.json` or restarts 9847. The confirmed iOS
 fingerprint and invokes the existing asynchronous Stable deployment core.
 
 The command serializes selection publication per channel, verifies complete
-payload fingerprints, calls authenticated drain-aware `gateway.restart`, waits
-without a startup deadline for the exact local pre-restart listener process to
-exit or be replaced, and only then starts bounded exact-candidate health checks.
+payload fingerprints, calls authenticated drain-aware `gateway.restart`, waits for the
+exact local pre-restart listener process to exit or be replaced, and only then starts
+bounded exact-candidate health checks. When launched by the Gateway, the updater can
+arm independent native freeze/interruption before a blocked restart RPC; it observes
+the acknowledged deadline without numeric-PID signalling. The detached update helper
+is never targeted.
 Health absence alone is never accepted as a drain transition. Local listener ownership
 uses bounded `lsof` terse PID output plus a separate process-start identity probe; field
 mode is intentionally excluded because macOS always emits an extra file-descriptor record.

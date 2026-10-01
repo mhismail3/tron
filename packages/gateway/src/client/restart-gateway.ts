@@ -33,7 +33,7 @@ try {
     activeSessionIds: string[];
   };
   if (result.scheduled) {
-    console.log(`Tron Gateway restart scheduled after ${result.activeSessionIds.length} active agent run${result.activeSessionIds.length === 1 ? "" : "s"} settles.`);
+    console.log(`Tron Gateway restart accepted; interruption requested for ${result.activeSessionIds.length} active agent run${result.activeSessionIds.length === 1 ? "" : "s"} and owned processes. Interrupted commands are not replayed.`);
   } else {
     console.log("Tron Gateway is restarting.");
   }

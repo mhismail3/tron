@@ -30,6 +30,10 @@ describe("Tron operating context", () => {
     const result = await fixture().get("before_agent_start")!({ systemPrompt: "SDK + project rules" }, { cwd: "/project" });
     expect(result.systemPrompt).toMatch(/^SDK \+ project rules\n\n## Tron operating context/);
     expect(Object.keys(result)).toEqual(["systemPrompt"]);
+    expect(result.systemPrompt).toContain("tool-call IDs, subagent status/transcripts and worktree changes");
+    expect(result.systemPrompt).toContain("outcome unknown, not failure or success");
+    expect(result.systemPrompt).toContain("never automatically replay interrupted commands");
+    expect(result.systemPrompt).toContain("do not invent one");
   });
 
   it.each([

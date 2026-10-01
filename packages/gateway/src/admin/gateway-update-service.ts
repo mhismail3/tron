@@ -194,6 +194,8 @@ function launchAgentUpdater(environment: NodeJS.ProcessEnv = process.env, tronHo
         detached: true,
         stdio: "ignore",
         windowsHide: true,
+        // The updater is a replacement coordinator, never Gateway-owned work.
+        env: Object.fromEntries(Object.entries(environment).filter(([key]) => key !== "PI_SUBAGENT_PROCESS_OWNER")),
       });
       // An unref'd child can still emit an asynchronous spawn error. Attach
       // this listener before unref so it is observed rather than uncaught;

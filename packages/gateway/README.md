@@ -818,9 +818,11 @@ build or promotion success; asynchronous helper failures are reported in update 
 helper may still stage or copy a candidate, but the new `.bin/pi` runtime contract fails closed
 before a source-only transition can become healthy; the manual reinstall replaces launcher and
 payload together. A
-planned restart publishes a distinct `draining` phase and may wait without a startup deadline
-for already-accepted runs; only after the exact captured old PID/start identity disappears or
-changes does the bounded startup deadline begin. Readiness requires one different PID/start
+planned restart publishes a distinct `draining` phase and gives accepted work a bounded
+cancellation opportunity; receipt and projection uncertainty remains owned rather than being
+converted to success. The external deployment supervisor waits for the exact captured old
+PID/start identity and, if its event loop is blocked past the drain deadline, interrupts only
+that exact Gateway process before beginning the bounded startup deadline. Readiness requires one different PID/start
 identity stable across an authenticated exact fingerprint/revision/epoch probe. Normal candidate
 startup belongs exclusively to launchd; listener absence cannot authorize a kickstart because a
 live startup process may not have bound yet. Candidate startup uses the launcher's atomic
@@ -1084,7 +1086,7 @@ Live and canonical transcript projections preserve the canonical tool name while
 
 Every canonical `custom_message` is context-bearing input under Pi semantics. Producer-visible messages project as right-aligned inbound context; producer-hidden messages remain absent from ordinary chat. At the exact Pi message boundary, Gateway captures available owner identity from the wrapped extension callback and whether the message was stored for a later turn or delivered during active work. Callback and tool/command owner lookups resolve finalized package SourceInfo at admission, not the provisional local source present during extension loading (`owner-attribution.test.ts`). Sender attribution is incomplete in the pinned SDK: custom-message queues do not retain sender async context, and extension-initialization timers are outside the callback wrapper. Ownerless receipts therefore remain unknown, including after reopen; complete attribution requires trusted sender evidence carried through the SDK's exact message object, not a custom-type or run-ID lookup. Pi exposes stored custom messages after their canonical append and turn-triggering messages immediately before it; the Gateway binds the exact canonical tail identity at those respective lifecycle boundaries and appends a bounded `tron.context-delivery.v4` receipt targeting that entry. It never scans forward for an unowned payload candidate. Receipts may follow later branch entries, so projection validates exact target identity and target-before-receipt branch order rather than current-leaf adjacency. Text, title, custom type, timestamps, details, and renderer registration never infer producer identity or delivery. Canonical `custom`/`appendEntry` state remains available to extensions but is omitted from chat and tree projection unless it is a validated Gateway invocation-start receipt; validated extension-notification receipts are promoted only into the chat timeline and never become navigation nodes. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Everything provider-specific about that integration — the provider tool name, the run-directory shape, the accepted lifecycle file names, and the exact installed-owner identity used to authorize controls — lives in one `sessions/delegated-provider.ts` boundary rather than in the session runtime, so the runtime depends on a narrow contract instead of embedding package conventions. That boundary grants no authority by itself: the runtime still proves canonical tool/run ownership before projecting or controlling work, and a same-named tool from another package never becomes the provider. Provider recognition requires the finalized `npm:pi-subagents` package identity as well as matching path evidence, so a project or local extension living in a directory named `pi-subagents` cannot impersonate the installed provider. The resolved `<tronHome>/internal/subagents/` root is scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. Project-local and temporary roots are accepted only by isolated pre-cutover fixtures, never as a second production authority. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction. Native `subagent_supervisor` receipts remain ordinary control-tool results: their `runId` references an existing execution and never creates a delegated activity or canonical launch-ownership claim. This applies equally to live admission and replay of existing session history; a supervisor reply cannot prevent the real launch's terminal artifact from settling. Distinct genuine launch calls claiming the same run still fail closed. The supervisor-reference regression in `runtime-registry.integration.test.ts` verifies completion and drain release.
 
-Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. Planned restart exits with code 75 only after the registry drain completes. A handled signal in a supervised runtime also exits 75, while an ordinary foreground signal remains a clean exit; process replacement belongs to the supervisor.
+Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. A confirmed planned restart starts a process-watchdog helper, requests work cancellation, and schedules exit with code 75; it does not wait indefinitely for registry drain completion. A handled signal in a supervised runtime also exits 75, while an ordinary foreground signal remains a clean exit; process replacement belongs to the supervisor.
 
 Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions.extensionsOverride` seam on every load and reload. Registration admission is the extension's own registration maps rather than a one-shot pass over the loader result: Pi permits an already-loaded extension to register tools, commands, handlers, shortcuts, and renderers at any time, so a load-time-only pass would let a later `registerTool` replace the admitted entry and lose producer identity or bypass a reserved first-party name. Load-time and late registration therefore share one policy path, and each callback is admitted once even when a handler list is re-set. Pi's markdown transformer is the one registration surface outside those maps (it is a plain property read live by the runner), so a transformer registered after load is not owner-attributed; nothing in Tron authorizes behavior from transformer provenance, so no gate is bypassed. An AsyncLocalStorage owner (an opaque SHA-256 identity derived from stable source/path provenance, a generic humanized title, and exact `sourceInfo.source`) follows handlers, tools, commands, renderers, promises, and timers. Raw extension paths never enter owner IDs. Owner and reserved-name admission are resolved at invocation time, because the pinned SDK finalizes package `SourceInfo` after `extensionsOverride` returns. The semantic broker records optional widget owners and per-key status owners; rendered component surfaces retain only exact source provenance. Callbacks that originate outside a wrapped owner context—such as a package-owned long-lived timer created during extension initialization—remain ownerless rather than being guessed, and protocol owner records are bounded at the store and native admission boundary.
 
@@ -1377,9 +1379,9 @@ loaded from an obsolete decision. PTY output has an independent monotonic
 sequence and wire-safe attach replay for gap/reconnect convergence. The global
 terminal catalog retains at most 128 records in insertion order, evicting only
 the oldest exited records before creation, while at most 16 PTYs may remain
-active. Destructive termination signals the complete PTY process group and its RPC
-resolves only after the node-pty exit callback has retired canonical active-terminal
-state and published `terminal.exit`. Output is split at UTF-8 boundaries into at most 64 KiB events, and
+active. Destructive termination requests cleanup from the retained native PTY session
+leader. Its RPC resolves only after verified session quiescence over a private control
+channel AND the node-pty exit callback retire active state and publish `terminal.exit`. Output is split at UTF-8 boundaries into at most 64 KiB events, and
 replay uses encoded JSON byte accounting below the 1 MiB frame ceiling. Context, tree,
 resources, commands, exports, transcript paging, terminal inventory, and all live-runtime mutations
 require an established open subscription for that exact session. Dashboard rename and delete remain
@@ -1708,12 +1710,61 @@ Read projections redact secret-looking strings; matching redaction placeholders 
 from canonical state during update so mobile editing cannot erase credentials it was never
 allowed to read.
 
-Administrative restart is a deadline-free drain, not an abort: the Gateway synchronously
-closes session and administration admission, lets every admitted owner settle without
-cancelling accepted work, then exits with the supervised restart code. Unexpected
-signal/error shutdown may request exact fenced cancellation and logs if its bounded
-cleanup grace expires with ownership still outstanding. `GatewayWorkRegistry` is a
-bounded, process-local registry with separate normal and derived-settlement capacity. It
+Explicit administrative restart interrupts accepted work rather than waiting indefinitely
+for drain projections or receipt writes. At Gateway startup an acknowledged native guardian
+captures its actual parent's kernel audit token. Before cancellation or receipt completion,
+restart arms one non-extending 15-second deadline. Native authority first freezes launch
+admission and interrupts its live owner connections, then signals the exact old Gateway
+(TERM at deadline minus 3.5 seconds, KILL at minus 3 seconds). It never launches a replacement;
+the existing supervisor owns that operation. The detached updater alone receives the private
+arm capability, allowing it to arm even when the Gateway loop was blocked before the RPC.
+Ordinary children receive a distinct launch-only capability, never restart authority.
+
+Every hosted process gets a retained native session leader before user execution: terminal
+jobs, direct/SDK bash, foreground and detached subagents, external CLI/preflight, acceptance,
+workflow host commands, setup hooks and diagnostics. Async launches also obtain their existing
+`GatewayWorkRegistry` token before execution; synchronous hooks join native authority directly
+while their enclosing operation owns registry admission, avoiding a blocked-parent handshake.
+Nested owners may outlive the immediate launching agent but not their origin's native lease.
+Native freeze rejects late launches even while JS remains responsive; control EOF independently
+starts cleanup after origin loss. Before signalling, a native owner also captures still-live
+parent/child edges with bracketing audit-token checks, covering ordinary descendants that
+created their own session. Captured tokens survive leader exit; independently registered
+native owners are excluded so intentional detached work can outlive its launcher. This is
+volatile native resource authority, not a persisted PID manifest. Each retained leader uses
+kernel audit-token signals, a 500 ms TERM grace and one 2-second force window. Updaters and unrelated
+sessions are not members. Arbitrary daemonization outside supported launch seams is not a
+sandboxed workload; unprovable kernel cleanup remains unknown, never successful termination.
+
+Missing authority fails closed. Lost acknowledgement after submission remains `outcomeUnknown`
+and does not reopen admission or schedule a second restart. Native cleanup proof is physical
+quiescence, not command success: pending receipts, run markers, canonical JSONL, subagent
+artifacts/logs and worktrees are retained. On reopen, agents use the prior conversation,
+tool-call/operation identities, retained child transcripts and actual file changes to continue
+deliberately. Neither prompts nor uncertain side-effecting commands replay automatically.
+Forced termination cannot guarantee a final agent summary or buffered output; the first-turn
+SDK durability limitation above still applies. The operating prompt explains this recovery
+boundary instead of inventing a second transcript or shutdown checkpoint journal.
+
+Terminal Quit requires both a native session-cleanup receipt and the PTY owner exit
+callback. Disposal without both settles an admitted Quit as `outcomeUnknown`, preserving
+the pending command receipt and refusing replay, rather than returning `terminated: true`.
+Neither PTY stdout nor shell/helper exit alone establishes cleanup. Regression coverage:
+`terminal-service-receipt.test.ts` exercises missing cleanup proof, delayed/missing callbacks,
+control failure, restart overlap, and durable uncertain receipts without spawning a PTY.
+
+Process-terminal projections accept `external-cli-writer` evidence alongside `pi-writer`
+and require observed group cleanup for either. An unfamiliar writer kind, unknown cleanup,
+or a whole-run proof omitting externally launched steps cannot establish paused quiescence.
+`restart-watchdog.test.ts` exercises real blocked origins/controllers, a separate SDK shell,
+synchronous native hooks, pre-RPC arming, child-capability refusal, late-launch rejection and
+updater survival, checking writers stop before the origin exits. `owned-process.test.ts`
+covers nested lifetime and resistant descendants after leader exit. Receipt/single-scheduling
+tests are in `gateway-restart.test.ts`; `runtime-registry.integration.test.ts` covers cancellation
+fanout and reopening interrupted tool context without replay or fabricated completion. These
+are isolated source/native composition checks, not an installed Gateway release validation.
+
+`GatewayWorkRegistry` is a bounded, process-local registry with separate normal and derived-settlement capacity. It
 never persists or expires work by age and does not duplicate Pi's runtime, JSONL, or run
 markers. Prompt preflight transfers one token into accepted foreground, queue, or
 extension-command ownership without a release/reacquire gap. Exact accepted queue owners
@@ -1756,12 +1807,14 @@ drain identity and revision while retaining its legacy fields. Snapshots contain
 counts, at most 64 opaque hashed blocker summaries, omitted and suspect-projection counts,
 and monotonic revisions—never session/run IDs, prompts, output, paths, provider data, or
 credentials. They are diagnostics only; exact tokens, runtime settlement, terminal
-artifacts, and durable receipts remain liveness authority. While waiting the Gateway also
-emits bounded `gateway.restart-drain.waiting` log records every 15 seconds, plus an
-explicit completion record, so operators can distinguish progress from a failed restart.
-Live PTYs block restart because process replacement cannot preserve them. Restart closes
-terminal admission atomically only after proving no PTY is live, so an already-dispatched
-`terminal.open` cannot resume across the cutoff and spawn a shell.
+artifacts, and durable receipts remain liveness authority. The Gateway records the accepted drain identity for diagnostics; restart scheduling remains
+single-shot even when its command receipt write fails. Operators must treat timeout or process
+exit as an uncertain command outcome and inspect the authoritative Gateway state before retrying.
+Live PTYs are interrupted at restart through their native session owner; restart closes
+terminal admission before any already-dispatched `terminal.open` can resume and spawn a
+shell. The Gateway deadline does not kill the PTY owner first: control-channel EOF independently
+starts cleanup if the Gateway disappears. A stalled Gateway callback cannot prevent native
+cleanup, but still cannot manufacture a successful Quit receipt.
 The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
 separate Debug lifecycle on 9848 through the same immutable payload store and launcher.
 Its loopback-by-default handoff copies only an authenticated, selected Debug
@@ -1878,8 +1931,9 @@ interpreting unavailable membership as an empty catalog.
    extension work is represented separately by extension UI state.
 8. Fork/session replacement rekeys the same owning slot and subscription-token map entry. An open that overlaps rekey uses the slot's post-acquire canonical ID for synchronization, snapshot, and attention. A replacement open rotates the carried token; an old-ID close may resolve through the bounded alias but cannot revoke that newer token. Pre-commit rekey failure restores the source runtime and removes any uniquely created fork JSONL/artifact directory before reporting failure.
 9. Idle runtimes may be evicted only while not busy and unsubscribed.
-10. Administrative restart waits for admitted agent runs to settle and requires an
-    external supervisor; it never claims that in-process runtime memory survives replacement.
+10. Explicit administrative restart uses acknowledged native launch freeze and bounded
+    interruption, independently of JS drain/receipt settlement, and requires an external
+    supervisor. Persisted context survives; in-process runtime memory does not.
 11. The gateway is the sole mutable runtime owner. Terminal and mobile chat surfaces
    must attach to this runtime; opening the JSONL in an independent Pi process is
    unsupported because Pi has no cross-process session lock.
@@ -1941,6 +1995,55 @@ The PTY implementation uses node-pty's architecture-specific macOS spawn
 helper. The locked package's install hook is followed by Tron's `postinstall`
 repair, which enforces executable permissions on that helper; terminal tests
 open a real PTY so packaging cannot silently ship a non-executable helper.
+
+`native/terminal-owner.c` is the retained macOS PTY session leader, not the interactive
+shell. It forks the real login shell into its own foreground group, preserves terminal
+stdio/resize/job control, and never executes user callbacks in the owner. Keeping that
+leader alive prevents SID reuse even when the shell exits first. Cleanup discovers all
+ordinary same-session foreground/background groups, brackets membership with kernel audit
+identity, and uses `proc_signal_with_audittoken` only; no PID-string/numeric-signal fallback.
+It gives TERM 500 ms then uses one total 2-second force window, including rescans for
+concurrent forks/execs. Shell exit, explicit Quit, HUP/TERM, or control-parent loss starts
+the same idempotent cleanup. Different PTYs and non-session updater processes are excluded.
+This is not a sandbox or ownership of descendants that deliberately create new sessions,
+privilege transitions, agent bash tools, or delegated/subagent trees.
+
+node-pty closes non-stdio descriptors at launch. A per-terminal 0700 temporary Unix socket
+therefore establishes the lifetime channel before any user shell starts. The native owner
+checks the peer parent PID; Gateway checks the launch nonce. The rendezvous is removed at
+handshake, the descriptor is close-on-exec and explicitly closed in the shell child, and
+EOF triggers native cleanup without needing a live Gateway event loop. Only this channel
+carries cleanup proof. Normal completion closes the channel and retires the helper. If
+kernel signalling/inspection cannot prove quiescence by the deadline, the owner sends
+`unknown`, closes the channel, and stops sending signals. It retains its SID while polling
+for surviving members; once none can execute, it exits without upgrading the unknown
+receipt. This exceptional retained owner has no socket directory and never starts another
+force window. Gateway Quit settles unknown instead of waiting for that eventual exit.
+
+The Mac payload builder compiles a universal macOS 15+ owner into `app/native/terminal-owner`;
+the existing fingerprint and Mach-O signing passes cover it and its source input. Payload
+admission requires both files, and candidate preflight runs a private owner with
+`/usr/bin/true`, requiring actual cleanup proof before readiness. Source-only updates copy
+the validated native binary unchanged and compare the fingerprinted native source bytes
+with the checkout; a mismatch or omission rejects the update with a newly signed-build
+requirement. Older bases without this resource are rejected rather than publishing a
+Gateway whose terminals cannot open. Source-only terminals fail
+clearly if that executable is absent; there is no old-shell fallback. To prepare a source
+runtime (build only, no Gateway transition), from `packages/gateway`:
+
+```bash
+xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -mmacosx-version-min=15.0 \
+  native/terminal-owner.c -o native/terminal-owner
+```
+
+`terminal-owner.test.ts` compiles isolated temporary artifacts and proves real resistant
+foreground/background death, shell-first exit, Ctrl-C/resize, control EOF and actual parent
+loss, unrelated PTY/updater survival, stale-token refusal, and bounded unknown retirement.
+Its signal-refusal ablation keeps the heartbeat oracle live until the fixture exits itself;
+`terminal-service-receipt.test.ts` separately protects unknown command receipts, and
+`terminal-owner-control.test.ts` covers pre-authentication endpoint cleanup.
+`terminal-owner-payload.test.mjs` exercises actual candidate preflight, including missing
+helpers and forged stdout, without running a Gateway or changing a payload selection.
 
 ## Session search
 

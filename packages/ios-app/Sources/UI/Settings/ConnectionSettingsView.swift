@@ -359,6 +359,7 @@ enum AdministrativeDrainPresentation {
         let singular: String
         switch category {
         case .slotAdmission: singular = "session opening"
+        case .nativeProcessLease: singular = "owned process"
         case .promptPreflight: singular = "prompt admission"
         case .foregroundAgentOperation: singular = "agent run"
         case .queuedMutation: singular = "queued operation"
@@ -465,14 +466,14 @@ enum GatewayUpdateIntent: Identifiable, Equatable {
         case .debug(let candidate):
             return GatewayUpdateConfirmationPresentation(
                 title: "Promote Debug Gateway to Stable?",
-                message: "Select exact version \(candidate.version) (fingerprint \(candidate.payloadFingerprint.prefix(12))). It activates when accepted runs finish and Tron restarts automatically.",
+                message: "Select exact version \(candidate.version) (fingerprint \(candidate.payloadFingerprint.prefix(12))). Tron interrupts active agents, shell commands and terminals, then restarts automatically. Saved conversations and files are kept.",
                 confirmTitle: "Promote and restart",
                 centersTitle: false
             )
         case .source:
             return GatewayUpdateConfirmationPresentation(
                 title: "Rebuild Tron Gateway from source?",
-                message: "This is an on-demand maintenance rebuild, not a pending-update warning. Tron builds and selects a verified candidate, then activates it when accepted runs finish and the Gateway restarts automatically.",
+                message: "This is an on-demand maintenance rebuild, not a pending-update warning. Tron builds and selects a verified candidate, then interrupts active agents, shell commands and terminals before restarting. Saved conversations and files are kept.",
                 confirmTitle: "Rebuild",
                 centersTitle: true
             )
@@ -744,7 +745,7 @@ struct GatewayConnectionDetailView: View {
         ) {
             TronConfirmationSheet(
                 title: "Restart Tron Gateway?",
-                message: "Accepted agent runs finish before Tron restarts. Active terminal sessions must be closed first; the app reconnects automatically.",
+                message: "Interrupt active agents, shell commands and terminals, then restart the Gateway. Saved conversations and files are kept; the app reconnects automatically. Interrupted commands are not replayed.",
                 confirmTitle: "Restart",
                 destructive: true,
                 icon: "arrow.clockwise",

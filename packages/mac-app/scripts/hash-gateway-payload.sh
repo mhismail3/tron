@@ -26,6 +26,7 @@ done
 for required in \
     app/dist/index.js app/package.json app/package-lock.json app/PushService.xcconfig \
     app/scripts/ensure-node-pty-helper.mjs app/scripts/gateway-payload-deploy.mjs \
+    app/native app/native/terminal-owner app/native/terminal-owner.c \
     app/node_modules runtime/node-arm64 runtime/node-x64 \
     runtime/npm-arm64/bin/npm-cli.js runtime/npm-x64/bin/npm-cli.js \
     runtime/xcodegen/bin/xcodegen \
@@ -34,6 +35,9 @@ for required in \
         echo "required payload entry is missing or symlinked: $required" >&2; exit 2;
     }
 done
+[[ -x "$ROOT/app/native/terminal-owner" ]] || {
+    echo "required native terminal owner is not executable" >&2; exit 2;
+}
 [[ -x "$ROOT/runtime/xcodegen/bin/xcodegen" ]] || {
     echo "required payload XcodeGen is not executable" >&2; exit 2;
 }

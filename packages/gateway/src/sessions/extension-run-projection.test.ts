@@ -168,7 +168,22 @@ describe("projectExtensionRunActivity", () => {
       resumeDisposition: "resumable",
     };
     const paused = { state: "paused", processTerminal: proof };
+    const external = {
+      kind: "external-cli-writer", processInstanceId: "external-writer", closeObservedAt: 298,
+      exitCode: 0, signal: null, attempt: 0,
+      processTree: { state: "observed", mechanism: "posix-process-group", processGroupId: 42001, verifiedAt: 299 },
+    };
+    expect(hasObservedPausedProcessTerminal({ ...paused, processTerminal: { ...proof, instances: [...proof.instances, external] } }, "paused-run")).toBe(true);
+    for (const mechanism of ["native-session-owner", "unrecognized-owner"]) {
+      const writer = { ...external, processTree: { ...external.processTree, mechanism } };
+      expect(hasObservedPausedProcessTerminal({ ...paused, processTerminal: { ...proof, instances: [...proof.instances, writer] } }, "paused-run")).toBe(mechanism === "native-session-owner");
+    }
+    expect(hasObservedPausedProcessTerminal({ ...paused, processTerminal: { ...proof, instances: [...proof.instances, { ...external, processTree: { state: "unknown", reason: "verification-failed" } }] } }, "paused-run")).toBe(false);
+    expect(hasObservedPausedProcessTerminal({ ...paused, processTerminal: { ...proof, instances: [...proof.instances, { ...external, kind: "unrecognized-writer" }] } }, "paused-run")).toBe(false);
     expect(hasObservedPausedProcessTerminal(paused, "paused-run")).toBe(true);
+    const steps = [{ runner: { type: "external-cli" }, externalProcess: { pid: 42001 } }];
+    expect(hasObservedPausedProcessTerminal({ ...paused, steps }, "paused-run")).toBe(false);
+    expect(hasObservedPausedProcessTerminal({ ...paused, steps, processTerminal: { ...proof, instances: [...proof.instances, external] } }, "paused-run")).toBe(true);
     expect(hasObservedPausedProcessTerminal({ ...paused, state: "running" }, "paused-run")).toBe(false);
     expect(hasObservedPausedProcessTerminal(paused, "other-run")).toBe(false);
     expect(hasObservedPausedProcessTerminal({ ...paused, processTerminal: { ...proof, state: "pending" } }, "paused-run")).toBe(false);

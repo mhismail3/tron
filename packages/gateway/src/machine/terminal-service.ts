@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { spawn, type IPty } from "node-pty";
-import { GatewayError } from "../errors.js";
+import type { IPty } from "node-pty";
+import { spawnTerminalOwner, type TerminalOwner } from "./terminal-owner.js";
+import { GatewayError, uncertainOutcome } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 
 export const MAX_RETAINED_TERMINALS = 128;
@@ -28,19 +29,9 @@ interface TerminalRecord {
   outputBytes: number;
   writes: Set<string>;
   pty: IPty | undefined;
-  exitPromise: Promise<void>;
-  resolveExit: () => void;
-}
-
-function terminatePtyProcessGroup(pty: IPty): void {
-  if (process.platform === "win32") {
-    pty.kill();
-    return;
-  }
-  // node-pty creates the shell as the leader of its own process group. Quit is
-  // destructive by contract, so retire the whole group rather than signalling
-  // only the login shell and leaving foreground children behind.
-  process.kill(-pty.pid, "SIGKILL");
+  owner: TerminalOwner;
+  exitPromise: Promise<"exited" | "unknown">;
+  resolveExit: (outcome: "exited" | "unknown") => void;
 }
 
 export interface TerminalSummary {
@@ -63,16 +54,19 @@ export class TerminalService {
   constructor(
     replayBytes: number,
     private readonly broadcast: (terminalId: string, topic: string, payload: JsonValue) => void,
-    private readonly terminateProcessGroup: (pty: IPty) => void = terminatePtyProcessGroup,
   ) {
     this.replayBytes = Math.max(0, Math.min(replayBytes, MAX_TERMINAL_REPLAY_ENCODED_BYTES));
   }
 
-  /** Atomically refuse replacement when a PTY is live, otherwise close future
-   * PTY admission before any previously dispatched terminal.open can spawn. */
+  /** Close admission and request native session cleanup without waiting. */
   beginRestartDrain(): boolean {
-    if (this.activeTerminalIds().length > 0) return false;
+    if (this.restartAdmissionClosed) return true;
     this.restartAdmissionClosed = true;
+    for (const id of this.activeTerminalIds()) {
+      void this.terminate(id).catch(() => {
+        // A failed cleanup must not become a fabricated terminal-exit success.
+      });
+    }
     return true;
   }
 
@@ -84,16 +78,17 @@ export class TerminalService {
     }
     const id = randomUUID();
     const shell = process.env.SHELL && existsSync(process.env.SHELL) ? process.env.SHELL : "/bin/zsh";
-    const pty = spawn(shell, ["-l"], {
+    const owner = spawnTerminalOwner(shell, {
       name: "xterm-256color",
       cols: columns,
       rows,
       cwd,
       env: { ...process.env, ...sessionEnvironment, TERM: "xterm-256color", COLORTERM: "truecolor", HOME: homedir() } as Record<string, string>,
     });
+    const { pty } = owner;
     this.evictExitedForOpen();
-    let resolveExit = () => {};
-    const exitPromise = new Promise<void>((resolve) => { resolveExit = resolve; });
+    let resolveExit: TerminalRecord["resolveExit"] = () => {};
+    const exitPromise = new Promise<"exited" | "unknown">((resolve) => { resolveExit = resolve; });
     const record: TerminalRecord = {
       id,
       sessionId,
@@ -104,20 +99,30 @@ export class TerminalService {
       outputBytes: 0,
       writes: new Set(),
       pty,
+      owner,
       exitPromise,
       resolveExit,
     };
     this.terminals.set(id, record);
     pty.onData((data) => this.append(record, data));
-    pty.onExit(({ exitCode }) => {
-      if (this.disposed || this.terminals.get(record.id) !== record) {
-        record.resolveExit();
+    void owner.cleanup.then((outcome) => {
+      if (outcome === "unknown") record.resolveExit("unknown");
+    });
+    pty.onExit(async ({ exitCode }) => {
+      // Retire the PTY handle even when cleanup proof is unavailable. The
+      // separate receipt stays unknown; a later Quit must not turn it into success.
+      record.pty = undefined;
+      if (await owner.cleanup !== "exited") {
+        record.resolveExit("unknown");
         return;
       }
-      record.pty = undefined;
+      if (this.disposed || this.terminals.get(record.id) !== record) {
+        record.resolveExit("exited");
+        return;
+      }
       record.exitCode = exitCode;
       record.exitedAt = new Date().toISOString();
-      record.resolveExit();
+      record.resolveExit("exited");
       this.broadcast(id, "terminal.exit", { terminalId: id, exitCode, sequence: record.sequence });
     });
     return this.summary(record);
@@ -162,17 +167,10 @@ export class TerminalService {
 
   async terminate(id: string): Promise<void> {
     const terminal = this.get(id);
-    const pty = terminal.pty;
-    if (!pty) return;
-    try {
-      this.terminateProcessGroup(pty);
-    } catch (error) {
-      // Process exit can win the race before node-pty delivers its callback.
-      // ESRCH therefore still waits for the canonical callback; other failures
-      // remain visible instead of reporting a false successful quit.
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH" && terminal.pty !== undefined) throw error;
+    if (terminal.pty) terminal.owner.terminate();
+    if (await terminal.exitPromise !== "exited") {
+      throw uncertainOutcome("Terminal session cleanup could not be verified; termination outcome is unknown.");
     }
-    await terminal.exitPromise;
   }
 
   dispose(): void {
@@ -181,15 +179,11 @@ export class TerminalService {
     for (const terminal of this.terminals.values()) {
       const pty = terminal.pty;
       if (pty) {
-        try {
-          this.terminateProcessGroup(pty);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-            try { pty.kill("SIGKILL"); } catch {}
-          }
-        }
+        try { terminal.owner.terminate(); } catch { /* Preserve unknown below; never kill the SID owner first. */ }
       }
-      terminal.resolveExit();
+      // Disposal is not an exit receipt. Preserve uncertainty for an already
+      // admitted Quit even if signalling was attempted or the PTY record is lost.
+      terminal.resolveExit("unknown");
     }
     this.terminals.clear();
   }

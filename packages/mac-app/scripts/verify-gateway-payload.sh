@@ -76,12 +76,17 @@ for required_file in \
     "$PAYLOAD_DIR/app/PushService.xcconfig" \
     "$PAYLOAD_DIR/app/scripts/ensure-node-pty-helper.mjs" \
     "$PAYLOAD_DIR/app/scripts/gateway-payload-deploy.mjs" \
+    "$PAYLOAD_DIR/app/native/terminal-owner" "$PAYLOAD_DIR/app/native/terminal-owner.c" \
     "$PAYLOAD_DIR/runtime/node-arm64" "$PAYLOAD_DIR/runtime/node-x64" \
     "$PAYLOAD_DIR/runtime/npm-arm64/bin/npm-cli.js" "$PAYLOAD_DIR/runtime/npm-x64/bin/npm-cli.js" \
     "$PAYLOAD_DIR/runtime/xcodegen/bin/xcodegen" \
     "$PAYLOAD_DIR/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"; do
     [[ -f "$required_file" && ! -L "$required_file" ]] || fail "required file missing or symlinked: $required_file"
 done
+
+terminal_owner="$PAYLOAD_DIR/app/native/terminal-owner"
+[[ -x "$terminal_owner" ]] || fail "native terminal owner is not executable"
+lipo "$terminal_owner" -verify_arch arm64 x86_64 >/dev/null 2>&1 || fail "native terminal owner is not universal"
 
 validate_runtime() {
     local arch="$1" expected_sha="$2" expected_arch="arm64" path="$PAYLOAD_DIR/runtime/node-$1"

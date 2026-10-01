@@ -112,7 +112,7 @@ final class MenuBarActionHandler {
             _ = try await setup.restartGateway()
             await finishServerStartAction(
                 successTitle: "Tron restarted",
-                successBody: "The Gateway drained accepted work and reconnected through launchd.",
+                successBody: "The Gateway reconnected through launchd after requesting work interruption. Saved conversations and files are kept.",
                 failureTitle: "Restart failed"
             )
         } catch let failure as GatewayRestartClient.Failure {

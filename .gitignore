@@ -1,6 +1,7 @@
 # TypeScript build outputs
 *.tsbuildinfo
 **/dist/
+packages/gateway/native/terminal-owner
 
 # IDE
 .idea/

@@ -12,7 +12,10 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from "vitest";
+import { nativeFixtureExecutable } from "../../test-fixtures/terminal-owner.js";
+import { createProcessLeaseHost, PROCESS_OWNER_ENV } from "../lifecycle/process-lease-host.js";
+import { startRestartWatchdog } from "../lifecycle/restart-watchdog.js";
 import { TrustService } from "../admin/trust-service.js";
 import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
 import { admitsAutomationAction } from "../automations/automation-contract.js";
@@ -30,7 +33,7 @@ import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { observationEntriesDigest, type KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
-import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-markers.js";
+import { RunMarkerCompletionConflictError, RunMarkerStore } from "./run-markers.js";
 import { toolSegmentId } from "./projection.js";
 import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
@@ -52,6 +55,17 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
 describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
+  const previousOwner = process.env[PROCESS_OWNER_ENV];
+  let processHost: Awaited<ReturnType<typeof createProcessLeaseHost>>;
+  beforeAll(async () => {
+    const guardian = await startRestartWatchdog(nativeFixtureExecutable);
+    processHost = await createProcessLeaseHost(new GatewayWorkRegistry(), guardian.leaseCapability, nativeFixtureExecutable);
+    Object.assign(process.env, processHost.environment);
+  });
+  afterAll(() => {
+    processHost?.close();
+    if (previousOwner === undefined) delete process.env[PROCESS_OWNER_ENV]; else process.env[PROCESS_OWNER_ENV] = previousOwner;
+  });
 
   async function coldFixture(label: string, options: {
     nested?: boolean;
@@ -121,6 +135,33 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  });
+
+  it("reopens interrupted work with its tool identity and disk effects without replay or fabricated completion", async () => {
+    const fixture = await coldFixture("restart-context");
+    const target = join(fixture.cwd, "partial-effect.txt");
+    await writeFile(target, "effect landed before the receipt");
+    fixture.manager.appendMessage({ role: "user", content: "Update the worktree", timestamp: Date.now() });
+    fixture.manager.appendMessage(fauxAssistantMessage([
+      fauxToolCall("bash", { command: `printf replayed > ${JSON.stringify(target)}` }, { id: "interrupted-tool-call" }),
+    ], { stopReason: "toolUse" }));
+    const markers = new RunMarkerStore(join(fixture.root, "tron"));
+    await markers.mark(fixture.manager.getSessionId(), "interrupted-operation");
+    await fixture.registry.dispose();
+    const replacement = new RuntimeRegistry({
+      agentDir: fixture.agentDir, tronHome: join(fixture.root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: fixture.runtimeFactory, trust: new TrustService(fixture.agentDir),
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(replacement);
+    await replacement.initialize();
+    const slot = await replacement.acquire(fixture.manager.getSessionId());
+    expect(slot.snapshot().phase).toBe("interrupted");
+    const entries = (await readFile(fixture.sessionFile, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(entries.some(entry => entry.message?.content?.some?.((part: any) => part.id === "interrupted-tool-call"))).toBe(true);
+    expect(entries.some(entry => entry.message?.toolCallId === "interrupted-tool-call")).toBe(false);
+    expect(await readFile(target, "utf8")).toBe("effect landed before the receipt");
+    expect(await markers.evidenceFor(slot.id)).toMatchObject([{ operationId: "interrupted-operation" }]);
   });
 
   it("rejects malformed or incomplete cold JSONL before branch projection", async () => {
@@ -9538,6 +9579,55 @@ export default function (pi) {
     await waitUntil(() => dispose.mock.calls.length === 2, 3_000);
     await waitUntil(() => fixture.registry.administrativeWorkRegistry.size === 0);
     expect(slot.isDisposed).toBe(true);
+  });
+
+  it("fans shutdown cancellation to other slots while one owner is blocked", async () => {
+    const fixture = await coldFixture("shutdown-fanout");
+    const first = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const second = await fixture.registry.create(fixture.cwd);
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const firstCancel = vi.spyOn(first, "requestShutdownCancellation").mockReturnValue(blocked);
+    const secondCancel = vi.spyOn(second, "requestShutdownCancellation");
+    try {
+      const cancellation = fixture.registry.requestShutdownCancellation();
+      expect(firstCancel).toHaveBeenCalledTimes(1);
+      expect(secondCancel).toHaveBeenCalledTimes(1);
+      await expect(fixture.registry.create(fixture.cwd)).rejects.toMatchObject({ code: "conflict" });
+      release();
+      await cancellation;
+    } finally {
+      release();
+      firstCancel.mockRestore();
+      secondCancel.mockRestore();
+    }
+  });
+
+  it("fans slot shutdown cancellation past synchronous failure and a blocked SDK abort", async () => {
+    const fixture = await coldFixture("shutdown-sdk-fanout");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const { runtime, ui } = slot as any;
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const compaction = vi.spyOn(runtime.session, "abortCompaction").mockImplementation(() => {
+      throw new Error("injected compaction cancellation failure");
+    });
+    const retry = vi.spyOn(runtime.session, "abortRetry");
+    const bash = vi.spyOn(runtime.session, "abortBash");
+    const abort = vi.spyOn(runtime.session, "abort").mockReturnValue(blocked);
+    const cancelUI = vi.spyOn(ui, "cancelAll");
+    try {
+      const cancellation = slot.requestShutdownCancellation().catch((error) => error);
+      expect(retry).toHaveBeenCalledTimes(1);
+      expect(bash).toHaveBeenCalledTimes(1);
+      expect(abort).toHaveBeenCalledTimes(1);
+      expect(cancelUI).toHaveBeenCalledTimes(1);
+      release();
+      expect(await cancellation).toBeInstanceOf(AggregateError);
+    } finally {
+      release();
+      for (const spy of [compaction, retry, bash, abort, cancelUI]) spy.mockRestore();
+    }
   });
 
   it("retries registry disposal after a transient slot failure without duplicating shared cleanup", async () => {

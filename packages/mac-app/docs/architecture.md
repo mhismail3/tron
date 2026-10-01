@@ -385,8 +385,10 @@ from the active immutable payload and never accept a source-tree or environment
 replacement. A source-only rebuild also requires an exact dependency-lock and dependency-manifest match, then reuses the selected payload's already validated dependency tree without launching npm or contacting a registry; dependency changes require a newly signed payload. Installed-app verification compares the selected stable file with the signed bundled product and fails on origin drift, rather than reporting a stale sandbox/production selection as healthy. Notification state remains outside payload versions under the
 canonical Tron home.
 `promote` records expected identity, atomically publishes `current.json` while
-retaining `previous.json`, and invokes authenticated `gateway.restart`. It waits
-without a deadline for the exact old PID/start to disappear, then requires a different
+retaining `previous.json`, and invokes authenticated `gateway.restart`. It waits for the
+exact old PID/start to disappear. The Gateway-started updater holds private native arm
+authority, so it can freeze/interrupt owned work even before a blocked restart RPC,
+then require a different
 PID/start stable across the exact candidate health probe. Normal candidate startup belongs
 to launchd; listener absence cannot authorize a kickstart while an unbound startup process
 may be live. After the candidate deadline, Stable recovery may use only the fixed
@@ -470,10 +472,17 @@ the bundled payload together; the physical-device helper additionally compares
 the target Mac app before installation. The Mac menu Restart action
 authenticates to the Gateway WebSocket, validates protocol identity, and calls
 `gateway.restart` with a bounded command ID. The
-Gateway drains accepted work; the wrapper then waits for the launchd-owned
-Gateway to become healthy again. It does not use `launchctl kickstart -k` as a
-restart shortcut; the fixed kickstart is reserved for payload deployment recovery after
-the captured old process has exited.
+Gateway arms its startup-acknowledged native guardian before cancellation or receipt
+completion. Native launch freeze and session owners interrupt agents, SDK shells and
+PTY jobs independently of blocked JS, before the exact Gateway audit-token deadline;
+the detached update helper remains outside those leases. Lost arm acknowledgement is
+uncertain, not permission to schedule twice. The wrapper waits for the launchd-owned
+Gateway to become healthy; this does not manufacture successful command receipts or
+restore in-memory work. Persisted transcripts and files remain available for deliberate
+continuation. A request that cannot reach the Gateway has not been accepted; the Mac
+menu does not inherit the updater's arm capability. It does not use `launchctl kickstart -k` as a restart
+shortcut; the fixed kickstart is reserved for payload deployment recovery after the
+captured old process has exited.
 
 Changing the bundled LaunchAgent plist requires the manual Release reinstall and
 registration refresh in `docs/development.md`; payload promotion cannot update the

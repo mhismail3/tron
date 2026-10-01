@@ -258,6 +258,7 @@ enum AdministrativeDrainPhase: String, Codable, Hashable, Sendable {
 
 enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Sendable, CaseIterable {
     case slotAdmission = "slot-admission"
+    case nativeProcessLease = "native-process-lease"
     case promptPreflight = "prompt-preflight"
     case foregroundAgentOperation = "foreground-agent-operation"
     case queuedMutation = "queued-mutation"

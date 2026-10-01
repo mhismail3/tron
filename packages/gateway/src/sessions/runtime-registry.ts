@@ -3886,6 +3886,19 @@ export class RuntimeRegistry {
     }
   }
 
+  /** Fan cancellation into every currently-owned slot before disposal waits on
+   * admission critical sections. Exact receipts and markers remain owned by
+   * each slot's shutdown path; this method only starts interruption. */
+  async requestShutdownCancellation(): Promise<void> {
+    if (this.shutdownState === "disposed") return;
+    this.shutdownState = "shuttingDown";
+    const results = await Promise.allSettled([...this.slots.values()].map(async (slot) => {
+      await slot.requestShutdownCancellation();
+    }));
+    const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason);
+    if (errors.length) throw new AggregateError(errors, "Session shutdown cancellation failed");
+  }
+
   async dispose(): Promise<void> {
     if (this.shutdownState === "disposed") return;
     if (this.disposalPromise) return this.disposalPromise;

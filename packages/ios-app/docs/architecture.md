@@ -474,12 +474,16 @@ background observations—broadcast `knowledge.changed` invalidations, coalesced
 read task includes that revision in its identity, cancelling superseded reads while preserving publication fences.
 It re-reads authoritative status and records without polling or a pull-to-refresh surface.
 
-Gateway restart uses a supervised drain contract. The request freezes new mutations,
-waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
-process; active PTYs must be closed first because their process state is not restartable.
+Explicit Gateway restart interrupts work under supervision. Before cancellation or receipt
+completion, it arms its startup-acknowledged native guardian, freezes launch admission,
+and interrupts registered agent, shell and PTY owners independently of blocked JS.
+Replacement does not wait indefinitely for accepted-work projections or persistence.
+Confirmations explain interruption and retention of saved conversations/files, not automatic
+command replay. A lost native acknowledgement or missing command result stays uncertain;
+process cleanup never manufactures command success or a final agent handoff.
 iOS keeps the chat mounted, follows `system.stopping` into its ordinary bounded reconnect
 loop, and installs a fresh authoritative session baseline from the replacement runtime.
-A restart response may be immediate or scheduled behind active runs. Connection Settings may
+A restart response may be immediate or scheduled behind the command receipt write. Connection Settings may
 briefly poll the bounded drain projection only for an operation explicitly requested in that view;
 it shows fixed aggregate labels and retains nothing after the view's ownership ends. Drain phase,
 counts, and ages are diagnostic presentation only: `system.stopping` and the replacement handshake

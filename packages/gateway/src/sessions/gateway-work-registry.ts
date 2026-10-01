@@ -4,6 +4,7 @@ import { GatewayError } from "../errors.js";
 
 export const gatewayWorkKinds = [
   "slot-admission",
+  "native-process-lease",
   "prompt-preflight",
   "foreground-agent-operation",
   "queued-mutation",

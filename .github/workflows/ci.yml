@@ -128,7 +128,7 @@ jobs:
         working-directory: packages/gateway
       - name: Test macOS development lifecycle state tooling
         run: node --test scripts/tron-dev-state.test.mjs
-      - run: node --test scripts/gateway-payload-deploy.test.mjs
+      - run: node --test scripts/gateway-payload-deploy.test.mjs scripts/terminal-owner-payload.test.mjs
       - run: npm test
         working-directory: packages/gateway
       - run: npm run test:pi-sdk-rollback

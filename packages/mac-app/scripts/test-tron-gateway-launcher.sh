@@ -29,7 +29,7 @@ xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations 
 
 make_payload() {
   local root="$1" version="$2" marker="$3" fingerprint
-  mkdir -p "$root/app/dist" "$root/app/scripts" "$root/app/node_modules" "$root/runtime"
+  mkdir -p "$root/app/dist" "$root/app/scripts" "$root/app/native" "$root/app/node_modules" "$root/runtime"
   printf '#!/bin/sh\nprintf "%%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"\nexit 0\n' > "$root/app/dist/index.js"
   dd if=/dev/zero bs=1024 count=2 2>/dev/null | tr '\\0' '#' >> "$root/app/dist/index.js"
   chmod 755 "$root/app/dist/index.js"
@@ -38,6 +38,9 @@ make_payload() {
   printf '%s\n' 'TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test' > "$root/app/PushService.xcconfig"
   printf '%s\n' '// fixture helper' > "$root/app/scripts/ensure-node-pty-helper.mjs"
   printf '%s\n' '// fixture updater' > "$root/app/scripts/gateway-payload-deploy.mjs"
+  printf '%s\n' '#!/bin/sh' 'exit 125' > "$root/app/native/terminal-owner"
+  chmod 755 "$root/app/native/terminal-owner"
+  printf '%s\n' '// fixture terminal owner' > "$root/app/native/terminal-owner.c"
   mkdir -p "$root/app/node_modules/@earendil-works/pi-coding-agent/dist" "$root/app/node_modules/.bin"
   printf '%s\n' '{"name":"@earendil-works/pi-coding-agent","bin":{"pi":"dist/cli.js"}}' > "$root/app/node_modules/@earendil-works/pi-coding-agent/package.json"
   printf '%s\n' '#!/usr/bin/env node' > "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"

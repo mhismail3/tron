@@ -11,7 +11,7 @@ import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { isIP } from "node:net";
+import { isIP, createConnection } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -69,6 +69,9 @@ const REQUIREMENTS = [
   ["app/PushService.xcconfig", 1, false],
   ["app/scripts/ensure-node-pty-helper.mjs", 1, false],
   ["app/scripts/gateway-payload-deploy.mjs", 1, false],
+  ["app/native", 0, true],
+  ["app/native/terminal-owner", 1, false, true],
+  ["app/native/terminal-owner.c", 1, false],
   ["app/node_modules", 0, true],
   ["runtime/node-arm64", 1_048_576, false, true],
   ["runtime/node-x64", 1_048_576, false, true],
@@ -1065,6 +1068,16 @@ export async function captureReusableSourcePackage(activeRoot, gatewayRoot) {
     || activePackage.name !== lockedRoot.name || activePackage.version !== lockedRoot.version) {
     throw new Error("Gateway package lock does not match the active and source package manifests");
   }
+  // Native code is carried from the validated signed base, never compiled or
+  // replaced by source-only updates. Its fingerprinted source input makes this
+  // boundary exact without another manifest or trusting a source-built binary.
+  const nativeSource = await Promise.all([
+    readBoundedRegular(join(activeRoot, "app/native/terminal-owner.c"), 64 * 1024),
+    readBoundedRegular(join(gatewayRoot, "native/terminal-owner.c"), 64 * 1024),
+  ]).catch(() => undefined);
+  if (!nativeSource || !nativeSource[0].equals(nativeSource[1])) {
+    throw new Error("Native terminal owner changed or is missing; install a newly signed Tron build before rebuilding from source");
+  }
   return { sourcePackage, packageBytes: sourcePackageBytes, lockBytes: sourceLock };
 }
 
@@ -1266,8 +1279,63 @@ export async function authenticatedRequest({ host, port, token, timeoutMs, metho
   });
 }
 
-async function requestRestart({ host, port, token, timeoutMs, commandId }) {
-  return authenticatedRequest({ host, port, token, timeoutMs, method: "gateway.restart", params: { commandId } });
+export async function armNativeRestart(capability, oldProcess, deadline = Date.now() + 15_000) {
+  if (!capability || capability.originPid !== oldProcess.pid || typeof capability.socket !== "string" || typeof capability.nonce !== "string") {
+    throw new Error("Native restart authority does not belong to the old Gateway; prepare the matching native base manually");
+  }
+  return new Promise((resolveArm, reject) => {
+    const socket = createConnection(capability.socket);
+    let settled = false, buffer = "";
+    const timer = setTimeout(() => finish(new Error("Native restart acknowledgement timed out")), 1_000);
+    const finish = (error, accepted) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      if (error) reject(error); else resolveArm(accepted);
+    };
+    socket.on("connect", () => socket.write(`${capability.nonce} ${deadline}\n`));
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      if (buffer.length > 64) { finish(new Error("Invalid native restart acknowledgement")); return; }
+      if (!buffer.endsWith("\n")) return;
+      const accepted = Number(/^R(\d+)\n$/u.exec(buffer)?.[1]);
+      if (!Number.isSafeInteger(accepted) || accepted > deadline || accepted <= Date.now()) finish(new Error("Invalid native restart deadline"));
+      else finish(undefined, accepted);
+    });
+    socket.on("error", (error) => finish(error));
+    socket.on("close", () => finish(new Error("Native restart owner closed without acknowledgement")));
+  });
+}
+
+async function requestRestart({ host, port, token, timeoutMs, commandId, oldProcess }) {
+  const raw = process.env.TRON_RESTART_OWNER;
+  const independentlyAccepted = raw ? await armNativeRestart(JSON.parse(raw), oldProcess) : undefined;
+  try {
+    const response = await authenticatedRequest({ host, port, token,
+      timeoutMs: Math.min(timeoutMs, 2_000), method: "gateway.restart", params: { commandId } });
+    const deadline = independentlyAccepted ?? response?.restartDeadline;
+    if (!Number.isSafeInteger(deadline) || deadline > Date.now() + 15_000) throw new Error("Gateway did not acknowledge a native restart deadline; prepare the matching native base manually");
+    return deadline;
+  } catch (error) {
+    // A lost/blocked RPC does not undo native acceptance. Keep its exact command
+    // ID uncertain; do not replay or invent a successful command receipt.
+    if (independentlyAccepted !== undefined) return independentlyAccepted;
+    throw error;
+  }
+}
+
+export async function preflightTerminalOwner(root, runCommand = runBounded, timeoutMs = 30_000) {
+  const runtime = join(root, process.arch === "arm64" ? "runtime/node-arm64" : "runtime/node-x64");
+  // Readiness includes an actual private PTY-owner handshake/cleanup, not just
+  // loading node-pty or starting the Gateway. /usr/bin/true executes no shell
+  // startup files; the fixture never opens a canonical Tron session.
+  const terminalProbe = "process.exitCode = 1; const path = require('node:path'); const {pathToFileURL} = require('node:url'); import(pathToFileURL(path.join(process.env.TRON_CANDIDATE_ROOT, 'app/dist/machine/terminal-owner.js')).href).then(({spawnTerminalOwner}) => { const owner = spawnTerminalOwner('/usr/bin/true', {cwd:'/tmp',env:{PATH:'/usr/bin:/bin',HOME:'/tmp'}}); owner.pty.onData(() => {}); owner.pty.onExit(async () => { process.exitCode = await owner.cleanup === 'exited' ? 0 : 1; }); }).catch(() => { process.exitCode = 1; });";
+  await runCommand(runtime, ["-e", terminalProbe], {
+    timeoutMs, maxOutputBytes: 8 * 1024,
+    env: { ...process.env, TRON_CANDIDATE_ROOT: root },
+  });
 }
 
 export async function preflightPayload(root, runCommand = runBounded, timeoutMs = 30_000) {
@@ -1298,6 +1366,7 @@ export async function preflightPayload(root, runCommand = runBounded, timeoutMs 
       TRON_CANDIDATE_NATIVE_MODULES: JSON.stringify(nativeModules),
     },
   });
+  await preflightTerminalOwner(root, runCommand, timeoutMs);
   // Protocol values are deliberately read from the candidate's compiled
   // module with the candidate runtime. Manifests do not carry these fields;
   // defaulting them here would turn a preflight into a self-assertion.
@@ -1421,8 +1490,17 @@ export async function waitForReplacement({
   throw error;
 }
 
-export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, timeoutMs, onDrainComplete }) {
-  await waitForDrainCompletion(oldProcess, replacement.readExactProcess, replacement.sleep);
+export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, timeoutMs, drainTimeoutMs, restartDeadline, onDrainComplete }) {
+  await waitForDrainCompletion(
+    oldProcess,
+    replacement.readExactProcess,
+    replacement.sleep,
+    {
+      ...(replacement.now ? { now: replacement.now } : {}),
+      ...(drainTimeoutMs === undefined ? {} : { timeoutMs: drainTimeoutMs }),
+      ...(restartDeadline === undefined ? {} : { deadline: restartDeadline }),
+    },
+  );
   onDrainComplete?.();
   return waitForReplacement({
     oldProcess,
@@ -1533,14 +1611,13 @@ export async function captureLocalListenerProcess(port, runCommand = runBounded)
   return captureLocalProcess(pids[0], runCommand);
 }
 
-/** A planned restart may drain accepted work without a deadline. Health,
- * listener, and port state are never transition evidence after capture: the
- * candidate startup deadline begins only after the exact old PID/start pair is
- * gone or replaced. */
+/** Observe only. Signal authority belongs to the acknowledged native parent
+ * guardian; a ps identity is never authority to kill a historical PID. */
 export async function waitForDrainCompletion(
   oldProcess,
   readExactProcess,
   sleep = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)),
+  { now = Date.now, timeoutMs = 15_000, deadline = now() + timeoutMs } = {},
 ) {
   if (!oldProcess || !Number.isSafeInteger(oldProcess.pid) || oldProcess.pid < 1 || !oldProcess.startIdentity) {
     throw new Error("old Gateway listener process identity is unavailable");
@@ -1548,7 +1625,8 @@ export async function waitForDrainCompletion(
   while (true) {
     const current = await readExactProcess(oldProcess.pid);
     if (!current || current.pid !== oldProcess.pid || current.startIdentity !== oldProcess.startIdentity) return current;
-    await sleep(500);
+    if (now() >= deadline) throw new Error("Gateway native restart deadline expired; process termination is unknown");
+    await sleep(Math.min(250, Math.max(1, deadline - now())));
   }
 }
 
@@ -1712,10 +1790,11 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
         published = true;
       }
       await writeState(paths, { ...stateBase, state: deploymentTransition("prepared", "published") });
-      await requestRestart({ host, port, token, timeoutMs, commandId: stateBase.commandId });
+      const restartDeadline = await requestRestart({ host, port, token, timeoutMs, commandId: stateBase.commandId, oldProcess });
       await writeState(paths, { ...stateBase, state: "draining" });
       await writeProgress(paths, "draining", stateBase.commandId);
       const ready = await waitForDrainedReplacement({
+        restartDeadline,
         oldProcess,
         replacement: replacementBoundary,
         expected: manifest,
@@ -2290,8 +2369,9 @@ async function rollback({ paths, host, port, token, timeoutMs, commandId, replac
     try {
       await rollbackSelectionAndClearAttempt(paths);
       switched = true;
-      await requestRestart({ host, port, token, timeoutMs, commandId: restartCommandId });
+      const restartDeadline = await requestRestart({ host, port, token, timeoutMs, commandId: restartCommandId, oldProcess });
       const ready = await waitForDrainedReplacement({
+        restartDeadline,
         oldProcess,
         replacement: replacementBoundary,
         expected: target,

@@ -4,7 +4,8 @@ import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
 import type { GatewayConfig } from "../config.js";
-import { GatewayError } from "../errors.js";
+import { GatewayError, uncertainOutcome } from "../errors.js";
+import { RestartArmUncertainError } from "../lifecycle/restart-watchdog.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import type { JsonValue } from "../protocol/types.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
@@ -235,6 +236,11 @@ export interface GatewayServiceDependencies {
   logger: GatewayLogger;
   receipts: CommandReceiptStore;
   requestRestart: () => void;
+  /** Arms an external exact-process fallback before receipt persistence can block.
+   * False means the caller must start shutdown immediately. */
+  armRestartWatchdog: () => Promise<number>;
+  /** Starts every owned cancellation path before receipt persistence. */
+  beginRestartCancellation?: () => void;
   sessionDeleted: (sessionId: string) => void;
   broadcast: (topic: string, payload: JsonValue) => void;
   notifications?: NotificationService;
@@ -656,8 +662,24 @@ export class GatewayService {
         try {
           return await this.mutation(client, method, params, async () => {
             await this.requireNoActiveIosDeviceInstall();
+            // No owner callbacks, terminal disposal or receipt completion may
+            // run until independent native enforcement has acknowledged.
+            if (this.restartRequested) throw new GatewayError("busy", "Gateway restart is already accepted", true);
+            this.restartRequested = true;
+            let restartDeadline: number | undefined;
+            try {
+              restartDeadline = await this.dependencies.armRestartWatchdog();
+              if (!Number.isSafeInteger(restartDeadline) || restartDeadline <= Date.now() || restartDeadline > Date.now() + 15_000) {
+                throw new RestartArmUncertainError("Native restart authority returned an invalid acknowledgement");
+              }
+            } catch (error) {
+              if (error instanceof RestartArmUncertainError) throw uncertainOutcome(error.message);
+              this.restartRequested = false;
+              throw error;
+            }
+            ownsSchedule = true;
             if (!this.dependencies.terminals.beginRestartDrain()) {
-              throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
+              throw new GatewayError("busy", "Gateway could not claim terminal interruption for restart", true);
             }
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
@@ -667,11 +689,9 @@ export class GatewayService {
               `Gateway restart requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,
               { event: "gateway.restart.requested", source: "transport" }
             );
-            if (!this.restartRequested) {
-              this.restartRequested = true;
-              ownsSchedule = true;
-            }
+            this.dependencies.beginRestartCancellation?.();
             return safeJson({
+              ...(restartDeadline === undefined ? {} : { restartDeadline }),
               restarting: drain.blockerCount === 0,
               scheduled: drain.blockerCount > 0,
               activeSessionIds,

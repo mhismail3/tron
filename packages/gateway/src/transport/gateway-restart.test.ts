@@ -24,10 +24,14 @@ function drain(blockerCount = 0) {
   } as const;
 }
 
+import { RestartArmUncertainError } from "../lifecycle/restart-watchdog.js";
+
 function service(options: {
   activeSessions?: string[];
   activeTerminals?: string[];
   requestRestart?: () => void;
+  armRestartWatchdog?: () => Promise<number>;
+  beginRestartCancellation?: () => void;
   executeReceipt?: GatewayServiceDependencies["receipts"]["execute"];
   workRegistry?: GatewayWorkRegistry;
   rename?: (name: string) => Promise<void>;
@@ -46,7 +50,7 @@ function service(options: {
     },
     terminals: {
       activeTerminalIds: () => options.activeTerminals ?? [],
-      beginRestartDrain: () => (options.activeTerminals ?? []).length === 0,
+      beginRestartDrain: () => true,
     },
     receipts: { execute: options.executeReceipt ?? (async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation()) },
     devices: { hasDevice: async () => true },
@@ -55,6 +59,8 @@ function service(options: {
       removeDevice: async () => true,
     },
     requestRestart: options.requestRestart ?? (() => {}),
+    armRestartWatchdog: options.armRestartWatchdog ?? (async () => Date.now() + 15_000),
+    ...(options.beginRestartCancellation ? { beginRestartCancellation: options.beginRestartCancellation } : {}),
     ...(options.workRegistry ? { workRegistry: options.workRegistry } : {}),
   } as unknown as GatewayServiceDependencies;
   return new GatewayService(dependencies);
@@ -73,20 +79,25 @@ describe("Gateway administrative restart", () => {
       .rejects.toMatchObject({ code: "unsupported" });
   });
 
-  it("refuses process replacement while a terminal PTY is alive", async () => {
+  it("accepts restart with an active terminal and leaves interruption to its owner", async () => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
-    const gateway = service({ activeTerminals: ["terminal-1"] });
+    vi.useFakeTimers();
+    const requestRestart = vi.fn();
+    const gateway = service({ activeTerminals: ["terminal-1"], requestRestart });
     await expect(gateway.invoke(client, "gateway.restart", { commandId: "restart-command" }))
-      .rejects.toMatchObject({ code: "busy" });
+      .resolves.toMatchObject({ activeSessionIds: [] });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requestRestart).toHaveBeenCalledTimes(1);
   });
 
-  it("schedules one restart after active agents settle and freezes new mutations", async () => {
+  it("schedules one restart despite active agents and freezes new mutations", async () => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     vi.useFakeTimers();
     const requestRestart = vi.fn();
     const gateway = service({ activeSessions: ["session-1"], requestRestart });
 
     await expect(gateway.invoke(client, "gateway.restart", { commandId: "restart-command" })).resolves.toEqual({
+      restartDeadline: Date.now() + 15_000,
       restarting: false,
       scheduled: true,
       activeSessionIds: ["session-1"],
@@ -169,6 +180,7 @@ describe("Gateway administrative restart", () => {
       },
       receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation() },
       requestRestart: () => {},
+      armRestartWatchdog: async () => Date.now() + 15_000,
     } as unknown as GatewayServiceDependencies;
     const gateway = new GatewayService(dependencies);
     const opening = gateway.invoke(client, "terminal.open", { sessionId: "session", commandId: "terminal-open-command" });
@@ -244,14 +256,61 @@ describe("Gateway administrative restart", () => {
     expect(registry.size).toBe(0);
   });
 
+  it("arms the fallback before cancellation and still schedules after cancellation throws", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const requestRestart = vi.fn();
+    const gateway = service({
+      requestRestart,
+      armRestartWatchdog: async () => { calls.push("armed"); return Date.now() + 15_000; },
+      beginRestartCancellation: () => {
+        calls.push("cancel");
+        throw new Error("cleanup failed");
+      },
+    });
+    await expect(gateway.invoke(client, "gateway.restart", { commandId: "cleanup-failure" }))
+      .rejects.toThrow("cleanup failed");
+    expect(calls).toEqual(["armed", "cancel"]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requestRestart).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects failed native arming without entering cancellation or claiming accepted restart", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+    vi.useFakeTimers();
+    const requestRestart = vi.fn();
+    const beginRestartCancellation = vi.fn();
+    const gateway = service({ requestRestart, beginRestartCancellation, armRestartWatchdog: async () => { throw new Error("Native restart authority is unavailable"); } });
+    await expect(gateway.invoke(client, "gateway.restart", { commandId: "watchdog-failure" })).rejects.toThrow("authority is unavailable");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requestRestart).not.toHaveBeenCalled();
+    expect(beginRestartCancellation).not.toHaveBeenCalled();
+  });
+
+  it("keeps lost native acknowledgement uncertain and cannot arm or schedule twice", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+    const arm = vi.fn(async () => { throw new RestartArmUncertainError("acknowledgement lost after submission"); });
+    const requestRestart = vi.fn();
+    const cancel = vi.fn();
+    const gateway = service({ armRestartWatchdog: arm, requestRestart, beginRestartCancellation: cancel });
+    await expect(gateway.invoke(client, "gateway.restart", { commandId: "lost-ack" })).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    await expect(gateway.invoke(client, "gateway.restart", { commandId: "different-id" })).rejects.toMatchObject({ code: "busy" });
+    expect(arm).toHaveBeenCalledTimes(1);
+    expect(requestRestart).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
   it("does not schedule replacement before the completed receipt write attempt settles", async () => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     vi.useFakeTimers();
     const requestRestart = vi.fn();
+    const armRestartWatchdog = vi.fn(async () => Date.now() + 15_000);
     let releaseReceipt!: () => void;
     const receiptBarrier = new Promise<void>((resolve) => { releaseReceipt = resolve; });
     const gateway = service({
       requestRestart,
+      armRestartWatchdog,
       executeReceipt: async (_identity, _method, _commandId, operation) => {
         const result = await operation();
         await receiptBarrier;
@@ -260,6 +319,9 @@ describe("Gateway administrative restart", () => {
     });
 
     const restarting = gateway.invoke(client, "gateway.restart", { commandId: "restart-command" });
+    // Admission includes an actual device-lease filesystem read. Observe the
+    // arm event instead of assuming one fake-timer turn completes that I/O.
+    await vi.waitFor(() => expect(armRestartWatchdog).toHaveBeenCalledTimes(1));
     await vi.advanceTimersByTimeAsync(250);
     expect(requestRestart).not.toHaveBeenCalled();
     releaseReceipt();

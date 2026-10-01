@@ -125,6 +125,7 @@ required=(
     "$REPO_ROOT/scripts/gateway_protocol_contract.py"
     "$REPO_ROOT/scripts/gateway-payload-deploy.mjs"
     "$GATEWAY_DIR/scripts/check-pi-sdk.mjs"
+    "$GATEWAY_DIR/native/terminal-owner.c"
     "$SCRIPT_DIR/tron-gateway-launcher.c"
     "$SCRIPT_DIR/verify-gateway-payload.sh"
     "$HELPER_DIR/Info.plist"
@@ -474,7 +475,7 @@ stage_node() {
     validate_npm_runtime "$arch"
 }
 
-mkdir -p "$APP_DIR/dist" "$APP_DIR/scripts" "$RUNTIME_DIR" \
+mkdir -p "$APP_DIR/dist" "$APP_DIR/scripts" "$APP_DIR/native" "$RUNTIME_DIR" \
     "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources"
 # Permit replacing a previously staged immutable payload during an explicit
 # bundle operation; publication directories remain read-only afterward.
@@ -510,6 +511,13 @@ for arch in arm64 x64; do
     ln -s "../../app/node_modules/.bin/pi" "$alias_dir/pi"
 done
 
+# Retain the PTY SID independently of the shell and Gateway event loop.
+# The generic Mach-O signing pass covers this executable inside app/**.
+xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror \
+    -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
+    "$GATEWAY_DIR/native/terminal-owner.c" -o "$APP_DIR/native/terminal-owner"
+cp "$GATEWAY_DIR/native/terminal-owner.c" "$APP_DIR/native/terminal-owner.c"
+
 launcher_temp="$(mktemp -d)/tron"
 xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations \
     -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
@@ -522,7 +530,7 @@ rm -rf "$(dirname "$launcher_temp")"
 for required_payload in \
     "$APP_DIR/dist/index.js" "$APP_DIR/dist/version.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" "$APP_DIR/PushService.xcconfig" \
     "$APP_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
-    "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64" \
+    "$APP_DIR/native/terminal-owner" "$APP_DIR/native/terminal-owner.c" "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64" \
     "$RUNTIME_DIR/npm-arm64/bin/npm-cli.js" "$RUNTIME_DIR/npm-x64/bin/npm-cli.js" \
     "$RUNTIME_DIR/xcodegen/bin/xcodegen" "$RUNTIME_DIR/xcodegen/share/xcodegen/SettingPresets/base.yml"; do
     [[ -e "$required_payload" ]] || { echo "missing required staged payload: $required_payload" >&2; exit 3; }

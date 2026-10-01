@@ -2,12 +2,24 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 
+import { nativeFixtureExecutable } from "../../test-fixtures/terminal-owner.js";
+import { createProcessLeaseHost, PROCESS_OWNER_ENV } from "../lifecycle/process-lease-host.js";
+import { GatewayWorkRegistry } from "./gateway-work-registry.js";
+import { startRestartWatchdog } from "../lifecycle/restart-watchdog.js";
+let host: Awaited<ReturnType<typeof createProcessLeaseHost>>;
+beforeEach(async () => {
+  const guardian = await startRestartWatchdog(nativeFixtureExecutable);
+  host = await createProcessLeaseHost(new GatewayWorkRegistry(), guardian.leaseCapability, nativeFixtureExecutable);
+  vi.stubEnv(PROCESS_OWNER_ENV, host.environment[PROCESS_OWNER_ENV]);
+});
 const roots: string[] = [];
 afterEach(async () => {
+  host.close();
+  vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
@@ -27,7 +39,7 @@ function processExists(pid: number): boolean {
 
 describe("DirectBashProcessOwner", () => {
   it.skipIf(process.platform === "win32")(
-    "aborts the foreground shell and descendants that create another process group",
+    "aborts the foreground shell and resistant same-session descendants",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-owner-"));
       roots.push(root);
@@ -42,11 +54,11 @@ describe("DirectBashProcessOwner", () => {
         stdio: "ignore",
       });
       const unrelatedPid = unrelated.pid!;
-      const childProgram = "setInterval(() => {}, 1000)";
+      const childProgram = "process.on('SIGTERM',()=>{});setInterval(() => {}, 1000);setTimeout(()=>process.exit(),10000)";
       const parentProgram = [
         "const { spawn } = require('node:child_process');",
         "const { writeFileSync } = require('node:fs');",
-        `const child = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(childProgram)}], { detached: true, stdio: 'ignore' });`,
+        `const child = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(childProgram)}], { stdio: 'ignore' });`,
         `writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
         "setInterval(() => {}, 1000);",
       ].join(" ");
