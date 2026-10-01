@@ -338,7 +338,7 @@ struct TranscriptRow: View, Equatable {
               let modelName = item.modelId else { return nil }
         let physical = ModelDisplayFormatting.reference(provider: provider, model: modelName)
         if let thinking = item.thinkingLevel, !thinking.isEmpty {
-            return "\(physical) · \(thinking)"
+            return "\(physical) · \(ThinkingLevelPresentation.title(thinking))"
         }
         return physical
     }
