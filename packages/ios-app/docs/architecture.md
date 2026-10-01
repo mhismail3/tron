@@ -397,8 +397,7 @@ exact initial transcript projection, and a physically verified viewport at the m
 after transcript and queue rows. The positioning command targets the terminal physical row
 from that installed spine (including an admitted alias). Rows remain fully realizable beneath the
 opaque cover, which also extends under the navigation bar because the transcript scrolls there,
-outside its safe frame (`ChatViewScrollHarnessTests.openingCoverHidesNavigationBand`); an
-opacity-zero lazy stack is never used as a layout gate. The origin is exact, so opening issues no
+outside its safe frame; an opacity-zero lazy stack is never used as a layout gate. The origin is exact, so opening issues no
 tail-positioning command and waits for no physical-tail marker or settlement deadline. One covered
 display frame precedes the cosmetic eight-point reveal; interaction, paging, live projection intake,
 and extension routes remain gated until a current ready frame. Every asynchronous boundary

@@ -2576,7 +2576,12 @@ struct ChatView: View {
             case .oldestHistory:
                 transcriptScrollPosition.scrollTo(edge: transcriptOrientation.oldestEdge)
             case .tail:
-                transcriptScrollPosition.scrollTo(edge: transcriptOrientation.newestEdge)
+                // On the origin-anchored transcript, the newest end is the
+                // native content origin. A fresh position makes repeated catch-up
+                // requests to that same origin observable to SwiftUI.
+                var target = ScrollPosition(idType: String.self)
+                target.scrollTo(y: 0)
+                transcriptScrollPosition = target
             case .offsetY(let offsetY):
                 // The coordinator's point is measured from the newest content
                 // origin; reflect it back before sending it to the native scroll

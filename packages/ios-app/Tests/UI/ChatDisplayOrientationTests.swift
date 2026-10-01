@@ -248,6 +248,12 @@ struct ChatDisplayOrientationTests {
                 #expect(harness.probeObservation.isDetached)
                 let oldest = try #require(harness.visuallyTopmostOnScreenRow())
                 #expect(oldest.semanticID == harness.firstTranscriptID, "Reached \(oldest.semanticID)")
+                let visibleRows = harness.probeObservation.visibleRowIDs
+                #expect(visibleRows.contains(harness.firstTranscriptID))
+                #expect(visibleRows.contains("earlier-messages"))
+                let pillIndex = try #require(visibleRows.firstIndex(of: "earlier-messages"))
+                let oldestIndex = try #require(visibleRows.firstIndex(of: harness.firstTranscriptID))
+                #expect(pillIndex < oldestIndex, "The load-earlier pill is above the oldest loaded row")
                 harness.captureScreenshot(named: "status-bar-origin-oldest.png")
                 harness.setCovered(true)
                 for _ in 0..<12 { try await harness.driveFrameBoundary() }
