@@ -16,6 +16,7 @@ import dashboard  # noqa: E402
 import land  # noqa: E402
 import start  # noqa: E402
 import verify  # noqa: E402
+import warm  # noqa: E402
 from gh import Gh, GhError  # noqa: E402
 
 
@@ -75,7 +76,7 @@ def main(argv: list) -> int:
         if args.command == "steward":
             return land.steward(Gh(root), root, config, args.land)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError,
-            land.LandError, FileNotFoundError, json.JSONDecodeError) as error:
+            land.LandError, warm.WarmError, FileNotFoundError, json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1
     return 64

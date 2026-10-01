@@ -182,7 +182,7 @@ struct SessionToolPickerSheet: View {
             }
         }
         .tronManagedSheet(item: $selected, identity: { _ in "chat.available-tool-detail" }) { selection in
-            ProjectResourceDetailSheet(sessionID: sessionID, selection: selection) { selected = nil }
+            ProjectResourceDetailSheet(sessionID: sessionID, selection: selection, accentOverride: .tronSessionTeal) { selected = nil }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])

@@ -91,6 +91,14 @@ workspace:
 4. **Worktree.** `start` creates `<worktreeRoot>/<issue>-<slug>` on the branch.
    `worktreeRoot` is relative to the primary checkout, so `start` gives the
    same path when run from any worktree.
+5. **Warm local dependencies.** On a new or resumed worktree, `start` copy-on-write
+   clones `packages/gateway/node_modules` and `packages/push-relay/node_modules`
+   only when the corresponding lockfile bytes exactly match the primary
+   checkout and npm verifies that its dependency tree is complete. A missing or
+   incomplete source install, lock mismatch, or clone failure falls back to
+   `npm ci` in that worktree. iOS build caches are owned and seeded by
+   the build-bearing commands of `scripts/tron-ios-test` (`build`, `checkpoint`
+   and `prepare`), not by `start`.
 
 The session is `--session`, then `WORK_SESSION_ID`, then `PI_SESSION_ID`.
 
@@ -101,6 +109,15 @@ active claims exceeds `claim.softCap`; the claim still proceeds.
 Re-running `start` in the same session resumes a claim that is already made.
 It fills in whatever is missing (Status, comment, worktree) and never makes a
 second claim. A different session is refused, and the refusal names the owner.
+
+### Warm-worktree failure modes
+
+`test_warm.py` covers dependency seeding: exact lock match plus a complete npm
+hidden lock and dependency tree clones independent files; mismatch, missing or
+incomplete primary dependencies uses `npm ci`; and failed clones remove partial
+output before installing. `scripts/test-ios-test-infrastructure.py` covers
+runner-owned iOS cache seeding and cleanup of failed cache clones. Neither tool
+shares mutable build products or trusts an incomplete dependency tree.
 
 ### Claimed and active statuses
 
@@ -225,11 +242,28 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   full suite instead, because `vitest related` cannot select a test that still
   imports a deleted module and the build excludes tests.
 - **iOS** runs the source, build-matrix and archive-privacy policy scripts,
-  `scripts/tron-ios-test build` and the complete unit target. Focused owners cannot be derived from paths: suite names are not
-  file names, and an `--only-testing` selector that names no suite runs zero
-  tests and passes. The simulator admission and lease rules of
-  `scripts/tron-ios-test` still apply, so a busy Mac fails the check with exit
-  73; verify again once memory is free.
+  then `scripts/tron-ios-test build`. For changed test files, verify derives
+  their declared suites only when every non-private top-level declaration is a
+  test suite; shared helpers or unrecognized syntax force the complete unit
+  target. Audited Settings UI sources select their explicit owning suites.
+  Any deletion or rename anywhere in the branch diff forces the complete unit
+  target because `{paths}` omits files that do not exist at HEAD. Unmapped
+  source paths and empty selections also run the full target. Do not infer a
+  suite from a filename: an `--only-testing` selector that names no suite runs
+  zero tests and passes. The full hosted suite
+  remains in CI's heavy run and explicit checkpoints. The simulator admission
+  and lease rules of `scripts/tron-ios-test` still apply, so a busy Mac fails
+  the check with exit 73; verify again once memory is free.
+- **CI policy's iOS infrastructure test** uses
+  `scripts/ci_ios_infra_scope.py` to skip only for recognized non-iOS paths.
+  The workflow compares the available base and head trees directly (two-dot
+  `git diff`); it logs the selected value and reason. iOS-app, runner/toolchain,
+  CI-workflow, unknown and empty path sets run the infrastructure suite. If the
+  base commit cannot be resolved or path classification fails, the workflow
+  runs it. This does not change CI's hosted iOS unit suite.
+- **iOS selector tooling** has its own `work-selector-tests` check, so owner
+  selection and CI path-classification tests run locally when their sources
+  change, not only in GitHub Actions.
 - **Mac** regenerates the project with `scripts/generate-xcode-project mac`
   (what `scripts/tron mac generate` runs) and runs `build-for-testing` and
   `test-without-building` for `TronMacTests`, as in the Mac development guide.
@@ -274,6 +308,19 @@ covers the GitHub side.
 19. **A receipt describes content that is not the committed head.** Dirty
     worktrees are refused, and a head or worktree that changes during the run
     discards the receipt.
+47. **A narrowed iOS run misses deleted inputs or shared owners.** The selector
+    owns deletion detection and forces the full iOS suite for any deletion. A
+    changed test file focuses its declared suites only when every non-private
+    top-level declaration is a test suite and no other test file references
+    those suites as `SuiteName.`; shared helpers, external references and
+    unknown syntax therefore run the full target. Owner-map and the configured
+    command-line invocation are covered by
+    `scripts/test-ios-verify-test-selection.py`.
+48. **The policy job skips iOS infrastructure for a relevant or unknown path.**
+    Only recognized non-iOS changes skip that test; iOS/toolchain/workflow paths,
+    an empty diff, an unclassified path, or an unresolved base run it. The
+    workflow logs the decision. `scripts/test-ci-ios-infra-scope.py` covers the
+    path classification.
 
 ## `dashboard`
 

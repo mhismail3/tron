@@ -30,7 +30,6 @@ describe("X OAuth connection", () => {
     const extension = new KnowledgeConnectorExtension(store, {
       credentials: credentialStore,
       connections: owner,
-      xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 1 },
       http: async (url, init) => {
         calls.push(url);
         if (url === "https://api.x.com/2/oauth2/token" && init.method === "POST") {
@@ -69,7 +68,7 @@ describe("X OAuth connection", () => {
     const reconnectCallback = new URL("https://app.example/callback"); reconnectCallback.searchParams.set("code", "reconnect-code"); reconnectCallback.searchParams.set("state", reconnect.state);
     await extension.invoke({ operation: "knowledge.x.oauth.complete", request: { commandId: "oauth-reconnect-complete", operationId: reconnect.operationId, callbackUrl: reconnectCallback.toString() } } as any);
     expect(await store.connectorState("x", "x-reader")).toMatchObject({ pending: [{ id: "pending" }], capturedIds: ["captured"], checkpoints: { "98765": "cursor" }, paidBudgetCents: 17 });
-    expect(await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "x", connectionId: "x-reader" } } as any)).toMatchObject({ paidBudgetCents: 17 });
+    expect(await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "x", connectionId: "x-reader" } } as any)).toMatchObject({ capCents: 100, availableCents: 100 });
   });
 
   it("refreshes once after X returns 401 and persists the rotated refresh token before retry", async () => {
@@ -80,7 +79,7 @@ describe("X OAuth connection", () => {
     const calls: string[] = [];
     let bookmarkAttempts = 0;
     const extension = new KnowledgeConnectorExtension(new KnowledgeStore(new TronWorkspace(root)), {
-      credentials: credentialStore, connections: owner, xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 1 }, sleep: async () => {},
+      credentials: credentialStore, connections: owner, sleep: async () => {},
       http: async (url, init) => {
         calls.push(url);
         if (url === "https://api.x.com/2/oauth2/token" && init.method === "POST") {
@@ -118,8 +117,7 @@ describe("X OAuth connection", () => {
     const credentialStore = { async read(reference: string) { return credentials.get(reference); }, async write(reference: string, value: string) { credentials.set(reference, value); }, async delete(reference: string) { credentials.delete(reference); } } as ConnectorCredentialStore & { write(reference: string, value: string): Promise<void>; delete(reference: string): Promise<void> };
     const store = new KnowledgeStore(new TronWorkspace(root));
     const extension = new KnowledgeConnectorExtension(store, {
-      credentials: credentialStore, connections: owner,
-      xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 1 }, sleep: async () => {},
+      credentials: credentialStore, connections: owner, sleep: async () => {},
       http: async (url, init) => {
         if (url === "https://api.x.com/2/oauth2/token" && init.method === "POST") {
           const form = new URLSearchParams(init.body);
@@ -149,8 +147,7 @@ describe("X OAuth connection", () => {
     let refreshes = 0;
     const store = new KnowledgeStore(new TronWorkspace(root));
     const extension = new KnowledgeConnectorExtension(store, {
-      credentials: credentialStore, connections: owner,
-      xPricing: { accountId: "98765", costCentsPerAttempt: 1, maxAttempts: 1 }, sleep: async () => {},
+      credentials: credentialStore, connections: owner, sleep: async () => {},
       http: async (url, init) => {
         if (url === "https://api.x.com/2/oauth2/token" && init.method === "POST") {
           const form = new URLSearchParams(init.body);
@@ -176,6 +173,46 @@ describe("X OAuth connection", () => {
     expect(JSON.parse(credentials.get("connector:x:x-reader")!).refreshToken).toBe("refresh-rotated");
     expect((await owner.resolveInstance("x-reader")).health).toBe("setup-required");
     expect((await store.connectorState("x", "x-reader"))?.health).toBe("ready");
+  });
+
+  it("prices bookmark pages from the OAuth connection and settles the returned resource count", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-x-oauth-pricing-")); roots.push(root);
+    const owner = new ConnectionOwner(root);
+    const credentials = new Map<string, string>();
+    const credentialStore = { async read(reference: string) { return credentials.get(reference); }, async write(reference: string, value: string) { credentials.set(reference, value); }, async delete(reference: string) { credentials.delete(reference); } } as ConnectorCredentialStore & { write(reference: string, value: string): Promise<void>; delete(reference: string): Promise<void> };
+    const store = new KnowledgeStore(new TronWorkspace(root), undefined, async id => owner.resolveInstance(id).catch(() => undefined));
+    let bookmarkRequests = 0;
+    let reservedAtDispatch = -1;
+    const extension = new KnowledgeConnectorExtension(store, {
+      credentials: credentialStore, connections: owner, sleep: async () => {},
+      http: async (url, init) => {
+        if (url === "https://api.x.com/2/oauth2/token" && init.method === "POST") return response({ token_type: "bearer", access_token: "access-1", refresh_token: "refresh-1", expires_in: 7_200 });
+        if (url.startsWith("https://api.x.com/2/users/me")) return response({ data: { id: "98765", username: "reader" } });
+        if (url.startsWith("https://api.x.com/2/users/98765/bookmarks")) {
+          bookmarkRequests += 1;
+          const maxResults = new URL(url).searchParams.get("max_results");
+          reservedAtDispatch = (await store.connectorState("x", "x-reader"))?.xDiscoveryBudget?.reservedCents ?? -1;
+          return response({ data: maxResults === "1" ? [{ id: "three", text: "three" }] : [{ id: "one", text: "one" }, { id: "two", text: "two" }], meta: {} });
+        }
+        throw new Error(`Unexpected X request ${url}`);
+      },
+    });
+    const started = await extension.invoke({ operation: "knowledge.x.oauth.begin", request: { commandId: "price-start", instanceId: "x-reader", clientId: "client", redirectUri: "https://app.example/callback", policy: { ...policy, paidBudgetCents: 10 } } } as any) as any;
+    const callback = new URL("https://app.example/callback"); callback.searchParams.set("code", "price-code"); callback.searchParams.set("state", started.state);
+    await extension.invoke({ operation: "knowledge.x.oauth.complete", request: { commandId: "price-complete", operationId: started.operationId, callbackUrl: callback.toString() } } as any);
+    const result = await extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: "price-discovery", connector: "x", connectionId: "x-reader", limit: 50 } } as any) as any;
+    expect(result.discovered).toBe(2);
+    expect(bookmarkRequests).toBe(1);
+    expect(reservedAtDispatch).toBe(5); // Reserve 50 * 0.1 cents, rounded up, before dispatch.
+    expect(await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "x", connectionId: "x-reader" } } as any)).toMatchObject({ capCents: 10, spentCents: 1, reservedCents: 0, availableCents: 9 }); // Settle 2 * 0.1 cents, rounded up.
+    const live = await owner.resolveInstance("x-reader");
+    await owner.execute({ kind: "policy.update", commandId: "price-lower-cap", instanceId: "x-reader", expectedSetupRevision: live.setupRevision, policy: { ...live.policy, paidBudgetCents: 4 } });
+    await expect(extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: "price-budget-refusal", connector: "x", connectionId: "x-reader", limit: 50 } } as any)).rejects.toMatchObject({ code: "unsupported" });
+    expect(bookmarkRequests).toBe(1); // A page whose 5¢ reservation does not fit sends no X request.
+    const oneItem = await extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: "price-small-page", connector: "x", connectionId: "x-reader", limit: 1 } } as any) as any;
+    expect(oneItem.discovered).toBe(1);
+    expect(bookmarkRequests).toBe(2);
+    expect(await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "x", connectionId: "x-reader" } } as any)).toMatchObject({ capCents: 4, spentCents: 2, reservedCents: 0, availableCents: 2 });
   });
 
   it("rejects a callback from another attempt without exchanging its code", async () => {

@@ -550,6 +550,7 @@ export class GatewayService {
       case "knowledge.source.tag":
       case "knowledge.tags.run":
       case "knowledge.tags.budget.reconcile":
+      case "knowledge.connector.budget.reconcile":
       case "knowledge.source.curate":
       case "knowledge.source.take":
       case "knowledge.source.admission":

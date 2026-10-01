@@ -2052,7 +2052,9 @@ have no duplicate row or Context Files section there: their assembled guidance b
 Agent Instructions, which lists each file under Project Instructions. Canonical resource discovery
 is unchanged. Project Resources, Session History, and Subagent History use the originating Manage Session teal titles and
 toolbar actions to match their originating Session rows. Resource detail chrome instead
-matches its own category accent. Project Resource titles prefer authored labels, otherwise
+matches its own category accent, except a tool opened from Available Tools keeps that sheet's
+session teal. Project Resource titles prefer authored labels (a label that only repeats the
+raw name, such as Pi's `codemode` and `tool_search`, is not authored), otherwise
 humanize tool/skill/prompt/command/subagent names using the shared composer formatter. Extension titles derive
 from npm/Git package names, meaningful local entrypoints, or named inline extensions rather
 than generic `index.ts` filenames and `<inline:…>` wrappers. First-party inline names read as

@@ -77,17 +77,6 @@ await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
 // extensions. No source or installed package is rewritten at startup.
 delegatedProviderEnvironment(delegatedRoot);
-// Paid X access is only qualified when the host explicitly supplies the
-// provider/account price and retry ceiling. Missing or malformed values keep
-// the connector unavailable; no default price is inferred in production.
-const xPricing = (() => {
-  const accountId = process.env.TRON_X_ACCOUNT_ID?.trim();
-  const costCentsPerAttempt = Number(process.env.TRON_X_COST_CENTS_PER_ATTEMPT);
-  const maxAttempts = Number(process.env.TRON_X_MAX_ATTEMPTS);
-  if (!accountId || !Number.isSafeInteger(costCentsPerAttempt) || costCentsPerAttempt < 1
-    || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3) return undefined;
-  return { accountId, costCentsPerAttempt, maxAttempts };
-})();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 // Pi installs its private agent-bin projection while loading settings. Apply
 // the supervised immutable command contract afterward, before extension or
@@ -370,7 +359,6 @@ const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   queueSummary: source => queueKnowledgeSummary(source),
   assessment: jevSourceAssessment,
   jevBudget: knowledgeTaggingBudget,
-  ...(xPricing ? { xPricing } : {}),
   connections,
 });
 const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(modelRuntime), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, assessment: jevSourceAssessment };
@@ -404,7 +392,14 @@ const knowledge = new KnowledgeService(
   },
   // The event carries the whole job, the same shape `knowledge.curation.jobs`
   // returns, so one client decoder serves both.
-  new KnowledgeCurationJobs(64, 120_000, job => transport?.broadcast("knowledge.curation.job", { ...job })),
+  new KnowledgeCurationJobs(64, 120_000, job => {
+    transport?.broadcast("knowledge.curation.job", { ...job });
+    if (job.status === "failed" && (job.code === "model-error" || job.code === "model-output-invalid")) logger.log(
+      "warning",
+      "Knowledge model completion failed",
+      { event: "knowledge.model-failed", source: "knowledge", code: job.code, ...(job.reason ? { reason: job.reason } : {}) },
+    );
+  }),
   knowledgeTagging,
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
@@ -528,6 +523,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     sessionSearchWarmTask = undefined;
     await shutdownStep("search-close", async () => { await sessionSearch?.close(); }, recordShutdownStep);
     await shutdownStep("sessions-dispose", () => sessions.dispose(), recordShutdownStep);
+    await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     clearTimeout(forced);
     recordStopped(exitCode);
