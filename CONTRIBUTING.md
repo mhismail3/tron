@@ -37,10 +37,11 @@ agent execution, session state, inbox, badge, or reminder policy.
 5. Never add or invoke an automated production deployment command.
 6. Trust is not sandboxing. Copy and docs must say that executable resources run
    with the Mac user's authority.
-7. Gateway rebuilds and lifecycle transitions are user-initiated. Automated
-   assistants may prepare and validate source or artifacts, but must not run a
-   mutating `scripts/tron dev` lifecycle command or submit Gateway
-   update/rollback/restart/promote RPCs.
+7. Agents may start, restart and stop the Debug Gateway (`scripts/tron dev`,
+   port 9848). `scripts/tron dev handoff` and every Stable or production
+   transition (update, rollback, promotion and restart RPCs, the installed app,
+   the `com.tron.server` LaunchAgent, Mac reinstall) remain maintainer actions
+   ([AGENTS.md rule 8](AGENTS.md#rules)).
 8. Pi SDK updates are one atomic family change. `packages/gateway/package.json`
    is the version authority; do not merge independent Pi package updates. Use
    `cd packages/gateway && npm run update:pi-sdk -- <exact-version>` from a
@@ -142,18 +143,18 @@ reused PID based on `kill -0` alone. The supervisor atomically publishes bounded
 is the intentional authenticated restart drain; other exits consume a bounded
 restart budget and eventually become `failed`.
 
-After source changes, automated assistants stop after source/build validation
-and report the appropriate command; they do not execute a Gateway rebuild or
-lifecycle transition. The user or maintainer initiates the Debug restart with
-`scripts/tron dev restart` for loopback or adds `--tailscale` when iOS must reach
-it. A command without a host flag inherits a live supervisor's recorded host; an
-explicit conflicting flag fails closed and requires the user to run
-`scripts/tron dev stop` before changing exposure. A fresh user-initiated start without a flag
-defaults to loopback. This sole Debug supervisor uses the signed launcher from
+After source changes, an agent or the maintainer restarts the Debug Gateway
+with `scripts/tron dev restart` for loopback, or adds `--tailscale` when iOS
+must reach it. The Debug Gateway is one shared resource: check
+`scripts/tron dev status` first, and do not replace another worktree's running
+candidate while its work may still be validating. A command without a host flag
+inherits a live supervisor's recorded host; an explicit conflicting flag fails
+closed and requires `scripts/tron dev stop` before changing exposure. A fresh
+start without a flag defaults to loopback. This sole Debug supervisor uses the signed launcher from
 `/Applications/Tron.app`, builds and stages an immutable candidate, preserves
 accepted-run shutdown draining, and waits for truthful exact health identity.
-It refuses an unknown owner already listening on 9848. After testing, the user
-may initiate `scripts/tron dev handoff --tailscale`; it performs authenticated
+It refuses an unknown owner already listening on 9848. After testing, only the
+maintainer may run `scripts/tron dev handoff --tailscale`; it performs authenticated
 pre/post identity checks and copies the exact payload into Stable as an inactive
 candidate only after pre/post authenticated identity proof. Stable is always a
 known commit: handoff refuses the selected candidate unless its runtime epoch's

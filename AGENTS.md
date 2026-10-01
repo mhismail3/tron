@@ -22,13 +22,23 @@
    only; speculative runtime surfaces should be deleted.
 7. **Never run or add automated production deployment.** Production release and
    deployment are manual maintainer actions.
-8. **Gateway rebuilds are user-initiated only.** Agents must never invoke a
-   Gateway rebuild, update, rollback, promotion, restart, any mutating
-   `scripts/tron dev` lifecycle command, or the corresponding control-plane RPC.
-   This applies even when the requested change needs a newer Gateway. Agents may
-   prepare and validate source or build artifacts and report the exact user
-   action, but the user or maintainer must perform the action that transitions a
-   running Gateway.
+8. **Agents manage only the Debug Gateway; Stable and production are
+   maintainer-only.**
+   - **Agents may** run `scripts/tron dev start`, `restart` and `stop` (and the
+     read-only `status` and `preflight`) to build, run and validate their changes
+     on the isolated Debug Gateway (port 9848, `~/.tron-dev`).
+   - **Only the user or maintainer may** transition Stable or production:
+     - `scripts/tron dev handoff`, which writes a candidate into Stable;
+     - Gateway update, rollback, promotion and restart, and the corresponding
+       control-plane RPCs;
+     - the installed `/Applications/Tron.app`, the `com.tron.server`
+       LaunchAgent, and a Mac reinstall.
+
+     Agents prepare and validate, then report the exact action.
+   - **The Debug Gateway is shared by every agent.** Before a restart, read
+     `scripts/tron dev status`. If the running candidate came from another
+     worktree, do not replace it while that work may still be validating against
+     it; coordinate through its issue instead.
 9. **Do not OS-freeze Gateway-owned agent work.** `SIGSTOP` or equivalent
    suspension does not update Pi's authoritative lifecycle, so Tron still
    projects the run as active and a drain-aware Gateway restart remains blocked.
@@ -157,7 +167,7 @@ process you start.
 - Never run broad kills such as `pkill node` or `xcrun simctl shutdown all`, and
   never stop a process or release a simulator, lane or lease another session
   holds. Stop only processes you started, and ask before stopping anything you
-  are unsure about. The Gateway and its agent children are never yours to stop
+  are unsure about. The Stable Gateway and its agent children are never yours to stop
   (rules 8 and 9).
 - If the machine is slow, check swap (`sysctl vm.swapusage`), and each
   process's age, CPU, memory and parent. Clean up your own leftover processes

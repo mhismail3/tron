@@ -152,10 +152,11 @@ reclaim simulators yourself.
 
 ## Stop rules
 
-- Never initiate a Gateway rebuild, update, rollback, promotion, restart, or
-  mutating `scripts/tron dev` lifecycle command. Prepare and validate source or
-  artifacts, report the required action, and wait for the user or maintainer to
-  perform the Gateway transition.
+- You may start, restart and stop the Debug Gateway (`scripts/tron dev`) to
+  validate iOS work against it; check `scripts/tron dev status` first and do not
+  replace another worktree's running candidate. Never run `scripts/tron dev
+  handoff` or any Stable/production Gateway transition; report it for the
+  maintainer.
 - Never infer push routing from `DEBUG`, bundle naming, or a scheme; inspect the
   emitted artifact metadata and entitlements.
 - Never install iOS before its target Gateway contract is verified. A protocol
