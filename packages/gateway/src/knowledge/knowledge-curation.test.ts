@@ -322,9 +322,9 @@ describe("Knowledge curation", () => {
     await expect(service.tool({ action: "summarize", commandId: other("job-stale"), sourceId: record.id, revisionId: record.revisionId })).rejects.toThrow(/revision changed/);
   });
 
-  // Acceptance case from epic #214 / K1: one
-  // batch driven through the real agent tool through an injected conflict, a
-  // replay, a budget stop, and a restart, leaving an inspectable JSON report.
+  // Acceptance case from epic #214 / K1: one batch exercises the real agent tool
+  // through an injected conflict, replay, budget stop, and restart, leaving an
+  // inspectable JSON report.
   it("survives a conflict, a replay, a budget stop and a restart in one batch", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-curation-acceptance-")); roots.push(root);
     const workspace = new TronWorkspace(root);

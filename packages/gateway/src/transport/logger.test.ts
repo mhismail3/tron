@@ -232,10 +232,13 @@ describe("GatewayLogger", () => {
       writeFileSync(`${path}.${index}`, "");
       truncateSync(`${path}.${index}`, segmentBytes);
     }
-    writeFileSync(path, "");
-    truncateSync(path, segmentBytes);
+    writeFileSync(path, "active-segment-prefill\n");
+    const activePrefillBytes = segmentBytes - 4 * 1_024;
+    truncateSync(path, activePrefillBytes);
     const logger = new GatewayLogger(path);
-    logger.log("info", "newest-record");
+    for (let index = 0; index < 4; index += 1) {
+      logger.log("info", `boundary-record-${index}-${"x".repeat(1_900)}`);
+    }
     const segments = [path, ...Array.from({ length: 7 }, (_, index) => `${path}.${index + 1}`)];
     expect(segments.every((segment) => existsSync(segment))).toBe(true);
     expect(existsSync(`${path}.8`)).toBe(false);
@@ -243,7 +246,12 @@ describe("GatewayLogger", () => {
     for (const segment of segments) expect(statSync(segment).size).toBeLessThanOrEqual(segmentBytes);
     expect(total).toBeLessThanOrEqual(8 * segmentBytes);
     expect(readFileSync(`${path}.7`, "utf8")).not.toContain("record-0-");
-    expect(lines(path).at(-1)?.message).toBe("newest-record");
+    const previous = readFileSync(`${path}.1`, "utf8");
+    expect(previous).toContain("boundary-record-0-");
+    expect(previous).toContain("boundary-record-1-");
+    expect(previous).not.toContain("boundary-record-2-");
+    expect(previous).not.toContain("boundary-record-3-");
+    expect(lines(path).at(-1)?.message).toMatch(/^boundary-record-3-/u);
   });
 
   it("restores the client tail from the newest segments after restart", () => {
