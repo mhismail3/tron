@@ -11,6 +11,7 @@ function shapedRuntime(provider: string, shapes: Array<{ api: string; baseUrl: s
     getAuth: vi.fn(async () => auth),
     getProvider: () => undefined,
     hasConfiguredAuth: () => auth !== null,
+    isUsingOAuth: () => false,
   } as any;
 }
 const openCodeGoShapes = [
@@ -433,5 +434,89 @@ describe("provider usage owner", () => {
     release();
     await Promise.all(reads.map((read) => read.catch(() => undefined)));
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("OpenAI ChatGPT-subscription usage borrowed from the Codex login", () => {
+  // Sign in with ChatGPT tokens are audience-bound to api.openai.com/v1 and carry no
+  // ChatGPT account claim, so OpenAI's plan windows come only from the Codex login.
+  const codexToken = `h.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "fixture-account" } })).toString("base64url")}.s`;
+  const codexBody = { rate_limit: { primary_window: { used_percent: 12.5, reset_at: "2026-01-02T05:00:00Z", limit_window_seconds: 18_000 }, secondary_window: { used_percent: 63, reset_at: "2026-01-09T00:00:00Z", limit_window_seconds: 604_800 } } };
+  function pair(options: { openaiOAuth?: boolean; openaiBase?: string; codexBase?: string; codexAuth?: unknown } = {}) {
+    const state = {
+      openaiOAuth: options.openaiOAuth ?? true,
+      openaiBase: options.openaiBase ?? "https://api.openai.com/v1",
+      codexBase: options.codexBase ?? "https://chatgpt.com/backend-api",
+      codexAuth: options.codexAuth === undefined ? { auth: { apiKey: codexToken } } : options.codexAuth,
+    };
+    const getAuth = vi.fn(async (id: string) => {
+      if (id === "openai") return { auth: { apiKey: "siwc-openai-token" } };
+      return id === "openai-codex" ? state.codexAuth : undefined;
+    });
+    const fixture = {
+      getModels: (id: string) => id === "openai" ? [{ provider: id, id: "gpt", api: "openai-responses", baseUrl: state.openaiBase }]
+        : id === "openai-codex" ? [{ provider: id, id: "gpt-codex", api: "openai-codex-responses", baseUrl: state.codexBase }] : [],
+      getProvider: () => undefined,
+      getAuth,
+      hasConfiguredAuth: (id: string) => id === "openai" || (id === "openai-codex" && state.codexAuth !== null),
+      isUsingOAuth: (id: string) => id === "openai" ? state.openaiOAuth : id === "openai-codex",
+    } as any;
+    return { fixture, state, getAuth };
+  }
+
+  it("reports Codex plan windows under OpenAI without resolving the OpenAI credential", async () => {
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://chatgpt.com/backend-api/wham/usage");
+      expect((init?.headers as Record<string, string>).Authorization).toBe(`Bearer ${codexToken}`);
+      return response(codexBody);
+    });
+    const { fixture, getAuth } = pair();
+    expect(providerUsageSupported(fixture, "openai")).toBe(true);
+    const result = await new ProviderUsageOwner({ fetch }).read(fixture, "openai");
+    expect(result.providers).toEqual([expect.objectContaining({ providerId: "openai", status: "available", source: "openai-codex.wham", scope: "account" })]);
+    expect(result.providers[0]!.windows.map((w) => w.usedPercent)).toEqual([12.5, 63]);
+    expect(getAuth.mock.calls.map(([id]) => id)).not.toContain("openai");
+    expect(JSON.stringify(fetch.mock.calls)).not.toContain("siwc-openai-token");
+  });
+
+  it("does not advertise or read plan usage for an API-key OpenAI account", async () => {
+    const fetch = vi.fn();
+    const { fixture, getAuth } = pair({ openaiOAuth: false });
+    expect(providerUsageSupported(fixture, "openai")).toBe(false);
+    await expect(new ProviderUsageOwner({ fetch }).read(fixture, "openai")).resolves.toMatchObject({ providers: [{ providerId: "openai", status: "unsupported", windows: [] }] });
+    const global = await new ProviderUsageOwner({ fetch }).read(fixture, undefined);
+    expect(global.providers.map((p) => p.providerId)).not.toContain("openai");
+    expect(fetch.mock.calls.filter(([, init]) => JSON.stringify(init).includes("siwc-openai-token"))).toEqual([]);
+    expect(getAuth.mock.calls.map(([id]) => id)).not.toContain("openai");
+  });
+
+  it("does not borrow Codex usage for a non-first-party OpenAI or Codex composition", async () => {
+    for (const options of [{ openaiBase: "https://proxy.example/v1" }, { codexBase: "https://proxy.example/backend-api" }]) {
+      const fetch = vi.fn();
+      const { fixture } = pair(options);
+      expect(providerUsageSupported(fixture, "openai")).toBe(false);
+      await expect(new ProviderUsageOwner({ fetch }).read(fixture, "openai")).resolves.toMatchObject({ providers: [{ providerId: "openai", status: "unsupported", windows: [] }] });
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  });
+
+  it("names the missing Codex sign-in instead of sending a request", async () => {
+    const fetch = vi.fn();
+    const { fixture } = pair({ codexAuth: null });
+    expect(providerUsageSupported(fixture, "openai")).toBe(true);
+    const result = await new ProviderUsageOwner({ fetch }).read(fixture, undefined);
+    expect(result.providers).toEqual([expect.objectContaining({ providerId: "openai", status: "unconfigured", source: "openai-codex.wham", windows: [] })]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("withholds borrowed windows when the OpenAI login stops qualifying during the read", async () => {
+    let release!: () => void;
+    const fetch = vi.fn(() => new Promise<Response>((resolve) => { release = () => resolve(response(codexBody)); }));
+    const { fixture, state } = pair();
+    const pending = new ProviderUsageOwner({ fetch }).read(fixture, "openai");
+    await waitFor(() => typeof release === "function");
+    state.openaiOAuth = false;
+    release();
+    await expect(pending).resolves.toMatchObject({ providers: [{ providerId: "openai", status: "unavailable", windows: [] }] });
   });
 });

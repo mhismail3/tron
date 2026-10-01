@@ -137,6 +137,20 @@ const adapters: Record<string, Adapter> = {
   },
 };
 
+/**
+ * A provider whose own credential has no first-party usage endpoint, but whose
+ * plan usage another provider's login can read. Pi's `openai` OAuth login is a
+ * Sign in with ChatGPT token: audience-bound to api.openai.com/v1, without a
+ * ChatGPT account claim, and OpenAI forbids sending it to ChatGPT backend
+ * endpoints. The same ChatGPT plan's windows are therefore read only through the
+ * `openai-codex` adapter and credential. The borrower's credential is never
+ * resolved; account identity across the two logins cannot be proven (#312).
+ */
+interface BorrowedUsage { shapes: readonly ProviderShape[]; from: string; }
+const borrowedUsage: Record<string, BorrowedUsage> = {
+  openai: { shapes: [{ api: "openai-responses", baseUrl: "https://api.openai.com/v1" }], from: "openai-codex" },
+};
+
 function emptySnapshot(providerId: string, status: ProviderStatus, source: string | null = null, scope: "account" | "key" | null = null, message: string | null = null): ProviderUsageSnapshot {
   return { providerId, status, source, scope, updatedAt: null, retryAt: null, stale: false, message, windows: [], balances: [] };
 }
@@ -418,6 +432,8 @@ function parseBalances(value: unknown): UsageBalance[] {
 
 /** True when this runtime's effective composition has a first-party usage adapter. */
 export function providerUsageSupported(runtime: ModelRuntime, providerId: string): boolean {
+  const borrowed = borrowedUsage[providerId];
+  if (borrowed) return borrowerQualifies(runtime, providerId, borrowed) && adapterFor(runtime, borrowed.from) !== undefined;
   const adapter = adapterFor(runtime, providerId);
   return adapter !== undefined && (!adapter.oauthOnly || !runtime.hasConfiguredAuth(providerId) || runtime.isUsingOAuth(providerId));
 }
@@ -459,16 +475,22 @@ function providerBinding(runtime: ModelRuntime, id: string): ProviderBinding {
   };
 }
 function adapterFor(runtime: ModelRuntime, id: string): Adapter | undefined {
-  const adapter = adapters[id]; if (!adapter) return undefined;
+  const adapter = adapters[id];
+  return adapter && firstPartyComposition(runtime, id, adapter.shapes) ? adapter : undefined;
+}
+function firstPartyComposition(runtime: ModelRuntime, id: string, shapes: readonly ProviderShape[]): boolean {
   const binding = providerBinding(runtime, id);
   // Matching the effective composed models is intentional: provider IDs alone can
   // be reused by models.json or an extension for an unrelated upstream, so every
   // resolved (api, base URL) must be a declared first-party shape.
-  const declared = new Set(adapter.shapes.map((shape) => `${shape.api}:${normalizeBaseUrl(shape.baseUrl)}`));
+  const declared = new Set(shapes.map((shape) => `${shape.api}:${normalizeBaseUrl(shape.baseUrl)}`));
   const models = runtime.getModels(id);
   const exactModels = models.length > 0 && models.every((model) => declared.has(`${model.api}:${normalizeBaseUrl(model.baseUrl)}`));
-  const exactProvider = binding.providerBaseUrl === null || adapterBaseUrls(adapter).has(binding.providerBaseUrl);
-  return exactModels && exactProvider ? adapter : undefined;
+  const exactProvider = binding.providerBaseUrl === null || shapes.some((shape) => normalizeBaseUrl(shape.baseUrl) === binding.providerBaseUrl);
+  return exactModels && exactProvider;
+}
+function borrowerQualifies(runtime: ModelRuntime, id: string, borrowed: BorrowedUsage): boolean {
+  return runtime.isUsingOAuth(id) && firstPartyComposition(runtime, id, borrowed.shapes);
 }
 function sameBinding(left: ProviderBinding, right: ProviderBinding): boolean {
   return left.providerBaseUrl === right.providerBaseUrl
@@ -496,12 +518,14 @@ export class ProviderUsageOwner {
 
   async read(runtime: ModelRuntime, providerId: string | undefined, signal?: AbortSignal): Promise<ProviderUsageResponse> {
     const ids = providerId === undefined
-      ? Object.keys(adapters).filter((id) => providerUsageSupported(runtime, id) && runtime.hasConfiguredAuth(id))
+      ? [...Object.keys(adapters), ...Object.keys(borrowedUsage)].filter((id) => providerUsageSupported(runtime, id) && runtime.hasConfiguredAuth(id))
       : [providerId];
     const providers = await Promise.all(ids.slice(0, MAX_PROVIDERS).map((id) => this.readOne(runtime, id, signal)));
     return { providers };
   }
   private async readOne(runtime: ModelRuntime, providerId: string, signal?: AbortSignal): Promise<ProviderUsageSnapshot> {
+    const borrowed = borrowedUsage[providerId];
+    if (borrowed) return this.readBorrowed(runtime, providerId, borrowed, signal);
     const admission = this.acquireAdmission();
     if (!admission) return emptySnapshot(providerId, "unavailable", adapters[providerId]?.source ?? null, adapters[providerId]?.scope ?? null, "Provider usage is busy");
     try { return await this.readOneAdmitted(runtime, providerId, signal, admission); }
@@ -598,6 +622,21 @@ export class ProviderUsageOwner {
       // Producer settlement, rather than the first waiter, owns flight cleanup.
       // A cancelled waiter must not cancel or prematurely remove the socket.
     }
+  }
+  private async readBorrowed(runtime: ModelRuntime, providerId: string, borrowed: BorrowedUsage, signal?: AbortSignal): Promise<ProviderUsageSnapshot> {
+    const lender = adapters[borrowed.from]!;
+    if (!borrowerQualifies(runtime, providerId, borrowed)) {
+      return emptySnapshot(providerId, "unsupported", lender.source, lender.scope, "Usage is not supported for this provider configuration");
+    }
+    const initialBinding = providerBinding(runtime, providerId);
+    // The lender's read owns credential resolution, account fences, cache and
+    // admission; the borrower only relabels its snapshot. Clients identify the
+    // lent source (`source` names the lender) to explain where usage comes from.
+    const lent = await this.readOne(runtime, borrowed.from, signal);
+    if (!borrowerQualifies(runtime, providerId, borrowed) || !sameBinding(initialBinding, providerBinding(runtime, providerId))) {
+      return emptySnapshot(providerId, "unavailable", lender.source, lender.scope, "Provider usage changed while the request was in flight");
+    }
+    return { ...lent, providerId };
   }
   private acquireAdmission(): ReadAdmission | undefined {
     if (this.activeReads >= MAX_ACTIVE_READS) return undefined;

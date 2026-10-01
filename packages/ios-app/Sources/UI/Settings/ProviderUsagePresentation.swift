@@ -29,8 +29,21 @@ enum ProviderUsagePresentation {
         return !snapshot.windows.isEmpty || !snapshot.balances.isEmpty || retryCopy(snapshot) != nil
     }
 
+    /// The login whose usage a provider borrows, when `source` names another
+    /// provider. OpenAI's ChatGPT sign-in has no usage endpoint of its own, so the
+    /// Gateway reads the same plan through the Codex login (gateway README,
+    /// "Provider account usage").
+    static func lenderName(_ snapshot: ProviderUsageSnapshot) -> String? {
+        guard snapshot.source == "openai-codex.wham", snapshot.providerId != "openai-codex" else { return nil }
+        return "OpenAI Codex (legacy)"
+    }
+
     static func summary(_ snapshot: ProviderUsageSnapshot) -> String {
         guard snapshot.status == .available || snapshot.status == .rateLimited else {
+            // The borrowing provider is connected; only the lender's login is missing.
+            if snapshot.status == .unconfigured, let lender = lenderName(snapshot) {
+                return "Sign in to \(lender) to view plan usage"
+            }
             return statusCopy(snapshot.status)
         }
         var parts: [String] = []
@@ -126,7 +139,8 @@ enum ProviderUsagePresentation {
 
     static func updatedCopy(_ snapshot: ProviderUsageSnapshot) -> String? {
         guard let updatedAt = snapshot.updatedAt, let date = GatewayTimestamp.parse(updatedAt) else { return nil }
-        return "Updated \(date.formatted(date: .abbreviated, time: .shortened))\(snapshot.stale ? " · Stale" : "")"
+        let lender = lenderName(snapshot).map { " · From your \($0) sign-in" } ?? ""
+        return "Updated \(date.formatted(date: .abbreviated, time: .shortened))\(snapshot.stale ? " · Stale" : "")\(lender)"
     }
 
     static func retryCopy(_ snapshot: ProviderUsageSnapshot) -> String? {

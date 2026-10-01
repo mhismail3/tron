@@ -444,9 +444,18 @@ authentication fingerprint, so logout, reauthentication, and account changes can
 reuse another account's usage. Raw credentials and response bodies remain local.
 
 `provider.list` exposes OpenAI's API-key and OAuth login methods, and labels the
-separate Codex provider `OpenAI Codex (legacy)`. OpenAI OAuth is not currently
-advertised as usage-supported: the usage adapter covers only the Codex `wham`
-endpoint. Sign in with ChatGPT receives a stable device ID from global Pi
+separate Codex provider `OpenAI Codex (legacy)`. Sign in with ChatGPT tokens are
+audience-bound to `api.openai.com/v1`, carry no ChatGPT account claim, and OpenAI
+forbids sending them to ChatGPT backend endpoints, so no first-party endpoint
+reports usage for them. OpenAI usage is therefore borrowed: only while `openai`
+uses OAuth and both `openai` and `openai-codex` resolve to their exact first-party
+shapes, `provider.usage` for `openai` runs the Codex `wham` read with the Codex
+credential and returns it under `openai` with `source` `openai-codex.wham`. The
+`openai` credential is never resolved for usage. A missing Codex login reports
+`unconfigured`, which clients present as a Codex sign-in prompt. Tron cannot prove
+the two logins belong to the same ChatGPT account (#312). API-key `openai` is not
+usage-supported. A change to the `openai` login or composition during the read
+answers `unavailable` instead of the lent windows. Sign in with ChatGPT receives a stable device ID from global Pi
 settings. AuthBroker serializes OpenAI and Codex legacy OAuth operations because
 both SDK flows use callback port 1455; live sign-in remains a manual acceptance
 gate.
