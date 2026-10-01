@@ -186,8 +186,9 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     ///
     /// The spacer is layout, not scroll-content inset. Remove it from the model's
     /// content and usable viewport heights, report it as bottom obstruction, and
-    /// reflect the native visible rect. Thus distanceFromBottom is exactly the
-    /// native distance from content origin, independent of every lazy estimate.
+    /// reflect the native visible rect. On this path, `distanceFromBottom` then
+    /// cancels the reflected content height and is exactly `visibleRect.minY`:
+    /// distance from the native content origin, independent of the lazy estimate.
     func coordinatorGeometry(_ geometry: ScrollGeometry, obstruction: CGFloat = 0) -> ChatTranscriptGeometry {
         let contentHeight = geometry.contentSize.height
         let visibleTop = geometry.visibleRect.minY

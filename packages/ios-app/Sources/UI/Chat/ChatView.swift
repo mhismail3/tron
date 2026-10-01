@@ -933,8 +933,6 @@ struct ChatView: View {
             // and shallow tool-state updates keep current hosts and evidence.
             scrollCoordinator.projectionInstalled(
                 structure: installed?.physicalRowSpineIdentity,
-                terminalPhysicalID: terminalPhysicalID,
-                projectionTag: installed?.tag,
                 physicalRowPositions: physicalRowPositions,
                 physicalTerminalPosition: physicalTerminalPosition
             )
@@ -2061,8 +2059,6 @@ struct ChatView: View {
             if hasEarlierMessages { physicalPositions["earlier-messages"] = 0 }
             scrollCoordinator.projectionInstalled(
                 structure: retained.physicalRowSpineIdentity,
-                terminalPhysicalID: terminalID,
-                projectionTag: retained.tag,
                 physicalRowPositions: physicalPositions,
                 physicalTerminalPosition: terminalID.flatMap { physicalPositions[$0] }
             )
@@ -2582,10 +2578,6 @@ struct ChatView: View {
                 transcriptScrollPosition = target
             case .oldestHistory:
                 transcriptScrollPosition.scrollTo(edge: transcriptOrientation.oldestEdge)
-            case .openingTail(let renderedID):
-                var target = ScrollPosition(idType: String.self)
-                target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
-                transcriptScrollPosition = target
             case .tail:
                 transcriptScrollPosition.scrollTo(edge: transcriptOrientation.newestEdge)
             case .offsetY(let offsetY):

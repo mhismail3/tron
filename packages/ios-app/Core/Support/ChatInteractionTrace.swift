@@ -26,21 +26,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         case retired
     }
 
-    package enum OpeningFailureReason: String, Sendable {
-        case authority = "authority-missing"
-        case projection = "projection-missing"
-        case commandApplication = "command-not-applied"
-        case markerEpoch = "marker-epoch-stale"
-        case viewport = "viewport-not-plausible"
-        case viewportBoundary = "viewport-not-at-boundary"
-        case physicalAlignment = "physical-tail-not-aligned"
-        case frameStability = "frame-stability-incomplete"
-        case presentationInactive = "presentation-inactive"
-        case cancelled
-        case replaced
-        case unknown
-    }
-
     package enum ProjectionChange: String, Sendable {
         case first
         case sameSpine = "same-spine"
@@ -300,21 +285,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
             context: context,
             level: stage == .failed ? "error" : "info",
             event: "opening.\(stage.rawValue)",
-            details: values.joined(separator: " ")
-        )
-    }
-
-    package func openingFailure(
-        _ reasons: [OpeningFailureReason],
-        context: Int,
-        state: State
-    ) {
-        var values = ["reasons=\(reasons.map(\.rawValue).joined(separator: ","))"]
-        appendState(state, to: &values)
-        append(
-            context: context,
-            level: "error",
-            event: "opening.failure-snapshot",
             details: values.joined(separator: " ")
         )
     }
@@ -711,7 +681,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         switch destination {
         case .tail: "tail"
         case .row: "row"
-        case .openingTail: "opening-tail"
         case .oldestHistory: "oldest-history"
         case .offsetY: "offset"
         }

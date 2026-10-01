@@ -25,7 +25,6 @@ package struct ChatScrollCommand: Equatable, Sendable {
         case oldestHistory
         /// Exact semantic row target used when restoring a reader's position.
         case row(String)
-        case openingTail(String)
         case offsetY(CGFloat)
     }
 

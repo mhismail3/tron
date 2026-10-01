@@ -285,6 +285,8 @@ struct ChatViewScrollHarnessTests {
                 #expect(ready.observation.projectionInstallCount > 0)
                 #expect(ready.observation.physicalRowAppearanceCounts[terminalID, default: 0] > 0)
                 #expect(ready.observation.visibleRowIDs.contains(terminalID))
+                let pinnedGap = try #require(harness.newestRowClearance())
+                #expect(abs(pinnedGap - 4) <= 0.5, "the 0122f8416 mounted gap measured 4 pt")
                 #expect(harness.isPinnedToBottom())
 
                 // The production ChatView/ChatTranscriptScrollView path must
@@ -476,6 +478,8 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil { $0.observation.isReady }
                 #expect(ContinuousClock.now - start < ChatTranscriptPageRequest.optionalOpeningPageDeadline + .seconds(4))
                 #expect(harness.rpcMethods.contains("session.transcript"))
+                let pinnedGap = try #require(harness.newestRowClearance())
+                #expect(abs(pinnedGap - 4) <= 0.5, "the 0122f8416 mounted gap measured 4 pt")
                 #expect(harness.isPinnedToBottom())
             }
         }
@@ -767,7 +771,7 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(30)) {
             try await withHarness(seed: 1_272) { harness in
                 _ = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeSettledAtBottom
+                    $0.observation.isReady && $0.nativeSettledAtOrigin
                 }
                 let samples = try await harness.driveKeyboardInsetAtWrongEdge(.show())
                 // The keyboard's own transition ran: the composer moved with its
@@ -1135,10 +1139,10 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(20)) {
             try await withHarness(seed: 1_270) { harness in
                 let ready = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeSettledAtBottom
+                    $0.observation.isReady && $0.nativeSettledAtOrigin
                 }
                 #expect(harness.isPinnedToBottom())
-                #expect(ready.nativePinnedAtBottom)
+                #expect(ready.nativePinnedAtOrigin)
                 #expect(
                     TranscriptWindowOracle.isPinned(
                         in: harness.visibleRootView, tolerance: TranscriptWindowOracle.profilingTolerance
@@ -1150,7 +1154,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(!harness.isPinnedToBottom())
                 let pinnedError = try #require(harness.pinnedError())
                 #expect(pinnedError > 40, "the newest row left the pinned bottom by \(pinnedError) pt")
-                #expect(harness.recorder.samples.last?.nativePinnedAtBottom == false)
+                #expect(harness.recorder.samples.last?.nativePinnedAtOrigin == false)
                 // The profiling scenarios' own decision, which ends a measured
                 // window while the transcript may still be settling.
                 #expect(
@@ -1285,7 +1289,7 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(15)) {
             let snapshot = try SessionScenarioBuilder(seed: 1_229).openingTail(targetEncodedBytes: 10_000)
             try await withHarness(snapshot: snapshot, enablesPresentationCover: true) { harness in
-                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtBottom }
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtOrigin }
                 let authorityOpensBeforeCover = harness.traceRecords.filter {
                     $0.record.event == "chat.opening.authority-opened"
                 }.count
@@ -1316,7 +1320,7 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.projectionInstallCount > frozen.projectionInstallCount
                         && $0.observation.targetReleaseCount > frozen.targetReleaseCount
                         && $0.nativeRows.contains { $0.semanticID == "covered-latest-3" && $0.isOnScreen }
-                        && $0.nativePinnedAtBottom
+                        && $0.nativePinnedAtOrigin
                 }
                 #expect(returned.observation.projectionInstallCount == frozen.projectionInstallCount + 1)
                 #expect(harness.isPinnedToBottom())
@@ -1334,7 +1338,7 @@ struct ChatViewScrollHarnessTests {
             try await withHarness(
                 snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true
             ) { harness in
-                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtBottom }
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtOrigin }
                 try await harness.loadCanonicalCommands(["initial"])
                 _ = try await harness.recorder.waitUntil { _ in
                     harness.probe.composerCatalogCommandNames == ["initial"]
@@ -1369,7 +1373,7 @@ struct ChatViewScrollHarnessTests {
                     harness.setScenePhase(.active)
                 }
                 _ = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeSettledAtBottom
+                    $0.observation.isReady && $0.nativeSettledAtOrigin
                         && harness.probe.composerCatalogBuildCount >= buildsBefore + 1
                         && harness.probe.composerCatalogCommandNames == latest
                 }
@@ -1386,7 +1390,7 @@ struct ChatViewScrollHarnessTests {
             try await withHarness(
                 snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true
             ) { harness in
-                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtBottom }
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtOrigin }
                 try await harness.loadCanonicalCommands(["initial"], skills: ["skill:retain"])
                 _ = try await harness.recorder.waitUntil { _ in
                     harness.probe.composerCatalogCommandNames == ["initial"]
@@ -1432,7 +1436,7 @@ struct ChatViewScrollHarnessTests {
                     harness.setCovered(false)
                     try await harness.waitForCoverTransition(presented: false)
                     _ = try await harness.recorder.waitUntil {
-                        $0.observation.isReady && $0.nativeSettledAtBottom
+                        $0.observation.isReady && $0.nativeSettledAtOrigin
                             && harness.probe.composerCatalogCommandNames == ["current"]
                     }
                     #expect(harness.selectedComposerResource == nil)
@@ -1455,7 +1459,7 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(15)) {
             let snapshot = try SessionScenarioBuilder(seed: 1_249).openingTail(targetEncodedBytes: 10_000)
             try await withHarness(snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true) { harness in
-                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtBottom }
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtOrigin }
                 try await harness.loadCanonicalCommands(["original"])
                 try harness.setComposerText("/")
                 _ = try await harness.recorder.waitUntil { _ in
@@ -1519,7 +1523,7 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(15)) {
             let snapshot = try SessionScenarioBuilder(seed: 1_249).openingTail(targetEncodedBytes: 10_000)
             try await withHarness(snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true) { harness in
-                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtBottom }
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtOrigin }
                 try await harness.loadCanonicalCommands(["review"], skills: ["skill:review"], prompts: ["review"])
                 try harness.setComposerText(mention ? "@rev" : "/rev")
                 let expected = mention ? ["skill:skill:review"] : ["extension:review", "prompt:review"]
@@ -1559,7 +1563,7 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.isReady
                         && $0.observation.readyFrameCompletionCount >= 1
-                        && $0.nativePinnedAtBottom
+                        && $0.nativePinnedAtOrigin
                 }
                 #expect(try harness.isAttachmentButtonEnabled())
                 #expect(try harness.isNativeTranscriptInteractionEnabled())
@@ -1832,10 +1836,17 @@ struct ChatViewScrollHarnessTests {
 
     @Test("production unfinished opening retains its exact subscription across cover and settles an accepted upload once")
     func unfinishedCoveredOpeningResumesAuthority() async throws {
-        try await withTestWatchdog(timeout: .seconds(20)) {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let gate = OpeningFrameGate()
+            defer { gate.release() }
             let snapshot = try SessionScenarioBuilder(seed: 1_232).openingTail(targetEncodedBytes: 10_000)
-            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true,
-                                  enablesPresentationCover: true, usesRealOpening: true) { harness in
+            try await withHarness(snapshot: snapshot, displayFrameScheduler: gate.scheduler,
+                                  enablesComposerSubmission: true, enablesPresentationCover: true,
+                                  usesRealOpening: true) { harness in
+                gate.condition = {
+                    [.presented, .ready].contains(harness.probe.openingPhase?() ?? .opening)
+                }
+                try await gate.waitUntilHeld()
                 let installed = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > 0 && !$0.observation.isReady
                 }
@@ -1851,13 +1862,16 @@ struct ChatViewScrollHarnessTests {
                 #expect(harness.currentTarget == target)
                 #expect(harness.currentAuthorityIsMounted)
                 #expect(harness.rpcMethods.filter { $0 == "session.close" }.isEmpty)
+                gate.release()
+                try await harness.waitForOpeningAttemptCompletion(1)
+                #expect(harness.probe.readyPublicationCount == 0)
                 harness.uploads.release()
                 await upload.value
                 #expect(harness.currentAttachments.map(\.gatewayUploadID) == ["fixture-upload-1"])
                 harness.setCovered(false)
                 try await harness.waitForCoverTransition(presented: false)
                 let ready = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeSettledAtBottom
+                    $0.observation.isReady && $0.nativeSettledAtOrigin
                         && $0.observation.readyFrameCompletionCount >= 2
                 }
                 #expect(ready.observation.projectionInstallCount == installed.observation.projectionInstallCount)
@@ -1997,7 +2011,9 @@ struct ChatViewScrollHarnessTests {
                 #expect(firstReady.observation.geometry.isPlausibleOpeningViewport)
                 #expect(firstReady.observation.geometry.distanceFromBottom
                     <= ChatTranscriptGeometry.catchUpDistance)
-                #expect(firstReady.nativePinnedAtBottom)
+                let pinnedGap = try #require(harness.newestRowClearance())
+                #expect(abs(pinnedGap - 4) <= 0.5, "the 0122f8416 mounted gap measured 4 pt")
+                #expect(firstReady.nativePinnedAtOrigin)
                 #expect(harness.isPinnedToBottom())
                 #expect(!firstReady.observation.visibleRowIDs.isEmpty)
                 #expect(harness.recorder.samples.filter(\.observation.isReady).allSatisfy {
@@ -2115,7 +2131,7 @@ struct ChatViewScrollHarnessTests {
                 for _ in 0..<3 { try await harness.driveFrameBoundary() }
                 let settled = harness.probeObservation
                 #expect(settled.visibleRowIDs.contains(tailSemanticID))
-                #expect(harness.recorder.samples.last?.nativePinnedAtBottom == true)
+                #expect(harness.recorder.samples.last?.nativePinnedAtOrigin == true)
                 #expect(harness.isPinnedToBottom())
             }
         }
@@ -2158,12 +2174,12 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.animatedEntranceCount == entranceBaseline + 1
                         && $0.observation.rowFrames["turn-agent"] != nil
                         && !$0.observation.visibleRowIDs.isEmpty
-                        && $0.nativePinnedAtBottom
+                        && $0.nativePinnedAtOrigin
                 }
                 #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
                 #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
                 #expect(revealed.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
-                #expect(revealed.nativePinnedAtBottom, "the reveal's display frame: \(harness.pinnedDescription())")
+                #expect(revealed.nativePinnedAtOrigin, "the reveal's display frame: \(harness.pinnedDescription())")
                 #expect(!revealed.observation.visibleRowIDs.isEmpty)
 
                 var final = intermediate
@@ -2183,12 +2199,12 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.projectionInstallCount > revealed.observation.projectionInstallCount
                         && $0.observation.rowFrames["turn-agent"] != nil
                         && !$0.observation.visibleRowIDs.isEmpty
-                        && $0.nativePinnedAtBottom
+                        && $0.nativePinnedAtOrigin
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
                 #expect(settled.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
                 #expect((settled.observation.physicalRowDisappearanceCounts["turn-agent"] ?? 0) == 0)
-                #expect(settled.nativePinnedAtBottom, "the settled display frame: \(harness.pinnedDescription())")
+                #expect(settled.nativePinnedAtOrigin, "the settled display frame: \(harness.pinnedDescription())")
                 #expect(!settled.observation.visibleRowIDs.isEmpty)
 
                 let compactionOrdinal = try #require(final.transcriptTotal)
@@ -2204,10 +2220,10 @@ struct ChatViewScrollHarnessTests {
                         && ($0.observation.scrollSettledDistance ?? .infinity)
                             <= ChatTranscriptGeometry.catchUpDistance
                         && !$0.observation.visibleRowIDs.isEmpty
-                        && $0.nativePinnedAtBottom
+                        && $0.nativePinnedAtOrigin
                 }
                 #expect(progress.observation.animatedEntranceCount >= entranceBaseline + 1)
-                #expect(progress.nativePinnedAtBottom, "the compacting display frame: \(harness.pinnedDescription())")
+                #expect(progress.nativePinnedAtOrigin, "the compacting display frame: \(harness.pinnedDescription())")
                 #expect(!progress.observation.visibleRowIDs.isEmpty)
 
                 var compacted = compacting
@@ -2223,11 +2239,11 @@ struct ChatViewScrollHarnessTests {
                         && ($0.observation.scrollSettledDistance ?? .infinity)
                             <= ChatTranscriptGeometry.catchUpDistance
                         && !$0.observation.visibleRowIDs.isEmpty
-                        && $0.nativePinnedAtBottom
+                        && $0.nativePinnedAtOrigin
                 }
                 #expect(compactionSettled.observation.animatedEntranceCount
                     >= progress.observation.animatedEntranceCount)
-                #expect(compactionSettled.nativePinnedAtBottom, "the compacted display frame: \(harness.pinnedDescription())")
+                #expect(compactionSettled.nativePinnedAtOrigin, "the compacted display frame: \(harness.pinnedDescription())")
                 #expect(!compactionSettled.observation.visibleRowIDs.isEmpty)
             }
         }
@@ -2699,11 +2715,8 @@ struct ChatViewScrollHarnessTests {
                     !harness.probeObservation.isDetached,
                     "the catch-up returned to a pinned viewport: \(harness.pinnedDescription())"
                 )
-                // The newest row's own settle, judged by the shared oracle: the
-                // two legal pinned positions are the tail spacing and the
-                // terminal row's own overlap of the affordance, and the exact
-                // 12.0 the origin-anchored path keeps is the keyboard journey's
-                // measurement, not this one's.
+                // The newest row settles with the shared 12 pt marker-owned
+                // gap, independent of row identity or opening state.
                 #expect(
                     harness.isPinnedToBottom(),
                     "the caught-up transcript settled \(ct2Number(clearance)) pt from the composer: \(harness.pinnedDescription())"
@@ -2979,7 +2992,7 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(20)) {
             try await withHarness(seed: 1_277) { harness in
                 let ready = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeSettledAtBottom
+                    $0.observation.isReady && $0.nativeSettledAtOrigin
                 }
                 // A content change may publish the new terminal row's own exact
                 // realization lease. Every other command is the application
@@ -3007,10 +3020,10 @@ struct ChatViewScrollHarnessTests {
                 let grew = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > installBaseline
                         && $0.observation.rowFrames[semanticID] != nil
-                        && $0.nativePinnedAtBottom
+                        && $0.nativePinnedAtOrigin
                 }
                 #expect(
-                    grew.nativePinnedAtBottom,
+                    grew.nativePinnedAtOrigin,
                     "the grown tail: \(harness.pinnedDescription())"
                 )
                 #expect(
@@ -3028,10 +3041,10 @@ struct ChatViewScrollHarnessTests {
                 harness.replaceAuthoritativeSnapshot(shrunk)
                 let shrank = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > grew.observation.projectionInstallCount
-                        && $0.nativePinnedAtBottom
+                        && $0.nativePinnedAtOrigin
                 }
                 #expect(
-                    shrank.nativePinnedAtBottom,
+                    shrank.nativePinnedAtOrigin,
                     "the shrunk tail: \(harness.pinnedDescription())"
                 )
                 #expect(
@@ -3039,10 +3052,8 @@ struct ChatViewScrollHarnessTests {
                     "pinned shrink published a position write: \(harness.pinnedDescription())"
                 )
                 // The settled live state, not only the sample the wait returned on.
-                // The oracle's own pinned decision, which allows both positions a
-                // pinned transcript has today: the 12 pt tail affordance after its
-                // newest row, and the terminal row owning that affordance. The
-                // shrink's own layout gets its frames first.
+                // The marker-owned 12 pt gap remains stable after the shrink's
+                // own layout gets its frames first.
                 for _ in 0..<24 { try await harness.driveFrameBoundary() }
                 let settledBottom = harness.transcriptBottom()
                 #expect(
@@ -3058,7 +3069,7 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(30)) {
             try await withHarness(seed: 1_278) { harness in
                 _ = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeSettledAtBottom
+                    $0.observation.isReady && $0.nativeSettledAtOrigin
                 }
                 try await harness.detachReaderMidHistory()
                 #expect(
@@ -3269,7 +3280,8 @@ struct ChatViewScrollHarnessTests {
         } catch {
             if let sample = harness.recorder.samples.last {
                 print("Hosted failure frame \(sample.frameIndex): releases=\(sample.observation.targetReleaseCount) rows=\(sample.nativeRows.suffix(8))")
-                print("Geometry comparison: native=\(String(describing: harness.recorder.samples.last?.nativeContentHeight)) model=\(harness.probeObservation.geometry)")
+                print("Origin readiness: newest=\(String(describing: sample.nativeBottom.newestRowSemanticID)) visible=\(sample.observation.visibleRowIDs) distance=\(sample.observation.geometry.distanceFromBottom) originPinned=\(sample.nativePinnedAtOrigin)")
+                print("Geometry comparison (diagnostic only): native=\(String(describing: sample.nativeContentHeight)) model=\(sample.observation.geometry)")
                 print("Composer catalog: builds=\(harness.probe.composerCatalogBuildCount) installed=\(harness.probe.composerCatalogCommandNames) canonical=\(harness.canonicalCommandNames) activity=\(harness.chatSurfaceActivity)")
             }
             await harness.close()
@@ -4193,8 +4205,8 @@ final class ChatViewScrollHarness {
     func isPinnedToBottom() -> Bool { transcriptBottom().isPinned }
 
     /// The visual gap between the newest mounted row's bottom edge and the
-    /// composer's top edge: `TranscriptWindowOracle.tailSpacing` (12 pt) at the
-    /// pinned tail, or 0 while the terminal row overlaps the tail affordance.
+    /// composer's top edge. The eager marker owns its 12 pt band; the measured
+    /// row-to-composer clearance is fixture-specific and pinned by opening tests.
     /// `nil` when no composer or no mounted row is there to measure.
     func newestRowClearance() -> CGFloat? { transcriptBottom().clearance }
 
@@ -5118,10 +5130,10 @@ enum TranscriptWindowOracle {
         /// The pinned bottom band: `bottomBandHeight` points ending at the
         /// composer's top edge.
         let band: CGRect?
-        /// The bottom edge of the bottom-most mounted row, which is the newest
-        /// row's bottom edge while the transcript is pinned and the row the
-        /// reader sees at the composer edge while it is not.
+        /// The bottom edge and identity of the bottom-most mounted row, which
+        /// is the newest row when the origin-anchored viewport is pinned.
         let newestRowBottomEdge: CGFloat?
+        let newestRowSemanticID: String?
         /// The fraction of the visible transcript rect that mounted rows cover.
         let visibleRowFraction: CGFloat
         /// Whether any mounted row intersects the bottom band.
@@ -5139,11 +5151,8 @@ enum TranscriptWindowOracle {
             return composerTop - newestRowBottomEdge
         }
 
-        /// Whether the newest row sits where the pinned tail puts it. Two
-        /// positions are legal today: the transcript keeps a 12 pt tail
-        /// affordance after its newest row, and overlaps that affordance while
-        /// the terminal row owns the opening target, which puts the newest row's bottom edge at the
-        /// composer edge itself.
+        /// The marker-owned band is the sole pinned placement; short and tall
+        /// terminal rows produce different measured gaps within that band.
         var isPinned: Bool {
             guard let clearance else { return false }
             return clearance >= -pinnedTolerance && clearance <= tailSpacing + pinnedTolerance
@@ -5226,7 +5235,8 @@ enum TranscriptWindowOracle {
                 composerClearance: composerTop.map { $0 - frame.maxY }
             ))
         }
-        let newestRowBottomEdge = rows.map(\.windowFrame.maxY).max()
+        let newestRow = rows.max { $0.windowFrame.maxY < $1.windowFrame.maxY }
+        let newestRowBottomEdge = newestRow?.windowFrame.maxY
         let clearance = composerTop.flatMap { top in
             newestRowBottomEdge.map { top - $0 }
         }
@@ -5235,6 +5245,7 @@ enum TranscriptWindowOracle {
             composerTop: composerTop,
             band: band,
             newestRowBottomEdge: newestRowBottomEdge,
+            newestRowSemanticID: newestRow?.semanticID,
             visibleRowFraction: hasVisibleArea
                 ? min(1, max(0, coveredHeight / visible.height)) : 0,
             isBandCovered: rows.contains { $0.isInBottomBand },
@@ -5282,6 +5293,7 @@ enum TranscriptWindowOracle {
 
     private static let emptyBottom = Bottom(
         composerTop: nil, band: nil, newestRowBottomEdge: nil,
+        newestRowSemanticID: nil,
         visibleRowFraction: 0, isBandCovered: false, pinnedError: nil
     )
 
@@ -5376,23 +5388,18 @@ final class PresentedFrameRecorder: NSObject {
         /// The transcript scroll view's own content height at this display frame.
         let nativeContentHeight: CGFloat?
 
-        /// Whether the transcript's newest row sat in the pinned bottom band at
-        /// this display frame.
-        var nativePinnedAtBottom: Bool { nativeBottom.isPinned }
-
-        /// Whether the native transcript and the coordinator agree that the
-        /// pinned bottom is at the composer: the window oracle sees the newest
-        /// row in the pinned band, the coordinator's own viewport reports it
-        /// inside its catch-up distance, and the two agree about the content
-        /// height. The orientation-independent replacement for "the native
-        /// scroll view matches the coordinator's geometry" as a readiness fence:
-        /// the oracle alone is true as soon as the row hosts land, before the
-        /// opening has settled.
-        var nativeSettledAtBottom: Bool {
-            nativePinnedAtBottom
+        /// Whether the newest row is visible at the origin-anchored pinned edge.
+        var nativePinnedAtOrigin: Bool {
+            guard let newestRowID = nativeBottom.newestRowSemanticID else { return false }
+            return nativeBottom.isPinned
                 && observation.geometry.distanceFromBottom <= ChatTranscriptGeometry.catchUpDistance
-                && nativeContentHeight.map { abs($0 - observation.geometry.contentHeight) <= 2 } ?? false
+                && observation.visibleRowIDs.contains(newestRowID)
+                && nativeRows.contains { $0.semanticID == newestRowID && $0.isOnScreen }
         }
+
+        /// Opening is settled at the pinned edge, without comparing estimates of
+        /// the lazily materialized far history end.
+        var nativeSettledAtOrigin: Bool { nativePinnedAtOrigin }
     }
 
     private struct Waiter {

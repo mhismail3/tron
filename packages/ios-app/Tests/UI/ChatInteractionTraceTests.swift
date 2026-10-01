@@ -70,7 +70,7 @@ struct ChatInteractionTraceTests {
             context: context,
             command: ChatScrollCommand(
                 token: 7, presentation: 1, origin: .presentation,
-                destination: .openingTail("private-row"), animation: .disabled
+                destination: .row("private-row"), animation: .disabled
             ),
             state: .empty
         )

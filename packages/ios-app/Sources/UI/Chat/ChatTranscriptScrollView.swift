@@ -700,19 +700,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                   ($0.sourceWindow.originalStart ?? 0) > 0 else { return nil }
             return "earlier-messages"
         }
-        let terminalTargetID = terminalPhysicalID ?? terminalMaterializationID
-        let terminalRowOwnsOpeningTarget = terminalTargetID.map {
-            scrollCoordinator.ownsOpeningTailTarget(physicalID: $0)
-        } == true
-        let terminalRowOwnsTailAffordance = terminalRowOwnsOpeningTarget
         ScrollView {
             transcriptContent(
                 installed: installed,
                 physicalRows: physicalRows,
                 terminalPhysicalID: terminalPhysicalID,
                 terminalMaterializationID: terminalMaterializationID,
-                terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance,
-                clearance: orientation.layoutClearance(for: safeAreaInsets)
+                    clearance: orientation.layoutClearance(for: safeAreaInsets)
             )
             .environment(\.chatOwnsStatusBar, true)
             .chatTranscriptStatusBar(orientation, active: isReady && admitsNativeCallbacks) {
@@ -806,41 +800,15 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 finalGeometry: orientation.coordinatorGeometry(context.geometry, obstruction: orientation.layoutClearance(for: safeAreaInsets).top)
             )
         }
-        .onChange(of: scrollCoordinator.commandRevision) { _, _ in
-            // Coordinator-owned output does not depend on native input delivery.
-            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
-            onExecuteCommand()
-        }
-        .onChange(of: scrollCoordinator.viewportMode) { _, mode in
-            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
-            onApplyViewportMode(mode)
-        }
-        .onChange(of: scrollCoordinator.targetReleaseGeneration) { _, _ in
-            // Cleanup consumes the current exact target lease, not captured
-            // geometry. It remains admitted while the viewport is covered.
-            guard scrollCoordinator.consumeTargetRelease() else { return }
-            onReleaseCommandTarget()
-            if scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) {
-                onAutomaticProjectionIntakeAvailable()
-            }
-        }
-        .onChange(of: scrollCoordinator.tailSettlementGeneration) { _, _ in
-            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
-            onApplyViewportMode(.pinned)
-            onAutomaticProjectionIntakeAvailable()
-        }
-        .onChange(of: scrollCoordinator.pinnedPositionRevision) { _, _ in
-            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
-            onApplyViewportMode(.pinned)
-        }
-        .onChange(of: scrollCoordinator.layoutEpoch) { _, _ in
-            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
-            // A layout epoch retires every prior marker sample. The next
-            // physical geometry callback must re-admit the marker; reusing the
-            // old frame here can certify an empty pre-projection layout.
-            scrollCoordinator.installedLayoutEpochChanged()
-            scrollCoordinator.revalidateTailMarkerAfterLayoutEpoch()
-        }
+        .modifier(ChatTranscriptCoordinatorObservationModifier(
+            coordinator: scrollCoordinator,
+            viewportActivation: viewportActivation,
+            responseState: responseState,
+            executeCommand: onExecuteCommand,
+            applyViewportMode: onApplyViewportMode,
+            releaseCommandTarget: onReleaseCommandTarget,
+            automaticProjectionIntakeAvailable: onAutomaticProjectionIntakeAvailable
+        ))
         // The opening overlay may already be fading during `.presented`;
         // native scrolling remains disabled until the reveal owner publishes
         // the first fully ready frame.
@@ -869,10 +837,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             hostedRecorder?.recordScrollSettle(distanceFromBottom: current.distanceFromBottom)
         }
         guard admitsNativeCallbacks else { return }
-        if phase == .opening {
-            scrollCoordinator.observeOpeningGeometry(current)
-            return
-        }
+        if phase == .opening { return }
         guard phase == .positioning || phase == .revealing || phase == .presenting
                 || phase == .presented || phase == .ready,
               admitsGeometryCallbacks else { return }
@@ -896,7 +861,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         physicalRows: ChatPhysicalTranscriptRows?,
         terminalPhysicalID: String?,
         terminalMaterializationID: String?,
-        terminalRowOwnsTailAffordance: Bool,
         clearance: EdgeInsets
     ) -> some View {
         let hasEarlierMessages = (installed?.sourceWindow.originalStart ?? 0) > 0
@@ -916,23 +880,20 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         .background { ChatHostedObstructionProbe() }
                         #endif
                         .id("transcript-obstruction")
-                    tailMarker(terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance)
+                    tailMarker()
                 }
                 if let installed, let physicalRows {
                     if !newestFirst, hasEarlierMessages {
                         earlierMessagesRow(
                             installed: installed,
                             terminalMaterializationID: terminalMaterializationID,
-                            terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance
-                        )
+                                        )
                     }
                     ForEach(Array(physicalRows.enumerated()), id: \.element.id) { spinePosition, row in
                         physicalRowHost(
                             row,
                             terminalPhysicalID: terminalPhysicalID,
                             terminalMaterializationID: terminalMaterializationID,
-                            terminalRowOwnsTailAffordance:
-                                terminalRowOwnsTailAffordance,
                             installed: installed
                         )
                         .chatTranscriptOrientation(orientation)
@@ -945,8 +906,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         earlierMessagesRow(
                             installed: installed,
                             terminalMaterializationID: terminalMaterializationID,
-                            terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance
-                        )
+                                        )
                         // Older history appends at the far end, where an estimate
                         // only sizes the scroll range: a page load moves nothing
                         // on screen.
@@ -963,7 +923,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 }
             }
             if !newestFirst {
-                tailMarker(terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance)
+                tailMarker()
             }
         }
         // Register the complete transcript layout once. Independent row
@@ -993,7 +953,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     private func earlierMessagesRow(
         installed: InstalledChatTranscript,
         terminalMaterializationID: String?,
-        terminalRowOwnsTailAffordance: Bool
     ) -> some View {
         stableRow(
             semanticID: "earlier-messages",
@@ -1004,12 +963,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         ) {
             earlierRow(installed)
                 .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
-                .padding(
-                    orientation.paddingEdgeSet(.bottom),
-                    terminalMaterializationID == "earlier-messages"
-                        && terminalRowOwnsTailAffordance
-                        ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0
-                )
         }
         .id("earlier-messages")
     }
@@ -1050,7 +1003,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         _ row: ChatPhysicalTranscriptRow,
         terminalPhysicalID: String?,
         terminalMaterializationID: String?,
-        terminalRowOwnsTailAffordance: Bool,
         installed: InstalledChatTranscript
     ) -> some View {
         let entrance = promptEntrance(for: row, installed: installed)
@@ -1075,15 +1027,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 suppressEntrance: suppressEntrance
             )
         }
-        // The exact row target includes the complete affordance. The eager
-        // marker overlaps that same empty band so both targets end identically.
-        // The band is the 12 pt the pinned transcript keeps above the composer,
-        // which is the content origin once the order is origin-anchored.
-        .padding(
-            orientation.paddingEdgeSet(.bottom),
-            row.id == terminalPhysicalID && terminalRowOwnsTailAffordance
-                ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0
-        )
         .id(row.id)
     }
 
@@ -1390,18 +1333,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     layoutEpoch: sample.layoutEpoch,
                     frame: sample.frame
                 )
-                // The terminal row shares this geometry observation with
-                // semantic layout. Its captured epoch, viewport activation,
-                // installed tag, and physical ID are all validated by the
-                // coordinator before they can certify opening.
-                if let terminalPhysicalID {
-                    scrollCoordinator.physicalTerminalRowObserved(
-                        physicalID: terminalPhysicalID,
-                        layoutEpoch: sample.layoutEpoch,
-                        viewportActivation: sample.viewportActivation,
-                        projectionTag: installedTag
-                    )
-                }
                 let currentInstalled = transcriptPresentation.installed
                 let currentState = transcriptPresentation.entranceState(for: semanticID)
                 if admitsGeometryCallbacks, ChatEntranceGeometryAdmissionPolicy.admits(
@@ -1443,7 +1374,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             }
     }
 
-    private func tailMarker(terminalRowOwnsTailAffordance: Bool) -> some View {
+    private func tailMarker() -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
         return Color.clear
             .frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)
@@ -1470,10 +1401,58 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     stability: .notARow
                 )
             }
-            // Keep one full-size measurable marker. While the row owns the
-            // target, overlap its padding instead of splitting the affordance
-            // into fractional heights that round differently at target release.
-            .padding(orientation.paddingEdgeSet(.top), terminalRowOwnsTailAffordance
-                ? -ChatTranscriptLayoutConstants.tailAffordanceHeight : 0)
+    }
+}
+
+@MainActor
+private struct ChatTranscriptCoordinatorObservationModifier: ViewModifier {
+    let coordinator: ChatScrollCoordinator
+    let viewportActivation: Int
+    let responseState: ChatResponseState?
+    let executeCommand: () -> Void
+    let applyViewportMode: (ChatViewportMode) -> Void
+    let releaseCommandTarget: () -> Void
+    let automaticProjectionIntakeAvailable: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: coordinator.commandRevision) { _, _ in
+                guard coordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
+                executeCommand()
+            }
+            .onChange(of: coordinator.viewportMode) { _, mode in
+                guard coordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
+                applyViewportMode(mode)
+            }
+            .onChange(of: coordinator.targetReleaseGeneration) { _, _ in
+                guard coordinator.consumeTargetRelease() else { return }
+                releaseCommandTarget()
+                if coordinator.admitsViewportCallback(capturedActivation: viewportActivation) {
+                    automaticProjectionIntakeAvailable()
+                }
+            }
+            .onChange(of: coordinator.tailSettlementGeneration) { _, _ in
+                guard coordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
+                applyViewportMode(.pinned)
+                automaticProjectionIntakeAvailable()
+            }
+            .onChange(of: coordinator.pinnedPositionRevision) { _, _ in
+                guard coordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
+                applyViewportMode(.pinned)
+            }
+            .onChange(of: coordinator.layoutEpoch) { _, _ in
+                guard coordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
+                coordinator.installedLayoutEpochChanged()
+            }
+            .onChange(of: responseState, initial: true) { previous, current in
+                guard let current, previous?.sessionID == current.sessionID else { return }
+                if ChatUnreadResponsePolicy.shouldMarkUnread(
+                    previous: previous,
+                    current: current,
+                    userScrolledAway: coordinator.shouldTrackUnreadResponse
+                ) {
+                    coordinator.semanticResponseArrived()
+                }
+            }
     }
 }

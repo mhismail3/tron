@@ -2203,7 +2203,7 @@ Detached semantic settlement waits passively for that exact sample; after each d
 owner requires both a strictly newer sample of the same semantic frame and a newer scroll-geometry
 revision, accepts either callback order, permits at most one late correction, and succeeds only within
 one point. A corrected detached or prepend transaction then completes its bounded programmatic point correction
-without moving the viewport. Prepend admission refuses active catch-up, opening-tail ownership, and any
+without moving the viewport. Prepend admission refuses active catch-up, a visible opening reveal, and any
 outstanding non-prepend command rather than overwriting position authority. There is no next-frame assumption,
 total content-height polling loop, unanchored success, or stale defer
 that can end a newer paging token. The
