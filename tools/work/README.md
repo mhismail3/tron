@@ -97,7 +97,8 @@ workspace:
    checkout and npm verifies that its dependency tree is complete. A missing or
    incomplete source install, lock mismatch, or clone failure falls back to
    `npm ci` in that worktree. iOS build caches are owned and seeded by
-   `scripts/tron-ios-test build`, not by `start`.
+   the build-bearing commands of `scripts/tron-ios-test` (`build`, `checkpoint`
+   and `prepare`), not by `start`.
 
 The session is `--session`, then `WORK_SESSION_ID`, then `PI_SESSION_ID`.
 
