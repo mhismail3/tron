@@ -990,7 +990,6 @@ final class ChatHostedProbe {
         importCameraImage = nil
         fixtureOpenPresentation = nil
         openingPhase = nil
-        openingSettlementReturned = nil
         extensionPublicationAllowed = nil
         installedRuntime = nil
         displayControl = nil
@@ -1042,8 +1041,6 @@ final class ChatHostedProbe {
     }
 
     var openingPhase: (() -> ChatOpenPresentationPhase)?
-    // Observe/hold the real coordinator result; tests never synthesize settlement.
-    var openingSettlementReturned: ((ChatScrollCoordinator.OpeningTailSettlementResult) async -> Void)?
     var extensionPublicationAllowed: (() -> Bool)?
     var installedRuntime: (() -> String?)?
     private(set) var readyPublicationCount = 0

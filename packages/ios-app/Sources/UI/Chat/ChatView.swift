@@ -2176,8 +2176,7 @@ struct ChatView: View {
                     retainedPresentation: true,
                     state: interactionTraceState(installed: installed)
                 )
-                guard await completePositionedOpening(
-                    installed: installed,
+                guard await completeOpening(
                     interval: interval,
                     epoch: epoch
                 ) == .ready else {
@@ -2209,35 +2208,11 @@ struct ChatView: View {
                 retainedPresentation: false,
                 state: interactionTraceState(installed: installed)
             )
-            let completion = await completePositionedOpening(
-                installed: installed,
+            let completion = await completeOpening(
                 interval: interval,
                 epoch: epoch
             )
             guard completion == .ready else {
-                if case .positioningFailed(let reasons) = completion {
-                    let traceContext = ensureInteractionTraceContext()
-                    model.chatInteractionTrace.opening(
-                        .failed,
-                        context: traceContext,
-                        positioningSucceeded: false,
-                        state: interactionTraceState()
-                    )
-                    model.chatInteractionTrace.openingFailure(
-                        reasons,
-                        context: traceContext,
-                        state: interactionTraceState()
-                    )
-                    await model.appLog.recordCausal(
-                        name: "opening.failed", outcome: "failure", level: "warning",
-                        details: reasons.map { String(describing: $0) }.joined(separator: ";")
-                    )
-                    _ = sessionPresentation.open.fail(
-                        sessionID: sessionID,
-                        epoch: epoch,
-                        message: "The conversation layout did not settle. Please retry."
-                    )
-                }
                 await retireOpeningGeneration(
                     generation,
                     retainingVisiblePresentation: true
@@ -2417,21 +2392,20 @@ struct ChatView: View {
     #endif
 
     @MainActor
-    private func revealPositionedTranscript(epoch: Int) -> Bool {
+    private func beginOpeningReveal(epoch: Int) -> Bool {
         model.chatInteractionTrace.opening(
             .revealBegan,
             context: ensureInteractionTraceContext(),
             state: interactionTraceState()
         )
-        // Resolve the physical positioning lift atomically while it is still
-        // covered. The single user-visible animation is owned later, after
-        // marker settlement, so two animation clocks cannot race geometry.
+        // Begin the reveal while the opening surface still covers the exact
+        // origin-anchored baseline; the cosmetic animation is separate from
+        // viewport ownership and first-ready publication.
         var transaction = Transaction()
         transaction.disablesAnimations = true
         let began = withTransaction(transaction) {
             sessionPresentation.open.beginPositionedReveal(sessionID: sessionID, epoch: epoch)
         }
-        if began { scrollCoordinator.openingRevealCompleted() }
         return began
     }
 
@@ -2537,81 +2511,34 @@ struct ChatView: View {
         intakeTranscriptProjection(capture)
     }
 
-    private func physicalOpeningTailID(for installed: InstalledChatTranscript) -> String {
-        let rows = ChatPhysicalTranscriptRowPolicy.rows(
-            installed: installed,
-            canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
-            orientation: transcriptOrientation
-        )
-        // Target the current physical terminal row so lazy content realizes its
-        // natural tail. The marker remains the separate settlement oracle.
-        if let terminal = rows.newest { return terminal.id }
-        if (installed.sourceWindow.originalStart ?? 0) > 0 { return "earlier-messages" }
-        return "transcript-bottom"
-    }
-
-    private enum PositionedOpeningCompletion: Equatable {
+    private enum OpeningCompletion: Equatable {
         case ready
-        case positioningFailed([ChatInteractionTrace.OpeningFailureReason])
         case discarded
     }
 
     /// Shared production/hosted post-authority path. Authority setup differs,
-    /// but baseline positioning, reveal, and first-frame proof must not drift.
+    /// but the origin-anchored viewport needs no tail-positioning pass.
     @MainActor
-    private func completePositionedOpening(
-        installed: InstalledChatTranscript,
+    private func completeOpening(
         interval: PerformanceInterval,
         epoch: Int
-    ) async -> PositionedOpeningCompletion {
-        let positioned = await positionLatestTail(
-            epoch: epoch,
-            targetRenderedID: "transcript-bottom",
-            physicalTargetID: physicalOpeningTailID(for: installed)
-        )
-        guard admitCurrentOpeningCommit(), positioned else {
-            let isCurrentFailure = sessionPresentation.open.epoch == epoch
-                && ChatOpeningAttemptPolicy.shouldFailUnsettledAttempt(
-                    completedOwnedTask: true,
-                    taskCancelled: Task.isCancelled,
-                    sceneActive: scenePhase == .active,
-                    presentationActive: presentationActivity.allowsPresentationPublication,
-                    modelAdmitsOpen: model.admitsSessionPresentationOpen,
-                    phase: sessionPresentation.open.phase
-                )
-            performanceSignposts.end(
-                interval,
-                result: isCurrentFailure ? .failure : .discarded,
-                metrics: .none
-            )
-            return isCurrentFailure
-                ? .positioningFailed(scrollCoordinator.openingFailureReasons())
-                : .discarded
+    ) async -> OpeningCompletion {
+        guard admitCurrentOpeningCommit() else {
+            performanceSignposts.end(interval, result: .discarded, metrics: .none)
+            return .discarded
         }
-        guard !Task.isCancelled, revealPositionedTranscript(epoch: epoch) else {
+        guard !Task.isCancelled, beginOpeningReveal(epoch: epoch) else {
             performanceSignposts.end(interval, result: .discarded, metrics: .none)
             return .discarded
         }
         let activation = viewportActivation
-        let settlement: ChatScrollCoordinator.OpeningTailSettlementResult
-        if transcriptOrientation.pinsToEstimatedOrigin {
-            settlement = await scrollCoordinator.waitForOpeningTailSettlement()
-            #if HOSTED_TEST
-            await hostedProbe?.openingSettlementReturned?(settlement)
-            #endif
-        } else {
-            // The newest row is the exact content origin on the first layout
-            // pass, so one covered frame installs the settled viewport: there is
-            // no physical settlement proof to wait for, and the reveal below is
-            // unchanged.
-            do { try await displayFrameScheduler.nextFrame() } catch {
-                performanceSignposts.end(interval, result: .discarded, metrics: .none)
-                return .discarded
-            }
-            settlement = .settled
+        // The newest row is the exact content origin on the first layout pass.
+        // Keep one covered frame before revealing it, without a tail-positioning
+        // command or a physical settlement proof.
+        do { try await displayFrameScheduler.nextFrame() } catch {
+            performanceSignposts.end(interval, result: .discarded, metrics: .none)
+            return .discarded
         }
-        // A deadline owns physical settlement, not authority. Fence failures
-        // as well as successes before either can publish or retire a runtime.
         guard !Task.isCancelled,
               sessionPresentation.open.epoch == epoch,
               viewportActivation == activation,
@@ -2621,16 +2548,6 @@ struct ChatView: View {
               admitCurrentOpeningCommit() else {
             performanceSignposts.end(interval, result: .discarded, metrics: .none)
             return .discarded
-        }
-        switch settlement {
-        case .cancelled:
-            performanceSignposts.end(interval, result: .cancelled, metrics: .none)
-            return .discarded
-        case .failed(let reasons):
-            performanceSignposts.end(interval, result: .failure, metrics: .none)
-            return .positioningFailed(reasons)
-        case .settled:
-            break
         }
         guard sessionPresentation.open.installSettledViewport(
             sessionID: sessionID,
@@ -2645,50 +2562,6 @@ struct ChatView: View {
             return .discarded
         }
         return await completeFirstReadyFrame(interval, epoch: epoch) ? .ready : .discarded
-    }
-
-    @MainActor
-    private func positionLatestTail(
-        epoch: Int,
-        targetRenderedID: String?,
-        physicalTargetID: String
-    ) async -> Bool {
-        // The opening surface remains opaque until the exact physical marker
-        // after transcript and queue rows intersects a plausible bottom viewport.
-        guard !Task.isCancelled,
-              sessionPresentation.open.epoch == epoch,
-              sessionPresentation.open.phase == .positioning else { return false }
-        guard transcriptOrientation.pinsToEstimatedOrigin else {
-            // The newest row is the exact content origin on the first layout
-            // pass, so there is nothing to position and no physical origin
-            // evidence to wait for. Ownership still runs to the first ready
-            // frame, which is what keeps intake and asynchronous content gated
-            // through the reveal exactly as today.
-            return !Task.isCancelled
-                && sessionPresentation.open.epoch == epoch
-                && sessionPresentation.open.phase == .positioning
-        }
-        let context = ensureInteractionTraceContext()
-        model.chatInteractionTrace.opening(
-            .positioningBegan,
-            context: context,
-            state: interactionTraceState()
-        )
-        let positioned = await scrollCoordinator.positionOpeningTail(
-            targetRenderedID: targetRenderedID,
-            physicalTargetID: physicalTargetID
-        )
-        model.chatInteractionTrace.opening(
-            .positioningEnded,
-            context: context,
-            positioningSucceeded: positioned,
-            state: interactionTraceState()
-        )
-        if positioned { performanceTracker.settleScroll() }
-        return positioned
-            && !Task.isCancelled
-            && sessionPresentation.open.epoch == epoch
-            && sessionPresentation.open.phase == .positioning
     }
 
     @MainActor

@@ -18,8 +18,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         case authorityOpened = "authority-opened"
         case projectionInstalled = "projection-installed"
         case baselineInstalled = "baseline-installed"
-        case positioningBegan = "positioning-began"
-        case positioningEnded = "positioning-ended"
         case revealBegan = "reveal-began"
         case visibleRevealBegan = "visible-reveal-began"
         case readyFrameAwaited = "ready-frame-awaited"

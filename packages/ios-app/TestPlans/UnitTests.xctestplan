@@ -64,7 +64,6 @@
         "ChatViewScrollHarnessTests/resourcePickerSourceSelection(mention:)",
         "ChatViewScrollHarnessTests/openingReadyFrameReleasesNativeControls()",
         "ChatViewScrollHarnessTests/coveredFinalOpeningFrame()",
-        "ChatViewScrollHarnessTests/openingDeadlineRevalidatesOwner(owner:)",
         "ChatViewScrollHarnessTests/runtimeReplacementDuringOpening(finalFrame:)",
         "ChatViewScrollHarnessTests/cancelledDetachedReplacement(background:revoke:)",
         "ChatViewScrollHarnessTests/unfinishedCoveredOpeningResumesAuthority()",

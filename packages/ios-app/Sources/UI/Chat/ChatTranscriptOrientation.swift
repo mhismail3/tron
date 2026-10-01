@@ -42,9 +42,6 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// top blur is drawn by the transcript itself and is the same on both paths.
     var suppressesPinnedEndScrollEdgeEffect: Bool { true }
 
-    /// Estimate-based tail recovery is not used on the origin-anchored layout.
-    var pinsToEstimatedOrigin: Bool { false }
-
     // MARK: The layout the transcript's own ends map to
 
     /// The scroll view's layout edge that holds the newest row.

@@ -352,20 +352,16 @@ projection: content that arrived while iOS was backgrounded is shown in place, n
 burst of row animations or automatic scroll writes. Its monotonic reconciliation
 generation is carried through delayed projection work and consumed once at installation,
 so a fast network completion cannot reclassify the same suspended rows as fresh later.
-After the authoritative two-phase handshake completes, the projection remains behind
-the opaque opening surface until the exact physical marker after transcript and queue rows intersects
-a plausible native bottom viewport. One leased bottom-edge command realizes a missing lazy tail; submitted commands,
-clamped negative bottom distance, auxiliary rows, transient boundary geometry, and overflow overshoot are
-not settlement evidence. The native geometry observation identity includes the opening epoch and phase, so
-entering positioning replays current geometry even when SwiftUI would coalesce equal numeric fields. Exact-ID
-realization can proceed without a geometry sample. If physical proof still cannot settle within 750 milliseconds, the
-bounded attempt fails closed and the opening surface presents its retry path; elapsed time never substitutes for
-viewport evidence. The physical positioning lift resolves behind the opaque surface while the tail binding remains
-owned through its completion, current non-lifted marker/geometry evidence, two unchanged display frames, and the exact target-release callback. A separate visual entrance then installs for one covered frame and crossfades that surface into the settled transcript's slight upward motion. The opening lease continues to exclude repair, paging, submission, and live projection until animation completion and the first ready frame; only then is the transcript interactive. A separate two-second post-reveal deadline retires the stale target and fails behind the opening surface; it cannot certify missing evidence or expose a displaced transcript. Direct user or accessibility interaction
-cancels that arm. The composer
-remains visible throughout opening, while sending stays disabled until readiness. Opening tail
-positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
-phase. Automatic live projection intake remains coalesced through that phase and its applied target release, then submits only the newest desired cut. Ordinary pinned growth, shrink, streaming, existing-row settlement, and new-row insertion remain owned by native size-change anchoring. Explicit
+After the authoritative two-phase handshake completes, the exact-origin projection remains behind
+the opaque opening surface for one covered display frame, then enters its cosmetic reveal. Opening
+issues no tail-positioning command and waits for no physical-tail marker, settlement deadline, or
+correction loop. The current opening epoch, viewport activation, active scene, presentation activity,
+and mounted runtime authority are revalidated across each asynchronous boundary. The composer
+remains visible throughout opening, while sending, interaction, paging, extension routes, and live
+projection intake stay gated until a current first-ready frame; only then is the transcript
+interactive. Automatic live projection intake remains coalesced through that opening transaction,
+then submits only the newest desired cut. Ordinary pinned growth, shrink, streaming, existing-row
+settlement, and new-row insertion remain owned by native size-change anchoring. Explicit
 opening, catch-up, semantic restore, prepend, and retained resume remain distinct command owners; after they release, pinned mode
 keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Ordinary pinned growth and shrink need no estimate-based correction command.
 Short-content alignment remains bottom-owned by the native anchor; blank space stays above the tail. Editor-only composer height changes install atomically;

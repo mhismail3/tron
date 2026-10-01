@@ -1737,73 +1737,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    enum OpeningDeadlineOwner: CaseIterable { case current, replacedRuntime, coveredAfterFailure }
-
-    @Test("real opening deadline failures publish only for their current live owner", arguments: OpeningDeadlineOwner.allCases)
-    func openingDeadlineRevalidatesOwner(owner: OpeningDeadlineOwner) async throws {
-        try await withTestWatchdog(timeout: .seconds(15)) { @MainActor in
-            let frames = OpeningFrameGate()
-            let returned = OpeningSettlementReturnGate()
-            defer { frames.release(); returned.release() }
-            let snapshot = try SessionScenarioBuilder(seed: 1_254).openingTail(targetEncodedBytes: 10_000)
-            try await withHarness(snapshot: snapshot, displayFrameScheduler: frames.scheduler,
-                                  enablesComposerSubmission: true, enablesPresentationCover: true, usesRealOpening: true) { harness in
-                frames.condition = { harness.probe.openingPhase?() == .revealing }
-                harness.probe.openingSettlementReturned = { await returned.hold($0) }
-                try await frames.waitUntilHeld()
-                let target = try #require(harness.currentTarget)
-                var next = snapshot
-                if owner == .replacedRuntime {
-                    next.runtimeGeneration += "-replacement"
-                    next.revision += 1
-                    next.eventSequence += 1
-                    harness.replaceAuthoritativeSnapshot(next)
-                    #expect(harness.currentTarget == target)
-                }
-                // The production two-second post-reveal deadline runs while
-                // its real display-frame dependency is held, producing failure.
-                try await returned.waitUntilHeld()
-                guard case .failed(let reasons) = returned.result else {
-                    Issue.record("Expected the actual post-reveal deadline failure")
-                    return
-                }
-                #expect(reasons.contains(.frameStability))
-                if owner == .coveredAfterFailure {
-                    harness.setCovered(true)
-                    try await harness.waitForCoverTransition(presented: true)
-                }
-                harness.probe.openingSettlementReturned = nil
-                returned.release() // Ignores cancellation: failure was already produced.
-                frames.release()
-                try await harness.waitForOpeningAttemptCompletion(1)
-                let failures = harness.traceRecords.filter { $0.record.event == "chat.opening.failed" }
-                if owner == .current {
-                    #expect(failures.count == 1)
-                    #expect(ChatOpeningAttemptPolicy.isFailed(harness.probe.openingPhase?() ?? .opening))
-                    #expect(harness.currentTarget == nil)
-                    #expect(harness.probe.readyPublicationCount == 0)
-                    #expect(harness.rpcMethods.filter { $0 == "session.close" }.count == 1)
-                    return
-                }
-                #expect(failures.isEmpty)
-                #expect(!ChatOpeningAttemptPolicy.isFailed(harness.probe.openingPhase?() ?? .opening))
-                #expect(harness.currentTarget == target)
-                #expect(!harness.rpcMethods.contains("session.close"))
-                if owner == .coveredAfterFailure {
-                    #expect(harness.probe.readyPublicationCount == 0)
-                    #expect(harness.probe.extensionPublicationAllowed?() == false)
-                    harness.setCovered(false)
-                    try await harness.waitForCoverTransition(presented: false)
-                }
-                _ = try await harness.recorder.waitUntil { _ in harness.probe.readyPublicationCount == 1 }
-                #expect(harness.probe.installedRuntime?() == next.runtimeGeneration)
-                #expect(harness.currentTarget == target)
-                #expect(harness.rpcMethods.filter { $0 == "session.open" }.count == 1)
-                #expect(!harness.rpcMethods.contains("session.close"))
-            }
-        }
-    }
-
     @Test("same-target runtime replacement invalidates every unfinished opening cut", arguments: [false, true])
     func runtimeReplacementDuringOpening(finalFrame: Bool) async throws {
         try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
@@ -5597,26 +5530,6 @@ private final class HostedUploadReceipt {
 
     func release() {
         continuation?.resume(returning: "fixture-upload-\(calls)")
-        continuation = nil
-    }
-}
-
-@MainActor
-private final class OpeningSettlementReturnGate {
-    private(set) var result: ChatScrollCoordinator.OpeningTailSettlementResult?
-    private var continuation: CheckedContinuation<Void, Never>?
-
-    func hold(_ result: ChatScrollCoordinator.OpeningTailSettlementResult) async {
-        self.result = result
-        await withCheckedContinuation { continuation = $0 }
-    }
-
-    func waitUntilHeld() async throws {
-        while continuation == nil { try await DisplayFrameScheduler.displayLink.nextFrame() }
-    }
-
-    func release() {
-        continuation?.resume()
         continuation = nil
     }
 }

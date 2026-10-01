@@ -395,24 +395,25 @@ its baseline. The transcript remains behind a nonblank opening surface containin
 two-phase `session.open`/`session.sync` handshake installs its authoritative tail, the
 exact initial transcript projection, and a physically verified viewport at the marker
 after transcript and queue rows. The positioning command targets the terminal physical row
-from that installed spine (including an admitted alias), while the marker remains the separate
-settlement oracle. Rows remain fully realizable beneath that opaque cover, which also extends
-under the navigation bar because the transcript scrolls there, outside its safe frame
-(`ChatViewScrollHarnessTests.openingCoverHidesNavigationBand`);
-an opacity-zero lazy stack is never used as a layout gate. The eight-point positioning lift resolves behind that cover, and the cover is removed only after
-current non-lifted marker and geometry evidence, two physically unchanged presented frames regardless of duplicate SwiftUI observation callbacks, and consumption of
-the exact opening-target release. One still-covered frame then installs the settled transcript at zero opacity and an eight-point visual offset; the immutable commit rises while the cover fades in one cosmetic animation transaction. Physical settlement plus the next ready display-link frame, rather than animation completion, admits interaction, repair, paging, live projection intake, and the exact submission/layout authority. The cosmetic reveal remains `presented` until that frame revalidates the opening epoch, exact viewport activation, active scene, live presentation activity, mounted target, and installed runtime identity. Coverage retires even a final-frame attempt; a late scheduler return cannot publish ready or extension routes behind the cover. Same-target runtime replacement rejects an unfinished cut and resumes against current authority without reopening transport. A missing cosmetic completion therefore cannot strand the pulse or controls; Reduce Motion keeps only the short fade. Automatic projection intake remains
-coalesced through that complete transaction. The first complete same-session/presentation/runtime commit may
-position and reveal even if streaming has advanced its payload; only the newest desired source is submitted
-after that lease ends. Runtime or presentation replacement still fails closed. Opening uses one exact
-terminal-row `ScrollPosition` command when the target is not yet realized, rejects native overflow
-overshoot as a bottom boundary, and never uses the lifted reveal frame or elapsed time as settlement proof. Every post-reveal settlement result, including the two-second deadline failure, revalidates cancellation, opening epoch, exact viewport activation, live presentation activity, and current mounted/runtime authority before interpretation. An obsolete failure uses cancellation/reconciliation rather than closing a valid same-target replacement; a covered late failure cannot publish unavailable. `ChatViewScrollHarnessTests.openingDeadlineRevalidatesOwner` holds the real frame dependency through the production deadline and covers current-owner failure, runtime replacement, and coverage after failure production. A separate two-second post-reveal deadline retires the stale target and fails the still-opaque
-opening for explicit retry; it never certifies readiness or falls through to a visible repair. A retained
-pinned presentation re-enters this same physical-marker positioning gate on resume;
-temporary coverage preserves only its committed authority and immutable installed
-projection, while a retained detached reader remains anchored and is never repinned.
-A temporarily covered unfinished opening resumes against that installed commit without a new
-session-open or projection install. Retirement checks the exact current mounted authority and
+from that installed spine (including an admitted alias). Rows remain fully realizable beneath the
+opaque cover, which also extends under the navigation bar because the transcript scrolls there,
+outside its safe frame (`ChatViewScrollHarnessTests.openingCoverHidesNavigationBand`); an
+opacity-zero lazy stack is never used as a layout gate. The origin is exact, so opening issues no
+tail-positioning command and waits for no physical-tail marker or settlement deadline. One covered
+display frame precedes the cosmetic eight-point reveal; interaction, paging, live projection intake,
+and extension routes remain gated until a current ready frame. Every asynchronous boundary
+revalidates the opening epoch, viewport activation, active scene, presentation activity, and mounted
+runtime authority. Coverage retires even a final-frame attempt; a late scheduler return cannot
+publish ready or extension routes behind the cover. Same-target runtime replacement rejects an
+unfinished cut and resumes against current authority without reopening transport. A missing cosmetic
+completion cannot strand the pulse or controls; Reduce Motion keeps only the short fade. Automatic
+projection intake remains coalesced through that transaction. The first complete
+same-session/presentation/runtime commit may reveal even if streaming has advanced its payload;
+only the newest desired source is submitted after that lease ends. Runtime or presentation
+replacement still fails closed. A retained pinned presentation resumes from its retained native
+origin and uses a direct handoff only if current geometry proves it displaced; a retained detached
+reader remains anchored and is never repinned. A temporarily covered unfinished opening resumes
+against that installed commit without a new session-open or projection install. Retirement checks the exact current mounted authority and
 live coverage before closing, not cancellation alone; failures and true route loss close the
 old owner. Reader retention and authority retirement are independent: cancelling a covered or backgrounded detached replacement preserves a valid current subscription, while revocation closes that owner without erasing the permitted old reader cut. A detached display cut does not bind command authority: a replacement target from
 the current route/profile's mounted subscription is reconciled independently, with send and
@@ -475,7 +476,7 @@ A gesture that begins during that correction cancels every remaining position wr
 and its final native geometry wins over the pre-load detached state. A 256-record,
 content-free in-memory chat trace correlates opening, projection-spine replacement,
 layout participants, viewport intent, explicit scroll commands, submission lifecycle,
-and thresholded geometry changes with local context/generation numbers. A terminal opening deadline also emits one bounded failure snapshot naming the missing authority/projection, unapplied command, stale marker epoch, implausible or non-boundary viewport, missing physical-tail alignment, incomplete two-frame stability, inactive presentation, cancellation, or replacement category; this is evidence only and never a readiness fallback. The hosted ChatView harness exercises both idle and streaming production openings, while coordinator tests inject missing physical proof. It emits automatic anomalies when a ready opening loses its installed rows or a pinned opening or
+and thresholded geometry changes with local context/generation numbers. The origin-anchored opening needs no tail-positioning command or physical-tail settlement proof: it commits a covered display frame, then performs the reveal and publishes readiness from a current first-ready frame. The interaction trace separately records pinned displacement anomalies. It emits automatic anomalies when a ready opening loses its installed rows or a pinned opening or
 submission becomes substantially displaced. SwiftUI marker classification edges additionally record the
 first loss of pinned-tail alignment before recovery with before/after displacement, offset, and content
 scalars, excluding user-owned scrolling. Marker/row observations and estimated scroll geometry are
@@ -1114,22 +1115,14 @@ tail anchors; a bottom-starting pull that remains within the tail boundary or na
 rubber band stays pinned and never exposes catch-up. A physically observed direct return, catch-up, or opening pins; submission and prepend preserve
 the current mode; a fresh presentation reset pins while a retained same-session reset preserves
 reader authority. `ChatScrollCoordinator` owns the reducer, raw geometry and semantic frames,
-unread state, and four bounded command purposes only: exact opening-tail positioning, catch-up,
-semantic-anchor correction, and prepend correction. Ordinary pinned growth and shrink are owned by
+unread state, and bounded explicit commands for catch-up, semantic-anchor correction, and prepend
+correction. Origin opening issues no tail-positioning command. Ordinary pinned growth and shrink are owned by
 the native origin anchor, not by estimate-based correction commands. Automatic growth follow,
 tail-correction arbitration, and callback-order compatibility flags no longer exist.
 
-Chat interaction diagnostics remain a 256-record in-memory projection in Logs, not a session journal. Content-free composer availability transitions record connection/reconciliation, mounted authority, projection availability, opening/scroll ownership, pending uploads/submission, and live surface activity; blocked send admission records the same inputs. Visible-reveal and ready-frame-await milestones separate physical settlement from presentation publication. Compact entrance admission/completion and queued physical-target ordinals correlate growth with target retarget/release, including the callback's captured versus current layout epoch. Geometry scalars are diagnostic only; lazy estimates are not independent UIKit visibility or composited-frame proof. These event-driven diagnostics add no polling, native-view scan, or second state authority. Structural native continuity remains a known separate limitation; the trace helps localize the next incident without claiming that a later aligned marker proves uninterrupted visibility. Schema 2 context records include numeric app/build metadata. Closed lease events distinguish requested, frame-ready, actually consumed, and canonical-handoff boundaries. Geometry/semantic/marker revisions explain evidence provenance; a cached row frame is not a claim of current native visibility. At most 64 short in-memory identity entries assign local non-reused ordinals to physical/semantic IDs without exporting IDs, hashes, text, filenames, or credentials or scanning the transcript spine. Retirement revokes delayed checkpoints while retaining the ended context, so a truly lost active projection remains diagnosable. Hosted tests use test-only mounted UIKit row/composer markers plus the SwiftUI host's state identity, rather than retained semantic frames or estimated content height, to exercise send → acknowledgement (before and after release) → first successor with short history, an oversized send crossing into overflow, and 160 mixed-height rows. Separate cases cover short streaming/appends through the composer-inset boundary and viewport contraction. These are mounted-frame/clearance checks, not a substitute for full physical-device visual acceptance.
+Chat interaction diagnostics remain a 256-record in-memory projection in Logs, not a session journal. Content-free composer availability transitions record connection/reconciliation, mounted authority, projection availability, opening/scroll ownership, pending uploads/submission, and live surface activity; blocked send admission records the same inputs. Visible-reveal and ready-frame-await milestones separate the cosmetic reveal from presentation publication. Compact entrance admission/completion and queued physical-target ordinals correlate growth with target retarget/release, including the callback's captured versus current layout epoch. Geometry scalars are diagnostic only; lazy estimates are not independent UIKit visibility or composited-frame proof. These event-driven diagnostics add no polling, native-view scan, or second state authority. Structural native continuity remains a known separate limitation; the trace helps localize the next incident without claiming that a later aligned marker proves uninterrupted visibility. Schema 2 context records include numeric app/build metadata. Closed lease events distinguish requested, frame-ready, actually consumed, and canonical-handoff boundaries. Geometry/semantic/marker revisions explain evidence provenance; a cached row frame is not a claim of current native visibility. At most 64 short in-memory identity entries assign local non-reused ordinals to physical/semantic IDs without exporting IDs, hashes, text, filenames, or credentials or scanning the transcript spine. Retirement revokes delayed checkpoints while retaining the ended context, so a truly lost active projection remains diagnosable. Hosted tests use test-only mounted UIKit row/composer markers plus the SwiftUI host's state identity, rather than retained semantic frames or estimated content height, to exercise send → acknowledgement (before and after release) → first successor with short history, an oversized send crossing into overflow, and 160 mixed-height rows. Separate cases cover short streaming/appends through the composer-inset boundary and viewport contraction. These are mounted-frame/clearance checks, not a substitute for full physical-device visual acceptance.
 
-Opening still keeps the opaque surface until the exact physical marker after transcript and
-queue rows is positioned. Initial opaque-surface geometry is retained as evidence without
-admitting ordinary scroll side effects. The 750-millisecond acknowledgement cadence starts only
-after an exact command crosses the application boundary, requires fresh post-application marker
-and viewport evidence, and permits at most three corrective commands; it never converts missing
-or cross-frame evidence into a user-visible failure. The 30-second opening owner is the sole
-terminal deadline. The lease remains through the reveal's stable frames before releasing to native
-size-change anchoring. Direct interaction abandons
-opening immediately. Catch-up retains its
+Opening keeps the opaque surface through a covered display frame and the visual reveal; readiness is published only by a current first-ready frame. Authority, scene, and presentation checks fence every asynchronous boundary. Direct interaction cancels automatic viewport ownership immediately. Catch-up retains its
 staged long-distance approach and unread ownership until physical settlement; interruption
 restores anchored/unread state. Command application re-evaluates an already-admitted tail boundary,
 so geometry/application callback inversion cannot strand catch-up or composer submission authority.
