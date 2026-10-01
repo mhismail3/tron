@@ -391,8 +391,6 @@ final class ChatHostedProbe {
     private var frameControl: (() async throws -> Void)?
     private var stateControl: (() -> ChatHostedScrollState)?
     private var prependControl: (() -> Bool)?
-    private var invalidatePresentationControl: (() -> Void)?
-    private var reopenPresentationControl: (() async -> Void)?
     private var cancelPresentationControl: (() -> Void)?
     private var nextProjectionInstallControl: (@MainActor (Int) -> Void)?
     private var prependPageContinuation: CheckedContinuation<Void, Error>?
@@ -851,8 +849,6 @@ final class ChatHostedProbe {
         frame: @escaping () async throws -> Void,
         state: @escaping () -> ChatHostedScrollState,
         prepend: @escaping () -> Bool,
-        invalidatePresentation: @escaping () -> Void,
-        reopenPresentation: @escaping () async -> Void,
         cancelPresentation: @escaping () -> Void
     ) {
         geometryControl = geometry
@@ -865,8 +861,6 @@ final class ChatHostedProbe {
         frameControl = frame
         stateControl = state
         prependControl = prepend
-        invalidatePresentationControl = invalidatePresentation
-        reopenPresentationControl = reopenPresentation
         cancelPresentationControl = cancelPresentation
         refreshControlledState()
     }
@@ -951,20 +945,6 @@ final class ChatHostedProbe {
         prependPageContinuation = nil
     }
 
-    func drivePresentationInvalidation() {
-        controlEventCount &+= 1
-        invalidatePresentationControl?()
-        refreshControlledState()
-        revision &+= 1
-    }
-
-    func reopenPresentation() async {
-        controlEventCount &+= 1
-        await reopenPresentationControl?()
-        refreshControlledState()
-        revision &+= 1
-    }
-
     func retirePresentation() {
         cancelPresentationControl?()
         refreshControlledState()
@@ -977,17 +957,11 @@ final class ChatHostedProbe {
         catchUpControl = nil
         semanticResponseControl = nil
         submitPromptControl = nil
-        importCameraImage = nil
         fixtureOpenPresentation = nil
-        openingPhase = nil
-        extensionPublicationAllowed = nil
-        installedRuntime = nil
         displayControl = nil
         frameControl = nil
         stateControl = nil
         prependControl = nil
-        invalidatePresentationControl = nil
-        reopenPresentationControl = nil
         cancelPresentationControl = nil
         nextProjectionInstallControl = nil
         composerCatalogWillInstall = nil
@@ -1029,12 +1003,8 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    var openingPhase: (() -> ChatOpenPresentationPhase)?
-    var extensionPublicationAllowed: (() -> Bool)?
-    var installedRuntime: (() -> String?)?
     private(set) var readyPublicationCount = 0
     var fixtureOpenPresentation: (() async throws -> Int)?
-    var importCameraImage: ((UIImage) async -> Void)?
 
     func markReady() {
         readyPublicationCount += 1

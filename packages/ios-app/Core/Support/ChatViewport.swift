@@ -13,7 +13,6 @@ package enum ChatScrollAnimation: Equatable, Sendable {
 
 package struct ChatScrollCommand: Equatable, Sendable {
     package enum Origin: Equatable, Sendable {
-        case presentation
         case catchUp
         case oldestHistory
         case layout

@@ -2281,10 +2281,6 @@ struct ChatView: View {
     #if HOSTED_TEST
     @MainActor
     private func installHostedControls(probe: ChatHostedProbe) {
-        probe.openingPhase = { sessionPresentation.open.phase }
-        probe.extensionPublicationAllowed = { sessionPresentation.permitsExtensionInteractionPresentation }
-        probe.installedRuntime = { transcriptPresentation.installed?.tag.runtimeGeneration }
-        probe.importCameraImage = { await importCameraImage($0) }
         probe.composerPickerEntries = {
             presentedComposerResourcePicker == nil ? [] : composerResourceResults
         }
@@ -2368,12 +2364,6 @@ struct ChatView: View {
                         self.intakeLatestTranscriptProjectionIfNeeded()
                     }
                 )
-            },
-            invalidatePresentation: {
-                scrollCoordinator.resetForPresentation()
-            },
-            reopenPresentation: {
-                await beginOpeningPresentation()
             },
             cancelPresentation: {
                 scrollCoordinator.cancel()

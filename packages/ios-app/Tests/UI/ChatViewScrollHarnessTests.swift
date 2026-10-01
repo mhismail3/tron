@@ -710,12 +710,11 @@ struct ChatViewScrollHarnessTests {
             }
             #expect(harness.probeObservation.hasUnread)
 
-            // Return to the tail through the product's catch-up affordance:
-            // re-pins, clears unread, and the newest row is visible again. A
-            // hosted test cannot synthesize the pan gesture that re-pins a
-            // programmatic scroll, so the finger-driven return stays a device
-            // check and this is its real in-product equivalent.
-            try await harness.returnReaderToPinnedTailByCatchUp()
+            // Return to the newest row by the manual gesture path: scroll back to
+            // the tail and deliver the pan's interacting→idle phases. The idle
+            // phase at the tail re-pins through `scrollPhaseChanged` → `pinAtTail`,
+            // clears unread, and makes the newest row visible again.
+            try await harness.returnReaderToPinnedTail()
             let returned = try await harness.recorder.waitUntil {
                 !$0.observation.isDetached
                     && !$0.observation.hasUnread
@@ -1641,11 +1640,6 @@ final class ChatViewScrollHarness {
         model.selectedSnapshot?.transcript.contains { $0.id == id } == true
     }
 
-    func reopenWithAuthoritativeSnapshot(_ snapshot: SessionSnapshot) async {
-        model.installHostedSubscribedSnapshot(snapshot, token: "replacement-token")
-        await probe.reopenPresentation()
-    }
-
     func driveGeometry(
         previous: ChatTranscriptGeometry,
         current: ChatTranscriptGeometry,
@@ -1675,8 +1669,6 @@ final class ChatViewScrollHarness {
     func drivePrepend() -> Bool { probe.drivePrepend() }
 
     func releasePrependPage() { probe.releasePrependPage() }
-
-    func drivePresentationInvalidation() { probe.drivePresentationInvalidation() }
 
     func driveFrameBoundary() async throws {
         try await probe.driveFrameBoundary()
@@ -1809,24 +1801,22 @@ final class ChatViewScrollHarness {
         }
     }
 
-    /// Return the reader to the pinned tail through the real scroll view.
-    func returnReaderToPinnedTail(boundaries: Int = 40) async throws {
+    /// Return the reader to the newest row the way a finger does: move the real
+    /// transcript scroll view back to the tail, then deliver the pan's own
+    /// interacting→idle phase callbacks. The idle phase at the tail is the
+    /// coordinator's manual re-pin path (`scrollPhaseChanged` → `pinAtTail`), the
+    /// same phase synthesis `detachReaderByRealScroll` uses to take ownership.
+    func returnReaderToPinnedTail(boundaries: Int = 60) async throws {
         try scrollReader(byVisualPoints: 0)
+        try await driveFrameBoundary()
+        drivePhase(from: .idle, to: .interacting, geometry: nil)
+        drivePhase(from: .interacting, to: .idle, geometry: nil)
         for _ in 0..<boundaries {
             if !probeObservation.isDetached && isPinnedToBottom() { return }
             try await driveFrameBoundary()
         }
     }
 
-    /// Return the reader to the pinned tail through the real scroll view, by
-    /// pressing the product's own catch-up affordance. A hosted test cannot
-    /// synthesize the pan gesture whose phase transitions re-pin a detached
-    /// reader (`onScrollPhaseChange` is the gesture's own callback), so the
-    /// finger-driven return stays the device checklist's check and this is the
-    /// real in-product equivalent: a scroll command to the tail, its exact lease
-    /// settling, and the pinned mode restored. It drives the default
-    /// (non-Reduce-Motion) affordance, so the staged `.offsetY` reveal and the
-    /// origin reflection on the way to the final `.tail` are exercised.
     /// Drive display-frame boundaries until the newest row's rendered bottom
     /// sits in the pinned band, or the bound is reached. A smooth catch-up or a
     /// keyboard inset change animates the native offset over several frames, so
@@ -1837,6 +1827,11 @@ final class ChatViewScrollHarness {
         }
     }
 
+    /// Return the reader to the pinned tail by pressing the product's own
+    /// catch-up affordance: the default (non-Reduce-Motion) staged `.offsetY`
+    /// reveal and origin reflection on the way to the final `.tail`, then the
+    /// settled pinned mode. This is the catch-up path, distinct from the manual
+    /// phase-driven return above.
     func returnReaderToPinnedTailByCatchUp(boundaries: Int = 60) async throws {
         let baseline = probeObservation.scrollCommandCount
         driveCatchUp(reduceMotion: false)

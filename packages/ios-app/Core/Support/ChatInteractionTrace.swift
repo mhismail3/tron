@@ -670,7 +670,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
     }
     private static func origin(_ origin: ChatScrollCommand.Origin) -> String {
         switch origin {
-        case .presentation: "presentation"
         case .catchUp: "catch-up"
         case .layout: "layout"
         case .prepend: "prepend"

@@ -89,10 +89,6 @@ final class ChatScrollCoordinator {
     private(set) var tailSettlementGeneration = 0
     private(set) var pinnedPositionRevision = 0
     private(set) var maximumPrependSemanticExcursion: CGFloat = 0
-    #if HOSTED_TEST
-    var hostedGeometryEvidenceRevision: Int { geometryRevision }
-    var hostedSemanticEvidenceRevision: Int { semanticFrameRevision }
-    #endif
 
     private let frameScheduler: DisplayFrameScheduler
     /// The transcript's origin-anchored layout. Geometry reaches this
@@ -145,21 +141,6 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private var interactionTrace: ChatInteractionTrace?
     @ObservationIgnored private var interactionTraceContext: Int?
 
-    #if HOSTED_TEST
-    private struct HostedCommandWaiter {
-        let id: Int
-        let continuation: CheckedContinuation<ChatScrollCommand, Error>
-    }
-    private struct HostedPrependSampleWaiter {
-        let id: Int
-        let continuation: CheckedContinuation<Void, Error>
-    }
-    @ObservationIgnored private var hostedCommandWaiters: [HostedCommandWaiter] = []
-    @ObservationIgnored private var hostedPrependSampleWaiters: [HostedPrependSampleWaiter] = []
-    private var nextHostedCommandWaiterID = 0
-    private var nextHostedPrependSampleWaiterID = 0
-    #endif
-
     init(
         frameScheduler: DisplayFrameScheduler = .displayLink,
         orientation: ChatTranscriptOrientation = .newestAtOrigin,
@@ -199,7 +180,6 @@ final class ChatScrollCoordinator {
     var blocksAutomaticLiveProjectionIntake: Bool {
         defersAutomaticLiveProjectionIntake
             || visibleOpeningRevealPending
-            || appliedTargetOrigin == .presentation
     }
     var latestGeometry: ChatTranscriptGeometry { geometry }
     /// Native size-change anchoring is intent-based, not overflow-dependent.
@@ -744,9 +724,6 @@ final class ChatScrollCoordinator {
                 context.readyForMeasurement = true
                 self.prepend = context
                 self.evaluatePrependIfReady()
-                #if HOSTED_TEST
-                self.resumeHostedPrependSampleWaiters()
-                #endif
             }
         }
         return true
@@ -994,9 +971,6 @@ final class ChatScrollCoordinator {
         requestAppliedTargetRelease(origin: .prepend)
         prepend = nil
         reduceViewport(.prependEnded)
-        #if HOSTED_TEST
-        cancelHostedPrependSampleWaiters()
-        #endif
         context.completion(result)
     }
 
@@ -1012,9 +986,6 @@ final class ChatScrollCoordinator {
         prependCompletion?(result)
         prependTask = nil
         prependTimeoutTask = nil
-        #if HOSTED_TEST
-        cancelHostedPrependSampleWaiters()
-        #endif
     }
 
     private func requestTargetRelease(_ token: Int?) {
@@ -1203,11 +1174,6 @@ final class ChatScrollCoordinator {
         )
         commandRevision &+= 1
         traceCommand(.issued, command: command!)
-        #if HOSTED_TEST
-        let waiters = hostedCommandWaiters
-        hostedCommandWaiters.removeAll()
-        waiters.forEach { $0.continuation.resume(returning: command!) }
-        #endif
     }
 
     private func clearCommand() {
@@ -1274,60 +1240,6 @@ final class ChatScrollCoordinator {
         }
 
     }
-
-    #if HOSTED_TEST
-    var hostedSemanticFrameCount: Int { rawSemanticFrames.count }
-
-    func hostedNextCommand() async throws -> ChatScrollCommand {
-        if let command { return command }
-        let id = nextHostedCommandWaiterID
-        nextHostedCommandWaiterID &+= 1
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
-                else { hostedCommandWaiters.append(.init(id: id, continuation: continuation)) }
-            }
-        } onCancel: {
-            Task { @MainActor in self.cancelHostedCommandWaiter(id: id) }
-        }
-    }
-
-    func hostedWaitForPrependSemanticSample() async throws {
-        if isWaitingForPrependSemanticFrame { return }
-        let id = nextHostedPrependSampleWaiterID
-        nextHostedPrependSampleWaiterID &+= 1
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
-                else { hostedPrependSampleWaiters.append(.init(id: id, continuation: continuation)) }
-            }
-        } onCancel: {
-            Task { @MainActor in self.cancelHostedPrependSampleWaiter(id: id) }
-        }
-    }
-
-    private func resumeHostedPrependSampleWaiters() {
-        let waiters = hostedPrependSampleWaiters
-        hostedPrependSampleWaiters.removeAll()
-        waiters.forEach { $0.continuation.resume() }
-    }
-
-    private func cancelHostedPrependSampleWaiters() {
-        let waiters = hostedPrependSampleWaiters
-        hostedPrependSampleWaiters.removeAll()
-        waiters.forEach { $0.continuation.resume(throwing: CancellationError()) }
-    }
-
-    private func cancelHostedPrependSampleWaiter(id: Int) {
-        guard let index = hostedPrependSampleWaiters.firstIndex(where: { $0.id == id }) else { return }
-        hostedPrependSampleWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
-    }
-
-    private func cancelHostedCommandWaiter(id: Int) {
-        guard let index = hostedCommandWaiters.firstIndex(where: { $0.id == id }) else { return }
-        hostedCommandWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
-    }
-    #endif
 
     private static func isDirectUserPhase(_ phase: ScrollPhase) -> Bool {
         phase == .interacting || phase == .tracking || phase == .decelerating
