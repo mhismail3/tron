@@ -1253,6 +1253,10 @@ describe("transcript projection", () => {
       snapshot.transcript.slice(removedTranscriptRows).map((item) => item.id),
     );
 
+    // Sixteen-kilobyte command and partial-output fields over 256 entries
+    // exceed the one-megabyte budget while keeping this max-count fixture small.
+    const maximumToolArguments = "x".repeat(8_000);
+    const maximumToolOutput = "y".repeat(8_000);
     const maximumToolSnapshot: SessionSnapshot = {
       ...snapshot,
       transcript: Array.from({ length: 20 }, (_, index) => ({
@@ -1264,8 +1268,8 @@ describe("transcript projection", () => {
       transcriptTotal: 20,
       toolExecutions: Array.from({ length: 256 }, (_, index) => ({
         toolCallId: `maximum-tool-${index}`, toolName: "bash", order: index,
-        status: "running" as const, arguments: { command: "x".repeat(150_000) },
-        partialResult: { output: "y".repeat(150_000) }, output: "z".repeat(96 * 1_024),
+        status: "running" as const, arguments: { command: maximumToolArguments },
+        partialResult: { output: maximumToolOutput }, output: "z".repeat(1_024),
         isError: false, startedAt: new Date(index).toISOString(), updatedAt: new Date(index).toISOString(),
         lastProgressAt: new Date(index).toISOString(), progressSequence: index + 1,
       })),

@@ -652,9 +652,10 @@ describe("SessionCatalog", () => {
     expect(catalog.row(file)?.messageCount).toBe(1);
 
     // The append's own event never arrives: a coalesced, dropped or
-    // watcher-restarting event looks exactly like this.
-    await appendMessage(file, "two", 2);
+    // watcher-restarting event looks exactly like this. Observe the interval
+    // before writing so a fast first pass cannot escape instrumentation.
     const walks = vi.spyOn(source, "scan");
+    await appendMessage(file, "two", 2);
     await waitFor(() => catalog.row(file)?.messageCount === 2, 5_000);
     // The interval's own cut is what found it; no event was emitted.
     expect(walks).toHaveBeenCalled();

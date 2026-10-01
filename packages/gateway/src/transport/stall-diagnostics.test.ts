@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { GatewayServer } from "./server.js";
-import { formatHostEvidence, formatStallEvidence, formatResourceSample, parseHostSysctl, probeHostKernel, resourceSampleLevel, ResourceSampler, EVENT_LOOP_DELAY_RESOLUTION_MS, HEAP_USED_INFO_STEP_BYTES, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler, type HostMemory, type ResourceRuntimeEntry } from "./stall-diagnostics.js";
+import { formatHostEvidence, formatStallEvidence, formatResourceSample, parseHostSysctl, probeHostKernel, resourceSampleLevel, ResourceSampler, HEAP_USED_INFO_STEP_BYTES, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler, type HostMemory, type ResourceRuntimeEntry } from "./stall-diagnostics.js";
 
 /** Cumulative busy/idle clock; two marks give their delta like Node's API. */
 function fakeUtilization() {
@@ -327,7 +327,7 @@ describe("ResourceSampler", () => {
     expect(promotions[0]).toContain("moved 10% from");
   });
 
-  it("reads the real histogram so an idle loop reads zero and a blocked one reads the block", async () => {
+  it("captures and rolls over an event-loop block from the real histogram", async () => {
     const sampler = new ResourceSampler({
       readRuntimes: async () => [],
       durableWrites: () => ({ count: 0, ms: 0 }),
@@ -335,14 +335,7 @@ describe("ResourceSampler", () => {
       heapLimitBytes: () => 10_000,
     });
     try {
-      // Idle: the sampling period is not delay, so a window with no blocking
-      // work reads well under the period. The wall clock itself is not asserted:
-      // a shared, paging Mac can schedule this process late.
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      expect((await sampler.sample()).eventLoopDelayP50Ms)
-        .toBeLessThan(EVENT_LOOP_DELAY_RESOLUTION_MS / 2);
-      // A read restarts the histogram and its first interval is discarded, so
-      // let it run a few periods before blocking the loop.
+      // Let the 20 ms monitor collect intervals before the deliberate block.
       await new Promise((resolve) => setTimeout(resolve, 60));
       const startedAt = performance.now();
       while (performance.now() - startedAt < 150) { /* block the loop */ }

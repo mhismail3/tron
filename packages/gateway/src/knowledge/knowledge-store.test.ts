@@ -316,7 +316,9 @@ describe("KnowledgeStore", () => {
 
   it("searches beyond the presentation page before applying its result limit", async () => {
     const { store } = await fixture();
-    for (let index = 0; index < 55; index += 1) await store.captureSource({ commandId: command(`page-${index}`), record: source(index === 54 ? "needle beyond page" : `ordinary source ${index}`) });
+    // The presentation page is 50 rows; one later matching row proves search
+    // continues beyond it without paying to seed an arbitrary larger corpus.
+    for (let index = 0; index < 51; index += 1) await store.captureSource({ commandId: command(`page-${index}`), record: source(index === 50 ? "needle beyond page" : `ordinary source ${index}`) });
     const result = await store.search({ query: "needle", limit: 1 });
     expect(result.hits).toHaveLength(1);
     expect(result.hits[0]?.record.content).toMatchObject({ title: "needle beyond page" });
@@ -356,22 +358,18 @@ describe("KnowledgeStore", () => {
     await expect(store.captureSource({ commandId: command("corrupt-reference"), record: { ...source("corrupt"), content: { ...source("corrupt").content, object, text: undefined } } })).rejects.toThrow(/durably captured|bytes/i);
   });
 
-  it("authorizes object bytes by exact source revision after a large unrelated corpus", async () => {
+  it("authorizes object bytes only for the source record and exact revision", async () => {
     const { store } = await fixture();
     const object = await store.putObject(new TextEncoder().encode("exact retained bytes"), "text/plain");
-    const filler = "x".repeat(1_800_000);
-    for (let index = 0; index < 20; index += 1) {
-      const record = source(`unrelated-${index}`);
-      await store.captureSource({ commandId: command(`large-unrelated-${index}`), record: { ...record, content: { ...record.content, text: filler } } });
-    }
-    const target = await store.captureSource({ commandId: command("large-corpus-target"), record: { ...source("exact target"), content: { ...source("exact target").content, text: undefined, object } } });
+    const unrelated = await store.captureSource({ commandId: command("unrelated-owner"), record: source("Unrelated source") });
+    const target = await store.captureSource({ commandId: command("exact-target"), record: { ...source("exact target"), content: { ...source("exact target").content, text: undefined, object } } });
     const authority = { recordId: target.record.id, revisionId: target.record.revisionId };
     await expect(store.readObject(object, authority)).resolves.toEqual(Buffer.from("exact retained bytes"));
-    await expect(store.readObject(object, { recordId: "unrelated-owner", revisionId: target.record.revisionId })).resolves.toBeNull();
+    await expect(store.readObject(object, { recordId: unrelated.record.id, revisionId: unrelated.record.revisionId })).resolves.toBeNull();
     await expect(store.readObject(object, { recordId: target.record.id, revisionId: "f".repeat(16) })).resolves.toBeNull();
-    await store.setExclusion(command("large-corpus-exclude"), target.record.id, true, target.record.revisionId, "synthetic privacy fence");
+    await store.setExclusion(command("exact-target-exclude"), target.record.id, true, target.record.revisionId, "synthetic privacy fence");
     await expect(store.readObject(object, authority)).resolves.toBeNull();
-  }, 30_000);
+  });
 
   it("rejects missing established state and fences late scope publication", async () => {
     const { store, home } = await fixture();

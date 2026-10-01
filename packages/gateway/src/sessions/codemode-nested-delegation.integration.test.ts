@@ -38,11 +38,13 @@ describe("codemode nested Jev and subagent tools", () => {
     let maximumConcurrentJevRequests = 0;
     const workspaceMarker = join(root, "tron", "workspace");
     const handoffPath = join(root, "handoff.txt");
-    const subagentExtension = `import { writeFile } from "node:fs/promises";
+    const subagentExtension = `import { rename, writeFile } from "node:fs/promises";
 export default function(pi) {
       pi.registerTool({ name: "subagent", label: "Fake subagent", description: "Fixture foreground subagent", parameters: { type: "object", properties: { action: { type: "string" }, agent: { type: "string" }, task: { type: "string" }, id: { type: "string" }, childId: { type: "string" } } }, execute: async (_id, args, signal, update) => {
         if (args.action === "stop") return { content: [{ type: "text", text: "stopped" }], details: {} };
-        await writeFile(${JSON.stringify(handoffPath)}, args.task);
+        const handoffTemp = ${JSON.stringify(handoffPath + ".tmp")};
+        await writeFile(handoffTemp, args.task);
+        await rename(handoffTemp, ${JSON.stringify(handoffPath)});
         update({ content: [{ type: "text", text: "running" }], details: { mode: "single", runId: "fake-run", results: [{ index: 0, agent: "worker", status: "running" }], progress: [{ index: 0, agent: "worker", status: "running", currentTool: "read", toolCount: 1 }] } });
         await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
         return { content: [{ type: "text", text: "stopped" }], details: { mode: "single", runId: "fake-run", results: [{ index: 0, agent: "worker", status: "stopped" }], progress: [{ index: 0, agent: "worker", status: "stopped", currentTool: "read", toolCount: 1 }] } };
