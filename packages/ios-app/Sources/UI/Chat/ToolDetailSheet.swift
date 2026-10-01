@@ -56,26 +56,7 @@ struct ToolDetailSheet: View {
         }
         .tronManagedSheet(isPresented: $showingCodemodeSource, identity: "chat.tool.codemode-source.\(tool.id)") {
             if let source = presentation.primaryPreview?.text {
-                NavigationStack {
-                    ScrollView {
-                        Text(verbatim: source)
-                            .font(TronTypography.code(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(16)
-                    }
-                    .tronScrollEdgeChrome()
-                    .toolbar {
-                        ToolbarItem(placement: .principal) {
-                            TronSheetTitle(title: "Codemode source", accent: accent)
-                        }
-                    }
-                }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-                .tronPresentation()
+                CodemodeSourceSheet(source: source, accent: accent)
             }
         }
         .tronManagedSheet(
@@ -257,9 +238,18 @@ struct ToolDetailSheet: View {
                     HStack(spacing: 9) {
                         Image(systemName: ToolDetailPresentation.icon(for: call.toolName))
                             .foregroundStyle(call.status == .failed ? Color.tronError : accent)
-                        Text(ToolDetailPresentation.displayTitle(for: call.toolName))
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                            .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ToolDetailPresentation.displayTitle(for: call.toolName))
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                .lineLimit(1)
+                            if let primary = call.primary {
+                                Text(verbatim: primary.value)
+                                    .font(TronTypography.code(size: TronTypography.sizeSecondary))
+                                    .foregroundStyle(Color.tronTextSecondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
                         Spacer(minLength: 4)
                         Text([call.status.displayLabel, call.durationMs.map(ToolTiming.format(milliseconds:))].compactMap { $0 }.joined(separator: " · "))
                             .font(TronTypography.code(size: TronTypography.sizeSecondary))
@@ -435,40 +425,157 @@ private func nestedStatusIcon(_ status: NestedToolCallPresentation.Status) -> St
     }
 }
 
-private struct NestedToolCallDetailSheet: View {
-    let call: NestedToolCallPresentation
+/// Section layout shared by the tool detail descendants so they read as
+/// continuations of the parent sheet: same insets, labels and code surfaces.
+private struct ToolDetailSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title.uppercased())
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(Color.tronTextMuted)
+            content
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct ToolDetailCodeBlock: View {
+    let text: String
     let accent: Color
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Label(call.status.displayLabel, systemImage: nestedStatusIcon(call.status))
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(call.status == .failed ? Color.tronError : call.status == .unfinished ? Color.tronTextSecondary : accent)
-                if let error = call.error, !error.isEmpty {
-                    Text(error)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronError)
-                        .textSelection(.enabled)
+        Text(verbatim: text)
+            .font(TronTypography.code(size: TronTypography.sizeBodySM))
+            .foregroundStyle(Color.tronTextSecondary)
+            .textSelection(.enabled)
+            .padding(12)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .tronGlassSurface(accent: accent, tintOpacity: 0.07)
+    }
+}
+
+/// Chrome shared by sheets a tool detail opens: inline principal title (no
+/// reserved large-title region), Done, no drag indicator, parent insets.
+private struct ToolDetailChildSheet<Content: View>: View {
+    let title: String
+    var icon: String?
+    let accent: Color
+    @ViewBuilder let content: Content
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) { content }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 2)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .defaultScrollAnchor(.top, for: .initialOffset)
+            .tronScrollEdgeChrome()
+            .tronToolDetailNavigationChrome()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: title, accent: accent, icon: icon)
                 }
-                if let duration = call.durationMs {
-                    Text(ToolTiming.format(milliseconds: duration))
-                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
-                if let arguments = call.arguments {
-                    TronStructuredJSONView(value: arguments, title: "Arguments", accent: accent, showsRawDisclosure: false)
-                } else if let bytes = call.argumentsBytes {
-                    Text("Arguments omitted (\(bytes) bytes).")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(accent)
+                    }
+                    .accessibilityLabel("Done")
                 }
             }
-            .padding(16)
         }
-        .tronScrollEdgeChrome()
+        .tronTopBlur(.toolDetail)
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
         .tronPresentation()
+    }
+}
+
+struct CodemodeSourceSheet: View {
+    let source: String
+    let accent: Color
+
+    var body: some View {
+        ToolDetailChildSheet(title: "Codemode source", accent: accent) {
+            ToolDetailSection(title: "Script") {
+                ToolDetailCodeBlock(text: source, accent: accent)
+            }
+        }
+    }
+}
+
+struct NestedToolCallDetailSheet: View {
+    let call: NestedToolCallPresentation
+    let accent: Color
+
+    private var statusAccent: Color {
+        switch call.status {
+        case .failed: .tronError
+        case .unfinished: .tronTextSecondary
+        case .running, .completed: accent
+        }
+    }
+
+    /// Arguments other than the one already shown as the primary value.
+    private var remainingArguments: JSONValue? {
+        guard let arguments = call.arguments else { return nil }
+        guard let primary = call.primary, let object = arguments.objectValue else { return arguments }
+        let rest = object.filter { $0.value.stringValue != primary.value }
+        return rest.isEmpty ? nil : .object(rest)
+    }
+
+    var body: some View {
+        ToolDetailChildSheet(
+            title: ToolDetailPresentation.displayTitle(for: call.toolName),
+            icon: ToolDetailPresentation.sheetTitleIcon(for: call.toolName),
+            accent: accent
+        ) {
+            ToolChipFlowLayout(spacing: 7) {
+                ToolStaticChip(
+                    icon: nestedStatusIcon(call.status),
+                    text: [call.status.displayLabel, call.durationMs.map(ToolTiming.format(milliseconds:))]
+                        .compactMap { $0 }.joined(separator: " · "),
+                    accent: statusAccent
+                )
+            }
+            if let error = call.error, !error.isEmpty {
+                ToolDetailSection(title: "Error") {
+                    ToolDetailCodeBlock(text: error, accent: .tronError)
+                }
+            }
+            if let primary = call.primary {
+                ToolDetailSection(title: primary.label) {
+                    ToolDetailCodeBlock(text: primary.value, accent: accent)
+                }
+            }
+            if let remaining = remainingArguments {
+                TronStructuredJSONView(
+                    value: remaining,
+                    title: call.primary == nil ? "Arguments" : "Other arguments",
+                    accent: accent,
+                    showsRawDisclosure: false
+                )
+            } else if call.arguments == nil, let bytes = call.argumentsBytes {
+                Text("Arguments omitted (\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))).")
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+            }
+            // Only each nested call's request, status and timing are recorded;
+            // its output reaches the user through the script's own result.
+            Text("This call's output is part of the codemode script's result.")
+                .font(TronTypography.sans(size: TronTypography.sizeSecondary + TronSettingsLayoutPolicy.metadataSizeAdjustment))
+                .foregroundStyle(Color.tronTextMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
