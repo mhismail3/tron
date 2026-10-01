@@ -133,7 +133,7 @@ struct Pi099VisualEvidenceTests {
                                     "command": .object(["type": .string("string"), "description": .string("Bash command to execute")]),
                                     "timeout": .object(["type": .string("number"), "description": .string("Timeout in seconds (optional, no default timeout)")])
                                 ])])])
-            )) {}.environment(model)),
+            ), accentOverride: .tronSessionTeal) {}.environment(model)),
             scene("tool-chips", VStack(alignment: .leading, spacing: 10) {
                 Text("Recent tools").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
                 ToolCard(data: codemode, onOpenDetails: { _ in })

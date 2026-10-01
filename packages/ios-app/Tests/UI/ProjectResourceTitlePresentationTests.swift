@@ -52,6 +52,15 @@ struct ProjectResourceTitlePresentationTests {
         }
     }
 
+    @Test("a runtime label that only repeats the tool name is not an authored title")
+    func echoedToolLabels() {
+        for (name, title) in [("codemode", "Code Mode"), ("tool_search", "Search Tools"), ("web_search", "Web Search")] {
+            let value: JSONValue = .object(["name": .string(name), "label": .string(name)])
+            #expect(ProjectResourceTitlePresentation.title(kind: .tools, value: value) == title)
+            #expect(ProjectResourceDetailPresentation(kind: .tools, value: value).invocation == name)
+        }
+    }
+
     @Test("skills and prompts share the composer formatter but not formatted identifiers")
     func skillsAndPrompts() {
         for kind in [ProjectResourceKind.skills, .prompts] {
