@@ -11,53 +11,68 @@
       "description": "One claimable unit of work; one branch, one worktree, one PR"
     },
     {
-      "name": "bug",
-      "color": "d73a4a",
-      "description": "Something isn't working"
+      "name": "kind:bug",
+      "color": "d1242f",
+      "description": "Kind (one per issue): behavior is wrong, including a failing or flaky test"
     },
     {
-      "name": "chore",
-      "color": "c5def5",
-      "description": "Maintenance with no product behavior change"
+      "name": "kind:improvement",
+      "color": "1f883d",
+      "description": "Kind (one per issue): a committed feature, enhancement or UX change"
     },
     {
-      "name": "dependencies",
-      "color": "0366d6",
-      "description": "Dependency update; follows the owning dependency runbook"
+      "name": "kind:maintenance",
+      "color": "8c959f",
+      "description": "Kind (one per issue): no behavior change; cleanup, refactor, tests, tooling, docs, deps"
     },
     {
-      "name": "enhancement",
-      "color": "a2eeef",
-      "description": "New feature or request"
+      "name": "kind:idea",
+      "color": "f9c513",
+      "description": "Kind (one per issue): a forward-looking proposal, not yet committed or scoped"
+    },
+    {
+      "name": "kind:exploration",
+      "color": "1b7c83",
+      "description": "Kind (one per issue): an open question to investigate; delivers findings or new issues"
+    },
+    {
+      "name": "visibility:user-facing",
+      "color": "fb8f44",
+      "description": "Visibility (one per issue): the maintainer would notice it while using Tron"
+    },
+    {
+      "name": "visibility:internal",
+      "color": "d0d7de",
+      "description": "Visibility (one per issue): behind the scenes; code, tests, tooling, CI"
     },
     {
       "name": "area:gateway",
-      "color": "0e8a16",
+      "color": "bfd4f2",
       "description": "packages/gateway"
     },
     {
       "name": "area:ios",
-      "color": "0e8a16",
+      "color": "bfd4f2",
       "description": "packages/ios-app"
     },
     {
       "name": "area:mac",
-      "color": "0e8a16",
+      "color": "bfd4f2",
       "description": "packages/mac-app"
     },
     {
       "name": "area:relay",
-      "color": "0e8a16",
+      "color": "bfd4f2",
       "description": "packages/push-relay"
     },
     {
       "name": "area:tooling",
-      "color": "0e8a16",
+      "color": "bfd4f2",
       "description": "scripts, tools, CI and agent guidance"
     },
     {
       "name": "area:docs",
-      "color": "0e8a16",
+      "color": "bfd4f2",
       "description": "Documentation only"
     },
     {
@@ -78,7 +93,12 @@
     {
       "name": "regression",
       "color": "b60205",
-      "description": "Filed by a scheduled or non-blocking check on main"
+      "description": "Source: filed by a scheduled or non-blocking check on main (always with kind:bug)"
+    },
+    {
+      "name": "dependencies",
+      "color": "0366d6",
+      "description": "Dependabot pull requests only; routes them to the dependency runbook"
     }
   ],
   "project": {
@@ -538,6 +558,11 @@
     "regressionLabel": "regression",
     "priorityField": "Priority",
     "rankField": "Epic rank",
-    "verifyContext": "tron/verify"
+    "verifyContext": "tron/verify",
+    "kindPrefix": "kind:",
+    "visibilityPrefix": "visibility:",
+    "areaPrefix": "area:",
+    "ideaLabel": "kind:idea",
+    "recentDays": 14
   }
 }
