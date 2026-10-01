@@ -291,11 +291,14 @@ covers the GitHub side.
 19. **A receipt describes content that is not the committed head.** Dirty
     worktrees are refused, and a head or worktree that changes during the run
     discards the receipt.
-47. **A narrowed iOS run misses deleted inputs or shared owners.** Any deletion
-    forces the full iOS suite; a test file focuses only when all non-private
-    top-level declarations are test suites. Shared helper declarations and
-    unknown syntax therefore run the full target. Owner-map regressions are
-    covered by `scripts/test-ios-verify-test-selection.py`.
+47. **A narrowed iOS run misses deleted inputs or shared owners.** The selector
+    owns deletion detection and forces the full iOS suite for any deletion. A
+    changed test file focuses its declared suites only when every non-private
+    top-level declaration is a test suite and no other test file references
+    those suites as `SuiteName.`; shared helpers, external references and
+    unknown syntax therefore run the full target. Owner-map and the configured
+    command-line invocation are covered by
+    `scripts/test-ios-verify-test-selection.py`.
 48. **The policy job skips iOS infrastructure for a relevant or unknown path.**
     Only recognized non-iOS changes skip that test; iOS/toolchain/workflow paths,
     an empty diff, an unclassified path, or an unresolved base run it. The

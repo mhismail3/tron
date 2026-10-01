@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -129,8 +128,23 @@ def _test_file_owners(relative: str) -> Optional[list[str]]:
         if not is_suite:
             # Top-level helpers can be imported or referenced by suites in other files.
             return None
+        if _referenced_by_other_test_file(name, path):
+            return None
         owners.append(name)
     return sorted(set(owners)) if owners else None
+
+
+def _referenced_by_other_test_file(suite: str, defining_file: Path) -> bool:
+    pattern = re.compile(rf"\b{re.escape(suite)}\s*\.")
+    for candidate in (ROOT / "packages/ios-app/Tests").rglob("*.swift"):
+        if candidate == defining_file:
+            continue
+        try:
+            if pattern.search(candidate.read_text(errors="replace")):
+                return True
+        except OSError:
+            return True
+    return False
 
 
 def selectors_for(paths: list[str], *, has_deletions: bool = False) -> Optional[list[str]]:

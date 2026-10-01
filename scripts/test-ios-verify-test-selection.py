@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Failure modes: wrong iOS owners omit coverage; unmapped or deleted inputs select zero tests."""
+import json
+import shlex
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from ios_verify_test_selection import _has_deletions, selectors_for, test_command
@@ -40,6 +43,10 @@ class IOSVerifyTestSelectionTests(unittest.TestCase):
             ],
         )
 
+    def test_external_nested_suite_reference_forces_full_suite(self):
+        relative = "packages/ios-app/Tests/Gateway/SessionHistoryStoreTests.swift"
+        self.assertIsNone(selectors_for([relative]))
+
     def test_shared_top_level_helpers_force_full_suite(self):
         for relative in (
             "packages/ios-app/Tests/Gateway/BoundedHTTPDataTransportTests.swift",
@@ -68,9 +75,52 @@ class IOSVerifyTestSelectionTests(unittest.TestCase):
             with patch("ios_verify_test_selection.ROOT", repo):
                 self.assertTrue(_has_deletions(merge_base))
                 self.assertEqual(
-                    test_command(["packages/ios-app/Sources/UI/Settings/SettingsView.swift"], has_deletions=True),
+                    test_command(
+                        ["packages/ios-app/Sources/UI/Settings/SettingsView.swift"],
+                        has_deletions=_has_deletions(merge_base),
+                    ),
                     ["scripts/tron-ios-test", "run"],
                 )
+
+    def test_work_json_ios_command_runs_the_script_entry_point(self):
+        root = Path(__file__).resolve().parents[1]
+        config = json.loads((root / ".github/work.json").read_text())
+        ios_check = next(check for check in config["verify"]["checks"] if check["name"] == "ios")
+        script_part = next(
+            part.strip() for part in ios_check["command"].split("&&")
+            if "python3 scripts/ios_verify_test_selection.py" in part
+        )
+        script_command = script_part[script_part.index("python3 scripts/ios_verify_test_selection.py"):]
+        invocation = shlex.split(script_command)
+        self.assertEqual(invocation[:2], ["python3", "scripts/ios_verify_test_selection.py"])
+        relative = "packages/ios-app/Sources/UI/Settings/SettingsAutosave.swift"
+        merge_base = subprocess.run(
+            ["git", "-C", str(root), "merge-base", "HEAD", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        invocation = [
+            item.replace("{merge_base}", merge_base).replace("{paths}", relative)
+            for item in invocation[2:]
+        ]
+        import ios_verify_test_selection
+
+        original_run = subprocess.run
+        executed = []
+
+        def run(command, **kwargs):
+            if command[0] == "scripts/tron-ios-test":
+                executed.append(command)
+                return SimpleNamespace(returncode=0)
+            return original_run(command, **kwargs)
+
+        with patch("sys.argv", ["ios_verify_test_selection.py", *invocation]), patch(
+            "ios_verify_test_selection.subprocess.run", side_effect=run
+        ):
+            self.assertEqual(ios_verify_test_selection.main(), 0)
+        self.assertEqual(
+            executed,
+            [["scripts/tron-ios-test", "run", "--only-testing", "TronMobileTests/ConfigurationAutosaveTests"]],
+        )
 
     def test_unmapped_deleted_empty_and_non_ios_paths_fail_closed(self):
         self.assertIsNone(selectors_for(["packages/ios-app/Sources/NewArea/UnknownView.swift"]))

@@ -348,7 +348,7 @@
           "scripts/verify-ci-toolchain.sh",
           "scripts/install-ci-tools.sh"
         ],
-        "command": "packages/ios-app/scripts/test-source-policy.sh && packages/ios-app/scripts/test-build-matrix-policy.sh && packages/ios-app/scripts/test-verify-archive-privacy.sh && scripts/tron-ios-test build && if ! git diff --quiet --no-renames --diff-filter=D {merge_base} HEAD; then scripts/tron-ios-test run; else python3 scripts/ios_verify_test_selection.py {paths}; fi"
+        "command": "packages/ios-app/scripts/test-source-policy.sh && packages/ios-app/scripts/test-build-matrix-policy.sh && packages/ios-app/scripts/test-verify-archive-privacy.sh && scripts/tron-ios-test build && python3 scripts/ios_verify_test_selection.py --merge-base {merge_base} {paths}"
       },
       {
         "name": "work-selector-tests",
