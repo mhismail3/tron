@@ -945,8 +945,9 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         progressSequence = tool.progressSequence
         outputTruncated = tool.outputTruncated
         let nested = tool.nestedCalls?.objectValue?["calls"]?.arrayValue ?? []
-        nestedCallCount = min(32, nested.count)
-        nestedFailureCount = nested.prefix(32).filter { $0.objectValue?["status"]?.stringValue == "failed" }.count
+        // The Gateway bounds the list; the chip counts the calls the sheet lists.
+        nestedCallCount = nested.count
+        nestedFailureCount = nested.filter { $0.objectValue?["status"]?.stringValue == "failed" }.count
         display = tool.display
         requestedDisplaySurface = tool.display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? DisplayPresentationPolicy.invocationSurface(toolName: tool.toolName, request: tool.request)

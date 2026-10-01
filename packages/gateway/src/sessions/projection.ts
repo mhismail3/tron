@@ -401,12 +401,21 @@ export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonVa
   return { ...bounded, truncated: true };
 }
 
+/** Pi records up to 256 nested calls per parent (`NESTED_CALL_LIMITS`); the
+ * Gateway projects every one it kept, so a long script's call list is whole. */
+export const NESTED_CALL_LIMIT = 256;
+/** Argument bytes one call may project, and all of a parent's calls together
+ * (Pi's own total), so every live frame stays bounded however many calls run. */
+export const NESTED_ARGUMENT_CALL_BYTES = 1_024;
+export const NESTED_ARGUMENT_TOTAL_BYTES = 32 * 1_024;
+
 function projectNestedCalls(value: unknown): NestedToolCallsProjection {
   const record = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : {};
   const sourceCalls = Array.isArray(record.calls) ? record.calls : [];
   let complete = record.complete === true;
-  const calls = sourceCalls.slice(0, 32).map((candidate) => {
+  let argumentBudget = NESTED_ARGUMENT_TOTAL_BYTES;
+  const calls = sourceCalls.slice(0, NESTED_CALL_LIMIT).map((candidate) => {
     const item = candidate && typeof candidate === "object" && !Array.isArray(candidate)
       ? candidate as Record<string, unknown> : {};
     const id = typeof item.id === "string" ? item.id.slice(0, 512) : "";
@@ -421,8 +430,10 @@ function projectNestedCalls(value: unknown): NestedToolCallsProjection {
     if (item.arguments !== undefined) {
       let bytes = 0;
       try { bytes = Buffer.byteLength(JSON.stringify(item.arguments)); } catch { bytes = Number.MAX_SAFE_INTEGER; }
-      if (bytes <= 1_024) args = projectJson(item.arguments, 1_024);
-      else { argumentsBytes = bytes; complete = false; }
+      if (bytes <= NESTED_ARGUMENT_CALL_BYTES && bytes <= argumentBudget) {
+        args = projectJson(item.arguments, NESTED_ARGUMENT_CALL_BYTES);
+        argumentBudget -= bytes;
+      } else { argumentsBytes = bytes; complete = false; }
     }
     if (!id) complete = false;
     const durationMs = typeof item.durationMs === "number" && Number.isFinite(item.durationMs)

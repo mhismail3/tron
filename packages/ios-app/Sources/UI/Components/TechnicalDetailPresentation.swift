@@ -165,3 +165,24 @@ struct TronTechnicalSectionLabel: View {
             .accessibilityAddTraits(.isHeader)
     }
 }
+
+/// The top-leading toolbar button that opens a sheet's technical details or
+/// metadata. Every sheet with that affordance uses this one button, so its
+/// symbol, size, placement and spoken label read the same everywhere. A nil
+/// accent follows the settings theme accent.
+struct TronSheetInfoButton: View {
+    let accessibilityLabel: String
+    var accent: Color?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if let accent {
+                Image(systemName: "info.circle").font(TronTypography.buttonSM).foregroundStyle(accent)
+            } else {
+                Image(systemName: "info.circle").font(TronTypography.buttonSM).tronSettingsAccent()
+            }
+        }
+        .accessibilityLabel(accessibilityLabel)
+    }
+}

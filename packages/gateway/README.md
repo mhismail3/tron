@@ -1516,9 +1516,10 @@ a second stream identity or duplicate finalized tool groups in a settlement snap
 
 Pi nested tool calls keep their `<parent>/<n>` identity under the model-issued call; they are
 never independent transcript rows, invocation receipts, segments, or extension activities.
-Live parent progress carries a bounded child list (32 calls; arguments at most 1 KiB, otherwise
-a byte count), and the canonical parent result carries Pi's bounded `nestedCalls` record with its
-`complete` flag. Child failures use `failed` even when the tool returns `isError` instead of
+Live parent progress and the canonical parent result carry the same bounded child list: every
+call Pi records (`NESTED_CALL_LIMIT`, Pi's own 256), with each call's arguments at most 1 KiB and
+all of a parent's arguments together at most 32 KiB (Pi's total); an argument outside either bound
+is replaced by its byte count and clears the `complete` flag. Child failures use `failed` even when the tool returns `isError` instead of
 throwing; Pi's `unfinished` child status remains an explicit terminal presentation state when
 recovered from history, and each child error is projected to at most 512 UTF-8 bytes. Opaque
 `structuredContent` is not forwarded by generic live tool-result projection.
