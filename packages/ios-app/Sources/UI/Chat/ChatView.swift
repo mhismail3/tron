@@ -2536,7 +2536,11 @@ struct ChatView: View {
         // Keep one covered frame before revealing it, without a tail-positioning
         // command or a physical settlement proof.
         do { try await displayFrameScheduler.nextFrame() } catch {
-            performanceSignposts.end(interval, result: .discarded, metrics: .none)
+            performanceSignposts.end(
+                interval,
+                result: PerformanceResult.forFailure(error),
+                metrics: .none
+            )
             return .discarded
         }
         guard !Task.isCancelled,
