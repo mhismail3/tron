@@ -438,3 +438,48 @@ test("Debug stop terminates and reaps an exactly owned child", async () => {
     }
   }
 });
+
+// Issue #144. Failure modes:
+// 1. An agent shell inherits the Stable Gateway's environment, and a Stable
+//    value (PI_SUBAGENTS_TEMP_ROOT pointing at Stable's subagent store,
+//    TRON_GATEWAY_CHANNEL=stable, another TRON_GATEWAY_* or PI_* value)
+//    reaches a process the Debug lifecycle starts.
+// 2. The scrub drops what the lifecycle needs: HOME, the pinned Node selection
+//    (TRON_NODE_BIN, NVM_DIR) or the CI tools cache (TRON_CI_TOOLS_DIR).
+test("Debug lifecycle commands never see the caller's Stable Gateway environment", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-env-"));
+  const home = join(root, "home");
+  const fakeBin = join(root, "bin");
+  const fakeNode = join(fakeBin, "node");
+  const seen = join(root, "seen.env");
+  try {
+    mkdirSync(join(home, ".tron-dev", "gateway"), { recursive: true });
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(fakeNode, `#!/bin/sh
+if [ "${"$"}{1:-}" = "--version" ]; then echo v22.22.0; exit 0; fi
+/usr/bin/env > "${seen}"
+echo '{"lifecycle":"stopped"}'
+`);
+    execFileSync("/bin/chmod", ["+x", fakeNode]);
+    writeFileSync(join(fakeBin, "npm"), "#!/bin/sh\nexit 0\n");
+    execFileSync("/bin/chmod", ["+x", join(fakeBin, "npm")]);
+    execFileSync("bash", [new URL("./tron-dev", import.meta.url).pathname, "status"], {
+      env: {
+        PATH: process.env.PATH, HOME: home, TRON_NODE_BIN: fakeNode, TRON_CI_TOOLS_DIR: join(root, "tools"),
+        PI_SUBAGENTS_TEMP_ROOT: join(root, "stable", "internal", "subagents"), PI_SESSION_ID: "stable-session",
+        PI_CODING_AGENT_DIR: join(root, "stable", "agent"), TRON_GATEWAY_CHANNEL: "stable", TRON_GATEWAY_SUPERVISED: "1",
+        TRON_GATEWAY_PAYLOAD_ROOT: join(root, "stable", "payload"), TRON_DATA_DIR: join(root, "stable"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const environment = Object.fromEntries(readFileSync(seen, "utf8").trim().split("\n").map(line => {
+      const index = line.indexOf("=");
+      return [line.slice(0, index), line.slice(index + 1)];
+    }));
+    const leaked = Object.keys(environment).filter(name => /^(PI_|TRON_GATEWAY_|TRON_DATA_DIR$|TRON_AGENT_DIR_NAME$)/u.test(name));
+    assert.deepEqual(leaked, []);
+    assert.equal(environment.HOME, home);
+    assert.equal(environment.TRON_NODE_BIN, fakeNode);
+    assert.equal(environment.TRON_CI_TOOLS_DIR, join(root, "tools"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
