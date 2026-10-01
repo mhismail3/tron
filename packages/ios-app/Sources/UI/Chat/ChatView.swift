@@ -2699,8 +2699,6 @@ struct ChatView: View {
         performanceTracker.beginScrollCommand()
         let update = {
             switch command.destination {
-            case .tail where command.origin == .physicalTailRepair:
-                installStableTailTarget()
             case .row(let renderedID):
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
@@ -2710,11 +2708,6 @@ struct ChatView: View {
             case .openingTail(let renderedID):
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
-                transcriptScrollPosition = target
-            case .tail where command.origin == .targetFreeRebase:
-                // Reapply the native edge after a retired physical-tail repair.
-                var target = ScrollPosition(idType: String.self)
-                target.scrollTo(edge: transcriptOrientation.newestEdge)
                 transcriptScrollPosition = target
             case .tail:
                 transcriptScrollPosition.scrollTo(edge: transcriptOrientation.newestEdge)
@@ -2747,8 +2740,7 @@ struct ChatView: View {
         #if HOSTED_TEST
         hostedProbe?.recordScrollCommand(
             isAutomatic: false,
-            isSmooth: command.animation != .disabled,
-            origin: command.origin
+            isSmooth: command.animation != .disabled
         )
         #endif
         // The coordinator keeps this exact token installed through its native
@@ -2756,14 +2748,6 @@ struct ChatView: View {
         // Clearing the binding in this same update could cancel the
         // scrollTo before SwiftUI applies it.
         _ = scrollCoordinator.commandApplied(command)
-    }
-
-    @MainActor
-    private func installStableTailTarget() {
-        // A fresh value forces SwiftUI to apply the marker target after drift.
-        var target = ScrollPosition(idType: String.self)
-        target.scrollTo(id: "transcript-bottom", anchor: transcriptOrientation.newestEndAnchor)
-        transcriptScrollPosition = target
     }
 
     @MainActor

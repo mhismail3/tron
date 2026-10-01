@@ -258,7 +258,6 @@ struct ChatHostedObservation: Sendable {
     let scrollSettledDistance: CGFloat?
     let scrollCommandCount: Int
     let targetReleaseCount: Int
-    let physicalTailRepairCommandCount: Int
     let automaticScrollCommandCount: Int
     let smoothAutomaticScrollCommandCount: Int
     let animatedEntranceCount: Int
@@ -349,7 +348,6 @@ final class ChatHostedProbe {
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
     private var targetReleaseCount = 0
-    private var physicalTailRepairCommandCount = 0
     private var automaticScrollCommandCount = 0
     private var smoothAutomaticScrollCommandCount = 0
     private var animatedEntranceCount = 0
@@ -437,7 +435,6 @@ final class ChatHostedProbe {
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
             targetReleaseCount: targetReleaseCount,
-            physicalTailRepairCommandCount: physicalTailRepairCommandCount,
             automaticScrollCommandCount: automaticScrollCommandCount,
             smoothAutomaticScrollCommandCount: smoothAutomaticScrollCommandCount,
             animatedEntranceCount: animatedEntranceCount,
@@ -623,13 +620,8 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func recordScrollCommand(
-        isAutomatic: Bool,
-        isSmooth: Bool,
-        origin: ChatScrollCommand.Origin? = nil
-    ) {
+    func recordScrollCommand(isAutomatic: Bool, isSmooth: Bool) {
         scrollCommandCount &+= 1
-        if origin == .physicalTailRepair { physicalTailRepairCommandCount &+= 1 }
         if isAutomatic {
             automaticScrollCommandCount &+= 1
             if isSmooth { smoothAutomaticScrollCommandCount &+= 1 }

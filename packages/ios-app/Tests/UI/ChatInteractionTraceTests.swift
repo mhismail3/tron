@@ -93,7 +93,7 @@ struct ChatInteractionTraceTests {
         trace.lease(.canonicalHandoff, context: context, token: 7,
                     reason: .canonicalAcknowledgement,
                     state: .init(geometryRevision: 3, semanticRevision: 9,
-                                 markerRevision: 5, repairAttempts: 1,
+                                 markerRevision: 5,
                                  physicalRowToken: physical, semanticRowToken: semantic))
         for index in 0..<300 {
             _ = trace.identityToken("evicted-\(index)")

@@ -668,7 +668,7 @@ struct ChatRuntimeWorkingPresentation: Equatable {
 
 /// Presentation-only physical proof for the mounted tail marker. It is never
 /// a second scroll position: the native scroll anchor remains the routine
-/// owner and this evidence only permits a bounded repair of proven drift.
+/// owner; this evidence distinguishes physical marker alignment from geometry estimates.
 struct ChatPhysicalTailEvidence: Equatable, Sendable {
     let presentationEpoch: Int
     let layoutEpoch: Int

@@ -2179,12 +2179,11 @@ struct ChatViewScrollHarnessTests {
                     resumed.observation.smoothAutomaticScrollCommandCount
                         == ready.observation.smoothAutomaticScrollCommandCount
                 )
-                let repairBaseline = resumed.observation.physicalTailRepairCommandCount
                 for _ in 0..<3 { try await harness.driveFrameBoundary() }
                 let settled = harness.probeObservation
-                #expect(settled.physicalTailRepairCommandCount == repairBaseline)
                 #expect(settled.visibleRowIDs.contains(tailSemanticID))
                 #expect(harness.recorder.samples.last?.nativePinnedAtBottom == true)
+                #expect(harness.isPinnedToBottom())
             }
         }
     }
@@ -2827,7 +2826,10 @@ struct ChatViewScrollHarnessTests {
                             <= ChatTranscriptGeometry.catchUpDistance
                 }
                 try await harness.detachReaderByRealScroll()
-                #expect(harness.probeObservation.isDetached)
+                try #require(
+                    harness.probeObservation.isDetached,
+                    "the real scroll must detach before streaming updates"
+                )
 
                 var newest = harness.snapshot
                 let initialSequence = newest.eventSequence

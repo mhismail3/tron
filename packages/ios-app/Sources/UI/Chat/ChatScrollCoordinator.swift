@@ -144,7 +144,7 @@ final class ChatScrollCoordinator {
             && !openingTailSettlementPending
             && !visibleOpeningRevealPending
             && hasCompatiblePendingCommand && appliedTargetCommandToken == nil
-            && targetReleaseToken == nil && physicalTailRepairCommandToken == nil
+            && targetReleaseToken == nil
     }
     private(set) var command: ChatScrollCommand?
     private(set) var commandRevision = 0
@@ -192,15 +192,6 @@ final class ChatScrollCoordinator {
     /// A newly mounted non-retained tree cannot repair its placeholder geometry
     /// before ChatView installs the authoritative opening baseline.
     private var awaitingOpeningBaseline = false
-    private enum RetainedViewportReconciliationState {
-        case idle
-        case pendingMarker
-        // The old target retired without a fresh marker. The next legal
-        // geometry boundary may rebase without leasing a replacement target.
-        case pendingTargetFreeRebase
-    }
-
-    private var retainedViewportReconciliationState: RetainedViewportReconciliationState = .idle
     @ObservationIgnored private var rawSemanticFrames: [String: SemanticFrameSample] = [:]
     @ObservationIgnored private var semanticFrameRevision = 0
     private var openingTailPhase: OpeningTailPhase = .idle
@@ -216,6 +207,10 @@ final class ChatScrollCoordinator {
     private var appliedTargetOrigin: ChatScrollCommand.Origin?
     private var targetReleaseToken: Int?
     private(set) var targetReleaseGeneration = 0
+    private var retainedPinnedHandoffPending = false
+    private var retainedPinnedHandoffCommandToken: Int?
+    private var retainedPinnedHandoffGeometryRevision: Int?
+    private var retainedPinnedHandoffMarkerRevision: Int?
     private var catchUpPhase: CatchUpPhase = .none
     private var catchUpCommandToken: Int?
     private var catchUpUnreadBeforeJump = false
@@ -224,13 +219,6 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private(set) var physicalTailEvidence: ChatPhysicalTailEvidence?
     @ObservationIgnored private var physicalTailEvidenceOffsetY: CGFloat?
     @ObservationIgnored private var physicalTailEvidenceContentHeight: CGFloat?
-    @ObservationIgnored private var physicalTailRepairAttempts = 0
-    @ObservationIgnored private var physicalTailRepairEvidenceRevision: Int?
-    private var physicalTailRepairCommandToken: Int?
-    @ObservationIgnored private var physicalTailRepairIssuedEvidenceRevision: Int?
-    /// Reveal/layout transitions must publish a new marker frame before drift
-    /// repair can inspect it; the lifted opening frame is not repair evidence.
-    @ObservationIgnored private var physicalTailRepairBlockedUntilEvidenceRevision: Int?
     @ObservationIgnored private var catchUpTask: Task<Void, Never>?
     @ObservationIgnored private var layoutRestoreTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var prependTask: Task<Void, Never>?
@@ -238,7 +226,6 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private var openingTailFrameTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailPostRevealTimeoutTask: Task<Void, Never>?
-    @ObservationIgnored private var physicalTailRepairTask: Task<Void, Never>?
     @ObservationIgnored private var targetReleaseTask: Task<Void, Never>?
     @ObservationIgnored private var directPositionOwnership = false
     @ObservationIgnored private var viewportObservationActive = true
@@ -345,15 +332,15 @@ final class ChatScrollCoordinator {
         _ presentation: Int? = nil,
         retainingVisibleViewport: Bool = false
     ) {
+        let retainsPinnedViewport = retainingVisibleViewport && viewportMode == .pinned
         cancelAllOwnedWork(result: .discarded)
+        retainedPinnedHandoffPending = retainsPinnedViewport
+        retainedPinnedHandoffCommandToken = nil
+        retainedPinnedHandoffGeometryRevision = nil
+        retainedPinnedHandoffMarkerRevision = nil
         physicalTailEvidence = nil
         physicalTailEvidenceOffsetY = nil
         physicalTailEvidenceContentHeight = nil
-        physicalTailRepairEvidenceRevision = nil
-        physicalTailRepairCommandToken = nil
-        physicalTailRepairIssuedEvidenceRevision = nil
-        physicalTailRepairBlockedUntilEvidenceRevision = nil
-        physicalTailRepairAttempts = 0
         installedPhysicalRowSpine = nil
         installedPhysicalRowPositions = [:]
         installedPhysicalTerminalPosition = nil
@@ -365,7 +352,6 @@ final class ChatScrollCoordinator {
         visibleOpeningRevealPending = !retainingVisibleViewport
         lastForegroundActivation = nil
         reduceViewport(.presentationReset(retainingViewport: retainingVisibleViewport))
-        retainedViewportReconciliationState = retainingVisibleViewport ? .pendingMarker : .idle
         clearCommand()
         if viewportMode == .pinned { pinnedPositionRevision &+= 1 }
         // Semantic evidence is scoped to the current presentation epoch.
@@ -429,7 +415,6 @@ final class ChatScrollCoordinator {
         if renderedID == "transcript-bottom",
            let marker = semanticFrame(for: renderedID) {
             refreshPhysicalTailEvidence(marker: marker)
-            reconcileRetainedViewport(with: geometry)
         }
         if rawSemanticFrames.count > 256,
            let oldest = rawSemanticFrames.min(by: { $0.value.revision < $1.value.revision })?.key {
@@ -440,6 +425,7 @@ final class ChatScrollCoordinator {
                 renderedID: renderedID, layoutEpoch: layoutEpoch, frame: adaptedFrame
             )
         }
+        reconcileRetainedPinnedHandoff()
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
         if openingTailPhase.context?.targetRenderedID == renderedID {
@@ -491,7 +477,6 @@ final class ChatScrollCoordinator {
         }
         guard newPhase == .idle else { return }
         if wasDirect, geometry.isAtCatchUpBoundary {
-            physicalTailRepairAttempts = 0
             pinAtTail()
         }
         directPositionOwnership = false
@@ -636,7 +621,6 @@ final class ChatScrollCoordinator {
             let hasOwnedWaiter = layoutRestore != nil
                 || prepend != nil
                 || openingTailSettlementPending
-                || retainedViewportReconciliationState != .idle
                 || appliedTargetOrigin != nil
             // Identical callbacks are inert unless an exact active owner is
             // waiting for a later native sample after its command/layout epoch.
@@ -645,7 +629,6 @@ final class ChatScrollCoordinator {
             if let marker = semanticFrame(for: "transcript-bottom"), marker.layoutEpoch == layoutEpoch {
                 refreshPhysicalTailEvidence(marker: marker)
             }
-            reconcileRetainedViewport(with: current)
             evaluateLayoutRestoreIfReady()
             evaluatePrependIfReady()
             evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
@@ -698,7 +681,7 @@ final class ChatScrollCoordinator {
         if meaningfulTraceChange {
             traceGeometry(.meaningfulChange)
         }
-        reconcileRetainedViewport(with: current)
+        reconcileRetainedPinnedHandoff()
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
@@ -720,73 +703,6 @@ final class ChatScrollCoordinator {
         if catchUpPhase == .settling, current.isAtCatchUpBoundary {
             finishCatchUpPinned()
         }
-    }
-
-    private func reconcileRetainedViewport(with current: ChatTranscriptGeometry) {
-        // The retained-viewport rebase exists to recover a pinned viewport whose
-        // target retired against an estimated content end. The origin-anchored
-        // transcript re-anchors at the exact origin, so the mechanism is gated
-        // off, not deleted (CT-19).
-        guard orientation.pinsToEstimatedOrigin else { return }
-        guard retainedViewportReconciliationState != .idle, current.isValid else { return }
-        if isUserInteracting {
-            retainedViewportReconciliationState = .idle
-            return
-        }
-        // A geometry sample that has not reached the legal tail is not an
-        // acknowledgement of the target-free rebase. Native bottom anchoring
-        // converges only from near the tail; a pinned viewport displaced
-        // beyond that band never reaches the boundary by itself, so the rebase
-        // owner returns it there once instead of stranding the pinned chat.
-        guard current.isAtCatchUpBoundary else {
-            if retainedViewportReconciliationState == .pendingTargetFreeRebase,
-               !current.isAtBottom {
-                publishTargetFreeRebaseIfAdmitted(current)
-            }
-            return
-        }
-        let hasCurrentAlignedTail = physicalTailEvidence.map {
-            $0.presentationEpoch == presentation
-                && $0.layoutEpoch == layoutEpoch
-                && $0.classification == .aligned
-        } == true
-        let wasTargetFreeRebase = retainedViewportReconciliationState == .pendingTargetFreeRebase
-        retainedViewportReconciliationState = .idle
-        if hasCurrentAlignedTail {
-            pinAtTail()
-        } else if wasTargetFreeRebase {
-            // The native geometry is already at the legal boundary, but the
-            // marker callback is stale or absent. Re-apply the persistent
-            // pinned mode without leasing another ScrollPosition target; the
-            // next marker sample remains the only physical-proof admission.
-            tailSettlementGeneration &+= 1
-        } else {
-            // A retained presentation handoff still waits for its own marker
-            // proof; it must not claim a reader's viewport from geometry alone.
-            retainedViewportReconciliationState = .pendingMarker
-        }
-    }
-
-    /// Hands a displaced pinned viewport back to native bottom anchoring with
-    /// one disabled bottom-edge position that is released on application. It
-    /// needs no marker: the retired repair already proved the marker target
-    /// unreliable. Any other viewport owner keeps the rebase pending.
-    private func publishTargetFreeRebaseIfAdmitted(_ current: ChatTranscriptGeometry) {
-        guard current.isValid, current.hasScrollableOverflow,
-              !current.isBeyondLegalContentBottom,
-              viewportMode == .pinned,
-              !isUserInteracting, !directPositionOwnership,
-              viewportObservationActive,
-              !awaitingOpeningBaseline,
-              command == nil, appliedTargetCommandToken == nil,
-              targetReleaseToken == nil,
-              physicalTailRepairCommandToken == nil,
-              prepend == nil, layoutRestore == nil,
-              catchUpPhase == .none,
-              !openingTailPhase.isActive,
-              !visibleOpeningRevealPending else { return }
-        retainedViewportReconciliationState = .idle
-        publish(.tail, animation: .disabled, origin: .targetFreeRebase)
     }
 
     func positionOpeningTail(
@@ -852,10 +768,18 @@ final class ChatScrollCoordinator {
         targetReleaseToken = nil
         let releasedOrigin = appliedTargetOrigin
         completeOpeningTargetReleaseIfNeeded(releasedOrigin, result: .settled)
+        if releasedOrigin == .presentation,
+           retainedPinnedHandoffPending,
+           retainedPinnedHandoffCommandToken == token {
+            retainedPinnedHandoffPending = false
+            retainedPinnedHandoffCommandToken = nil
+            retainedPinnedHandoffGeometryRevision = nil
+            retainedPinnedHandoffMarkerRevision = nil
+            pinAtTail()
+        }
         traceLease(.released, token: token, reason: .consumed)
         appliedTargetCommandToken = nil
         appliedTargetOrigin = nil
-        schedulePhysicalTailRepairIfNeeded()
         return true
     }
 
@@ -937,7 +861,6 @@ final class ChatScrollCoordinator {
     func completeVisibleOpeningReveal() {
         guard visibleOpeningRevealPending else { return }
         visibleOpeningRevealPending = false
-        schedulePhysicalTailRepairIfNeeded()
     }
 
     func requestCatchUp(reduceMotion: Bool) {
@@ -1048,29 +971,11 @@ final class ChatScrollCoordinator {
         viewportObservationActive && capturedActivation == viewportActivation
     }
 
-    /// Cancels disposable repair work while another surface covers the native
-    /// viewport. Canonical projection and pinned/anchored intent remain intact.
     func viewportObservationChanged(isActive: Bool) {
         viewportObservationActive = isActive
-        guard !isActive else {
-                return
-        }
-        if retainedViewportReconciliationState == .pendingTargetFreeRebase {
-            retainedViewportReconciliationState = .idle
-        }
-        physicalTailRepairTask?.cancel()
-        physicalTailRepairTask = nil
-        physicalTailRepairEvidenceRevision = nil
-        physicalTailRepairIssuedEvidenceRevision = nil
-        if command?.origin == .physicalTailRepair { clearCommand() }
-        if appliedTargetOrigin == .physicalTailRepair {
-            retireAppliedTargetWithoutCallback()
-        }
-        physicalTailRepairCommandToken = nil
     }
 
-    /// Retains native viewport ownership and admits bounded repair from current
-    /// same-presentation or fresh resumed marker evidence.
+    /// Retains pinned ownership and retires targets captured by the old native tree.
     func foregroundViewportBecameActive(activation: Int? = nil) {
         viewportObservationActive = true
         guard viewportMode == .pinned, !isUserInteracting else { return }
@@ -1078,7 +983,6 @@ final class ChatScrollCoordinator {
             guard lastForegroundActivation != activation else { return }
             lastForegroundActivation = activation
         }
-        retainedViewportReconciliationState = .pendingMarker
         if catchUpPhase != .none {
             // Background suspension can interrupt before command application;
             // clear the whole catch-up owner so it cannot block later sends.
@@ -1086,44 +990,22 @@ final class ChatScrollCoordinator {
         }
         // A ScrollPosition target is tied to the old native scroll tree. Retain
         // pinned intent, but retire that stale lease before the new tree emits
-        // evidence; otherwise it can block repair or replay against a changed
-        // content hierarchy. Detached readers never enter this branch.
+        // evidence; otherwise it can replay against a changed content hierarchy.
+        // Detached readers never enter this branch.
         if command != nil || appliedTargetCommandToken != nil {
             clearCommand()
             retireAppliedTargetWithoutCallback()
             pinnedPositionRevision &+= 1
         }
-        if physicalTailRepairCommandToken != nil {
-            retireAppliedTargetWithoutCallback()
-            pinnedPositionRevision &+= 1
-        }
         // Native geometry can remain numerically unchanged while the backing
         // UIScrollView is rebuilt. Rebase the semantic epoch so the next
-        // marker callback measures the new tree instead of trusting a stale
-        // aligned sample from before suspension.
+        // marker callback measures the new tree instead of trusting stale data.
         advanceLayoutEpoch()
         geometryRevision &+= 1
         if openingTailPhase.isActive {
             scheduleOpeningTailFrame()
             return
         }
-        // An existing command or target retains its original settlement owner.
-        guard command == nil, appliedTargetCommandToken == nil,
-              physicalTailRepairCommandToken == nil else { return }
-        physicalTailRepairTask?.cancel()
-        physicalTailRepairTask = nil
-        physicalTailRepairEvidenceRevision = nil
-        physicalTailRepairAttempts = 0
-        let currentEvidenceIsDisplaced = physicalTailEvidence.map {
-            $0.presentationEpoch == presentation
-                && $0.layoutEpoch == layoutEpoch
-                && ($0.classification == .aboveViewport
-                    || $0.classification == .belowViewport)
-        } == true
-        physicalTailRepairBlockedUntilEvidenceRevision = currentEvidenceIsDisplaced
-            ? max(-1, semanticFrameRevision - 1)
-            : semanticFrameRevision
-        schedulePhysicalTailRepairIfNeeded()
     }
 
     func ownsOpeningTailTarget(physicalID: String) -> Bool {
@@ -1238,19 +1120,10 @@ final class ChatScrollCoordinator {
         targetReleaseToken = nil
         appliedTargetCommandToken = applied.token
         appliedTargetOrigin = applied.origin
-        if applied.origin == .physicalTailRepair {
-            // Application is not physical acknowledgement. Keep the target
-            // lease until a newer, current marker frame proves alignment.
-            physicalTailRepairCommandToken = applied.token
-            physicalTailRepairIssuedEvidenceRevision = physicalTailEvidence?.semanticFrameRevision
-            schedulePhysicalTailRepairAcknowledgement(
-                token: applied.token,
-                presentation: presentation,
-                layout: layoutEpoch,
-                issuedRevision: physicalTailRepairIssuedEvidenceRevision
-            )
+        if retainedPinnedHandoffCommandToken == applied.token {
+            retainedPinnedHandoffGeometryRevision = geometryRevision
+            retainedPinnedHandoffMarkerRevision = physicalTailEvidence?.semanticFrameRevision
         }
-
         if case .positioning(var opening) = openingTailPhase,
            opening.commandToken == applied.token {
             // The command application boundary owns the acknowledgement clock.
@@ -1263,6 +1136,7 @@ final class ChatScrollCoordinator {
             scheduleOpeningTailTimeout(token: opening.token, presentation: opening.presentation)
             scheduleOpeningTailFrame()
         }
+        reconcileRetainedPinnedHandoff()
         if catchUpCommandToken == applied.token {
             catchUpCommandToken = nil
             if catchUpPhase == .staged {
@@ -1314,6 +1188,47 @@ final class ChatScrollCoordinator {
     func cancel() {
         cancelAllOwnedWork(result: .cancelled)
         clearCommand()
+    }
+
+    private func reconcileRetainedPinnedHandoff() {
+        guard retainedPinnedHandoffPending,
+              viewportMode == .pinned, !isUserInteracting, !directPositionOwnership,
+              viewportObservationActive, geometry.isValid,
+              let evidence = physicalTailEvidence,
+              evidence.presentationEpoch == presentation,
+              evidence.layoutEpoch == layoutEpoch,
+              evidence.classification != .incomplete,
+              command == nil || command?.token == retainedPinnedHandoffCommandToken,
+              prepend == nil, layoutRestore == nil, catchUpPhase == .none,
+              !openingTailPhase.isActive, !visibleOpeningRevealPending else { return }
+
+        if let token = retainedPinnedHandoffCommandToken {
+            guard appliedTargetCommandToken == token,
+                  let geometryBaseline = retainedPinnedHandoffGeometryRevision,
+                  let markerBaseline = retainedPinnedHandoffMarkerRevision,
+                  geometryRevision > geometryBaseline,
+                  evidence.semanticFrameRevision > markerBaseline,
+                  geometry.isAtCatchUpBoundary,
+                  evidence.classification == .aligned else { return }
+            if targetReleaseToken == nil {
+                requestAppliedTargetRelease(origin: .presentation)
+            }
+            return
+        }
+
+        guard command == nil else { return }
+        guard geometry.isAtCatchUpBoundary,
+              evidence.classification == .aligned else {
+            // The retained intent was pinned, but the replacement native tree
+            // no longer sits at the origin. One exact origin position hands
+            // the viewport back to native anchoring; it is never retried.
+            publish(.tail, animation: .disabled, origin: .presentation)
+            retainedPinnedHandoffCommandToken = command?.token
+            return
+        }
+
+        retainedPinnedHandoffPending = false
+        pinAtTail()
     }
 
     private func evaluateLayoutRestoreIfReady() {
@@ -1684,11 +1599,6 @@ final class ChatScrollCoordinator {
         reduceViewport(.opened)
         isAtBottom = true
         tailSettlementGeneration &+= 1
-        // The marker frame observed while the transcript is lifted by the
-        // opening reveal is intentionally not repair evidence. Wait for the
-        // first post-reveal marker sample before admitting physical repair.
-        physicalTailRepairBlockedUntilEvidenceRevision = semanticFrameRevision
-        schedulePhysicalTailRepairIfNeeded()
     }
 
     private func clearOpeningCommand(matching token: Int?) {
@@ -1838,7 +1748,6 @@ final class ChatScrollCoordinator {
     }
 
     private func finishCatchUpPinned() {
-        physicalTailRepairAttempts = 0
         requestAppliedTargetRelease(origin: .catchUp)
         catchUpTask?.cancel()
         catchUpTask = nil
@@ -1866,12 +1775,10 @@ final class ChatScrollCoordinator {
     }
 
     private func beginDirectInteraction(allowsBottomRubberBand: Bool = true) {
-        retainedViewportReconciliationState = .idle
-        physicalTailRepairTask?.cancel()
-        physicalTailRepairTask = nil
-        physicalTailRepairEvidenceRevision = nil
-        physicalTailRepairCommandToken = nil
-        physicalTailRepairIssuedEvidenceRevision = nil
+        retainedPinnedHandoffPending = false
+        retainedPinnedHandoffCommandToken = nil
+        retainedPinnedHandoffGeometryRevision = nil
+        retainedPinnedHandoffMarkerRevision = nil
         retireAppliedTargetWithoutCallback()
         let isBottomRubberBand = allowsBottomRubberBand
             && viewportMode == .pinned
@@ -1923,12 +1830,10 @@ final class ChatScrollCoordinator {
     }
 
     private func cancelAllOwnedWork(result: PerformanceResult) {
-        physicalTailRepairTask?.cancel()
-        physicalTailRepairTask = nil
-        physicalTailRepairEvidenceRevision = nil
-        physicalTailRepairCommandToken = nil
-        physicalTailRepairIssuedEvidenceRevision = nil
-        physicalTailRepairBlockedUntilEvidenceRevision = nil
+        retainedPinnedHandoffPending = false
+        retainedPinnedHandoffCommandToken = nil
+        retainedPinnedHandoffGeometryRevision = nil
+        retainedPinnedHandoffMarkerRevision = nil
         visibleOpeningRevealPending = false
         retireAppliedTargetWithoutCallback()
         clearOpeningTailSettlement()
@@ -2119,7 +2024,6 @@ final class ChatScrollCoordinator {
             geometryRevision: geometryRevision,
             semanticRevision: semanticFrameRevision,
             markerRevision: physicalTailEvidence?.semanticFrameRevision,
-            repairAttempts: physicalTailRepairAttempts,
             requestedRowOffsetFromTerminal: requestedRowOffsetFromTerminal,
             nativeTailEvidence: physicalTailEvidence.map {
                 $0.presentationEpoch == presentation && $0.layoutEpoch == layoutEpoch
@@ -2162,27 +2066,6 @@ final class ChatScrollCoordinator {
 
     private func advanceLayoutEpoch() {
         layoutEpoch &+= 1
-        // Materialization leases require evidence from the current layout epoch.
-        if command?.origin == .physicalTailRepair {
-            clearCommand()
-        }
-        if appliedTargetOrigin == .physicalTailRepair {
-            // Projection installation invalidates the native target tree. Retire
-            // the applied repair target atomically so its cancelled acknowledgement
-            // cannot strand ScrollPosition ownership across the new layout.
-            retireAppliedTargetWithoutCallback()
-            pinnedPositionRevision &+= 1
-        }
-        physicalTailRepairTask?.cancel()
-        physicalTailRepairTask = nil
-        physicalTailRepairAttempts = 0
-        physicalTailRepairEvidenceRevision = nil
-        physicalTailRepairCommandToken = nil
-        physicalTailRepairIssuedEvidenceRevision = nil
-        physicalTailRepairBlockedUntilEvidenceRevision = nil
-        // Preserve an admitted pending insertion across an epoch change. The
-        // projection reconciliation callback still removes it when its exact
-        // row disappears; dropping it here would strand the active sentinel.
         physicalTailEvidence = nil
         physicalTailEvidenceOffsetY = nil
         physicalTailEvidenceContentHeight = nil
@@ -2217,9 +2100,6 @@ final class ChatScrollCoordinator {
             physicalTailEvidenceContentHeight = geometry.isValid ? geometry.contentHeight : nil
             return
         }
-        physicalTailRepairTask?.cancel()
-        physicalTailRepairTask = nil
-        physicalTailRepairEvidenceRevision = nil
         physicalTailEvidence = evidence
         physicalTailEvidenceOffsetY = geometry.isValid ? geometry.offsetY : nil
         physicalTailEvidenceContentHeight = geometry.isValid ? geometry.contentHeight : nil
@@ -2240,159 +2120,7 @@ final class ChatScrollCoordinator {
                               previousContentHeight: previousContentHeight)
             }
         }
-        // Geometry jitter, including transient alignment, cannot replenish a
-        // repair episode. Only a new installed spine or explicit viewport
-        // intent admits a fresh two-command budget.
-        if let token = physicalTailRepairCommandToken {
-            let isAcknowledged = evidence.classification == .aligned
-                && evidence.semanticFrameRevision
-                    > (physicalTailRepairIssuedEvidenceRevision ?? -1)
-            if isAcknowledged {
-                physicalTailRepairCommandToken = nil
-                physicalTailRepairIssuedEvidenceRevision = nil
-                physicalTailRepairTask?.cancel()
-                physicalTailRepairTask = nil
-                requestTargetRelease(token)
-            } else {
-                schedulePhysicalTailRepairAcknowledgement(
-                    token: token,
-                    presentation: presentation,
-                    layout: layoutEpoch,
-                    issuedRevision: physicalTailRepairIssuedEvidenceRevision
-                )
-            }
-            return
-        }
-        schedulePhysicalTailRepairIfNeeded()
-    }
 
-    private func schedulePhysicalTailRepairIfNeeded() {
-        // The marker this repair chases is only authoritative at an estimated
-        // content end. The origin-anchored transcript's origin is exact, so the
-        // mechanism is gated off rather than deleted (CT-19 removes it).
-        guard orientation.pinsToEstimatedOrigin else {
-            physicalTailRepairTask?.cancel()
-            physicalTailRepairTask = nil
-            return
-        }
-        guard let evidence = physicalTailEvidence,
-              evidence.presentationEpoch == presentation,
-              evidence.layoutEpoch == layoutEpoch,
-              (evidence.classification == .belowViewport
-                  || evidence.classification == .aboveViewport),
-              !awaitingOpeningBaseline,
-              viewportObservationActive,
-              !geometry.isNativeUnderflow,
-              // Ignore native rubber-band overshoot; repair only from a legal
-              // marker displacement in the installed viewport geometry.
-              !geometry.isBeyondLegalContentBottom,
-              viewportMode == .pinned,
-              !isUserInteracting, !directPositionOwnership,
-              command == nil, appliedTargetCommandToken == nil,
-              physicalTailRepairCommandToken == nil,
-              prepend == nil, layoutRestore == nil,
-              catchUpPhase == .none,
-              !openingTailPhase.isActive,
-              !visibleOpeningRevealPending,
-              physicalTailRepairAttempts < 2 else {
-            physicalTailRepairTask?.cancel()
-            physicalTailRepairTask = nil
-            return
-        }
-        guard evidence.semanticFrameRevision
-                > (physicalTailRepairBlockedUntilEvidenceRevision ?? -1) else {
-            physicalTailRepairTask?.cancel()
-            physicalTailRepairTask = nil
-            return
-        }
-        guard physicalTailRepairEvidenceRevision != evidence.semanticFrameRevision,
-              physicalTailRepairTask == nil else { return }
-        physicalTailRepairEvidenceRevision = evidence.semanticFrameRevision
-        let admittedPresentation = presentation
-        let admittedLayout = layoutEpoch
-        let admittedRevision = evidence.semanticFrameRevision
-        physicalTailRepairTask = Task { [weak self, frameScheduler] in
-            do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
-            catch { return }
-            guard let self,
-                  self.presentation == admittedPresentation,
-                  self.layoutEpoch == admittedLayout,
-                  self.physicalTailEvidence?.semanticFrameRevision == admittedRevision else { return }
-            self.physicalTailRepairTask = nil
-            guard let current = self.physicalTailEvidence,
-                  (current.classification == .belowViewport
-                      || current.classification == .aboveViewport),
-                  !self.awaitingOpeningBaseline,
-                  self.viewportObservationActive,
-                  !self.geometry.isNativeUnderflow,
-                  !self.geometry.isBeyondLegalContentBottom,
-                  self.viewportMode == .pinned,
-                  !self.isUserInteracting, !self.directPositionOwnership,
-                  self.command == nil, self.appliedTargetCommandToken == nil,
-                  self.physicalTailRepairCommandToken == nil,
-                  self.prepend == nil, self.layoutRestore == nil,
-                  self.catchUpPhase == .none,
-                  !self.openingTailPhase.isActive,
-                  !self.visibleOpeningRevealPending,
-                  self.physicalTailRepairAttempts < 2 else { return }
-            self.physicalTailRepairAttempts &+= 1
-            self.publish(.tail, animation: .disabled, origin: .physicalTailRepair)
-        }
-    }
-
-    private func schedulePhysicalTailRepairAcknowledgement(
-        token: Int,
-        presentation: Int,
-        layout: Int,
-        issuedRevision: Int?
-    ) {
-        physicalTailRepairTask?.cancel()
-        physicalTailRepairTask = Task { [weak self, frameScheduler] in
-            do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
-            catch { return }
-            guard let self,
-                  self.physicalTailRepairCommandToken == token,
-                  self.presentation == presentation,
-                  self.layoutEpoch == layout else { return }
-            self.physicalTailRepairTask = nil
-            let hasNewEvidence = if let revision = self.physicalTailEvidence?.semanticFrameRevision {
-                revision > (issuedRevision ?? -1)
-            } else {
-                false
-            }
-            let aligned = self.physicalTailEvidence?.classification == .aligned && hasNewEvidence
-            if aligned {
-                self.physicalTailRepairCommandToken = nil
-                self.physicalTailRepairIssuedEvidenceRevision = nil
-                self.requestTargetRelease(token)
-                return
-            }
-            // A retry is admitted only for a newer settling marker frame. If
-            // no exact acknowledgement arrived, retire the lease rather than
-            // issuing a recurring tail command.
-            guard hasNewEvidence, self.physicalTailRepairAttempts < 2,
-                  (self.physicalTailEvidence?.classification == .belowViewport
-                    || self.physicalTailEvidence?.classification == .aboveViewport) else {
-                self.physicalTailRepairCommandToken = nil
-                self.physicalTailRepairIssuedEvidenceRevision = nil
-                if self.physicalTailRepairAttempts >= 2 {
-                    self.traceLease(.repairExhausted, token: token, reason: .attemptLimit)
-                }
-                self.retireAppliedTargetWithoutCallback()
-                // Do not leave a stale target silently owning the ready view.
-                // One target-free pinned revision lets SwiftUI rebase its native
-                // scroll tree. Later evidence may use only the remaining
-                // attempt, never renew this episode's budget.
-                self.retainedViewportReconciliationState = .pendingTargetFreeRebase
-                self.pinnedPositionRevision &+= 1
-                return
-            }
-            self.physicalTailRepairCommandToken = nil
-            self.physicalTailRepairIssuedEvidenceRevision = nil
-            self.retireAppliedTargetWithoutCallback()
-            self.physicalTailRepairAttempts &+= 1
-            self.publish(.tail, animation: .disabled, origin: .physicalTailRepair)
-        }
     }
 
     #if HOSTED_TEST

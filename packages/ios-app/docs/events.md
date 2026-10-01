@@ -366,8 +366,8 @@ cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness. Opening tail
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
 phase. Automatic live projection intake remains coalesced through that phase and its applied target release, then submits only the newest desired cut. Ordinary pinned growth, shrink, streaming, existing-row settlement, and new-row insertion remain owned by native size-change anchoring. Explicit
-opening, catch-up, semantic restore, prepend, retained resume, and the bounded physical-tail repair remain distinct command owners; after they release, pinned mode
-keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Repair is admitted only from current signed marker evidence and is cancelled by interaction or a newer layout epoch.
+opening, catch-up, semantic restore, prepend, and retained resume remain distinct command owners; after they release, pinned mode
+keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Ordinary pinned growth and shrink need no estimate-based correction command.
 Short-content alignment remains bottom-owned by the native anchor; blank space stays above the tail. Editor-only composer height changes install atomically;
 attachment, selected-skill, and resource-result identity changes use one value-scoped 240 ms smooth
 host-height transition, disabled under Reduce Motion. Direct user movement away from the tail and

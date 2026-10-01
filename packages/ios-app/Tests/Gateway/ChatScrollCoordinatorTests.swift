@@ -25,26 +25,8 @@ struct ChatScrollCoordinatorTests {
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom",
             layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
-    }
-
-    /// Releases `count` display boundaries in order, waiting for the next frame
-    /// request when the task under test is not parked on one yet.
-    private func releaseRepairFrames(
-        _ frames: ManualViewportFrameScheduler,
-        count: Int
-    ) async {
-        for _ in 0..<count {
-            var spins = 0
-            while !frames.hasPendingFrame, spins < 200 {
-                if Task.isCancelled { return }
-                await Task.yield()
-                spins += 1
-            }
-            frames.releaseNext()
-            await Task.yield()
-        }
     }
 
     @Test("physical tail uses the short content edge until it fills the container", arguments: [80.0, 240.0, 622.0, 647.0, 1_200.0])
@@ -58,7 +40,12 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: .zero, current: geometry)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: min(contentHeight, 675) - 12, width: 100, height: 12)
+            frame: CGRect(
+                x: 0,
+                y: 675 + 53 - min(contentHeight, 675),
+                width: 100,
+                height: 12
+            )
         )
         #expect(coordinator.physicalTailEvidence?.classification == .aligned)
         #expect(geometry.isNativeUnderflow == (contentHeight <= 622))
@@ -70,7 +57,7 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: .zero, current: bottom)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
         let admitted = try #require(coordinator.physicalTailEvidence?.semanticFrameRevision)
         coordinator.semanticFrameChanged(
@@ -82,7 +69,7 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.physicalTailEvidence?.semanticFrameRevision == admitted)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 488, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 1, width: 100, height: 12)
         )
         #expect((coordinator.physicalTailEvidence?.semanticFrameRevision ?? 0) > admitted)
         #expect(coordinator.physicalTailEvidence?.classification == .aligned)
@@ -91,7 +78,7 @@ struct ChatScrollCoordinatorTests {
     @Test("duplicate geometry and semantic frames do not advance physical evidence")
     func duplicateEvidenceIsIdempotent() {
         let coordinator = ChatScrollCoordinator()
-        let frame = CGRect(x: 0, y: 388, width: 100, height: 12)
+        let frame = CGRect(x: 0, y: 0, width: 100, height: 12)
         coordinator.geometryChanged(previous: .zero, current: bottom)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom",
@@ -139,10 +126,13 @@ struct ChatScrollCoordinatorTests {
         #expect(!coordinator.consumeTargetRelease())
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 300, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 88, width: 100, height: 12)
         )
 
         coordinator.geometryChanged(previous: farAway, current: bottom)
+        await Task.yield()
+        #expect(frames.requestCount == 1, "catch-up settlement requests its exact target-release frame")
+        guard frames.requestCount == 1 else { coordinator.cancel(); return }
         await frames.waitForRequest(count: 1)
         #expect(coordinator.targetReleaseGeneration == 0)
         frames.releaseNext()
@@ -151,10 +141,6 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.targetReleaseGeneration == 1)
         #expect(coordinator.consumeTargetRelease())
         #expect(!coordinator.consumeTargetRelease())
-        await frames.waitForRequest(count: 2)
-        frames.releaseNext()
-        let repair = try await coordinator.hostedNextCommand()
-        #expect(repair.origin == .physicalTailRepair)
         coordinator.cancel()
     }
 
@@ -276,7 +262,7 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: .zero, current: underflow)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 228, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 213, width: 100, height: 12)
         )
         #expect(coordinator.physicalTailEvidence?.classification == .aligned)
         coordinator.projectionInstalled()
@@ -306,7 +292,7 @@ struct ChatScrollCoordinatorTests {
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom",
             layoutEpoch: installedEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
         #expect(coordinator.physicalTailEvidence?.classification == .aligned)
 
@@ -798,26 +784,47 @@ struct ChatScrollCoordinatorTests {
         #expect(!coordinator.canInstallPersistentBottomPosition)
     }
 
-    @Test("same-session presentation handoff reconciles physical tail without moving a reader")
-    func retainedPresentationHandoffReconcilesViewport() {
-        let reader = detachedCoordinator(at: away)
+    @Test("same-session handoff preserves a detached reader and positions a retained pin once")
+    func retainedPresentationHandoffReconcilesViewport() async throws {
+        let frames = ManualViewportFrameScheduler()
+        let reader = detachedCoordinator(at: away, frames: frames)
         reader.resetForPresentation(2, retainingVisibleViewport: true)
         reader.geometryChanged(previous: away, current: away)
+        reader.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: reader.layoutEpoch,
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
+        )
         #expect(reader.viewportMode == .anchored)
         #expect(!reader.isAtBottom)
         #expect(reader.command == nil)
 
-        let tail = detachedCoordinator(at: away)
-        tail.resetForPresentation(2, retainingVisibleViewport: true)
-        tail.geometryChanged(previous: away, current: .zero)
-        #expect(tail.viewportMode == .anchored)
-        #expect(!tail.isAtBottom)
+        let tail = ChatScrollCoordinator(frameScheduler: frames.scheduler)
         tail.geometryChanged(previous: .zero, current: bottom)
-        #expect(tail.viewportMode == .anchored)
         tail.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: tail.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
+        tail.resetForPresentation(2, retainingVisibleViewport: true)
+        tail.geometryChanged(previous: bottom, current: away)
+        tail.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: tail.layoutEpoch,
+            frame: CGRect(x: 0, y: 300, width: 100, height: 12)
+        )
+        let command = try #require(tail.command)
+        #expect(command.origin == .presentation)
+        #expect(command.destination == .tail)
+        #expect(tail.commandApplied(command))
+
+        tail.geometryChanged(previous: away, current: bottom)
+        tail.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: tail.layoutEpoch,
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
+        )
+        #expect(tail.physicalTailEvidence?.classification == .aligned)
+        await frames.waitForRequest(count: 1)
+        frames.releaseNext()
+        await Task.yield()
+        #expect(tail.consumeTargetRelease())
         #expect(tail.viewportMode == .pinned)
         #expect(tail.isAtBottom)
         #expect(tail.command == nil)
@@ -829,7 +836,7 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: .zero, current: bottom)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
         let epoch = coordinator.layoutEpoch
         coordinator.projectionInstalled()
@@ -888,7 +895,7 @@ struct ChatScrollCoordinatorTests {
             coordinator.geometryChanged(previous: .zero, current: bottom)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 396, width: 100, height: 12)
+                frame: CGRect(x: 0, y: 0, width: 100, height: 12)
             )
             #expect(await positioning.value)
             #expect(coordinator.blocksAutomaticLiveProjectionIntake)
@@ -905,7 +912,7 @@ struct ChatScrollCoordinatorTests {
             coordinator.geometryChanged(previous: bottom, current: bottom)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                frame: CGRect(x: 0, y: 0, width: 100, height: 12)
             )
             var nextRequest = 3
             while coordinator.targetReleaseGeneration == 0, nextRequest <= 8 {
@@ -914,7 +921,7 @@ struct ChatScrollCoordinatorTests {
                     coordinator.geometryChanged(previous: bottom, current: bottom)
                     coordinator.semanticFrameChanged(
                         renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                        frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                        frame: CGRect(x: 0, y: 0, width: 100, height: 12)
                     )
                 }
                 // Repeated identical observation callbacks must not reset the
@@ -1095,7 +1102,7 @@ struct ChatScrollCoordinatorTests {
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom",
             layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
         coordinator.observeOpeningGeometry(bottom)
         coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
@@ -1124,7 +1131,7 @@ struct ChatScrollCoordinatorTests {
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom",
                 layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                frame: CGRect(x: 0, y: 0, width: 100, height: 12)
             )
             coordinator.geometryChanged(previous: .zero, current: self.bottom)
 
@@ -1170,7 +1177,7 @@ struct ChatScrollCoordinatorTests {
             coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                frame: CGRect(x: 0, y: 0, width: 100, height: 12)
             )
             coordinator.geometryChanged(previous: .zero, current: self.bottom)
             #expect(await task.value)
@@ -1199,7 +1206,7 @@ struct ChatScrollCoordinatorTests {
             coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                frame: CGRect(x: 0, y: 0, width: 100, height: 12)
             )
             coordinator.geometryChanged(previous: .zero, current: self.bottom)
             #expect(await task.value)
@@ -1235,7 +1242,7 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: .zero, current: underflow)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 335, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 106, width: 100, height: 12)
         )
         await Task.yield()
         // The current marker and provisional underflow are insufficient; the
@@ -1265,7 +1272,7 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: .zero, current: bottom)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
         coordinator.physicalTerminalRowObserved(
             physicalID: "terminal", layoutEpoch: coordinator.layoutEpoch,
@@ -1292,7 +1299,7 @@ struct ChatScrollCoordinatorTests {
         await Task.yield()
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: successorEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
         #expect(coordinator.command != nil)
         coordinator.physicalTerminalRowObserved(
@@ -1338,7 +1345,7 @@ struct ChatScrollCoordinatorTests {
             await frames.waitForRequest(count: 2)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                frame: CGRect(x: 0, y: 0, width: 100, height: 12)
             )
             // This is fresh marker evidence, but the native geometry sample
             // still predates command application. The old OR gate released
@@ -1393,7 +1400,7 @@ struct ChatScrollCoordinatorTests {
             coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
             coordinator.geometryChanged(previous: .zero, current: bottom)
             coordinator.semanticFrameChanged(renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                                             frame: CGRect(x: 0, y: 388, width: 100, height: 12))
+                                             frame: CGRect(x: 0, y: 0, width: 100, height: 12))
             #expect(await positioning.value)
             coordinator.openingRevealCompleted()
             let settlement = Task { await coordinator.waitForOpeningTailSettlement() }
@@ -1402,7 +1409,7 @@ struct ChatScrollCoordinatorTests {
             coordinator.projectionInstalled()
             coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
             coordinator.semanticFrameChanged(renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                                             frame: CGRect(x: 0, y: 388, width: 100, height: 12))
+                                             frame: CGRect(x: 0, y: 0, width: 100, height: 12))
             // This callback belongs to the previous layout. It must retire its
             // task handle and schedule fresh proof, not leave a non-nil dead task.
             frames.releaseNext()
@@ -1437,7 +1444,7 @@ struct ChatScrollCoordinatorTests {
             coordinator.geometryChanged(previous: .zero, current: bottom)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                frame: CGRect(x: 0, y: 0, width: 100, height: 12)
             )
             #expect(await positioning.value)
 
@@ -1454,7 +1461,7 @@ struct ChatScrollCoordinatorTests {
                 coordinator.geometryChanged(previous: previous, current: geometry)
                 coordinator.semanticFrameChanged(
                     renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                    frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                    frame: CGRect(x: 0, y: 0, width: 100, height: 12)
                 )
                 previous = geometry
                 await Task.yield()
@@ -1487,7 +1494,7 @@ struct ChatScrollCoordinatorTests {
         geometryFirst.geometryChanged(previous: .zero, current: bottom)
         geometryFirst.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: geometryFirst.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
         #expect(geometryFirst.command == nil)
 
@@ -1496,7 +1503,7 @@ struct ChatScrollCoordinatorTests {
         frameFirst.physicalTerminalRowObserved(layoutEpoch: frameFirst.layoutEpoch)
         frameFirst.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: frameFirst.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 0, width: 100, height: 12)
         )
         frameFirst.geometryChanged(previous: .zero, current: bottom)
         #expect(frameFirst.command == nil)
@@ -1530,7 +1537,7 @@ struct ChatScrollCoordinatorTests {
         emptySpine.geometryChanged(previous: .zero, current: installedUnderflow)
         emptySpine.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: emptySpine.layoutEpoch,
-            frame: CGRect(x: 0, y: 335, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 106, width: 100, height: 12)
         )
         #expect(await emptySpine.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom"))
         emptySpine.cancel()
@@ -1543,7 +1550,7 @@ struct ChatScrollCoordinatorTests {
         positioned.geometryChanged(previous: .zero, current: installedUnderflow)
         positioned.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: positioned.layoutEpoch,
-            frame: CGRect(x: 0, y: 335, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 106, width: 100, height: 12)
         )
         #expect(await task.value)
         #expect(positioned.command == nil)
@@ -1580,56 +1587,6 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.viewportMode == .pinned)
     }
 
-    @Test("projection replacement retires a pending physical repair command")
-    func projectionReplacementRetiresPendingPhysicalRepair() async throws {
-        try await withTestWatchdog { @MainActor in
-            let frames = ManualViewportFrameScheduler()
-            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            coordinator.geometryChanged(previous: .zero, current: self.bottom)
-            coordinator.semanticFrameChanged(
-                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 300, width: 100, height: 12)
-            )
-            await frames.waitForRequest(count: 1)
-            frames.releaseNext()
-            let command = try await coordinator.hostedNextCommand()
-            #expect(command.origin == .physicalTailRepair)
-
-            coordinator.projectionInstalled()
-
-            #expect(coordinator.command == nil)
-            #expect(!coordinator.commandApplied(command))
-            #expect(coordinator.canInstallPersistentBottomPosition)
-            coordinator.cancel()
-        }
-    }
-
-    @Test("projection replacement retires an applied physical repair target")
-    func projectionReplacementRetiresPhysicalRepairTarget() async throws {
-        try await withTestWatchdog { @MainActor in
-            let frames = ManualViewportFrameScheduler()
-            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            coordinator.geometryChanged(previous: .zero, current: self.bottom)
-            coordinator.semanticFrameChanged(
-                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 300, width: 100, height: 12)
-            )
-            await frames.waitForRequest(count: 1)
-            frames.releaseNext()
-            let command = try await coordinator.hostedNextCommand()
-            #expect(command.origin == .physicalTailRepair)
-            #expect(coordinator.commandApplied(command))
-            let revisionBeforeProjection = coordinator.pinnedPositionRevision
-
-            coordinator.projectionInstalled()
-
-            #expect(coordinator.command == nil)
-            #expect(coordinator.pinnedPositionRevision == revisionBeforeProjection + 1)
-            #expect(coordinator.canInstallPersistentBottomPosition)
-            coordinator.cancel()
-        }
-    }
-
     @Test("valid underflow marker is aligned without subtracting the composer inset twice")
     func underflowMarkerIsAligned() async {
         let frames = ManualViewportFrameScheduler()
@@ -1644,207 +1601,13 @@ struct ChatScrollCoordinatorTests {
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom",
             layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 664, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 164, width: 100, height: 12)
         )
         await Task.yield()
         #expect(underflow.isNativeUnderflow)
         #expect(coordinator.physicalTailEvidence?.classification == .aligned)
         #expect(frames.requestCount == 0)
         #expect(coordinator.command == nil)
-    }
-
-    @Test("placeholder geometry cannot repair before the authoritative opening baseline")
-    func placeholderGeometryDoesNotRepair() async {
-        let frames = ManualViewportFrameScheduler()
-        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-        coordinator.resetForPresentation()
-        coordinator.geometryChanged(previous: .zero, current: bottom)
-        coordinator.semanticFrameChanged(
-            renderedID: "transcript-bottom",
-            layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 300, width: 100, height: 12)
-        )
-        await Task.yield()
-        #expect(frames.requestCount == 0)
-        #expect(coordinator.command == nil)
-    }
-
-    @Test("viewport coverage retires an applied physical repair without changing intent")
-    func viewportCoverageRetiresPhysicalRepair() async throws {
-        try await withTestWatchdog { @MainActor in
-            let frames = ManualViewportFrameScheduler()
-            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            coordinator.geometryChanged(previous: .zero, current: self.bottom)
-            coordinator.semanticFrameChanged(
-                renderedID: "transcript-bottom",
-                layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 300, width: 100, height: 12)
-            )
-            await frames.waitForRequest(count: 1)
-            frames.releaseNext()
-            let command = try await coordinator.hostedNextCommand()
-            #expect(coordinator.commandApplied(command))
-
-            coordinator.viewportObservationChanged(isActive: false)
-
-            #expect(coordinator.command == nil)
-            #expect(coordinator.viewportMode == .pinned)
-            #expect(coordinator.canInstallPersistentBottomPosition)
-        }
-    }
-
-    @Test("physical tail repair releases only after a newer aligned marker acknowledgement")
-    func physicalTailRepairRequiresMarkerAcknowledgement() async throws {
-        try await withTestWatchdog { @MainActor in
-            let frames = ManualViewportFrameScheduler()
-            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            coordinator.geometryChanged(previous: .zero, current: self.bottom)
-            coordinator.semanticFrameChanged(
-                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 300, width: 100, height: 12)
-            )
-            await frames.waitForRequest(count: 1)
-            frames.releaseNext()
-            let command = try await coordinator.hostedNextCommand()
-            #expect(command.origin == .physicalTailRepair)
-            #expect(coordinator.commandApplied(command))
-            #expect(coordinator.targetReleaseGeneration == 0)
-
-            coordinator.semanticFrameChanged(
-                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
-            )
-            await frames.waitForRequest(count: 2)
-            frames.releaseNext()
-            await Task.yield()
-            #expect(coordinator.targetReleaseGeneration == 1)
-            #expect(coordinator.consumeTargetRelease())
-            #expect(coordinator.command == nil)
-        }
-    }
-
-    @Test("physical tail repair failure retires without a recurring command loop")
-    func physicalTailRepairFailureIsBounded() async throws {
-        try await withTestWatchdog { @MainActor in
-            let frames = ManualViewportFrameScheduler()
-            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            coordinator.geometryChanged(previous: .zero, current: self.bottom)
-            coordinator.semanticFrameChanged(
-                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 300, width: 100, height: 12)
-            )
-            await frames.waitForRequest(count: 1)
-            frames.releaseNext()
-            let command = try await coordinator.hostedNextCommand()
-            coordinator.commandApplied(command)
-            await frames.waitForRequest(count: 2)
-            frames.releaseNext()
-            await Task.yield()
-            #expect(coordinator.command == nil)
-            #expect(coordinator.targetReleaseGeneration == 0)
-
-            // The no-marker retirement must wait for a legal next geometry
-            // sample and request a target-free pinned rebase. It must not
-            // leave the mounted transcript permanently displaced.
-            let beforeRebase = coordinator.tailSettlementGeneration
-            coordinator.geometryChanged(previous: self.bottom, current: self.bottom)
-            #expect(coordinator.tailSettlementGeneration > beforeRebase)
-            #expect(coordinator.command == nil)
-        }
-    }
-
-    // Failure mode: an exhausted repair that left the pinned viewport far above
-    // the tail. Native bottom anchoring holds only a viewport already at the
-    // tail, so a rebase that waits for a legal-boundary sample strands a pinned
-    // chat for the rest of the stream.
-    @Test("an exhausted physical repair that left the pinned viewport displaced re-follows the native tail once")
-    func exhaustedRepairRebasesDisplacedViewportToNativeTail() async throws {
-        try await withTestWatchdog { @MainActor in
-            let frames = ManualViewportFrameScheduler()
-            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            coordinator.geometryChanged(previous: .zero, current: self.bottom)
-            coordinator.semanticFrameChanged(
-                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                frame: CGRect(x: 0, y: 300, width: 100, height: 12)
-            )
-            await frames.waitForRequest(count: 1)
-            frames.releaseNext()
-            let repair = try await coordinator.hostedNextCommand()
-            #expect(coordinator.commandApplied(repair))
-            await frames.waitForRequest(count: 2)
-            frames.releaseNext()
-            await Task.yield()
-            #expect(coordinator.command == nil)
-
-            // Native anchoring still converges from near the tail.
-            let nearTail = ChatTranscriptGeometry(offsetY: 560, contentHeight: 1_000, containerHeight: 400)
-            coordinator.geometryChanged(previous: self.bottom, current: nearTail)
-            #expect(coordinator.command == nil)
-
-            // The misplaced repair left the viewport well above the tail.
-            coordinator.geometryChanged(previous: nearTail, current: self.farAway)
-            let rebase = try #require(coordinator.command)
-            #expect(rebase.destination == .tail)
-            #expect(rebase.animation == .disabled)
-            #expect(rebase.origin == .targetFreeRebase)
-            #expect(coordinator.viewportMode == .pinned)
-            let releases = coordinator.targetReleaseGeneration
-            #expect(coordinator.commandApplied(rebase))
-            await self.releaseRepairFrames(frames, count: 1)
-            await Task.yield()
-            #expect(coordinator.targetReleaseGeneration == releases + 1)
-            #expect(coordinator.consumeTargetRelease())
-
-            // One rebase per retired repair: a still-displaced sample cannot
-            // turn it into a recurring follow loop.
-            let revision = coordinator.commandRevision
-            coordinator.geometryChanged(previous: self.farAway, current: self.away)
-            coordinator.geometryChanged(previous: self.away, current: self.farAway)
-            #expect(coordinator.command == nil)
-            #expect(coordinator.commandRevision == revision)
-        }
-    }
-
-    @Test("alignment and changing displacement cannot renew an exhausted physical repair episode")
-    func physicalRepairJitterDoesNotRenewBudget() async throws {
-        try await withTestWatchdog { @MainActor in
-            let frames = ManualViewportFrameScheduler()
-            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            let trace = ChatInteractionTrace()
-            coordinator.configureInteractionTrace(trace, context: trace.beginContext(retainedPresentation: true))
-            coordinator.geometryChanged(previous: .zero, current: self.bottom)
-            for attempt in 0..<2 {
-                let before = frames.requestCount
-                coordinator.semanticFrameChanged(
-                    renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                    frame: CGRect(x: 0, y: 300 - attempt * 20, width: 100, height: 12)
-                )
-                await frames.waitForRequest(count: before + 1)
-                frames.releaseNext()
-                let command = try await coordinator.hostedNextCommand()
-                #expect(command.origin == .physicalTailRepair)
-                let beforeAck = frames.requestCount
-                #expect(coordinator.commandApplied(command))
-                await frames.waitForRequest(count: beforeAck + 1)
-                frames.releaseNext()
-                await Task.yield()
-                #expect(coordinator.command == nil)
-            }
-            let exhaustedRequests = frames.requestCount
-            for index in 0..<20 {
-                coordinator.semanticFrameChanged(
-                    renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-                    frame: CGRect(x: 0, y: index.isMultiple(of: 2) ? 388 : 270 - index * 3,
-                                  width: 100, height: 12)
-                )
-                await Task.yield()
-            }
-            #expect(coordinator.command == nil)
-            #expect(frames.requestCount == exhaustedRequests)
-            #expect(trace.diagnosticRecords(limit: 256).filter {
-                $0.record.event == "chat.lease.repair-exhausted"
-            }.count == 1)
-        }
     }
 
     @Test("semantic frame projection is count bounded")

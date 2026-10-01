@@ -486,12 +486,10 @@ mounted (`scenario.render.rows`). A window that fails its check is discarded
 and measured again on a fresh instance up to three times (listed as
 `render_retries` warnings); otherwise the run fails with the check's evidence
 and a screenshot, so the profiler refuses a scenario instead of reporting a
-median over two workloads. On a loaded host `streaming-reply` still sees the
-physical-tail repair land above the tail as the prompt and reply rows enter
-(`chat.lease.repair-exhausted`); the retired repair's target-free rebase
-returns that pinned chat to the native tail
-(`ChatScrollCoordinatorTests.exhaustedRepairRebasesDisplacedViewportToNativeTail`),
-so a diverged window there is a regression. The tests in `Tests/Profiling/` skip unless the
+median over two workloads. On a loaded host `streaming-reply` must remain at the transcript tail as prompt
+and reply rows enter; the origin-anchored native size-change anchor owns that
+pinned growth without estimate-based correction commands. A diverged window is
+a regression. The tests in `Tests/Profiling/` skip unless the
 profiler selects them, so ordinary unit runs are unaffected.
 
 | Scenario | Default window | Workload |
