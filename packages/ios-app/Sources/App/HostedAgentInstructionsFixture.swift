@@ -53,7 +53,7 @@ struct HostedAgentInstructionsFixtureView: View {
         let subagents = source(["kind": "package", "name": "pi-subagents"])
         let agents = "/Users/fixture/Workspace/project/AGENTS.md"
         let skill = "/Users/fixture/Workspace/project/.agents/skills/tron-ios/SKILL.md"
-        let tron = "## Tron operating context\nYou are Tron, the user's private agent operating on the Mac.\nGateway rebuilds, restarts, updates, rollbacks, promotions, and deployments remain manual user actions; never initiate them yourself."
+        let tron = "## Tron operating context\nYou are Tron, the user's private agent operating on the Mac.\nRebuilds, restarts, updates, rollbacks, promotions, and deployments of the Gateway hosting this session, or of any Stable or production Gateway, remain manual user actions; never initiate them yourself. A repository's own instructions may permit managing an isolated development Gateway."
         let sections: [JSONValue] = [
             section("preamble", "You are an expert coding assistant operating inside pi, a coding agent harness.", source: pi),
             section("tools", "- read: Read file contents\n- subagent: Delegate to subagents; orchestrate in one workflowScript call.", entries: [

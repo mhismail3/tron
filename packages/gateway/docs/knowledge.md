@@ -239,8 +239,11 @@ recurring queue or scheduler.
 The TypeSafe key is configured in Pi's existing provider settings. Knowledge
 tagging retains its durable monthly reservation ledger (the current default
 ceiling is 500 cents); there is no separate Jev connection setup, Keychain
-credential, or paid-approval flag. A persisted `knowledge.jev` connection is
-rejected at load with an error directing the operator to configure TypeSafe.
+credential, or paid-approval flag. Persisted legacy `knowledge.jev` rows are
+hidden from connection projections and rejected with an instance-specific error
+until the first accepted connection write explicitly removes the rows and their
+setup operations. That revision emits one `connection.legacy-jev-retired`
+observability event; reads and rejected writes leave persisted state unchanged.
 
 Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
 owned background work, not a request that waits for a model: the call accepts a
@@ -805,8 +808,8 @@ the linked-capture safety downgrade. It leaves admission pending and does not ac
 assess, or decide. `knowledge.connector.ack` requires processed/skipped plus a bounded
 reason, removes the item from pending, persists bounded processed history, and is
 idempotent. Personal scope remains excluded from work retrieval. `raindropIntake` still owns its
-legacy decision and move workflow until C23, but uses the same ingest primitive
-for source capture. Agent sweeps use the same accepted-work owner as RPC runs, so
+legacy decision and move workflow remains available, but uses the same ingest
+primitive for source capture. Agent sweeps use the same accepted-work owner as RPC runs, so
 disconnecting a presentation waiter does not replay or abandon admitted provider
 work. Connector identity reuse
 resolves through a canonical Knowledge catalog index keyed by
@@ -846,12 +849,13 @@ provenance. Mutations remain revision-fenced and receipted; personal sources
 never appear in work retrieval; Jev assessment refuses a source whose current
 scope is personal, before any reservation, and legacy intake routes by the
 source's own scope; provider
-movement requires write permission and an explicit collection destination. The routine's dry run performs no source/admission,
-acknowledgment, remote-move, or paid-assessment effects. It may refresh Raindrop
-queue bookkeeping through free read-only provider discovery, but must not invoke
-paid X discovery; it reports X from its existing queue. Until C23, the legacy
-`knowledge.raindrop.intake` operation remains available and continues using the
-same ingestion primitive.
+movement requires write permission; its destination is derived from the current
+admission and scope and cannot be selected by the caller. The routine's dry run
+performs no source/admission, acknowledgment, remote-move, or paid-assessment
+effects. It may refresh Raindrop queue bookkeeping through free read-only provider
+discovery, but must not invoke paid X discovery; it reports X from its existing
+queue. The `knowledge.raindrop.intake` operation remains available and continues
+using the same ingestion primitive.
 
 ## Bounded Raindrop intake
 
@@ -1019,4 +1023,4 @@ For Raindrop, `ConnectionInstance.raindropCollections` is the sole routing confi
 
 Research and personal homes ingest with their role as Knowledge scope. Triage inboxes require the routine to choose and pass a scope explicitly; archive-role collections are never ingested. A provider/account/item identity has one canonical source across scopes. When discovery sees it in a different mapped collection, the existing source's collection provenance is refreshed and K1's receipted `placement` operation changes its scope only when there is no authoritative user/agent admission or placement; it does not create a second record. If setup revision changes during a run, it stops before admission or a remote effect; any evidence already captured remains pending under the mapping that admitted that run and is inspectable for retry.
 
-`raindropMove` accepts no destination from its caller. It derives archive-role home for an archived source and otherwise the home matching the source's Knowledge scope, refusing when that home is unmapped. If the source already resides in that home it returns typed `already-home` success without provider mutation. Remote moves still require `allowWrites`, exact source/object authority, the current setup revision, a durable effect receipt, and provider read-back reconciliation. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.
+`raindropMove` accepts no destination from its caller. It derives archive-role home for an archived source and otherwise the home matching the source's Knowledge scope, refusing when that home is unmapped. The admission decision authorizes movement even for partial captures and records without a captured `collectionId`: captured collection metadata is not authoritative for the bookmark's current location. The operation verifies the exact source revision and provider identity, queries Raindrop for the live item and its mapped collection, and returns typed `already-home` success without a provider mutation when it is already at its derived home. Otherwise, remote moves still require `allowWrites`, current setup and mapping authority, object authorization when captured object evidence exists, a durable effect receipt, and provider read-back reconciliation. Pending admission and unmapped live collections remain refused. The operation is manual only; no recurring approval, scheduler, X integration, or collection creation is implied.

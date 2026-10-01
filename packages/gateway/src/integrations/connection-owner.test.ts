@@ -6,21 +6,33 @@ import { drainDurableWriteStats } from "../util/durable-json.js";
 import { ConnectionOwner } from "./connection-owner.js";
 
 describe("ConnectionOwner", () => {
-  it("rejects only a persisted knowledge.jev instance while keeping other connections readable", async () => {
+  it("retires persisted Jev rows and setup operations on the first accepted write, once", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-legacy-jev-connection-"));
+    const retirements: string[][] = [];
     try {
-      const owner = new ConnectionOwner(home);
+      const owner = new ConnectionOwner(home, undefined, (instanceIds) => retirements.push([...instanceIds]));
       const setup = await owner.execute({ kind: "setup.begin", commandId: "setup-healthy-001", instanceId: "healthy", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
       await owner.execute({ kind: "setup.complete", commandId: "setup-healthy-002", operationId: setup.operationId, instanceId: "healthy", providerAccountId: "42", credentialRef: "connector:raindrop:test", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
       const path = join(home, "state", "integrations", "connections.json");
-      const persisted = JSON.parse(await readFile(path, "utf8")) as { instances: Record<string, unknown> };
-      persisted.instances.legacy = { ...persisted.instances.healthy as object, definitionId: "knowledge.jev" };
+      const persisted = JSON.parse(await readFile(path, "utf8")) as { instances: Record<string, object>; setupOperations: Record<string, { instanceId: string }> };
+      persisted.instances.legacy = { ...persisted.instances.healthy, id: "legacy", definitionId: "knowledge.jev" };
+      persisted.setupOperations["legacy-operation"] = { operationId: "legacy-operation", instanceId: "legacy", definitionId: "knowledge.jev", method: "token", status: "pending", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       await writeFile(path, JSON.stringify(persisted), { mode: 0o600 });
       const snapshot = await owner.snapshot();
       expect(snapshot.instances.map((instance) => instance.id)).toEqual(["healthy"]);
-      await expect(owner.resolveInstance("legacy")).rejects.toThrow(/knowledge\.jev connection 'legacy'.*configure the typesafe provider credential/);
-      await expect(owner.execute({ kind: "disconnect", commandId: "legacy-disconnect-001", instanceId: "legacy" }))
-        .rejects.toThrow(/knowledge\.jev connection 'legacy'.*configure the typesafe provider credential/);
+      expect(snapshot.setupOperations.some(operation => operation.instanceId === "legacy")).toBe(false);
+      expect(JSON.parse(await readFile(path, "utf8")).instances.legacy).toBeDefined();
+      await expect(owner.execute({ kind: "policy.update", commandId: "invalid-write-001", instanceId: "healthy", expectedSetupRevision: 999, policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } })).rejects.toThrow(/changed/);
+      expect(JSON.parse(await readFile(path, "utf8")).instances.legacy).toBeDefined();
+      expect(retirements).toEqual([]);
+      await owner.execute({ kind: "setup.begin", commandId: "accepted-write-001", instanceId: "x", definitionId: "knowledge.x", method: "oauth" });
+      const after = JSON.parse(await readFile(path, "utf8")) as { instances: Record<string, unknown>; setupOperations: Record<string, { instanceId: string }> };
+      expect(after.instances.legacy).toBeUndefined();
+      expect(Object.values(after.setupOperations).some(operation => operation.instanceId === "legacy")).toBe(false);
+      expect(retirements).toEqual([["legacy"]]);
+      await owner.execute({ kind: "setup.begin", commandId: "accepted-write-002", instanceId: "x2", definitionId: "knowledge.x", method: "oauth" });
+      expect(retirements).toEqual([["legacy"]]);
+      await expect(owner.resolveInstance("legacy")).rejects.toThrow(/unknown/);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   it("validates unique Raindrop collection roles and revision-fences their configuration", async () => {

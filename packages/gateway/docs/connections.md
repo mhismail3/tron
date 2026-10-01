@@ -20,8 +20,12 @@ session search, and the first-party `jev` tool use Pi's `ModelRuntime.classify()
 with the TypeSafe `jev-latest` classifier and Pi's provider credential store.
 Tron retains its qualified pre-dispatch estimate and monthly tagging ledger;
 provider credential readiness is owned by Pi and configured through Provider
-Settings. Existing persisted `knowledge.jev` connection state is rejected with
-an instance-specific setup error rather than migrated or silently reused.
+Settings. Persisted legacy `knowledge.jev` rows are hidden from connection
+projections and rejected with an instance-specific setup error while they remain
+on disk. The first accepted connection write explicitly removes those rows and
+their setup operations, persists the retirement in the same revision, and emits
+one `connection.legacy-jev-retired` event listing the retired instance IDs.
+Reads and rejected writes do not remove them. No Keychain item is read or deleted.
 
 The accepted owner-typed commands are:
 
