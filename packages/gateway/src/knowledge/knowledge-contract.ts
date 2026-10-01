@@ -752,6 +752,8 @@ export type KnowledgeCurationCode =
   | "decision-authority"
   | "budget-exhausted"
   | "model-not-configured"
+  | "model-error"
+  | "model-output-invalid"
   | "unavailable"
   | "cancelled";
 
