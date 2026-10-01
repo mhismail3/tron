@@ -15,8 +15,6 @@ IOS_OWNED_PREFIXES = (
     "scripts/ci_ios_infra_scope.py",
     "scripts/tron-ios-test",
     "scripts/tron-ios-simulator",
-    "scripts/patch-ios-gateway-e2e-test",
-    "scripts/test-ios-test-infrastructure.py",
     "scripts/ios-gateway-e2e-test",
     "scripts/tron-profile-ios",
     "scripts/ios-release-toolchain-doctor.sh",

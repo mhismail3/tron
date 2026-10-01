@@ -90,18 +90,33 @@ jobs:
         run: |
           set -euo pipefail
           run=true
+          reason=workflow-dispatch
           if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
             if [[ "${{ github.event_name }}" == "pull_request" ]]; then
               base='${{ github.event.pull_request.base.sha }}'
             else
               base='${{ github.event.before }}'
             fi
-            if [[ -n "$base" && ! "$base" =~ ^0+$ ]] && git cat-file -e "$base^{commit}" 2>/dev/null; then
-              if git diff --name-only --no-renames -z "$base"...HEAD > "$RUNNER_TEMP/changed-paths.nul"; then
-                run="$(python3 scripts/ci_ios_infra_scope.py --paths-file "$RUNNER_TEMP/changed-paths.nul")"
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              reason=missing-base
+            elif ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              reason=base-unavailable
+            elif git diff --name-only --no-renames -z "$base" HEAD > "$RUNNER_TEMP/changed-paths.nul"; then
+              if run="$(python3 scripts/ci_ios_infra_scope.py --paths-file "$RUNNER_TEMP/changed-paths.nul")"; then
+                reason=classified-changed-paths
+              else
+                run=true
+                reason=classifier-failed
               fi
+            else
+              reason=diff-failed
             fi
           fi
+          if [[ "$run" != true && "$run" != false ]]; then
+            run=true
+            reason=invalid-classification
+          fi
+          echo "iOS runner infrastructure selection: run=$run reason=$reason"
           echo "run=$run" >> "$GITHUB_OUTPUT"
       - name: Test iOS runner infrastructure without hardware
         if: steps.ios-infrastructure-scope.outputs.run == 'true'
