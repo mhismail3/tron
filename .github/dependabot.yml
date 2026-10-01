@@ -4,6 +4,7 @@ updates:
     directory: /packages/gateway
     schedule:
       interval: weekly
+    labels: ["dependencies"]
     groups:
       pi-sdk:
         patterns:
@@ -12,3 +13,4 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    labels: ["dependencies"]

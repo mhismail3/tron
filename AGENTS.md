@@ -307,6 +307,9 @@ and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
 - **Discovered work:** file it, then stay in scope.
   - File a new task issue (Task form). If it belongs to the current epic, make
     it a sub-issue there; otherwise label it `needs-triage`.
+  - Give every issue except an epic exactly one `kind:*` and one `visibility:*`
+    label and its `area:*` label. `.github/work.json` declares what each means;
+    the dashboard reports any issue that breaks this.
   - Add it to the Project. Use Status Ready only when it is inside an approved
     epic's scope, and Proposed otherwise.
   - Link it from your pull request. Do not do it in your pull request unless
