@@ -267,6 +267,13 @@ struct ChatDisplayOrientationTests {
                 let oldestFrame = try #require(frames[harness.firstTranscriptID])
                 #expect(pillFrame.minY >= oldestFrame.maxY - 1, "The load-earlier pill renders above the oldest loaded row")
                 harness.captureScreenshot(named: "status-bar-origin-oldest.png")
+                // The pill must be actionable after the jump: the status-bar
+                // `.oldestHistory` target is released on application, so a load
+                // of earlier messages is admitted. Without that release
+                // `canRequestHistoryPage` stays false and this page never begins.
+                #expect(harness.drivePrepend(), "the load-earlier page must be admitted after the status-bar jump")
+                _ = try await harness.recorder.waitUntil { $0.observation.prependLoadWaiting }
+                harness.releasePrependPage()
                 harness.setCovered(true)
                 for _ in 0..<12 { try await harness.driveFrameBoundary() }
                 #expect(transcript.scrollsToTop, "Coverage restores the original native setting")

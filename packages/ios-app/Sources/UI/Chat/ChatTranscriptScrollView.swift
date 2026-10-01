@@ -806,16 +806,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // the first fully ready frame.
         .scrollDisabled(!isReady)
         .scrollDismissesKeyboard(.interactively)
-        .onChange(of: responseState, initial: true) { previous, current in
-            guard let current, previous?.sessionID == current.sessionID else { return }
-            if ChatUnreadResponsePolicy.shouldMarkUnread(
-                previous: previous,
-                current: current,
-                userScrolledAway: scrollCoordinator.shouldTrackUnreadResponse
-            ) {
-                scrollCoordinator.semanticResponseArrived()
-            }
-        }
+        // The unread-response observer lives in
+        // ChatTranscriptCoordinatorObservationModifier above; one owner only.
         .overlay { openingSurface() }
     }
 

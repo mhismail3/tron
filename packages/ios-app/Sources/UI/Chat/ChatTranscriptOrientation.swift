@@ -21,8 +21,6 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// card's shrink) render exactly as they do today.
     fileprivate var verticalScale: CGFloat { -1 }
 
-    // MARK: Semantic questions the product asks
-
     // MARK: The layout the transcript's own ends map to
 
     /// The scroll view's layout edge that holds the newest row.

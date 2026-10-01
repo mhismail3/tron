@@ -13,8 +13,9 @@ struct ChatView: View {
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
-    /// The transcript's vertical orientation (CT-23's development switch).
-    /// Today's path is the default and it is fixed for the life of the view.
+    /// The transcript's origin-anchored layout. There is one layout; the value
+    /// is fixed for the life of the view and owns the geometry reflection and
+    /// anchors the coordinator and row modifiers read.
     private let transcriptOrientation: ChatTranscriptOrientation
     #if HOSTED_TEST
     let hostedProbe: ChatHostedProbe?

@@ -95,11 +95,10 @@ final class ChatScrollCoordinator {
     #endif
 
     private let frameScheduler: DisplayFrameScheduler
-    /// The transcript's vertical orientation. Geometry reaches this coordinator
-    /// already adapted by the orientation owner, so every decision below still
-    /// reads one model — `distanceFromBottom` is the distance from the newest
-    /// row — and only the mechanisms that exist to chase an estimated end are
-    /// gated off while the newest row is the exact content origin.
+    /// The transcript's origin-anchored layout. Geometry reaches this
+    /// coordinator already adapted by the orientation owner, so every decision
+    /// below reads one model — `distanceFromBottom` is the distance from the
+    /// newest row, which is the exact content origin.
     private let orientation: ChatTranscriptOrientation
     private let clock: MonotonicClock
     private var presentation = 0
@@ -127,10 +126,6 @@ final class ChatScrollCoordinator {
     private var appliedTargetOrigin: ChatScrollCommand.Origin?
     private var targetReleaseToken: Int?
     private(set) var targetReleaseGeneration = 0
-    private var retainedPinnedHandoffPending = false
-    private var retainedPinnedHandoffCommandToken: Int?
-    private var retainedPinnedHandoffGeometryRevision: Int?
-    private var retainedPinnedHandoffMarkerRevision: Int?
     private var catchUpPhase: CatchUpPhase = .none
     private var catchUpCommandToken: Int?
     private var catchUpUnreadBeforeJump = false
@@ -208,7 +203,6 @@ final class ChatScrollCoordinator {
     }
     var latestGeometry: ChatTranscriptGeometry { geometry }
     /// Native size-change anchoring is intent-based, not overflow-dependent.
-    /// The bounded physical repair is the only explicit fallback.
     var usesPinnedSizeChangeAnchor: Bool { viewportMode == .pinned }
     var shouldTrackUnreadResponse: Bool { viewportMode == .anchored || catchUpPhase != .none }
     var isWaitingForPrependSemanticFrame: Bool {
@@ -241,12 +235,7 @@ final class ChatScrollCoordinator {
         _ presentation: Int? = nil,
         retainingVisibleViewport: Bool = false
     ) {
-        let retainsPinnedViewport = retainingVisibleViewport && viewportMode == .pinned
         cancelAllOwnedWork(result: .discarded)
-        retainedPinnedHandoffPending = retainsPinnedViewport
-        retainedPinnedHandoffCommandToken = nil
-        retainedPinnedHandoffGeometryRevision = nil
-        retainedPinnedHandoffMarkerRevision = nil
         physicalTailEvidence = nil
         physicalTailEvidenceOffsetY = nil
         physicalTailEvidenceContentHeight = nil
@@ -330,7 +319,6 @@ final class ChatScrollCoordinator {
                 renderedID: renderedID, layoutEpoch: layoutEpoch, frame: adaptedFrame
             )
         }
-        reconcileRetainedPinnedHandoff()
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
     }
@@ -489,14 +477,6 @@ final class ChatScrollCoordinator {
         geometry = current
         let viewportStructureChanged = abs(current.containerHeight - previousGeometry.containerHeight) > 0.5
             || abs(current.bottomInset - previousGeometry.bottomInset) > 0.5
-        if viewportStructureChanged {
-            // A container or inset change re-derives the mounted LazyVStack's
-            // content estimate, which can strand this pinned viewport past the
-            // tail again inside the same installed epoch. Re-arm the one
-            // correction on exactly that structural boundary, never on a
-            // repeating sample, so a re-reported impossible viewport cannot
-            // oscillate the net.
-        }
         let contentHeightChangedMaterially = abs(current.contentHeight - previousGeometry.contentHeight)
             > max(80, current.containerHeight * 0.25)
         let meaningfulTraceChange = viewportStructureChanged
@@ -513,7 +493,6 @@ final class ChatScrollCoordinator {
         if meaningfulTraceChange {
             traceGeometry(.meaningfulChange)
         }
-        reconcileRetainedPinnedHandoff()
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
         if (isUserInteracting || directPositionOwnership),
@@ -542,15 +521,6 @@ final class ChatScrollCoordinator {
               token == appliedTargetCommandToken,
               command == nil else { return false }
         targetReleaseToken = nil
-        if appliedTargetOrigin == .presentation,
-           retainedPinnedHandoffPending,
-           retainedPinnedHandoffCommandToken == token {
-            retainedPinnedHandoffPending = false
-            retainedPinnedHandoffCommandToken = nil
-            retainedPinnedHandoffGeometryRevision = nil
-            retainedPinnedHandoffMarkerRevision = nil
-            pinAtTail()
-        }
         traceLease(.released, token: token, reason: .consumed)
         appliedTargetCommandToken = nil
         appliedTargetOrigin = nil
@@ -807,11 +777,14 @@ final class ChatScrollCoordinator {
         targetReleaseToken = nil
         appliedTargetCommandToken = applied.token
         appliedTargetOrigin = applied.origin
-        if retainedPinnedHandoffCommandToken == applied.token {
-            retainedPinnedHandoffGeometryRevision = geometryRevision
-            retainedPinnedHandoffMarkerRevision = physicalTailEvidence?.semanticFrameRevision
+        if applied.origin == .oldestHistory {
+            // The status-bar jump to the oldest edge needs no marker proof: the
+            // oldest end is legal as soon as the command lands. Release through
+            // the bounded lease so native anchoring owns the viewport again from
+            // the next frame and the load-earlier page request is admitted,
+            // instead of holding an edge target across the jump.
+            requestTargetRelease(applied.token)
         }
-        reconcileRetainedPinnedHandoff()
         if catchUpCommandToken == applied.token {
             catchUpCommandToken = nil
             if catchUpPhase == .staged {
@@ -863,47 +836,6 @@ final class ChatScrollCoordinator {
     func cancel() {
         cancelAllOwnedWork(result: .cancelled)
         clearCommand()
-    }
-
-    private func reconcileRetainedPinnedHandoff() {
-        guard retainedPinnedHandoffPending,
-              viewportMode == .pinned, !isUserInteracting, !directPositionOwnership,
-              viewportObservationActive, geometry.isValid,
-              let evidence = physicalTailEvidence,
-              evidence.presentationEpoch == presentation,
-              evidence.layoutEpoch == layoutEpoch,
-              evidence.classification != .incomplete,
-              command == nil || command?.token == retainedPinnedHandoffCommandToken,
-              prepend == nil, layoutRestore == nil, catchUpPhase == .none,
-              !visibleOpeningRevealPending else { return }
-
-        if let token = retainedPinnedHandoffCommandToken {
-            guard appliedTargetCommandToken == token,
-                  let geometryBaseline = retainedPinnedHandoffGeometryRevision,
-                  let markerBaseline = retainedPinnedHandoffMarkerRevision,
-                  geometryRevision > geometryBaseline,
-                  evidence.semanticFrameRevision > markerBaseline,
-                  geometry.isAtCatchUpBoundary,
-                  evidence.classification == .aligned else { return }
-            if targetReleaseToken == nil {
-                requestAppliedTargetRelease(origin: .presentation)
-            }
-            return
-        }
-
-        guard command == nil else { return }
-        guard geometry.isAtCatchUpBoundary,
-              evidence.classification == .aligned else {
-            // The retained intent was pinned, but the replacement native tree
-            // no longer sits at the origin. One exact origin position hands
-            // the viewport back to native anchoring; it is never retried.
-            publish(.tail, animation: .disabled, origin: .presentation)
-            retainedPinnedHandoffCommandToken = command?.token
-            return
-        }
-
-        retainedPinnedHandoffPending = false
-        pinAtTail()
     }
 
     private func evaluateLayoutRestoreIfReady() {
@@ -1019,10 +951,6 @@ final class ChatScrollCoordinator {
     }
 
     private func beginDirectInteraction(allowsBottomRubberBand: Bool = true) {
-        retainedPinnedHandoffPending = false
-        retainedPinnedHandoffCommandToken = nil
-        retainedPinnedHandoffGeometryRevision = nil
-        retainedPinnedHandoffMarkerRevision = nil
         retireAppliedTargetWithoutCallback()
         let isBottomRubberBand = allowsBottomRubberBand
             && viewportMode == .pinned
@@ -1073,10 +1001,6 @@ final class ChatScrollCoordinator {
     }
 
     private func cancelAllOwnedWork(result: PerformanceResult) {
-        retainedPinnedHandoffPending = false
-        retainedPinnedHandoffCommandToken = nil
-        retainedPinnedHandoffGeometryRevision = nil
-        retainedPinnedHandoffMarkerRevision = nil
         visibleOpeningRevealPending = false
         retireAppliedTargetWithoutCallback()
         cancelLayoutRestore()
