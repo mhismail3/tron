@@ -261,6 +261,9 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   CI-workflow, unknown and empty path sets run the infrastructure suite. If the
   base commit cannot be resolved or path classification fails, the workflow
   runs it. This does not change CI's hosted iOS unit suite.
+- **The related-issue check** (`.agents/skills/tron-work/related-issues.js`)
+  has its own `work-related-issues` check, a Node test that runs the script as
+  codemode does against a Jev stand-in enforcing Jev's request bounds.
 - **iOS selector tooling** has its own `work-selector-tests` check, so owner
   selection and CI path-classification tests run locally when their sources
   change, not only in GitHub Actions.
@@ -465,6 +468,38 @@ The names it reads (statuses, labels, fields, the verify context) come from the
 46. **GitHub text reaches a filter or a style.** Undeclared or hostile labels
     never become filter tokens or class names, and a label color is used only
     when it is six hex digits.
+
+## `issues`
+
+`scripts/tron work issues [--closed [--closed-limit <n>]]` prints one JSON
+document to stdout: every open issue, and with `--closed` the `n` most recently
+updated closed issues (default 200, at most 500). Each entry has the number,
+state, close reason, an epic flag (`dashboard.epicLabel`), the title, the
+labels and a body excerpt with issue-form scaffolding (HTML comments, headings,
+unanswered fields) removed. It is the input of a related-issue check, so it must
+be complete or fail: an agent reads it back through a tool that merges stderr
+into stdout and truncates at 1 MiB.
+
+Titles are capped at 200 characters, bodies at 1,000, and the document at
+900,000 bytes. Tron's related-issue check, which classifies the corpus with Jev
+through Tron's codemode tool, belongs to the harness, not to this tooling. It
+lives with the [tron-work skill](../../.agents/skills/tron-work/SKILL.md).
+
+### Failure modes
+
+`test_issues.py` runs `cli.py issues` in a real Git checkout against a stand-in
+`gh` executable that honors `--state` and `--limit`.
+
+49. **A truncated open list reads as complete.** It asks for one more than its
+    limit of 500 open issues and refuses when GitHub returns that many, so a
+    check never reports "nothing related" for an issue it did not see.
+50. **Closed issues leak into the default corpus, or lose their state.** Closed
+    issues are queried only with `--closed`, newest update first, and each
+    keeps `state` and `stateReason`.
+51. **The corpus overruns the agent's output bound.** A document over 900,000
+    bytes is refused with nothing on stdout, never cut off mid-JSON.
+52. **Success output is not pure JSON.** On success stderr is empty and stdout
+    holds only the bounded corpus.
 
 ## `land`
 

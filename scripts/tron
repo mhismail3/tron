@@ -43,6 +43,10 @@ Commands:
   work dashboard [--html <path>] [--json <path>]
                                     Read-only live view of all work: needs-you,
                                     epics, claims, queue, stale, orphans
+  work issues [--closed [--closed-limit <n>]]
+                                    Print every open issue (optionally recent closed
+                                    ones) as a bounded JSON corpus for related-issue
+                                    checks
   work land [--title <t>] [--summary-file <md>] [--needs-user-validation <text>]
                                     From a claim worktree: merge the base in, verify,
                                     push, open or update the PR, wait for required

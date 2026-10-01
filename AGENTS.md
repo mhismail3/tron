@@ -271,6 +271,9 @@ and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
   in this order: lowest Epic rank, then highest Priority, with every blocker
   closed. Never claim a Proposed, Blocked, In progress or In review issue, or
   an epic.
+- **Check before new work:** when the user asks for a fix or feature without
+  naming an issue, run the tron-work skill's related-issue check first and
+  report any duplicate before claiming or filing anything.
 - **Claim and isolate:** `scripts/tron work start <issue>`. It is the only way to
   get a task branch (`<type>/<issue>-<slug>`) and its worktree under
   `../tron-worktrees/`.
