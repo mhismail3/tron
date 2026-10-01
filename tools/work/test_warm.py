@@ -43,7 +43,8 @@ class WarmWorktreeTests(unittest.TestCase):
         destination = self.package(self.worktree)
         install = unittest.mock.Mock()
 
-        warm.seed_node_modules(self.primary, self.worktree, install=install)
+        with patch.object(warm, "_npm_tree_valid", return_value=True):
+            warm.seed_node_modules(self.primary, self.worktree, install=install)
 
         seeded = destination / "node_modules"
         self.assertEqual((seeded / "installed.txt").read_text(), "independent install")
@@ -83,12 +84,29 @@ class WarmWorktreeTests(unittest.TestCase):
             calls.append(package)
             self.installed(package)
 
-        with patch.object(warm, "_clone_tree", fail_clone):
+        with patch.object(warm, "_npm_tree_valid", return_value=True), \
+                patch.object(warm, "_clone_tree", fail_clone):
             warm.seed_node_modules(self.primary, self.worktree, install=install)
 
         self.assertEqual(calls, [destination])
         self.assertFalse((destination / "node_modules/partial").exists())
         self.assertTrue((destination / "node_modules/installed.txt").is_file())
+
+    def test_incomplete_primary_dependency_tree_uses_npm_ci(self) -> None:
+        self.installed(self.package(self.primary))
+        destination = self.package(self.worktree)
+        calls: list[Path] = []
+
+        def install(package: Path) -> None:
+            calls.append(package)
+            self.installed(package)
+            (package / "node_modules/.npm-ci").touch()
+
+        with patch.object(warm, "_npm_tree_valid", return_value=False):
+            warm.seed_node_modules(self.primary, self.worktree, install=install)
+
+        self.assertEqual(calls, [destination])
+        self.assertTrue((destination / "node_modules/.npm-ci").is_file())
 
     def test_missing_primary_install_uses_npm_ci(self) -> None:
         destination = self.package(self.worktree)

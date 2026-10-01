@@ -104,11 +104,12 @@ workspace:
 
 ### Warm-worktree failure modes
 
-`test_warm.py` covers the safety boundary: exact lock match and a complete npm
-hidden lock clones independent files; mismatch, missing or incomplete primary
-dependencies uses `npm ci`; a failed clone removes partial output before
-installing; and iOS warming copies only compiler and SDK caches, never another
-worktree's built products. Clone failures are fail-closed rather than sharing
+`test_warm.py` covers the safety boundary: exact lock match, a complete npm
+hidden lock and npm's dependency-tree check clone independent files; mismatch,
+missing or incomplete primary dependencies uses `npm ci`; a failed clone
+removes partial output before installing; and iOS warming copies only compiler
+and SDK caches, never another worktree's built products. Clone failures are
+fail-closed rather than sharing
 or trusting mutable dependency state.
 
 The session is `--session`, then `WORK_SESSION_ID`, then `PI_SESSION_ID`.

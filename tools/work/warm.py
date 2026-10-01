@@ -45,18 +45,29 @@ def _npm_ci(package: Path) -> None:
 
 
 def _installed_from_lock(package: Path, lockfile: Path) -> bool:
-    """Reject empty or incomplete node_modules trees before considering a clone."""
+    """Reject empty, stale or incomplete node_modules trees before cloning."""
     try:
         expected = json.loads(lockfile.read_text())
         installed = json.loads((package / "node_modules/.package-lock.json").read_text())
         expected_packages = expected["packages"]
         installed_packages = installed["packages"]
-        return bool(installed_packages) and all(
+        metadata_matches = bool(installed_packages) and all(
             path in expected_packages and expected_packages[path] == metadata
             for path, metadata in installed_packages.items()
         )
     except (OSError, ValueError, KeyError, TypeError):
         return False
+    return metadata_matches and _npm_tree_valid(package)
+
+
+def _npm_tree_valid(package: Path) -> bool:
+    """Let npm check required, optional-platform and peer dependency completeness."""
+    try:
+        result = subprocess.run(["npm", "ls", "--all", "--json"], cwd=package,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except OSError:
+        return False
+    return result.returncode == 0
 
 
 def seed_node_modules(primary: Path, worktree: Path, *,
