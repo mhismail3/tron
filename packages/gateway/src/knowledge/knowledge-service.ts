@@ -24,7 +24,7 @@ import { createHash } from "node:crypto";
 import { KnowledgeTaggingBudget, KnowledgeTaggingEngine, KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, KNOWLEDGE_TAG_QUESTIONS_PER_CALL, activeTagDefinitions } from "./knowledge-tagger.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("assessSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorDiscover"), Type.Literal("connectorStatus"), Type.Literal("connectorQueue"), Type.Literal("connectorAck"), Type.Literal("raindropMove"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("assessSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorDiscover"), Type.Literal("connectorStatus"), Type.Literal("connectorQueue"), Type.Literal("connectorAck"), Type.Literal("raindropMove"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("ingestItem"), Type.Literal("synthesis"), Type.Literal("curate"), Type.Literal("summarize"), Type.Literal("reextractSource"), Type.Literal("curationJob"), Type.Literal("configureTags"), Type.Literal("setKnowledgeModel"), Type.Literal("reconcileTags"), Type.Literal("tagsNeedingRetag"), Type.Literal("tagSource"), Type.Literal("retagQueue"), Type.Literal("estimateTaggingCost"), Type.Literal("taggingBudget"), Type.Literal("reconcileTagBudget"), Type.Literal("reconcileConnectorBudget")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -729,6 +729,10 @@ export class KnowledgeService {
         if (!this.tagging) throw new GatewayError("unsupported", "Jev Knowledge tagging is not installed");
         return this.tagging.budget.reconcileUncertain(action.request.connectionId, action.request.attemptId);
       }
+      case "knowledge.connector.budget.reconcile": {
+        if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
+        return this.extensions.connector(action, signal);
+      }
       case "knowledge.tags.estimate": return this.estimateTaggingCost(action.request);
       case "knowledge.curation.jobs": return this.summaryJobs(action.request);
       case "knowledge.source.assess": {
@@ -1084,6 +1088,11 @@ export class KnowledgeService {
         if (!parameters.connectionId || !parameters.attemptId) throw new GatewayError("invalid_request", "reconcileTagBudget requires connectionId and attemptId");
         const details = await this.invoke({ operation: "knowledge.tags.budget.reconcile", request: { connectionId: parameters.connectionId, attemptId: parameters.attemptId } }, signal);
         return { text: `Uncertain Jev attempt reconciled at its full reservation ceiling (${(details as { reconciledCostCents: number }).reconciledCostCents.toFixed(3)} cents).`, details };
+      }
+      case "reconcileConnectorBudget": {
+        if (!parameters.commandId || !parameters.connectionId || !parameters.attemptId) throw new GatewayError("invalid_request", "reconcileConnectorBudget requires commandId, connectionId, and attemptId");
+        const details = await this.invoke({ operation: "knowledge.connector.budget.reconcile", request: { commandId: parameters.commandId, connector: "x", connectionId: parameters.connectionId, attemptId: parameters.attemptId } }, signal) as { reconciledCostCents: number };
+        return { text: `X attempt reconciled at its full page reservation ceiling (${details.reconciledCostCents} cents).`, details };
       }
       case "curationJob": {
         const result = this.summaryJobs({ ...(parameters.commandId ? { commandId: parameters.commandId } : {}), ...(parameters.sourceId ? { sourceId: parameters.sourceId } : {}), ...(parameters.curationStatus ? { status: parameters.curationStatus } : {}) });
