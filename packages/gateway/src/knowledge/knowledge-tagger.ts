@@ -5,6 +5,7 @@ import type { KnowledgeConnectorState, KnowledgeRecord, KnowledgeTagDefinition, 
 import type { KnowledgeStore } from "./knowledge-store.js";
 import { GatewayError } from "../errors.js";
 import { KnowledgeCurationRefusal } from "./knowledge-contract.js";
+import { availablePaidBudgetCents, hasOpenPaidBudgetAttempt, markPaidBudgetDispatch, paidBudgetMonth, releaseUndispatchedPaidBudgetAttempt, reservePaidBudgetAttempt, rollPaidBudget } from "./paid-budget-ledger.js";
 
 export const KNOWLEDGE_TAG_CONFIDENCE_THRESHOLD = 0.65;
 export const KNOWLEDGE_TAG_QUESTIONS_PER_CALL = 16;
@@ -80,7 +81,6 @@ function tagQuestion(tag: KnowledgeTagDefinition): JevQuestion {
   };
 }
 
-function budgetMonth(instant = new Date()): string { return `${instant.getUTCFullYear()}-${String(instant.getUTCMonth() + 1).padStart(2, "0")}`; }
 function attemptHash(connectionId: string, jobId: string, callIndex: number, month: string): string {
   return createHash("sha256").update(JSON.stringify([connectionId, jobId, callIndex, month])).digest("hex").slice(0, 48);
 }
@@ -88,12 +88,8 @@ function budgetCommand(attemptId: string, stage: string): string { return `jev-t
 function emptyJevState(connectionId: string): KnowledgeConnectorState {
   return { connector: "jev", connectionId, enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: KNOWLEDGE_TAG_DEFAULT_MONTHLY_CAP_CENTS, recurringApproved: false, pending: [], capturedIds: [], health: "ready", remaining: 0 };
 }
-function rollBudget(state: KnowledgeConnectorState, month: string) {
-  const old = state.taggingBudget;
-  if (old?.month === month) return old;
-  const attempts = Object.fromEntries(Object.entries(old?.attempts ?? {}).filter(([, attempt]) => attempt.status === "uncertain" || attempt.status === "reserved"));
-  return { month, spentCents: 0, reservedCents: 0, attempts };
-}
+function rollBudget(state: KnowledgeConnectorState, month: string) { return rollPaidBudget(state.taggingBudget, month); }
+const budgetMonth = paidBudgetMonth;
 
 /** Why one attempt key cannot be reserved again. Only a settled attempt tells
  * the caller what it cost; an open one must be reconciled, not retried. */
@@ -135,7 +131,7 @@ export class KnowledgeTaggingBudget {
     return {
       connectionId, enabled: instance.policy.enabled, paidAccessApproved: instance.policy.paidAccessApproved,
       capCents: instance.policy.paidBudgetCents, month, spentCents: ledger.spentCents,
-      reservedCents: ledger.reservedCents, availableCents: Math.max(0, instance.policy.paidBudgetCents - ledger.spentCents - ledger.reservedCents),
+      reservedCents: ledger.reservedCents, availableCents: availablePaidBudgetCents(instance.policy.paidBudgetCents, ledger),
       uncertain: Object.entries(ledger.attempts).filter(([, attempt]) => attempt.status === "uncertain" || attempt.status === "reserved").map(([attemptId, attempt]) => ({ attemptId, month: attempt.month, reservedCents: attempt.reservedCents })),
     };
   }
@@ -168,12 +164,10 @@ export class KnowledgeTaggingBudget {
       const state = current ?? { ...emptyJevState(connectionId), enabled: authority.policy.enabled, paidAccessApproved: authority.policy.paidAccessApproved, paidBudgetCents: authority.policy.paidBudgetCents };
       if (!state.enabled || !state.paidAccessApproved || state.paidBudgetCents <= 0 || state.paidBudgetCents !== authority.policy.paidBudgetCents) throw new GatewayError("conflict", "Jev tagging paid-access policy changed before reservation");
       const ledger = rollBudget(state, month);
-      if (Object.values(ledger.attempts).some(attempt => attempt.month === month && (attempt.status === "uncertain" || attempt.status === "reserved"))) throw new GatewayError("conflict", "An uncertain Jev dispatch must be reconciled before more paid Jev work");
+      if (hasOpenPaidBudgetAttempt(ledger)) throw new GatewayError("conflict", "An uncertain Jev dispatch must be reconciled before more paid Jev work");
       if (ledger.attempts[id]) throw attemptReuse(ledger.attempts[id]);
-      if (ledger.spentCents + ledger.reservedCents + KNOWLEDGE_TAG_CALL_RESERVATION_CENTS > state.paidBudgetCents + 1e-9) throw new KnowledgeCurationRefusal("budget-exhausted", "Monthly Jev budget is exhausted");
-      ledger.reservedCents += KNOWLEDGE_TAG_CALL_RESERVATION_CENTS;
-      ledger.attempts[id] = { month, reservedCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, status: "reserved" };
-      return { ...state, taggingBudget: ledger };
+      if (availablePaidBudgetCents(state.paidBudgetCents, ledger) + 1e-9 < KNOWLEDGE_TAG_CALL_RESERVATION_CENTS) throw new KnowledgeCurationRefusal("budget-exhausted", "Monthly Jev budget is exhausted");
+      return { ...state, taggingBudget: reservePaidBudgetAttempt(ledger, id, month, KNOWLEDGE_TAG_CALL_RESERVATION_CENTS, state.paidBudgetCents) };
     }, { stage: "reserve", attemptId: id, monthlyReservationCents: KNOWLEDGE_TAG_CALL_RESERVATION_CENTS }, connectionId);
     return id;
   }
@@ -182,10 +176,8 @@ export class KnowledgeTaggingBudget {
     const month = budgetMonth();
     await this.store.updateConnectorState(budgetCommand(attemptId, "dispatch"), "jev", current => {
       if (!current?.taggingBudget) throw new GatewayError("conflict", "Jev tagging reservation is missing");
-      const ledger = rollBudget(current, month); const attempt = ledger.attempts[attemptId];
-      if (!attempt || attempt.status !== "reserved" || attempt.month !== month) throw new GatewayError("conflict", "Jev tagging reservation is no longer dispatchable in this UTC month");
-      attempt.status = "uncertain";
-      return { ...current, taggingBudget: ledger };
+      const ledger = rollBudget(current, month);
+      return { ...current, taggingBudget: markPaidBudgetDispatch(ledger, attemptId, month) };
     }, { stage: "dispatch", attemptId }, connectionId);
   }
 
@@ -223,9 +215,8 @@ export class KnowledgeTaggingBudget {
     const month = budgetMonth();
     await this.store.updateConnectorState(budgetCommand(attemptId, "release"), "jev", current => {
       if (!current?.taggingBudget) return current ?? emptyJevState(connectionId);
-      const ledger = rollBudget(current, month); const attempt = ledger.attempts[attemptId];
-      if (attempt?.status === "reserved") { attempt.status = "settled"; attempt.actualCostCents = 0; ledger.reservedCents = Math.max(0, ledger.reservedCents - attempt.reservedCents); }
-      return { ...current, taggingBudget: ledger };
+      const ledger = rollBudget(current, month);
+      return { ...current, taggingBudget: releaseUndispatchedPaidBudgetAttempt(ledger, attemptId, month) };
     }, { stage: "release", attemptId }, connectionId);
   }
 }
