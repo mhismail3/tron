@@ -442,10 +442,8 @@ final class ChatVisualParityRunner {
         self.recordsArtifacts = recordsArtifacts
     }
 
-    /// Capture the transcript without moving an exact-origin pin. Only the
-    /// estimated-end orientation uses the reference's whole-point normalization.
+    /// Capture the transcript without modifying the native viewport.
     func capture(_ phase: String) {
-        try? harness.snapNativeTranscriptOffsetToWholePoint()
         let rendered = harness.renderedParityFrame(
             scale: ChatVisualParitySpec.renderScale,
             rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
@@ -497,7 +495,6 @@ final class ChatVisualParityRunner {
         var stable = 0
         for _ in 0..<cap {
             try await harness.driveFrameBoundary()
-                try? harness.snapNativeTranscriptOffsetToWholePoint()
             let fingerprint = ChatVisualParityFingerprint(harness.renderedParityFrame(
                 scale: ChatVisualParitySpec.renderScale,
                 rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,

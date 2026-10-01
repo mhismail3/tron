@@ -776,12 +776,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 presentationEpoch: presentationEpoch,
                 presentationPhase: presentationPhase
             )
-        } action: { previous, observation in
+        } action: { _, observation in
             guard scrollCoordinator.admitsViewportCallback(capturedActivation: observation.viewportActivation),
                   observation.presentationEpoch == presentationEpoch,
                   let change = viewportGeometry.update(
                     native: observation.geometry,
-                    previousNative: previous.geometry,
                     obstruction: orientation.layoutClearance(for: safeAreaInsets).top,
                     orientation: orientation
                   ) else { return }

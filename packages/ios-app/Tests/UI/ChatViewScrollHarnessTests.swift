@@ -4436,26 +4436,6 @@ final class ChatViewScrollHarness {
         hostingController.view.convert(row.windowFrame, from: nil)
     }
 
-    /// One display boundary of a CT-2 shape, sampled directly from the native
-    /// transcript scroll view: the content estimate the lazy stack publishes,
-    /// the native offset, container and bottom inset, and the mounted row hosts
-    /// with their window-coordinate visibility. Native rows come from the live
-    /// hierarchy and exclude markers whose view has no window, so a row that
-    /// unmounted cannot be counted as visible. Blankness and bottom-band
-    /// coverage are decided by `TranscriptWindowOracle`, so neither count
-    /// depends on the transcript's own orientation.
-    func snapNativeTranscriptOffsetToWholePoint() throws {
-        guard orientation.pinsToEstimatedOrigin else { return }
-        let scrollView = try nativeTranscriptScrollView()
-        let snapped = scrollView.contentOffset.y.rounded()
-        guard abs(snapped - scrollView.contentOffset.y) > 0.01 else { return }
-        scrollView.setContentOffset(
-            CGPoint(x: scrollView.contentOffset.x, y: snapped),
-            animated: false
-        )
-        scrollView.layoutIfNeeded()
-    }
-
     func isNativeTranscriptInteractionEnabled() throws -> Bool {
         let scrollView = try nativeTranscriptScrollView()
         return scrollView.isScrollEnabled && scrollView.isUserInteractionEnabled

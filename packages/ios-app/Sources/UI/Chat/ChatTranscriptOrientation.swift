@@ -295,16 +295,13 @@ final class ChatTranscriptViewportGeometry {
 
     func update(
         native: ScrollGeometry? = nil,
-        previousNative: ScrollGeometry? = nil,
         obstruction: CGFloat,
         orientation: ChatTranscriptOrientation
     ) -> (previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry)? {
         if let native { self.native = native }
         self.obstruction = obstruction
         guard let applied = self.native else { return nil }
-        let previous = previousNative.flatMap { sample in
-            orientation.pinsToEstimatedOrigin ? orientation.coordinatorGeometry(sample) : nil
-        } ?? published
+        let previous = published
         let current = orientation.coordinatorGeometry(applied, obstruction: self.obstruction)
         published = current
         return (previous, current)
