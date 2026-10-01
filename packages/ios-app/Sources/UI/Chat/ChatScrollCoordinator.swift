@@ -296,7 +296,7 @@ final class ChatScrollCoordinator {
         // origin-anchored path those measure upward from the visual bottom, so
         // every consumer below — the reader's anchor row, the marker's
         // placement against the viewport, a correction's signed residual — is
-        // handed the same transcript-relative space today's transcript reports.
+        // handed this single transcript-relative coordinate space.
         // SwiftUI can invoke an observation action again with the same frame
         // while the row tree settles. Such callbacks are inert unless an exact
         // active owner is awaiting later temporal evidence from that row.

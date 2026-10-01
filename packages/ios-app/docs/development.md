@@ -892,42 +892,20 @@ bound for a frame in a transition phase; the same runs measured a worst
 transition diff of 0.0528, at the send entrance's frame 43. The phases are classified in
 `ChatVisualParitySpec.transitionPhases`, so which frames are compared tightly is
 the scenario's own declaration and every phase not named there is tight by
-default. Sampling is normalized so the compared states reproduce wherever they
-can: only the estimated-end orientation's native offset is snapped to a whole
-point before rendering, a rendered frame may be re-aligned by up to 2 points vertically, a
-rendered frame may be matched to a recorded frame one boundary away, and each
-scenario settles on the rendered pixels (not the recorder's layout sample
-stream) before its fixed frame sequence begins. CT-25
-measured removing the offset snap: the gate stayed green in three runs, but the
-opened-long-history reference's stable frames moved to 0.019 of their 0.025
-bound, so today's path retains it. The orientation owner excludes the exact-origin
-path: rounding its applied negative inset by even a third of a point moves it
-off the native pin and makes subsequent margin changes preserve that displaced
-offset. Capture must observe the keyboard, not scroll it. The keyboard parity
-scenario also checks the settled row against the composer before comparing
-pixels. The suite runs in about 60 s.
+default. Image comparison is bounded to a two-point vertical alignment and a
+single recorded display boundary, and each scenario settles on rendered pixels
+rather than the recorder's layout sample stream before its fixed frame sequence
+begins. These presentation-only allowances never mutate the scroll position or
+normalize content geometry: the native transcript remains pinned at its exact
+origin during capture. The keyboard parity scenario also checks the settled
+newest row against the composer before comparing pixels. The suite runs in about
+60 s.
 
-The alignment search's step is per frame (CT-23 stage 2). A frame in a stable
-phase is searched at one display pixel — a third of a point on this lane's
-device — matching the display-pixel placement of pinned row frames. Today's
-reference uses whole-point offset normalization; the candidate's exact origin
-is never moved for a capture. Transition frames keep the half-point step their
-own bound was measured with. The finer step is not enough on its own, and the
-gate states it: today's container pins to the `LazyVStack`'s own estimated
-content height, so it settles at a 12.667 pt tail clearance where its contract is
-12 pt, while an exactly pinned candidate settles at 12.000. The reference
-therefore carries a 0.667 pt (two display pixel) offset, and the 2-point bands
-are sensitive to the capture's ink phase: the finer search finds that offset
-(the reported shift is 0.333-0.667 pt) but the opened-long-history scenario's
-stable frames still read 0.0277-0.0285 against the 0.025 bound, and
-`ordinary-send-keyboard-up`'s pinned frame can sit on either side of the bound
-(0.02498 with the pre-margin viewport, 0.02505 with margins, identical row
-positions; their image-to-image RMS is 0.00165). Scenario-wide `maxDiff` may
-belong to a permitted transition and must not be reported as the failed stable
-frame's magnitude; `report.json` names each frame's own magnitude and bound.
-Today's path stays 10/10 in the same runs. Closing it needs either a re-record
-(excluded by the CT-12 rule above) or a comparison that is insensitive to the
-capture's ink phase, and CT-12/CT-25's owner owns that decision.
+Stable-frame alignment uses one display-pixel increments; transition frames use
+the measured half-point step. A frame match is limited to one recorded boundary,
+and `report.json` names each frame's magnitude and bound. The origin is always
+observed as rendered; capture alignment never shifts the native viewport. Capture
+must observe the keyboard, not scroll it.
 
 What the gate cannot resolve, measured on this lane: the exact rise and duration
 of a sub-60 ms-phase transition. A frame must force a screen update to carry the

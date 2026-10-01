@@ -71,14 +71,9 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
 
     let installed: InstalledChatTranscript
     let canonicalAliases: [String: String]
-    /// Whether the spine presents the newest row first (CT-23's origin-anchored
-    /// transcript). It is an O(1) index reversal of the same storage, so one
-    /// spine serves both orientations and no caller copies or re-sorts rows.
-    let presentsNewestRowFirst: Bool
-
     /// The newest row: the row the pinned transcript anchors, and the row a
     /// send's transition belongs to.
-    var newest: ChatPhysicalTranscriptRow? { presentsNewestRowFirst ? first : last }
+    var newest: ChatPhysicalTranscriptRow? { first }
 
     private var canonicalCount: Int { installed.committedLedger.items.count }
     private var liveCount: Int { installed.liveRegion.items.count }
@@ -100,7 +95,7 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
 
     subscript(position: Int) -> ChatPhysicalTranscriptRow {
         precondition(indices.contains(position))
-        var index = presentsNewestRowFirst ? endIndex - 1 - position : position
+        var index = endIndex - 1 - position
         if index < canonicalCount {
             if index == canonicalCount - 1, let fusion = boundaryFusion {
                 return transcriptRow(.toolRun(fusion.run), isCommitted: true)
@@ -205,16 +200,14 @@ struct ChatPhysicalToolRunFusion: Hashable {
 enum ChatPhysicalTranscriptRowPolicy {
     static func rows(
         installed: InstalledChatTranscript,
-        canonicalAliases: [String: String],
-        orientation: ChatTranscriptOrientation = .newestAtOrigin
+        canonicalAliases: [String: String]
     ) -> ChatPhysicalTranscriptRows {
         ChatPhysicalTranscriptRows(
             installed: installed,
             canonicalAliases: admittedAliases(
                 installed: installed,
                 candidates: canonicalAliases
-            ),
-            presentsNewestRowFirst: orientation.presentsNewestRowFirst
+            )
         )
     }
 
@@ -680,7 +673,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
 
     var body: some View {
-        ChatTranscriptViewport(orientation: orientation) { insets in
+        ChatTranscriptViewport { insets in
             transcriptBody(safeAreaInsets: insets)
         }
     }
@@ -690,8 +683,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         let physicalRows = installed.map {
             ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
-                canonicalAliases: canonicalSubmissionAliases,
-                orientation: orientation
+                canonicalAliases: canonicalSubmissionAliases
             )
         }
         let terminalPhysicalID = physicalRows?.newest?.id
@@ -709,7 +701,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     clearance: orientation.layoutClearance(for: safeAreaInsets)
             )
             .environment(\.chatOwnsStatusBar, true)
-            .chatTranscriptStatusBar(orientation, active: isReady && admitsNativeCallbacks) {
+            .chatTranscriptStatusBar(active: isReady && admitsNativeCallbacks) {
                 scrollCoordinator.requestOldestHistory(reduceMotion: reduceMotion)
                 onExecuteCommand()
             }
@@ -864,7 +856,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         clearance: EdgeInsets
     ) -> some View {
         let hasEarlierMessages = (installed?.sourceWindow.originalStart ?? 0) > 0
-        let newestFirst = orientation.presentsNewestRowFirst
         // The accessibility order of the transcript's elements. VoiceOver reads
         // the accessibility tree's own order, which follows the view order: the
         // origin-anchored spine's view order is its visual order reversed, so
@@ -874,21 +865,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // supplies the orientation owner's accessibility order.
         VStack(alignment: .leading, spacing: 0) {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if newestFirst {
-                    ChatTranscriptClearance(height: clearance.top)
-                        #if HOSTED_TEST
-                        .background { ChatHostedObstructionProbe() }
-                        #endif
-                        .id("transcript-obstruction")
-                    tailMarker()
-                }
+                ChatTranscriptClearance(height: clearance.top)
+                    #if HOSTED_TEST
+                    .background { ChatHostedObstructionProbe() }
+                    #endif
+                    .id("transcript-obstruction")
+                tailMarker()
                 if let installed, let physicalRows {
-                    if !newestFirst, hasEarlierMessages {
-                        earlierMessagesRow(
-                            installed: installed,
-                            terminalMaterializationID: terminalMaterializationID,
-                                        )
-                    }
                     ForEach(Array(physicalRows.enumerated()), id: \.element.id) { spinePosition, row in
                         physicalRowHost(
                             row,
@@ -902,11 +885,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             spinePosition: spinePosition
                         )
                     }
-                    if newestFirst, hasEarlierMessages {
+                    if hasEarlierMessages {
                         earlierMessagesRow(
                             installed: installed,
-                            terminalMaterializationID: terminalMaterializationID,
-                                        )
+                            terminalMaterializationID: terminalMaterializationID
+                        )
                         // Older history appends at the far end, where an estimate
                         // only sizes the scroll range: a page load moves nothing
                         // on screen.
@@ -917,13 +900,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         )
                     }
                 }
-                if newestFirst {
-                    ChatTranscriptClearance(height: clearance.bottom)
-                        .id("transcript-oldest-obstruction")
-                }
-            }
-            if !newestFirst {
-                tailMarker()
+                ChatTranscriptClearance(height: clearance.bottom)
+                    .id("transcript-oldest-obstruction")
             }
         }
         // Register the complete transcript layout once. Independent row

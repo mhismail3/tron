@@ -975,8 +975,8 @@ struct ChatViewScrollHarnessTests {
                     try await harness.driveFrameBoundary()
                     let scrollView = try harness.nativeTranscriptScrollViewForTesting()
                     #expect(
-                        TranscriptWindowOracle.isFlipped(scrollView) == orientation.presentsNewestRowFirst,
-                        "\(orientation): this journey must run on the orientation's own path"
+                        TranscriptWindowOracle.isFlipped(scrollView),
+                        "\(orientation): the transcript must use its origin-anchored layout"
                     )
                     let surfaces = harness.promptContextMenuSurfaces()
                     #expect(!surfaces.isEmpty, "\(orientation): the production menu surface must be mounted")
@@ -1060,8 +1060,8 @@ struct ChatViewScrollHarnessTests {
         return snapshot
     }
 
-    @Test("the orientation read multiplies the flip along the layer chain")
-    func orientationReadMultipliesTheFlipAlongTheChain() {
+    @Test("the origin flip is read through the complete layer chain")
+    func originFlipIsReadThroughTheCompleteLayerChain() {
         let root = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let scrollView = UIScrollView(frame: root.bounds)
         root.addSubview(scrollView)
@@ -1080,11 +1080,8 @@ struct ChatViewScrollHarnessTests {
     }
 
     // The bottom-coverage gate's own failure modes, in isolation: it must not
-    // pass a run that leaves the pinned bottom uncovered on CT-23's path, and it
-    // must not pass today's path when the fixture stopped reproducing the blank.
-    // (The journeys' own negative control is the flip test below, and the
-    // empirical one is a run with the expectation temporarily flipped, recorded
-    // in the plan's CT-25 stage A entry.)
+    // pass a run that leaves the origin-pinned edge uncovered or a fixture that
+    // stopped reproducing the blank.
     @Test("the bottom-coverage gate fails an uncovered bottom and a fixture that stopped reproducing")
     func transcriptBottomGateExpectations() {
         func coverage(
@@ -2621,20 +2618,11 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    // CT-23 P1-1: the catch-up's staged step.
-    //
-    // The coordinator computes that point in its own model. Today's model is the
-    // scroll view's own offset, so the point clamps to the legal end and the
-    // reader jumps to the newest row. The origin-anchored transcript's model is
-    // the reflection of that offset, so the same point, unreflected, lands
-    // thousands of points into the oldest loaded history and the smooth step then
-    // animates the whole transcript back. The observable is the reader's own
-    // newest row: it is on screen at every boundary of a catch-up that landed at
-    // the newest end, and not mounted at all on one that landed in history. The
-    // gate holds on both orientations — today's path passes it by clamping — so it
-    // is one gate rather than a per-orientation expectation.
-    @Test("a staged catch-up lands at the newest end on both transcript orientations")
-    func stagedCatchUpLandsAtTheNewestEnd() async throws {
+    // CT-23 P1-1: the catch-up's staged step is reflected back into the native
+    // scroll coordinate before scrolling, so it remains near the newest row
+    // instead of jumping thousands of points into loaded history.
+    @Test("a staged catch-up lands at the newest end with origin anchoring")
+    func stagedCatchUpLandsAtTheNewestEndWithOriginAnchoring() async throws {
         try await withTestWatchdog(timeout: .seconds(60)) {
             var snapshot = try SessionScenarioBuilder(seed: 1_231)
                 .openingTail(targetEncodedBytes: 10_000)
@@ -5484,7 +5472,7 @@ final class PresentedFrameRecorder: NSObject {
             nativeBottom: state.bottom,
             nativeRows: state.rows,
             nativeContentHeight: state.contentHeight.map {
-                $0 - (orientation.presentsNewestRowFirst ? observation.geometry.bottomInset : 0)
+                $0 - observation.geometry.bottomInset
             }
         )
         samples.append(sample)

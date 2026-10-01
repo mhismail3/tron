@@ -743,7 +743,7 @@ struct ReadOnlySubagentSessionSheet: View {
     }
 
     private func transcript(_ store: ReadOnlySubagentSessionStore) -> some View {
-        ChatTranscriptViewport(orientation: orientation) { insets in
+        ChatTranscriptViewport { insets in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ChatTranscriptClearance(height: orientation.layoutClearance(for: insets).top)

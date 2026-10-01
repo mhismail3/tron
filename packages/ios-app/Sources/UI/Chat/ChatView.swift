@@ -895,8 +895,7 @@ struct ChatView: View {
         let physicalRowPositions: [String: Int] = installed.map {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
-                orientation: transcriptOrientation
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
             )
             let hasEarlierMessages = ($0.sourceWindow.originalStart ?? 0) > 0
             var positions = Dictionary(uniqueKeysWithValues: rows.enumerated().map {
@@ -913,8 +912,7 @@ struct ChatView: View {
         let terminalPhysicalID = installed.flatMap {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
-                orientation: transcriptOrientation
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
             )
             if let terminal = rows.newest { return terminal.id }
             return ($0.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil
@@ -2042,8 +2040,7 @@ struct ChatView: View {
         if (retainsInstalledPresentation || retainsDetachedCut), let retained = transcriptPresentation.installed {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: retained,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
-                orientation: transcriptOrientation
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
             )
             let terminalID = rows.newest?.id
                 ?? ((retained.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil)
@@ -2581,11 +2578,9 @@ struct ChatView: View {
             case .tail:
                 transcriptScrollPosition.scrollTo(edge: transcriptOrientation.newestEdge)
             case .offsetY(let offsetY):
-                // The coordinator computes points in its own model, which is the
-                // scroll view's offset on today's path and its reflection on the
-                // origin-anchored one. Reflecting a point back is the owner's
-                // mapping: without it a point near the newest row scrolls the
-                // view the same distance the other way, into the oldest history.
+                // The coordinator's point is measured from the newest content
+                // origin; reflect it back before sending it to the native scroll
+                // view, or a point near the newest row jumps into old history.
                 transcriptScrollPosition.scrollTo(y: transcriptOrientation.scrollOffsetY(
                     forModelOffsetY: offsetY,
                     geometry: scrollCoordinator.latestGeometry
