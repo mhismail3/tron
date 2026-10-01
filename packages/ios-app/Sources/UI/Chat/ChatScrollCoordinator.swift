@@ -88,7 +88,6 @@ final class ChatScrollCoordinator {
     private(set) var layoutEpoch = 0
     private(set) var tailSettlementGeneration = 0
     private(set) var pinnedPositionRevision = 0
-    private(set) var maximumPrependSemanticExcursion: CGFloat = 0
 
     private let frameScheduler: DisplayFrameScheduler
     /// The transcript's origin-anchored layout. Geometry reaches this
@@ -185,9 +184,6 @@ final class ChatScrollCoordinator {
     /// Native size-change anchoring is intent-based, not overflow-dependent.
     var usesPinnedSizeChangeAnchor: Bool { viewportMode == .pinned }
     var shouldTrackUnreadResponse: Bool { viewportMode == .anchored || catchUpPhase != .none }
-    var isWaitingForPrependSemanticFrame: Bool {
-        prepend?.readyForMeasurement == true && prepend?.correctionCommandToken == nil
-    }
     var canAutomaticallyFollow: Bool {
         viewportMode == .pinned && !isUserInteracting && prepend == nil
             && catchUpPhase == .none
@@ -293,11 +289,6 @@ final class ChatScrollCoordinator {
         if rawSemanticFrames.count > 256,
            let oldest = rawSemanticFrames.min(by: { $0.value.revision < $1.value.revision })?.key {
             rawSemanticFrames[oldest] = nil
-        }
-        if let adaptedFrame = semanticFrame(for: renderedID)?.frame {
-            recordPrependExcursionIfOwned(
-                renderedID: renderedID, layoutEpoch: layoutEpoch, frame: adaptedFrame
-            )
         }
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
@@ -686,7 +677,6 @@ final class ChatScrollCoordinator {
             requiredGeometryRevision: geometryRevision,
             completion: completion
         )
-        maximumPrependSemanticExcursion = 0
         prependTimeoutTask = Task { [weak self, clock] in
             do { try await clock.sleep(.seconds(8)) } catch { return }
             guard let self, self.prepend?.token == token,
@@ -860,7 +850,6 @@ final class ChatScrollCoordinator {
               geometryRevision > context.requiredGeometryRevision else { return }
         context.readyForMeasurement = false
         let residual = sample.frame.minY - anchor.viewportOffsetY
-        maximumPrependSemanticExcursion = max(maximumPrependSemanticExcursion, abs(residual))
         if abs(residual) <= 1 {
             prepend = context
             finishPrepend(result: .success)
@@ -879,16 +868,6 @@ final class ChatScrollCoordinator {
         publish(.offsetY(requested), animation: .disabled, origin: .prepend)
         context.correctionCommandToken = command?.token
         prepend = context
-    }
-
-    private func recordPrependExcursionIfOwned(renderedID: String, layoutEpoch: Int, frame: CGRect) {
-        guard let context = prepend, let anchor = context.anchor,
-              context.renderedAnchorID == renderedID,
-              context.expectedLayoutEpoch == layoutEpoch else { return }
-        maximumPrependSemanticExcursion = max(
-            maximumPrependSemanticExcursion,
-            abs(frame.minY - anchor.viewportOffsetY)
-        )
     }
 
     private func pinAtTail() {

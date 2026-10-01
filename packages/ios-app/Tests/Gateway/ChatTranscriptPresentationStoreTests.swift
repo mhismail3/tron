@@ -1597,7 +1597,7 @@ struct ChatTranscriptPresentationStoreTests {
         let canonicalRow = ChatPhysicalTranscriptRow(
             id: physicalID,
             semanticID: "canonical-prompt",
-            content: .transcript(.transcript(canonical), isCommitted: true)
+            content: .transcript(.transcript(canonical))
         )
         let target = SessionPresentationIdentity(sessionID: "session", generation: 1)
         func outgoing(_ behavior: String?) -> ChatPhysicalTranscriptRow {
@@ -1690,7 +1690,7 @@ struct ChatTranscriptPresentationStoreTests {
                 canonicalAliases: [:]
             )
             let pendingPhysical = try #require(pendingRows.first { $0.id == pendingID })
-            guard case .transcript(.notification(let pendingNotification), _) = pendingPhysical.content else {
+            guard case .transcript(.notification(let pendingNotification)) = pendingPhysical.content else {
                 Issue.record("runtime compaction did not occupy the unified transcript owner")
                 return
             }
@@ -1714,7 +1714,7 @@ struct ChatTranscriptPresentationStoreTests {
                 canonicalAliases: [:]
             )
             let resolvedPhysical = try #require(overlappingRows.first { $0.id == pendingID })
-            guard case .transcript(.notification(let resolvedNotification), _) = resolvedPhysical.content else {
+            guard case .transcript(.notification(let resolvedNotification)) = resolvedPhysical.content else {
                 Issue.record("canonical compaction did not replace the unified physical row")
                 return
             }
@@ -1806,7 +1806,7 @@ struct ChatTranscriptPresentationStoreTests {
                 canonicalAliases: [canonicalID: submission.presentationID]
             )
             let replacement = try #require(aliased.first { $0.id == submission.presentationID })
-            guard case .transcript(let item, _) = replacement.content else {
+            guard case .transcript(let item) = replacement.content else {
                 Issue.record("canonical submission did not replace lifecycle content")
                 return
             }
@@ -2286,7 +2286,7 @@ struct ChatTranscriptPresentationStoreTests {
             let runningToolRows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: running, canonicalAliases: [:]
             ).compactMap { row -> ChatToolRunPresentation? in
-                guard case .transcript(.toolRun(let run), _) = row.content else { return nil }
+                guard case .transcript(.toolRun(let run)) = row.content else { return nil }
                 return run
             }
             #expect(running.committedLedger.items.count == baseline.committedLedger.items.count)
@@ -2315,7 +2315,7 @@ struct ChatTranscriptPresentationStoreTests {
             let settledToolRows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: settled, canonicalAliases: [:]
             ).compactMap { row -> ChatToolRunPresentation? in
-                guard case .transcript(.toolRun(let run), _) = row.content else { return nil }
+                guard case .transcript(.toolRun(let run)) = row.content else { return nil }
                 return run
             }
             #expect(settled.liveRegion.items.isEmpty)

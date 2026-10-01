@@ -203,7 +203,6 @@ struct ChatHostedThinkingTraceProbe: View {
 struct ChatHostedScrollState: Sendable {
     let isDetached: Bool
     let hasUnread: Bool
-    let isWaitingForPrependSemanticFrame: Bool
 }
 
 struct ChatHostedGeometryTraceSample: Sendable, Equatable {
@@ -261,26 +260,19 @@ struct ChatHostedObservation: Sendable {
     let automaticScrollCommandCount: Int
     let smoothAutomaticScrollCommandCount: Int
     let animatedEntranceCount: Int
-    let lastAnimatedEntranceSourceOrdinal: Int?
     let offscreenEntranceResolutionCount: Int
     let geometryCallbackCount: Int
     let semanticFrameCallbackCount: Int
     let projectionSubmitCount: Int
-    let projectionWorkAdmissionCount: Int
     let projectionInstallCount: Int
-    let committedHistoryRowEvaluationCount: Int
-    let remountedWhileSemanticIDDisplayed: Int
     let physicalRowAppearanceCounts: [String: Int]
     let physicalRowDisappearanceCounts: [String: Int]
     let toolChipSamples: [ToolChipInstrumentationSample]
     let installedProjectionRowCount: Int
-    let installedProjectionSourceOrdinal: Int?
-    let maximumSemanticExcursion: CGFloat
     let controlEventCount: Int
     let isDetached: Bool
     let hasUnread: Bool
     let prependLoadWaiting: Bool
-    let prependSemanticFrameWaiting: Bool
     let prependCompletionResult: PerformanceResult?
     let readyFrameCompletionCount: Int
     let isReady: Bool
@@ -306,15 +298,6 @@ struct ChatHostedObservation: Sendable {
     /// of a row that never left the installed projection.
     var remountedSemanticIDs: [String] {
         rowIdentityInstanceCounts.filter { $0.value > 1 }.keys.sorted()
-    }
-
-    var hasMonotonicOffsetY: Bool {
-        guard geometryTrace.count > 2 else { return true }
-        let deltas = zip(geometryTrace, geometryTrace.dropFirst()).map {
-            $1.offsetY - $0.offsetY
-        }.filter { abs($0) > 1 }
-        guard let first = deltas.first else { return true }
-        return deltas.allSatisfy { $0.sign == first.sign }
     }
 }
 
@@ -351,12 +334,10 @@ final class ChatHostedProbe {
     private var automaticScrollCommandCount = 0
     private var smoothAutomaticScrollCommandCount = 0
     private var animatedEntranceCount = 0
-    private var lastAnimatedEntranceSourceOrdinal: Int?
     private var offscreenEntranceResolutionCount = 0
     private var geometryCallbackCount = 0
     private var semanticFrameCallbackCount = 0
     private var projectionSubmitCount = 0
-    private var projectionWorkAdmissionCount = 0
     private var projectionInstallCount = 0
     private(set) var composerCatalogBuildCount = 0
     private(set) var composerCatalogCommandNames: [String] = []
@@ -365,20 +346,15 @@ final class ChatHostedProbe {
     var composerPickerEntries: (@MainActor () -> [ComposerResourceEntry])?
     var composerResourcePickerPresentation: (@MainActor (ChatAttachmentDestination?) -> Void)?
     var composerResourceSelection: (@MainActor (ComposerResourceEntry) -> Void)?
-    private var committedHistoryRowEvaluationCount = 0
-    private var remountedWhileSemanticIDDisplayed = 0
     private var physicalRowAppearanceCounts: [String: Int] = [:]
     private var physicalRowDisappearanceCounts: [String: Int] = [:]
     private var toolChipSamples: [ToolChipInstrumentationSample] = []
     private var renderedIDBySemanticID: [String: String] = [:]
     private var installedProjectionRowCount = 0
-    private var installedProjectionSourceOrdinal: Int?
-    private var maximumSemanticExcursion: CGFloat = 0
     private var controlEventCount = 0
     private var isDetached = false
     private var hasUnread = false
     private var prependLoadWaiting = false
-    private var prependSemanticFrameWaiting = false
     private var prependCompletionResult: PerformanceResult?
     private var readyFrameCompletionCount = 0
     private var geometryControl: ((ChatTranscriptGeometry, ChatTranscriptGeometry, Bool) -> Void)?
@@ -392,7 +368,6 @@ final class ChatHostedProbe {
     private var stateControl: (() -> ChatHostedScrollState)?
     private var prependControl: (() -> Bool)?
     private var cancelPresentationControl: (() -> Void)?
-    private var nextProjectionInstallControl: (@MainActor (Int) -> Void)?
     private var prependPageContinuation: CheckedContinuation<Void, Error>?
     private var isReady = false
     private(set) var revision = 0
@@ -435,26 +410,19 @@ final class ChatHostedProbe {
             automaticScrollCommandCount: automaticScrollCommandCount,
             smoothAutomaticScrollCommandCount: smoothAutomaticScrollCommandCount,
             animatedEntranceCount: animatedEntranceCount,
-            lastAnimatedEntranceSourceOrdinal: lastAnimatedEntranceSourceOrdinal,
             offscreenEntranceResolutionCount: offscreenEntranceResolutionCount,
             geometryCallbackCount: geometryCallbackCount,
             semanticFrameCallbackCount: semanticFrameCallbackCount,
             projectionSubmitCount: projectionSubmitCount,
-            projectionWorkAdmissionCount: projectionWorkAdmissionCount,
             projectionInstallCount: projectionInstallCount,
-            committedHistoryRowEvaluationCount: committedHistoryRowEvaluationCount,
-            remountedWhileSemanticIDDisplayed: remountedWhileSemanticIDDisplayed,
             physicalRowAppearanceCounts: physicalRowAppearanceCounts,
             physicalRowDisappearanceCounts: physicalRowDisappearanceCounts,
             toolChipSamples: toolChipSamples,
             installedProjectionRowCount: installedProjectionRowCount,
-            installedProjectionSourceOrdinal: installedProjectionSourceOrdinal,
-            maximumSemanticExcursion: maximumSemanticExcursion,
             controlEventCount: controlEventCount,
             isDetached: isDetached,
             hasUnread: hasUnread,
             prependLoadWaiting: prependLoadWaiting,
-            prependSemanticFrameWaiting: prependSemanticFrameWaiting,
             prependCompletionResult: prependCompletionResult,
             readyFrameCompletionCount: readyFrameCompletionCount,
             isReady: isReady
@@ -631,19 +599,17 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func recordEntranceResolution(animated: Bool, sourceOrdinal: Int) {
+    func recordEntranceResolution(animated: Bool) {
         if animated {
             animatedEntranceCount &+= 1
-            lastAnimatedEntranceSourceOrdinal = sourceOrdinal
         } else {
             offscreenEntranceResolutionCount &+= 1
         }
         revision &+= 1
     }
 
-    func recordProjectionSubmit(startedWork: Bool) {
+    func recordProjectionSubmit() {
         projectionSubmitCount &+= 1
-        if startedWork { projectionWorkAdmissionCount &+= 1 }
         revision &+= 1
     }
 
@@ -775,22 +741,11 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func recordCommittedHistoryRowEvaluation() {
-        committedHistoryRowEvaluationCount &+= 1
-        revision &+= 1
-    }
-
     func recordProjectionInstall(
         rowCount: Int,
         sourceOrdinal: Int,
         nextRenderedIDBySemanticID: [String: String]
     ) {
-        for (semanticID, previousRenderedID) in renderedIDBySemanticID {
-            if let nextRenderedID = nextRenderedIDBySemanticID[semanticID],
-               nextRenderedID != previousRenderedID {
-                remountedWhileSemanticIDDisplayed &+= 1
-            }
-        }
         let previousPhysicalIDs = Set(renderedIDBySemanticID.values)
         let nextPhysicalIDs = Set(nextRenderedIDBySemanticID.values)
         let preservesLayout = rowFrameGeneration != nil
@@ -821,20 +776,6 @@ final class ChatHostedProbe {
         }
         projectionInstallCount &+= 1
         installedProjectionRowCount = max(0, rowCount)
-        installedProjectionSourceOrdinal = max(0, sourceOrdinal)
-        revision &+= 1
-        let control = nextProjectionInstallControl
-        nextProjectionInstallControl = nil
-        control?(sourceOrdinal)
-    }
-
-    func onNextProjectionInstall(_ control: @escaping @MainActor (Int) -> Void) {
-        nextProjectionInstallControl = control
-    }
-
-    func recordMaximumSemanticExcursion(_ value: CGFloat) {
-        guard value > maximumSemanticExcursion else { return }
-        maximumSemanticExcursion = value
         revision &+= 1
     }
 
@@ -963,7 +904,6 @@ final class ChatHostedProbe {
         stateControl = nil
         prependControl = nil
         cancelPresentationControl = nil
-        nextProjectionInstallControl = nil
         composerCatalogWillInstall = nil
         composerCatalogDidFinish = nil
         composerPickerEntries = nil
@@ -995,7 +935,6 @@ final class ChatHostedProbe {
         guard let state = stateControl?() else { return }
         isDetached = state.isDetached
         hasUnread = state.hasUnread
-        prependSemanticFrameWaiting = state.isWaitingForPrependSemanticFrame
     }
 
     func recordReadyFrameCompletion() {

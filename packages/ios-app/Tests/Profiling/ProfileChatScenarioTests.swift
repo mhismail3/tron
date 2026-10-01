@@ -237,8 +237,8 @@ final class ProfileChatRun: ProfileScenarioRun {
     ///
     /// The check is in window coordinates, through the same
     /// `TranscriptWindowOracle` the hosted journeys use: a scroll-space offset
-    /// against the estimated content size points at the oldest history once
-    /// CT-23 flips the transcript, and would then read a blank chat as followed.
+    /// against the estimated content size points at the oldest history in the
+    /// origin-anchored transcript and could read a blank chat as followed.
     static let pinnedTailTolerance = TranscriptWindowOracle.profilingTolerance
 
     func renderCheck() -> ProfileRenderCheck {

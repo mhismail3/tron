@@ -8,8 +8,7 @@ protocol ChatTranscriptHostedRecording: AnyObject {
     func recordToolChip(_ sample: ToolChipInstrumentationSample)
     func recordPhysicalRowAppearance(id: String)
     func recordPhysicalRowDisappearance(id: String)
-    func recordCommittedHistoryRowEvaluation()
-    func recordEntranceResolution(animated: Bool, sourceOrdinal: Int)
+    func recordEntranceResolution(animated: Bool)
     func recordRowIdentity(id: String, instance: UUID, isMount: Bool)
     func recordThinkingTrace(id: String, contentHeight: CGFloat, referenceHeight: CGFloat, overflowing: Bool)
     func recordThinkingTraceViewport(id: String, height: CGFloat)
@@ -23,7 +22,6 @@ protocol ChatTranscriptHostedRecording: AnyObject {
         generation: Int?,
         stability: ChatHostedRowStability
     )
-    func recordMaximumSemanticExcursion(_ value: CGFloat)
 }
 
 #if HOSTED_TEST
@@ -53,7 +51,7 @@ struct ChatQueuedMessageRenderEntry: Identifiable, Hashable {
 /// `semanticID` remains the canonical anchor/geometry identity.
 struct ChatPhysicalTranscriptRow: Identifiable, Hashable {
     enum Content: Hashable {
-        case transcript(ChatTranscriptRenderItem, isCommitted: Bool)
+        case transcript(ChatTranscriptRenderItem)
         case pending(ChatPendingPromptPresentation)
         case outgoing(ChatOutgoingSubmissionPresentation, [PendingAttachment])
         case queued(ChatQueuedMessageRenderEntry)
@@ -98,14 +96,14 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
         var index = endIndex - 1 - position
         if index < canonicalCount {
             if index == canonicalCount - 1, let fusion = boundaryFusion {
-                return transcriptRow(.toolRun(fusion.run), isCommitted: true)
+                return transcriptRow(.toolRun(fusion.run))
             }
-            return transcriptRow(installed.committedLedger.items[index], isCommitted: true)
+            return transcriptRow(installed.committedLedger.items[index])
         }
         index -= canonicalCount
         if hasBoundaryFusion { index += 1 }
         if index < liveCount {
-            return transcriptRow(installed.liveRegion.items[index], isCommitted: false)
+            return transcriptRow(installed.liveRegion.items[index])
         }
         index -= liveCount
         if handoffCount == 1 {
@@ -153,8 +151,7 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
     }
 
     private func transcriptRow(
-        _ item: ChatTranscriptRenderItem,
-        isCommitted: Bool
+        _ item: ChatTranscriptRenderItem
     ) -> ChatPhysicalTranscriptRow {
         let canonicalID = ChatPhysicalTranscriptRowPolicy.canonicalSemanticID(item)
         let promptAlias = canonicalID.flatMap { canonicalAliases[$0] }
@@ -162,7 +159,7 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
         return ChatPhysicalTranscriptRow(
             id: promptAlias ?? toolAlias ?? item.id,
             semanticID: promptAlias == nil ? item.id : (canonicalID ?? item.id),
-            content: .transcript(item, isCommitted: isCommitted)
+            content: .transcript(item)
         )
     }
 }
@@ -282,14 +279,14 @@ enum ChatPhysicalTranscriptReplacementPolicy {
         to next: ChatPhysicalTranscriptRow
     ) -> ChatPhysicalTranscriptReplacementKind {
         guard previous.id == next.id else { return .none }
-        if case .transcript(.notification(let old), _) = previous.content,
-           case .transcript(.notification(let new), _) = next.content,
+        if case .transcript(.notification(let old)) = previous.content,
+           case .transcript(.notification(let new)) = next.content,
            old.showsProgress,
            !new.showsProgress {
             return .notification
         }
         guard previous.usesQueuedCardVisual,
-              case .transcript(let item, _) = next.content,
+              case .transcript(let item) = next.content,
               item.isCanonicalUserPrompt else { return .none }
         return .promptContent
     }
@@ -1009,13 +1006,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         suppressEntrance: Bool = false
     ) -> some View {
         switch row.content {
-        case .transcript(let item, let isCommitted):
+        case .transcript(let item):
             transcriptRow(
                 item,
                 semanticID: row.semanticID,
                 physicalID: row.id,
                 installed: installed,
-                isCommitted: isCommitted,
                 terminalMaterializationID: terminalMaterializationID,
                 isReplacementOverlay: isReplacementOverlay,
                 suppressEntrance: suppressEntrance
@@ -1169,7 +1165,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         semanticID: String,
         physicalID: String,
         installed: InstalledChatTranscript,
-        isCommitted: Bool,
         terminalMaterializationID: String?,
         isReplacementOverlay: Bool,
         suppressEntrance: Bool
@@ -1208,7 +1203,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             // that selection remounted the prompt subtree, including its native
             // context-menu interaction, when the handoff added the ID.
             if isReplacementOverlay {
-                renderRow(item, installed: installed, isCommitted: isCommitted)
+                renderRow(item, installed: installed)
                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             } else {
                 ChatTranscriptEntranceRow(
@@ -1224,7 +1219,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         transcriptPresentation.consumeTranscriptEntrance(id: semanticID)
                     }
                 ) {
-                    renderRow(item, installed: installed, isCommitted: isCommitted)
+                    renderRow(item, installed: installed)
                         .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                 }
             }
@@ -1233,8 +1228,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
 
     private func renderRow(
         _ item: ChatTranscriptRenderItem,
-        installed: InstalledChatTranscript,
-        isCommitted: Bool
+        installed: InstalledChatTranscript
     ) -> some View {
         ChatTranscriptRenderRow(
             item: item,
@@ -1247,9 +1241,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             toolPayloadRevision: installed.toolPayloadRevision(for: item),
             resolveToolDetails: { callIDs in
                 installed.resolveToolDetails(callIDs: callIDs)
-            },
-            recordEvaluation: {
-                if isCommitted { hostedRecorder?.recordCommittedHistoryRowEvaluation() }
             },
             recordToolChip: { sample in hostedRecorder?.recordToolChip(sample) }
         )
@@ -1329,17 +1320,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         )
                     }
                     hostedRecorder?.recordEntranceResolution(
-                        animated: animated,
-                        sourceOrdinal: entranceTag.timelineGeneration
+                        animated: animated
                     )
                 }
                 hostedRecorder?.updateRowFrame(
                     id: semanticID, frame: sample.frame,
                     generation: installedTag?.timelineGeneration,
                     stability: rowStability
-                )
-                hostedRecorder?.recordMaximumSemanticExcursion(
-                    scrollCoordinator.maximumPrependSemanticExcursion
                 )
             }
     }
@@ -1395,6 +1382,8 @@ private struct ChatTranscriptCoordinatorObservationModifier: ViewModifier {
                 applyViewportMode(mode)
             }
             .onChange(of: coordinator.targetReleaseGeneration) { _, _ in
+                // Cleanup consumes the current exact target lease, not captured
+                // geometry. It remains admitted while the viewport is covered.
                 guard coordinator.consumeTargetRelease() else { return }
                 releaseCommandTarget()
                 if coordinator.admitsViewportCallback(capturedActivation: viewportActivation) {

@@ -1177,7 +1177,7 @@ struct ChatView: View {
             scrollCoordinator.transcriptProjectionWillChange(from: installedBeforeSubmission)
         }
         #if HOSTED_TEST
-        hostedProbe?.recordProjectionSubmit(startedWork: startedWork)
+        hostedProbe?.recordProjectionSubmit()
         #endif
     }
 
@@ -2319,8 +2319,7 @@ struct ChatView: View {
             state: {
                 ChatHostedScrollState(
                     isDetached: scrollCoordinator.userScrolledAway,
-                    hasUnread: scrollCoordinator.hasUnreadContent,
-                    isWaitingForPrependSemanticFrame: scrollCoordinator.isWaitingForPrependSemanticFrame
+                    hasUnread: scrollCoordinator.hasUnreadContent
                 )
             },
             prepend: {

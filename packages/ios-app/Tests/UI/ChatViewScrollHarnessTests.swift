@@ -1575,8 +1575,7 @@ final class ChatViewScrollHarness {
     /// Whether the newest mounted row's bottom edge sits in the pinned bottom
     /// band. The one spelling of "the transcript is pinned to its visual
     /// bottom", and the replacement for every scroll-space tail error: window
-    /// coordinates make it independent of the scroll view's orientation, so it
-    /// reads the same after CT-23 flips the transcript.
+    /// coordinates measure the rendered rows rather than lazy content estimates.
     func isPinnedToBottom() -> Bool { transcriptBottom().isPinned }
 
     /// The visual gap between the newest mounted row's bottom edge and the
@@ -1585,31 +1584,10 @@ final class ChatViewScrollHarness {
     /// `nil` when no composer or no mounted row is there to measure.
     func newestRowClearance() -> CGFloat? { transcriptBottom().clearance }
 
-    /// The visual distance between the newest mounted row's bottom edge and the
-    /// pinned band, signed: `0` while pinned, negative when the transcript rests
-    /// above the composer, positive when the row runs under it.
-    func pinnedError() -> CGFloat? { transcriptBottom().pinnedError }
-
-    /// The transcript's pinned state in window coordinates, for a failure
-    /// message.
-    func pinnedDescription() -> String {
-        let bottom = transcriptBottom()
-        func point(_ value: CGFloat?) -> String {
-            value.map { String(format: "%.1f", Double($0)) } ?? "none"
-        }
-        return "clearance=\(point(bottom.clearance))"
-            + " composerTop=\(point(bottom.composerTop))"
-            + " newestEdge=\(point(bottom.newestRowBottomEdge))"
-            + " bandCovered=\(bottom.isBandCovered)"
-            + " visibleFraction=\(String(format: "%.2f", Double(bottom.visibleRowFraction)))"
-    }
-
     /// Place the real reader `points` visual points from the newest end: `0` is
     /// the pinned bottom, larger values move toward older history, and the value
     /// is clamped to the transcript's legal scroll range. The distance is a
-    /// visual distance and the newest end is the visual end the rows call
-    /// newest, so the same call means the same thing on a flipped transcript
-    /// (CT-23) as on today's pinned `LazyVStack`.
+    /// visual distance from the origin-anchored transcript's newest end.
     func scrollReader(byVisualPoints points: CGFloat) throws {
         let scrollView = try nativeTranscriptScrollView()
         let inset = scrollView.adjustedContentInset
@@ -1738,26 +1716,6 @@ final class ChatViewScrollHarness {
             .map { ReaderAnchor(
                 physicalID: $0.physicalID, instance: $0.instance, windowMinY: $0.windowFrame.minY
             ) }
-    }
-
-    /// Advance driven boundaries until the reader's anchor row sits where it did,
-    /// or the bound is reached; returns the anchor either way. A journey that
-    /// gates the anchor uses this to give the layout transaction's clock its own
-    /// frames, then asserts the position itself.
-    @discardableResult
-    func settleReaderAnchor(
-        to anchor: ReaderAnchor,
-        boundaries: Int = 40
-    ) async throws -> ReaderAnchor? {
-        for _ in 0..<boundaries {
-            if let current = readerAnchor(),
-               current.physicalID == anchor.physicalID,
-               abs(current.windowMinY - anchor.windowMinY) <= 0.5 {
-                return current
-            }
-            try await driveFrameBoundary()
-        }
-        return readerAnchor()
     }
 
     func isNativeTranscriptInteractionEnabled() throws -> Bool {
@@ -1930,15 +1888,6 @@ final class ChatViewScrollHarness {
             scale: scale,
             afterScreenUpdates: afterScreenUpdates
         )
-    }
-
-    func renderedPixelDistance(_ first: [Double], _ second: [Double]) -> Double {
-        guard first.count == second.count, !first.isEmpty else { return .infinity }
-        let squared = zip(first, second).reduce(0.0) { partial, pair in
-            let delta = (pair.0 - pair.1) / 255
-            return partial + delta * delta
-        }
-        return (squared / Double(first.count)).squareRoot()
     }
 
     /// One origin-layout geometry sample for the scale and lazy-history regressions.

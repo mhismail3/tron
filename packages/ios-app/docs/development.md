@@ -789,16 +789,15 @@ the authority for real keyboard, context-menu, status-bar, and sheet gestures.
 Detached reading is driven through the real scroll view. `ChatViewScrollHarness.detachReaderByRealScroll()`
 moves the transcript's own `UIScrollView` to the oldest loaded row — the path the
 coordinator reads as direct ownership — instead of the hand-written
-offset/container geometry the fixtures used to inject; `returnReaderToPinnedTailByCatchUp()`
-returns the reader through the product's own catch-up affordance, because a
-hosted test cannot synthesize the pan gesture whose phase transitions re-pin a
-detached reader. `detachedReaderHoldsItsTopRowThroughStreamingKeyboardAndPage`
-asserts the reader's top visible row stays within 0.5 pt in window coordinates
-through streaming, the keyboard's inset cycle and a page load, and that none of
-them writes an automatic scroll command; that invariant replaced the
-synthetic geometry; scroll acceptance now stays with the hosted journeys that
-assert visible row identity and pinned or detached state. The finger-driven
-return and real software keyboard stay device-checklist checks.
+offset/container geometry the fixtures used to inject. `returnReaderToPinnedTail()`
+returns through native scrolling and interacting→idle phases, exercising the
+coordinator's manual re-pin path. `returnReaderToPinnedTailByCatchUp()` exercises
+the separate product catch-up affordance.
+`detachedReaderHoldsItsTopRowThroughStreamingKeyboardAndPage` asserts that the
+original visible row remains visible through streaming, keyboard-sized inset
+changes and a page load, while the coordinator remains detached. It does not
+assert subpoint window-position stability or absence of automatic commands.
+The finger-driven return and real software keyboard stay device-checklist checks.
 
 `ChatTranscriptScaleMeasurementTests` is the transcript's cost at scale: 150,
 300 and 512 heavy mixed rows (user prompts with file chips, assistant Markdown
@@ -1696,8 +1695,7 @@ polling. They also cover atomic installation, runtime-only exact-key reuse, 512-
 both pending and admitted geometry-owned entrances across more than 512 accumulated rows, and isolated
 suffix work across thirty updates of a 10,000-entry text stream. `ChatCommittedLedgerTests` require
 streaming and compatible foreground replacement to retain both the committed revision and every
-committed row's equatable render identity; the hosted streaming-burst journey also requires the aggregate
-committed-history body-evaluation counter to remain unchanged. A fresh store
+committed row's equatable render identity. A fresh store
 rebuilds identical canonical rows deterministically at revision one. The same suite checks that
 foreground entrance suppression remains empty on both retained and cold owners. This is the active/passive resume contract: both
 modes install one complete authoritative commit, live-region replacement never mutates history lineage,
@@ -1720,12 +1718,12 @@ entries and atoms, inspect the complete unique runtime membership, and count onl
 prove exact page `start`/`end`/count admission and that return-to-latest compacts loaded
 history back to the retained authoritative tail. Opening readiness belongs to the presentation lifecycle and does not introduce a scroll-coordinator
 phase. `ChatViewportModeTests` prove that only explicit takeover, return, catch-up, submission, prepend,
-and presentation intents can change durable viewport authority. User-visible scroll behavior is covered by the retained `ChatViewScrollHarnessTests` journeys: pinned keyboard resizing, opening on the exact installed tail, detached top-row continuity through streaming/keyboard/page changes, explicit catch-up to a newly arrived message, and manual return to latest. These tests assert visible row identity and pinned/detached state; catch-up additionally checks that the command lands at the flipped scroll view's native origin before the new row becomes visible. `ChatDisplayOrientationTests.statusBarRecipientAndOldestHistory` keeps status-bar routing distinct: its origin callback leaves the system tap unconsumed, detaches the reader, shows the oldest loaded row with the load-earlier pill above it, and the released target leaves that pill actionable so an earlier page loads. Pure viewport-policy tests remain isolated in `ChatViewportModeTests`; the retired coordinator-only UI suite is not an acceptance surface. The transcript remains one origin-anchored layout, with `.tail` issuing a fresh native-origin `ScrollPosition`, oldest-history routing using the oldest semantic edge, and semantic corrections using the orientation's model-to-native conversion. Manual device validation remains authoritative for gestures and compositor behavior. `ChatInteractionTraceTests` continue to cover their trace schema and bounded evidence. Streaming while a reader is detached is covered by the detached-reader journey; authority/presentation replacement is folded into the hosted opening and detached journeys rather than a separate scroll test. Canonical/live tool handoff tests also assert that adjacent equal nonempty producer segments compose into one display-only row with the first physical ID, canonical payload precedence, incremented membership, and any-member-running state; barriers or missing/conflicting segments remain separate. `ChatCompactPillTests` own the 364-point long-prompt bound, agent-matched Dynamic Type body
+and presentation intents can change durable viewport authority. User-visible scroll behavior is covered by the retained `ChatViewScrollHarnessTests` journeys: pinned keyboard resizing, opening on the exact installed tail, detached top-row continuity through streaming/keyboard/page changes, explicit catch-up to a newly arrived message, and manual return to latest. These tests assert visible row identity and pinned/detached state; catch-up additionally waits for the new row to become visible, then checks that the command landed at the flipped scroll view's native origin. `ChatDisplayOrientationTests.statusBarRecipientAndOldestHistory` keeps status-bar routing distinct: its origin callback leaves the system tap unconsumed, detaches the reader, shows the oldest loaded row with the load-earlier pill above it, and the released target leaves that pill actionable so an earlier page loads. Pure viewport-policy tests remain isolated in `ChatViewportModeTests`; the retired coordinator-only UI suite is not an acceptance surface. The transcript remains one origin-anchored layout, with `.tail` issuing a fresh native-origin `ScrollPosition`, oldest-history routing using the oldest semantic edge, and semantic corrections using the orientation's model-to-native conversion. Manual device validation remains authoritative for gestures and compositor behavior. `ChatInteractionTraceTests` continue to cover their trace schema and bounded evidence. Streaming while a reader is detached is covered by the detached-reader journey; authority/presentation replacement is folded into the hosted opening and detached journeys rather than a separate scroll test. Canonical/live tool handoff tests also assert that adjacent equal nonempty producer segments compose into one display-only row with the first physical ID, canonical payload precedence, incremented membership, and any-member-running state; barriers or missing/conflicting segments remain separate. `ChatCompactPillTests` own the 364-point long-prompt bound, agent-matched Dynamic Type body
 sizing, and flat/detail material policy. Manual UI validation owns role classification, trailing
 composer-edge prompt/queue motion, aligned activity motion, and the identity transform required by
 Reduce Motion.
-Hosted scroll tests remain the authority that these visual transforms do not grant detached readers
-automatic writes or replay same-ID entrances. Lifecycle entrance receipts live in the projection owner rather than lazy row state, survive memory-pressure text eviction, and are pruned with their installed outgoing/pending/queue identities.
+Hosted scroll tests check detached-reader visible row identity through streaming and
+keyboard-sized changes; they do not assert absence of automatic writes or same-ID entrance replay. Lifecycle entrance receipts live in the projection owner rather than lazy row state, survive memory-pressure text eviction, and are pruned with their installed outgoing/pending/queue identities.
 `GatewayProtocolContractTests`, `SharedProtocolFixtureTests`, and
 `SessionMutationServiceTests` cover revisioned queue projection and replacement commands.
 `QueuedMessagePresentationTests` own capability/field admission for editing, prove that advancing
@@ -1741,8 +1739,9 @@ content edge (`contentSize.height + contentInsets.bottom`); the hosted native he
 UIKit offset evidence so past-bottom overshoot cannot pass as zero distance. Direct detachment freezes
 the immutable installed transcript, cancels in-flight automatic projection derivation, and observes only
 the scalar authoritative timeline generation for unread state. Manual tail return installs one newest
-coalesced cut; catch-up keeps the freeze until its explicit old-tail command settles. Focused coordinator
-and hosted burst cases prove no detached projection install or repeated committed-row evaluation occurs.
+coalesced cut; catch-up keeps the freeze until its explicit old-tail command settles. The kept hosted
+journeys check manual re-pin state and explicit catch-up visibility, not detached projection-install
+counts or committed-row evaluation counts.
 Pinned structural shrink
 and viewport expansion are handled by the one native bottom size-change anchor; ordinary pinned mode
 keeps `ScrollPosition` target-free, while anchored readers select top retention and remain native-owned.
