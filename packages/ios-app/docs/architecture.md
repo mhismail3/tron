@@ -707,7 +707,12 @@ percentage-of-primary caption, or `Deficit` when the amount is negative. A negat
 negative currency value. The catalog's `localOnly` flag marks a provider whose models all resolve to a
 loopback base URL; its list row shows an emerald infinity glyph in the usage slot and its detail sheet
 shows an `Unlimited` local-models row instead of any snapshot, loading, or failure copy, without a
-Gateway usage capability or a `provider.usage` read.
+Gateway usage capability or a `provider.usage` read. The catalog's `usageLentTo` names the row that
+currently presents a provider's usage as its own (OpenAI's ChatGPT sign-in shows the Codex login's plan
+usage). While both are configured, the Providers list hides the lender, so one plan appears once. A lender
+that is the only login, or that sits beside an API-key OpenAI, stays as it is, and a signed-out lender
+stays under Available. That row's detail header names the lender login as the source, and a missing lender
+login reads as a Codex sign-in prompt.
 
 Compaction Settings owns automatic compaction and advanced reserve/recent controls. The existing scoped draft
 store/coordinator owns edits, target switching and confirmed writes. `compaction-policy.v1`

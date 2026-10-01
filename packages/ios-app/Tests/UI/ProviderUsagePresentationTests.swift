@@ -54,6 +54,28 @@ struct ProviderUsagePresentationTests {
         #expect(result.map(\.id) == ["a2", "b", "a", "z"])
     }
 
+    @Test("a lender row hides only while the configured borrower presents its usage")
+    func lentUsageRowVisibility() {
+        let codex: (Bool, String?) -> ProviderSummary = { configured, lentTo in
+            ProviderSummary(id: "openai-codex", name: "OpenAI Codex (legacy)", configured: configured, usageSupported: true,
+                            localOnly: false, authSource: nil, credentialType: nil, authMethods: ["oauth"], modelCount: 1,
+                            usageLentTo: lentTo)
+        }
+        let openai: (Bool) -> ProviderSummary = { configured in
+            ProviderSummary(id: "openai", name: "OpenAI", configured: configured, usageSupported: configured, localOnly: false,
+                            authSource: nil, credentialType: nil, authMethods: ["api_key", "oauth"], modelCount: 1)
+        }
+        // Both signed in: OpenAI presents the Codex plan usage, so Codex is hidden.
+        #expect(ProviderUsageOrdering.visible([openai(true), codex(true, "openai")]).map(\.id) == ["openai"])
+        // Codex alone, or beside an API-key OpenAI (the Gateway names no borrower): shown as is.
+        #expect(ProviderUsageOrdering.visible([openai(false), codex(true, nil)]).map(\.id) == ["openai", "openai-codex"])
+        #expect(ProviderUsageOrdering.visible([openai(true), codex(true, nil)]).map(\.id) == ["openai", "openai-codex"])
+        // A borrower missing from the catalog never hides its lender.
+        #expect(ProviderUsageOrdering.visible([codex(true, "openai")]).map(\.id) == ["openai-codex"])
+        // Signed out Codex stays available so the user can sign in to it.
+        #expect(ProviderUsageOrdering.visible([openai(true), codex(false, "openai")]).map(\.id) == ["openai", "openai-codex"])
+    }
+
     @Test("unsupported status never presents fabricated measurements")
     func unsupportedStatusCopy() {
         let snapshot = ProviderUsageSnapshot(

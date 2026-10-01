@@ -37,7 +37,9 @@ struct ProvidersSettingsView: View {
                         TronSettingsCaption("No providers are available from this Gateway.")
                     }
                 } else {
-                    let visibleProviders = providers.contains(where: { $0.id == "typesafe" }) ? providers : providers + [classifierOnlyTypeSafeProvider]
+                    let visibleProviders = ProviderUsageOrdering.visible(
+                        providers.contains(where: { $0.id == "typesafe" }) ? providers : providers + [classifierOnlyTypeSafeProvider]
+                    )
                     let configured = ProviderUsageOrdering.sorted(visibleProviders.filter(\.configured))
                     let available = ProviderUsageOrdering.sorted(visibleProviders.filter { !$0.configured })
                     if !configured.isEmpty {

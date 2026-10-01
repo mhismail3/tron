@@ -343,17 +343,22 @@ package struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     /// never applies. Optional so a Gateway that predates the field simply
     /// presents no local indicator.
     let localOnly: Bool?
+    /// The provider whose row currently presents this provider's account usage
+    /// (OpenAI's ChatGPT sign-in borrows the Codex login's plan usage). Absent
+    /// from Gateways that predate the field.
+    package let usageLentTo: String?
     package let authSource: String?
     package let credentialType: String?
     package let authMethods: [String]
     let modelCount: Int
 
-    package init(id: String, name: String, configured: Bool, usageSupported: Bool?, localOnly: Bool?, authSource: String?, credentialType: String?, authMethods: [String], modelCount: Int) {
+    package init(id: String, name: String, configured: Bool, usageSupported: Bool?, localOnly: Bool?, authSource: String?, credentialType: String?, authMethods: [String], modelCount: Int, usageLentTo: String? = nil) {
         self.id = id
         self.name = name
         self.configured = configured
         self.usageSupported = usageSupported
         self.localOnly = localOnly
+        self.usageLentTo = usageLentTo
         self.authSource = authSource
         self.credentialType = credentialType
         self.authMethods = authMethods
