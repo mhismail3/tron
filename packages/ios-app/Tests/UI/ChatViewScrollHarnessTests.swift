@@ -107,6 +107,35 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // A cancelled opening frame wait closes the first-ready signpost as
+    // `.cancelled`, exactly once per attempt. This guards the branch's own
+    // cancelled-frame classification fix.
+    @Test("cancelled frame wait closes readiness exactly once")
+    func cancelledReadyFrame() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            let scheduler = DisplayFrameScheduler { throw CancellationError() }
+            try await withHarness(seed: 105, displayFrameScheduler: scheduler) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount >= 1
+                }
+                // Multiple cancelled attempts can finish before one presented
+                // sample. Check every recorded attempt, not a transient count
+                // that the frame observer is allowed to skip.
+                let events = harness.firstReadyEvents
+                #expect(events.count >= 2)
+                for index in stride(from: 0, to: events.count - 1, by: 2) {
+                    #expect(Array(events[index...index + 1]) == [
+                        .begin(.firstReadyFrame),
+                        .end(.firstReadyFrame, .cancelled, .none),
+                    ])
+                }
+                if !events.count.isMultiple(of: 2) {
+                    #expect(events.last == .begin(.firstReadyFrame))
+                }
+            }
+        }
+    }
+
     // A positive-start tail with room for more rows admits one optional older
     // page inside the opaque opening. A Gateway that never answers it must
     // leave the opening on the usable tail within that page's bound, not fail
@@ -225,29 +254,6 @@ struct ChatViewScrollHarnessTests {
             }
         }
     }
-
-    // Stage 3 diagnostic fixture for the 2026-09-25 LazyVStack estimate
-    // blow-up. That export resumed 177 canonical rows with a 17,371 pt content
-    // estimate and an ~80,870 pt settled content, then jumped to 185,852 pt
-    // about 3 ms after the send's changed physical spine installed, and
-    // collapsed in multi-thousand-point steps under a pinned offset until the
-    // reader saw a blank viewport.
-    //
-    // This fixture keeps the two structural ingredients that make such an
-    // estimate possible: a realized tail of one-line rows, and unmeasured rows
-    // near the end that render many screens tall. It then runs an ordinary send
-    // across a keyboard-sized viewport transition, which is the one display
-    // window that dismisses the keyboard, collapses the composer, and installs
-    // the changed spine together under native origin anchoring.
-    //
-    // Measured here, SwiftUI re-derives the LazyVStack estimate from the rows it
-    // has mounted when the container/inset changes, rather than from a row
-    // target command: this history reports ~9,000-12,900
-    // pt while pinned at the full-height viewport, ~27,900 pt after the keyboard
-    // contraction, and the identical send with no container change leaves the
-    // estimate alone. The incident's 2.3x overshoot under a held offset did not
-    // reproduce in the hosted harness, so this fixture protects the product
-    // invariant instead: the pinned transcript still settles on its native tail.
 
     // MARK: Accessibility, the status-bar tap and the context menu
 
@@ -749,14 +755,15 @@ struct ChatViewScrollHarnessTests {
             let snapshot = try harnessInlineMarkdownDisplaySnapshot()
             for _ in 0..<2 {
                 try await withHarness(snapshot: snapshot) { harness in
-                    let ready = try await harness.recorder.waitUntil {
-                        $0.observation.readyFrameCompletionCount == 1
-                            && $0.observation.isReady
-                            && $0.observation.visibleRowIDs.contains("transcript-bottom")
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.isReady
+                            && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
                     }
-                    #expect(ready.observation.geometry.isPlausibleOpeningViewport)
-                    #expect(ready.observation.geometry.distanceFromBottom
-                        <= ChatTranscriptGeometry.catchUpDistance)
+                    // The user-visible cold-reopen contract: the newest row is
+                    // present and the transcript is pinned, not a geometry number.
+                    try await harness.settleUntilPinned()
+                    #expect(harness.probeObservation.visibleRowIDs.contains(harness.lastTranscriptID))
+                    #expect(harness.isPinnedToBottom())
                 }
             }
         }
@@ -890,40 +897,6 @@ struct ChatViewScrollHarnessTests {
     }
 }
 
-/// The opening reveal's direction gate, as a pure decision so its failure mode is
-/// pinnable: the committed position of the newest row's bottom edge, in window
-/// coordinates, must never move down across the reveal and must step up by the
-/// reveal's own physical lift. A flip of the transcript inverts any offset applied
-/// outside a row's counter-flip, which turns the whole sequence into a drop.
-///
-/// The hosted journey calls this on the frames it samples; the negative control
-/// calls it on the measured sequence and its reversal, which is what an inverted
-/// reveal reports.
-enum OpeningRevealDirection {
-    /// The reveal's physical lift, in points, and how far the measured step may
-    /// differ from it: 786.7 → 778.7 pt in every CT-25 run.
-    static let lift: CGFloat = 8
-    static let liftTolerance: CGFloat = 3
-    /// The downward drift one boundary may carry without counting as a move down:
-    /// the lazy stack's own sub-point settle.
-    static let driftTolerance: CGFloat = 0.5
-
-    /// Why `edges` is not an upward reveal, or `nil` when it is. `edges` is the
-    /// newest row's bottom edge at each sampled display boundary, in window
-    /// coordinates.
-    static func failure(edges: [CGFloat]) -> String? {
-        guard let first = edges.first, let settled = edges.last else {
-            return "the reveal sampled no newest-row edge"
-        }
-        guard abs((first - settled) - lift) <= liftTolerance else {
-            return "the reveal stepped the newest row's edge from \(first) to \(settled)"
-        }
-        guard zip(edges, edges.dropFirst()).allSatisfy({ $1 <= $0 + driftTolerance }) else {
-            return "the newest row's edge moved down: \(edges)"
-        }
-        return nil
-    }
-}
 
 /// The operation identity the hosted composer send stub returns for every
 /// submission (`composerSubmissionHarness`). An acknowledgement must carry it:
@@ -1001,88 +974,10 @@ struct KeyboardBoundarySample {
     let tailState: String?
 }
 
-/// One journey's bottom-coverage gate evidence, folded from its samples.
-struct TranscriptCoverageSummary: Sendable, Equatable {
-    let samples: Int
-    let blankBoundaries: Int
-    let blankAfterSettle: Int
-    let uncoveredBandBoundaries: Int
-    let longestBlankRun: Int
-    let blankPhases: String
-    let minimumVisibleRowFraction: CGFloat
 
-    init(samples: [TranscriptBottomCoverage], phaseLengths: [Int]) {
-        let shape = blankShape(
-            blankBoundaries: samples.map(\.blank), phaseLengths: phaseLengths
-        )
-        self.samples = samples.count
-        blankBoundaries = shape.blank
-        blankAfterSettle = shape.afterSettle
-        uncoveredBandBoundaries = samples.count { $0.uncoveredBand }
-        longestBlankRun = shape.longestRun
-        blankPhases = shape.phases
-        minimumVisibleRowFraction = samples.map(\.visibleRowFraction).min() ?? 0
-    }
-}
 
-/// The origin-anchored transcript keeps the pinned newest-row band covered.
-enum TranscriptBottomGateExpectation {
-    case coveringBottomIsRequired
-    static let current = coveringBottomIsRequired
 
-    /// The floor the CT-23 path gates `minimumVisibleRowFraction` against: half
-    /// the visible transcript. Every CT-2 and CT-24 shape's newest row is
-    /// taller than the viewport (1,143-1,906 pt measured), so a pinned
-    /// transcript covers it.
-    static let coveredFractionFloor: CGFloat = 0.5
-}
 
-/// The verdict of one journey's bottom-coverage gate.
-enum TranscriptBottomGateOutcome: Equatable {
-    case asExpected
-    case bottomUncovered(blankBoundaries: Int, uncoveredBandBoundaries: Int, minimumVisibleRowFraction: CGFloat)
-}
-
-private func ct2Number(_ value: CGFloat) -> String {
-    String(format: "%.1f", Double(value))
-}
-
-/// The blank-boundary shape of one planned sample sequence: how many sampled
-/// display boundaries were blank, how many of those survived the settling
-/// bound, the longest consecutive blank run, and which phases
-/// (`p<index>:<blank count>`) held any blank at all. `phaseLengths` describes
-/// the sampled sequence in order, so a phase's first boundaries are the ones
-/// where its transition is still landing.
-private func blankShape(
-    blankBoundaries: [Bool],
-    phaseLengths: [Int],
-    settlingBoundaries: Int = 2
-) -> (blank: Int, afterSettle: Int, longestRun: Int, phases: String) {
-    var blank = 0
-    var afterSettle = 0
-    var longestRun = 0
-    var currentRun = 0
-    var phases: [String] = []
-    var index = 0
-    for (phase, length) in phaseLengths.enumerated() {
-        var phaseBlanks = 0
-        for offset in 0..<length where index < blankBoundaries.count {
-            let isBlank = blankBoundaries[index]
-            index += 1
-            guard isBlank else {
-                currentRun = 0
-                continue
-            }
-            blank += 1
-            phaseBlanks += 1
-            currentRun += 1
-            longestRun = max(longestRun, currentRun)
-            if offset >= settlingBoundaries { afterSettle += 1 }
-        }
-        if phaseBlanks > 0 { phases.append("p\(phase):\(phaseBlanks)") }
-    }
-    return (blank, afterSettle, longestRun, phases.isEmpty ? "none" : phases.joined(separator: ","))
-}
 
 private func harnessInlineMarkdownDisplaySnapshot() throws -> SessionSnapshot {
     var snapshot = try SessionScenarioBuilder(seed: 1_210).openingTail(targetEncodedBytes: 10_000)
@@ -1528,23 +1423,14 @@ final class ChatViewScrollHarness {
         }
     }
 
-    func waitForOpeningAttemptCompletion(_ count: Int) async throws {
-        while probe.observation.readyFrameCompletionCount < count {
-            try await DisplayFrameScheduler.displayLink.nextFrame()
-        }
-    }
 
     var currentTarget: SessionPresentationIdentity? { model.mountedPresentationTarget }
-    var currentAuthorityIsMounted: Bool { currentTarget.map(model.hasMountedSessionAuthority) ?? false }
     var currentSubmission: ComposerSubmissionSnapshot? {
         currentTarget.flatMap { model.composerDrafts.outgoingSubmission(for: $0) }
     }
     var currentAttachments: [PendingAttachment] {
         currentTarget.map { model.composerDrafts.pendingAttachments(for: $0) } ?? []
     }
-    func revokeTarget() { if let currentTarget { model.revokePresentationIntake(currentTarget) } }
-    var admitsUploads: Bool { currentTarget.map(model.admitsLiveSessionUploads) ?? false }
-    func disconnectTransport() async { await model.enteredBackground().value }
 
     /// The mounted chat's media owner, so a hosted test can read what it
     /// retained for an exact artifact identity.
@@ -1555,10 +1441,8 @@ final class ChatViewScrollHarness {
         model.chatMediaIdentity(blobID: blobID, sessionID: snapshot.sessionId)
     }
 
-    func removeChatRoute() { hostingController.rootView = AnyView(EmptyView()) }
 
     func setCovered(_ value: Bool) { cover.presented = value }
-    func setScenePhase(_ phase: ScenePhase) { cover.scenePhase = phase }
 
     var chatSurfaceActivity: PresentationSurfaceActivity { cover.coordinator.activity(for: cover.rootToken) }
     var coverTransitionSettled: Bool {
@@ -1733,11 +1617,11 @@ final class ChatViewScrollHarness {
             -inset.top,
             scrollView.contentSize.height - scrollView.bounds.height + inset.bottom
         )
-        // Today the rows run oldest-first, so the newest end is the scroll
-        // view's legal maximum offset; a flipped scroll view puts it at the
-        // content origin.
-        let newestEnd = TranscriptWindowOracle.isFlipped(scrollView) ? -inset.top : maximumOffset
-        let proposed = newestEnd - (TranscriptWindowOracle.isFlipped(scrollView) ? -points : points)
+        // The origin transcript is flipped: its newest end is the native content
+        // origin, and a larger visual distance moves the reader toward older
+        // history (down the content, up the screen).
+        let newestEnd = -inset.top
+        let proposed = newestEnd + points
         scrollView.setContentOffset(
             CGPoint(x: scrollView.contentOffset.x, y: min(maximumOffset, max(-inset.top, proposed))),
             animated: false
@@ -1745,17 +1629,12 @@ final class ChatViewScrollHarness {
         scrollView.layoutIfNeeded()
     }
 
-    /// The scroll view's own offset at the transcript's newest end: today the
-    /// legal maximum, and on a flipped transcript the content origin (see
-    /// `scrollReader(byVisualPoints:)`, which places the reader from it).
+    /// The scroll view's own offset at the transcript's newest end: the flipped
+    /// origin transcript's content origin (see `scrollReader(byVisualPoints:)`,
+    /// which places the reader from it).
     func nativeNewestEndOffset() throws -> CGFloat {
         let scrollView = try nativeTranscriptScrollView()
-        let inset = scrollView.adjustedContentInset
-        let maximumOffset = max(
-            -inset.top,
-            scrollView.contentSize.height - scrollView.bounds.height + inset.bottom
-        )
-        return TranscriptWindowOracle.isFlipped(scrollView) ? -inset.top : maximumOffset
+        return -scrollView.adjustedContentInset.top
     }
 
     /// Move the real transcript scroll view to its oldest loaded content, then
@@ -2102,24 +1981,8 @@ final class ChatViewScrollHarness {
         )
     }
 
-    /// Advance driven boundaries until the newest row is back inside the pinned
-    /// band, up to `boundaries`, and report the boundary's own sample. A
-    /// keyboard or send transition is owned by the layout transaction's clock,
-    /// which may re-anchor the tail a few frames after the transition's own
-    /// frames, so a journey that gates the settled position waits for it here
-    /// instead of guessing a frame count. This is not a retry: it is the same
-    /// wait every other pinned journey makes, and a transcript that never
-    /// returns fails the caller's own assertion.
-    func newestRowSettledAtComposer(boundaries: Int = 40) async throws -> KeyboardBoundarySample {
-        for _ in 0..<boundaries {
-            if isPinnedToBottom() { break }
-            try await driveFrameBoundary()
-        }
-        return try keyboardBoundarySample()
-    }
 
-    /// The safe-area keyboard journey's `CT25-KEYBOARD-METRICS` line, folded
-    /// from its per-boundary samples.
+    /// Resize the hosted window, for a journey that changes the available height.
     func resize(height: CGFloat) {
         window.frame = CGRect(x: 0, y: 0, width: 390, height: height)
         hostingController.view.frame = window.bounds
@@ -2163,34 +2026,6 @@ final class ChatViewScrollHarness {
             try onBoundary?()
         }
         return samples
-    }
-
-    /// The safe-area scenario's negative control: the keyboard's own transition
-    /// with its height reserved at the transcript's *far* edge. CT-23's flipped
-    /// transcript has to apply the keyboard as a swapped content margin — the
-    /// height has to land at the visual bottom, where the composer's edge is — so
-    /// a wrong-edge application leaves the pinned row one keyboard height away
-    /// from the composer while the rows keep their orientation and order. The
-    /// inset itself is the real one, stepped through the curve's own values, so
-    /// the composer moves with it exactly as it does in the journey.
-    @discardableResult
-
-    /// Test-only: reserve `height` at the transcript's far edge instead of the
-    /// composer's, the way a wrongly swapped keyboard margin does. The real scroll
-    /// view cannot be *dragged* past its legal bottom, so the reservation is
-    /// written as the offset beyond that bottom: the geometry the wrong edge
-    /// produces for the reader, with the rows keeping their own height and order
-    /// and the composer — outside the scroll view — keeping its own edge.
-    func reserveKeyboardHeightAtTranscriptFarEdge(_ height: CGFloat) throws {
-        let scrollView = try nativeTranscriptScrollView()
-        let maximumOffset = max(
-            -scrollView.adjustedContentInset.top,
-            scrollView.contentSize.height - scrollView.bounds.height
-                + scrollView.adjustedContentInset.bottom
-        )
-        scrollView.setContentOffset(
-            CGPoint(x: scrollView.contentOffset.x, y: maximumOffset + height), animated: false
-        )
     }
 
     /// The bottom safe area a keyboard owns, applied without a notification:

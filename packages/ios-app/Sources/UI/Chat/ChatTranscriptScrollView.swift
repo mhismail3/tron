@@ -905,8 +905,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // covered `.presenting` frame installs a separate visual entrance;
         // `.presented` then fades/rises the immutable commit without
         // changing its scroll geometry or admitting concurrent input. The lift
-        // is a layout offset inside the flipped transcript, so it keeps the
-        // screen direction of today's rise.
+        // is a layout offset inside the flipped transcript, so it negates its
+        // sign to stay an upward rise on screen.
         .offset(y: orientation.screenOffset(
             forLayoutRise: hasSettledOpeningOffset || reduceMotion ? 0 : 8
         ))

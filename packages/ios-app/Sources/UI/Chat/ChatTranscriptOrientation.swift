@@ -18,7 +18,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// that counter-flip cancels the transcript's flip for the element's own
     /// content while leaving its position in the origin-anchored order, so
     /// row-local transforms (the entrance rise, streaming growth, the queued
-    /// card's shrink) render exactly as they do today.
+    /// card's shrink) render upright in their natural direction.
     fileprivate var verticalScale: CGFloat { -1 }
 
     // MARK: The layout the transcript's own ends map to

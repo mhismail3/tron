@@ -54,6 +54,7 @@
         "ChatViewScrollHarnessTests/inlineDisplayColdReopen()",
         "ChatViewScrollHarnessTests/emptySessionMaterializesExtensionPills()",
         "ChatViewScrollHarnessTests/manualTailReturnAndKeyboardFollow()",
+        "ChatViewScrollHarnessTests/cancelledReadyFrame()",
         "ChatFloatingDisplayLayoutTests/keyboardAndAccessories()",
         "ChatFloatingDisplayLayoutTests/dragReleaseContinuity()",
         "ChatFloatingDisplayLayoutTests/interruptedDockAndCancellation()",

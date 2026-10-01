@@ -403,10 +403,13 @@ duration is at or above `slowOperationThresholdMilliseconds` (250 ms), else info
 The 256-record, content-free in-memory ring described in the streams table: it is
 merged into the existing Logs destination on demand and reserved first inside a
 `device-exports/` bundle. Its event prefix is `chat.`. The origin-anchored
-transcript pins the newest row by construction, so there is no app-driven
-viewport-recovery warning to catalogue; the ring carries the informational
-`chat.geometry.*`, `chat.viewport.transition`, `chat.submission.checkpoint`,
-and `chat.context.*` records described below.
+transcript pins the newest row by construction, so the former app-driven
+viewport-recovery warning (`chat.tail.past-end-repair`) was removed with that
+mechanism. The ring still carries informational records (`chat.geometry.*`,
+`chat.viewport.transition`, `chat.submission.checkpoint`, `chat.context.*`,
+`chat.composer.availability`), warning records (`chat.tail.first-displacement`,
+`chat.projection.removed`, `chat.layout.abandoned`, `chat.layout.overflow`), and
+`chat.anomaly.*` error records; warnings and errors are evicted last.
 
 Ring pressure reclaims slots in this order: an unchanged `chat.composer.availability`
 repeat is never stored, then the oldest `chat.composer.availability` samples go
