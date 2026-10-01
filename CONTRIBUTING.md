@@ -145,7 +145,10 @@ restart budget and eventually become `failed`.
 
 After source changes, an agent or the maintainer restarts the Debug Gateway
 with `scripts/tron dev restart` for loopback, or adds `--tailscale` when iOS
-must reach it. The Debug Gateway is one shared resource: check
+must reach it. `scripts/tron dev` runs every mode under a minimal, allow-listed
+environment, so an agent shell's inherited Stable Gateway values (subagent root,
+channel, payload identity, session) never reach the Debug build, deploy helper,
+supervisor or Gateway. The Debug Gateway is one shared resource: check
 `scripts/tron dev status` first, and do not replace another worktree's running
 candidate while its work may still be validating. A command without a host flag
 inherits a live supervisor's recorded host; an explicit conflicting flag fails

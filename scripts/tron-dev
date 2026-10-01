@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # Developer-owned immutable Gateway lifecycle for port 9848.
 set -euo pipefail
+# Agents run this from shells that inherit the Stable Gateway's environment
+# (PI_SUBAGENTS_TEMP_ROOT, TRON_GATEWAY_CHANNEL=stable, payload identity, session
+# ids). None of it may reach the Debug build, deploy helper, supervisor or child,
+# so every mode re-runs once under the minimal environment launchd gives Stable,
+# plus the toolchain selections this script honours (#144).
+if [[ "${TRON_DEV_CLEAN_ENVIRONMENT:-}" != 1 ]]; then
+  clean=(TRON_DEV_CLEAN_ENVIRONMENT=1 "HOME=$HOME" "PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin")
+  for name in USER LOGNAME SHELL TMPDIR LANG LC_ALL LC_CTYPE TERM SSH_AUTH_SOCK __CF_USER_TEXT_ENCODING NVM_DIR TRON_NODE_BIN TRON_CI_TOOLS_DIR; do
+    [[ -n "${!name:-}" ]] && clean+=("$name=${!name}")
+  done
+  exec /usr/bin/env -i "${clean[@]}" /bin/bash "${BASH_SOURCE[0]}" "$@"
+fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY="$ROOT/scripts/gateway-payload-deploy.mjs"
 NODE_VERSION_FILE="$ROOT/.node-version"
