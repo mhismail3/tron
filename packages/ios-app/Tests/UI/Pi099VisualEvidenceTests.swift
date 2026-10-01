@@ -41,7 +41,7 @@ struct Pi099VisualEvidenceTests {
                         .background(Color.tronBackground)
                         .environment(\.colorScheme, scheme)
                         .environment(\.dynamicTypeSize, size)
-                    let image = try await renderHosted(view, size: captureSize, dynamicTypeSize: size, scrollToBottom: scene.id == "tool-codemode-continuation")
+                    let image = try await renderHosted(view, size: captureSize, dynamicTypeSize: size, scrollToBottom: scene.id.hasSuffix("-continuation"))
                     let data = try #require(image.pngData())
                     let url = Self.captureDirectory.appendingPathComponent("\(name).png")
                     try data.write(to: url, options: .atomic)
@@ -102,6 +102,46 @@ struct Pi099VisualEvidenceTests {
         ]), "browserLiveViews": .array([])])])
         let codemode = tool("codemode", request: .object(["code": .string("const events = await tools.calendar.find_events({ query: 'today' });\nconsole.log(events);\nawait tools.display({ title: 'Schedule' });")]), response: nil, content: "Found 3 events for today.\n• Design review · 10:00\n• Planning · 13:30\n• Demo · 16:00", nestedCalls: nested, details: display, usage: .object(["cost": .object(["total": .number(0.0125)])]))
 
+        // A long run as the Gateway now projects it: more than the old 32-call
+        // cap, a script and a result longer than their previews, and Pi's own
+        // `details.calls`, which must not reappear as a generic Details table.
+        var longCalls: [JSONValue] = []
+        for index in 1...40 {
+            let isBash = index % 5 == 0
+            let arguments: JSONValue = isBash
+                ? .object(["command": .string("scripts/tron work issues --closed")])
+                : .object(["maxChargeCents": .number(0.5)])
+            let fields: [String: JSONValue] = [
+                "id": .string("long/\(index)"),
+                "toolName": .string(isBash ? "bash" : "jev"),
+                "status": .string("completed"),
+                "durationMs": .number(Double(80 + index)),
+                "arguments": arguments,
+            ]
+            longCalls.append(.object(fields))
+        }
+        let scriptLines: [String] = (1...30).map { index in
+            "const step\(index) = await tools.jev({ maxChargeCents: 0.5, state: { request }, questions });"
+        }
+        let longScript = scriptLines.joined(separator: "\n")
+        let resultLines: [String] = (1...20).map { index in
+            "{\"id\":\"probe-\(index)\",\"found\":true,\"hits\":[\"#311 open duplicate 1\"]}"
+        }
+        let longResult = "Script completed\nWall time 5.2 seconds\nOutput:\n" + resultLines.joined(separator: "\n")
+        let longCodemode = tool("codemode", request: .object(["code": .string(longScript)]), response: nil, content: longResult,
+                                nestedCalls: .object(["complete": .bool(true), "calls": .array(longCalls)]),
+                                details: .object(["calls": .array(longCalls)]))
+        let hostedLong = NavigationStack {
+            ToolDetailSheet(tool: longCodemode, density: .expanded)
+                .tronToolDetailNavigationChrome()
+                .toolbar {
+                    ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: longCodemode) }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button {} label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald) }
+                    }
+                }
+        }
+
         let views: [Scene] = [
             scene("mcp-servers-global", MCPServersSettingsView(projectCWD: nil).environment(model)),
             scene("mcp-servers-project", MCPServersSettingsView(projectCWD: "/fixture/trusted-project", initialScope: "project").environment(model)),
@@ -111,6 +151,9 @@ struct Pi099VisualEvidenceTests {
             scene("provider-typesafe", ProvidersSettingsView(sessionID: nil).environment(model)),
             scene("tool-codemode", ToolDetailSheet(tool: codemode, density: .expanded)),
             scene("tool-codemode-continuation", ToolDetailSheet(tool: codemode, density: .expanded)),
+            scene("tool-codemode-long", hostedLong),
+            scene("tool-codemode-long-continuation", hostedLong),
+            scene("tool-codemode-full-result", ToolTextSheet(title: "Result", text: longResult, accent: ChatSemanticPillRole.tool.accent)),
             scene("tool-mcp-text", ToolDetailSheet(tool: tool("mcp__calendar__find_events", request: .object(["query": .string("today")]), response: .object(["content": .string("Found 3 events for today.")]), content: "Found 3 events for today."), density: .expanded)),
             scene("tool-mcp-image", ToolDetailSheet(tool: tool("mcp__gallery__get_image", request: .object(["item": .string("sunset")]), response: .object(["content": .array([.object(["type": .string("image"), "mimeType": .string("image/png"), "data": .string("fixture-image")])])]), content: "Image result · image/png"), density: .expanded)),
             scene("tool-mcp-structured", ToolDetailSheet(tool: tool("mcp__inventory__lookup", request: .object(["sku": .string("A-104")]), response: .object(["structuredContent": .object(["available": .bool(true), "quantity": .number(12)])]), content: ""), density: .expanded)),
@@ -119,7 +162,7 @@ struct Pi099VisualEvidenceTests {
             scene("tool-read-mcp-resource", ToolDetailSheet(tool: tool("read_mcp_resource", request: .object(["uri": .string("file:///notes/today")]), response: .object(["contents": .array([.object(["text": .string("Team notes for today")])])]), content: "Team notes for today"), density: .expanded)),
             scene("tool-technical-details", ToolTechnicalDetailsSheet(tool: tool("mcp__calendar__find_events", request: .object(["query": .string("today")]), response: .object(["content": .string("Found 3 events")]), content: "Found 3 events"), presentation: ToolDetailPresentation(tool: tool("mcp__calendar__find_events", request: .object(["query": .string("today")]), response: .object(["content": .string("Found 3 events")]), content: "Found 3 events")))),
             scene("tool-picker", pickerFixture(model)),
-            scene("tool-codemode-source", CodemodeSourceSheet(source: "const [labels, issues] = await Promise.allSettled([\n  tools.bash({ command: \"gh label list --json name\" }),\n  tools.bash({ command: \"gh issue list --state all\" })\n]);\nreturn issues.value?.output;", accent: ChatSemanticPillRole.tool.accent)),
+            scene("tool-codemode-source", ToolTextSheet(title: "Script", text: "const [labels, issues] = await Promise.allSettled([\n  tools.bash({ command: \"gh label list --json name\" }),\n  tools.bash({ command: \"gh issue list --state all\" })\n]);\nreturn issues.value?.output;", accent: ChatSemanticPillRole.tool.accent)),
             scene("tool-nested-call", NestedToolCallDetailSheet(call: NestedToolCallPresentation(
                 id: "call-04", toolName: "bash", status: .completed, error: nil, durationMs: 7,
                 arguments: .object(["command": .string("gh label list --limit 200 --json name -q '.[].name' 2>&1 | tr '\\n' ' '"), "timeout": .number(30)]),

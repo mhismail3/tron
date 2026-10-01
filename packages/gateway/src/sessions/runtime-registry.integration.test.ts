@@ -9763,6 +9763,82 @@ export default function (pi) {
     await writeFile(artifactPath, `${JSON.stringify({ live: liveSnapshot, reloaded: reloadedParent }, null, 2)}\n`);
   });
 
+  it("projects every nested call Pi records, live and after a cold reload, within one argument budget", async () => {
+    // Failure modes: the Gateway drops calls Pi kept (it projected only the
+    // first 32 of Pi's 256), so a long script's call list is cut short; or a
+    // long list of calls with large arguments makes every live frame unbounded.
+    const root = await mkdtemp(join(tmpdir(), "tron-nested-call-list-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const extensions = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd)]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await Promise.all([
+      writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
+      writeFile(join(extensions, "echo-tool.ts"), `export default function (pi) { pi.registerTool({ name: "test_echo", label: "Echo fixture", description: "Returns ok", parameters: { type: "object", properties: { note: { type: "string" } } }, execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }) }); }\n`),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-nested-call-list", tokensPerSecond: 10_000 });
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    // 48 small calls, then 40 calls whose ~900-byte arguments pass the
+    // per-call bound but together exceed the 32 KiB argument budget.
+    const script = `for (let i = 0; i < 48; i++) await tools.test_echo({ note: "small " + i });\n`
+      + `for (let i = 0; i < 40; i++) await tools.test_echo({ note: "x".repeat(900) + i });\nreturn "done";`;
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: script }, { id: "codemode-list" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("done"),
+    ]);
+    const liveFrames: Array<{ calls: Array<{ arguments?: unknown }>; complete: boolean }> = [];
+    const makeRegistry = () => new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory: createModels, trust,
+      broadcast: (_sessionId, topic, payload: any) => {
+        if (topic === "session.toolProgress" && payload.data?.toolCallId === "codemode-list" && payload.data.nestedCalls) {
+          liveFrames.push(payload.data.nestedCalls);
+        }
+      },
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    let registry = makeRegistry();
+    registries.push(registry);
+    await initializeRegistry(registry);
+    let slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("run many nested calls");
+    await waitUntil(() => !slot.isBusy);
+
+    const argumentBytes = (calls: Array<{ arguments?: unknown }>) =>
+      calls.reduce((total, call) => total + (call.arguments === undefined ? 0 : Buffer.byteLength(JSON.stringify(call.arguments))), 0);
+    const largestLive = liveFrames.reduce((most, frame) => frame.calls.length > most.calls.length ? frame : most, liveFrames[0]!);
+    expect(largestLive.calls).toHaveLength(88);
+    expect(liveFrames.every((frame) => argumentBytes(frame.calls) <= 32 * 1024)).toBe(true);
+    const parentOf = (snapshot: ReturnType<typeof slot.snapshot>) => snapshot.transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-list");
+    const canonical = parentOf(slot.snapshot());
+    const canonicalCalls = canonical?.kind === "message" ? canonical.nestedCalls?.calls ?? [] : [];
+    expect(canonicalCalls).toHaveLength(88);
+    expect(canonicalCalls.slice(0, 48).every((call) => call.arguments !== undefined)).toBe(true);
+    expect(argumentBytes(canonicalCalls)).toBeLessThanOrEqual(32 * 1024);
+    expect(canonicalCalls.some((call) => call.arguments === undefined && typeof call.argumentsBytes === "number")).toBe(true);
+
+    await registry.dispose();
+    registry = makeRegistry();
+    registries.push(registry);
+    await initializeRegistry(registry);
+    slot = await registry.acquire(slot.id);
+    const reloaded = parentOf(slot.snapshot());
+    const reloadedCalls = reloaded?.kind === "message" ? reloaded.nestedCalls?.calls ?? [] : [];
+    expect(reloadedCalls.map((call) => call.id)).toEqual(canonicalCalls.map((call) => call.id));
+  });
+
   it("returns Pi structured bash output through nested codemode calls", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-codemode-bash-output-e2e-"));
     const agentDir = join(root, "agent");

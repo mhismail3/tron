@@ -1449,10 +1449,7 @@ struct KnowledgeDetailView: View {
         .toolbar {
             if observationPresentation != nil {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { technicalDetailsSheet = true } label: {
-                        Image(systemName: "info.circle").foregroundStyle(Color.tronKnowledge)
-                    }
-                    .accessibilityLabel("Technical details")
+                    TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronKnowledge) { technicalDetailsSheet = true }
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {

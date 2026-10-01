@@ -737,12 +737,7 @@ struct ComposerResourceDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showsResourceInfo = true } label: {
-                        Image(systemName: "info.circle")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
-                    }
-                    .accessibilityLabel("Resource Info")
+                    TronSheetInfoButton(accessibilityLabel: "Resource Info", accent: accent) { showsResourceInfo = true }
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 5) {

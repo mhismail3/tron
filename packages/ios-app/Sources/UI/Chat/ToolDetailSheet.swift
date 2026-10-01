@@ -5,7 +5,7 @@ struct ToolDetailSheet: View {
     let tool: ChatToolPresentation
     let density: ToolDetailDisplayDensity
     @State private var showingTechnicalDetails = false
-    @State private var showingCodemodeSource = false
+    @State private var fullText: ToolFullText?
     @State private var showingChanges = false
     @State private var selectedNestedCall: NestedToolCallPresentation?
     @Environment(\.canonicalResourceSessionID) private var sessionID
@@ -26,16 +26,22 @@ struct ToolDetailSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 chipSection(presentation)
-                if presentation.displayTitle != "Codemode" {
+                if presentation.isCodemode {
+                    codemodeTextSection(title: "Script", text: presentation.primaryValue)
+                    codemodeTextSection(title: tool.isRunning ? "Live output" : "Result", text: presentation.readableResult)
+                    if presentation.readableResult?.isEmpty ?? true {
+                        Text(tool.isRunning ? "Waiting for the first runtime result." : "Completed without output.")
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextSecondary)
+                    }
+                    callsSection(presentation)
+                    attachmentSection(presentation)
+                    classifyCostSection(presentation)
+                } else {
                     primarySection(presentation)
+                    resultSection(presentation)
+                    diffSection(presentation)
                 }
-                resultSection(presentation)
-                nestedCallsSection(presentation)
-                attachmentSection(presentation)
-                classifyCostSection(presentation)
-                codemodeSourceButton(presentation)
-                diffSection(presentation)
-                technicalDetailsButton
             }
             .padding(.horizontal, 16)
             .padding(.top, 2)
@@ -46,6 +52,13 @@ struct ToolDetailSheet: View {
         .defaultScrollAnchor(.top, for: .alignment)
         .defaultScrollAnchor(.top, for: .sizeChanges)
         .tronScrollEdgeChrome()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                TronSheetInfoButton(accessibilityLabel: "Technical details", accent: accent) {
+                    showingTechnicalDetails = true
+                }
+            }
+        }
         .tronManagedSheet(
             isPresented: $showingChanges,
             identity: "chat.tool.changes.\(tool.id)"
@@ -54,10 +67,8 @@ struct ToolDetailSheet: View {
                 ToolChangesSheet(diff: diff, accent: accent)
             }
         }
-        .tronManagedSheet(isPresented: $showingCodemodeSource, identity: "chat.tool.codemode-source.\(tool.id)") {
-            if let source = presentation.primaryPreview?.text {
-                CodemodeSourceSheet(source: source, accent: accent)
-            }
+        .tronManagedSheet(item: $fullText, identity: { "chat.tool.full-text.\(tool.id).\($0.id)" }) { item in
+            ToolTextSheet(title: item.title, text: item.text, accent: accent)
         }
         .tronManagedSheet(
             isPresented: $showingTechnicalDetails,
@@ -228,11 +239,46 @@ struct ToolDetailSheet: View {
         }
     }
 
+    /// A codemode text (script or result): its opening lines, and a row that
+    /// opens the whole text when the preview had to stop.
     @ViewBuilder
-    private func nestedCallsSection(_ presentation: ToolDetailPresentation) -> some View {
-        if presentation.displayTitle == "Codemode", !presentation.nestedCalls.isEmpty {
+    private func codemodeTextSection(title: String, text: String?) -> some View {
+        if let text, !text.isEmpty {
+            let preview = ToolTextHeadPreview.make(text)
+            VStack(alignment: .leading, spacing: 7) {
+                sectionLabel(title)
+                Text(verbatim: preview.text)
+                    .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .padding(12)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: accent, tintOpacity: 0.07)
+                if preview.isTruncated {
+                    Button { fullText = ToolFullText(title: title, text: text) } label: {
+                        TronSettingsRow(
+                            icon: title == "Script" ? "chevron.left.forwardslash.chevron.right" : "text.alignleft",
+                            title: "View full \(title.lowercased())",
+                            subtitle: "\(text.split(separator: "\n", omittingEmptySubsequences: false).count) lines",
+                            accent: accent,
+                            subtitleColor: Color.tronTextSecondary
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
+                }
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    @ViewBuilder
+    private func callsSection(_ presentation: ToolDetailPresentation) -> some View {
+        if !presentation.nestedCalls.isEmpty {
         VStack(alignment: .leading, spacing: 7) {
-            sectionLabel("Nested calls · \(presentation.nestedCalls.count)")
+            sectionLabel("Calls · \(presentation.nestedCalls.count)")
+            // Up to 256 rows; only the visible ones are built.
+            LazyVStack(alignment: .leading, spacing: 7) {
             ForEach(presentation.nestedCalls) { call in
                 Button { selectedNestedCall = call } label: {
                     HStack(spacing: 9) {
@@ -264,6 +310,7 @@ struct ToolDetailSheet: View {
                 }
                 .buttonStyle(.plain)
             }
+            }
             if !presentation.nestedCallsComplete {
                 boundedPreviewNote("Some calls weren't fully recorded.")
             }
@@ -273,7 +320,7 @@ struct ToolDetailSheet: View {
 
     @ViewBuilder
     private func attachmentSection(_ presentation: ToolDetailPresentation) -> some View {
-        if presentation.displayTitle == "Codemode",
+        if presentation.isCodemode,
            let nested = tool.details?.objectValue?["tronNested"]?.objectValue {
         let display = nested["display"]?.arrayValue ?? []
         let browsers = nested["browserLiveViews"]?.arrayValue ?? []
@@ -358,23 +405,6 @@ struct ToolDetailSheet: View {
         }
     }
 
-    @ViewBuilder
-    private func codemodeSourceButton(_ presentation: ToolDetailPresentation) -> some View {
-        if presentation.displayTitle == "Codemode", presentation.primaryPreview != nil {
-            Button { showingCodemodeSource = true } label: {
-                TronSettingsRow(
-                    icon: "chevron.left.forwardslash.chevron.right",
-                    title: "View script",
-                    subtitle: "Open the complete codemode source",
-                    accent: accent,
-                    subtitleColor: Color.tronTextSecondary
-                )
-            }
-            .buttonStyle(.plain)
-            .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
-        }
-    }
-
     private func structuredResultSection(_ structured: JSONValue, title: String? = nil) -> some View {
         TronStructuredJSONView(
             value: structured,
@@ -386,20 +416,6 @@ struct ToolDetailSheet: View {
 
     private var primaryValueFont: Font {
         TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold)
-    }
-
-    private var technicalDetailsButton: some View {
-        Button { showingTechnicalDetails = true } label: {
-            TronSettingsRow(
-                icon: "slider.horizontal.3",
-                title: "Technical details",
-                subtitle: "Execution metadata and request/result JSON",
-                accent: .tronSlate
-            ) { EmptyView() }
-        }
-        .buttonStyle(.plain)
-        .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08, interactive: true)
-        .accessibilityHint("Opens protocol and timing details")
     }
 
     private func sectionLabel(_ title: String) -> some View {
@@ -500,16 +516,46 @@ private struct ToolDetailChildSheet<Content: View>: View {
     }
 }
 
-struct CodemodeSourceSheet: View {
-    let source: String
+/// One full text a tool detail previews, opened in its own sheet.
+struct ToolFullText: Identifiable, Hashable {
+    let title: String
+    let text: String
+    var id: String { title }
+}
+
+/// The whole of a previewed tool text, titled by what it is and shown directly
+/// in the same selectable, scrollable code view as the Request JSON sheet.
+struct ToolTextSheet: View {
+    let title: String
+    let text: String
     let accent: Color
+    @Environment(\.dismiss) private var dismiss
+    @State private var detent: PresentationDetent = .large
 
     var body: some View {
-        ToolDetailChildSheet(title: "Codemode source", accent: accent) {
-            ToolDetailSection(title: "Script") {
-                ToolDetailCodeBlock(text: source, accent: accent)
-            }
+        NavigationStack {
+            TronReadOnlyTextView(text: text, style: .code)
+                .tronDocumentTopBlurSurface()
+                .ignoresSafeArea(.container, edges: .bottom)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        TronSheetTitle(title: title, accent: accent)
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "checkmark")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(accent)
+                        }
+                        .accessibilityLabel("Done")
+                    }
+                }
         }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.hidden)
+        .tint(accent)
     }
 }
 

@@ -305,8 +305,7 @@ struct HookExtensionDetailView: View {
             .defaultScrollAnchor(.top)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showsInfo = true } label: { Image(systemName: "info.circle").font(TronTypography.buttonSM).foregroundStyle(accent) }
-                        .accessibilityLabel("Hook technical information")
+                    TronSheetInfoButton(accessibilityLabel: "Hook technical information", accent: accent) { showsInfo = true }
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: title ?? record.friendlyName, accent: accent) }
                 ToolbarItem(placement: .confirmationAction) {
