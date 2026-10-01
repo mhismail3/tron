@@ -2549,6 +2549,17 @@ below that limit. `runtime.loaded` and `runtime.evicted` record each transition
 with the session, its reason (`heap` for the heap-pressure pass `G-12` added),
 its transcript bytes and the charge, as named `counts`.
 
+A chat's tool loadout (`session.setTools`) lives only in its canonical
+transcript, as the system messages' `toolsAdded`/`toolsRemoved`. Every runtime
+the Gateway creates for an existing transcript (cold open, reopen after idle or
+capacity eviction, restart, fork, previous-runtime restore) applies the loadout
+the transcript declares; only a transcript that declares none gets the
+configured `defaultTools`. Pi's `createAgentSession` always supplies the
+defaults and so skips its own transcript restore, which made an enabled tool
+such as `codemode` disappear after a reload and the next prompt persist the
+defaults. `runtime-tool-loadout.integration.test.ts` covers a reopen and the
+next prompt.
+
 Catalog membership is one owner's index, so nothing coalesces a second
 discovery: a live persisted `RuntimeSlot` proves membership for
 attention reads and writes, as it does for `acquire`, so acknowledging an open
