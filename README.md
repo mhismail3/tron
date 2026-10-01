@@ -117,7 +117,8 @@ is not required.
 Debug Gateway lifecycle uses the signed launcher from `/Applications/Tron.app`.
 Install the Mac app first; source-built local replacements must follow the
 manual [local Release reinstall runbook](packages/mac-app/docs/development.md#reinstall-a-local-release-build).
-Gateway lifecycle transitions remain user-initiated.
+Agents may run the Debug Gateway; Stable and production transitions remain
+maintainer actions.
 
 The [iOS build matrix](packages/ios-app/docs/development.md#build-matrix) lists
 the five configurations with their schemes, identities, and routes.
