@@ -1784,14 +1784,6 @@ struct ChatTranscriptPresentationStoreTests {
                 canonicalAliases: [:]
             )
             #expect(localRows.contains { $0.id == submission.presentationID })
-            let coordinator = ChatScrollCoordinator()
-            #expect(coordinator.discreteTailInserted(
-                renderedID: submission.presentationID,
-                layoutTransactionID: 44
-            ))
-            let materialization = try #require(coordinator.command)
-            #expect(coordinator.commandApplied(materialization))
-
             let canonicalID = "canonical-owned"
             let canonical = try decodeTranscriptFixture(
                 TranscriptItem.self,
@@ -1831,11 +1823,6 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(semanticIDs[submission.presentationID] == canonicalID)
             #expect(semanticIDs[canonicalID] == nil)
             #expect(semanticIDs["transcript-bottom"] == "transcript-bottom")
-            coordinator.reconcileMaterializationRows { semanticIDs[$0] }
-            #expect(coordinator.ownsTailMaterializationTarget(
-                renderedID: submission.presentationID
-            ))
-            #expect(!coordinator.consumeTargetRelease())
             let outgoingPhysical = try #require(
                 localRows.first { $0.id == submission.presentationID }
             )
@@ -1902,7 +1889,6 @@ struct ChatTranscriptPresentationStoreTests {
             )
             #expect(earlierCollision.contains { $0.id == canonicalID })
             #expect(!earlierCollision.contains { $0.id == "earlier-messages" })
-            coordinator.cancel()
         }
     }
 

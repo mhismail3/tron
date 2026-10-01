@@ -600,9 +600,8 @@ private func scaleStreamingBody(step: Int, of steps: Int) -> String {
 @MainActor
 private func scaleCommandCounts(_ harness: ChatViewScrollHarness) -> String {
     let observation = harness.probeObservation
-    return "materialize:\(observation.tailMaterializationCommandCount)"
+    return "scroll:\(observation.scrollCommandCount)"
         + ",physical:\(observation.physicalTailRepairCommandCount)"
-        + ",pastEnd:\(observation.pastEndRepairCommandCount)"
         + ",automatic:\(observation.automaticScrollCommandCount)"
         + ",smooth:\(observation.smoothAutomaticScrollCommandCount)"
 }

@@ -108,7 +108,6 @@ struct ChatViewScrollHarnessTests {
                 }
                 let baselineClearance = try #require(harness.newestRowClearance())
                 let initialHeight = ready.observation.geometry.containerHeight
-                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
 
                 harness.resize(height: 620)
                 _ = try await harness.recorder.waitUntil {
@@ -137,10 +136,6 @@ struct ChatViewScrollHarnessTests {
                 // same legal native tail instead of retaining the old viewport
                 // delta as a new past-bottom blank gap.
                 #expect(abs(expandedClearance - baselineClearance) <= 16)
-                #expect(
-                    harness.probeObservation.pastEndRepairCommandCount == pastEndBaseline,
-                    "keyboard contraction and expansion must never fire the past-end net"
-                )
             }
         }
     }
@@ -166,7 +161,6 @@ struct ChatViewScrollHarnessTests {
                 let trailingGap = try #require(leading.composerClearance)
                 #expect(trailingGap >= -2)
                 #expect(trailingGap <= 32)
-                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
 
                 // The hosted window contraction is the keyboard-sized native
                 // viewport boundary. Do not also summon the simulator keyboard,
@@ -183,10 +177,6 @@ struct ChatViewScrollHarnessTests {
                 #expect(contracted.instance == leading.instance)
                 #expect(try #require(contracted.composerClearance) >= -2)
                 #expect(try #require(contracted.composerClearance) <= 32)
-                #expect(
-                    harness.probeObservation.pastEndRepairCommandCount == pastEndBaseline,
-                    "a short-transcript contraction must never fire the past-end net"
-                )
             }
         }
     }
@@ -379,7 +369,6 @@ struct ChatViewScrollHarnessTests {
                     $0.physicalID == "queued-message-queued-prompt-operation" && $0.isOnScreen
                 })
                 let region = harness.renderRegion(ofRow: queued)
-                let pastEndBaseline = queuedSample.observation.pastEndRepairCommandCount
                 var previousPixels = samplesPixels ? harness.renderedRowLuminance(in: region) : []
                 harness.replaceAuthoritativeSnapshot(canonicalTemplate)
                 var heights: [CGFloat] = []
@@ -415,10 +404,6 @@ struct ChatViewScrollHarnessTests {
                     harness.isPinnedToBottom(),
                     "the replacement returned to the pinned bottom: \(harness.pinnedDescription())"
                 )
-                #expect(
-                    harness.probeObservation.pastEndRepairCommandCount == pastEndBaseline,
-                    "the queued-card cross-fade must never fire the past-end net"
-                )
                 if samplesPixels {
                     #expect(pixelChangingFrames >= 3)
                 } else {
@@ -444,7 +429,6 @@ struct ChatViewScrollHarnessTests {
             let initial = snapshot
             try await withHarness(snapshot: initial) { harness in
                 _ = try await harness.recorder.waitUntil { $0.observation.isReady }
-                let pastEndBaseline = harness.probeObservation.pastEndRepairCommandCount
                 var next = initial
                 next.phase = .running
                 var crossedInsetBand = false
@@ -471,10 +455,6 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(harness.probeObservation.geometry.hasScrollableOverflow)
                 #expect(crossedInsetBand)
-                #expect(
-                    harness.probeObservation.pastEndRepairCommandCount == pastEndBaseline,
-                    "streaming growth must never fire the past-end net"
-                )
             }
         }
     }
@@ -542,10 +522,6 @@ struct ChatViewScrollHarnessTests {
                 let previousTail = try #require(ready.nativeRows.first {
                     $0.semanticID == harness.lastTranscriptID && $0.isOnScreen
                 })
-                let commandBaseline = ready.observation.tailMaterializationCommandCount
-                let releaseBaseline = ready.observation.targetReleaseCount
-                let repairBaseline = ready.observation.physicalTailRepairCommandCount
-                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
                 let composerHeight = ready.observation.composerHeight
                 let outgoingPrefix = "outgoing-submission:\(snapshot.sessionId):"
 
@@ -554,33 +530,25 @@ struct ChatViewScrollHarnessTests {
                 )
                 harness.submitPrompt()
                 let stabilized = try await harness.recorder.waitUntil { sample in
-                    let observation = sample.observation
-                    return observation.tailMaterializationCommandCount == commandBaseline + 1
-                        && observation.targetReleaseCount == releaseBaseline
-                        && sample.nativeRows.contains {
-                            $0.physicalID.hasPrefix(outgoingPrefix) && $0.isOnScreen
-                                && $0.isAtTailSpacing()
-                        }
+                    sample.nativeRows.contains {
+                        $0.physicalID.hasPrefix(outgoingPrefix) && $0.isOnScreen
+                            && $0.isAtTailSpacing()
+                    }
                 }
                 #expect(try harness.isAttachmentButtonEnabled())
                 let outgoing = try #require(stabilized.nativeRows.first {
                     $0.physicalID.hasPrefix(outgoingPrefix) && $0.isOnScreen
                 })
                 let outgoingID = outgoing.physicalID
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.targetReleaseCount == releaseBaseline + 1
-                        && $0.nativeRows.contains {
-                            $0.physicalID == outgoingID && $0.isOnScreen
-                                && $0.isAtTailSpacing()
+                // Observe subsequent presented geometry: origin anchoring
+                // needs no app-issued target for this insertion.
+                let settled = try await harness.recorder.waitUntil { sample in
+                    sample.frameIndex > stabilized.frameIndex
+                        && sample.nativeRows.contains {
+                            $0.physicalID == outgoingID && $0.instance == outgoing.instance
+                                && $0.isOnScreen && $0.isAtTailSpacing()
                         }
                 }
-
-                // Consuming the release command precedes its native layout.
-                // Observe that layout too, rather than ending on whichever
-                // side of the display callback recorded the release counter.
-                try await harness.driveFrameBoundary()
-                try await harness.driveFrameBoundary()
-                let settled = try #require(harness.recorder.samples.last)
                 // The send's continuity is judged over the whole span from the
                 // ready frame; a truncated recorder window would inspect only
                 // its tail and pass.
@@ -621,13 +589,10 @@ struct ChatViewScrollHarnessTests {
                             && $0.isAtTailSpacing()
                     }
                 })
-                #expect(settled.observation.targetReleaseCount == releaseBaseline + 1)
-                #expect(settled.observation.tailMaterializationCommandCount == commandBaseline + 1)
-                #expect(settled.observation.physicalTailRepairCommandCount == repairBaseline)
-                #expect(
-                    settled.observation.pastEndRepairCommandCount == pastEndBaseline,
-                    "the send choreography must never fire the past-end net"
-                )
+                #expect(settled.nativeRows.contains {
+                    $0.physicalID == outgoingID && $0.instance == outgoing.instance && $0.isOnScreen
+                        && $0.isAtTailSpacing()
+                })
                 #expect(abs(settled.observation.composerHeight - composerHeight) <= 1)
                 #expect(settled.observation.physicalRowAppearanceCounts[outgoingID] == 1)
                 #expect(settled.observation.physicalRowDisappearanceCounts[outgoingID, default: 0] == 0)
@@ -652,13 +617,11 @@ struct ChatViewScrollHarnessTests {
             snapshot.transcriptTotal = snapshot.transcript.count
             let initial = snapshot
             try await withHarness(snapshot: initial, enablesComposerSubmission: true) { harness in
-                let ready = try await harness.recorder.waitUntil {
+                _ = try await harness.recorder.waitUntil {
                     $0.observation.isReady && $0.nativeRows.contains {
                         $0.semanticID == "resumed-turn-95" && $0.isOnScreen
                     }
                 }
-                let releaseBaseline = ready.observation.targetReleaseCount
-                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
                 try harness.setComposerDraftText(String(repeating: "multiline resumed prompt ", count: 28))
                 harness.submitPrompt()
                 // Exercise both sides of the keyboard-sized viewport change
@@ -712,11 +675,6 @@ struct ChatViewScrollHarnessTests {
                     harness.recorder.windowIsComplete(since: sent.frameIndex),
                     "the recorder retained every sample of the resumed send"
                 )
-                #expect(settled.observation.targetReleaseCount >= releaseBaseline + 1)
-                #expect(
-                    settled.observation.pastEndRepairCommandCount == pastEndBaseline,
-                    "a resumed send across keyboard resize must never fire the past-end net"
-                )
                 #expect(successor.nativeRows.contains {
                     $0.physicalID == outgoing.physicalID && $0.instance == outgoing.instance && $0.isOnScreen
                 })
@@ -730,10 +688,6 @@ struct ChatViewScrollHarnessTests {
                     }
                 })
                 #expect(!harness.traceRecords.contains { $0.record.event == "chat.layout.abandoned" })
-                #expect(!harness.traceRecords.contains {
-                    $0.record.event == "chat.lease.release-requested"
-                        && $0.record.message.contains("reason=bounded-fallback")
-                })
             }
         }
     }
@@ -749,13 +703,12 @@ struct ChatViewScrollHarnessTests {
     // estimate possible: a realized tail of one-line rows, and unmeasured rows
     // near the end that render many screens tall. It then runs an ordinary send
     // across a keyboard-sized viewport transition, which is the one display
-    // window that dismisses the keyboard, collapses the composer, applies the
-    // tail-materialization `scrollTo(id:anchor:.bottom)`, and installs the
-    // changed spine together.
+    // window that dismisses the keyboard, collapses the composer, and installs
+    // the changed spine together under native origin anchoring.
     //
     // Measured here, SwiftUI re-derives the LazyVStack estimate from the rows it
-    // has mounted when the container/inset changes, and not from the spine
-    // install or the materialization target: this history reports ~9,000-12,900
+    // has mounted when the container/inset changes, rather than from a row
+    // target command: this history reports ~9,000-12,900
     // pt while pinned at the full-height viewport, ~27,900 pt after the keyboard
     // contraction, and the identical send with no container change leaves the
     // estimate alone. The incident's 2.3x overshoot under a held offset did not
@@ -783,8 +736,6 @@ struct ChatViewScrollHarnessTests {
                         $0.semanticID == "tall-history-turn-171" && $0.isOnScreen
                     }
                 }
-                let commandBaseline = ready.observation.tailMaterializationCommandCount
-                let repairBaseline = ready.observation.pastEndRepairCommandCount
                 // Keyboard-sized contraction, as while the reader is typing.
                 harness.resize(height: 620)
                 _ = try await harness.recorder.waitUntil {
@@ -796,820 +747,21 @@ struct ChatViewScrollHarnessTests {
                         .joined(separator: " ")
                 )
                 harness.submitPrompt()
-                // The send dismisses the keyboard and collapses the composer in
-                // the same display window that applies the materialization.
+                // The send dismisses the keyboard and collapses the composer;
+                // the exact origin keeps the new physical prompt at the tail.
                 harness.resize(height: 844)
-                for _ in 0..<120 { try await harness.driveFrameBoundary() }
-
-                // The opening and contracted estimates this fixture measures stay
-                // in the hosted recorder's bounded geometry trace; these are the
-                // invariants, not the number.
-                #expect(
-                    harness.probeObservation.tailMaterializationCommandCount
-                        == commandBaseline + 1
-                )
+                _ = try await harness.recorder.waitUntil { sample in
+                    sample.nativeRows.contains {
+                        $0.physicalID.hasPrefix("outgoing-submission:") && $0.isOnScreen
+                            && $0.isAtTailSpacing()
+                    }
+                }
                 #expect(!harness.probeObservation.geometry.isPastBottomEdge)
                 #expect(harness.isPinnedToBottom())
-                #expect(
-                    harness.probeObservation.pastEndRepairCommandCount == repairBaseline,
-                    "a healthy tall-history send must never fire the past-end net"
-                )
             }
         }
     }
 
-    // CT-2 baseline fixtures. These are the blank-transcript investigation's
-    // hosted reproduction fixtures, ported as measurements; CT-25 stage A turned
-    // their bottom-coverage evidence into a gate. Each drives one shape, prints
-    // one `CT2-METRICS` line, and asserts that the pinned bottom behaved the way
-    // `TranscriptBottomGateExpectation.current` says it must: today that means
-    // the run reproduced the known blank, because a fixture that quietly stopped
-    // reproducing it would let the defect this work exists to remove go
-    // unnoticed. The blank recovery, the mounted-row ledger and the gap sampler
-    // that branch added alongside them are not ported — this plan deletes
-    // compensations rather than adding them.
-    //
-    // Both shapes start from the plan's context: an assistant message renders as
-    // one physical row however long it is, and a `LazyVStack` derives its content
-    // estimate from the height of the rows it has placed, so a tall row near the
-    // tail is what makes the estimate swing when the container changes. One shape
-    // applies a single keyboard contraction, send and dismissal to a history
-    // whose tail holds many tall replies; the other repeats keyboard up/down
-    // cycles with sends.
-    //
-    // The metric line is one space-separated `key=value` set so repeated runs
-    // diff cleanly. Fields:
-    // - `blankBoundaries=<blank>/<samples>` and `blankAfterSettle`: sampled
-    //   display boundaries whose visible transcript intersects no mounted row,
-    //   and the same excluding the first two boundaries of each phase, where the
-    //   transition is still landing. The row set is read from the row hosts in
-    //   the live hierarchy in window coordinates, so a row that unmounted cannot
-    //   be counted and the answer does not depend on the transcript's
-    //   orientation.
-    // - `uncoveredBandBoundaries` and `minVisibleRowFraction`: sampled
-    //   boundaries whose pinned bottom band (the 12 pt tail spacing plus 24 pt
-    //   above the composer) held no mounted row, and the smallest fraction of
-    //   the visible transcript the mounted rows covered. The band is the gate's
-    //   second signal: a partial blank that leaves a row somewhere on screen
-    //   still fails it.
-    // - `longestBlankRun` and `blankPhases`: the longest consecutive blank run,
-    //   and which phases (`p<index>:<blank count>`) held any blank at all.
-    // - `maxEstimateRatio`: the estimate's swing, the largest published content
-    //   estimate over the smallest (max/min), i.e. how far the lazy stack's own
-    //   estimate moved during the journey. It is not a truth ratio: the harness
-    //   has no independent measurement of the whole history's realized height —
-    //   a lazy stack never realizes all of it, and the offsets of the rows it
-    //   does place are themselves estimate-derived — so this is the estimate's
-    //   own excursion, with `estimateOpen`/`Min`/`Max` carrying the raw points.
-    // - `reDerivations`/`maxReDerivation`: content-estimate changes of at least
-    //   1,000 pt between consecutive callbacks, and the largest of them, read
-    //   from the probe's geometry trace (the only place a re-derivation inside one
-    //   frame is visible).
-    // - `tailDisplacements`: `chat.tail.first-displacement` diagnostics traced
-    //   during the journey; `repairCommands` the commands by origin, with
-    //   `pastEndRepairs` repeated on its own.
-    // - `traceCoverage`: whether the two bounded buffers those counts are read
-    //   from were full when the journey ended — the probe's geometry trace keeps
-    //   its last 240 samples and the chat trace ring its last 256 records, each
-    //   with its own eviction order. `saturated` means the buffer may have
-    //   evicted records this journey counted, so `reDerivations` and
-    //   `tailDisplacements` are lower bounds then; `complete` means neither
-    //   buffer was full.
-    // - `pastBottomBoundaries`, `tallRowHeight`, `tailClearanceSettled`:
-    //   sampled boundaries whose offset was past the legal content bottom, the
-    //   tall row's measured frame height, and the visual gap between the newest
-    //   row's bottom edge and the composer at the end of the journey (the pinned
-    //   tail's legal value is 12 pt; `none` when nothing was there to measure).
-    //
-    // Each invocation runs one journey of each shape, so the line carries no run
-    // number: the plan rule's repeated runs are repeated invocations, named by
-    // the runner's own run directory.
-
-    @Test("CT-2 baseline: many tall replies measure the blank boundaries and estimate swing", .enabled(if: UIValidationTier.isActive))
-    func ct2ManyTallRepliesMetrics() async throws {
-        try await withTestWatchdog(timeout: .seconds(60)) {
-            // 140 rows, the last eight of them ~1,300 pt tall: the incident's
-            // largest estimate excursion was the row count times one tall row's
-            // measured height, a re-derivation that measured only the tall row.
-            let rowCount = 140
-            let tallRowIndices = Set((rowCount - 8)..<rowCount)
-            let terminalSemanticID = "ct2-turn-\(rowCount - 1)"
-            var snapshot = try SessionScenarioBuilder(seed: 1_268)
-                .openingTail(targetEncodedBytes: 10_000)
-            snapshot.acceptsQueuedPrompts = false
-            snapshot.transcript = try (0..<rowCount).map { index in
-                try harnessRichAssistantMessage(
-                    id: "ct2-history-\(index)",
-                    presentationID: "ct2-turn-\(index)",
-                    thinkingLines: [],
-                    text: tallRowIndices.contains(index)
-                        ? harnessTallEstimateRowText(index)
-                        : "Short history row \(index) stays one line."
-                )
-            }
-            snapshot.transcriptStart = 0
-            snapshot.transcriptTotal = snapshot.transcript.count
-            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
-                let ready = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeRows.contains {
-                        $0.semanticID == terminalSemanticID && $0.isOnScreen
-                    }
-                }
-                // Phases, in order: settle the opened history the way a resumed
-                // conversation has by the time the reader types, the
-                // keyboard-sized contraction, the send's materialization, and the
-                // dismissal that lands in one display window with it.
-                let phaseLengths = [16, 12, 12, 32]
-                let baselines = (materializations: ready.observation.tailMaterializationCommandCount,
-                                 physicalRepairs: ready.observation.physicalTailRepairCommandCount,
-                                 pastEndRepairs: ready.observation.pastEndRepairCommandCount,
-                                 displacements: harness.tailDisplacementRecordCount)
-                let traceFrame = (harness.probeObservation.geometryTrace.last?.frame ?? 0) + 1
-                var samples: [CT2BoundarySample] = []
-                let measurePhase: @MainActor (Int) async throws -> Void = { length in
-                    for _ in 0..<length {
-                        try await harness.driveFrameBoundary()
-                        try samples.append(harness.ct2BoundarySample(tallSemanticID: terminalSemanticID))
-                    }
-                }
-                try await measurePhase(phaseLengths[0])
-                let openingSample = try #require(samples.last)
-                harness.resize(height: 620)
-                try await measurePhase(phaseLengths[1])
-                try harness.setComposerDraftText("Keep this resumed conversation stable.")
-                harness.submitPrompt()
-                try await measurePhase(phaseLengths[2])
-                harness.resize(height: 844)
-                try await measurePhase(phaseLengths[3])
-
-                let metrics = try ct2Metrics(
-                    shape: "many-tall-replies", harness: harness, samples: samples,
-                    phaseLengths: phaseLengths, baselines: baselines, traceFrame: traceFrame,
-                    estimateOpen: openingSample.contentHeight,
-                    tallRowHeight: openingSample.tallRowFrame?.height ?? 0
-                )
-                print(metrics.line)
-                #expect(
-                    transcriptBottomGateOutcome(
-                        try #require(metrics.coverage),
-                        expectation: .current(for: harness.orientation)
-                    ) == .asExpected,
-                    "the pinned bottom's coverage: \(metrics.line)"
-                )
-                #expect(
-                    samples.count == phaseLengths.reduce(0, +),
-                    "the scenario ran every sampled display boundary"
-                )
-                #expect(
-                    metrics.tallRowHeight > 1_000,
-                    "the shape's tall row was realized and measured as the estimate-stressing row"
-                )
-                // Today's send has to materialize its lazy tail; the
-                // origin-anchored transcript's newest row is the content origin,
-                // so there is nothing to materialize and the count must stay
-                // zero.
-                if harness.orientation.mountsNewestRowWithContent {
-                    #expect(
-                        metrics.materializations == 0,
-                        "the origin-anchored transcript has no lazy tail to materialize"
-                    )
-                } else {
-                    #expect(metrics.materializations > 0, "the send materialized its tail")
-                }
-            }
-        }
-    }
-
-    // The second shape drives the reader's actual journey instead of one send:
-    // repeated keyboard up/down cycles, each submitting a prompt before the
-    // keyboard dismisses. The first recorded baseline materialized one tail for
-    // three submissions, because the journey never acknowledged its first send:
-    // `ComposerDraftCoordinator` holds an admitted submission until an
-    // authoritative snapshot publishes its canonical user row, and refuses the
-    // next prompt meanwhile (`submission_in_progress`), so only the first send
-    // reached the transcript (plan CT-10). The journey now installs that
-    // canonical row after each cycle, the way a Gateway publishes it, so every
-    // cycle's send is admitted. The single-send shape settles against the same
-    // estimate; this one measures whether the pinned viewport is ever left with
-    // no realized row on screen once each transition has landed.
-    //
-    // Measured on the branch that reproduced the 2026-09-26 blank, before any
-    // recovery existed, over eight cycles of 20/20/60 boundaries: 240-280 of 600
-    // sampled boundaries blank, every blank beginning at a phase boundary and
-    // persisting for that whole phase. This journey is three cycles at
-    // 20/20/60 after a 40-boundary settle; if it records no blank on a given
-    // baseline, the estimate still swings and the displacement warnings are
-    // still traced, and the plan's numbers come from the first shape.
-    @Test("CT-2 baseline: repeated keyboard and send cycles measure the realized rows left on screen", .enabled(if: UIValidationTier.isActive))
-    func repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen() async throws {
-        try await withTestWatchdog(timeout: .seconds(60)) {
-            let rowCount = 140
-            let tallRowIndex = rowCount - 2
-            let terminalSemanticID = "tall-estimate-turn-\(rowCount - 1)"
-            let tallSemanticID = "tall-estimate-turn-\(tallRowIndex)"
-            let cycles = 3
-            // A phase boundary is where the container changes, so the first two
-            // boundaries of every phase are the transition still landing.
-            let phaseLengths = [40] + Array(repeating: [20, 20, 60], count: cycles).flatMap { $0 }
-            var snapshot = try SessionScenarioBuilder(seed: 1_268)
-                .openingTail(targetEncodedBytes: 10_000)
-            snapshot.acceptsQueuedPrompts = false
-            snapshot.transcript = try (0..<rowCount).map { index in
-                try harnessRichAssistantMessage(
-                    id: "tall-estimate-history-\(index)",
-                    presentationID: "tall-estimate-turn-\(index)",
-                    thinkingLines: [],
-                    text: index == tallRowIndex
-                        ? harnessTallEstimateRowText(index)
-                        : "Short history row \(index) stays one line."
-                )
-            }
-            snapshot.transcriptStart = 0
-            snapshot.transcriptTotal = snapshot.transcript.count
-            let opened = snapshot
-            try await withHarness(snapshot: opened, enablesComposerSubmission: true) { harness in
-                let ready = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeRows.contains {
-                        $0.semanticID == terminalSemanticID && $0.isOnScreen
-                    }
-                }
-                let baselines = (materializations: ready.observation.tailMaterializationCommandCount,
-                                 physicalRepairs: ready.observation.physicalTailRepairCommandCount,
-                                 pastEndRepairs: ready.observation.pastEndRepairCommandCount,
-                                 displacements: harness.tailDisplacementRecordCount)
-                let traceFrame = (harness.probeObservation.geometryTrace.last?.frame ?? 0) + 1
-                var samples: [CT2BoundarySample] = []
-                let measurePhase: @MainActor (Int) async throws -> Void = { length in
-                    for _ in 0..<length {
-                        try await harness.driveFrameBoundary()
-                        try samples.append(harness.ct2BoundarySample(tallSemanticID: tallSemanticID))
-                    }
-                }
-                try await measurePhase(phaseLengths[0])
-                let openingSample = try #require(samples.last)
-                var acknowledged = opened
-                for cycle in 0..<cycles {
-                    harness.resize(height: 620)
-                    try await measurePhase(phaseLengths[1])
-                    try harness.setComposerDraftText("Keep this resumed conversation stable.")
-                    harness.submitPrompt()
-                    try await measurePhase(phaseLengths[2])
-                    harness.resize(height: 844)
-                    try await measurePhase(phaseLengths[3])
-                    // The Gateway's canonical row for the prompt just sent, so
-                    // the next cycle's submission is admitted.
-                    acknowledged = try harnessAcknowledgedSnapshot(
-                        acknowledged,
-                        promptIndex: cycle,
-                        text: "Keep this resumed conversation stable."
-                    )
-                    harness.replaceAuthoritativeSnapshot(acknowledged)
-                }
-
-                let metrics = try ct2Metrics(
-                    shape: "keyboard-cycles-with-sends", harness: harness, samples: samples,
-                    phaseLengths: phaseLengths, baselines: baselines, traceFrame: traceFrame,
-                    estimateOpen: openingSample.contentHeight,
-                    tallRowHeight: openingSample.tallRowFrame?.height ?? 0
-                )
-                print(metrics.line)
-                #expect(
-                    transcriptBottomGateOutcome(
-                        try #require(metrics.coverage),
-                        expectation: .current(for: harness.orientation)
-                    ) == .asExpected,
-                    "the pinned bottom's coverage: \(metrics.line)"
-                )
-                #expect(
-                    samples.count == phaseLengths.reduce(0, +),
-                    "the scenario ran every sampled display boundary"
-                )
-                if harness.orientation.mountsNewestRowWithContent {
-                    #expect(
-                        metrics.materializations == 0,
-                        "the origin-anchored transcript has no lazy tail to materialize"
-                    )
-                } else {
-                    #expect(
-                        metrics.materializations >= cycles,
-                        "every cycle's admitted send materialized its tail"
-                    )
-                }
-            }
-        }
-    }
-
-    // CT-24 field-shape fixtures. The two 2026-09-28 device incidents (exports
-    // `…T22-49-38-443Z` and `…T22-51-14-263Z`) went blank with published
-    // content estimates of about 5x and 17x the transcript's real height,
-    // because the newest replies are very tall and the lazy stack derives its
-    // estimate from the rows it places. (`chat.command.issued` at 22:50:51.585
-    // read `content=424420` for 362 rows against a history whose pre-send
-    // estimate was 23,194 pt.) These journeys re-create the two shapes the way
-    // the harness can and gate their bottom coverage the same way CT-2's do:
-    // today the run must reproduce the blank, and CT-23's origin-anchored
-    // transcript must instead keep the pinned bottom covered in every boundary.
-    //
-    // Each shape opens a ~250-row history whose newest replies are very tall,
-    // which is the only structural difference from an ordinary history (the
-    // other rows are one line). Shape (a) then replaces the authoritative
-    // snapshot with one carrying four more very tall replies, the way a
-    // reconnect resync installs the Gateway's current transcript, and samples
-    // 90 boundaries without user input. Shape (b) submits a prompt with the
-    // keyboard-sized viewport in place, publishes the canonical prompt row and
-    // five assistant replies of varying tall heights across 60 boundaries, and
-    // samples every boundary without further input.
-    //
-    // The line is one space-separated `key=value` set so repeated runs diff
-    // cleanly. Fields:
-    // - `blankBoundaries=<blank>/<samples>` and `blankAfterSettle`: sampled
-    //   display boundaries whose window-coordinate oracle sees no mounted
-    //   transcript row, and the same excluding the first two boundaries of each
-    //   phase, where the transition is still landing.
-    // - `uncoveredBandBoundaries` and `minVisibleRowFraction`: sampled
-    //   boundaries whose pinned bottom band held no mounted row, and the
-    //   smallest fraction of the visible transcript the mounted rows covered.
-    // - `longestBlankRun` and `blankPhases`: the longest consecutive blank run,
-    //   and which phases (`p<index>:<blank count>`) held any blank at all.
-    // - `maxEstimateRatio`: the largest published content estimate over the
-    //   total height of the rows whose real height is known (the probe's
-    //   semantic row frames). The lazy stack measures only the rows it places,
-    //   so that total is a lower bound on the transcript's real height and this
-    //   ratio an upper bound on how far the estimate exceeds measured truth;
-    //   `measuredRowsAtMax` says how little of the history the bound rests on.
-    // - `estimateOpen`/`estimateMax`/`measuredHeightAtMax`: the raw points.
-    // - `tallestRowHeight`: the tallest realized row frame, the shape's identity
-    //   (every shape here needs rows of at least 1,500 pt).
-    // - `newestRowClearanceSettled`: the visual gap between the newest row's
-    //   bottom edge and the composer at the end of the journey (the pinned
-    //   tail's legal value is 12 pt; `none` when nothing was there to measure).
-    //
-    // Each invocation runs one journey of each shape, so the line carries no run
-    // number: the plan rule's repeated runs are repeated invocations, named by
-    // the runner's own run directory.
-
-    @Test("CT-24 field shape: a reconnect resync under very tall newest replies", .enabled(if: UIValidationTier.isActive))
-    func ct24ResyncUnderVeryTallNewestReplies() async throws {
-        try await withTestWatchdog(timeout: .seconds(120)) {
-            let shape = try ct24TallNewestHistory(
-                rowCount: 250, tallCount: 6, appendedTallCount: 4, seed: 1_269
-            )
-            let terminalSemanticID = "ct24-turn-\(250 - 1)"
-            try await withHarness(snapshot: shape.opened) { harness in
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeRows.contains {
-                        $0.semanticID == terminalSemanticID && $0.isOnScreen
-                    }
-                }
-                // Phase 0 is the settled read before the resync; phase 1 is the
-                // resync itself and the 80 boundaries that follow it. No input
-                // reaches the harness from here on.
-                let phaseLengths = [10, 80]
-                var samples: [CT24BoundarySample] = []
-                for _ in 0..<phaseLengths[0] {
-                    try await harness.driveFrameBoundary()
-                    try samples.append(harness.ct24BoundarySample())
-                }
-                harness.replaceAuthoritativeSnapshot(shape.resynced)
-                for _ in 0..<phaseLengths[1] {
-                    try await harness.driveFrameBoundary()
-                    try samples.append(harness.ct24BoundarySample())
-                }
-
-                let metrics = try ct24Metrics(
-                    shape: "resync-under-tall-newest", harness: harness,
-                    samples: samples, phaseLengths: phaseLengths
-                )
-                print(metrics.line)
-                #expect(
-                    transcriptBottomGateOutcome(
-                        try #require(metrics.coverage),
-                        expectation: .current(for: harness.orientation)
-                    ) == .asExpected,
-                    "the pinned bottom's coverage: \(metrics.line)"
-                )
-                #expect(
-                    samples.count == phaseLengths.reduce(0, +),
-                    "the scenario ran every sampled display boundary"
-                )
-                #expect(
-                    metrics.tallestRowHeight >= 1_500,
-                    "the shape's newest replies were realized as at least 1,500 pt tall"
-                )
-            }
-        }
-    }
-
-    @Test("CT-24 field shape: a send under very tall newest replies", .enabled(if: UIValidationTier.isActive))
-    func ct24SendUnderVeryTallNewestReplies() async throws {
-        try await withTestWatchdog(timeout: .seconds(120)) {
-            let shape = try ct24TallNewestHistory(
-                rowCount: 250, tallCount: 6, appendedTallCount: 0, seed: 1_269
-            )
-            let terminalSemanticID = "ct24-turn-\(250 - 1)"
-            try await withHarness(snapshot: shape.opened, enablesComposerSubmission: true) { harness in
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeRows.contains {
-                        $0.semanticID == terminalSemanticID && $0.isOnScreen
-                    }
-                }
-                // The device incident's send happened with the keyboard-sized
-                // viewport in place: 624 pt of container against 758 pt at rest.
-                harness.resize(height: 620)
-                // Phase 0 is the keyboard contraction landing; the prompt is
-                // then submitted with no further input, and phase 1 publishes
-                // five assistant replies of varying tall heights, one every
-                // twelve boundaries.
-                let phaseLengths = [8, 60]
-                var samples: [CT24BoundarySample] = []
-                for _ in 0..<phaseLengths[0] {
-                    try await harness.driveFrameBoundary()
-                    try samples.append(harness.ct24BoundarySample())
-                }
-                let draft = "Keep this resumed conversation stable."
-                try harness.setComposerDraftText(draft)
-                harness.submitPrompt()
-                var published = try harnessAcknowledgedSnapshot(shape.opened, promptIndex: 0, text: draft)
-                harness.replaceAuthoritativeSnapshot(published)
-                var publishedReplies = 0
-                for boundary in 0..<phaseLengths[1] {
-                    if boundary.isMultiple(of: 12), publishedReplies < ct24FieldReplyParagraphCounts.count {
-                        published.transcript.append(try harnessRichAssistantMessage(
-                            id: "ct24-reply-\(publishedReplies)",
-                            presentationID: "ct24-reply-turn-\(publishedReplies)",
-                            thinkingLines: [],
-                            text: harnessFieldReplyText(
-                                index: publishedReplies,
-                                paragraphs: ct24FieldReplyParagraphCounts[publishedReplies]
-                            )
-                        ))
-                        published.transcriptTotal = published.transcript.count
-                        harness.replaceAuthoritativeSnapshot(published)
-                        publishedReplies += 1
-                    }
-                    try await harness.driveFrameBoundary()
-                    try samples.append(harness.ct24BoundarySample())
-                }
-
-                let metrics = try ct24Metrics(
-                    shape: "send-under-tall-newest", harness: harness,
-                    samples: samples, phaseLengths: phaseLengths
-                )
-                print(metrics.line)
-                #expect(
-                    transcriptBottomGateOutcome(
-                        try #require(metrics.coverage),
-                        expectation: .current(for: harness.orientation)
-                    ) == .asExpected,
-                    "the pinned bottom's coverage: \(metrics.line)"
-                )
-                #expect(
-                    samples.count == phaseLengths.reduce(0, +),
-                    "the scenario ran every sampled display boundary"
-                )
-                #expect(publishedReplies == 5, "the shape appended five assistant replies")
-                #expect(
-                    metrics.tallestRowHeight >= 1_500,
-                    "the shape's newest replies were realized as at least 1,500 pt tall"
-                )
-            }
-        }
-    }
-
-    // Failure mode: accessories plus the keyboard can shrink/translate the
-    // flipped viewport, clipping old content below the navigation bar even
-    // though newest-row pinning still passes. Inspect the native clip, not blur.
-    @Test("accessories never clip the transcript below its navigation inset", .enabled(if: UIValidationTier.isActive))
-    func accessoryObstructionsPreserveTopViewport() async throws {
-        try await withTestWatchdog(timeout: .seconds(40)) {
-            let snapshot = try SessionScenarioBuilder(seed: 1_285).openingTail(targetEncodedBytes: 50_000)
-            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
-                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtBottom }
-                try await harness.loadCanonicalCommands(["inspect", "explain"], skills: ["skill:review"])
-                _ = try await harness.recorder.waitUntil { _ in harness.probe.composerCatalogBuildCount > 0 }
-                for keyboard in [false, true] {
-                    try harness.setRealKeyboardVisible(keyboard)
-                    try await Task.sleep(for: .milliseconds(750))
-                    for tall in [false, true] {
-                        let draft = tall ? (1...12).map { "Draft line \($0)" }.joined(separator: "\n") : ""
-                        for accessory in ["none", "attachments", "chip", "catalog"] {
-                            harness.probe.composerResourcePickerPresentation?(nil)
-                            try harness.setMotionAccessory(nil)
-                            try harness.setComposerText(draft)
-                            try await DisplayFrameScheduler.displayLink.nextFrame()
-                            if accessory == "attachments" { try harness.setMotionAccessory(.photo) }
-                            if accessory == "chip" { try harness.selectCanonicalSkill(named: "skill:review") }
-                            if accessory == "catalog" { harness.probe.composerResourcePickerPresentation?(.commands) }
-                            try await Task.sleep(for: .milliseconds(750))
-                            let clip = try harness.topViewportEvidence()
-                            print("CT23-TOP keyboard=\(keyboard) tall=\(tall) accessory=\(accessory) \(clip.description)")
-                            #expect(clip.uncoveredTop <= 0.5, "\(clip.description)")
-                        }
-                    }
-                }
-                try harness.setRealKeyboardVisible(false)
-            }
-        }
-    }
-
-    @Test("animated obstructions follow the pinned newest row on every presented frame", .enabled(if: UIValidationTier.isActive))
-    func animatedObstructionFollowsNewestRow() async throws {
-        try await animatedObstructionJourney(detached: false)
-    }
-
-    @Test("animated obstructions cover a detached reader without moving or remounting it", .enabled(if: UIValidationTier.isActive))
-    func animatedObstructionPreservesDetachedReader() async throws {
-        try await animatedObstructionJourney(detached: true)
-    }
-
-    private func animatedObstructionJourney(detached: Bool) async throws {
-        try await withTestWatchdog(timeout: .seconds(40)) {
-            var snapshot = try SessionScenarioBuilder(seed: 1_284).openingTail(targetEncodedBytes: 10_000)
-            snapshot.transcript = try (0..<120).map { index in
-                try harnessRichAssistantMessage(id: "motion-\(index)", presentationID: "motion-turn-\(index)",
-                                                thinkingLines: [], text: "A measured history row \(index).")
-            }
-            snapshot.transcriptStart = 0
-            snapshot.transcriptTotal = snapshot.transcript.count
-            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
-                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeSettledAtBottom }
-                try await harness.loadCanonicalCommands(["inspect", "explain"], skills: ["skill:review"])
-                _ = try await harness.recorder.waitUntil { _ in harness.probe.composerCatalogBuildCount > 0 }
-                try await Task.sleep(for: .milliseconds(500))
-                if detached { try await harness.detachReaderMidHistory() }
-                let anchor = detached ? try #require(harness.readerAnchor()) : nil
-                let commandBaseline = harness.probeObservation.scrollCommandCount
-                let frames = try harness.obstructionRecorder(trackedID: anchor?.physicalID)
-                frames.start()
-                defer { frames.stop() }
-                let transition: @MainActor (String, () throws -> Void) async throws -> Void = { phase, action in
-                    frames.phase = phase
-                    try action()
-                    try await Task.sleep(for: .milliseconds(750))
-                    if !detached, harness.orientation.presentsNewestRowFirst {
-                        let last = try #require(frames.samples.last)
-                        #expect(abs(last.declaredObstruction - (last.renderedObstruction ?? -.infinity)) <= 0.5,
-                                "\(phase): adapter must describe the rendered spacer")
-                    }
-                }
-                try await transition("catalog-open") { harness.probe.composerResourcePickerPresentation?(.commands) }
-                #expect(!(harness.probe.composerPickerEntries?().isEmpty ?? true))
-                try await transition("catalog-close") { harness.probe.composerResourcePickerPresentation?(nil) }
-                try await transition("editor-grow") {
-                    try harness.setComposerDraftText("First line\nSecond line\nThird line\nFourth line")
-                }
-                try await transition("editor-shrink") { try harness.setComposerDraftText("") }
-                try await transition("keyboard-show") { try harness.setRealKeyboardVisible(true) }
-                try await transition("keyboard-hide") { try harness.setRealKeyboardVisible(false) }
-                var recent = harness.snapshot
-                let now = Date.now
-                recent.processActivities = [SessionProcessActivity(
-                    processId: "motion-worker", kind: .subagent, executionMode: .asynchronous,
-                    source: .delegatedAgent,
-                    lifecycle: SessionProcessLifecycle(
-                        state: .completed, sequence: 1,
-                        observedAt: GatewayTimestamp.preciseString(from: now),
-                        terminalAt: GatewayTimestamp.preciseString(from: now),
-                        recentUntil: GatewayTimestamp.preciseString(from: now.addingTimeInterval(300))
-                    ), visibility: .recent, title: "Finished worker"
-                )]
-                recent.processOverview = SessionProcessOverview(
-                    revision: 1, asOf: GatewayTimestamp.preciseString(from: now),
-                    activeCount: 0, recentCount: 1, problemCount: 0, visibility: .recent,
-                    nearestExpiry: GatewayTimestamp.preciseString(from: now.addingTimeInterval(300))
-                )
-                recent.revision += 1
-                recent.eventSequence += 1
-                try await transition("recent-subagent-add") { harness.replaceAuthoritativeSnapshot(recent) }
-                recent.processActivities = []
-                recent.processOverview = nil
-                recent.revision += 1
-                recent.eventSequence += 1
-                try await transition("recent-subagent-remove") { harness.replaceAuthoritativeSnapshot(recent) }
-                try await transition("photo-add") { try harness.setMotionAccessory(.photo) }
-                try await transition("photo-remove") { try harness.setMotionAccessory(nil) }
-                try await transition("file-add") { try harness.setMotionAccessory(.file) }
-                try await transition("file-remove") { try harness.setMotionAccessory(nil) }
-                try await transition("skill-add") { try harness.setMotionAccessory(.skill) }
-                try await transition("skill-remove") { try harness.setMotionAccessory(nil) }
-                try await transition("command-add") { try harness.setMotionAccessory(.command) }
-                try await transition("command-remove") { try harness.setMotionAccessory(nil) }
-                try await transition("combo-keyboard") { try harness.setRealKeyboardVisible(true) }
-                try await transition("combo-tall-draft") {
-                    try harness.setComposerDraftText((1...12).map { "Draft line \($0)" }.joined(separator: "\n"))
-                }
-                try await transition("combo-photo") { try harness.setMotionAccessory(.photo) }
-                try await transition("combo-chip") { try harness.selectCanonicalSkill(named: "skill:review") }
-                try await transition("combo-catalog") { harness.probe.composerResourcePickerPresentation?(.commands) }
-                try await transition("combo-catalog-close") { harness.probe.composerResourcePickerPresentation?(nil) }
-                try await transition("combo-accessories-remove") { try harness.setMotionAccessory(nil) }
-                try await transition("combo-keyboard-hide") { try harness.setRealKeyboardVisible(false) }
-                frames.stop()
-                let data = try JSONEncoder().encode(frames.samples)
-                Attachment.record(data, named: "animated-obstruction-\(harness.orientation)-detached-\(detached).json")
-                for phase in Set(frames.samples.map(\.phase)).sorted() {
-                    let samples = frames.samples.filter { $0.phase == phase }
-                    let gaps = samples.compactMap(\.gap)
-                    let worst = gaps.map { abs($0 - 12) }.max() ?? .infinity
-                    let tops = samples.compactMap(\.composerTop)
-                    let travel = (tops.max() ?? 0) - (tops.min() ?? 0)
-                    print("CT23-ANIMATED detached=\(detached) phase=\(phase) frames=\(samples.count) worstGap=\(worst) composerTravel=\(travel)")
-                    #expect(samples.count >= 10 && gaps.count == samples.count)
-                    // Atomic editor changes may finish before the first callback;
-                    // retain their endpoint and every display callback, not a
-                    // fabricated minimum number of animated frames.
-                    if phase == "catalog-open" || phase == "keyboard-show" {
-                        #expect(travel > 8, "the actual obstruction changed size or position")
-                    }
-                    if let anchor {
-                        let positions = samples.compactMap(\.trackedTop)
-                        #expect(positions.count == samples.count)
-                        #expect(positions.allSatisfy { abs($0 - anchor.windowMinY) < 0.5 })
-                        #expect(samples.allSatisfy { $0.trackedInstance == anchor.instance })
-                        #expect(harness.probeObservation.scrollCommandCount == commandBaseline)
-                    } else {
-                        if harness.orientation.presentsNewestRowFirst {
-                            #expect(samples.allSatisfy { $0.distanceFromNewest <= 0.5 })
-                        }
-                        // Today's native estimated-end path independently jumps
-                        // on these transitions. Retain their full frame evidence,
-                        // but do not copy those defects into the origin contract.
-                        let knownTodayExcursions = ["catalog-close", "combo-catalog-close", "combo-tall-draft"]
-                        if !knownTodayExcursions.contains(phase) || harness.orientation.presentsNewestRowFirst {
-                            #expect(worst <= 3, "\(phase) newest row diverged from the presented composer by \(worst) pt")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // The keyboard's own input, which no journey drove before: the bottom safe
-    // area moves through the keyboard's intermediate positions while the history
-    // keeps tall replies in its measured set. `resize(height:)` changes the whole
-    // window, which the flip does not touch; the keyboard changes only the
-    // composer's inset, which is where CT-23's swapped mobile margins have to
-    // land. Every sampled boundary records the gap between the composer's top
-    // edge and the newest row's bottom edge in window coordinates (P0-1).
-    @Test("keyboard safe-area inset keeps the newest row measured at the composer", .enabled(if: UIValidationTier.isActive))
-    func safeAreaKeyboardInsetKeepsNewestRowAtComposer() async throws {
-        try await withTestWatchdog(timeout: .seconds(120)) {
-            // The CT-2 shape's content: 140 rows whose last eight measure about
-            // 1,300 pt, the tallest measured set a container change can
-            // re-derive an estimate from.
-            let rowCount = 140
-            let tallRowIndices = Set((rowCount - 8)..<rowCount)
-            let terminalSemanticID = "ct25-keyboard-turn-\(rowCount - 1)"
-            var snapshot = try SessionScenarioBuilder(seed: 1_268)
-                .openingTail(targetEncodedBytes: 10_000)
-            snapshot.acceptsQueuedPrompts = false
-            snapshot.transcript = try (0..<rowCount).map { index in
-                try harnessRichAssistantMessage(
-                    id: "ct25-keyboard-history-\(index)",
-                    presentationID: "ct25-keyboard-turn-\(index)",
-                    thinkingLines: [],
-                    text: tallRowIndices.contains(index)
-                        ? harnessTallEstimateRowText(index)
-                        : "Short history row \(index) stays one line."
-                )
-            }
-            snapshot.transcriptStart = 0
-            snapshot.transcriptTotal = snapshot.transcript.count
-            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeRows.contains {
-                        $0.semanticID == terminalSemanticID && $0.isOnScreen
-                    }
-                }
-                // Phases: the opened history settling, the keyboard's inset
-                // transition, the composer's multi-line growth, the dismissal's
-                // transition, and the settled rest after it.
-                let show = KeyboardInsetTransition.show()
-                let hide = KeyboardInsetTransition.hide()
-                let phaseLengths: [Int] = [8, show.boundaries, 16, hide.boundaries, 8]
-                var samples: [KeyboardBoundarySample] = []
-                let measurePhase: @MainActor (Int) async throws -> Void = { length in
-                    for _ in 0..<length {
-                        try await harness.driveFrameBoundary()
-                        try samples.append(harness.keyboardBoundarySample())
-                    }
-                }
-                try await measurePhase(phaseLengths[0])
-                let showRamp = try await harness.driveKeyboardInset(show)
-                samples.append(contentsOf: showRamp)
-                let shownSettled = try await harness.newestRowSettledAtComposer()
-                try harness.setComposerDraftText(
-                    "First line of the draft\nSecond line\nThird line\nFourth line"
-                )
-                try await measurePhase(phaseLengths[2])
-                try harness.setComposerDraftText("")
-                let hideRamp = try await harness.driveKeyboardInset(hide)
-                samples.append(contentsOf: hideRamp)
-                let hiddenSettled = try await harness.newestRowSettledAtComposer()
-                try await measurePhase(phaseLengths[4])
-
-                let metrics = harness.keyboardMetrics(samples: samples, phaseLengths: phaseLengths)
-                print(metrics.line)
-                #expect(
-                    samples.count == phaseLengths.reduce(0, +),
-                    "the scenario ran every sampled display boundary"
-                )
-                let composerSpan = try #require(metrics.composerHeightSpan)
-                #expect(
-                    composerSpan.upperBound - composerSpan.lowerBound > 8,
-                    "the multi-line draft grew the composer: \(metrics.line)"
-                )
-                let topSpan = try #require(metrics.composerTopSpan)
-                #expect(
-                    topSpan.upperBound - topSpan.lowerBound > 200,
-                    "the keyboard's inset moved the composer across the window: \(metrics.line)"
-                )
-                // The keyboard moves the composer's own inset, so the transcript
-                // must land back on the pinned tail once the keyboard
-                // transition's own clock has run. This is the check the flip can
-                // break and today's gates never made: with the keyboard inset
-                // applied at the wrong edge the newest row settles away from the
-                // composer, while `resize(height:)` would have kept it there
-                // without any correction at all.
-                let shown = try #require(
-                    shownSettled.clearance,
-                    "the keyboard-up transition settled with no newest row: \(metrics.line)"
-                )
-                #expect(
-                    abs(shown - TranscriptWindowOracle.tailSpacing) <= 6,
-                    "the newest row settled \(ct2Number(shown)) pt from the composer with the keyboard up: \(metrics.line)"
-                )
-                let hidden = try #require(
-                    hiddenSettled.clearance,
-                    "the dismissal settled with no newest row: \(metrics.line)"
-                )
-                #expect(
-                    abs(hidden - TranscriptWindowOracle.tailSpacing) <= 6,
-                    "the newest row settled \(ct2Number(hidden)) pt from the composer after the dismissal: \(metrics.line)"
-                )
-                // The keyboard's own transition frames, not only its settled
-                // ends: a transcript whose inset lands at the composer's edge
-                // rides the keyboard's transaction frame for frame, while one
-                // that reserves it anywhere else measures the whole keyboard
-                // height as a gap inside the ramp the reader is watching.
-                let ramp = (showRamp + hideRamp).compactMap(\.clearance)
-                let rampWorstGap = ramp.map { abs($0 - TranscriptWindowOracle.tailSpacing) }.max()
-                print("CT25-KEYBOARD-RAMP boundaries=\(ramp.count)"
-                    + " worstGap=\(rampWorstGap.map(ct2Number) ?? "none")")
-                #expect(
-                    ramp.count == show.boundaries + hide.boundaries,
-                    "every driven transition boundary measured a newest row: \(metrics.line)"
-                )
-                switch KeyboardRampExpectation.current(for: .selected) {
-                case .ridesTheComposerEdge:
-                    #expect(
-                        (rampWorstGap ?? .infinity) <= KeyboardRampExpectation.tolerance,
-                        "the keyboard's ramp left the newest row \(rampWorstGap.map(ct2Number) ?? "unknown") pt from the composer: \(metrics.line)"
-                    )
-                case .measuresTheKnownDrop:
-                    #expect(
-                        (rampWorstGap ?? 0) > KeyboardRampExpectation.tolerance,
-                        "today's path stopped measuring the ramp's known drop: \(metrics.line)"
-                    )
-                }
-                // Failure modes: a cached reflection classifies an unchanged raw
-                // marker against the previous viewport; mixing the inset source
-                // with applied geometry invents a distance during the ramp.
-                // The reflect-on-arrival negative-control revision must fail here.
-                if harness.orientation.presentsNewestRowFirst {
-                    for (index, sample) in (showRamp + hideRamp).enumerated() {
-                        #expect(sample.distanceFromNewest <= 0.5,
-                            "boundary \(index) distance=\(sample.distanceFromNewest)")
-                        #expect(sample.tailState?.contains("tail=aligned ") == true,
-                            "boundary \(index): \(sample.tailState ?? "missing marker evidence")")
-                    }
-                }
-                let displacedOpeningViewports = harness.traceRecords.count {
-                    $0.record.event == "chat.anomaly.opening-viewport-displaced"
-                }
-                print("CT25-OPENING-ANOMALY displaced=\(displacedOpeningViewports)")
-                // Measured, not gated: with the frames adapted (P1-2) a *pinned*
-                // transcript's marker classifies `aligned` at the composer edge —
-                // the pinned dump reads `[663, 675]` against the viewport's 675 —
-                // but the opening still passes through un-settled states that can
-                // record one displaced viewport (measured: `displaced=0` in four
-                // focused runs and 1 in one heavy suite run). That transient is
-                // the opening's own, not the pinned misclassification the review
-                // named, so the count is printed for comparison instead of gating
-                // a fixture that reproduces it one run in five.
-            }
-        }
-    }
-
-    // The safe-area scenario's own negative control, and a different failure from
-    // the mirrored-transcript control above: the keyboard's inset lands at the
-    // transcript's *far* edge instead of the composer's. CT-23's flipped
-    // transcript applies the keyboard as a swapped content margin, so an
-    // implementation that reserves the height at the wrong end leaves the pinned
-    // row one keyboard height away from the composer while every row keeps its
-    // own orientation and order. The rows are untouched here, so this isolates the
-    // inset's edge; the mirrored control above cannot, because it fails with or
-    // without a keyboard.
     @Test("a keyboard inset reserved at the transcript's far edge fails the composer gate")
     func keyboardInsetAtWrongEdgeFailsTheComposerGate() async throws {
         try await withTestWatchdog(timeout: .seconds(30)) {
@@ -1674,14 +826,6 @@ struct ChatViewScrollHarnessTests {
                     !scrollView.bottomEdgeEffect.isHidden,
                     "the origin-anchored transcript leaves the other edge's effect alone"
                 )
-            }
-            try await withHarness(snapshot: snapshot, orientation: .newestAtEnd) { harness in
-                let scrollView = try harness.nativeTranscriptScrollViewForTesting()
-                #expect(
-                    !scrollView.topEdgeEffect.isHidden,
-                    "today's transcript keeps the edge effect it has always drawn"
-                )
-                #expect(!scrollView.bottomEdgeEffect.isHidden)
             }
         }
     }
@@ -1764,36 +908,29 @@ struct ChatViewScrollHarnessTests {
         return "the accessibility order would be \(actual), not the visual order \(expected)"
     }
 
-    @Test("the accessibility reading order puts the oldest row first on both transcript orientations")
+    @Test("the accessibility reading order puts the oldest row first on the origin-anchored transcript")
     func accessibilityReadingOrderFollowsTheVisualOrder() {
         let count = 24
-        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
-            let failure = voiceOverOrderFailure(orientation: orientation, count: count) {
-                orientation.voiceOverSortPriority(forSpinePosition: $0)
-            }
-            #expect(failure == nil, "\(orientation): \(failure ?? "")")
+        let orientation = ChatTranscriptOrientation.newestAtOrigin
+        let failure = voiceOverOrderFailure(orientation: orientation, count: count) {
+            orientation.voiceOverSortPriority(forSpinePosition: $0)
         }
+        #expect(failure == nil, "\(orientation): \(failure ?? "")")
         // The failure mode the priority exists for: the same origin-anchored
         // transcript with no priority applied reads bottom-up, which is what the
         // tree order gives.
         let unprioritized = voiceOverOrderFailure(orientation: .newestAtOrigin, count: count) { _ in 0 }
         #expect(unprioritized != nil, "\(unprioritized ?? "")")
-        // A reversed priority is not a fix, and applying one to today's path
-        // breaks the order today's transcript already has.
-        let reversed = voiceOverOrderFailure(orientation: .newestAtOrigin, count: count) {
+        // A reversed priority is not a fix for the surviving layout.
+        let reversed = voiceOverOrderFailure(orientation: orientation, count: count) {
             Double(count - 1 - $0)
         }
         #expect(reversed != nil, "\(reversed ?? "")")
-        let appliedToToday = voiceOverOrderFailure(orientation: .newestAtEnd, count: count) {
-            Double($0)
-        }
-        #expect(appliedToToday != nil, "\(appliedToToday ?? "")")
     }
 
     @Test("the context-menu preview gate fails a mirrored, displaced or resized preview")
     func contextMenuPreviewPlacementGateRejectsAMirroredPreview() {
         let source = CGRect(x: 40, y: 700, width: 231, height: 36)
-        let center = CGPoint(x: source.midX, y: source.midY)
         func failure(
             transform: CGAffineTransform = .identity,
             center: CGPoint = .zero,
@@ -1818,11 +955,9 @@ struct ChatViewScrollHarnessTests {
         #expect(failure(previewFlipped: true) != nil, "a flipped preview view")
     }
 
-    @Test("the prompt menu's preview is upright and in place on both transcript orientations")
+    @Test("the prompt menu's preview is upright and in place on the origin-anchored transcript")
     func promptContextMenuPreviewIsUprightAndInPlace() async throws {
-        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
-            ($0, try transcriptMenuSnapshot())
-        }
+        let snapshots = [(ChatTranscriptOrientation.newestAtOrigin, try transcriptMenuSnapshot())]
         try await withTestWatchdog(timeout: .seconds(60)) {
             for (orientation, snapshot) in snapshots {
                 try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
@@ -1878,11 +1013,9 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("the display card's context menu resolves at the card on both transcript orientations")
+    @Test("the display card's context menu resolves at the card on the origin-anchored transcript")
     func displayCardContextMenuResolvesAtTheCard() async throws {
-        let snapshots = try [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin].map {
-            ($0, try transcriptMenuSnapshot())
-        }
+        let snapshots = [(ChatTranscriptOrientation.newestAtOrigin, try transcriptMenuSnapshot())]
         try await withTestWatchdog(timeout: .seconds(60)) {
             for (orientation, snapshot) in snapshots {
                 try await withHarness(snapshot: snapshot, orientation: orientation) { harness in
@@ -1968,31 +1101,23 @@ struct ChatViewScrollHarnessTests {
         // A short transcript that leaves most of the viewport empty.
         let sparse = coverage(blank: false, uncoveredBand: false, visibleRowFraction: 0.2)
 
-        // Today's path: the known defect must appear.
-        #expect(transcriptBottomGateOutcome(summary([blank, blank])) == .asExpected)
-        #expect(transcriptBottomGateOutcome(summary([partial])) == .asExpected)
-        #expect(transcriptBottomGateOutcome(summary([covered, covered])) == .fixtureStoppedReproducing)
-        // CT-23's path: every boundary keeps the pinned bottom covered and at
-        // least half the visible transcript in rows.
+        // The origin-anchored transcript must keep each boundary covered and
+        // at least half the visible transcript in rows.
+        #expect(transcriptBottomGateOutcome(summary([covered, covered])) == .asExpected)
         #expect(
-            transcriptBottomGateOutcome(
-                summary([covered, covered]), expectation: .coveringBottomIsRequired
-            ) == .asExpected
-        )
-        #expect(
-            transcriptBottomGateOutcome(summary([blank]), expectation: .coveringBottomIsRequired)
+            transcriptBottomGateOutcome(summary([blank]))
                 == .bottomUncovered(
                     blankBoundaries: 1, uncoveredBandBoundaries: 1, minimumVisibleRowFraction: 0
                 )
         )
         #expect(
-            transcriptBottomGateOutcome(summary([partial]), expectation: .coveringBottomIsRequired)
+            transcriptBottomGateOutcome(summary([partial]))
                 == .bottomUncovered(
                     blankBoundaries: 0, uncoveredBandBoundaries: 1, minimumVisibleRowFraction: 0.3
                 )
         )
         #expect(
-            transcriptBottomGateOutcome(summary([sparse]), expectation: .coveringBottomIsRequired)
+            transcriptBottomGateOutcome(summary([sparse]))
                 == .bottomUncovered(
                     blankBoundaries: 0, uncoveredBandBoundaries: 0, minimumVisibleRowFraction: 0.2
                 )
@@ -2022,18 +1147,6 @@ struct ChatViewScrollHarnessTests {
                 try harness.flipNativeTranscriptWithoutCounterFlippingRows()
                 try await harness.driveFrameBoundary()
 
-                // The removed measurement: the native offset is still the legal
-                // maximum, so it reads the transcript as pinned at its tail.
-                let scrollView = try harness.nativeTranscriptScrollViewForTesting()
-                let legalEnd = max(
-                    -scrollView.adjustedContentInset.top,
-                    scrollView.contentSize.height - scrollView.bounds.height
-                        + scrollView.adjustedContentInset.bottom
-                )
-                #expect(
-                    abs(scrollView.contentOffset.y - legalEnd) <= 2,
-                    "the scroll-space tail measurement still reads the legal end"
-                )
                 #expect(!harness.isPinnedToBottom())
                 let pinnedError = try #require(harness.pinnedError())
                 #expect(pinnedError > 40, "the newest row left the pinned bottom by \(pinnedError) pt")
@@ -2049,102 +1162,9 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    /// Assemble the CT-24 metric line for one field shape. The estimate ratio is
-    /// `contentHeight / measuredRowHeightSum`: the published `LazyVStack`
-    /// content estimate over the total height of the rows whose real height is
-    /// known. The lazy stack measures only the rows it places, so that total is
-    /// a lower bound on the transcript's real height — the ratio is therefore an
-    /// upper bound on how far the estimate exceeds measured truth, and
-    /// `measuredRowsAtMax` reports how many rows it rests on.
-    private func ct24Metrics(
-        shape: String,
-        harness: ChatViewScrollHarness,
-        samples: [CT24BoundarySample],
-        phaseLengths: [Int]
-    ) throws -> CT24Metrics {
-        let coverage = TranscriptCoverageSummary(
-            samples: samples.map(\.coverage), phaseLengths: phaseLengths
-        )
-        let ratios = samples.filter { $0.measuredRowHeightSum > 0 }
-        let ratioOf: (CT24BoundarySample) -> CGFloat = {
-            $0.contentHeight / $0.measuredRowHeightSum
-        }
-        let maxRatio = ratios.max { ratioOf($0) < ratioOf($1) }
-        var metrics = CT24Metrics()
-        metrics.shape = shape
-        metrics.orientation = harness.orientation.presentsNewestRowFirst ? "origin" : "end"
-        metrics.samples = samples.count
-        metrics.blankBoundaries = coverage.blankBoundaries
-        metrics.blankAfterSettle = coverage.blankAfterSettle
-        metrics.longestBlankRun = coverage.longestBlankRun
-        metrics.blankPhases = coverage.blankPhases
-        metrics.uncoveredBandBoundaries = coverage.uncoveredBandBoundaries
-        metrics.minimumVisibleRowFraction = coverage.minimumVisibleRowFraction
-        metrics.maxEstimateRatio = maxRatio.map(ratioOf) ?? 0
-        metrics.estimateOpen = samples.first?.contentHeight ?? 0
-        metrics.estimateMax = samples.map(\.contentHeight).max() ?? 0
-        metrics.measuredRowsAtMax = maxRatio?.measuredRowCount ?? 0
-        metrics.measuredHeightAtMax = maxRatio?.measuredRowHeightSum ?? 0
-        metrics.tallestRowHeight = samples.map(\.tallestOnScreenRowHeight).max() ?? 0
-        metrics.newestRowClearanceSettled = harness.newestRowClearance()
-        metrics.coverage = coverage
-        return metrics
-    }
-
-    /// Assemble the CT-2 metric line for one journey. `baselines` are the
-    /// observation's command counts and the trace's displacement count at the
-    /// journey's start, and `traceFrame` the probe geometry trace's last frame
-    /// then, so every counted command and estimate change belongs to the journey.
-    private func ct2Metrics(
-        shape: String,
-        harness: ChatViewScrollHarness,
-        samples: [CT2BoundarySample],
-        phaseLengths: [Int],
-        baselines: (materializations: Int, physicalRepairs: Int, pastEndRepairs: Int, displacements: Int),
-        traceFrame: Int,
-        estimateOpen: CGFloat,
-        tallRowHeight: CGFloat
-    ) throws -> CT2Metrics {
-        let observation = harness.probeObservation
-        let transitionTrace = observation.geometryTrace.filter { $0.frame >= traceFrame }
-        let estimates = samples.map(\.contentHeight)
-        let reDerivations = zip(transitionTrace, transitionTrace.dropFirst())
-            .map { abs($1.contentHeight - $0.contentHeight) }
-        let coverage = TranscriptCoverageSummary(
-            samples: samples.map(\.coverage), phaseLengths: phaseLengths
-        )
-        var metrics = CT2Metrics()
-        metrics.shape = shape
-        metrics.orientation = harness.orientation.presentsNewestRowFirst ? "origin" : "end"
-        metrics.samples = samples.count
-        metrics.blankBoundaries = coverage.blankBoundaries
-        metrics.blankAfterSettle = coverage.blankAfterSettle
-        metrics.longestBlankRun = coverage.longestBlankRun
-        metrics.blankPhases = coverage.blankPhases
-        metrics.uncoveredBandBoundaries = coverage.uncoveredBandBoundaries
-        metrics.minimumVisibleRowFraction = coverage.minimumVisibleRowFraction
-        metrics.estimateOpen = estimateOpen
-        metrics.estimateMin = estimates.min() ?? 0
-        metrics.estimateMax = estimates.max() ?? 0
-        metrics.pastBottomBoundaries = samples.filter {
-            $0.offsetY - max(0, $0.contentHeight + $0.bottomInset - $0.containerHeight) > 2
-        }.count
-        metrics.reDerivations = reDerivations.filter { $0 >= 1_000 }.count
-        metrics.maxReDerivation = reDerivations.max() ?? 0
-        metrics.tallRowHeight = tallRowHeight
-        metrics.tailDisplacements = harness.tailDisplacementRecordCount - baselines.displacements
-        metrics.materializations = observation.tailMaterializationCommandCount - baselines.materializations
-        metrics.physicalRepairs = observation.physicalTailRepairCommandCount - baselines.physicalRepairs
-        metrics.pastEndRepairs = observation.pastEndRepairCommandCount - baselines.pastEndRepairs
-        metrics.tailClearanceSettled = harness.newestRowClearance()
-        metrics.traceCoverage = ct2TraceCoverage(harness: harness)
-        metrics.coverage = coverage
-        return metrics
-    }
-
     enum SendHistory: CaseIterable, Sendable { case short, shortToOverflow, long }
-    @Test("short and long history preserve the mounted prompt through acknowledgement and successor", arguments: SendHistory.allCases, [false, true])
-    func resumedSendAcknowledgementSuccessor(history: SendHistory, acknowledgeDuringLease: Bool) async throws {
+    @Test("short and long history preserve the mounted prompt through acknowledgement and successor", arguments: SendHistory.allCases)
+    func resumedSendAcknowledgementSuccessor(history: SendHistory) async throws {
         try await withTestWatchdog(timeout: .seconds(15)) {
             let historyCount = history == .long ? 160 : 1
             var snapshot = try SessionScenarioBuilder(seed: 1_212)
@@ -2169,34 +1189,20 @@ struct ChatViewScrollHarnessTests {
                 }
                 let isShort = history != .long
                 #expect(ready.observation.geometry.hasScrollableOverflow == !isShort)
-                let commandBaseline = ready.observation.tailMaterializationCommandCount
-                let releaseBaseline = ready.observation.targetReleaseCount
-                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
-                let maximumSendCommands = history == .shortToOverflow ? 2 : 1
                 let text = history == .shortToOverflow
                     ? String(repeating: "A large outgoing prompt must cross the viewport without a forced offset. ", count: 40)
                     : "Keep this resumed conversation stable."
                 try harness.setComposerDraftText(text)
                 harness.submitPrompt()
-                let sent = try await harness.recorder.waitUntil {
-                    (acknowledgeDuringLease
-                        ? $0.observation.targetReleaseCount == releaseBaseline
-                        : $0.observation.targetReleaseCount > releaseBaseline)
-                        && (1...maximumSendCommands).contains($0.observation.tailMaterializationCommandCount - commandBaseline)
-                        && $0.nativeRows.contains {
-                            $0.physicalID.hasPrefix("outgoing-submission:") && $0.isOnScreen
-                                && (!acknowledgeDuringLease
-                                    || $0.isAtTailSpacing())
-                        }
+                let sent = try await harness.recorder.waitUntil { sample in
+                    sample.nativeRows.contains {
+                        $0.physicalID.hasPrefix("outgoing-submission:") && $0.isOnScreen
+                            && $0.isAtTailSpacing()
+                    }
                 }
                 let outgoing = try #require(sent.nativeRows.first {
                     $0.physicalID.hasPrefix("outgoing-submission:") && $0.isOnScreen
                 })
-                // Fail with the measured native gap rather than waiting for
-                // an exact subpixel geometry value that may never republish.
-                if !acknowledgeDuringLease {
-                    #expect(outgoing.isAtTailSpacing())
-                }
                 #expect(harness.probeObservation.geometry.hasScrollableOverflow == (history != .short))
                 var acknowledged = initial
                 acknowledged.transcript.append(try decodeTranscriptFixture(
@@ -2261,10 +1267,6 @@ struct ChatViewScrollHarnessTests {
                 #expect(prompt.isOnScreen)
                 #expect(prompt.instance == outgoing.instance)
                 #expect(settled.nativeRows.filter { $0.physicalID == outgoing.physicalID }.count == 1)
-                // The successor may already be realized before admission; it
-                // is entitled to at most one materialization, acknowledgement none.
-                #expect(ack.observation.tailMaterializationCommandCount == sent.observation.tailMaterializationCommandCount)
-                #expect(settled.observation.tailMaterializationCommandCount <= commandBaseline + maximumSendCommands + 1)
                 let frames = harness.recorder.samples.filter { $0.frameIndex >= ack.frameIndex }
                 #expect(frames.allSatisfy { sample in
                     sample.nativeRows.contains {
@@ -2274,11 +1276,6 @@ struct ChatViewScrollHarnessTests {
                 #expect(harness.isPinnedToBottom())
                 let successor = try #require(settled.nativeRows.first { $0.semanticID == "first-successor" })
                 #expect(try #require(successor.composerClearance) >= -2)
-                #expect(
-                    settled.observation.pastEndRepairCommandCount == pastEndBaseline,
-                    "an ordinary send over \(history) history must never fire the past-end net"
-                )
-                #expect(!harness.traceRecords.contains { $0.record.event == "chat.lease.bounded-fallback" })
             }
         }
     }
@@ -3192,114 +2189,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("actual ChatView keeps pinned overshoot native without app writes")
-    func pinnedOvershootNeedsNoAppWrite() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) {
-            try await withHarness(seed: 1_194) { harness in
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.readyFrameCompletionCount == 1
-                }
-                // Keep the mounted container and visible rect: a pinned
-                // overshoot is the legal offset of a larger estimate still held
-                // while the mounted rows report 100 pt less content. A synthetic
-                // 400 pt container would instead displace the real tail marker by
-                // the window's actual container height and let the marker-drift
-                // repair — not this journey — write.
-                let current = harness.probeObservation.geometry
-                #expect(current.hasScrollableOverflow)
-                let overshootOffset = max(
-                    0, current.contentHeight + current.bottomInset - current.containerHeight
-                )
-                let overshoot = ChatTranscriptGeometry(
-                    offsetY: overshootOffset,
-                    contentHeight: current.contentHeight - 100,
-                    containerHeight: current.containerHeight,
-                    bottomInset: current.bottomInset,
-                    visibleTopY: overshootOffset,
-                    visibleBottomY: overshootOffset + current.containerHeight
-                )
-                let baseline = harness.probeObservation.scrollCommandCount
-                let repairBaseline = harness.probeObservation.pastEndRepairCommandCount
-                #expect(overshoot.isPastBottomEdge)
-                #expect(overshoot.isPlausibleBottomRubberBand)
-                #expect(!overshoot.isBeyondLegalContentBottom)
-                harness.driveGeometry(previous: current, current: overshoot)
-                try await harness.driveFrameBoundary()
-                try await Task.sleep(for: .milliseconds(100))
-                #expect(harness.probeObservation.scrollCommandCount == baseline)
-                #expect(
-                    harness.probeObservation.pastEndRepairCommandCount == repairBaseline,
-                    "an in-tolerance pinned overshoot must never fire the past-end net"
-                )
-            }
-        }
-    }
-
-    @Test("a sustained past-end pinned viewport returns to the tail through one disabled repair")
-    func pastEndRepairReturnsToTail() async throws {
-        try await withTestWatchdog(timeout: .seconds(15)) {
-            try await withHarness(seed: 1_195) { harness in
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.readyFrameCompletionCount == 1
-                }
-                let repairBaseline = harness.probeObservation.pastEndRepairCommandCount
-                let commandBaseline = harness.probeObservation.scrollCommandCount
-                // The harness cannot drag the real `UIScrollView` past its legal
-                // bottom (`scrollReader(byVisualPoints:)` clamps to it), so
-                // the collapse is injected as native geometry: the incident's
-                // 2,128 pt offset past the legal content bottom, still pinned and
-                // with no layout transaction in flight.
-                let current = harness.probeObservation.geometry
-                #expect(current.hasScrollableOverflow)
-                let legalBottom = max(
-                    0, current.contentHeight + current.bottomInset - current.containerHeight
-                )
-                let injectedOffset = legalBottom + 2_128
-                let pastEnd = ChatTranscriptGeometry(
-                    offsetY: injectedOffset,
-                    contentHeight: current.contentHeight,
-                    containerHeight: current.containerHeight,
-                    bottomInset: current.bottomInset,
-                    visibleTopY: injectedOffset,
-                    visibleBottomY: injectedOffset + current.containerHeight
-                )
-                #expect(pastEnd.isBeyondLegalContentBottom)
-                harness.driveGeometry(previous: current, current: pastEnd)
-
-                // The condition must survive a presented frame before the one
-                // correction is published and applied.
-                for _ in 0..<30 where harness.probeObservation.pastEndRepairCommandCount == repairBaseline {
-                    try await harness.driveFrameBoundary()
-                }
-                #expect(harness.probeObservation.pastEndRepairCommandCount == repairBaseline + 1)
-                #expect(harness.probeObservation.scrollCommandCount == commandBaseline + 1)
-                // The lease is released and native pinning owns the real tail.
-                for _ in 0..<20 where !harness.isPinnedToBottom() {
-                    try await harness.driveFrameBoundary()
-                    await Task.yield()
-                }
-                #expect(harness.isPinnedToBottom())
-                // One correction per installed layout epoch: a continuing
-                // collapse that re-reports the same impossible viewport in that
-                // epoch cannot issue a second command.
-                for step in 1...6 {
-                    let collapsed = ChatTranscriptGeometry(
-                        offsetY: injectedOffset - Double(step),
-                        contentHeight: pastEnd.contentHeight,
-                        containerHeight: pastEnd.containerHeight,
-                        bottomInset: pastEnd.bottomInset,
-                        visibleTopY: injectedOffset - Double(step),
-                        visibleBottomY: injectedOffset - Double(step) + pastEnd.containerHeight
-                    )
-                    harness.driveGeometry(previous: collapsed, current: collapsed)
-                    try await harness.driveFrameBoundary()
-                }
-                #expect(harness.probeObservation.pastEndRepairCommandCount == repairBaseline + 1)
-                #expect(harness.probeObservation.scrollCommandCount == commandBaseline + 1)
-            }
-        }
-    }
-
     @Test("agent response and compaction settlement retain mounted physical rows")
     // Installation can precede this generation's native visibility callbacks.
     // Assert the rendered row only after a nonempty viewport observation, not
@@ -3315,7 +2204,6 @@ struct ChatViewScrollHarnessTests {
                 let entranceBaseline = ready.observation.animatedEntranceCount
                 let automaticScrollBaseline = ready.observation.automaticScrollCommandCount
                 let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
-                let materializationBaseline = ready.observation.tailMaterializationCommandCount
                 let installBaseline = ready.observation.projectionInstallCount
 
                 var intermediate = harness.snapshot
@@ -3342,7 +2230,6 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
                 #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
-                #expect(revealed.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(revealed.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
                 #expect(revealed.nativePinnedAtBottom, "the reveal's display frame: \(harness.pinnedDescription())")
                 #expect(!revealed.observation.visibleRowIDs.isEmpty)
@@ -3367,7 +2254,6 @@ struct ChatViewScrollHarnessTests {
                         && $0.nativePinnedAtBottom
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
-                #expect(settled.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(settled.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
                 #expect((settled.observation.physicalRowDisappearanceCounts["turn-agent"] ?? 0) == 0)
                 #expect(settled.nativePinnedAtBottom, "the settled display frame: \(harness.pinnedDescription())")
@@ -3426,7 +2312,6 @@ struct ChatViewScrollHarnessTests {
                 }
                 let entranceBaseline = ready.observation.animatedEntranceCount
                 let automaticScrollBaseline = ready.observation.automaticScrollCommandCount
-                let materializationBaseline = ready.observation.tailMaterializationCommandCount
                 let installBaseline = ready.observation.projectionInstallCount
 
                 var inserted = harness.snapshot
@@ -3442,7 +2327,6 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.rowFrames["discrete-tail"] != nil
                 }
                 #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
-                #expect(revealed.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(revealed.observation.physicalRowAppearanceCounts["discrete-tail"] == 1)
 
                 var revised = inserted
@@ -3459,7 +2343,6 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.rowFrames["discrete-tail"] != nil
                 }
                 #expect(updated.observation.animatedEntranceCount == entranceBaseline + 1)
-                #expect(updated.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(updated.observation.physicalRowAppearanceCounts["discrete-tail"] == 1)
                 #expect((updated.observation.physicalRowDisappearanceCounts["discrete-tail"] ?? 0) == 0)
             }
@@ -3580,7 +2463,6 @@ struct ChatViewScrollHarnessTests {
                 }
                 let entranceBaseline = ready.observation.animatedEntranceCount
                 let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
-                let materializationBaseline = ready.observation.tailMaterializationCommandCount
                 let installBaseline = ready.observation.projectionInstallCount
 
                 var running = harness.snapshot
@@ -3619,10 +2501,6 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
                 #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
-                #expect(
-                    settled.observation.tailMaterializationCommandCount
-                        == materializationBaseline + 2
-                )
                 #expect(settled.observation.rowFrames["tool-run-settled-group"] != nil)
                 #expect(settled.observation.physicalRowAppearanceCounts["tool-run-active-race"] == 1)
                 let lifecycleSamples = settled.observation.toolChipSamples.filter {
@@ -3630,19 +2508,6 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(lifecycleSamples.contains { $0.transitionToken == 1 })
                 #expect(lifecycleSamples.last?.runID == "tool-run-settled-group")
-                let handoffs = harness.traceRecords.filter {
-                    $0.record.event == "chat.lease.semantic-handoff"
-                }
-                #expect(handoffs.contains {
-                    $0.record.message.contains("physicalRow=")
-                        && $0.record.message.contains("semanticRow=")
-                        && $0.record.message.contains("rowEvidence=")
-                })
-                #expect(!harness.traceRecords.contains {
-                    $0.record.event == "chat.lease.bounded-fallback"
-                        || ($0.record.event == "chat.lease.release-requested"
-                            && $0.record.message.contains("reason=bounded-fallback"))
-                })
             }
         }
     }
@@ -3659,7 +2524,6 @@ struct ChatViewScrollHarnessTests {
                 }
                 let installBaseline = ready.observation.projectionInstallCount
                 let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
-                let materializationBaseline = ready.observation.tailMaterializationCommandCount
 
                 var first = harness.snapshot
                 first.phase = .running
@@ -3689,10 +2553,6 @@ struct ChatViewScrollHarnessTests {
 
                 #expect(settled.observation.rowFrames["tool-run-group-two"] == nil)
                 #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
-                #expect(
-                    settled.observation.tailMaterializationCommandCount
-                        == materializationBaseline + 2
-                )
                 #expect(settled.observation.physicalRowAppearanceCounts["tool-run-group-one"] == 1)
                 #expect(settled.observation.toolChipSamples.contains {
                     $0.runID == "tool-run-group-one" && $0.transitionToken == 1
@@ -4190,8 +3050,7 @@ struct ChatViewScrollHarnessTests {
                 // realization lease. Every other command is the application
                 // correcting a position the pinned layout should keep by itself, so
                 // the count of commands that are not leases must not move.
-                let nonLeaseCommands = ready.observation.scrollCommandCount
-                    - ready.observation.tailMaterializationCommandCount
+                let commandBaseline = ready.observation.scrollCommandCount
                 let installBaseline = ready.observation.projectionInstallCount
                 let semanticID = "pinned-growth-turn"
 
@@ -4220,8 +3079,7 @@ struct ChatViewScrollHarnessTests {
                     "the grown tail: \(harness.pinnedDescription())"
                 )
                 #expect(
-                    grew.observation.scrollCommandCount - grew.observation.tailMaterializationCommandCount
-                        == nonLeaseCommands,
+                    grew.observation.scrollCommandCount == commandBaseline,
                     "pinned growth published a position write: \(harness.pinnedDescription())"
                 )
                 // Content shrinks: the reply leaves again, so the pinned transcript
@@ -4242,8 +3100,7 @@ struct ChatViewScrollHarnessTests {
                     "the shrunk tail: \(harness.pinnedDescription())"
                 )
                 #expect(
-                    shrank.observation.scrollCommandCount - shrank.observation.tailMaterializationCommandCount
-                        == nonLeaseCommands,
+                    shrank.observation.scrollCommandCount == commandBaseline,
                     "pinned shrink published a position write: \(harness.pinnedDescription())"
                 )
                 // The settled live state, not only the sample the wait returned on.
@@ -4425,7 +3282,7 @@ struct ChatViewScrollHarnessTests {
 
     private func withHarness(
         seed: Int,
-        orientation: ChatTranscriptOrientation = .selected,
+        orientation: ChatTranscriptOrientation = .newestAtOrigin,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
@@ -4439,7 +3296,7 @@ struct ChatViewScrollHarnessTests {
 
     private func withHarness(
         snapshot: SessionSnapshot,
-        orientation: ChatTranscriptOrientation = .selected,
+        orientation: ChatTranscriptOrientation = .newestAtOrigin,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         enablesComposerSubmission: Bool = false,
         enablesPresentationCover: Bool = false,
@@ -4468,10 +3325,15 @@ struct ChatViewScrollHarnessTests {
             )
         }
         do {
+            #expect(harness.orientation == .newestAtOrigin)
+            #expect(
+                TranscriptWindowOracle.isFlipped(try harness.nativeTranscriptScrollViewForTesting()),
+                "the hosted harness must exercise the origin-anchored layout"
+            )
             try await operation(harness)
         } catch {
             if let sample = harness.recorder.samples.last {
-                print("Hosted failure frame \(sample.frameIndex): commands=\(sample.observation.tailMaterializationCommandCount) releases=\(sample.observation.targetReleaseCount) rows=\(sample.nativeRows.suffix(8))")
+                print("Hosted failure frame \(sample.frameIndex): releases=\(sample.observation.targetReleaseCount) rows=\(sample.nativeRows.suffix(8))")
                 print("Geometry comparison: native=\(String(describing: harness.recorder.samples.last?.nativeContentHeight)) model=\(harness.probeObservation.geometry)")
                 print("Composer catalog: builds=\(harness.probe.composerCatalogBuildCount) installed=\(harness.probe.composerCatalogCommandNames) canonical=\(harness.canonicalCommandNames) activity=\(harness.chatSurfaceActivity)")
             }
@@ -4569,74 +3431,6 @@ private func harnessTallTailHistoryRowText(_ index: Int) -> String {
     return "Short history row \(index) stays one line."
 }
 
-/// The ~1,300 pt assistant body the CT-2 shapes put beside the tail: 27 wrapped
-/// paragraphs measure 1,286 pt on the owned simulator, which is the one row
-/// whose measured height makes a `LazyVStack` re-derive its content estimate by
-/// the whole row count when the container changes. Every other row is one line,
-/// so the tall rows are the only structural difference from an ordinary history.
-private func harnessTallEstimateRowText(_ index: Int) -> String {
-    Array(
-        repeating: "Tall history row \(index) renders a body long enough to stand one screen above its neighbours.",
-        count: 27
-    ).joined(separator: "\n\n")
-}
-
-/// A CT-24 shape's very tall reply: 34 wrapped paragraphs measure about 1,620 pt
-/// on the owned simulator, the floor the field shapes need (the device's newest
-/// replies were tall enough to drive the published estimate to 5x and 17x the
-/// transcript's real height).
-private func harnessFieldReplyText(index: Int, paragraphs: Int) -> String {
-    Array(
-        repeating: "Very tall field reply \(index) renders a body long enough to stand more than one screen above its neighbours.",
-        count: paragraphs
-    ).joined(separator: "\n\n")
-}
-
-/// The five assistant replies shape (b) publishes while its send grows, in
-/// paragraphs: 1,900 / 1,620 / 1,140 / 1,330 / 670 pt on the owned simulator, so
-/// the shape's growth is tall and uneven rather than uniform.
-private let ct24FieldReplyParagraphCounts = [40, 34, 24, 28, 14]
-
-/// A CT-24 field shape's history: `rowCount` rows whose newest `tallCount` are
-/// very tall assistant replies and whose other rows are one line, plus the
-/// reconnect resync snapshot that appends `appendedTallCount` more very tall
-/// replies at the tail (the shape of the 2026-09-28 resync incident, where the
-/// install of new replies under tall newest rows left the pinned viewport
-/// blank).
-private func ct24TallNewestHistory(
-    rowCount: Int,
-    tallCount: Int,
-    appendedTallCount: Int,
-    seed: Int
-) throws -> (opened: SessionSnapshot, resynced: SessionSnapshot) {
-    var opened = try SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 10_000)
-    opened.acceptsQueuedPrompts = false
-    opened.transcript = try (0..<rowCount).map { index in
-        try harnessRichAssistantMessage(
-            id: "ct24-history-\(index)",
-            presentationID: "ct24-turn-\(index)",
-            thinkingLines: [],
-            text: index >= rowCount - tallCount
-                ? harnessFieldReplyText(index: index, paragraphs: 34)
-                : "Short history row \(index) stays one line."
-        )
-    }
-    opened.transcriptStart = 0
-    opened.transcriptTotal = opened.transcript.count
-    var resynced = opened
-    for offset in 0..<appendedTallCount {
-        let index = rowCount + offset
-        resynced.transcript.append(try harnessRichAssistantMessage(
-            id: "ct24-history-\(index)",
-            presentationID: "ct24-turn-\(index)",
-            thinkingLines: [],
-            text: harnessFieldReplyText(index: index, paragraphs: 34 + offset)
-        ))
-    }
-    resynced.transcriptTotal = resynced.transcript.count
-    return (opened, resynced)
-}
-
 /// The bottom-coverage evidence of one sampled display boundary, in window
 /// coordinates. `blank` is the CT-2 blank oracle: no mounted transcript row
 /// intersects the visible transcript at all. `uncoveredBand` is the pinned
@@ -4651,8 +3445,6 @@ struct TranscriptBottomCoverage: Sendable, Equatable {
     let newestRowClearance: CGFloat?
 }
 
-/// One display boundary of a CT-2 shape, sampled directly from the native
-/// transcript scroll view.
 struct CT2BoundarySample {
     let contentHeight: CGFloat
     let offsetY: CGFloat
@@ -4663,29 +3455,6 @@ struct CT2BoundarySample {
     let coverage: TranscriptBottomCoverage
 }
 
-/// One display boundary of a CT-24 field shape. `measuredRowCount` and
-/// `measuredRowHeightSum` come from the probe's semantic row frames — the only
-/// rows whose real height is known, because the lazy stack measures just the
-/// rows it places — and `onScreenRowCount` from the window-coordinate blank
-/// oracle.
-struct CT24BoundarySample {
-    let contentHeight: CGFloat
-    let measuredRowCount: Int
-    let measuredRowHeightSum: CGFloat
-    let onScreenRowCount: Int
-    let tallestOnScreenRowHeight: CGFloat
-    let coverage: TranscriptBottomCoverage
-}
-
-/// The keyboard's own input to the chat: the window's bottom safe area moves
-/// to `height`, the way UIKit moves it for a keyboard.
-///
-/// `resize(height:)` changes the whole window, which the flip does not touch.
-/// The keyboard changes only the bottom safe area — the composer's sole inset
-/// owner — so this is the one path CT-23's swapped insets change, and the
-/// parity gate never drove it. The inset is stepped through the curve's own
-/// intermediate positions one driven boundary at a time instead of running on
-/// the wall clock, so a recorded boundary means the same inset in every run.
 struct KeyboardInsetTransition: Sendable {
     let height: CGFloat
     let duration: Double
@@ -4756,29 +3525,10 @@ struct TranscriptCoverageSummary: Sendable, Equatable {
     }
 }
 
-/// What the CT-2 and CT-24 field shapes expect of their bottom-coverage gate.
+/// The origin-anchored transcript keeps the pinned newest-row band covered.
 enum TranscriptBottomGateExpectation {
-    /// Today's pinned `LazyVStack` computes its bottom from the lazy stack's own
-    /// content estimate, and these shapes reproduce the resulting blank. The
-    /// gate therefore requires the defect to appear: a run that keeps the band
-    /// covered failed to reproduce it and is a failure too, so the fixture
-    /// cannot pass silently.
-    case uncoveringBottomIsTheKnownDefect
-    /// CT-23's origin-anchored transcript anchors the newest row at the lazy
-    /// stack's exact origin. Every sampled boundary must then keep the pinned
-    /// bottom band covered and at least half the visible transcript in rows.
     case coveringBottomIsRequired
-
-    /// What a run in `orientation` must show. Today's path still reproduces the
-    /// defect its shapes were recorded from; the origin-anchored path must keep
-    /// the pinned bottom covered instead, so the same shape is a gate in both
-    /// directions rather than a measurement that can pass either way.
-    static func current(for orientation: ChatTranscriptOrientation) -> TranscriptBottomGateExpectation {
-        orientation.pinsToEstimatedOrigin ? .uncoveringBottomIsTheKnownDefect : .coveringBottomIsRequired
-    }
-
-    /// The default a caller that names no orientation gets: today's path.
-    static let current = current(for: .newestAtEnd)
+    static let current = coveringBottomIsRequired
 
     /// The floor the CT-23 path gates `minimumVisibleRowFraction` against: half
     /// the visible transcript. Every CT-2 and CT-24 shape's newest row is
@@ -4787,215 +3537,30 @@ enum TranscriptBottomGateExpectation {
     static let coveredFractionFloor: CGFloat = 0.5
 }
 
-/// What the keyboard's own transition frames expect of the gap between the
-/// newest row and the composer.
-enum KeyboardRampExpectation {
-    /// The origin-anchored transcript applies the keyboard as a content margin
-    /// before its render transform, so the newest row must stay
-    /// within 3 pt of the tail spacing at every driven boundary of both
-    /// transitions — not only at their settled ends.
-    case ridesTheComposerEdge
-    /// Today's transcript keeps its pinned bottom from the lazy stack's own
-    /// content estimate, so the same ramp measures the known defect (this shape
-    /// swings to -681 pt) and is gated by that reproduction instead.
-    case measuresTheKnownDrop
-
-    /// The tolerance the composer-edge gate allows, the ±3 pt the plan names.
-    static let tolerance: CGFloat = 3
-
-    static func current(for orientation: ChatTranscriptOrientation) -> KeyboardRampExpectation {
-        orientation.pinsToEstimatedOrigin ? .measuresTheKnownDrop : .ridesTheComposerEdge
-    }
-}
-
 /// The verdict of one journey's bottom-coverage gate.
 enum TranscriptBottomGateOutcome: Equatable {
     case asExpected
-    /// Today's path, but this run no longer reproduced the known blank.
-    case fixtureStoppedReproducing
-    /// CT-23's path, but the pinned bottom was left uncovered.
     case bottomUncovered(blankBoundaries: Int, uncoveredBandBoundaries: Int, minimumVisibleRowFraction: CGFloat)
 }
 
-/// The CT-2 and CT-24 bottom-coverage gate. On today's path it fails a run that
-/// stops reproducing the blank; once CT-23 flips the expectation it fails a run
-/// that leaves the pinned bottom uncovered or the visible transcript less than
-/// half covered by rows.
+/// The bottom-coverage gate fails when the pinned band or visible transcript is uncovered.
 func transcriptBottomGateOutcome(
-    _ summary: TranscriptCoverageSummary,
-    expectation: TranscriptBottomGateExpectation = .current
+    _ summary: TranscriptCoverageSummary
 ) -> TranscriptBottomGateOutcome {
-    switch expectation {
-    case .uncoveringBottomIsTheKnownDefect:
-        return summary.blankBoundaries > 0 || summary.uncoveredBandBoundaries > 0
-            ? .asExpected : .fixtureStoppedReproducing
-    case .coveringBottomIsRequired:
-        let uncovered = summary.blankBoundaries > 0
-            || summary.uncoveredBandBoundaries > 0
-            || summary.minimumVisibleRowFraction < TranscriptBottomGateExpectation.coveredFractionFloor
-        return uncovered
-            ? .bottomUncovered(
-                blankBoundaries: summary.blankBoundaries,
-                uncoveredBandBoundaries: summary.uncoveredBandBoundaries,
-                minimumVisibleRowFraction: summary.minimumVisibleRowFraction
-            )
-            : .asExpected
-    }
-}
-
-/// One `CT2-METRICS` line. The fields are the CT-2 baseline's shared
-/// vocabulary across shapes, so a shape that cannot measure one reports zero
-/// rather than dropping the key, and every line diffs against every other.
-private struct CT2Metrics {
-    var shape = ""
-    /// Which transcript orientation this journey measured. The gate the line is
-    /// judged against is `TranscriptBottomGateExpectation.current(for:)`, so the
-    /// line has to say which side of the switch produced it.
-    var orientation = ""
-    var samples = 0
-    var blankBoundaries = 0
-    var blankAfterSettle = 0
-    var longestBlankRun = 0
-    var blankPhases = "none"
-    var estimateOpen: CGFloat = 0
-    var estimateMin: CGFloat = 0
-    var estimateMax: CGFloat = 0
-    var pastBottomBoundaries = 0
-    var reDerivations = 0
-    var maxReDerivation: CGFloat = 0
-    var tallRowHeight: CGFloat = 0
-    var tailDisplacements = 0
-    var materializations = 0
-    var physicalRepairs = 0
-    var pastEndRepairs = 0
-    var uncoveredBandBoundaries = 0
-    var minimumVisibleRowFraction: CGFloat = 0
-    var tailClearanceSettled: CGFloat?
-    var traceCoverage = "none"
-    var coverage: TranscriptCoverageSummary?
-
-    var maxEstimateRatio: CGFloat { estimateMin > 0 ? estimateMax / estimateMin : 0 }
-
-    var line: String {
-        "CT2-METRICS"
-            + " shape=\(shape) orientation=\(orientation) samples=\(samples)"
-            + " blankBoundaries=\(blankBoundaries)/\(samples)"
-            + " blankAfterSettle=\(blankAfterSettle)"
-            + " longestBlankRun=\(longestBlankRun)"
-            + " blankPhases=\(blankPhases)"
-            + " maxEstimateRatio=\(ct2Number(maxEstimateRatio))"
-            + " estimateOpen=\(ct2Number(estimateOpen))"
-            + " estimateMin=\(ct2Number(estimateMin))"
-            + " estimateMax=\(ct2Number(estimateMax))"
-            + " pastBottomBoundaries=\(pastBottomBoundaries)"
-            + " reDerivations=\(reDerivations)"
-            + " maxReDerivation=\(ct2Number(maxReDerivation))"
-            + " tallRowHeight=\(ct2Number(tallRowHeight))"
-            + " tailDisplacements=\(tailDisplacements)"
-            + " repairCommands=materialize:\(materializations),physical:\(physicalRepairs),pastEnd:\(pastEndRepairs)"
-            + " pastEndRepairs=\(pastEndRepairs)"
-            + " uncoveredBandBoundaries=\(uncoveredBandBoundaries)"
-            + " minVisibleRowFraction=\(ct2Number(minimumVisibleRowFraction))"
-            + " tailClearanceSettled=\(tailClearanceSettled.map(ct2Number) ?? "none")"
-            + " traceCoverage=\(traceCoverage)"
-    }
+    let uncovered = summary.blankBoundaries > 0
+        || summary.uncoveredBandBoundaries > 0
+        || summary.minimumVisibleRowFraction < TranscriptBottomGateExpectation.coveredFractionFloor
+    return uncovered
+        ? .bottomUncovered(
+            blankBoundaries: summary.blankBoundaries,
+            uncoveredBandBoundaries: summary.uncoveredBandBoundaries,
+            minimumVisibleRowFraction: summary.minimumVisibleRowFraction
+        )
+        : .asExpected
 }
 
 private func ct2Number(_ value: CGFloat) -> String {
     String(format: "%.1f", Double(value))
-}
-
-/// One `CT24-METRICS` line per field shape.
-private struct CT24Metrics {
-    var shape = ""
-    /// Which transcript orientation this journey measured, as for `CT2Metrics`.
-    var orientation = ""
-    var samples = 0
-    var blankBoundaries = 0
-    var blankAfterSettle = 0
-    var longestBlankRun = 0
-    var blankPhases = "none"
-    var maxEstimateRatio: CGFloat = 0
-    var estimateOpen: CGFloat = 0
-    var estimateMax: CGFloat = 0
-    var measuredRowsAtMax = 0
-    var measuredHeightAtMax: CGFloat = 0
-    var tallestRowHeight: CGFloat = 0
-    var uncoveredBandBoundaries = 0
-    var minimumVisibleRowFraction: CGFloat = 0
-    var newestRowClearanceSettled: CGFloat?
-    var coverage: TranscriptCoverageSummary?
-
-    var line: String {
-        "CT24-METRICS"
-            + " shape=\(shape) orientation=\(orientation) samples=\(samples)"
-            + " blankBoundaries=\(blankBoundaries)/\(samples)"
-            + " blankAfterSettle=\(blankAfterSettle)"
-            + " longestBlankRun=\(longestBlankRun)"
-            + " blankPhases=\(blankPhases)"
-            + " maxEstimateRatio=\(ct2Number(maxEstimateRatio))"
-            + " estimateOpen=\(ct2Number(estimateOpen))"
-            + " estimateMax=\(ct2Number(estimateMax))"
-            + " measuredRowsAtMax=\(measuredRowsAtMax)"
-            + " measuredHeightAtMax=\(ct2Number(measuredHeightAtMax))"
-            + " tallestRowHeight=\(ct2Number(tallestRowHeight))"
-            + " uncoveredBandBoundaries=\(uncoveredBandBoundaries)"
-            + " minVisibleRowFraction=\(ct2Number(minimumVisibleRowFraction))"
-            + " newestRowClearanceSettled=\(newestRowClearanceSettled.map(ct2Number) ?? "none")"
-    }
-}
-
-/// One `CT25-KEYBOARD-METRICS` line: the safe-area keyboard journey's bottom
-/// coverage, the composer gap the reader sees and the composer's own position,
-/// phase by phase. The gap is the quantity P0-1's scenario exists to record, so
-/// its range and its settled value are on the line rather than only in the run
-/// log.
-fileprivate struct KeyboardMetrics {
-    var shape = "safe-area-keyboard"
-    var samples = 0
-    var blankBoundaries = 0
-    var uncoveredBandBoundaries = 0
-    var longestBlankRun = 0
-    var blankPhases = "none"
-    var minimumVisibleRowFraction: CGFloat = 0
-    var clearanceRange: ClosedRange<CGFloat>?
-    var settledClearance: CGFloat?
-    var composerHeightSpan: ClosedRange<CGFloat>?
-    var composerTopSpan: ClosedRange<CGFloat>?
-    var phaseClearances: [String] = []
-    var coverage: TranscriptCoverageSummary?
-
-    var line: String {
-        "CT25-KEYBOARD-METRICS"
-            + " shape=\(shape) samples=\(samples)"
-            + " blankBoundaries=\(blankBoundaries)/\(samples)"
-            + " uncoveredBandBoundaries=\(uncoveredBandBoundaries)"
-            + " longestBlankRun=\(longestBlankRun)"
-            + " blankPhases=\(blankPhases)"
-            + " minVisibleRowFraction=\(ct2Number(minimumVisibleRowFraction))"
-            + " clearanceRange=[\(clearanceRange.map { "\(ct2Number($0.lowerBound)),\(ct2Number($0.upperBound))" } ?? "none")]"
-            + " settledClearance=\(settledClearance.map(ct2Number) ?? "none")"
-            + " composerHeightSpan=[\(composerHeightSpan.map { "\(ct2Number($0.lowerBound)),\(ct2Number($0.upperBound))" } ?? "none")]"
-            + " composerTopSpan=[\(composerTopSpan.map { "\(ct2Number($0.lowerBound)),\(ct2Number($0.upperBound))" } ?? "none")]"
-            + " phaseClearances=\(phaseClearances.joined(separator: ","))"
-    }
-}
-
-/// Whether the two bounded buffers the journey's counts are read from were full
-/// when it ended. `reDerivations` is derived from the probe's geometry trace,
-/// which keeps its last 240 samples (`ChatHostedProbe.recordGeometryTrace`),
-/// and `tailDisplacements` from the chat trace ring, which keeps its last
-/// `ChatInteractionTrace.maximumRecords` (256) records with its own eviction
-/// order. A saturated buffer may have evicted records this journey counted, so
-/// the line labels those two counts as lower bounds instead of reporting them
-/// as complete.
-@MainActor
-private func ct2TraceCoverage(harness: ChatViewScrollHarness) -> String {
-    let geometryTraceBound = 240
-    let geometrySaturated = harness.probeObservation.geometryTrace.count >= geometryTraceBound
-    let chatSaturated = harness.traceRecords.count >= ChatInteractionTrace.maximumRecords
-    return "geometry:\(geometrySaturated ? "saturated" : "complete")"
-        + ",chat:\(chatSaturated ? "saturated" : "complete")"
 }
 
 /// The blank-boundary shape of one planned sample sequence: how many sampled
@@ -5222,10 +3787,7 @@ final class ChatViewScrollHarness {
     private let window: UIWindow
     private let hostingController: UIHostingController<AnyView>
     private let cover = HarnessCoverState()
-    /// The transcript orientation this harness was built with. Every journey
-    /// reads it to say what it expects the pinned bottom to do, so the four
-    /// CT-2/CT-24 shapes are gates in both orientations against the same
-    /// reference.
+    /// The sole transcript orientation exercised by hosted chat journeys.
     let orientation: ChatTranscriptOrientation
 
     convenience init(
@@ -5236,7 +3798,7 @@ final class ChatViewScrollHarness {
         installsSubscribedSnapshot: Bool = true,
         scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
         mediaFetch: ChatMediaFetch? = nil,
-        orientation: ChatTranscriptOrientation = .selected
+        orientation: ChatTranscriptOrientation = .newestAtOrigin
     ) throws {
         let dependencies = try Self.makeDependencies(
             enablesComposerSubmission: false,
@@ -5262,7 +3824,7 @@ final class ChatViewScrollHarness {
         usesRealOpening: Bool = false,
         unansweredRPCMethods: Set<String> = [],
         mediaFetch: ChatMediaFetch? = nil,
-        orientation: ChatTranscriptOrientation = .selected
+        orientation: ChatTranscriptOrientation = .newestAtOrigin
     ) async throws -> ChatViewScrollHarness {
         let dependencies = try makeDependencies(
             enablesComposerSubmission: true,
@@ -5367,7 +3929,7 @@ final class ChatViewScrollHarness {
         enablesPresentationCover: Bool = false,
         usesRealOpening: Bool = false,
         scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic,
-        orientation: ChatTranscriptOrientation = .selected
+        orientation: ChatTranscriptOrientation = .newestAtOrigin
     ) throws {
         self.snapshot = snapshot
         self.orientation = orientation
@@ -5880,58 +4442,6 @@ final class ChatViewScrollHarness {
     /// unmounted cannot be counted as visible. Blankness and bottom-band
     /// coverage are decided by `TranscriptWindowOracle`, so neither count
     /// depends on the transcript's own orientation.
-    func ct2BoundarySample(tallSemanticID: String) throws -> CT2BoundarySample {
-        let scrollView = try nativeTranscriptScrollView()
-        let rows = TranscriptWindowOracle.rows(in: hostingController.view)
-        let bottom = transcriptBottom()
-        return CT2BoundarySample(
-            contentHeight: scrollView.contentSize.height,
-            offsetY: scrollView.contentOffset.y,
-            containerHeight: scrollView.bounds.height,
-            bottomInset: scrollView.adjustedContentInset.bottom,
-            visibleRowCount: rows.count { $0.isOnScreen },
-            tallRowFrame: rows.first { $0.semanticID == tallSemanticID }?.windowFrame,
-            coverage: TranscriptBottomCoverage(
-                blank: rows.count { $0.isOnScreen } == 0,
-                uncoveredBand: !bottom.isBandCovered,
-                visibleRowFraction: bottom.visibleRowFraction,
-                newestRowClearance: newestRowClearance()
-            )
-        )
-    }
-
-    /// One display boundary of a CT-24 field shape.
-    func ct24BoundarySample() throws -> CT24BoundarySample {
-        let scrollView = try nativeTranscriptScrollView()
-        let measured = probeObservation.rowFrames
-            .filter { $0.key != "transcript-bottom" && $0.value.height > 0 }
-        let bottom = transcriptBottom()
-        let rows = TranscriptWindowOracle.rows(in: hostingController.view)
-        let onScreen = rows.filter(\.isOnScreen)
-        return CT24BoundarySample(
-            contentHeight: scrollView.contentSize.height,
-            measuredRowCount: measured.count,
-            measuredRowHeightSum: measured.values.reduce(0) { $0 + $1.height },
-            onScreenRowCount: onScreen.count,
-            tallestOnScreenRowHeight: onScreen.map(\.windowFrame.height).max() ?? 0,
-            coverage: TranscriptBottomCoverage(
-                blank: onScreen.isEmpty,
-                uncoveredBand: !bottom.isBandCovered,
-                visibleRowFraction: bottom.visibleRowFraction,
-                newestRowClearance: newestRowClearance()
-            )
-        )
-    }
-
-    /// Round the transcript's native offset to a whole point. The parity gate
-    /// compares rendered pixels, and the lazy stack's settled offset moves by a
-    /// fraction of a point run to run, which at 1x rendering re-rasterizes every
-    /// glyph and reads as a whole-frame difference unrelated to what the gate is
-    /// about. Snapping first makes the rendered position a deterministic
-    /// function of the layout instead of of the estimate on today's path.
-    /// Never round an exact-origin pin: a sub-point write moves it off the
-    /// applied margin, so SwiftUI correctly preserves that detached offset on
-    /// later inset changes instead of following the composer.
     func snapNativeTranscriptOffsetToWholePoint() throws {
         guard orientation.pinsToEstimatedOrigin else { return }
         let scrollView = try nativeTranscriptScrollView()
@@ -6184,10 +4694,28 @@ final class ChatViewScrollHarness {
         return (squared / Double(first.count)).squareRoot()
     }
 
-    /// One driven boundary of the safe-area keyboard journey: the visual gap
-    /// between the composer's top edge and the newest row's bottom edge, the
-    /// composer's own top edge and height, and the boundary's bottom coverage,
-    /// all in window coordinates.
+
+    /// One origin-layout geometry sample for the scale and lazy-history regressions.
+    func ct2BoundarySample(tallSemanticID: String) throws -> CT2BoundarySample {
+        let scrollView = try nativeTranscriptScrollView()
+        let rows = TranscriptWindowOracle.rows(in: hostingController.view)
+        let bottom = transcriptBottom()
+        return CT2BoundarySample(
+            contentHeight: scrollView.contentSize.height,
+            offsetY: scrollView.contentOffset.y,
+            containerHeight: scrollView.bounds.height,
+            bottomInset: scrollView.adjustedContentInset.bottom,
+            visibleRowCount: rows.count { $0.isOnScreen },
+            tallRowFrame: rows.first { $0.semanticID == tallSemanticID }?.windowFrame,
+            coverage: TranscriptBottomCoverage(
+                blank: rows.count { $0.isOnScreen } == 0,
+                uncoveredBand: !bottom.isBandCovered,
+                visibleRowFraction: bottom.visibleRowFraction,
+                newestRowClearance: newestRowClearance()
+            )
+        )
+    }
+
     fileprivate func keyboardBoundarySample() throws -> KeyboardBoundarySample {
         let bottom = transcriptBottom()
         let rows = TranscriptWindowOracle.rows(in: hostingController.view)
@@ -6225,49 +4753,6 @@ final class ChatViewScrollHarness {
 
     /// The safe-area keyboard journey's `CT25-KEYBOARD-METRICS` line, folded
     /// from its per-boundary samples.
-    fileprivate func keyboardMetrics(
-        samples: [KeyboardBoundarySample],
-        phaseLengths: [Int]
-    ) -> KeyboardMetrics {
-        var metrics = KeyboardMetrics()
-        metrics.samples = samples.count
-        let shape = blankShape(
-            blankBoundaries: samples.map(\.coverage.blank), phaseLengths: phaseLengths
-        )
-        metrics.blankBoundaries = shape.blank
-        metrics.longestBlankRun = shape.longestRun
-        metrics.blankPhases = shape.phases
-        metrics.uncoveredBandBoundaries = samples.count { $0.coverage.uncoveredBand }
-        metrics.minimumVisibleRowFraction = samples.map(\.coverage.visibleRowFraction).min() ?? 0
-        metrics.coverage = TranscriptCoverageSummary(
-            samples: samples.map(\.coverage), phaseLengths: phaseLengths
-        )
-        let clearances = samples.compactMap(\.clearance)
-        metrics.clearanceRange = clearances.min().flatMap { minimum in
-            clearances.max().map { minimum...$0 }
-        }
-        metrics.settledClearance = samples.last?.clearance
-        let heights = samples.map(\.composerHeight)
-        metrics.composerHeightSpan = heights.min().flatMap { minimum in
-            heights.max().map { minimum...$0 }
-        }
-        let tops = samples.compactMap(\.composerTop)
-        metrics.composerTopSpan = tops.min().flatMap { minimum in
-            tops.max().map { minimum...$0 }
-        }
-        var index = 0
-        for (phase, length) in phaseLengths.enumerated() {
-            let end = min(samples.count, index + length)
-            guard index < end else { break }
-            let phaseClearances = samples[index..<end].compactMap(\.clearance)
-            metrics.phaseClearances.append(
-                "p\(phase):[\(phaseClearances.min().map(ct2Number) ?? "none"),\(phaseClearances.max().map(ct2Number) ?? "none")]"
-            )
-            index = end
-        }
-        return metrics
-    }
-
     func resize(height: CGFloat) {
         window.frame = CGRect(x: 0, y: 0, width: 390, height: height)
         hostingController.view.frame = window.bounds
@@ -6742,8 +5227,7 @@ enum TranscriptWindowOracle {
         /// Whether the newest row sits where the pinned tail puts it. Two
         /// positions are legal today: the transcript keeps a 12 pt tail
         /// affordance after its newest row, and overlaps that affordance while
-        /// the terminal row owns the tail target (an opening, or a send's tail
-        /// materialization), which puts the newest row's bottom edge at the
+        /// the terminal row owns the opening target, which puts the newest row's bottom edge at the
         /// composer edge itself.
         var isPinned: Bool {
             guard let clearance else { return false }

@@ -58,7 +58,7 @@ enum ChatDisplayOrientationFixture {
         return { _ in ChatMediaPayload(data: data, mimeType: "image/png") }
     }
 
-    static func harness(orientation: ChatTranscriptOrientation = .selected, history: Bool = false, kind: String = "image") async throws -> ChatViewScrollHarness {
+    static func harness(orientation: ChatTranscriptOrientation = .newestAtOrigin, history: Bool = false, kind: String = "image") async throws -> ChatViewScrollHarness {
         try await ChatViewScrollHarness.composerSubmissionHarness(
             snapshot: snapshot(history: history, kind: kind), displayFrameScheduler: .displayLink,
             enablesPresentationCover: true,
@@ -114,7 +114,7 @@ enum ChatDisplayOrientationFixture {
 }
 
 @MainActor
-@Suite(.serialized, .enabled(if: UIValidationTier.isActive))
+@Suite(.serialized)
 struct ChatDisplayOrientationTests {
     @Test("composer-owned managed sheets reset inherited secondary-scroll policy for both presentation forms")
     func managedSheetRestoresStatusBarOwnership() async throws {
@@ -148,7 +148,7 @@ struct ChatDisplayOrientationTests {
 
     @Test("display preview lifts the single mounted upright card with an identity window target")
     func inlineImagePreviewTargetsMountedCard() async throws {
-        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+        for orientation in [ChatTranscriptOrientation.newestAtOrigin] {
             let harness = try await ChatDisplayOrientationFixture.harness(orientation: orientation)
             do {
                 _ = try await ChatDisplayOrientationFixture.waitForLoadedImage(harness)
@@ -185,7 +185,7 @@ struct ChatDisplayOrientationTests {
 
     @Test("native inline PDF and code renderers remain upright and cannot compete for status-bar ownership")
     func nativeInlineRenderers() async throws {
-        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+        for orientation in [ChatTranscriptOrientation.newestAtOrigin] {
             for kind in ["pdf", "code"] {
                 let harness = try await ChatDisplayOrientationFixture.harness(orientation: orientation, kind: kind)
                 do {
@@ -211,7 +211,7 @@ struct ChatDisplayOrientationTests {
 
     @Test("one status-bar recipient survives empty composer, attachments, chips and catalog; origin delegate detaches to oldest")
     func statusBarRecipientAndOldestHistory() async throws {
-        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+        for orientation in [ChatTranscriptOrientation.newestAtOrigin] {
             let harness = try await ChatDisplayOrientationFixture.harness(orientation: orientation, history: true)
             do {
                 _ = try await ChatDisplayOrientationFixture.waitForLoadedImage(harness)
@@ -234,39 +234,33 @@ struct ChatDisplayOrientationTests {
                     #expect(eligible.count == 1, "\(orientation)/\(state): \(eligible)")
                     #expect(transcript.delegate === originalDelegate, "Never replace SwiftUI's delegate")
                     let recipient = try #require(eligible.first)
-                    if orientation == .newestAtEnd {
-                        #expect(recipient === transcript, "Today's system gesture keeps its native transcript recipient")
-                    } else {
-                        #expect(recipient !== transcript)
-                        #expect(recipient.delegate is ChatTranscriptStatusBar.Probe)
-                    }
+                    #expect(recipient !== transcript)
+                    #expect(recipient.delegate is ChatTranscriptStatusBar.Probe)
                 }
                 harness.probe.composerResourcePickerPresentation?(nil)
                 try harness.setComposerAccessories(false)
                 for _ in 0..<24 { try await harness.driveFrameBoundary() }
-                if orientation == .newestAtOrigin {
-                    let window = try #require(harness.visibleRootView.window)
-                    let recipient = try #require(scrolls(in: window).first { $0.scrollsToTop })
-                    let delegate = try #require(recipient.delegate)
-                    #expect(delegate.scrollViewShouldScrollToTop?(recipient) == false)
-                    for _ in 0..<90 { try await harness.driveFrameBoundary() }
-                    #expect(harness.probeObservation.isDetached)
-                    let oldest = try #require(harness.visuallyTopmostOnScreenRow())
-                    #expect(oldest.semanticID == harness.firstTranscriptID, "Reached \(oldest.semanticID)")
-                    harness.captureScreenshot(named: "status-bar-origin-oldest.png")
-                    harness.setCovered(true)
-                    for _ in 0..<12 { try await harness.driveFrameBoundary() }
-                    #expect(transcript.scrollsToTop, "Coverage restores the original native setting")
-                    #expect(!scrolls(in: window).contains { $0.delegate is ChatTranscriptStatusBar.Probe })
-                }
+                let window = try #require(harness.visibleRootView.window)
+                let recipient = try #require(scrolls(in: window).first { $0.scrollsToTop })
+                let delegate = try #require(recipient.delegate)
+                #expect(delegate.scrollViewShouldScrollToTop?(recipient) == false)
+                for _ in 0..<90 { try await harness.driveFrameBoundary() }
+                #expect(harness.probeObservation.isDetached)
+                let oldest = try #require(harness.visuallyTopmostOnScreenRow())
+                #expect(oldest.semanticID == harness.firstTranscriptID, "Reached \(oldest.semanticID)")
+                harness.captureScreenshot(named: "status-bar-origin-oldest.png")
+                harness.setCovered(true)
+                for _ in 0..<12 { try await harness.driveFrameBoundary() }
+                #expect(transcript.scrollsToTop, "Coverage restores the original native setting")
+                #expect(!scrolls(in: window).contains { $0.delegate is ChatTranscriptStatusBar.Probe })
             } catch { await harness.close(); throw error }
             await harness.close()
         }
     }
 
-    @Test("loaded inline image renders upright in window pixels in both orientations")
+    @Test("loaded inline image renders upright in window pixels on the origin-anchored transcript")
     func inlineImageRendersUpright() async throws {
-        for orientation in [ChatTranscriptOrientation.newestAtEnd, .newestAtOrigin] {
+        for orientation in [ChatTranscriptOrientation.newestAtOrigin] {
             let harness = try await ChatDisplayOrientationFixture.harness(orientation: orientation)
             do {
                 harness.visibleRootView.window?.overrideUserInterfaceStyle = .dark

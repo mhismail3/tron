@@ -570,7 +570,7 @@ struct ReadOnlySubagentSessionSheet: View {
     @State private var sheetRoutes = ChatTranscriptSheetRouteOwner()
 
     private let tailID = "read-only-subagent-tail"
-    private let orientation = ChatTranscriptOrientation.selected
+    private let orientation = ChatTranscriptOrientation.newestAtOrigin
 
     var body: some View {
         NavigationStack {

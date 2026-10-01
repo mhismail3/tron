@@ -18,12 +18,7 @@ package struct ChatScrollCommand: Equatable, Sendable {
         case oldestHistory
         case layout
         case prepend
-        case tailMaterialization
         case physicalTailRepair
-        /// The bounded past-end safety net. It is admitted only from a
-        /// past-end condition that survives two display boundaries, never from
-        /// marker evidence or a held target lease.
-        case pastEndRepair
         /// The one native-tail position a retired physical-tail repair owes a
         /// pinned viewport it left displaced from the legal tail.
         case targetFreeRebase
@@ -32,9 +27,8 @@ package struct ChatScrollCommand: Equatable, Sendable {
     package enum Destination: Equatable, Sendable {
         case tail
         case oldestHistory
-        /// Exact lazy row realization target. The coordinator retains the
-        /// lease until both this row and the physical tail publish evidence.
-        case materialize(String)
+        /// Exact semantic row target used when restoring a reader's position.
+        case row(String)
         case openingTail(String)
         case offsetY(CGFloat)
     }

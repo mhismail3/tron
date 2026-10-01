@@ -72,7 +72,7 @@ struct ChatView: View {
         hostedProbe: ChatHostedProbe? = nil,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
-        transcriptOrientation: ChatTranscriptOrientation = .selected
+        transcriptOrientation: ChatTranscriptOrientation = .newestAtOrigin
     ) {
         self.sessionID = sessionID
         self.initialEditorText = initialEditorText
@@ -107,7 +107,7 @@ struct ChatView: View {
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
-        transcriptOrientation: ChatTranscriptOrientation = .selected
+        transcriptOrientation: ChatTranscriptOrientation = .newestAtOrigin
     ) {
         self.sessionID = sessionID
         self.initialEditorText = initialEditorText
@@ -328,13 +328,6 @@ struct ChatView: View {
             layoutTransaction.configure(keyboard: keyboardObserver.transition, reduceMotion: enabled)
         }
         .onChange(of: layoutTransaction.terminalEventRevision) { _, _ in consumeLayoutTerminalEvents() }
-        .onChange(of: layoutTransaction.generation?.id, initial: true) { _, generationID in
-            // The transaction is the structural clock for a send, keyboard, or
-            // transcript-growth mutation. Publishing only its liveness lets the
-            // viewport owner keep the past-end safety net out of that
-            // choreography without duplicating the transaction's own state.
-            scrollCoordinator.layoutTransactionStateChanged(isActive: generationID != nil)
-        }
         .onChange(of: scenePhase) { _, current in
             scenePhaseChanged(current)
         }
@@ -506,10 +499,10 @@ struct ChatView: View {
     private func consumeLayoutTerminalEvents() {
         for event in layoutTransaction.consumeTerminalEvents() {
             switch event {
-            case .settled(let generationID):
-                scrollCoordinator.layoutTransactionSettled(generationID)
-            case .abandoned(let generationID):
-                scrollCoordinator.layoutTransactionAbandoned(generationID)
+            case .settled:
+                break
+            case .abandoned:
+                break
             case .overflow:
                 scrollCoordinator.cancel()
             }
@@ -886,23 +879,6 @@ struct ChatView: View {
             previousTag: baseline?.tag,
             installed: installed
         )
-        guard let installed, scrollCoordinator.canAutomaticallyFollow else { return }
-        let rows = ChatPhysicalTranscriptRowPolicy.rows(
-            installed: installed,
-            canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
-            orientation: transcriptOrientation
-        )
-        let previousTail = baseline.flatMap {
-            ChatPhysicalTranscriptRowPolicy.rows(
-                installed: $0,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
-                orientation: transcriptOrientation
-            ).newest
-        }
-        guard let tail = rows.newest, tail.id != previousTail?.id else { return }
-        // Reuse the exact native target/settlement lease; detached readers
-        // never enter this path and no entrance animation is replayed.
-        scrollCoordinator.discreteTailInserted(renderedID: tail.semanticID, physicalTargetID: tail.id)
     }
 
     private func reconcileInstalledProjectionForViewport(
@@ -914,19 +890,8 @@ struct ChatView: View {
             for canonicalID in sessionPresentation.canonicalSubmissionHandoffs.ids
                 where installed.containsDisplayedID(canonicalID) {
                 transcriptPresentation.consumeTranscriptEntrance(id: canonicalID)
-                if let physicalID = sessionPresentation.canonicalSubmissionAliases.aliases[canonicalID] {
-                    scrollCoordinator.canonicalPromptAcknowledged(
-                        physicalID: physicalID, semanticID: canonicalID
-                    )
-                }
             }
         }
-        let semanticIDsByPhysicalID = installed.map {
-            ChatPhysicalTranscriptRowPolicy.semanticIDsByPhysicalID(
-                installed: $0,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
-            )
-        } ?? [:]
         let physicalRowPositions: [String: Int] = installed.map {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
@@ -955,11 +920,6 @@ struct ChatView: View {
             return ($0.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil
         }
         let physicalTerminalPosition = terminalPhysicalID.flatMap { physicalRowPositions[$0] }
-        // Keep the native physical target while transferring its geometry
-        // owner atomically with prompt/tool payload replacement.
-        scrollCoordinator.reconcileMaterializationRows { physicalID in
-            semanticIDsByPhysicalID[physicalID]
-        }
         let projectionLayoutChanged = previousTag.map { previousTag in
             installed.map { !previousTag.matchesProjectionPayload(of: $0.tag) } ?? true
         } ?? true
@@ -988,18 +948,7 @@ struct ChatView: View {
         guard let active = layoutTransaction.generation,
               active.joined.contains(.transcriptGrowth),
               !active.settled.contains(.transcriptGrowth) else { return }
-        guard !transcriptOrientation.mountsNewestRowWithContent else {
-            // No materialization lease exists on the origin-anchored path to
-            // certify which entrance owes the layout transaction: the newest row
-            // is on screen by construction, so the store's own entrance
-            // settlement settles the growth participant directly.
-            layoutTransaction.settle(active.id, source: .transcriptGrowth)
-            return
-        }
-        guard let generation = scrollCoordinator.layoutTransactionForSettledEntrance(
-            renderedID: renderedID
-        ) else { return }
-        layoutTransaction.settle(generation, source: .transcriptGrowth)
+        layoutTransaction.settle(active.id, source: .transcriptGrowth)
     }
 
     private func composerHeightChanged(_ height: CGFloat) {
@@ -2752,7 +2701,7 @@ struct ChatView: View {
             switch command.destination {
             case .tail where command.origin == .physicalTailRepair:
                 installStableTailTarget()
-            case .materialize(let renderedID):
+            case .row(let renderedID):
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
                 transcriptScrollPosition = target
@@ -2762,14 +2711,8 @@ struct ChatView: View {
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: transcriptOrientation.newestEndAnchor)
                 transcriptScrollPosition = target
-            case .tail where command.origin == .pastEndRepair
-                    || command.origin == .targetFreeRebase:
-                // A fresh value forces SwiftUI to apply the edge after a
-                // collapsed estimate stranded the old one, where re-scrolling a
-                // value SwiftUI already considers satisfied can be a no-op. The
-                // edge, not `installStableTailTarget`'s marker ID: both are
-                // admitted exactly when marker evidence is unavailable or has
-                // proved unreliable, so neither may depend on the marker.
+            case .tail where command.origin == .targetFreeRebase:
+                // Reapply the native edge after a retired physical-tail repair.
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(edge: transcriptOrientation.newestEdge)
                 transcriptScrollPosition = target
@@ -3650,38 +3593,14 @@ struct ChatView: View {
                     queuePresentationIDByOperationID:
                         installedBeforeSubmission.queuePresentationIDByOperationID
                 )
-                let materializationAdmitted = grafted && (
-                    ChatPromptBehavior(rawValue: submission.behavior) == .ordinary
-                        ? scrollCoordinator.fullHeightTailInserted(
-                            renderedID: submission.presentationID,
-                            layoutTransactionID: layoutGeneration
-                        )
-                        : scrollCoordinator.discreteTailInserted(
-                            renderedID: submission.presentationID,
-                            layoutTransactionID: layoutGeneration
-                        )
-                )
-                if materializationAdmitted,
-                   scrollCoordinator.consumePreAdmissionEntranceSettlement(
-                       renderedID: submission.presentationID,
-                       layoutTransactionID: layoutGeneration
-                   ) {
-                    layoutTransaction.settle(layoutGeneration, source: .transcriptGrowth)
-                } else if !materializationAdmitted {
-                    layoutTransaction.settle(layoutGeneration, source: .transcriptGrowth)
-                }
-                return (
-                    submission: submission,
-                    grafted: grafted,
-                    materialized: materializationAdmitted
-                )
+                layoutTransaction.settle(layoutGeneration, source: .transcriptGrowth)
+                return (submission: submission, grafted: grafted)
             }
             let submission = admission.submission
             model.chatInteractionTrace.submission(
                 .lifecycleGrafted,
                 context: traceContext,
                 grafted: admission.grafted,
-                materialized: admission.materialized,
                 state: interactionTraceState()
             )
             if let capture = transcriptProjectionCapture {

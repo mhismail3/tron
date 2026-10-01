@@ -257,10 +257,8 @@ struct ChatHostedObservation: Sendable {
     let replacementHostEvaluations: [String: Int]
     let scrollSettledDistance: CGFloat?
     let scrollCommandCount: Int
-    let tailMaterializationCommandCount: Int
     let targetReleaseCount: Int
     let physicalTailRepairCommandCount: Int
-    let pastEndRepairCommandCount: Int
     let automaticScrollCommandCount: Int
     let smoothAutomaticScrollCommandCount: Int
     let animatedEntranceCount: Int
@@ -350,10 +348,8 @@ final class ChatHostedProbe {
     private var replacementHostEvaluations: [String: Int] = [:]
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
-    private var tailMaterializationCommandCount = 0
     private var targetReleaseCount = 0
     private var physicalTailRepairCommandCount = 0
-    private var pastEndRepairCommandCount = 0
     private var automaticScrollCommandCount = 0
     private var smoothAutomaticScrollCommandCount = 0
     private var animatedEntranceCount = 0
@@ -440,10 +436,8 @@ final class ChatHostedProbe {
             replacementHostEvaluations: replacementHostEvaluations,
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
-            tailMaterializationCommandCount: tailMaterializationCommandCount,
             targetReleaseCount: targetReleaseCount,
             physicalTailRepairCommandCount: physicalTailRepairCommandCount,
-            pastEndRepairCommandCount: pastEndRepairCommandCount,
             automaticScrollCommandCount: automaticScrollCommandCount,
             smoothAutomaticScrollCommandCount: smoothAutomaticScrollCommandCount,
             animatedEntranceCount: animatedEntranceCount,
@@ -635,9 +629,7 @@ final class ChatHostedProbe {
         origin: ChatScrollCommand.Origin? = nil
     ) {
         scrollCommandCount &+= 1
-        if origin == .tailMaterialization { tailMaterializationCommandCount &+= 1 }
         if origin == .physicalTailRepair { physicalTailRepairCommandCount &+= 1 }
-        if origin == .pastEndRepair { pastEndRepairCommandCount &+= 1 }
         if isAutomatic {
             automaticScrollCommandCount &+= 1
             if isSmooth { smoothAutomaticScrollCommandCount &+= 1 }

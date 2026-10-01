@@ -81,18 +81,13 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         case releaseRequested = "release-requested"
         case releaseReady = "release-ready"
         case released
-        case retargeted
         case canonicalHandoff = "canonical-handoff"
         case semanticHandoff = "semantic-handoff"
-        case boundedFallback = "bounded-fallback"
         case repairExhausted = "repair-exhausted"
     }
 
     package enum LeaseReason: String, Sendable {
         case targetOwned = "target-owned"
-        case displacement
-        case incompleteEvidence = "incomplete-evidence"
-        case boundedFallback = "bounded-fallback"
         case settledEvidence = "settled-evidence"
         case frameBoundary = "frame-boundary"
         case consumed
@@ -196,29 +191,18 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         var geometryRevision: Int?
         var semanticRevision: Int?
         var markerRevision: Int?
-        var materializationRevision: Int?
         var repairAttempts: Int?
-        var layoutSettled: Bool?
-        /// Local bounded identity ordinals, not IDs or reversible hashes.
-        package var physicalRowToken: Int?
-        package var semanticRowToken: Int?
-        var pendingPhysicalRowToken: Int?
-        var pendingSemanticRowToken: Int?
-        var pendingLayoutSettled: Bool?
         /// Signed physical row index relative to the installed terminal row;
         /// this is not a transcript ordinal or an identity token.
         var requestedRowOffsetFromTerminal: Int?
-        var materializationRequiredRevision: Int?
         var nativeTailEvidence: Bool?
-        var nativeRowEvidence: Bool?
-        var nativeRowEvidenceFresh: Bool?
-        var pendingRowEvidenceFresh: Bool?
-        var rowMinY: CGFloat?
-        var rowHeight: CGFloat?
+        /// Local bounded identity ordinals, not IDs or reversible hashes.
+        package var physicalRowToken: Int?
+        package var semanticRowToken: Int?
 
         static let empty = State()
 
-        package init(presentationEpoch: Int? = nil, layoutEpoch: Int? = nil, observedLayoutEpoch: Int? = nil, layoutGeneration: Int? = nil, canonicalRows: Int? = nil, runtimeRows: Int? = nil, queueRows: Int? = nil, hasLifecycleRow: Bool? = nil, viewportMode: ChatViewportMode? = nil, isUserInteracting: Bool? = nil, isPositionedByUser: Bool? = nil, distanceFromBottom: CGFloat? = nil, offsetY: CGFloat? = nil, contentHeight: CGFloat? = nil, containerHeight: CGFloat? = nil, bottomInset: CGFloat? = nil, isPastBottomEdge: Bool? = nil, tailClassification: ChatPhysicalTailClassification? = nil, tailDisplacement: CGFloat? = nil, hasCommand: Bool? = nil, hasAppliedTarget: Bool? = nil, hasPendingRelease: Bool? = nil, geometryRevision: Int? = nil, semanticRevision: Int? = nil, markerRevision: Int? = nil, materializationRevision: Int? = nil, repairAttempts: Int? = nil, layoutSettled: Bool? = nil, physicalRowToken: Int? = nil, semanticRowToken: Int? = nil, pendingPhysicalRowToken: Int? = nil, pendingSemanticRowToken: Int? = nil, pendingLayoutSettled: Bool? = nil, requestedRowOffsetFromTerminal: Int? = nil, materializationRequiredRevision: Int? = nil, nativeTailEvidence: Bool? = nil, nativeRowEvidence: Bool? = nil, nativeRowEvidenceFresh: Bool? = nil, pendingRowEvidenceFresh: Bool? = nil, rowMinY: CGFloat? = nil, rowHeight: CGFloat? = nil) {
+        package init(presentationEpoch: Int? = nil, layoutEpoch: Int? = nil, observedLayoutEpoch: Int? = nil, layoutGeneration: Int? = nil, canonicalRows: Int? = nil, runtimeRows: Int? = nil, queueRows: Int? = nil, hasLifecycleRow: Bool? = nil, viewportMode: ChatViewportMode? = nil, isUserInteracting: Bool? = nil, isPositionedByUser: Bool? = nil, distanceFromBottom: CGFloat? = nil, offsetY: CGFloat? = nil, contentHeight: CGFloat? = nil, containerHeight: CGFloat? = nil, bottomInset: CGFloat? = nil, isPastBottomEdge: Bool? = nil, tailClassification: ChatPhysicalTailClassification? = nil, tailDisplacement: CGFloat? = nil, hasCommand: Bool? = nil, hasAppliedTarget: Bool? = nil, hasPendingRelease: Bool? = nil, geometryRevision: Int? = nil, semanticRevision: Int? = nil, markerRevision: Int? = nil, repairAttempts: Int? = nil, requestedRowOffsetFromTerminal: Int? = nil, nativeTailEvidence: Bool? = nil, physicalRowToken: Int? = nil, semanticRowToken: Int? = nil) {
             self.presentationEpoch = presentationEpoch
             self.layoutEpoch = layoutEpoch
             self.observedLayoutEpoch = observedLayoutEpoch
@@ -244,22 +228,11 @@ package final class ChatInteractionTrace: @unchecked Sendable {
             self.geometryRevision = geometryRevision
             self.semanticRevision = semanticRevision
             self.markerRevision = markerRevision
-            self.materializationRevision = materializationRevision
             self.repairAttempts = repairAttempts
-            self.layoutSettled = layoutSettled
+            self.requestedRowOffsetFromTerminal = requestedRowOffsetFromTerminal
+            self.nativeTailEvidence = nativeTailEvidence
             self.physicalRowToken = physicalRowToken
             self.semanticRowToken = semanticRowToken
-            self.pendingPhysicalRowToken = pendingPhysicalRowToken
-            self.pendingSemanticRowToken = pendingSemanticRowToken
-            self.pendingLayoutSettled = pendingLayoutSettled
-            self.requestedRowOffsetFromTerminal = requestedRowOffsetFromTerminal
-            self.materializationRequiredRevision = materializationRequiredRevision
-            self.nativeTailEvidence = nativeTailEvidence
-            self.nativeRowEvidence = nativeRowEvidence
-            self.nativeRowEvidenceFresh = nativeRowEvidenceFresh
-            self.pendingRowEvidenceFresh = pendingRowEvidenceFresh
-            self.rowMinY = rowMinY
-            self.rowHeight = rowHeight
         }
     }
 
@@ -400,12 +373,10 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         _ stage: SubmissionStage,
         context: Int,
         grafted: Bool? = nil,
-        materialized: Bool? = nil,
         state: State = .empty
     ) {
         var values: [String] = []
         if let grafted { values.append("grafted=\(Self.bit(grafted))") }
-        if let materialized { values.append("materialized=\(Self.bit(materialized))") }
         appendState(state, to: &values)
         let level = switch stage {
         case .transportFailed, .admissionFailed: "error"
@@ -490,7 +461,7 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         appendState(state, to: &values)
         append(
             context: context,
-            level: stage == .boundedFallback || stage == .repairExhausted ? "warning" : "info",
+            level: stage == .repairExhausted ? "warning" : "info",
             event: "lease.\(stage.rawValue)",
             details: values.joined(separator: " ")
         )
@@ -549,23 +520,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
             context: context,
             level: stage == .firstDisplacement ? "warning" : "info",
             event: "tail.\(stage.rawValue)",
-            details: values.joined(separator: " ")
-        )
-    }
-
-    /// The pinned past-end safety net. No marker evidence and no repair budget
-    /// are involved, so this record is the only evidence that an impossible
-    /// pinned viewport was returned to the tail.
-    package func tailPastEndRepair(context: Int, distanceBeyondBottom: CGFloat?, state: State) {
-        var values: [String] = []
-        if let distanceBeyondBottom {
-            values.append("pastEndBy=\(Self.scalar(distanceBeyondBottom))")
-        }
-        appendState(state, to: &values)
-        append(
-            context: context,
-            level: "warning",
-            event: "tail.past-end-repair",
             details: values.joined(separator: " ")
         )
     }
@@ -688,10 +642,7 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         if let value = state.isPositionedByUser { values.append("userPosition=\(Self.bit(value))") }
         if let value = state.distanceFromBottom { values.append("bottom=\(Self.scalar(value))") }
         if let value = state.offsetY { values.append("offset=\(Self.scalar(value))") }
-        if let value = state.contentHeight {
-            values.append("content=\(Self.scalar(value))")
-            values.append("geometrySource=swiftui-estimate")
-        }
+        if let value = state.contentHeight { values.append("content=\(Self.scalar(value))") }
         if let value = state.containerHeight { values.append("container=\(Self.scalar(value))") }
         if let value = state.bottomInset { values.append("inset=\(Self.scalar(value))") }
         if let value = state.isPastBottomEdge { values.append("pastBottom=\(Self.bit(value))") }
@@ -703,22 +654,11 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         if let value = state.geometryRevision { values.append("geometryRev=\(value)") }
         if let value = state.semanticRevision { values.append("semanticRev=\(value)") }
         if let value = state.markerRevision { values.append("markerRev=\(value)") }
-        if let value = state.materializationRevision { values.append("materializationRev=\(value)") }
         if let value = state.repairAttempts { values.append("repairs=\(value)") }
-        if let value = state.layoutSettled { values.append("layoutSettled=\(Self.bit(value))") }
         if let value = state.physicalRowToken { values.append("physicalRow=\(value)") }
         if let value = state.semanticRowToken { values.append("semanticRow=\(value)") }
-        if let value = state.pendingPhysicalRowToken { values.append("pendingPhysicalRow=\(value)") }
-        if let value = state.pendingSemanticRowToken { values.append("pendingSemanticRow=\(value)") }
-        if let value = state.pendingLayoutSettled { values.append("pendingLayoutSettled=\(Self.bit(value))") }
         if let value = state.requestedRowOffsetFromTerminal { values.append("requestedFromTerminal=\(value)") }
-        if let value = state.materializationRequiredRevision { values.append("materializationRequiredRev=\(value)") }
         if let value = state.nativeTailEvidence { values.append("tailEvidence=\(value ? "swiftui-marker" : "missing")") }
-        if let value = state.nativeRowEvidence { values.append("rowEvidence=\(value ? "swiftui-frame" : "missing")") }
-        if let value = state.nativeRowEvidenceFresh { values.append("rowEvidenceFresh=\(Self.bit(value))") }
-        if let value = state.pendingRowEvidenceFresh { values.append("pendingRowEvidenceFresh=\(Self.bit(value))") }
-        if let value = state.rowMinY { values.append("rowY=\(Self.scalar(value))") }
-        if let value = state.rowHeight { values.append("rowHeight=\(Self.scalar(value))") }
     }
 
     /// At most 64 short identities are retained in memory, never exported.
@@ -771,9 +711,7 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         case .catchUp: "catch-up"
         case .layout: "layout"
         case .prepend: "prepend"
-        case .tailMaterialization: "tail-materialization"
         case .physicalTailRepair: "physical-tail-repair"
-        case .pastEndRepair: "past-end-repair"
         case .targetFreeRebase: "target-free-rebase"
         case .oldestHistory: "oldest-history"
         }
@@ -781,7 +719,7 @@ package final class ChatInteractionTrace: @unchecked Sendable {
     private static func destination(_ destination: ChatScrollCommand.Destination) -> String {
         switch destination {
         case .tail: "tail"
-        case .materialize: "materialize"
+        case .row: "row"
         case .openingTail: "opening-tail"
         case .oldestHistory: "oldest-history"
         case .offsetY: "offset"

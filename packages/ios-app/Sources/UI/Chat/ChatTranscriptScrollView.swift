@@ -37,13 +37,6 @@ private struct ChatScrollGeometryObservation: Equatable {
     let presentationPhase: ChatOpenPresentationPhase
 }
 
-private struct ChatLazyTailMaterializationRequest: Hashable {
-    /// SwiftUI scroll-target identity can differ from semantic geometry identity
-    /// during an exact canonical/lifecycle handoff.
-    let physicalID: String
-    let semanticID: String
-}
-
 enum ChatTranscriptLayoutConstants {
     static let rowSpacing: CGFloat = 8
     static let tailAffordanceHeight: CGFloat = 12
@@ -213,7 +206,7 @@ enum ChatPhysicalTranscriptRowPolicy {
     static func rows(
         installed: InstalledChatTranscript,
         canonicalAliases: [String: String],
-        orientation: ChatTranscriptOrientation = .newestAtEnd
+        orientation: ChatTranscriptOrientation = .newestAtOrigin
     ) -> ChatPhysicalTranscriptRows {
         ChatPhysicalTranscriptRows(
             installed: installed,
@@ -707,15 +700,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                   ($0.sourceWindow.originalStart ?? 0) > 0 else { return nil }
             return "earlier-messages"
         }
-        let terminalRowOwnsMaterializationTarget = terminalPhysicalID.map {
-            scrollCoordinator.ownsTailMaterializationTarget(renderedID: $0)
-        } == true
         let terminalTargetID = terminalPhysicalID ?? terminalMaterializationID
         let terminalRowOwnsOpeningTarget = terminalTargetID.map {
             scrollCoordinator.ownsOpeningTailTarget(physicalID: $0)
         } == true
-        let terminalRowOwnsTailAffordance = terminalRowOwnsMaterializationTarget
-            || terminalRowOwnsOpeningTarget
+        let terminalRowOwnsTailAffordance = terminalRowOwnsOpeningTarget
         ScrollView {
             transcriptContent(
                 installed: installed,
@@ -852,53 +841,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             // old frame here can certify an empty pre-projection layout.
             scrollCoordinator.installedLayoutEpochChanged()
             scrollCoordinator.revalidateTailMarkerAfterLayoutEpoch()
-        }
-        .task(id: lazyTailMaterializationRequest) {
-            guard let request = lazyTailMaterializationRequest else { return }
-            await Task.yield()
-            guard !Task.isCancelled,
-                  lazyTailMaterializationRequest == request else { return }
-            let installationTag = transcriptPresentation.installed?.tag
-            guard scrollCoordinator.discreteTailInserted(
-                renderedID: request.semanticID,
-                physicalTargetID: request.physicalID
-            ) else { return }
-            // Geometry remains the ordinary entrance admission. A zero-height
-            // lazy child can nevertheless publish no frame even after its exact
-            // physical ID is targeted. Two presented frames provide a bounded
-            // visual-only fail-open: admit that still-current row so its natural
-            // height can materialize and produce normal settlement evidence.
-            do {
-                try await frameScheduler.nextFrame()
-                try await frameScheduler.nextFrame()
-                try Task.checkCancellation()
-            } catch { return }
-            guard scrollCoordinator.canAutomaticallyFollow,
-                  lazyTailMaterializationRequest == request,
-                  let installationTag,
-                  transcriptPresentation.installed?.tag == installationTag,
-                  transcriptPresentation.entranceState(for: request.semanticID) == .pending else {
-                return
-            }
-            let animated = transcriptPresentation.resolveEntrance(
-                id: request.semanticID,
-                installationTag: installationTag,
-                isVisible: true
-            )
-            if animated {
-                scrollCoordinator.recordEntranceDiagnostic(
-                    .admittedFallback, renderedID: request.semanticID,
-                    observedLayoutEpoch: scrollCoordinator.layoutEpoch
-                )
-                hostedRecorder?.recordEntranceResolution(
-                    animated: true,
-                    sourceOrdinal: installationTag.timelineGeneration
-                )
-                scrollCoordinator.retryTailMaterializationAfterEntranceAdmission(
-                    renderedID: request.semanticID,
-                    physicalTargetID: request.physicalID
-                )
-            }
         }
         // The opening overlay may already be fading during `.presented`;
         // native scrolling remains disabled until the reveal owner publishes
@@ -1242,7 +1184,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             installedTag: installed.tag,
             entranceState: .none,
             terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
-            lifecycleSettlementID: isReplacementOverlay ? nil : renderedID,
             publishesGeometry: !isReplacementOverlay,
             rowStability: .excluded
         ) {
@@ -1419,60 +1360,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         #endif
     }
 
-    /// The presentation ledger supplies the newest transcript entrance in O(1),
-    /// including assistant/tool/notification rows inserted before a queue tail.
-    /// Lifecycle rows are capped by the authoritative 32-item queue budget.
-    private var lazyTailMaterializationRequest: ChatLazyTailMaterializationRequest? {
-        // The origin-anchored transcript's newest row is the exact content origin
-        // and is on screen by construction: there is no lazy tail to realize and
-        // no zero-height fail-open to run. The row's own geometry admission
-        // resolves its entrance, as every other mounted row's does.
-        guard !orientation.mountsNewestRowWithContent else { return nil }
-        guard let installed else { return nil }
-        if let id = transcriptPresentation.newestPendingEntranceID,
-           !canonicalSubmissionIDs.contains(id),
-           installed.containsDisplayedID(id) {
-            let rows = ChatPhysicalTranscriptRowPolicy.rows(
-                installed: installed,
-                canonicalAliases: canonicalSubmissionAliases
-            )
-            guard let physicalID = rows.first(where: { $0.semanticID == id })?.id else {
-                return nil
-            }
-            return ChatLazyTailMaterializationRequest(
-                physicalID: physicalID,
-                semanticID: id
-            )
-        }
-        let lifecycleIDs: [String] = {
-            var ids: [String] = []
-            switch installed.handoff {
-            case .none:
-                break
-            case .pending(let pending):
-                ids.append("pending-prompt-\(pending.id)")
-            case .outgoing(let outgoing, _):
-                ids.append(outgoing.id)
-            }
-            ids.append(contentsOf: installed.queuedMessages.reversed().map { message in
-                installed.queuePresentationIDByOperationID[message.id]
-                    ?? "queued-message-\(message.id)"
-            })
-            return ids
-        }()
-        guard let id = lifecycleIDs.first(where: {
-            !transcriptPresentation.lifecycleEntranceIsConsumed(id: $0)
-        }) else { return nil }
-        return ChatLazyTailMaterializationRequest(physicalID: id, semanticID: id)
-    }
-
     private func stableRow<Content: View>(
         semanticID: String,
         installedTag: ChatTranscriptProjectionTag?,
         entranceState: ChatTranscriptEntranceState,
         entranceKind: ChatContentEntranceKind = .assistantContent,
         terminalPhysicalID: String? = nil,
-        lifecycleSettlementID: String? = nil,
         publishesGeometry: Bool = true,
         rowStability: ChatHostedRowStability = .settled,
         @ViewBuilder content: () -> Content
@@ -1539,23 +1432,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         animated: animated,
                         sourceOrdinal: entranceTag.timelineGeneration
                     )
-                }
-                // A lifecycle row can be fully laid out before SwiftUI delivers
-                // the animation completion. Its positive native frame is only
-                // materialization proof: current epoch/tag/row ownership and
-                // the exact transaction lease must also agree. Marker evidence
-                // still owns target release; this does not certify visual
-                // animation completion.
-                if let lifecycleSettlementID,
-                   sample.layoutEpoch == scrollCoordinator.layoutEpoch,
-                   installedTag == currentInstalled?.tag,
-                   currentInstalled?.containsPhysicalRowID(lifecycleSettlementID) == true,
-                   scrollCoordinator.materializationLayoutTransactionID(
-                       for: lifecycleSettlementID
-                   ) != nil,
-                   sample.frame.width.isFinite, sample.frame.width > 0,
-                   sample.frame.height.isFinite, sample.frame.height > 0 {
-                    onEntranceSettled(lifecycleSettlementID)
                 }
                 hostedRecorder?.updateRowFrame(
                     id: semanticID, frame: sample.frame,

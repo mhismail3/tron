@@ -1,13 +1,7 @@
 import SwiftUI
 import TronMobileCore
 
-/// The one owner of the transcript's vertical orientation (CT-23).
-///
-/// Today's transcript puts the newest row at the end of a `LazyVStack`, so the
-/// pinned bottom it keeps depends on that stack's own content estimate. CT-23
-/// flips the transcript's scroll view so the newest row is at the exact content
-/// origin, which the lazy stack lays out exactly; history it has not loaded lies
-/// beyond the viewport, where an estimate only sizes the scroll range.
+/// The transcript's origin-anchored layout: newest row at the exact content origin.
 ///
 /// Everything that has to agree about which end is newest lives here: the render
 /// flip on the scroll view, the counter-flip each element applies, the order the
@@ -17,29 +11,7 @@ import TronMobileCore
 /// that holds the newest row, `.top` the visual top where older history lives —
 /// or ask the semantic questions below. None of them branches on the flip.
 enum ChatTranscriptOrientation: Equatable, Sendable {
-    /// The newest row sits at the content end, which is a lazy estimate.
-    case newestAtEnd
-    /// The newest row sits at the content origin, which is exact.
     case newestAtOrigin
-
-    #if TRON_TRANSCRIPT_ORIENTATION_EVALUATION
-    // LocalDevice-only preference and Settings row retire together at CT-19.
-    static let evaluationDefaultsKey = "tron.transcript.flippedEvaluation"
-    #endif
-
-    /// One selection per launch. Hosted runs keep their environment override;
-    /// LocalDevice evaluation defaults to origin; Release keeps today's path.
-    static let selected: ChatTranscriptOrientation = {
-        #if HOSTED_TEST
-        return ProcessInfo.processInfo.environment["TRON_CHAT_TRANSCRIPT_ORIENTATION"] == "origin"
-            ? .newestAtOrigin : .newestAtEnd
-        #elseif TRON_TRANSCRIPT_ORIENTATION_EVALUATION
-        return (UserDefaults.standard.object(forKey: evaluationDefaultsKey) as? Bool ?? true)
-            ? .newestAtOrigin : .newestAtEnd
-        #else
-        return .newestAtEnd
-        #endif
-    }()
 
     /// The vertical render scale the transcript applies. Every element of the
     /// transcript's content applies the same value as its outermost modifier:
@@ -54,14 +26,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// Whether the transcript's content spine presents the newest row first.
     /// The origin-anchored transcript's first content element is the newest row
     /// and its last is the oldest loaded history.
-    var presentsNewestRowFirst: Bool { self == .newestAtOrigin }
-
-    /// Whether the newest row arrives with the content's first layout pass, with
-    /// no lazy realization of its own. The origin-anchored transcript's first
-    /// element is laid out before anything the reader can see, so nothing has to
-    /// materialize it and no materialization lease exists to certify the
-    /// entrance that owes a layout transaction.
-    var mountsNewestRowWithContent: Bool { self == .newestAtOrigin }
+    var presentsNewestRowFirst: Bool { true }
 
     /// Whether the transcript suppresses the automatic scroll edge effect at its
     /// pinned end.
@@ -75,12 +40,10 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// inside the wash). Today's transcript pins at the far end of its content, so
     /// its own top edge effect is the normal band it has always been. The chat's
     /// top blur is drawn by the transcript itself and is the same on both paths.
-    var suppressesPinnedEndScrollEdgeEffect: Bool { self == .newestAtOrigin }
+    var suppressesPinnedEndScrollEdgeEffect: Bool { true }
 
-    /// Whether the pinned newest end depends on the lazy stack's estimate.
-    /// Materialization and repair mechanisms are retained only on this path
-    /// until CT-19 removes them with their owning regressions.
-    var pinsToEstimatedOrigin: Bool { self == .newestAtEnd }
+    /// Estimate-based tail recovery is not used on the origin-anchored layout.
+    var pinsToEstimatedOrigin: Bool { false }
 
     // MARK: The layout the transcript's own ends map to
 
@@ -129,7 +92,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// returned unchanged.
     func transcriptFrame(_ frame: CGRect, geometry: ChatTranscriptGeometry) -> CGRect {
         let containerHeight = geometry.containerHeight + geometry.bottomInset
-        guard self == .newestAtOrigin, containerHeight > 0 else { return frame }
+        guard containerHeight > 0 else { return frame }
         return CGRect(
             x: frame.minX,
             y: containerHeight - frame.maxY,
@@ -151,12 +114,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
         currentModelOffsetY: CGFloat,
         visualOffset: CGFloat
     ) -> CGFloat {
-        switch self {
-        case .newestAtEnd:
-            return max(0, currentModelOffsetY + visualOffset)
-        case .newestAtOrigin:
-            return currentModelOffsetY - visualOffset
-        }
+        currentModelOffsetY - visualOffset
     }
 
     /// The scroll view's own `scrollTo(y:)` offset for a point in the model the
@@ -179,7 +137,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
         forModelOffsetY modelOffsetY: CGFloat,
         geometry: ChatTranscriptGeometry
     ) -> CGFloat {
-        guard self == .newestAtOrigin, geometry.isValid else { return modelOffsetY }
+        guard geometry.isValid else { return modelOffsetY }
         let pinnedModelOffsetY = geometry.offsetY + geometry.distanceFromBottom
         return (pinnedModelOffsetY - modelOffsetY)
     }
@@ -188,7 +146,6 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// two content clearances are lazy-layout items; only scroll indicators use
     /// margins. No component supplies a second height or curve.
     func layoutClearance(for safeAreaInsets: EdgeInsets) -> EdgeInsets {
-        guard self == .newestAtOrigin else { return .init() }
         return EdgeInsets(
             top: safeAreaInsets.bottom,
             leading: 0,
@@ -212,8 +169,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// highest-first, so the spine's own position is the value that puts the
     /// oldest element first and the newest last.
     func voiceOverSortPriority(forSpinePosition spinePosition: Int) -> Double {
-        guard presentsNewestRowFirst else { return 0 }
-        return Double(spinePosition)
+        Double(spinePosition)
     }
 
     /// The transcript position a spine index reports: a row's position counted
@@ -223,8 +179,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// origin-anchored spine presents the newest row first, so its positions are
     /// reversed.
     func visualPosition(ofSpinePosition position: Int, count: Int) -> Int {
-        guard self == .newestAtOrigin else { return position }
-        return count - 1 - position
+        count - 1 - position
     }
 
     /// Native geometry plus the declared newest-edge spacer. The native sample
@@ -238,16 +193,6 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// native distance from content origin, independent of every lazy estimate.
     func coordinatorGeometry(_ geometry: ScrollGeometry, obstruction: CGFloat = 0) -> ChatTranscriptGeometry {
         let contentHeight = geometry.contentSize.height
-        guard self == .newestAtOrigin else {
-            return ChatTranscriptGeometry(
-                offsetY: geometry.contentOffset.y,
-                contentHeight: contentHeight,
-                containerHeight: geometry.containerSize.height,
-                bottomInset: geometry.contentInsets.bottom,
-                visibleTopY: geometry.visibleRect.minY,
-                visibleBottomY: geometry.visibleRect.maxY
-            )
-        }
         let visibleTop = geometry.visibleRect.minY
         let visibleBottom = geometry.visibleRect.maxY
         return ChatTranscriptGeometry(
@@ -261,7 +206,6 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     }
 
     private func layoutEdge(_ transcriptEdge: Edge) -> Edge {
-        guard self == .newestAtOrigin else { return transcriptEdge }
         switch transcriptEdge {
         case .top: return .bottom
         case .bottom: return .top
@@ -270,7 +214,6 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     }
 
     private func layoutAnchor(_ transcriptAnchor: UnitPoint) -> UnitPoint {
-        guard self == .newestAtOrigin else { return transcriptAnchor }
         switch transcriptAnchor {
         case .top: return .bottom
         case .bottom: return .top

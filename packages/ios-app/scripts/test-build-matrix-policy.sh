@@ -36,7 +36,7 @@ for scheme in schemes[:-1]:
 expected = {
     "Development": ("com.tron.mobile.beta", "beta", "development", "development", "NO", "DEBUG TRON_DEVELOPMENT"),
     "Test": ("com.tron.mobile.testhost", "beta", "none", "none", "NO", "DEBUG HOSTED_TEST"),
-    "LocalDevice": ("com.tron.mobile", "production-sandbox", "development", "development", "YES", "TRON_PRIVATE_VARIABLE_BLUR TRON_TRANSCRIPT_ORIENTATION_EVALUATION"),
+    "LocalDevice": ("com.tron.mobile", "production-sandbox", "development", "development", "YES", "TRON_PRIVATE_VARIABLE_BLUR"),
     "DevicePerformance": ("com.tron.mobile", "production-sandbox", "development", "development", "NO", "HOSTED_TEST"),
     "Release": ("com.tron.mobile", "production", "production", "production", "NO", None),
 }
@@ -195,7 +195,7 @@ for block in blocks:
         assert re.search(rf"^    {re.escape(key)} = {re.escape(value)}$", block, re.M), (target, key)
     # CT-23's evaluation condition is LocalDevice-only; development.md owns it.
     assert re.search(
-        r"^    SWIFT_ACTIVE_COMPILATION_CONDITIONS = TRON_PRIVATE_VARIABLE_BLUR TRON_TRANSCRIPT_ORIENTATION_EVALUATION$",
+        r"^    SWIFT_ACTIVE_COMPILATION_CONDITIONS = TRON_PRIVATE_VARIABLE_BLUR$", 
         block, re.M,
     ), target
 assert seen == {"TronMobile", "TronShareExtension"}, seen
