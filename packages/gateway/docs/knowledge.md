@@ -239,8 +239,11 @@ recurring queue or scheduler.
 The TypeSafe key is configured in Pi's existing provider settings. Knowledge
 tagging retains its durable monthly reservation ledger (the current default
 ceiling is 500 cents); there is no separate Jev connection setup, Keychain
-credential, or paid-approval flag. A persisted `knowledge.jev` connection is
-rejected at load with an error directing the operator to configure TypeSafe.
+credential, or paid-approval flag. Persisted legacy `knowledge.jev` rows are
+hidden from connection projections and rejected with an instance-specific error
+until the first accepted connection write explicitly removes the rows and their
+setup operations. That revision emits one `connection.legacy-jev-retired`
+observability event; reads and rejected writes leave persisted state unchanged.
 
 Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
 owned background work, not a request that waits for a model: the call accepts a
