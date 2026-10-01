@@ -116,7 +116,9 @@ struct ProjectResourceOverviewContent: Equatable, Sendable {
 enum ProjectResourceOverviewPresentation {
     static func content(from resources: JSONValue?) -> ProjectResourceOverviewContent {
         guard let root = resources?.objectValue else { return .empty }
-        let sections = ProjectResourceKind.allCases.map { kind in
+        // Tools are listed once, in Manage Session → Available Tools, where
+        // they can also be turned on or off.
+        let sections = ProjectResourceKind.allCases.filter { $0 != .tools }.map { kind in
             ProjectResourceOverviewSection(kind: kind, rows: rows(kind: kind, root: root))
         }
         return ProjectResourceOverviewContent(

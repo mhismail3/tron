@@ -118,7 +118,7 @@ struct Pi099VisualEvidenceTests {
             scene("tool-search", ToolDetailSheet(tool: tool("tool_search", request: .object(["query": .string("calendar events")]), response: .object(["content": .string("Loaded tools: calendar/find_events, calendar/create_event")]), content: "Loaded tools: calendar/find_events, calendar/create_event"), density: .expanded)),
             scene("tool-read-mcp-resource", ToolDetailSheet(tool: tool("read_mcp_resource", request: .object(["uri": .string("file:///notes/today")]), response: .object(["contents": .array([.object(["text": .string("Team notes for today")])])]), content: "Team notes for today"), density: .expanded)),
             scene("tool-technical-details", ToolTechnicalDetailsSheet(tool: tool("mcp__calendar__find_events", request: .object(["query": .string("today")]), response: .object(["content": .string("Found 3 events")]), content: "Found 3 events"), presentation: ToolDetailPresentation(tool: tool("mcp__calendar__find_events", request: .object(["query": .string("today")]), response: .object(["content": .string("Found 3 events")]), content: "Found 3 events")))),
-            scene("tool-picker", pickerFixture()),
+            scene("tool-picker", pickerFixture(model)),
             scene("tool-chips", VStack(alignment: .leading, spacing: 10) {
                 Text("Recent tools").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
                 ToolCard(data: codemode, onOpenDetails: { _ in })
@@ -137,16 +137,14 @@ struct Pi099VisualEvidenceTests {
         return views
     }
 
-    private func pickerFixture() -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Tools").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronSessionTeal)
-            ForEach([("Calendar", "find_events", "mcp__calendar__find_events", "codemode"), ("Calendar", "create_event", "mcp__calendar__create_event", "direct"), ("Files", "read_file", "read", "direct"), ("Browser", "search", "agent_browser_search", "hidden")], id: \.2) { group, title, name, exposure in
-                HStack(spacing: 10) {
-                    Image(systemName: exposure == "hidden" ? "circle" : "checkmark.circle.fill").foregroundStyle(Color.tronSessionTeal)
-                    VStack(alignment: .leading, spacing: 3) { Text(title).font(TronTypography.bodySM); Text("\(name) · \(exposure)").font(TronTypography.code(size: TronTypography.sizeSecondary)).foregroundStyle(Color.tronTextSecondary).lineLimit(1) }
-                }.padding(10).frame(maxWidth: .infinity, alignment: .leading).tronScrollSurface(accent: .tronSessionTeal)
-            }
-        }.padding(18).background(Color.tronBackground)
+    /// The real Available Tools sheet over an installed session projection.
+    private func pickerFixture(_ model: AppModel) -> some View {
+        model.installHostedSecondaryProjection(
+            context: .object(["activeTools": .array(["read", "bash", "edit", "write", "display", "notify", "subagent", "mcp__deepwiki__ask_question"].map(JSONValue.string))]),
+            tree: [],
+            resources: SessionToolPickerTests.resources
+        )
+        return SessionToolPickerSheet(sessionID: "fixture-session").environment(model)
     }
 
     private func scene<V: View>(_ id: String, _ view: V) -> Scene { Scene(id: id, content: AnyView(view)) }
