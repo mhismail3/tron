@@ -13,29 +13,17 @@ package enum ChatScrollAnimation: Equatable, Sendable {
 
 package struct ChatScrollCommand: Equatable, Sendable {
     package enum Origin: Equatable, Sendable {
-        case presentation
         case catchUp
         case oldestHistory
         case layout
         case prepend
-        case tailMaterialization
-        case physicalTailRepair
-        /// The bounded past-end safety net. It is admitted only from a
-        /// past-end condition that survives two display boundaries, never from
-        /// marker evidence or a held target lease.
-        case pastEndRepair
-        /// The one native-tail position a retired physical-tail repair owes a
-        /// pinned viewport it left displaced from the legal tail.
-        case targetFreeRebase
     }
 
     package enum Destination: Equatable, Sendable {
         case tail
         case oldestHistory
-        /// Exact lazy row realization target. The coordinator retains the
-        /// lease until both this row and the physical tail publish evidence.
-        case materialize(String)
-        case openingTail(String)
+        /// Exact semantic row target used when restoring a reader's position.
+        case row(String)
         case offsetY(CGFloat)
     }
 
@@ -201,31 +189,5 @@ package struct ChatTranscriptGeometry: Equatable {
         return overscroll <= tolerance
     }
 
-    /// A pinned viewport past the legal content bottom that no finger can hold.
-    /// Lazy content estimates do collapse under an offset the larger estimate
-    /// put in range, and the result is an impossible viewport the reader sees as
-    /// blank. The 2 pt tolerance of `isPastBottomEdge` and the rubber-band
-    /// tolerance stay in force, so ordinary overscroll during a drag or an
-    /// inset change is never admitted; a viewport whose visible rect lies
-    /// entirely past the content edge is admitted regardless of tolerance,
-    /// because no rubber band produces it.
-    package var isBeyondLegalContentBottom: Bool {
-        guard isPastBottomEdge else { return false }
-        if let visibleTopY, let visibleBottomY,
-           visibleTopY.isFinite, visibleBottomY.isFinite,
-           visibleTopY >= contentHeight + bottomInset {
-            return true
-        }
-        return !isPlausibleBottomRubberBand
-    }
 
-    /// Distance the viewport sits past the legal content bottom, in points. It
-    /// is the diagnostic scalar for one past-end correction, never a threshold.
-    package var distanceBeyondLegalContentBottom: CGFloat {
-        guard isBeyondLegalContentBottom else { return 0 }
-        let legalBottom = max(0, contentHeight + bottomInset - containerHeight)
-        let offsetExcess = offsetY - legalBottom
-        guard let visibleBottomY, visibleBottomY.isFinite else { return max(0, offsetExcess) }
-        return max(0, max(offsetExcess, visibleBottomY - (contentHeight + bottomInset)))
-    }
 }

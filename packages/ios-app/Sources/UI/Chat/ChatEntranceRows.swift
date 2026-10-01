@@ -555,7 +555,6 @@ struct ChatTranscriptRenderRow: View, Equatable {
     let installationTag: ChatTranscriptProjectionTag
     let toolPayloadRevision: ChatToolPayloadRevision
     let resolveToolDetails: ([String]) -> [ChatToolPresentation]?
-    let recordEvaluation: () -> Void
     let recordToolChip: (ToolChipInstrumentationSample) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
@@ -569,7 +568,6 @@ struct ChatTranscriptRenderRow: View, Equatable {
     }
 
     @ViewBuilder var body: some View {
-        let _ = recordEvaluation()
         switch item {
         case .transcript(let transcript):
             TranscriptRow(

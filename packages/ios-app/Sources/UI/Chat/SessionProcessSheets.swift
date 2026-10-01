@@ -560,7 +560,6 @@ struct ReadOnlySubagentSessionSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var store: ReadOnlySubagentSessionStore?
     @State private var scrollPosition = ScrollPosition(idType: String.self)
-    @State private var isNearTail = true
     @State private var detent: PresentationDetent = .medium
     @State private var stopRequested = false
     @State private var invalidationSinkID: UUID?
@@ -570,7 +569,7 @@ struct ReadOnlySubagentSessionSheet: View {
     @State private var sheetRoutes = ChatTranscriptSheetRouteOwner()
 
     private let tailID = "read-only-subagent-tail"
-    private let orientation = ChatTranscriptOrientation.selected
+    private let orientation = ChatTranscriptOrientation.newestAtOrigin
 
     var body: some View {
         NavigationStack {
@@ -744,17 +743,13 @@ struct ReadOnlySubagentSessionSheet: View {
     }
 
     private func transcript(_ store: ReadOnlySubagentSessionStore) -> some View {
-        ChatTranscriptViewport(orientation: orientation) { insets in
+        ChatTranscriptViewport { insets in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if orientation.presentsNewestRowFirst {
-                        ChatTranscriptClearance(height: orientation.layoutClearance(for: insets).top)
-                            .id("read-only-subagent-obstruction")
-                        tail
-                        transcriptStatus(store).chatTranscriptOrientation(orientation)
-                    } else {
-                        earlierMessages(store)
-                    }
+                    ChatTranscriptClearance(height: orientation.layoutClearance(for: insets).top)
+                        .id("read-only-subagent-obstruction")
+                    tail
+                    transcriptStatus(store).chatTranscriptOrientation(orientation)
                     if store.presentation.timeline.items.isEmpty {
                         let isActive = store.liveActivity?.lifecycle.isActiveWork == true
                         SessionProcessPlaceholder(
@@ -785,14 +780,9 @@ struct ReadOnlySubagentSessionSheet: View {
                             .id(entry.item.id)
                         }
                     }
-                    if orientation.presentsNewestRowFirst {
-                        earlierMessages(store).chatTranscriptOrientation(orientation)
-                        ChatTranscriptClearance(height: orientation.layoutClearance(for: insets).bottom)
-                            .id("read-only-subagent-oldest-obstruction")
-                    } else {
-                        transcriptStatus(store)
-                        tail
-                    }
+                    earlierMessages(store).chatTranscriptOrientation(orientation)
+                    ChatTranscriptClearance(height: orientation.layoutClearance(for: insets).bottom)
+                        .id("read-only-subagent-oldest-obstruction")
                 }
                 .padding(.horizontal, 16)
                 .padding(orientation.paddingEdgeSet(.top), 12)
@@ -801,31 +791,14 @@ struct ReadOnlySubagentSessionSheet: View {
             .chatTranscriptViewport(orientation, safeAreaInsets: insets)
             .chatTranscriptScrollBehavior(
                 orientation,
-                sizeChangesPinned: !orientation.pinsToEstimatedOrigin || isNearTail,
+                sizeChangesPinned: true,
                 position: $scrollPosition,
                 underflowAt: .top
             )
             .onScrollGeometryChange(for: Bool.self) { geometry in
-                if orientation.pinsToEstimatedOrigin {
-                    // Today's evaluation path retains its original behavior.
-                    return geometry.contentOffset.y + geometry.containerSize.height
-                        >= geometry.contentSize.height - 72
-                }
-                return orientation.coordinatorGeometry(geometry).distanceFromBottom <= 72
+                orientation.coordinatorGeometry(geometry).distanceFromBottom <= 72
             } action: { _, nearTail in
-                if orientation.pinsToEstimatedOrigin {
-                    if isNearTail != nearTail { isNearTail = nearTail }
-                } else {
-                    store.updateViewportMode(nearTail ? .pinned : .anchored)
-                }
-            }
-            .onChange(of: store.transcriptTotal) { previous, current in
-                guard orientation.pinsToEstimatedOrigin, current > previous, isNearTail else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    scrollPosition.scrollTo(id: tailID, anchor: orientation.newestEndAnchor)
-                }
+                store.updateViewportMode(nearTail ? .pinned : .anchored)
             }
             .tronScrollEdgeChrome()
         }
