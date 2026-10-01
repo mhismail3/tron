@@ -880,6 +880,30 @@ describe("knowledge connectors", () => {
     expect((await store.connectorState("raindrop", "mapped"))?.pending).toEqual([]);
   });
 
+  // Failure modes recorded before implementation: (1) missing captured collection causes an unsupported result despite live mapped triage; (2) partial capture blocks an admitted move; (3) partial capture/missing captured collection blocks already-home; (4) pending admission and unmapped live collection must remain refused.
+  it("moves retained partial captures without captured collection and recognizes already-home", async () => {
+    const remote = new Map<string, string>([["partial-away", "10"], ["partial-home", "7"], ["partial-pending", "10"]]);
+    const writes: string[] = [];
+    const { store, extension } = await mappedRaindropFixture(async (url, init) => {
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
+      const itemId = /raindrop\/(partial-away|partial-home|partial-pending)/.exec(url)?.[1];
+      if (!itemId) throw new Error(`unexpected endpoint ${url}`);
+      if (init.method === "PUT") { const destination = String(JSON.parse(init.body ?? "{}").collection.$id); writes.push(destination); remote.set(itemId, destination); }
+      return response({ item: { _id: itemId, collection: { $id: Number(remote.get(itemId)) } } });
+    }, undefined, undefined, { allowWrites: true });
+    const create = async (itemId: string, admission: "retained" | "pending" = "retained") => {
+      const object = await store.putObject(new TextEncoder().encode(`evidence-${itemId}`), "text/plain");
+      return store.captureSource({ commandId: command(`partial-move-source-${itemId}`), record: { kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: itemId, uri: `https://example.test/${itemId}`, text: "Partial captured evidence.", object, identity: { provider: "raindrop", accountId: "42", itemId }, captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00.000Z", admission: admission === "retained" ? { status: "retained", reason: "decision", decidedAt: "2026-01-01T00:00:00.000Z" } : { status: "pending", decidedAt: "2026-01-01T00:00:00.000Z", producer: { actor: "connector" } } } } });
+    };
+    const away = await create("partial-away");
+    await expect(extension.invoke({ operation: "knowledge.raindrop.move", request: { commandId: command("partial-away-move"), connectionId: "mapped", itemId: "partial-away", sourceId: away.record.id, expectedRevision: away.record.revisionId } })).resolves.toMatchObject({ status: "moved" });
+    const home = await create("partial-home");
+    await expect(extension.invoke({ operation: "knowledge.raindrop.move", request: { commandId: command("partial-home-move"), connectionId: "mapped", itemId: "partial-home", sourceId: home.record.id, expectedRevision: home.record.revisionId } })).resolves.toMatchObject({ status: "already-home" });
+    const pending = await create("partial-pending", "pending");
+    await expect(extension.invoke({ operation: "knowledge.raindrop.move", request: { commandId: command("partial-pending-move"), connectionId: "mapped", itemId: "partial-pending", sourceId: pending.record.id, expectedRevision: pending.record.revisionId } })).resolves.toMatchObject({ status: "unsupported" });
+    expect(writes).toEqual(["7"]);
+  });
+
   it("derives remote destinations from admission/scope and returns already-home without a write", async () => {
     const remote = new Map<string, string>([["research-item", "10"], ["archived-item", "10"], ["after-triage-unmapped", "7"], ["unmapped-live", "999"], ["unmapped-home-item", "999"], ["home-item", "10"], ["live-home-item", "7"]]);
     const writes: string[] = [];

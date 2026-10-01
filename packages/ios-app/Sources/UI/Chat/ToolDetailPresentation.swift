@@ -25,6 +25,15 @@ struct NestedToolCallPresentation: Hashable, Sendable, Identifiable {
     let durationMs: Int?
     let arguments: JSONValue?
     let argumentsBytes: Int?
+
+    /// The argument that identifies what the call did (command, file,
+    /// pattern...), chosen by the same rule as a top-level tool's detail.
+    var primary: (label: String, value: String)? {
+        ToolDetailPresentation.primary(
+            kind: ToolDetailPresentation.kind(for: toolName),
+            request: arguments?.objectValue
+        )
+    }
 }
 
 private struct BoundedCircularBuffer<Element> {
@@ -808,7 +817,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
         }
     }
 
-    private static func sheetTitleIcon(for toolName: String) -> String? {
+    static func sheetTitleIcon(for toolName: String) -> String? {
         switch kind(for: toolName) {
         case .read, .write, .edit, .bash:
             icon(for: toolName)

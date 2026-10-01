@@ -1306,7 +1306,8 @@ struct TronSettingsDetailText: View {
 }
 
 struct TronSettingsRow<Trailing: View>: View {
-    let icon: String
+    /// Nil for dense lists whose rows share one kind and gain nothing from a glyph.
+    let icon: String?
     let title: String
     let subtitle: String?
     let subtitleLineLimit: Int?
@@ -1322,7 +1323,7 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
-        icon: String,
+        icon: String?,
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = nil,
@@ -1350,15 +1351,17 @@ struct TronSettingsRow<Trailing: View>: View {
         // not that target, so these rows size like ordinary Session rows.
         let labelsOwnInsets = controlSize == .small && !dynamicTypeSize.isAccessibilitySize
         HStack(alignment: .center, spacing: TronSpacing.xl) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(settingsTheme?.accent ?? accent)
-                .frame(
-                    width: TronSettingsLayoutPolicy.iconSize,
-                    height: TronSettingsLayoutPolicy.iconSize,
-                    alignment: .center
-                )
-                .accessibilityHidden(true)
+            if let icon {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(settingsTheme?.accent ?? accent)
+                    .frame(
+                        width: TronSettingsLayoutPolicy.iconSize,
+                        height: TronSettingsLayoutPolicy.iconSize,
+                        alignment: .center
+                    )
+                    .accessibilityHidden(true)
+            }
             // Compact value actions still use standard row insets; at larger
             // accessibility sizes they sit below the label, not beside a sliver.
             let stacksAction = controlSize == .small && dynamicTypeSize.isAccessibilitySize
@@ -1406,7 +1409,7 @@ struct TronSettingsRow<Trailing: View>: View {
 
 extension TronSettingsRow where Trailing == EmptyView {
     init(
-        icon: String,
+        icon: String?,
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = nil,
@@ -1612,7 +1615,7 @@ enum TronToggleContrastPolicy {
     }
 }
 
-private struct TronToggleControl: View {
+struct TronToggleControl: View {
     let isOn: Bool
     let accent: Color
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

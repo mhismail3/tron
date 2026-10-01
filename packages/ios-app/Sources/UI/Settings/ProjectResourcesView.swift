@@ -215,6 +215,15 @@ enum ProjectResourceTextPresentation {
 }
 
 struct ProjectResourceDetailPresentation: Equatable {
+    /// One declared tool parameter, in the schema's declaration order.
+    struct ToolInput: Equatable, Identifiable {
+        let name: String
+        let type: String?
+        let required: Bool
+        let detail: String?
+        var id: String { name }
+    }
+
     let purpose: String
     let invocation: String?
     let availability: String?
@@ -224,6 +233,7 @@ struct ProjectResourceDetailPresentation: Equatable {
     let commands: [String]
     let schemaSummary: String?
     let guidance: String?
+    let inputs: [ToolInput]
 
     init(kind: ProjectResourceKind, value: JSONValue) {
         let object = value.objectValue ?? [:]
@@ -233,6 +243,7 @@ struct ProjectResourceDetailPresentation: Equatable {
             value.isEmpty ? nil : ProjectResourceTextPresentation.readableDescription(value)
         }
         path = object["path"]?.stringValue ?? object["resolvedPath"]?.stringValue
+        inputs = kind == .tools ? Self.toolInputs(object["parameters"]?.objectValue) : []
 
         switch kind {
         case .prompts:
@@ -286,6 +297,25 @@ struct ProjectResourceDetailPresentation: Equatable {
             guidance = nil
         }
         model = kind == .subagents ? object["model"]?.stringValue : nil
+    }
+
+    /// JSON object keys carry no order; inputs list required ones first, then
+    /// by name, so the same tool always reads the same way.
+    private static func toolInputs(_ parameters: [String: JSONValue]?) -> [ToolInput] {
+        let required = Set(parameters?["required"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+        let properties = parameters?["properties"]?.objectValue ?? [:]
+        return properties.map { name, value in
+            let schema = value.objectValue
+            let type = schema?["type"]?.stringValue
+                ?? schema?["type"]?.arrayValue?.compactMap(\.stringValue).joined(separator: " | ")
+                ?? (schema?["anyOf"] != nil || schema?["oneOf"] != nil ? "one of several" : nil)
+            let detail = schema?["description"]?.stringValue
+                .map(ProjectResourceTextPresentation.readableDescription)
+                .flatMap { $0.isEmpty ? nil : $0 }
+            return ToolInput(name: name, type: type, required: required.contains(name), detail: detail)
+        }.sorted {
+            $0.required != $1.required ? $0.required : $0.name < $1.name
+        }
     }
 }
 
@@ -522,7 +552,11 @@ struct ProjectResourceDetailSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .tronGlassSurface(accent: accent, tintOpacity: 0.10)
                     }
-                    contentSection
+                    if selection.kind == .tools {
+                        inputsSection
+                    } else {
+                        contentSection
+                    }
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -579,6 +613,42 @@ struct ProjectResourceDetailSheet: View {
             return presentation.purpose
         }
         return ProjectResourceTextPresentation.readableDescription(description)
+    }
+
+    /// Tools have no body; what the model must supply is their useful detail.
+    private var inputsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TronTechnicalSectionLabel("Inputs")
+            VStack(alignment: .leading, spacing: 12) {
+                if presentation.inputs.isEmpty {
+                    Text("This tool takes no inputs.")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                }
+                ForEach(presentation.inputs) { input in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(verbatim: input.name)
+                                .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .foregroundStyle(Color.tronTextPrimary)
+                            Text([input.type, input.required ? "required" : "optional"].compactMap { $0 }.joined(separator: " · "))
+                                .font(TronTypography.sans(size: TronTypography.sizeSecondary))
+                                .foregroundStyle(input.required ? accent : Color.tronTextMuted)
+                        }
+                        if let detail = input.detail {
+                            Text(detail)
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .tronScrollSurface(accent: accent, cornerRadius: 16, tintOpacity: 0.06)
+        }
     }
 
     @ViewBuilder
