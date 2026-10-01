@@ -195,7 +195,7 @@ for block in blocks:
         assert re.search(rf"^    {re.escape(key)} = {re.escape(value)}$", block, re.M), (target, key)
     # CT-23's evaluation condition is LocalDevice-only; development.md owns it.
     assert re.search(
-        r"^    SWIFT_ACTIVE_COMPILATION_CONDITIONS = TRON_PRIVATE_VARIABLE_BLUR$", 
+        r"^    SWIFT_ACTIVE_COMPILATION_CONDITIONS = TRON_PRIVATE_VARIABLE_BLUR$",
         block, re.M,
     ), target
 assert seen == {"TronMobile", "TronShareExtension"}, seen
