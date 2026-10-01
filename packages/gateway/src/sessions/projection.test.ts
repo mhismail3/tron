@@ -1253,10 +1253,11 @@ describe("transcript projection", () => {
       snapshot.transcript.slice(removedTranscriptRows).map((item) => item.id),
     );
 
-    // Sixteen-kilobyte command and partial-output fields over 256 entries
-    // exceed the one-megabyte budget while keeping this max-count fixture small.
+    // Argument details are removed at the large-live-detail stage; these shared
+    // outputs remain just over the 8 KB tail bound and force the final output
+    // tail removal stage under the 800 KB snapshot budget.
     const maximumToolArguments = "x".repeat(8_000);
-    const maximumToolOutput = "y".repeat(8_000);
+    const liveOutput = "z".repeat(9 * 1_024);
     const maximumToolSnapshot: SessionSnapshot = {
       ...snapshot,
       transcript: Array.from({ length: 20 }, (_, index) => ({
@@ -1269,7 +1270,7 @@ describe("transcript projection", () => {
       toolExecutions: Array.from({ length: 256 }, (_, index) => ({
         toolCallId: `maximum-tool-${index}`, toolName: "bash", order: index,
         status: "running" as const, arguments: { command: maximumToolArguments },
-        partialResult: { output: maximumToolOutput }, output: "z".repeat(1_024),
+        partialResult: { output: maximumToolArguments }, output: liveOutput,
         isError: false, startedAt: new Date(index).toISOString(), updatedAt: new Date(index).toISOString(),
         lastProgressAt: new Date(index).toISOString(), progressSequence: index + 1,
       })),
@@ -1279,6 +1280,7 @@ describe("transcript projection", () => {
     expect(maximumToolFitted.toolExecutions.map((tool) => tool.toolCallId)).toEqual(
       maximumToolSnapshot.toolExecutions.map((tool) => tool.toolCallId),
     );
+    expect(maximumToolFitted.toolExecutions.every((tool) => tool.output === undefined)).toBe(true);
     expect(maximumToolFitted.transcript.filter(
       (item) => !(item.kind === "message" && item.role === "toolResult"),
     )).toHaveLength(20);

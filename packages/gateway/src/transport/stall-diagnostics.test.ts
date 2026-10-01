@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { GatewayServer } from "./server.js";
-import { formatHostEvidence, formatStallEvidence, formatResourceSample, parseHostSysctl, probeHostKernel, resourceSampleLevel, ResourceSampler, HEAP_USED_INFO_STEP_BYTES, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler, type HostMemory, type ResourceRuntimeEntry } from "./stall-diagnostics.js";
+import { eventLoopDelayLatenessMs, formatHostEvidence, formatStallEvidence, formatResourceSample, parseHostSysctl, probeHostKernel, resourceSampleLevel, ResourceSampler, HEAP_USED_INFO_STEP_BYTES, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler, type HostMemory, type ResourceRuntimeEntry } from "./stall-diagnostics.js";
 
 /** Cumulative busy/idle clock; two marks give their delta like Node's API. */
 function fakeUtilization() {
@@ -32,6 +32,14 @@ function fakeGc() {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe("event-loop delay conversion", () => {
+  it("subtracts the histogram sampling period and clamps invalid or idle readings", () => {
+    expect(eventLoopDelayLatenessMs(20_000_000)).toBe(0);
+    expect(eventLoopDelayLatenessMs(170_000_000)).toBe(150);
+    expect(eventLoopDelayLatenessMs(Number.NaN)).toBe(0);
+  });
 });
 
 describe("StallSampler", () => {
