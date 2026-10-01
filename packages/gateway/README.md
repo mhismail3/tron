@@ -1234,7 +1234,9 @@ Gateway drain owner. Same-command duplicates join that lane and receive the
 stored result. Process loss or a failed completion write in this response window
 leaves the pending receipt as an outcome-unknown replay fence; prompts are never
 re-run automatically. The receipt-store owner closes admission and joins accepted
-completion writes before releasing its state directory. Every other receipt-backed method still persists its
+receipt persistence, including completion writes and definitive-rejection cleanup,
+before releasing its state directory; this drain does not wait for the command's
+operation to settle. Every other receipt-backed method still persists its
 completed receipt before responding because its acknowledgement boundary has
 not been approved to move. A mutation whose owner reports an unknown
 outcome keeps its pending receipt even though the operation threw, so the

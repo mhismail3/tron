@@ -188,6 +188,39 @@ describe("CommandReceiptStore", () => {
     }, { respondBeforeCompletion: true })).rejects.toMatchObject({ details: { outcomeUnknown: true } });
     expect(operations).toBe(1);
     releaseCompletion();
+    await store.dispose();
+  });
+
+  it("does not wait for an accepted operation to settle during disposal", async () => {
+    const root = await temporaryRoot("tron-receipts-operation-drain-");
+    let operationStarted!: () => void;
+    const started = new Promise<void>((resolve) => { operationStarted = resolve; });
+    let releaseOperation!: () => void;
+    const operationGate = new Promise<void>((resolve) => { releaseOperation = resolve; });
+    const store = new CommandReceiptStore(root);
+    let operationSettled = false;
+    try {
+      const accepted = store.execute("device", "session.prompt", "operation-drain", async () => {
+        operationStarted();
+        await operationGate;
+        operationSettled = true;
+        return { accepted: true };
+      });
+      await started;
+      const shutdown = store.dispose();
+      let shutdownSettled = false;
+      void shutdown.then(() => { shutdownSettled = true; });
+      // Flush promise continuations after disposal without holding the test open
+      // behind the intentionally unresolved operation.
+      for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+      expect(shutdownSettled).toBe(true);
+      expect(operationSettled).toBe(false);
+      releaseOperation();
+      await expect(accepted).resolves.toEqual({ accepted: true });
+    } finally {
+      releaseOperation();
+      await store.dispose();
+    }
   });
 
   it("does not serialize one command's durable receipt write behind the inventory mutex", async () => {
