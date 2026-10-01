@@ -27,9 +27,15 @@ enum ChatDisplayOrientationFixture {
         }
         if history {
             snapshot.transcript = SessionScenarioBuilder(seed: 1_310).historyPage(count: 30, longRowBytes: 200) + snapshot.transcript
+            // Leave earlier messages unloaded on the server so the oldest loaded
+            // row carries the "Load earlier messages" pill above it: the exact
+            // state the status-bar jump-to-oldest requirement has to show.
+            snapshot.transcriptStart = 15
+            snapshot.transcriptTotal = snapshot.transcript.count + 15
+        } else {
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
         }
-        snapshot.transcriptStart = 0
-        snapshot.transcriptTotal = snapshot.transcript.count
         snapshot.toolExecutions = []
         return snapshot
     }
@@ -251,9 +257,15 @@ struct ChatDisplayOrientationTests {
                 let visibleRows = harness.probeObservation.visibleRowIDs
                 #expect(visibleRows.contains(harness.firstTranscriptID))
                 #expect(visibleRows.contains("earlier-messages"))
-                let pillIndex = try #require(visibleRows.firstIndex(of: "earlier-messages"))
-                let oldestIndex = try #require(visibleRows.firstIndex(of: harness.firstTranscriptID))
-                #expect(pillIndex < oldestIndex, "The load-earlier pill is above the oldest loaded row")
+                // The origin layout reports each row's frame with the newest row
+                // at the content origin and coordinates growing toward older
+                // history; the render flip then draws larger-y content higher on
+                // screen. The pill therefore renders above the oldest loaded row
+                // exactly when its older edge is at or beyond that row's.
+                let frames = harness.probeObservation.rowFrames
+                let pillFrame = try #require(frames["earlier-messages"])
+                let oldestFrame = try #require(frames[harness.firstTranscriptID])
+                #expect(pillFrame.minY >= oldestFrame.maxY - 1, "The load-earlier pill renders above the oldest loaded row")
                 harness.captureScreenshot(named: "status-bar-origin-oldest.png")
                 harness.setCovered(true)
                 for _ in 0..<12 { try await harness.driveFrameBoundary() }
