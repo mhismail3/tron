@@ -693,14 +693,14 @@ final class SessionSheetPresentationTests: XCTestCase {
                     XCTAssertEqual(self.views(of: UIScrollView.self, in: controller.view).filter(\.scrollsToTop).count, 1,
                                    "The child sheet retains its own native status-bar scroll recipient")
                     self.capture(controller, name: "worker-initial-\(texts.count)-messages")
-                    self.assertSubagentOpeningOffset(scroll, isLong: texts.count > 1)
+                    self.assertSubagentOpeningOffset(scroll)
                     let visibility = SubagentPresentedFrameRecorder(controller: controller)
                     print("CT23-SHEET-OPEN count=\(texts.count) rows=\(visibility.presentedRows()) scroll=\(scroll.frame) content=\(scroll.contentSize) adjusted=\(scroll.adjustedContentInset)")
                     if !texts.isEmpty { XCTAssertNotNil(visibility.visibleAnchor(), "Opening must present an actual row, not merely a legal offset") }
                     controller.sheetPresentationController?.selectedDetentIdentifier = .large
                     controller.presentationController?.containerView?.layoutIfNeeded()
                     for _ in 0..<6 { try await DisplayFrameScheduler.displayLink.nextFrame() }
-                    self.assertSubagentOpeningOffset(scroll, isLong: texts.count > 1)
+                    self.assertSubagentOpeningOffset(scroll)
                     self.capture(controller, name: "worker-expanded-\(texts.count)-messages")
                     if !texts.isEmpty { XCTAssertNotNil(visibility.visibleAnchor()) }
                     if texts.count > 1 {
@@ -719,12 +719,10 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
-    private func assertSubagentOpeningOffset(_ scroll: UIScrollView, isLong: Bool) {
-        let top = -scroll.adjustedContentInset.top
-        let tail = max(top, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
-        let newest = ChatTranscriptOrientation.selected.presentsNewestRowFirst ? top : tail
-        XCTAssertEqual(scroll.contentOffset.y, isLong ? newest : top, accuracy: 2,
-            "Initial and resized sheets must show the tail (or top-aligned short content), never an empty lazy-layout gap")
+    private func assertSubagentOpeningOffset(_ scroll: UIScrollView) {
+        let origin = -scroll.adjustedContentInset.top
+        XCTAssertEqual(scroll.contentOffset.y, origin, accuracy: 2,
+            "Initial and resized sheets must show the tail at the content origin, never an empty lazy-layout gap")
     }
 
     func testSubagentTranscriptOriginJourneys() async throws {
@@ -788,14 +786,12 @@ final class SessionSheetPresentationTests: XCTestCase {
                     let gaps = pinnedSamples.compactMap(\.gap)
                     let blanks = pinnedSamples.filter(\.blank).count
                     let worst = gaps.map { abs($0 - 12) }.max() ?? .infinity
-                    print("CT23-SHEET-PIN orientation=\(ChatTranscriptOrientation.selected) frames=\(pinnedSamples.count) blanks=\(blanks) worstGap=\(worst)")
-                    if ChatTranscriptOrientation.selected.presentsNewestRowFirst {
-                        XCTAssertEqual(blanks, 0)
-                        XCTAssertEqual(gaps.count, pinnedSamples.count)
-                        XCTAssertLessThanOrEqual(worst, 3)
-                    }
+                    print("CT23-SHEET-PIN orientation=\(ChatTranscriptOrientation.newestAtOrigin) frames=\(pinnedSamples.count) blanks=\(blanks) worstGap=\(worst)")
+                    XCTAssertEqual(blanks, 0)
+                    XCTAssertEqual(gaps.count, pinnedSamples.count)
+                    XCTAssertLessThanOrEqual(worst, 3)
                     recorder.phase = "detach"
-                    let direction: CGFloat = ChatTranscriptOrientation.selected.presentsNewestRowFirst ? 1 : -1
+                    let direction: CGFloat = 1
                     scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentOffset.y + direction * scroll.bounds.height * 1.5), animated: true)
                     try await Task.sleep(for: .milliseconds(750))
                     let anchor = try XCTUnwrap(recorder.visibleAnchor())
@@ -807,10 +803,8 @@ final class SessionSheetPresentationTests: XCTestCase {
                     texts.append("Child appends while its reader stays on earlier content.")
                     try await self.refreshSubagent(gateway, store: store, texts: texts, revision: "detached")
                     try await Task.sleep(for: .milliseconds(750))
-                    if ChatTranscriptOrientation.selected.presentsNewestRowFirst {
-                        XCTAssertEqual(store.presentation.timeline.items, installedBeforeAppend)
-                        XCTAssertEqual(store.items.count, texts.count - 40, "Canonical store still advances")
-                    }
+                    XCTAssertEqual(store.presentation.timeline.items, installedBeforeAppend)
+                    XCTAssertEqual(store.items.count, texts.count - 40, "Canonical store still advances")
                     recorder.phase = "load-earlier"
                     let before = await gateway.socket.sentFrames().count
                     store.loadEarlier()
@@ -820,32 +814,26 @@ final class SessionSheetPresentationTests: XCTestCase {
                     try await self.waitForRouting { store.status == .open && store.transcriptStart == 0 }
                     try await Task.sleep(for: .milliseconds(750))
                     let detached = Array(recorder.samples.dropFirst(firstDetached))
-                    if ChatTranscriptOrientation.selected.presentsNewestRowFirst {
-                        XCTAssertTrue(detached.allSatisfy { $0.anchorInstance == anchor.instance })
-                        XCTAssertTrue(detached.allSatisfy { abs(($0.anchorTop ?? .infinity) - anchor.top) < 0.5 })
-                        XCTAssertEqual(store.presentation.timeline.items.count, installedBeforeAppend.count + 40,
-                                       "Explicit historical page installs without admitting the live append")
-                    }
+                    XCTAssertTrue(detached.allSatisfy { $0.anchorInstance == anchor.instance })
+                    XCTAssertTrue(detached.allSatisfy { abs(($0.anchorTop ?? .infinity) - anchor.top) < 0.5 })
+                    XCTAssertEqual(store.presentation.timeline.items.count, installedBeforeAppend.count + 40,
+                                   "Explicit historical page installs without admitting the live append")
                     print("CT23-SHEET-DETACH frames=\(detached.count) maxMove=\(detached.map { abs(($0.anchorTop ?? .infinity) - anchor.top) }.max() ?? .infinity)")
                     recorder.phase = "return-to-newest"
                     let firstReturning = recorder.samples.count
-                    let newestOffset = ChatTranscriptOrientation.selected.presentsNewestRowFirst
-                        ? -scroll.adjustedContentInset.top
-                        : max(-scroll.adjustedContentInset.top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+                    let newestOffset = -scroll.adjustedContentInset.top
                     scroll.setContentOffset(CGPoint(x: 0, y: newestOffset), animated: true)
                     try await Task.sleep(for: .milliseconds(1000))
-                    if ChatTranscriptOrientation.selected.presentsNewestRowFirst {
-                        XCTAssertEqual(store.presentation.timeline.items.count, texts.count)
-                        XCTAssertFalse(recorder.samples.dropFirst(firstReturning).contains(where: \.blank))
-                        XCTAssertLessThanOrEqual(abs((recorder.samples.last?.gap ?? .infinity) - 12), 3)
-                    }
+                    XCTAssertEqual(store.presentation.timeline.items.count, texts.count)
+                    XCTAssertFalse(recorder.samples.dropFirst(firstReturning).contains(where: \.blank))
+                    XCTAssertLessThanOrEqual(abs((recorder.samples.last?.gap ?? .infinity) - 12), 3)
                     recorder.stop()
                     for phase in Set(recorder.samples.map(\.phase)).sorted() {
                         let frames = recorder.samples.filter { $0.phase == phase }
                         print("CT23-SHEET-PHASE \(phase) frames=\(frames.count) blanks=\(frames.filter(\.blank).count) gapError=\(frames.compactMap(\.gap).map { abs($0 - 12) }.max() ?? .infinity)")
                     }
                     let artifact = XCTAttachment(data: try JSONEncoder().encode(recorder.samples), uniformTypeIdentifier: "public.json")
-                    artifact.name = "subagent-transcript-\(ChatTranscriptOrientation.selected).json"
+                    artifact.name = "subagent-transcript-\(ChatTranscriptOrientation.newestAtOrigin).json"
                     artifact.lifetime = .keepAlways
                     self.add(artifact)
                 }

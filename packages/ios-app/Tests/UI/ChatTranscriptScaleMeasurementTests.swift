@@ -129,7 +129,7 @@ struct ChatTranscriptScaleMeasurementTests {
         guard opened else {
             let memoryAfterMiss = scaleResidentMemoryBytes()
             print(
-                "CT13-METRICS shape=\(shape) orientation=\(harness.orientation.presentsNewestRowFirst ? "origin" : "end") opened=false"
+                "CT13-METRICS shape=\(shape) orientation=origin opened=false"
                     + " items=\(rowCount) installedRows=\(installedRows)"
                     + " openInstallMs=\(scaleMilliseconds(installStartedAt.duration(to: readyAt)))"
                     + " openReadyFrameMs=\(signposts.duration(of: .firstReadyFrame).map(scaleMilliseconds) ?? -1)"
@@ -151,7 +151,7 @@ struct ChatTranscriptScaleMeasurementTests {
         let commandsAtReady = scaleCommandCounts(harness)
         let openInterval = signposts.duration(of: .firstReadyFrame)
         print(
-            "CT13-METRICS shape=\(shape) orientation=\(harness.orientation.presentsNewestRowFirst ? "origin" : "end") opened=true"
+            "CT13-METRICS shape=\(shape) orientation=origin opened=true"
                 + " items=\(rowCount) installedRows=\(installedRows)"
                 + " openInstallMs=\(scaleMilliseconds(installStartedAt.duration(to: readyAt)))"
                 + " openReadyFrameMs=\(openInterval.map(scaleMilliseconds) ?? -1)"
@@ -600,9 +600,7 @@ private func scaleStreamingBody(step: Int, of steps: Int) -> String {
 @MainActor
 private func scaleCommandCounts(_ harness: ChatViewScrollHarness) -> String {
     let observation = harness.probeObservation
-    return "materialize:\(observation.tailMaterializationCommandCount)"
-        + ",physical:\(observation.physicalTailRepairCommandCount)"
-        + ",pastEnd:\(observation.pastEndRepairCommandCount)"
+    return "scroll:\(observation.scrollCommandCount)"
         + ",automatic:\(observation.automaticScrollCommandCount)"
         + ",smooth:\(observation.smoothAutomaticScrollCommandCount)"
 }
