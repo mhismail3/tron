@@ -392,7 +392,14 @@ const knowledge = new KnowledgeService(
   },
   // The event carries the whole job, the same shape `knowledge.curation.jobs`
   // returns, so one client decoder serves both.
-  new KnowledgeCurationJobs(64, 120_000, job => transport?.broadcast("knowledge.curation.job", { ...job })),
+  new KnowledgeCurationJobs(64, 120_000, job => {
+    transport?.broadcast("knowledge.curation.job", { ...job });
+    if (job.status === "failed" && (job.code === "model-error" || job.code === "model-output-invalid")) logger.log(
+      "warning",
+      "Knowledge model completion failed",
+      { event: "knowledge.model-failed", source: "knowledge", code: job.code, ...(job.reason ? { reason: job.reason } : {}) },
+    );
+  }),
   knowledgeTagging,
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);

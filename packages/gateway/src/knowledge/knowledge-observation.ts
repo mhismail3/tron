@@ -5,6 +5,7 @@ import { knowledgeScopeEligible, type KnowledgeConfig, type KnowledgeRecordDraft
 import type { KnowledgeStore } from "./knowledge-store.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
+import { KnowledgeModelOutputError, knowledgeModelFailureSummary, knowledgeModelText } from "./knowledge-model-output.js";
 
 const OBSERVER_PROMPT_VERSION = "tron-observer-v2";
 const OBSERVER_SYSTEM_PROMPT = [
@@ -107,10 +108,7 @@ export class ModelRuntimeObservationModel implements ObservationModel {
       signal: input.signal,
       maxTokens: Math.max(128, Math.ceil(input.maxOutputChars / 4)),
     });
-    const text = result.content
-      .filter((part): part is Extract<AssistantMessage["content"][number], { type: "text" }> => part.type === "text")
-      .map(part => typeof part.text === "string" ? part.text : "")
-      .join("");
+    const text = knowledgeModelText(result, `${this.model.provider}/${this.model.id}`);
     if (text.length > input.maxOutputChars) throw new Error("Observer output exceeded its configured bound");
     return text;
   }
@@ -582,7 +580,7 @@ export class KnowledgeObservationService {
     const operationSignal = this.cancelled.signal;
     try {
       const model = typeof this.model === "function" ? this.model(config) : this.model;
-      if (!model) throw new Error("No explicitly configured observation model");
+      if (!model) throw new Error(config.observation.model ? `model not available: ${config.observation.model}` : "No explicitly configured observation model");
       // Model implementations are not required to honor AbortSignal. Fence
       // immediately after the await and again before parsing/publication so a
       // late completion cannot become durable evidence.
@@ -624,7 +622,8 @@ export class KnowledgeObservationService {
       // The composite signal has only observer/work-owner cancellation sources.
       // Leave pending coverage for recovery; cancellation must not requeue work.
       if (operationSignal.aborted) return true;
-      await this.store.setCoverage({ commandId: commandID("knowledge-failed", range, expectedRevision), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "failed", groupRevisionIds: [], reason: error instanceof Error ? bounded(error.message, 500) : "observer-failed" } }, operationSignal).catch(() => {});
+      const reason = error instanceof KnowledgeModelOutputError ? knowledgeModelFailureSummary(error).reason : error instanceof Error ? bounded(error.message, 500) : "observer-failed";
+      await this.store.setCoverage({ commandId: commandID("knowledge-failed", range, expectedRevision), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "failed", groupRevisionIds: [], reason: bounded(reason, 500) } }, operationSignal).catch(() => {});
       return true;
     }
     return true;
