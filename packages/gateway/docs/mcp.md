@@ -44,8 +44,10 @@ group cleanup lives in `src/sessions/runtime-registry.integration.test.ts`.
 The explicit admin status command accepts Pi's valid JSON output for CLI exit
 codes 0 and 1 (the latter reports unhealthy servers) and projects a bounded
 wire shape: at most 128 servers, each with `name`, `state`, `scope`, `enabled`,
-`transport`, and at most 128 tool names; each string is capped at 256 characters
-(except `state`, capped at 64). `errors` is a count, not a copy of Pi diagnostic
+`exposure`, `transport`, at most 128 tool names, and an optional bounded `error`.
+Each string is capped at 256 characters (except `state`, capped at 64); `error`
+is stripped of control bytes and capped at 2,048 characters. Filesystem `source`
+paths are not exposed. Top-level `errors` is a count, not a copy of Pi diagnostic
 objects. The captured pinned CLI payload fixture and startup/config behavior are
 covered by `src/admin/mcp-admin-service.test.ts`; sign-in relay outcomes and
 callback safety are covered by `src/admin/auth-broker.test.ts` and the local

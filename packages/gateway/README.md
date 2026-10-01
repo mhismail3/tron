@@ -1233,7 +1233,10 @@ finishes the completed receipt write while retaining the command lane and its
 Gateway drain owner. Same-command duplicates join that lane and receive the
 stored result. Process loss or a failed completion write in this response window
 leaves the pending receipt as an outcome-unknown replay fence; prompts are never
-re-run automatically. Every other receipt-backed method still persists its
+re-run automatically. The receipt-store owner closes admission and joins accepted
+receipt persistence, including completion writes and definitive-rejection cleanup,
+before releasing its state directory; this drain does not wait for the command's
+operation to settle. Every other receipt-backed method still persists its
 completed receipt before responding because its acknowledgement boundary has
 not been approved to move. A mutation whose owner reports an unknown
 outcome keeps its pending receipt even though the operation threw, so the
@@ -2429,7 +2432,8 @@ publishes a change in the visible order so an open picker can refetch. The
 document lives at `gateway/model-recents.json`, is owner-only, and is a
 disposable preference: a malformed or oversized document is replaced with an
 empty one instead of failing Gateway startup, because no canonical evidence
-exists to rebuild it from.
+exists to rebuild it from. Registry shutdown drains admitted recency writes
+before releasing its state directory.
 
 `model.list` items also carry an optional `cost` of `{input, output}` in USD per
 million tokens, copied from the pinned SDK catalog for the picker's rail cards.

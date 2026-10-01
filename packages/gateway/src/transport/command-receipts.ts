@@ -110,6 +110,18 @@ export class CommandReceiptStore {
   private readonly maximumAgeMs: number;
   private reservedCompletionBytes = 0;
   private inventory: CommandReceiptUsage | undefined;
+  private closed = false;
+  private disposalPromise: Promise<void> | undefined;
+  private readonly persistence = new Set<Promise<unknown>>();
+
+  private trackPersistence<T>(work: Promise<T>): Promise<T> {
+    this.persistence.add(work);
+    void work.then(
+      () => this.persistence.delete(work),
+      () => this.persistence.delete(work),
+    );
+    return work;
+  }
 
   constructor(
     tronHome: string,
@@ -295,6 +307,7 @@ export class CommandReceiptStore {
     operation: () => Promise<JsonValue>,
     options: CommandReceiptExecutionOptions = {},
   ): Promise<JsonValue> {
+    if (this.closed) throw new GatewayError("conflict", "Command receipt store is shutting down", true);
     if (!/^[A-Za-z0-9._:-]{8,160}$/.test(commandId)) {
       throw new GatewayError("invalid_request", "Mutating requests require a stable commandId");
     }
@@ -378,7 +391,7 @@ export class CommandReceiptStore {
         // clears that again: whatever reached the disk is then the truth.
         lane.unaccountedWrite = true;
         try {
-          await stage("receipt.pending-persist", () => this.writeReceipt(path, pending));
+          await stage("receipt.pending-persist", () => this.trackPersistence(this.writeReceipt(path, pending)));
         } catch (error) {
           await this.inventoryMutex.run(async () => {
             lane.unaccountedWrite = false;
@@ -412,7 +425,7 @@ export class CommandReceiptStore {
           await this.inventoryMutex.run(async () => {
             try {
               if (!uncertain) {
-                await rm(path, { force: true });
+                await this.trackPersistence(rm(path, { force: true }));
                 this.removeReceipt(pendingBytes);
                 // The receipt is gone from the disk and from the totals, so the
                 // lane must stop reporting a credit for it. Leaving the removed
@@ -440,8 +453,8 @@ export class CommandReceiptStore {
         lane.unaccountedWrite = true;
         const persistCompletion = async (): Promise<void> => {
           try {
-            if (options.respondBeforeCompletion) await this.writeReceipt(path, completed);
-            else await stage("receipt.completed-persist", () => this.writeReceipt(path, completed));
+            if (options.respondBeforeCompletion) await this.trackPersistence(this.writeReceipt(path, completed));
+            else await stage("receipt.completed-persist", () => this.trackPersistence(this.writeReceipt(path, completed)));
           } catch (error) {
             await this.inventoryMutex.run(async () => {
               lane.unaccountedWrite = false;
@@ -482,7 +495,20 @@ export class CommandReceiptStore {
     }
   }
 
+  /** Stop admitting receipt work and join every write already owned by this store. */
+  dispose(): Promise<void> {
+    if (this.disposalPromise) return this.disposalPromise;
+    this.closed = true;
+    this.disposalPromise = (async () => {
+      while (this.persistence.size > 0) {
+        await Promise.allSettled([...this.persistence]);
+      }
+    })();
+    return this.disposalPromise;
+  }
+
   async prune(maxAgeMs = this.maximumAgeMs): Promise<void> {
+    if (this.closed) return;
     await this.inventoryMutex.run(async () => {
       await this.pruneUnlocked(maxAgeMs);
     });

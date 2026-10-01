@@ -480,7 +480,7 @@ private struct IntegrationSetupView: View {
                 // Begin's receipt remains owned even after dismissal. Completion
                 // is a separate command: never send it to a replacement Gateway.
                 guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
-                _ = try await model.integrations.completeSetup(operationID: begun.operationId, instanceID: instanceID, providerAccountID: accountID, scope: scope.nilIfEmpty, credentialRef: credentialRef, policy: policy, configuration: nil)
+                _ = try await model.integrations.completeSetup(operationID: begun.operationId, instanceID: instanceID, providerAccountID: accountID, scope: scope.nilIfEmpty, credentialRef: credentialRef, policy: policy)
         })
     }
 }
