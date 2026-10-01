@@ -588,4 +588,3 @@ class FilterTokenTests(unittest.TestCase):
             self.assertTrue(set(token.split()) <= allowed, token)
         self.assertNotIn("display:none;}", page.split("</style>", 1)[1])
         self.assertNotIn("red;}body", page)
-
