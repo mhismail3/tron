@@ -4322,16 +4322,16 @@ final class ChatViewScrollHarness {
         return TranscriptWindowOracle.isFlipped(scrollView) ? -inset.top : maximumOffset
     }
 
-    /// Detach the reader the way a reader does: move the real transcript scroll
-    /// view to the oldest end of the loaded history, which the coordinator reads
-    /// as direct ownership (today's status-bar-tap path). The hand-written
-    /// `drivePhase`/`driveGeometry` sequence this replaces wrote an offset and a
-    /// container height no scroll view produced, so it encoded today's
-    /// orientation and could contradict the real view in the same frame. The
-    /// boundary ceiling is a fail-closed bound, not a retry: the caller asserts
-    /// the detached state it needs.
+    /// Move the real transcript scroll view to its oldest loaded content, then
+    /// deliver the native drag phases that make that viewport movement direct
+    /// user intent. Programmatic content-offset changes alone are not a reader
+    /// taking over. The geometry and visible row frames remain those produced by
+    /// the mounted scroll view.
     func detachReaderByRealScroll(boundaries: Int = 60) async throws {
         try scrollReader(byVisualPoints: 10_000_000)
+        try await driveFrameBoundary()
+        drivePhase(from: .idle, to: .interacting, geometry: nil)
+        drivePhase(from: .interacting, to: .idle, geometry: nil)
         for _ in 0..<boundaries {
             if probeObservation.isDetached, readerAnchor() != nil { return }
             try await driveFrameBoundary()
