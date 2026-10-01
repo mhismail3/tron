@@ -391,7 +391,6 @@ final class ChatHostedProbe {
     private var frameControl: (() async throws -> Void)?
     private var stateControl: (() -> ChatHostedScrollState)?
     private var prependControl: (() -> Bool)?
-    private var reapplyPinnedPositionControl: (() -> Void)?
     private var invalidatePresentationControl: (() -> Void)?
     private var reopenPresentationControl: (() async -> Void)?
     private var cancelPresentationControl: (() -> Void)?
@@ -852,7 +851,6 @@ final class ChatHostedProbe {
         frame: @escaping () async throws -> Void,
         state: @escaping () -> ChatHostedScrollState,
         prepend: @escaping () -> Bool,
-        reapplyPinnedPosition: @escaping () -> Void,
         invalidatePresentation: @escaping () -> Void,
         reopenPresentation: @escaping () async -> Void,
         cancelPresentation: @escaping () -> Void
@@ -867,7 +865,6 @@ final class ChatHostedProbe {
         frameControl = frame
         stateControl = state
         prependControl = prepend
-        reapplyPinnedPositionControl = reapplyPinnedPosition
         invalidatePresentationControl = invalidatePresentation
         reopenPresentationControl = reopenPresentation
         cancelPresentationControl = cancelPresentation
@@ -954,13 +951,6 @@ final class ChatHostedProbe {
         prependPageContinuation = nil
     }
 
-    func drivePinnedPositionReapplication() {
-        controlEventCount &+= 1
-        reapplyPinnedPositionControl?()
-        refreshControlledState()
-        revision &+= 1
-    }
-
     func drivePresentationInvalidation() {
         controlEventCount &+= 1
         invalidatePresentationControl?()
@@ -996,7 +986,6 @@ final class ChatHostedProbe {
         frameControl = nil
         stateControl = nil
         prependControl = nil
-        reapplyPinnedPositionControl = nil
         invalidatePresentationControl = nil
         reopenPresentationControl = nil
         cancelPresentationControl = nil

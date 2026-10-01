@@ -2369,9 +2369,6 @@ struct ChatView: View {
                     }
                 )
             },
-            reapplyPinnedPosition: {
-                scrollCoordinator.foregroundViewportBecameActive()
-            },
             invalidatePresentation: {
                 scrollCoordinator.resetForPresentation()
             },

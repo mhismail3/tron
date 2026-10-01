@@ -60,8 +60,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-
-
     @Test("pinned keyboard-sized viewport changes preserve the physical tail")
     func pinnedKeyboardViewportChangesPreserveTail() async throws {
         try await withHarness(seed: 1_208) { harness in
@@ -95,14 +93,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-
-
-
-
-
-
-
-
     @Test("opening readiness follows the installed terminal physical row")
     func openingReadinessFollowsInstalledTerminalRow() async throws {
         try await withHarness(seed: 1_217) { harness in
@@ -116,99 +106,6 @@ struct ChatViewScrollHarnessTests {
             })
         }
     }
-
-
-
-    // A queued card is taller than its sent row. The swap must shrink over
-    // several frames with the pinned tail held, never jump. Pixel sampling is
-    // expensive, so geometry and the cross-fade are measured in separate runs
-    // to keep geometry frames at display cadence.
-
-
-    private func queuedPromptCanonicalReplacement(samplesPixels: Bool) async throws {
-        try await withTestWatchdog(timeout: .seconds(20)) {
-            var initial = try SessionScenarioBuilder(seed: 1_263).openingTail(targetEncodedBytes: 10_000)
-            initial.phase = .running
-            initial.streaming = initial.transcript.last
-            initial.queueRevision += 1
-            initial.queuedItems = [
-                .init(id: "queued-prompt-operation", behavior: .steer, text: "A queued prompt", attachmentCount: 0)
-            ]
-            var canonicalTemplate = initial
-            canonicalTemplate.revision += 1
-            canonicalTemplate.eventSequence += 1
-            canonicalTemplate.queueRevision += 1
-            canonicalTemplate.queuedItems = []
-            canonicalTemplate.transcript.append(try decodeTranscriptFixture(
-                TranscriptItem.self,
-                from: JSONSerialization.data(withJSONObject: [
-                    "id": "queued-message-queued-prompt-operation", "parentId": NSNull(),
-                    "presentationId": "queued-prompt-operation", "timestamp": "2026-01-01T00:01:00Z",
-                    "kind": "message", "role": "user",
-                    "content": [["id": "queued-prompt-text", "ordinal": 0, "type": "text", "text": "A queued prompt"]]
-                ])
-            ))
-            canonicalTemplate.transcriptTotal = (canonicalTemplate.transcriptTotal ?? canonicalTemplate.transcript.count - 1) + 1
-            try await withHarness(snapshot: initial) { harness in
-                let queuedSample = try await harness.recorder.waitUntil {
-                    $0.observation.isReady && $0.nativeRows.contains {
-                        $0.physicalID == "queued-message-queued-prompt-operation" && $0.isOnScreen
-                    }
-                }
-                let queued = try #require(queuedSample.nativeRows.first {
-                    $0.physicalID == "queued-message-queued-prompt-operation" && $0.isOnScreen
-                })
-                let region = harness.renderRegion(ofRow: queued)
-                var previousPixels = samplesPixels ? harness.renderedRowLuminance(in: region) : []
-                harness.replaceAuthoritativeSnapshot(canonicalTemplate)
-                var heights: [CGFloat] = []
-                var tailDistances: [CGFloat] = []
-                var pixelChangingFrames = 0
-                var sawOtherHost = false
-                for _ in 0..<40 {
-                    try await harness.driveFrameBoundary()
-                    guard let sample = harness.recorder.samples.last,
-                          let row = sample.nativeRows.first(where: {
-                              $0.physicalID == queued.physicalID && $0.isOnScreen && $0.windowFrame.height > 1
-                          }) else { continue }
-                    if row.instance != queued.instance { sawOtherHost = true }
-                    heights.append(row.windowFrame.height)
-                    tailDistances.append(abs(harness.pinnedError() ?? .infinity))
-                    guard samplesPixels else { continue }
-                    // Sampled now, at this display boundary, not afterwards.
-                    let pixels = harness.renderedRowLuminance(in: region)
-                    let delta = zip(previousPixels, pixels).map { abs($1 - $0) }.reduce(0, +) / Double(max(1, pixels.count))
-                    if delta > 0.5 { pixelChangingFrames += 1 }
-                    previousPixels = pixels
-                }
-                #expect(!sawOtherHost)
-                let finalHeight = try #require(heights.last)
-                let totalChange = queued.windowFrame.height - finalHeight
-                // The fixture's queued card is taller than its canonical row.
-                #expect(totalChange > 8)
-                // The card's own height animation displaces the newest row's
-                // rendered bottom edge transiently (CT-20 measured 21.4 pt), so
-                // the transient is measured, not asserted away; what must hold
-                // is that the replacement returns to the pinned bottom.
-                #expect(
-                    harness.isPinnedToBottom(),
-                    "the replacement returned to the pinned bottom: \(harness.pinnedDescription())"
-                )
-                if samplesPixels {
-                    #expect(pixelChangingFrames >= 3)
-                } else {
-                    let steps = zip(heights, heights.dropFirst()).map { $0 - $1 }
-                    #expect(steps.allSatisfy { $0 >= -0.5 }, "height must shrink monotonically: \(heights)")
-                    #expect((steps.max() ?? 0) <= totalChange * 0.6, "height changed in one jump: \(heights)")
-                    let intermediate = heights.filter { $0 < queued.windowFrame.height - 1 && $0 > finalHeight + 1 }
-                    #expect(intermediate.count >= 3, "too few intermediate heights: \(heights)")
-                }
-                print("Queued→canonical evidence: queuedHeight=\(queued.windowFrame.height) finalHeight=\(finalHeight) heights=\(heights.map { Int($0.rounded()) }) maxTail=\(tailDistances.max() ?? 0) pixelChangingFrames=\(pixelChangingFrames)")
-            }
-        }
-    }
-
-
 
     // A positive-start tail with room for more rows admits one optional older
     // page inside the opaque opening. A Gateway that never answers it must
@@ -236,10 +133,6 @@ struct ChatViewScrollHarnessTests {
             }
         }
     }
-
-
-
-
 
     @Test("resumed multiline send settles from native row geometry during keyboard resize")
     func resumedMultilineSendSettlesDuringKeyboardResize() async throws {
@@ -356,31 +249,7 @@ struct ChatViewScrollHarnessTests {
     // reproduce in the hosted harness, so this fixture protects the product
     // invariant instead: the pinned transcript still settles on its native tail.
 
-
-
-
-    // The origin-anchored transcript's one piece of chrome (CT-23 stage 2): the
-    // automatic scroll edge effect at the pinned end.
-    //
-    // iOS 26 sizes that effect's band from the scroll view's own geometry, and
-    // under the flip it makes the band the whole scroll view viewport instead of
-    // the bar-sized one: measured 844 pt against 170.8 pt (106 pt with the hard
-    // style) for every style, scroll position, content size and inset, with the
-    // band's position (the visual top) unchanged. Drawn at that size it is a
-    // whole-viewport wash — 0.105 of the parity gate's difference against 0.018
-    // with it suppressed, and visible on the simulator's own screen — while the
-    // chat's own top blur is unchanged by the flip and still owns the chrome.
-    // So the origin-anchored path suppresses the pinned end's effect and today's
-    // path must keep the effect it has always drawn: this is the test that fails
-    // if the suppression is dropped or applied to the other path.
-
-
-    // The window oracle's orientation read, as a failure mode: a container that
-    // flips the scroll view *and* an ancestor renders upright, so the read has to
-    // multiply the signs along the layer chain instead of stopping at the first
-    // negative `m22`. Reading it as flipped would send `scrollReader`'s newest end
-    // and every pinned check the wrong way on exactly that container.
-    // MARK: CT-23 stage 4: accessibility, the status-bar tap and the context menu
+    // MARK: Accessibility, the status-bar tap and the context menu
 
     /// Why a context-menu preview is not the source lifted in place, or `nil`
     /// when it is.
@@ -472,8 +341,6 @@ struct ChatViewScrollHarnessTests {
         }
         #expect(reversed != nil, "\(reversed ?? "")")
     }
-
-
 
     @Test("the prompt menu's preview is upright and in place on the origin-anchored transcript")
     func promptContextMenuPreviewIsUprightAndInPlace() async throws {
@@ -576,24 +443,6 @@ struct ChatViewScrollHarnessTests {
         return snapshot
     }
 
-
-
-    // The bottom-coverage gate's own failure modes, in isolation: it must not
-    // pass a run that leaves the origin-pinned edge uncovered or a fixture that
-    // stopped reproducing the blank.
-
-
-    // The window oracle's negative control. A flipped transcript whose rows are
-    // not counter-flipped renders mirrored: the newest row is at the visual top
-    // and the oldest loaded rows cover the composer edge. The scroll-space tail
-    // measurement this oracle replaced reports that layout as perfectly aligned,
-    // because the offset is still at the legal end of the estimated content —
-    // which is exactly why a flipped transcript cannot be judged by it.
-
-
-    enum SendHistory: CaseIterable, Sendable { case short, shortToOverflow, long }
-
-
     @Test("a real managed sheet freezes covered chat and uncovers to the latest native frame")
     func managedSheetFreezesCoveredChat() async throws {
         let snapshot = try SessionScenarioBuilder(seed: 1_229).openingTail(targetEncodedBytes: 10_000)
@@ -620,12 +469,6 @@ struct ChatViewScrollHarnessTests {
             #expect(harness.isPinnedToBottom())
         }
     }
-
-
-
-
-
-
 
     // A stale or retired composer catalog completion, retired by a managed
     // sheet covering the chat, can neither publish nor become selectable, and
@@ -737,76 +580,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-
-
-    // F4: the opening reveal's direction. Flipping the transcript inverts any
-    // offset applied outside a row's counter-flip, so the reveal's rise would
-    // become a drop while every earlier check still passed (the reveal oracle is
-    // deliberately insensitive to direction, and the parity gate cannot resolve a
-    // sub-60 ms phase). The gate is the committed position of the newest row's
-    // bottom edge, in window coordinates: layout-true, and the amplitude —
-    // measured as the reveal's 8 pt step, 786.7 → 778.7 pt in every run. The
-    // rendered pixels were measured for the same gate and rejected (CT-25 stage
-    // B4): content realization moves the entering region's luminance centre 74 pt
-    // over the same frames, so the 8 pt rise is invisible inside it, and the
-    // send's 20 pt rise is never committed between display boundaries at all.
-
-
-    // The gate's own failure mode, in isolation: the reveal inverted. The
-    // sequence the gate accepts (CT-25 stage B4's three runs) must pass, and the
-    // same frames with the reveal inverted — the edge stepping *down* by the
-    // lift, and never monotone upward — must fail. Three hosted runs of the
-    // inverted product offset (both `.offset(y: 8)` modifiers negated, reverted
-    // afterwards) failed at the watchdog instead: the inverted offsets leave the
-    // opening unsettled, so the harness never samples and the assertions never
-    // ran. This pins what those runs would have reported.
-
-
-
-
-    // Regression: while the opening cover was up, transcript rows positioned
-    // under the navigation bar showed through it for a frame, because the
-    // cover was sized to the scroll view's safe frame.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     // A detached reader's new canonical row remains deferred until catch-up
     // reaches the origin and the newest row is visibly installed.
     @Test("catch-up lands on the newest message at the native origin")
@@ -855,10 +628,6 @@ struct ChatViewScrollHarnessTests {
         }
         }
     }
-
-
-
-
 
     @Test("a detached reader holds its top row through streaming, a keyboard cycle and a page load")
     func detachedReaderHoldsItsTopRowThroughStreamingKeyboardAndPage() async throws {
@@ -1163,52 +932,6 @@ enum OpeningRevealDirection {
 /// canonical user row whose `presentationId` is that operation ID.
 let harnessHostedPromptOperationID = "hosted-prompt-operation"
 
-/// The authoritative snapshot a Gateway publishes once it has accepted a
-/// prompt: the canonical user row for that send. The CT-2 cycle shape installs
-/// it after each send because an unacknowledged submission keeps
-/// `ComposerDraftCoordinator` from admitting the next prompt
-/// (`submission_in_progress`), which is why the first baseline materialized one
-/// tail for three submissions.
-private func harnessAcknowledgedSnapshot(
-    _ snapshot: SessionSnapshot,
-    promptIndex: Int,
-    text: String
-) throws -> SessionSnapshot {
-    var acknowledged = snapshot
-    acknowledged.transcript.append(try decodeTranscriptFixture(
-        TranscriptItem.self,
-        from: JSONSerialization.data(withJSONObject: [
-            "id": "cycle-prompt-\(promptIndex)",
-            "parentId": NSNull(),
-            "presentationId": harnessHostedPromptOperationID,
-            "timestamp": "2026-01-01T00:01:00Z",
-            "kind": "message",
-            "role": "user",
-            "content": [[
-                "id": "cycle-prompt-\(promptIndex)-text",
-                "ordinal": 0,
-                "type": "text",
-                "text": text
-            ]]
-        ])
-    ))
-    acknowledged.transcriptTotal = acknowledged.transcript.count
-    return acknowledged
-}
-
-/// Mixed-height lazy history for the tall-tailed send fixture: a realized tail
-/// of one-line rows, with six rows near the end rendering many screens tall so
-/// an estimate derived from the mounted rows can be wrong in both directions.
-private func harnessTallTailHistoryRowText(_ index: Int) -> String {
-    if (150...155).contains(index) {
-        return Array(
-            repeating: "Tall history row \(index) renders a body long enough to stand many screens above its neighbours.",
-            count: 48
-        ).joined(separator: "\n\n")
-    }
-    return "Short history row \(index) stays one line."
-}
-
 /// The bottom-coverage evidence of one sampled display boundary, in window
 /// coordinates. `blank` is the CT-2 blank oracle: no mounted transcript row
 /// intersects the visible transcript at all. `uncoveredBand` is the pinned
@@ -1319,22 +1042,6 @@ enum TranscriptBottomGateExpectation {
 enum TranscriptBottomGateOutcome: Equatable {
     case asExpected
     case bottomUncovered(blankBoundaries: Int, uncoveredBandBoundaries: Int, minimumVisibleRowFraction: CGFloat)
-}
-
-/// The bottom-coverage gate fails when the pinned band or visible transcript is uncovered.
-func transcriptBottomGateOutcome(
-    _ summary: TranscriptCoverageSummary
-) -> TranscriptBottomGateOutcome {
-    let uncovered = summary.blankBoundaries > 0
-        || summary.uncoveredBandBoundaries > 0
-        || summary.minimumVisibleRowFraction < TranscriptBottomGateExpectation.coveredFractionFloor
-    return uncovered
-        ? .bottomUncovered(
-            blankBoundaries: summary.blankBoundaries,
-            uncoveredBandBoundaries: summary.uncoveredBandBoundaries,
-            minimumVisibleRowFraction: summary.minimumVisibleRowFraction
-        )
-        : .asExpected
 }
 
 private func ct2Number(_ value: CGFloat) -> String {
@@ -1475,15 +1182,6 @@ func harnessRichAssistantMessage(
         "content": content
     ])
     return try decodeTranscriptFixture(TranscriptItem.self, from: data)
-}
-
-private func harnessCompactionItem(id: String) throws -> TranscriptItem {
-    try decodeTranscriptFixture(
-        TranscriptItem.self,
-        from: Data("""
-        {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"Compacted context","tokensBefore":100}
-        """.utf8)
-    )
 }
 
 func harnessUserMessage(id: String, text: String) throws -> TranscriptItem {
@@ -1848,13 +1546,6 @@ final class ChatViewScrollHarness {
     func revokeTarget() { if let currentTarget { model.revokePresentationIntake(currentTarget) } }
     var admitsUploads: Bool { currentTarget.map(model.admitsLiveSessionUploads) ?? false }
     func disconnectTransport() async { await model.enteredBackground().value }
-    func cancelNativeAppearanceTransition() async {
-        hostingController.beginAppearanceTransition(false, animated: true)
-        try? await DisplayFrameScheduler.displayLink.nextFrame()
-        hostingController.beginAppearanceTransition(true, animated: true)
-        hostingController.endAppearanceTransition()
-        try? await DisplayFrameScheduler.displayLink.nextFrame()
-    }
 
     /// The mounted chat's media owner, so a hosted test can read what it
     /// retained for an exact artifact identity.
@@ -1863,13 +1554,6 @@ final class ChatViewScrollHarness {
     /// The exact media identity the mounted chat resolves for one artifact.
     func chatMediaIdentity(blobID: String) -> ChatMediaIdentity? {
         model.chatMediaIdentity(blobID: blobID, sessionID: snapshot.sessionId)
-    }
-
-    func composerWidth() throws -> CGFloat {
-        guard let textView = Self.textViews(in: hostingController.view).first else {
-            throw HarnessError.missingComposer
-        }
-        return textView.bounds.width
     }
 
     func removeChatRoute() { hostingController.rootView = AnyView(EmptyView()) }
@@ -1957,24 +1641,9 @@ final class ChatViewScrollHarness {
         model.selectedSnapshot?.transcript.contains { $0.id == id } == true
     }
 
-    func installReplacementAuthority(_ snapshot: SessionSnapshot) {
-        model.installHostedSubscribedSnapshot(snapshot, token: "replacement-token")
-    }
-
     func reopenWithAuthoritativeSnapshot(_ snapshot: SessionSnapshot) async {
         model.installHostedSubscribedSnapshot(snapshot, token: "replacement-token")
         await probe.reopenPresentation()
-    }
-
-    func replaceOnNextProjectionInstall(
-        expectedSourceOrdinal: Int,
-        with snapshot: SessionSnapshot
-    ) {
-        probe.onNextProjectionInstall { [model] sourceOrdinal in
-            #expect(sourceOrdinal == expectedSourceOrdinal)
-            guard sourceOrdinal == expectedSourceOrdinal else { return }
-            model.replaceHostedAuthoritativeSnapshot(snapshot)
-        }
     }
 
     func driveGeometry(
@@ -2005,10 +1674,6 @@ final class ChatViewScrollHarness {
 
     func drivePrepend() -> Bool { probe.drivePrepend() }
 
-    func drivePinnedPositionReapplication() {
-        probe.drivePinnedPositionReapplication()
-    }
-
     func releasePrependPage() { probe.releasePrependPage() }
 
     func drivePresentationInvalidation() { probe.drivePresentationInvalidation() }
@@ -2016,7 +1681,6 @@ final class ChatViewScrollHarness {
     func driveFrameBoundary() async throws {
         try await probe.driveFrameBoundary()
     }
-
 
     var firstReadyEvents: [RecordingPerformanceSignposts.Event] {
         signposts.events().filter { $0.operation == .firstReadyFrame }
@@ -2145,8 +1809,6 @@ final class ChatViewScrollHarness {
         }
     }
 
-
-
     /// Return the reader to the pinned tail through the real scroll view.
     func returnReaderToPinnedTail(boundaries: Int = 40) async throws {
         try scrollReader(byVisualPoints: 0)
@@ -2224,12 +1886,6 @@ final class ChatViewScrollHarness {
         return readerAnchor()
     }
 
-    /// The render region of one oracle row. The oracle reports window
-    /// coordinates; the luminance samplers read the hosting view's own space.
-    func renderRegion(ofRow row: TranscriptWindowOracle.Row) -> CGRect {
-        hostingController.view.convert(row.windowFrame, from: nil)
-    }
-
     func isNativeTranscriptInteractionEnabled() throws -> Bool {
         let scrollView = try nativeTranscriptScrollView()
         return scrollView.isScrollEnabled && scrollView.isUserInteractionEnabled
@@ -2247,18 +1903,6 @@ final class ChatViewScrollHarness {
     /// native container directly.
     func nativeTranscriptScrollViewForTesting() throws -> UIScrollView {
         try nativeTranscriptScrollView()
-    }
-
-    /// Test-only: flip the real transcript scroll view the way CT-23's design
-    /// flips it, but leave the rows un-counter-flipped, so the transcript
-    /// renders mirrored and the newest row leaves the visual bottom. The window
-    /// oracle's negative control: the scroll-space tail measurement this oracle
-    /// replaced still reads the pinned bottom here, because the offset is still
-    /// at the legal end of the estimated content.
-    func flipNativeTranscriptWithoutCounterFlippingRows() throws {
-        let scrollView = try nativeTranscriptScrollView()
-        scrollView.layer.setAffineTransform(CGAffineTransform(scaleX: 1, y: -1))
-        scrollView.layoutIfNeeded()
     }
 
     /// The prompt rows' production context-menu surfaces: the native views that
@@ -2283,34 +1927,6 @@ final class ChatViewScrollHarness {
     private static func contextMenuViews(in view: UIView) -> [UIView] {
         let found = view.interactions.contains { $0 is UIContextMenuInteraction } ? [view] : []
         return found + view.subviews.flatMap(contextMenuViews)
-    }
-
-    /// Luminance samples from the top of the chat, where the transcript
-    /// scrolls under the navigation bar outside the scroll view's safe frame.
-    /// The glass bar buttons are excluded: their material re-renders with
-    /// small pixel noise unrelated to what is beneath them.
-    func renderedNavigationBandGrid() -> [Double] {
-        let width = hostingController.view.bounds.width
-        return renderedLuminance(in: CGRect(x: 72, y: 0, width: width - 144, height: 160), step: 3)
-    }
-
-    func renderedRowLuminance(in frame: CGRect) -> [Double] {
-        renderedLuminance(in: frame.intersection(hostingController.view.bounds), step: 3)
-    }
-
-    /// Luminance samples of the transcript, one per point, where the opening
-    /// reveal is measured. Full resolution is what makes the measurement
-    /// meaningful: the entrance rises the transcript while it fades, and a
-    /// coarser grid aliases that rise into the sample set — moving the settled
-    /// content by the entrance's 8 points changes the distance measured from a
-    /// 12-point grid by up to 20 percent, while the one-point integral stays
-    /// within 0.1 percent of itself.
-    func renderedRevealGrid() -> [Double] {
-        let bounds = hostingController.view.bounds
-        // Skip the edges and the centered opening pulse, whose animation is not
-        // part of the reveal being measured.
-        let pulse = CGRect(x: bounds.midX - 48, y: bounds.midY - 48, width: 96, height: 96)
-        return renderedLuminance(in: bounds.insetBy(dx: 8, dy: 24), step: 1, excluding: pulse)
     }
 
     /// The parity gate's rendered frame: the mean luminance per row and per
@@ -2442,25 +2058,6 @@ final class ChatViewScrollHarness {
         )
     }
 
-    /// Average-channel luminance sampled every `step` points of `region`,
-    /// rendered at 1x from the current hierarchy.
-    private func renderedLuminance(in region: CGRect, step: Int, excluding hole: CGRect = .null) -> [Double] {
-        let image = renderedWindowImage()
-        guard let cgImage = image.cgImage,
-              let data = cgImage.dataProvider?.data,
-              let bytes = CFDataGetBytePtr(data) else { return [] }
-        let bytesPerPixel = cgImage.bitsPerPixel / 8
-        var samples: [Double] = []
-        for y in stride(from: Int(region.minY), to: Int(region.maxY), by: step) {
-            for x in stride(from: Int(region.minX), to: Int(region.maxX), by: step) {
-                if hole.contains(CGPoint(x: x, y: y)) { continue }
-                let offset = y * cgImage.bytesPerRow + x * bytesPerPixel
-                samples.append((Double(bytes[offset]) + Double(bytes[offset + 1]) + Double(bytes[offset + 2])) / 3)
-            }
-        }
-        return samples
-    }
-
     func renderedPixelDistance(_ first: [Double], _ second: [Double]) -> Double {
         guard first.count == second.count, !first.isEmpty else { return .infinity }
         let squared = zip(first, second).reduce(0.0) { partial, pair in
@@ -2469,7 +2066,6 @@ final class ChatViewScrollHarness {
         }
         return (squared / Double(first.count)).squareRoot()
     }
-
 
     /// One origin-layout geometry sample for the scale and lazy-history regressions.
     func ct2BoundarySample(tallSemanticID: String) throws -> CT2BoundarySample {
@@ -2583,22 +2179,6 @@ final class ChatViewScrollHarness {
     /// inset itself is the real one, stepped through the curve's own values, so
     /// the composer moves with it exactly as it does in the journey.
     @discardableResult
-    func driveKeyboardInsetAtWrongEdge(
-        _ transition: KeyboardInsetTransition
-    ) async throws -> [KeyboardBoundarySample] {
-        beginKeyboardInset(transition)
-        var samples: [KeyboardBoundarySample] = []
-        for step in 1...max(1, transition.boundaries) {
-            let progress = Double(step) / Double(max(1, transition.boundaries))
-            applyKeyboardInset(transition, step: step)
-            try await driveFrameBoundary()
-            try reserveKeyboardHeightAtTranscriptFarEdge(
-                transition.height * Self.keyboardProgress(progress, curve: transition.curve)
-            )
-            samples.append(try keyboardBoundarySample())
-        }
-        return samples
-    }
 
     /// Test-only: reserve `height` at the transcript's far edge instead of the
     /// composer's, the way a wrongly swapped keyboard margin does. The real scroll
