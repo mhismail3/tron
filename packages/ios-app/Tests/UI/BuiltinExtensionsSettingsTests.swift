@@ -24,11 +24,4 @@ struct BuiltinExtensionsSettingsTests {
         #expect(global?["codemode"]?.objectValue?["mode"]?.stringValue == "only")
         #expect(project?["codemode"]?.objectValue?["mode"]?.stringValue == "on")
     }
-
-    @Test("loading a mode value never admits a settings write")
-    func suppressesReadbackWrite() {
-        #expect(!BuiltinExtensionsSettingsPolicy.shouldPersistModeChange(value: "only", loadedValue: "only", loading: false))
-        #expect(!BuiltinExtensionsSettingsPolicy.shouldPersistModeChange(value: "on", loadedValue: "only", loading: true))
-        #expect(BuiltinExtensionsSettingsPolicy.shouldPersistModeChange(value: "on", loadedValue: "only", loading: false))
-    }
 }

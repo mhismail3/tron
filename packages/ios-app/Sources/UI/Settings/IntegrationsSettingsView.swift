@@ -260,9 +260,15 @@ private struct IntegrationInstanceView: View {
             .tronSettingsCaption("Policy is independent per connection instance. Changing it does not install packages or silently reload a runtime.")
             if let lastError = instance.lastError { TronSettingsNotice(message: lastError, accent: .tronAmber) }
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
-            Button("Disconnect", role: .destructive) { disconnect() }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .disabled(mutation != nil)
+            Button(role: .destructive) { disconnect() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "link.badge.minus")
+                    Text("Disconnect")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(TronActionButtonStyle(role: .destructive))
+            .disabled(mutation != nil)
         }
         .modifier(IntegrationMutationObserver(mutation: $mutation, error: $error) {
             onChanged()

@@ -33,6 +33,15 @@ enum MCPServerPresentationPolicy {
     }
 
     static func isNeedsAuth(_ state: String) -> Bool { state == "needs-auth" }
+
+    /// Plain names for Pi's exposure values, in the order the menu offers them.
+    static let exposures: [(value: String, title: String)] = [
+        ("codemode", "Codemode"), ("codemode-deferred", "Codemode, on demand"),
+        ("deferred", "Tool search"), ("direct", "Direct"), ("hidden", "Hidden"),
+    ]
+    static func exposureTitle(_ value: String) -> String {
+        exposures.first { $0.value == value }?.title ?? value
+    }
     static func shouldDismissTokenSheet(afterError error: String?) -> Bool { error == nil }
 }
 
@@ -41,6 +50,7 @@ enum MCPServerPresentationPolicy {
 struct MCPServersSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
+    @Environment(\.colorScheme) private var colorScheme
     let projectCWD: String?
     /// The session Settings was opened from. MCP OAuth runs inside a live
     /// session's Pi MCP extension, so sign-in needs one.
@@ -76,36 +86,56 @@ struct MCPServersSettingsView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 18) {
                 if projectCWD != nil {
-                    TronSettingsGroup("Configuration", accent: .tronCyan) {
-                        Picker("Scope", selection: $selectedScope) {
-                            Text("Global").tag("global")
-                            Text("Trusted Project").tag("project")
-                        }.pickerStyle(.segmented).padding(12)
+                    TronSegmentedControl(
+                        options: [(label: "Global", value: "global"), (label: "Project", value: "project")],
+                        selection: $selectedScope,
+                        accent: .tronCyan,
+                        minimumHeight: 40
+                    )
+                }
+                if let error { TronSettingsNotice(message: error, accent: .tronError, retry: reload) }
+                if serverErrorCount > 0 {
+                    TronSettingsNotice(message: "\(serverErrorCount) entr\(serverErrorCount == 1 ? "y" : "ies") in mcp.json could not be read", accent: .tronError)
+                }
+                TronSettingsGroup(
+                    "Servers",
+                    detail: selectedScope == "global" ? "Available in every session." : "Only in this trusted project.",
+                    accent: .tronCyan,
+                    surfaceStyle: .scrollOptimized
+                ) {
+                    if loading && servers.isEmpty {
+                        TronLoadingState(label: "Loading MCP servers…", accent: .tronCyan)
+                            .padding(.vertical, TronSpacing.xl)
+                            .frame(maxWidth: .infinity)
+                    } else if visibleServers.isEmpty {
+                        TronPlaceholderState(title: "No MCP servers", detail: "Add a server that runs on your Mac or one you reach over HTTP.", icon: "server.rack")
+                    } else {
+                        ForEach(visibleServers) { server in
+                            serverRow(server)
+                            if server.id != visibleServers.last?.id { TronSettingsDivider(accent: .tronCyan) }
+                        }
                     }
                 }
-                if let error { TronSettingsNotice(message: error, retry: reload) }
-                TronSettingsGroup("MCP Servers", detail: selectedScope == "global" ? "Global configuration" : "Trusted project configuration", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
-                    if loading && servers.isEmpty { ProgressView("Loading MCP servers…").padding() }
-                    else if visibleServers.isEmpty { TronPlaceholderState(title: "No MCP servers", detail: "Add a stdio or HTTP server to your configuration.", icon: "server.rack") }
-                    if serverErrorCount > 0 {
-                        Text("\(serverErrorCount) MCP configuration error\(serverErrorCount == 1 ? "" : "s")")
-                            .font(TronTypography.caption).foregroundStyle(Color.tronError).padding(12)
-                    }
-                    ForEach(visibleServers) { server in
-                        serverRow(server)
-                        if server.id != visibleServers.last?.id { TronSettingsDivider(accent: .tronCyan) }
-                    }
-                    if !visibleServers.isEmpty { TronSettingsDivider(accent: .tronCyan) }
-                    HStack {
-                        Button("Add Server", systemImage: "plus") { showingAdd = true }
-                        Spacer()
-                        Button("Reload", systemImage: "arrow.clockwise") { reload() }
-                    }.padding(12)
+                .tronSettingsCaption("New and changed servers reach a chat when it starts or after /reload. Sign-ins stay on your Mac; bearer tokens are stored in the Mac Keychain.")
+                Button { showingAdd = true } label: {
+                    TronSettingsRow(
+                        icon: "plus",
+                        title: "Add Server",
+                        accent: .tronCyan,
+                        titleColor: TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : .tronCyan
+                    )
                 }
-                TronSettingsCaption("Server changes are loaded by new sessions or after /reload. Sign-in tokens stay on your Mac; bearer tokens are stored in the Mac Keychain.")
+                .buttonStyle(.plain)
+                .tronGlassSurface(accent: .tronCyan, interactive: true)
+                .disabled(working)
             }.padding(.horizontal, 20).padding(.vertical, 18)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                TronReloadToolbarButton(isReloading: loading, action: reload)
+            }
         }
         .tronScrollEdgeChrome().tronNavigationTitle("MCP Servers").tronSettingsLayout()
         .task(id: PresentationActivityTaskID(source: requestID, presentationActive: activity.allowsPresentationPublication)) { await load() }
@@ -145,31 +175,48 @@ struct MCPServersSettingsView: View {
         }
     }
 
-    @ViewBuilder private func serverRow(_ server: MCPServerList.Server) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(server.name).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
-                    Text("\(MCPServerPresentationPolicy.stateTitle(server.state)) · \(server.tools.count) tools · \(server.exposure)")
-                        .font(TronTypography.caption).foregroundStyle(statusColor(server))
+    private func serverRow(_ server: MCPServerList.Server) -> some View {
+        let summary = "\(MCPServerPresentationPolicy.stateTitle(server.state)) · \(server.tools.count) tool\(server.tools.count == 1 ? "" : "s") · \(MCPServerPresentationPolicy.exposureTitle(server.exposure))"
+        return TronSettingsRow(
+            icon: statusIcon(server),
+            title: server.name,
+            subtitle: server.error.map { "\(summary)\n\($0)" } ?? summary,
+            subtitleLineLimit: 4,
+            titleIsIdentifier: true,
+            accent: statusColor(server),
+            subtitleColor: statusColor(server)
+        ) {
+            TronInlineMenu("Manage", accent: .tronCyan) {
+                if MCPServerPresentationPolicy.isNeedsAuth(server.state) {
+                    Button("Sign In", systemImage: "person.badge.key") { Task { await startAuth(server.name) } }
                 }
-                Spacer()
-                Menu {
-                    Button("Enable") { Task { await update(server.name, enabled: true) } }
-                    Button("Disable") { Task { await update(server.name, enabled: false) } }
-                    Menu("Exposure") {
-                        ForEach(["codemode", "codemode-deferred", "deferred", "direct", "hidden"], id: \.self) { value in
-                            Button(value) { Task { await update(server.name, exposure: value) } }
-                        }
-                    }
-                    Button("Set Bearer Token") { tokenServer = server.name }
-                    Button("Sign In") { Task { await startAuth(server.name) } }
-                    Button("Sign Out") { Task { await mutate("mcp.logout", ["server": .string(server.name)]) } }
-                    Button("Remove", role: .destructive) { Task { await mutate("mcp.remove", ["server": .string(server.name)]) } }
-                } label: { Image(systemName: "ellipsis.circle") }.disabled(working)
+                Button(server.enabled ? "Turn Off" : "Turn On", systemImage: "power") {
+                    Task { await update(server.name, enabled: !server.enabled) }
+                }
+                Picker("Exposure", selection: Binding(
+                    get: { server.exposure },
+                    set: { value in Task { await update(server.name, exposure: value) } }
+                )) {
+                    ForEach(MCPServerPresentationPolicy.exposures, id: \.value) { Text($0.title).tag($0.value) }
+                }
+                .pickerStyle(.menu)
+                Button("Set Bearer Token", systemImage: "key") { tokenServer = server.name }
+                if !MCPServerPresentationPolicy.isNeedsAuth(server.state) {
+                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") { Task { await mutate("mcp.logout", ["server": .string(server.name)]) } }
+                }
+                Divider()
+                Button("Remove", systemImage: "trash", role: .destructive) { Task { await mutate("mcp.remove", ["server": .string(server.name)]) } }
             }
-            if let error = server.error { Text(error).font(TronTypography.caption).foregroundStyle(Color.tronError).textSelection(.enabled) }
-        }.padding(12)
+            .disabled(working)
+        }
+    }
+
+    private func statusIcon(_ server: MCPServerList.Server) -> String {
+        if !server.enabled || server.state == "disabled" { return "pause.circle" }
+        if MCPServerPresentationPolicy.isNeedsAuth(server.state) { return "person.badge.key" }
+        if server.state == "failed" || server.error != nil { return "exclamationmark.triangle" }
+        if server.state == "connected" { return "checkmark.circle" }
+        return "server.rack"
     }
 
     private func statusColor(_ server: MCPServerList.Server) -> Color {
