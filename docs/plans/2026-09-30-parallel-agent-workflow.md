@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-30
 - **Status:** Active
-- **Last updated:** 2026-09-30, wave 2 partly landed (W-6, W-30, W-32, W-33, W-34); W-7, W-31, W-35 paused
+- **Last updated:** 2026-09-30, agents manage the Debug Gateway (W-44, W-45); W-20 and W-27 validated
 - **Goal:** Any number of agents can pick up, isolate, validate, land and clean
   up Tron work concurrently, using GitHub Issues, PRs and one Project as the
   shared record, while the user sees everything on one dashboard.
@@ -215,14 +215,14 @@ Dated 2026-09-30:
 | W-17 | Done | #99 Default iOS test lane per worktree; E2E and profiler accept lanes; concurrent two-worktree iOS proof (P1) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-18 | Done | #100 Lease the Development simulator and the physical iPhone (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-19 | Done | #102 Worktree-relative Mac Release DerivedData; hook installer works from linked worktrees (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
-| W-20 | Done | #103 Dev Gateway status names the worktree and branch it runs (P2); merged, maintainer validation after W-27 | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-20 | Done | #103 Dev Gateway status names the worktree and branch it runs (P2) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-21 | Done | #101 Scope retained test/profile artifacts and `latest` pointers to the worktree (P3) | W-3 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-22 | Ready | Follow-up: triage procedure; an agent classifies `needs-triage` issues (type, area, priority, duplicate search) and places them as Proposed for maintainer approval | W-11 | Unassigned |
 | W-23 | Ready | Follow-up: warm worktrees; `work start` seeds `node_modules` and the iOS build cache from the primary checkout by APFS clone | W-4 | Unassigned |
 | W-24 | Ready | Follow-up: bug tasks record a failing reproduction before a fix; an unreproducible bug goes to Needs you with the missing details | W-11 | Unassigned |
 | W-25 | Ready | Follow-up: agents write to GitHub only through `scripts/tron work`, with a local audit log of every write | W-6 | Unassigned |
 | W-26 | Ready | Follow-up: type-specific PR body sections (Repro/Cause/Fix/Verification for bugs) validated before opening | W-6 | Unassigned |
-| W-27 | Done | #107 `tron dev start`/`restart` pass a short revision the payload manifest rejects; decision (b): full 40-hex HEAD plus a separate dirty-tree field (P1); merged, maintainer validation pending | W-20 | session 01a0f183 (orchestrator), 2026-09-30 |
+| W-27 | Done | #107 `tron dev start`/`restart` pass a short revision the payload manifest rejects; decision (b): full 40-hex HEAD plus a separate dirty-tree field (P1) | W-20 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-28 | Done | #110 CI workflow file was invalid (runner context in job env), so no CI ran from about 2026-09-24 (P0) | none | session 01a0f183, 2026-09-30 |
 | W-29 | Done | #113 CI red on main: failures accumulated while the workflow was invalid (P0) | W-28 | session 01a0f183 (orchestrator), 2026-09-30 |
 | W-30 | Done | #116 payload staging fails on macOS 15: rename of a directory frozen to 0555 (P1) | W-29 | session 01a0f183 (orchestrator), 2026-09-30 |
@@ -239,6 +239,9 @@ Dated 2026-09-30:
 | W-41 | Ready | #139 land and steward follow-ups (P3) | W-6 | Unassigned |
 | W-42 | Ready | #140 dev lifecycle follow-ups: dirtiness after build; handoff wiring test (P3) | W-32 | Unassigned |
 | W-43 | Ready | #141 old iOS lane directories; rare lane-removal traceback (P3) | W-34 | Unassigned |
+| W-44 | Done | #142 agents may start, restart and stop the Debug Gateway; handoff and every Stable or production transition stay maintainer-only (AGENTS.md rule 8) | none | session 01a0f183, 2026-09-30 |
+| W-45 | Done | #144 `scripts/tron dev` runs under an allow-listed environment and creates its state directory owner-only (P0) | W-44 | session 01a0f183, 2026-09-30 |
+| W-46 | Ready | #146 dev builds leave read-only payloads that block worktree removal (fold into W-7); `--skip-download` builds fail inconsistently (P2) | W-45 | Unassigned |
 
 ## Task details
 
@@ -769,3 +772,39 @@ file-level. Everything else inspected is A.
   - `land` exists now; land later lanes with `scripts/tron work land` rather
     than the orchestrator's script.
   - W-9's rules still wait for W-11.
+
+### W-44, W-45 · Done · 2026-09-30 · session 01a0f183
+
+- Result:
+  - The maintainer allowed agents to manage the Debug Gateway (#142, PR #143),
+    and `AGENTS.md` rule 8 was rewritten. Stable, handoff and production stay
+    maintainer-only.
+  - The first agent-run `scripts/tron dev restart` found two bugs, both fixed
+    in #144 (PR #145):
+    - Agent shells passed the Stable Gateway's environment into the Debug
+      lifecycle. `PI_SUBAGENTS_TEMP_ROOT` made the Debug Gateway treat
+      Stable's 941 MB subagent store as a legacy root to migrate.
+    - A fresh Debug home's `gateway/` directory was created 755, which the
+      Gateway refuses. This had blocked every fresh Debug start since
+      2026-08-24.
+  - Both PRs were landed with `scripts/tron work land`, its first real uses
+    (about 4 minutes each, end to end).
+- Evidence:
+  - Clean restart from `main` e188c4dd6: `ready`. `status` reports the full
+    revision, worktree and branch, and `sourceDirty: false`.
+  - Dirty restart: `ready`, with `sourceDirty: true` and a `-dirty` label.
+  - #103 and #107 closed with this evidence. Stable's process was unchanged
+    throughout.
+  - New test in `scripts/tron-dev-state.test.mjs` (17 pass); it failed before
+    the scrub.
+- Deviations:
+  - The Debug Gateway now runs from a long-lived `tron-worktrees/dev-gateway`
+    worktree on branch `dev/gateway`. The dashboard reports it as an orphan;
+    that is expected.
+- For the next agent:
+  - #146: W-7 must make read-only generated payloads writable before removing
+    a worktree.
+  - The Gateway's built-in operating context still tells every session never
+    to restart a Gateway (`packages/gateway/src/workspace/tron-core-extension.ts`).
+    Whether to scope that text to Stable is a product decision for the
+    maintainer.

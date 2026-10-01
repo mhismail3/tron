@@ -1057,10 +1057,12 @@ advertise byte ranges; malformed or unsatisfiable multi-range requests fail clos
 The retired `/engine` protocol is not exposed.
 
 Gateway updates are an explicit, bounded control-plane contract. Rebuild, update,
-rollback, promotion, and restart mutations are user-initiated operations: repository
-agents and automation may prepare and validate source or artifacts, but must not submit
-those RPCs or run a mutating Gateway lifecycle helper. The user or maintainer performs
-the confirmed action that transitions the running Gateway. `gateway.update.status`
+rollback, promotion, and restart mutations of Stable are maintainer operations:
+repository agents and automation may prepare and validate source or artifacts, but
+must not submit those RPCs or run `scripts/tron dev handoff`. Agents may start,
+restart and stop the isolated Debug Gateway (`scripts/tron dev`, port 9848) to
+validate their changes (AGENTS.md rule 8). The maintainer performs the confirmed
+action that transitions Stable. `gateway.update.status`
 projects only the selected channel's `deployment-state.json`, `current.json`,
 `previous.json`, and version manifests (each document is capped at 64 KiB); malformed
 or oversized state fails closed. `gateway.update` accepts only `channel` (`stable` or `dev`), `mode` (`source`,
