@@ -277,6 +277,16 @@ and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
   - Do all work in that worktree.
   - Never commit in the primary checkout, never push to `main`, and never edit
     another task's worktree or branch.
+- **`main` is protected by rule, not by GitHub.** The maintainer deliberately
+  leaves the ruleset in `.github/rulesets/main.json` unapplied, to keep an
+  emergency path. Act exactly as if it were enforced:
+  - every change reaches `main` as a squash-merged pull request that is up to
+    date with `main` and has passed `policy` and `tron/verify`, through
+    `land`;
+  - nobody force-pushes or deletes `main`;
+  - only the maintainer pushes directly, and only in an emergency.
+
+  That the push would succeed is not permission.
 - **Validate while working:** `scripts/tron work verify`. It runs exactly the
   checks the diff needs, plus the owning tests the testing policy requires.
 - **Land:**
