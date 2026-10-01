@@ -110,6 +110,9 @@ export class CommandReceiptStore {
   private readonly maximumAgeMs: number;
   private reservedCompletionBytes = 0;
   private inventory: CommandReceiptUsage | undefined;
+  private closed = false;
+  private disposalPromise: Promise<void> | undefined;
+  private readonly executions = new Set<Promise<unknown>>();
 
   constructor(
     tronHome: string,
@@ -295,6 +298,7 @@ export class CommandReceiptStore {
     operation: () => Promise<JsonValue>,
     options: CommandReceiptExecutionOptions = {},
   ): Promise<JsonValue> {
+    if (this.closed) throw new GatewayError("conflict", "Command receipt store is shutting down", true);
     if (!/^[A-Za-z0-9._:-]{8,160}$/.test(commandId)) {
       throw new GatewayError("invalid_request", "Mutating requests require a stable commandId");
     }
@@ -472,6 +476,11 @@ export class CommandReceiptStore {
         }
         return result;
       }));
+      this.executions.add(execution);
+      void execution.then(
+        () => this.executions.delete(execution),
+        () => this.executions.delete(execution),
+      );
       if (!earlyResult) return await execution;
       releaseLaneAfterExecution = true;
       void execution.then(resolveEarly, rejectEarly);
@@ -482,7 +491,20 @@ export class CommandReceiptStore {
     }
   }
 
+  /** Stop admitting receipt work and join every write already owned by this store. */
+  dispose(): Promise<void> {
+    if (this.disposalPromise) return this.disposalPromise;
+    this.closed = true;
+    this.disposalPromise = (async () => {
+      while (this.executions.size > 0) {
+        await Promise.allSettled([...this.executions]);
+      }
+    })();
+    return this.disposalPromise;
+  }
+
   async prune(maxAgeMs = this.maximumAgeMs): Promise<void> {
+    if (this.closed) return;
     await this.inventoryMutex.run(async () => {
       await this.pruneUnlocked(maxAgeMs);
     });

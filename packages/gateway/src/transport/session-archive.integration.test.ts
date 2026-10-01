@@ -66,6 +66,7 @@ interface Stack {
   registry: RuntimeRegistry;
   service: GatewayService;
   server: GatewayServer;
+  receipts: CommandReceiptStore;
   port: number;
 }
 
@@ -159,11 +160,12 @@ async function fixture(options: {
       materialize: vi.fn(async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 })),
       removeSession: vi.fn(async () => {}),
     };
+    const receipts = new CommandReceiptStore(root);
     const service = new GatewayService({
       config: { tronHome: root },
       devices,
       sessions: registry,
-      receipts: new CommandReceiptStore(root),
+      receipts,
       uploads,
       terminals: { belongsToSession: () => false },
       logger: { log: () => {} },
@@ -183,7 +185,7 @@ async function fixture(options: {
     });
     await server.listen();
     const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
-    current = { registry, service, server, port };
+    current = { registry, service, server, receipts, port };
     return current;
   };
   const stack = await start();
@@ -194,6 +196,7 @@ async function fixture(options: {
       await searchService?.close();
       searchService = undefined;
       await current.registry.dispose();
+      await current.receipts.dispose();
       current = undefined;
     }
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -209,6 +212,7 @@ async function fixture(options: {
     await searchService?.close();
     searchService = undefined;
     await previous.registry.dispose();
+    await previous.receipts.dispose();
     return start();
   };
   const connect = async (): Promise<Client> => {

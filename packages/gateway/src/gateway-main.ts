@@ -528,6 +528,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     sessionSearchWarmTask = undefined;
     await shutdownStep("search-close", async () => { await sessionSearch?.close(); }, recordShutdownStep);
     await shutdownStep("sessions-dispose", () => sessions.dispose(), recordShutdownStep);
+    await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     clearTimeout(forced);
     recordStopped(exitCode);

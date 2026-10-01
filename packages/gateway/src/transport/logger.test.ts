@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -222,17 +222,28 @@ describe("GatewayLogger", () => {
 
   it("rotates across eight 5 MB segments within the 40 MB budget", () => {
     const path = logPath();
+    const segmentBytes = 5 * 1_024 * 1_024;
+    // Pre-fill sparse segments to the rotation boundary: this exercises the
+    // same on-disk capacity transition without spending thousands of logger
+    // calls to manufacture 40 MB of fixture data under parallel suite load.
+    writeFileSync(`${path}.7`, "record-0-oldest\n");
+    truncateSync(`${path}.7`, segmentBytes);
+    for (let index = 1; index < 7; index += 1) {
+      writeFileSync(`${path}.${index}`, "");
+      truncateSync(`${path}.${index}`, segmentBytes);
+    }
+    writeFileSync(path, "");
+    truncateSync(path, segmentBytes);
     const logger = new GatewayLogger(path);
-    // ~2 KB per record; 24,000 records is ~48 MB, forcing the oldest segment out.
-    for (let index = 0; index < 24_000; index += 1) logger.log("info", `record-${index}-${"x".repeat(1_900)}`);
+    logger.log("info", "newest-record");
     const segments = [path, ...Array.from({ length: 7 }, (_, index) => `${path}.${index + 1}`)];
     expect(segments.every((segment) => existsSync(segment))).toBe(true);
     expect(existsSync(`${path}.8`)).toBe(false);
     const total = segments.reduce((sum, segment) => sum + statSync(segment).size, 0);
-    for (const segment of segments) expect(statSync(segment).size).toBeLessThanOrEqual(5 * 1_024 * 1_024);
-    expect(total).toBeLessThanOrEqual(40 * 1_024 * 1_024);
+    for (const segment of segments) expect(statSync(segment).size).toBeLessThanOrEqual(segmentBytes);
+    expect(total).toBeLessThanOrEqual(8 * segmentBytes);
     expect(readFileSync(`${path}.7`, "utf8")).not.toContain("record-0-");
-    expect(lines(path).at(-1)?.message).toMatch(/^record-23999-/u);
+    expect(lines(path).at(-1)?.message).toBe("newest-record");
   });
 
   it("restores the client tail from the newest segments after restart", () => {

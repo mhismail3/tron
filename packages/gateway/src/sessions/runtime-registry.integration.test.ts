@@ -11986,11 +11986,21 @@ export default function (pi) {
       return snapshot;
     });
 
-    const first = fixture.registry.acquire(target.getSessionId());
-    const second = fixture.registry.acquire(target.getSessionId());
-    const [firstSlot, secondSlot] = await Promise.all([first, second]);
-    expect(secondSlot).toBe(firstSlot);
-    expect(idleSlot.isDisposed).toBe(false);
+    try {
+      const first = fixture.registry.acquire(target.getSessionId());
+      const second = fixture.registry.acquire(target.getSessionId());
+      const [firstSlot, secondSlot] = await Promise.all([first, second]);
+      expect(secondSlot).toBe(firstSlot);
+      expect(idleSlot.isDisposed).toBe(false);
+    } finally {
+      // The byte-budget stimulus is synthetic sparse data; return these fixture
+      // transcripts to their small canonical size before registry disposal so
+      // watcher reconciliation never has to read the test's 500 MB input.
+      await Promise.all([
+        truncate(idleSlot.sessionFile!, 0),
+        truncate(target.getSessionFile()!, 0),
+      ]);
+    }
   });
 
   // Failure mode: an opening session whose bytes fit nowhere is refused on the

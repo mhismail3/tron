@@ -322,7 +322,7 @@ describe("Knowledge curation", () => {
     await expect(service.tool({ action: "summarize", commandId: other("job-stale"), sourceId: record.id, revisionId: record.revisionId })).rejects.toThrow(/revision changed/);
   });
 
-  // Acceptance case from docs/plans/2026-09-28-knowledge-agent-curation.md: one
+  // Acceptance case from epic #214 / K1: one
   // batch driven through the real agent tool through an injected conflict, a
   // replay, a budget stop, and a restart, leaving an inspectable JSON report.
   it("survives a conflict, a replay, a budget stop and a restart in one batch", async () => {
@@ -387,7 +387,7 @@ describe("Knowledge curation", () => {
     expect(verdicts.applied).toBe(25);
 
     const report = {
-      plan: "docs/plans/2026-09-28-knowledge-agent-curation.md#K1",
+      plan: "epic #214 / K1",
       batchCommandId: batch,
       items: records.length,
       phases,
