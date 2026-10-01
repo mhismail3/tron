@@ -191,6 +191,28 @@ struct ToolTextPreview: Hashable, Sendable {
     }
 }
 
+/// The opening lines of a long text, for a preview whose full text opens in
+/// its own sheet. Splitting stops after `maximumLines`, so a huge source is
+/// never split whole.
+struct ToolTextHeadPreview: Hashable, Sendable {
+    static let maximumLines = 8
+    static let maximumLineCharacters = 220
+
+    let text: String
+    let isTruncated: Bool
+
+    static func make(_ source: String) -> ToolTextHeadPreview {
+        let parts = source.split(separator: "\n", maxSplits: maximumLines, omittingEmptySubsequences: false)
+        var truncated = parts.count > maximumLines
+        let lines = parts.prefix(maximumLines).map { line -> Substring in
+            guard line.count > maximumLineCharacters else { return line }
+            truncated = true
+            return line.prefix(maximumLineCharacters)
+        }
+        return ToolTextHeadPreview(text: lines.joined(separator: "\n") + (truncated ? "\n…" : ""), isTruncated: truncated)
+    }
+}
+
 enum ToolDiffLineKind: Hashable, Sendable {
     case context
     case addition
@@ -666,10 +688,14 @@ struct ToolDetailPresentation: Hashable, Sendable {
     let nestedCallsComplete: Bool
     let tronNestedComplete: Bool?
     let classifyCostUSD: Double?
+    /// Codemode is identified by its invocation name; its display title is a
+    /// presentation choice that may change.
+    let isCodemode: Bool
 
     init(tool: ChatToolPresentation) {
         let request = tool.request?.objectValue
         let rawToolName = tool.toolName ?? tool.title
+        isCodemode = rawToolName == "codemode"
         kind = Self.kind(for: rawToolName)
         displayTitle = Self.displayTitle(for: tool)
         icon = Self.icon(for: rawToolName)
@@ -704,7 +730,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
                   value.isFinite, value >= 0 else { return nil }
             return value
         }()
-        classifyCostUSD = rawToolName == "codemode" ? usd : nil
+        classifyCostUSD = isCodemode ? usd : nil
     }
 
     static func kind(for title: String) -> ToolDetailKind {
@@ -984,8 +1010,10 @@ struct ToolDetailPresentation: Hashable, Sendable {
     private static func nestedCalls(_ value: JSONValue?) -> (calls: [NestedToolCallPresentation], complete: Bool) {
         guard let object = value?.objectValue,
               let rawCalls = object["calls"]?.arrayValue else { return ([], true) }
+        // The Gateway owns the bound (every call Pi records, up to 256) and
+        // reports dropped calls through `complete`.
         let complete = object["complete"]?.boolValue ?? false
-        let calls = rawCalls.prefix(32).compactMap { item -> NestedToolCallPresentation? in
+        let calls = rawCalls.compactMap { item -> NestedToolCallPresentation? in
             guard let fields = item.objectValue,
                   let id = fields["id"]?.stringValue, !id.isEmpty,
                   let name = fields["toolName"]?.stringValue ?? fields["name"]?.stringValue else { return nil }
@@ -998,7 +1026,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
                 argumentsBytes: fields["argumentsBytes"]?.intValue
             )
         }
-        return (calls, complete && rawCalls.count <= 32)
+        return (calls, complete)
     }
 
     private static func parsedJSON(_ text: String) -> JSONValue? {

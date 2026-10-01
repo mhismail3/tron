@@ -61,10 +61,7 @@ struct HookEventDetailView: View {
             .defaultScrollAnchor(.top)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showsInfo = true } label: {
-                        Image(systemName: "info.circle").font(TronTypography.buttonSM).foregroundStyle(accent)
-                    }
-                    .accessibilityLabel("Event technical information")
+                    TronSheetInfoButton(accessibilityLabel: "Event technical information", accent: accent) { showsInfo = true }
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: event.descriptor.title, accent: accent) }
                 ToolbarItem(placement: .confirmationAction) {

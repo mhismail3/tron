@@ -291,6 +291,14 @@ export interface ResourceSamplerDependencies {
   eventLoopUtilization?: (current?: EventLoopUtilization, previous?: EventLoopUtilization) => EventLoopUtilization;
 }
 
+/** Convert a Node delay-histogram reading to lateness beyond the configured
+ * sampling period. The exit criterion bounds lateness, not the period itself. */
+export function eventLoopDelayLatenessMs(valueNs: number): number {
+  return Number.isFinite(valueNs)
+    ? Math.max(0, valueNs / 1e6 - EVENT_LOOP_DELAY_RESOLUTION_MS)
+    : 0;
+}
+
 /** The event-loop delay histogram, read once per sample and reset with it, so a
  * percentile covers one minute and a momentary stall is not a permanent max.
  * Every reading carries the sampling period (see
@@ -301,13 +309,10 @@ function eventLoopDelayReader(): { read: () => { p50Ms: number; p99Ms: number; m
   histogram.enable();
   return {
     read: () => {
-      const delayMs = (value: number) => Number.isFinite(value)
-        ? Math.max(0, value / 1e6 - EVENT_LOOP_DELAY_RESOLUTION_MS)
-        : 0;
       const delay = {
-        p50Ms: delayMs(histogram.percentile(50)),
-        p99Ms: delayMs(histogram.percentile(99)),
-        maxMs: delayMs(histogram.max),
+        p50Ms: eventLoopDelayLatenessMs(histogram.percentile(50)),
+        p99Ms: eventLoopDelayLatenessMs(histogram.percentile(99)),
+        maxMs: eventLoopDelayLatenessMs(histogram.max),
       };
       histogram.reset();
       return delay;

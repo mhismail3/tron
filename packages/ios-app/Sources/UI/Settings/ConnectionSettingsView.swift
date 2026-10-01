@@ -647,11 +647,7 @@ struct GatewayConnectionDetailView: View {
         .tronNavigationTitle(currentProfile.label)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { showingServerInfo = true } label: {
-                    Image(systemName: "info.circle")
-                        .tronSettingsAccent()
-                }
-                .accessibilityLabel("Server info")
+                TronSheetInfoButton(accessibilityLabel: "Server info") { showingServerInfo = true }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button { dismiss() } label: {

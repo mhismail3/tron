@@ -16,7 +16,7 @@ import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { ImageContent, Model } from "@earendil-works/pi-ai";
+import { getCurrentSystemMessage, type ImageContent, type Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -84,6 +84,9 @@ import {
   boundCommandContent,
   boundStreamingProgressItem,
   fitSessionSnapshot,
+  NESTED_ARGUMENT_CALL_BYTES,
+  NESTED_ARGUMENT_TOTAL_BYTES,
+  NESTED_CALL_LIMIT,
   projectJson,
   projectMessage,
   mergeLiveToolOutput,
@@ -1594,6 +1597,13 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
       });
+      // The transcript owns a chat's tool loadout. Pi's createAgentSession always
+      // passes its configured defaults, which skips AgentSession's own transcript
+      // restore, so a resumed, forked or reloaded chat would silently fall back
+      // to the defaults and the next prompt would persist that (#327). Apply the
+      // declared loadout here; a session without one keeps the defaults.
+      const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
+      if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
       compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir);
       created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(created.session.agent.streamFunction));
       this.compactionPolicies.set(created.session, compactionPolicy);
@@ -2076,8 +2086,9 @@ export class RuntimeSlot {
     if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
     const sourceCalls = (details as Record<string, unknown>).calls;
     if (!Array.isArray(sourceCalls)) return undefined;
-    let complete = sourceCalls.length <= 32;
-    const calls = sourceCalls.slice(0, 32).flatMap((candidate): NestedToolExecutionState[] => {
+    let complete = sourceCalls.length <= NESTED_CALL_LIMIT;
+    let argumentBudget = NESTED_ARGUMENT_TOTAL_BYTES;
+    const calls = sourceCalls.slice(0, NESTED_CALL_LIMIT).flatMap((candidate): NestedToolExecutionState[] => {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
       const item = candidate as Record<string, unknown>;
       if (typeof item.id !== "string" || typeof item.name !== "string") return [];
@@ -2092,8 +2103,11 @@ export class RuntimeSlot {
       if (args) {
         try {
           const parsed: unknown = JSON.parse(args);
-          if (Buffer.byteLength(JSON.stringify(parsed)) <= 1_024) argumentsValue = projectJson(parsed, 1_024);
-          else { argumentsBytes = Buffer.byteLength(args); complete = false; }
+          const bytes = Buffer.byteLength(JSON.stringify(parsed));
+          if (bytes <= NESTED_ARGUMENT_CALL_BYTES && bytes <= argumentBudget) {
+            argumentsValue = projectJson(parsed, NESTED_ARGUMENT_CALL_BYTES);
+            argumentBudget -= bytes;
+          } else { argumentsBytes = Buffer.byteLength(args); complete = false; }
         } catch { argumentsBytes = Buffer.byteLength(args); complete = false; }
       }
       const id = item.id.slice(0, 512);
@@ -2143,7 +2157,7 @@ export class RuntimeSlot {
     if (!parent) return;
     const calls = parent.nestedCalls?.calls ?? [];
     const existing = calls.find((call) => call.id === event.toolCallId);
-    if (!existing && calls.length >= 32) {
+    if (!existing && calls.length >= NESTED_CALL_LIMIT) {
       this.toolExecutions.set(rootToolCallId, {
         ...parent,
         nestedCalls: { calls, complete: false },
@@ -2159,8 +2173,12 @@ export class RuntimeSlot {
     if (event.args !== undefined) {
       let encodedBytes = 0;
       try { encodedBytes = Buffer.byteLength(JSON.stringify(event.args)); } catch { encodedBytes = Number.MAX_SAFE_INTEGER; }
-      if (encodedBytes <= 1_024) argumentsValue = projectJson(event.args);
-      else {
+      // The budget left is what this parent's other calls have not used.
+      const usedBytes = calls.reduce((total, call) => call.id === event.toolCallId || call.arguments === undefined
+        ? total : total + Buffer.byteLength(JSON.stringify(call.arguments)), 0);
+      if (encodedBytes <= NESTED_ARGUMENT_CALL_BYTES && usedBytes + encodedBytes <= NESTED_ARGUMENT_TOTAL_BYTES) {
+        argumentsValue = projectJson(event.args);
+      } else {
         argumentsBytes = encodedBytes;
         complete = false;
       }

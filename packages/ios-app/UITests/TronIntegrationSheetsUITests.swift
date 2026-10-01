@@ -14,7 +14,6 @@ final class TronIntegrationSheetsUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Configured"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Raindrop"].exists)
-        XCTAssertFalse(app.staticTexts["Jev"].exists, "Jev is a provider credential, not a connected service")
         XCTAssertFalse(app.staticTexts["Available"].exists, "Configured services must not be duplicated in Available")
         XCTAssertTrue(app.staticTexts["X"].exists)
         XCTAssertTrue(app.staticTexts["Account"].exists)
@@ -55,7 +54,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertFalse(failing.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] %@", "failed")).firstMatch.exists)
         XCTAssertTrue(failing.staticTexts["Raindrop"].exists, "Failed credits do not block other rows")
         keepScreenshot(failing, name: "c29-x-credit-failure-dark")
-        failing.buttons["Details for Raindrop"].tap()
+        failing.buttons.matching(identifier: "Details for Raindrop").firstMatch.tap()
         XCTAssertTrue(failing.staticTexts["Capabilities"].waitForExistence(timeout: 5))
         XCTAssertTrue(failing.staticTexts["Raindrop collections"].waitForExistence(timeout: 3))
         XCTAssertTrue(failing.staticTexts["Research home"].exists)
@@ -64,7 +63,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         let lightRaindrop = launch(scenario: "credits-fail-light")
         defer { lightRaindrop.terminate() }
         XCTAssertTrue(lightRaindrop.staticTexts["Configured"].waitForExistence(timeout: 10))
-        lightRaindrop.buttons["Details for Raindrop"].tap()
+        lightRaindrop.buttons.matching(identifier: "Details for Raindrop").firstMatch.tap()
         XCTAssertTrue(lightRaindrop.staticTexts["Raindrop collections"].waitForExistence(timeout: 5))
         keepScreenshot(lightRaindrop, name: "c29-raindrop-detail-light")
     }

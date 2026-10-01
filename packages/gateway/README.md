@@ -1233,7 +1233,10 @@ finishes the completed receipt write while retaining the command lane and its
 Gateway drain owner. Same-command duplicates join that lane and receive the
 stored result. Process loss or a failed completion write in this response window
 leaves the pending receipt as an outcome-unknown replay fence; prompts are never
-re-run automatically. Every other receipt-backed method still persists its
+re-run automatically. The receipt-store owner closes admission and joins accepted
+receipt persistence, including completion writes and definitive-rejection cleanup,
+before releasing its state directory; this drain does not wait for the command's
+operation to settle. Every other receipt-backed method still persists its
 completed receipt before responding because its acknowledgement boundary has
 not been approved to move. A mutation whose owner reports an unknown
 outcome keeps its pending receipt even though the operation threw, so the
@@ -1513,9 +1516,10 @@ a second stream identity or duplicate finalized tool groups in a settlement snap
 
 Pi nested tool calls keep their `<parent>/<n>` identity under the model-issued call; they are
 never independent transcript rows, invocation receipts, segments, or extension activities.
-Live parent progress carries a bounded child list (32 calls; arguments at most 1 KiB, otherwise
-a byte count), and the canonical parent result carries Pi's bounded `nestedCalls` record with its
-`complete` flag. Child failures use `failed` even when the tool returns `isError` instead of
+Live parent progress and the canonical parent result carry the same bounded child list: every
+call Pi records (`NESTED_CALL_LIMIT`, Pi's own 256), with each call's arguments at most 1 KiB and
+all of a parent's arguments together at most 32 KiB (Pi's total); an argument outside either bound
+is replaced by its byte count and clears the `complete` flag. Child failures use `failed` even when the tool returns `isError` instead of
 throwing; Pi's `unfinished` child status remains an explicit terminal presentation state when
 recovered from history, and each child error is projected to at most 512 UTF-8 bytes. Opaque
 `structuredContent` is not forwarded by generic live tool-result projection.
@@ -2429,7 +2433,8 @@ publishes a change in the visible order so an open picker can refetch. The
 document lives at `gateway/model-recents.json`, is owner-only, and is a
 disposable preference: a malformed or oversized document is replaced with an
 empty one instead of failing Gateway startup, because no canonical evidence
-exists to rebuild it from.
+exists to rebuild it from. Registry shutdown drains admitted recency writes
+before releasing its state directory.
 
 `model.list` items also carry an optional `cost` of `{input, output}` in USD per
 million tokens, copied from the pinned SDK catalog for the picker's rail cards.
@@ -2544,6 +2549,17 @@ passes `--max-old-space-size=4096` to the Gateway's Node process
 below that limit. `runtime.loaded` and `runtime.evicted` record each transition
 with the session, its reason (`heap` for the heap-pressure pass `G-12` added),
 its transcript bytes and the charge, as named `counts`.
+
+A chat's tool loadout (`session.setTools`) lives only in its canonical
+transcript, as the system messages' `toolsAdded`/`toolsRemoved`. Every runtime
+the Gateway creates for an existing transcript (cold open, reopen after idle or
+capacity eviction, restart, fork, previous-runtime restore) applies the loadout
+the transcript declares; only a transcript that declares none gets the
+configured `defaultTools`. Pi's `createAgentSession` always supplies the
+defaults and so skips its own transcript restore, which made an enabled tool
+such as `codemode` disappear after a reload and the next prompt persist the
+defaults. `runtime-tool-loadout.integration.test.ts` covers a reopen and the
+next prompt.
 
 Catalog membership is one owner's index, so nothing coalesces a second
 discovery: a live persisted `RuntimeSlot` proves membership for

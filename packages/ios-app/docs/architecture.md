@@ -1046,7 +1046,7 @@ command, query, diff, and readable result. Extension-authored Pi tool labels are
 invocation names and become the native row/detail title (for example, `subagent_wait` displays as **Subagent Wait**),
 while arbitrary extension tools may foreground only the first
 trusted common string key and otherwise lead with their result. Pi codemode uses that same tool-detail route:
-its readable result leads, the complete script is behind its dedicated source sheet, bounded nested invocations stay inside the parent detail with their own semantic status/duration and a one-line preview of their primary argument. The source and nested-call sheets share the parent's chrome (inline principal title, Done, no drag indicator, parent insets and section labels); a nested call's sheet shows its status chip, any error, its primary argument in full and its remaining arguments. Only each call's request, status and timing are recorded, so its output stays part of the script result. Recovered `unfinished` calls are terminally presented as “Didn't finish,” not as running work; bounded per-call errors remain visible in the detail sheet. `details.tronNested` attachments remain parent-owned.
+its Script and then its Result show their first eight lines (`ToolTextHeadPreview`), each with a row that opens the whole text in a sheet titled Script or Result that shows it directly, like the Request JSON sheet. One Calls list follows: every nested call the Gateway projects (all that Pi records, up to 256, so the transcript chip and the sheet count the same calls), each with its semantic status/duration and a one-line preview of its primary argument; Pi's raw `details.calls` never appears as a second, generic Details table. The nested-call sheet shares the parent's chrome (inline principal title, Done, no drag indicator, parent insets and section labels); a nested call's sheet shows its status chip, any error, its primary argument in full and its remaining arguments. Only each call's request, status and timing are recorded, so its output stays part of the script result. Recovered `unfinished` calls are terminally presented as “Didn't finish,” not as running work; bounded per-call errors remain visible in the detail sheet. `details.tronNested` attachments remain parent-owned.
 Admitted display descriptors use the existing session-bound display presentation route; no nested call becomes a
 canonical transcript row or independent receipt. MCP tool names use the projected server/tool identity, resource
 and search tools remain generic result cards. Manage Session → Available Tools turns tools on or off for one chat
@@ -1056,7 +1056,9 @@ virtual model names are marked in the model and session selectors without replac
 Pi's empty result empty rather than inventing `(no output)`. Bash commands wrap to the available width
 using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
-and boolean metadata remains unchanged. The final Technical details sub-sheet starts with larger, compact selectable
+and boolean metadata remains unchanged. Every tool detail sheet opens Technical details from the top-leading info
+button (`TronSheetInfoButton`, the one info affordance every sheet with technical or metadata details uses); the
+sub-sheet starts with larger, compact selectable
 execution metadata, then exposes bounded Request JSON and Result JSON containers in that order. Tapping either
 container opens the shared selectable, vertically scrollable raw JSON sheet directly; no intermediate structured
 traversal or duplicate readable-output projection is introduced. Primary semantic content, faithful diff expansion,
@@ -1802,7 +1804,7 @@ inventing totals. Binary/absent diffs keep their existing non-text states. `Tool
 count scope and omission boundaries; native summary/sheet tests cover the shared pill's colors, fit, and placement.
 Diff preparation retains only bounded head/tail lines in circular tail storage,
 bounds individual rendered line width, and marks every omitted line or character while the untouched payload remains available under
-the final Technical details row. Empty edit sides represent pure insertions/deletions; blank rows are retained
+the Technical details sheet. Empty edit sides represent pure insertions/deletions; blank rows are retained
 only when a nonempty source value actually contains them. The tool-run row owns an open detail route and its
 detent above the one-tool/grouped rendering branch, resolving the selected stable call ID against every newest
 run projection so a second arriving call cannot dismiss the first call's sheet. Metadata VoiceOver labels use
@@ -2029,7 +2031,9 @@ have no duplicate row or Context Files section there: their assembled guidance b
 Agent Instructions, which lists each file under Project Instructions. Canonical resource discovery
 is unchanged. Project Resources, Session History, and Subagent History use the originating Manage Session teal titles and
 toolbar actions to match their originating Session rows. Resource detail chrome instead
-matches its own category accent. Project Resource titles prefer authored labels, otherwise
+matches its own category accent, except a tool opened from Available Tools keeps that sheet's
+session teal. Project Resource titles prefer authored labels (a label that only repeats the
+raw name, such as Pi's `codemode` and `tool_search`, is not authored), otherwise
 humanize tool/skill/prompt/command/subagent names using the shared composer formatter. Extension titles derive
 from npm/Git package names, meaningful local entrypoints, or named inline extensions rather
 than generic `index.ts` filenames and `<inline:…>` wrappers. First-party inline names read as

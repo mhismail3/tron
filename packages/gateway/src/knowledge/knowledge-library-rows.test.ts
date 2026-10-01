@@ -41,10 +41,10 @@ async function capture(store: KnowledgeStore, index: number, textChars: number, 
 const readSpy = (store: KnowledgeStore) => vi.spyOn(store as unknown as { readRecord: (...args: unknown[]) => Promise<KnowledgeRecord> }, "readRecord");
 
 describe("Knowledge library rows", () => {
-  it("serves a bounded page of large sources without reading a record body", async () => {
+  it("serves a full bounded row page without reading record bodies", async () => {
     const { store } = await fixture();
-    const count = 50; const chars = 200_000;
-    for (let index = 0; index < count; index += 1) await capture(store, index, chars);
+    const count = 50;
+    for (let index = 0; index < count; index += 1) await capture(store, index, index >= 45 ? 200_000 : 100);
     const reads = readSpy(store);
     const page = await store.listSourceRows({ kind: "source", sourceAdmission: "retained", projection: "sourceRow", limit: 50 });
     expect(reads).toHaveBeenCalledTimes(0);
@@ -52,14 +52,13 @@ describe("Knowledge library rows", () => {
     // Newest first, matching the full-record page order.
     expect(page.rows[0]?.title).toBe("Saved source 49");
     expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(30_000);
-    // The full-record page cannot even carry five of the same sources, so the
-    // row projection is what makes a complete page possible at all.
+    // Large source bodies consume the full-record page budget, while the row
+    // projection still returns every source in the requested page.
     const full = await store.list({ kind: "source", limit: 50 });
+    expect(reads.mock.calls.length).toBeGreaterThan(0);
     expect(full.records.length).toBeLessThan(5);
     expect(Buffer.byteLength(JSON.stringify(full))).toBeGreaterThan(500_000);
-    expect(reads.mock.calls.length).toBeGreaterThan(0);
     const row = page.rows.find(candidate => candidate.title === "Saved source 0")!;
-    // The row keeps identity and presentation, never the saved text or bytes.
     expect(row).toMatchObject({ title: "Saved source 0", uri: "https://example.test/0", captureDisposition: "partial", admission: "retained", scope: "research" });
     expect(JSON.stringify(row)).not.toContain("X Article body sentence");
     expect(Object.keys(row).sort()).toEqual(["admission", "ageBasis", "ageDays", "captureDisposition", "createdAt", "freshness", "hasTake", "id", "mediaType", "originalUri", "revisionId", "scope", "tagsStale", "title", "updatedAt", "uri"]);

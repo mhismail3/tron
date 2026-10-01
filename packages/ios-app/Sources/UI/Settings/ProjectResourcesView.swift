@@ -523,6 +523,9 @@ struct ProjectResourcesView: View {
 struct ProjectResourceDetailSheet: View {
     let sessionID: String
     let selection: ProjectResourceSelection
+    /// The presenting sheet's accent when it differs from the kind's own
+    /// (Available Tools keeps its session teal).
+    var accentOverride: Color?
     let onDone: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -537,7 +540,7 @@ struct ProjectResourceDetailSheet: View {
         ProjectResourceDetailPresentation(kind: selection.kind, value: selection.value)
     }
 
-    private var accent: Color { selection.kind.accent }
+    private var accent: Color { accentOverride ?? selection.kind.accent }
 
     var body: some View {
         NavigationStack {
@@ -566,12 +569,7 @@ struct ProjectResourceDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showsResourceInfo = true } label: {
-                        Image(systemName: "info.circle")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
-                    }
-                    .accessibilityLabel("Resource Info")
+                    TronSheetInfoButton(accessibilityLabel: "Resource Info", accent: accent) { showsResourceInfo = true }
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: selection.title, accent: accent)
