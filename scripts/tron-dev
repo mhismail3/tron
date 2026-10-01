@@ -78,6 +78,13 @@ LOG_FILE="$STATE_DIR/dev.log"
 COMMAND_LOCK="$STATE_DIR/command.lock"
 COMMAND_LOCK_HELD=no
 STATE_HELPER="$ROOT/scripts/tron-dev-state.mjs"
+# The Gateway refuses to start unless its gateway/ state directory is owner-only
+# (notification grants live there), and on a fresh Debug home this script
+# creates that directory first, so it must create it owner-only (#144).
+ensure_state_dir() {
+  (umask 077 && mkdir -p "$STATE_DIR")
+  chmod 700 "$STATE_DIR"
+}
 LAUNCHER="/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 require_installed_launcher() {
   [[ -x "$LAUNCHER" ]] || {
@@ -147,7 +154,7 @@ stop_dev() {
 supervise() {
   local failures=0 child="" child_identity="" supervisor_identity expected_epoch expected_revision expected_fingerprint terminating=0
   require_installed_launcher
-  mkdir -p "$STATE_DIR"
+  ensure_state_dir
   supervisor_identity="$("$NODE_BIN" "$STATE_HELPER" pid-start "$$")"
   "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" starting expectedHost="$HOST" expectedPort=9848 expectedHome="$HOME/.tron-dev" supervisorPid="$$" supervisorStartIdentity="$supervisor_identity" intentionalExit=false restartCount=0
   handle_termination() {
@@ -243,7 +250,7 @@ case "$command" in
 esac
 case "$command" in
   start|restart|stop|handoff)
-    mkdir -p "$STATE_DIR"
+    ensure_state_dir
     acquire_command_lock || exit $?
     ;;
 esac
