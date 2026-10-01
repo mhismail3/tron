@@ -176,6 +176,7 @@ describe("KnowledgeObservationService", () => {
   });
 
   it("retains the exact terminal cut when durable admission fails, then admits it once", async () => {
+    vi.useFakeTimers();
     const infer = vi.fn(async () => output);
     const { store, observer } = await fixture({ infer });
     const failure = vi.spyOn(store, "setCoverage").mockRejectedValueOnce(new Error("observer store unavailable"));
@@ -183,7 +184,8 @@ describe("KnowledgeObservationService", () => {
     await waitFor(() => failure.mock.calls.length >= 1);
     // The failed admission must not leak the cut to the model...
     expect(infer).not.toHaveBeenCalled();
-    // ...and must not be dropped: the retained cut is admitted after the store recovers.
+    // ...and must not be dropped: advance the owner's existing retry backoff.
+    await vi.advanceTimersByTimeAsync(1_000);
     await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1);
     expect(infer).toHaveBeenCalledTimes(1);
     observer.dispose();

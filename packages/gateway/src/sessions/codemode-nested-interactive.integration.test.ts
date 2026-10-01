@@ -99,20 +99,32 @@ describe("codemode nested interactive tools", () => {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
+    const interactionWaiters: Array<() => void> = [];
+    const waitForPendingInteraction = (): Promise<void> => new Promise((resolve) => interactionWaiters.push(resolve));
     const registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       notifications: notificationService as unknown as NotificationServiceType,
       scheduleToolOperations: schedule,
-      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      broadcast: (_sessionId, topic, payload) => {
+        if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return;
+        const data = (payload as { data?: unknown }).data;
+        if (typeof data !== "object" || data === null || Array.isArray(data)) return;
+        if (topic === "session.extensionPresentation") {
+          const interactionList = (data as { interactionList?: unknown }).interactionList;
+          if (Array.isArray(interactionList) && interactionList.length > 0) interactionWaiters.shift()?.();
+        }
+      },
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
+    const firstInteraction = waitForPendingInteraction();
     const prompting = slot.prompt("Run nested interactive actions");
 
-    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    await firstInteraction;
     const first = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     expect(first.method).toBe("form");
     expect(slot.snapshot().extensionPresentation.pendingInteractions).toHaveLength(1);
@@ -171,8 +183,9 @@ describe("codemode nested interactive tools", () => {
       ]) },
     });
 
+    const stopInteraction = waitForPendingInteraction();
     const stopPrompt = slot.prompt("Run nested form to stop");
-    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    await stopInteraction;
     const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     expect(pending.method).toBe("form");
     await slot.abort("agent");
