@@ -284,6 +284,38 @@ text summary. `--html` writes one self-contained HTML file with inline CSS, no
 external assets and no script, readable in a narrow phone sheet and in dark
 mode. `--json` writes the same model as JSON for tests and other tools.
 
+### Classification
+
+Every open issue that is not an epic carries exactly one label with the
+`dashboard.kindPrefix` (the kind of work, for example a bug or an idea) and
+exactly one with the `dashboard.visibilityPrefix` (whether the maintainer would
+notice it while using the product). The labels themselves, with their meanings,
+are declared in the `labels` block of `.github/work.json`; the dashboard reads
+the vocabulary from there, so a label is defined in one place. The issue that
+files work sets both; triage corrects them. An idea (`dashboard.ideaLabel`) that
+reaches the Ready status or a claimed status is reported, because approving an
+idea makes it committed work with another kind.
+
+### The HTML page
+
+The page is an overview first and a drill-down second, with no script:
+
+- a summary strip of counts that link to their sections;
+- **Needs you** and **Health** (stale claims, disagreements, orphans,
+  regressions, classification problems and the soft cap). Their items are
+  never inside a collapsed section;
+- **In progress**, one expandable row per claim with its branch, worktree,
+  session and pull request checks;
+- **Work**, every open issue that is not an epic plus those closed in the last
+  `dashboard.recentDays`, under a kind-by-visibility count matrix. Filters for
+  kind, visibility, status and area are radio buttons that CSS `:has()` applies;
+  where `:has()` is unsupported the filters do nothing and every row shows.
+  Ready rows keep their queue position;
+- **Epics**, each expandable to its open and recently closed tasks by status.
+
+Filter tokens come only from the declared vocabulary and Project options, never
+from raw label text, and kind colors come from the declared label colors.
+
 It reads, in a bounded number of calls:
 
 - the Project's items (paginated GraphQL): Status, Priority and Epic rank, and
@@ -373,6 +405,19 @@ The names it reads (statuses, labels, fields, the verify context) come from the
     issues.** GitHub answers a lookup of a missing number with a `NOT_FOUND`
     error and exit status 1; that issue is reported as missing. A `NOT_FOUND`
     on the repository itself still fails the run.
+43. **Something that needs attention is hidden.** Needs-you items and every
+    health alert render outside any collapsed `<details>`, whatever the
+    filters' default state.
+44. **A classification problem goes unreported.** A missing kind or
+    visibility, two of either, an undeclared label with either prefix, and an
+    idea in the Ready status or a claimed status are each reported under
+    Health; a correctly labeled issue is not.
+45. **The work list drops, repeats or mislabels an issue.** Each open non-epic
+    issue appears once; an issue closed within `dashboard.recentDays` appears
+    and an older one does not; epics stay in their own section.
+46. **GitHub text reaches a filter or a style.** Undeclared or hostile labels
+    never become filter tokens or class names, and a label color is used only
+    when it is six hex digits.
 
 ## `land`
 
