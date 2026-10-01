@@ -91,6 +91,25 @@ workspace:
 4. **Worktree.** `start` creates `<worktreeRoot>/<issue>-<slug>` on the branch.
    `worktreeRoot` is relative to the primary checkout, so `start` gives the
    same path when run from any worktree.
+5. **Warm local builds.** On a new or resumed worktree, `start` copy-on-write
+   clones `packages/gateway/node_modules` and `packages/push-relay/node_modules`
+   only when the corresponding lockfile bytes exactly match the primary
+   checkout. A missing source install, lock mismatch, or clone failure falls
+   back to `npm ci` in that worktree. Xcode's `ModuleCache.noindex` and
+   `SDKStatCaches.noindex` are seeded the same way from the primary checkout's
+   test products; a cache-clone failure leaves the build cold. Derived
+   products are never shared. `scripts/tron-ios-test` continues to build and
+   stamp products in the worktree's own derived-data directory, preserving its
+   source-identity check.
+
+### Warm-worktree failure modes
+
+`test_warm.py` covers the safety boundary: exact lock match and a complete npm
+hidden lock clones independent files; mismatch, missing or incomplete primary
+dependencies uses `npm ci`; a failed clone removes partial output before
+installing; and iOS warming copies only compiler and SDK caches, never another
+worktree's built products. Clone failures are fail-closed rather than sharing
+or trusting mutable dependency state.
 
 The session is `--session`, then `WORK_SESSION_ID`, then `PI_SESSION_ID`.
 
