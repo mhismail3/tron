@@ -225,11 +225,21 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   full suite instead, because `vitest related` cannot select a test that still
   imports a deleted module and the build excludes tests.
 - **iOS** runs the source, build-matrix and archive-privacy policy scripts,
-  `scripts/tron-ios-test build` and the complete unit target. Focused owners cannot be derived from paths: suite names are not
-  file names, and an `--only-testing` selector that names no suite runs zero
-  tests and passes. The simulator admission and lease rules of
-  `scripts/tron-ios-test` still apply, so a busy Mac fails the check with exit
-  73; verify again once memory is free.
+  then `scripts/tron-ios-test build`. For changed test files, verify derives the
+  declared Swift test-suite names; for audited Settings UI sources it selects
+  their explicit owning suites. Any deleted/unreadable test file, unmapped
+  source path, empty selection, or non-iOS input falls back to the complete
+  unit target. Do not infer a suite from a filename: an `--only-testing`
+  selector that names no suite runs zero tests and passes. The full hosted suite
+  remains in CI's heavy run and explicit checkpoints. The simulator admission
+  and lease rules of `scripts/tron-ios-test` still apply, so a busy Mac fails
+  the check with exit 73; verify again once memory is free.
+- **CI policy's iOS infrastructure test** uses
+  `scripts/ci_ios_infra_scope.py` to skip only for recognized non-iOS paths.
+  iOS-app, runner/toolchain, CI-workflow, unknown and empty path sets run the
+  infrastructure suite. If the base commit cannot be resolved or path
+  classification fails, the workflow runs it. This does not change CI's hosted
+  iOS unit suite.
 - **Mac** regenerates the project with `scripts/generate-xcode-project mac`
   (what `scripts/tron mac generate` runs) and runs `build-for-testing` and
   `test-without-building` for `TronMacTests`, as in the Mac development guide.
@@ -572,3 +582,12 @@ Project state and records every call. The live E2E covers GitHub itself.
 42. **A claimed status is misread.** An In review or Needs you claim is not a
     disagreement, a resumed `start` does not move it back to In progress, and
     `start` and the dashboard count the soft cap alike.
+47. **A narrowed iOS run omits its owner or selects zero tests.** Only test files
+    with readable suite declarations and explicitly mapped Settings UI sources
+    can select focused owners; an unmapped, deleted, empty or unsupported input
+    runs the full unit target.
+48. **The policy job skips iOS infrastructure for a relevant or unknown path.**
+    Only recognized non-iOS changes skip that test; iOS/toolchain/workflow paths,
+    an empty diff, and an unclassified path run it. The two selector tests under
+    `scripts/test-ios-verify-test-selection.py` and
+    `scripts/test-ci-ios-infra-scope.py` cover these fail-closed boundaries.
