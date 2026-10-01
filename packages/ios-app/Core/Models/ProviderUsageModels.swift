@@ -150,7 +150,7 @@ package struct ProviderUsageSnapshot: Codable, Hashable, Sendable, Identifiable 
     package let providerId: String
     package var id: String { providerId }
     package let status: ProviderUsageStatus
-    let source: String?
+    package let source: String?
     let scope: ProviderUsageScope?
     package let updatedAt: String?
     package let retryAt: String?
