@@ -199,7 +199,11 @@ const globalProviderResources = await GlobalProviderResources.create({
   broadcast: () => transport?.broadcast("providers.changed", {}),
 });
 startupCheckpoint("global-provider-resources");
-const connections = new ConnectionOwner(config.tronHome);
+const connections = new ConnectionOwner(config.tronHome, undefined, (instanceIds) => logger.log(
+  "info",
+  "Retired unsupported legacy Jev connection instances",
+  { event: "connection.legacy-jev-retired", source: "connections", instanceIds },
+));
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
 const jevClient = new JevDecisionClient(modelRuntime);
 let automations!: AutomationService;
