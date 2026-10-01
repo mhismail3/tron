@@ -342,11 +342,23 @@
           "config/ci-toolchain.env",
           "scripts/generate-xcode-project",
           "scripts/tron-ios-test",
+          "scripts/ios_verify_test_selection.py",
+          "scripts/test-ios-verify-test-selection.py",
           "scripts/ios-test-*.py",
           "scripts/verify-ci-toolchain.sh",
           "scripts/install-ci-tools.sh"
         ],
-        "command": "packages/ios-app/scripts/test-source-policy.sh && packages/ios-app/scripts/test-build-matrix-policy.sh && packages/ios-app/scripts/test-verify-archive-privacy.sh && scripts/tron-ios-test build && scripts/tron-ios-test run"
+        "command": "packages/ios-app/scripts/test-source-policy.sh && packages/ios-app/scripts/test-build-matrix-policy.sh && packages/ios-app/scripts/test-verify-archive-privacy.sh && scripts/tron-ios-test build && python3 scripts/ios_verify_test_selection.py --merge-base {merge_base} {paths}"
+      },
+      {
+        "name": "work-selector-tests",
+        "paths": [
+          "scripts/ios_verify_test_selection.py",
+          "scripts/test-ios-verify-test-selection.py",
+          "scripts/ci_ios_infra_scope.py",
+          "scripts/test-ci-ios-infra-scope.py"
+        ],
+        "command": "python3 scripts/test-ios-verify-test-selection.py && python3 scripts/test-ci-ios-infra-scope.py"
       },
       {
         "name": "mac",
