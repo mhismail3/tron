@@ -125,6 +125,40 @@ describe("CommandReceiptStore", () => {
     expect(workRegistry.size).toBe(0);
   });
 
+  it("settles accepted receipt writes before the owner releases its directory", async () => {
+    const root = await temporaryRoot("tron-receipts-shutdown-");
+    let completionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { completionStarted = resolve; });
+    let releaseCompletion!: () => void;
+    const completionGate = new Promise<void>((resolve) => { releaseCompletion = resolve; });
+    let writeCount = 0;
+    let completedWrite = false;
+    const store = new CommandReceiptStore(root, async (path, value, mode) => {
+      writeCount += 1;
+      if (writeCount === 2) {
+        completionStarted();
+        await completionGate;
+      }
+      await durableAtomicWriteJson(path, value, mode);
+      if (writeCount === 2) completedWrite = true;
+    });
+    try {
+      const accepted = store.execute("device", "session.prompt", "shutdown-receipt", async () => ({ accepted: true }), {
+        respondBeforeCompletion: true,
+      });
+      await started;
+      await expect(accepted).resolves.toEqual({ accepted: true });
+      const shutdown = store.dispose();
+      releaseCompletion();
+      await shutdown;
+      expect(completedWrite).toBe(true);
+      await expect(store.execute("device", "session.prompt", "after-shutdown", async () => ({ accepted: true })))
+        .rejects.toMatchObject({ code: "conflict" });
+    } finally {
+      releaseCompletion();
+    }
+  });
+
   it("keeps a pending prompt receipt as the replay fence after a response-window crash", async () => {
     const root = await temporaryRoot("tron-receipts-prompt-crash-");
     let completionStarted!: () => void;
@@ -154,6 +188,39 @@ describe("CommandReceiptStore", () => {
     }, { respondBeforeCompletion: true })).rejects.toMatchObject({ details: { outcomeUnknown: true } });
     expect(operations).toBe(1);
     releaseCompletion();
+    await store.dispose();
+  });
+
+  it("does not wait for an accepted operation to settle during disposal", async () => {
+    const root = await temporaryRoot("tron-receipts-operation-drain-");
+    let operationStarted!: () => void;
+    const started = new Promise<void>((resolve) => { operationStarted = resolve; });
+    let releaseOperation!: () => void;
+    const operationGate = new Promise<void>((resolve) => { releaseOperation = resolve; });
+    const store = new CommandReceiptStore(root);
+    let operationSettled = false;
+    try {
+      const accepted = store.execute("device", "session.prompt", "operation-drain", async () => {
+        operationStarted();
+        await operationGate;
+        operationSettled = true;
+        return { accepted: true };
+      });
+      await started;
+      const shutdown = store.dispose();
+      let shutdownSettled = false;
+      void shutdown.then(() => { shutdownSettled = true; });
+      // Flush promise continuations after disposal without holding the test open
+      // behind the intentionally unresolved operation.
+      for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+      expect(shutdownSettled).toBe(true);
+      expect(operationSettled).toBe(false);
+      releaseOperation();
+      await expect(accepted).resolves.toEqual({ accepted: true });
+    } finally {
+      releaseOperation();
+      await store.dispose();
+    }
   });
 
   it("does not serialize one command's durable receipt write behind the inventory mutex", async () => {

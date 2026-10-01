@@ -138,6 +138,7 @@ function catalogOwner(registry: RuntimeRegistry): SessionCatalog {
 describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
+  const syntheticTranscriptSizes = new Map<string, number>();
 
   async function coldFixture(label: string, options: {
     nested?: boolean;
@@ -227,9 +228,18 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   }
 
   afterEach(async () => {
-    await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    try {
+      const transcripts = [...syntheticTranscriptSizes];
+      await Promise.all(transcripts.map(([path, size]) => truncate(path, size)));
+      for (const [path, size] of transcripts) {
+        expect((await fsPromises.stat(path)).size).toBe(size);
+      }
+      syntheticTranscriptSizes.clear();
+    } finally {
+      await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
   });
 
   it("rejects malformed or incomplete cold JSONL before branch projection", async () => {
@@ -11906,8 +11916,15 @@ export default function (pi) {
    * and leaves it on a complete line, as a written transcript is: the header
    * reader treats a file whose final byte is not a newline as an append still in
    * progress. */
+  async function resizeSyntheticTranscript(path: string, bytes: number): Promise<void> {
+    if (!syntheticTranscriptSizes.has(path)) {
+      syntheticTranscriptSizes.set(path, (await fsPromises.stat(path)).size);
+    }
+    await truncate(path, bytes);
+  }
+
   async function growTranscript(path: string, bytes: number): Promise<void> {
-    await truncate(path, bytes - 1);
+    await resizeSyntheticTranscript(path, bytes - 1);
     await appendFile(path, "\n");
   }
 
@@ -12077,7 +12094,7 @@ export default function (pi) {
     // Sparse, so the file is 600 MiB without writing it. The admission stops on
     // the append fence this tail trips, which is as far as a fixture can carry an
     // oversize session without a real 512 MiB+ parseable transcript.
-    await truncate(oversize.getSessionFile()!, 600 * mebibyte);
+    await resizeSyntheticTranscript(oversize.getSessionFile()!, 600 * mebibyte);
 
     await expect(fixture.registry.acquire(oversize.getSessionId())).rejects.toMatchObject({
       code: "busy",

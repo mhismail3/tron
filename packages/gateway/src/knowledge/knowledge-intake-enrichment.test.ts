@@ -1,23 +1,25 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
+import { KnowledgeCurationJobs } from "./knowledge-curation.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
+import * as durableJson from "../util/durable-json.js";
 
 const roots: string[] = [];
 const command = (value: string) => `k5-intake-${value}`;
 const headers = () => new Headers();
 function response(value: unknown): ConnectorHTTPResponse { return { status: 200, headers: headers(), body: JSON.stringify(value) }; }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true}))); });
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true}))); });
 
 /** Failure modes: a model or tagging failure blocks other items; unapproved
  * tagging drops the summary; intake waits on model latency; a rerun re-charges;
@@ -159,14 +161,34 @@ describe("K5 Raindrop intake enrichment", () => {
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
     await store.configure("k5-partial-config", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 } });
-    const summarized: string[] = [];
+    const modelStarted = deferred<void>();
     const fakeModel: KnowledgeGenerationModel = {
       async reflect() { return "reflect"; }, async synthesize() { return "synthesis"; },
-      async summarizeSource(input) { summarized.push(input.sessionId); return { text: "Partial summary" }; },
+      async summarizeSource() { modelStarted.resolve(); return { text: "Partial summary" }; },
       async assess() { return { summary: "assessment", evidenceQuality: "high", freshness: "current" }; },
     };
-    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel);
     const items = [{ _id: 7, title: "A repository", link: "https://github.com/example/repository", created: "2026-09-28T00:00:00Z", collection: { $id: 111 } }];
+    const writeStarted = deferred<void>();
+    const releaseWrite = deferred<void>();
+    let summaryRecordId: string | undefined;
+    const terminalSummary = deferred<{ operation: string; status: string; sourceId: string }>();
+    const jobs = new KnowledgeCurationJobs(64, 120_000, job => {
+      if (job.operation === "summary" && job.sourceId === summaryRecordId) terminalSummary.resolve(job);
+    });
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel, undefined, undefined, jobs);
+    let blocked = false;
+    const originalWrite = durableJson.durableAtomicWriteJson;
+    const writeSpy = vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementation((path, value, mode) => originalWrite(path, value, mode, {
+      mkdir, open, rm,
+      rename: async (from, to) => {
+        if (!blocked && summaryRecordId && to.includes(`/records/${summaryRecordId}/`)) {
+          blocked = true;
+          writeStarted.resolve();
+          await releaseWrite.promise;
+        }
+        await rename(from, to);
+      },
+    }));
     const extension = new KnowledgeConnectorExtension(store, {
       credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]])),
       resolveHost: async () => ["93.184.216.34"],
@@ -178,17 +200,31 @@ describe("K5 Raindrop intake enrichment", () => {
         if (url.includes("/raindrops/111")) return response({ items });
         throw new Error(`Unexpected fake provider endpoint ${url}`);
       },
-      queueSummary: source => service.queueIntakeSummary(source),
+      queueSummary: source => { summaryRecordId = source.id; service.queueIntakeSummary(source); },
       sleep: async () => {}, now: () => "2026-09-29T00:00:00.000Z",
     });
-    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("partial-config"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:fixture" } });
-    const intake = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("partial-run"), sourceCollection: "111", dryRun: false, limit: 1, pilot: { id: "partial-pilot", maxItems: 1, budgetCents: 10 } } }) as { outcomes: Array<{ sourceId?: string }> };
-    const sourceId = intake.outcomes[0]?.sourceId;
-    const captured = await store.read(sourceId!, undefined, false, true, true);
-    expect(captured?.kind === "source" && captured.content.captureDisposition).not.toBe("complete");
-    expect(captured?.kind === "source" && captured.content.text).toBeTruthy();
-    for (let attempt = 0; attempt < 400 && summarized.length === 0; attempt += 1) await new Promise(resolve => setTimeout(resolve, 5));
-    expect(summarized).toEqual([sourceId]);
+    try {
+      await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("partial-config"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:fixture" } });
+      const intake = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("partial-run"), sourceCollection: "111", dryRun: false, limit: 1, pilot: { id: "partial-pilot", maxItems: 1, budgetCents: 10 } } }) as { outcomes: Array<{ sourceId?: string }> };
+      const sourceId = intake.outcomes[0]?.sourceId;
+      const captured = await store.read(sourceId!, undefined, false, true, true);
+      expect(captured?.kind === "source" && captured.content.captureDisposition).not.toBe("complete");
+      expect(captured?.kind === "source" && captured.content.text).toBeTruthy();
+      expect(summaryRecordId).toBe(sourceId);
+      await modelStarted.promise;
+      await writeStarted.promise;
+      // This is where the old test returned after observing model dispatch:
+      // the summary job is still running and its temp file is in the fixture.
+      const inFlight = await service.invoke({ operation: "knowledge.curation.jobs", request: { sourceId } }) as { jobs: Array<{ operation: string; status: string; sourceId: string }> };
+      expect(inFlight.jobs).toContainEqual(expect.objectContaining({ operation: "summary", sourceId, status: "running" }));
+      releaseWrite.resolve();
+      const summaryJob = await terminalSummary.promise;
+      expect(summaryJob).toMatchObject({ sourceId, status: "done" });
+      expect((await store.read(sourceId!, undefined, false, true, true))?.content.summary?.text).toBe("Partial summary");
+    } finally {
+      releaseWrite.resolve();
+      writeSpy.mockRestore();
+    }
   });
 });
 

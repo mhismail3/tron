@@ -8,6 +8,8 @@ import { GatewayError } from "../errors.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
+import { KnowledgeService } from "./knowledge-service.js";
+import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { drainDurableWriteStats } from "../util/durable-json.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { withInvocationContext } from "../extensions/owner-attribution.js";
@@ -21,7 +23,7 @@ const publicResolver = async () => ["93.184.216.34"];
 afterEach(async () => { vi.useRealTimers(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 function response(value: unknown, status = 200): ConnectorHTTPResponse { return { status, headers: headers(), body: JSON.stringify(value) }; }
-async function fixture(http: (url: string, init: { headers: Record<string, string>; signal: AbortSignal; method?: "GET" | "PUT" | "POST" | "DELETE" }) => Promise<ConnectorHTTPResponse>, xPricing?: { accountId: string; costCentsPerAttempt: number; maxAttempts: number }, options: { jevCapCents?: number; assessment?: SourceAssessmentModel; sourceFetch?: (url: string, excerpt: string | undefined, signal: AbortSignal) => Promise<Response> } = {}) {
+async function fixture(http: (url: string, init: { headers: Record<string, string>; signal: AbortSignal; method?: "GET" | "PUT" | "POST" | "DELETE" }) => Promise<ConnectorHTTPResponse>, options: { jevCapCents?: number; assessment?: SourceAssessmentModel; sourceFetch?: (url: string, excerpt: string | undefined, signal: AbortSignal) => Promise<Response> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-connector-")); roots.push(root);
   const owner = new ConnectionOwner(root);
   const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:test-account", "synthetic-raindrop-token"], ["connector:x:test-account", "synthetic-x-token"]]));
@@ -38,7 +40,6 @@ async function fixture(http: (url: string, init: { headers: Record<string, strin
     ...(options.assessment ? { assessment: options.assessment } : {}),
     sleep: async () => {},
     now: () => "2026-01-01T00:00:00.000Z",
-    ...(xPricing ? { xPricing } : {}),
     jevBudget,
   });
   return { store, extension, owner, jevBudget, jevPolicy };
@@ -343,12 +344,14 @@ describe("knowledge connectors", () => {
   });
 
   it("rejects malformed X discovery success without advancing its checkpoint", async () => {
-    const { store, extension } = await fixture(async () => response({ meta: { next_token: "next" } }), { accountId: "account-1", costCentsPerAttempt: 1, maxAttempts: 1 });
+    const { store, extension } = await fixture(async () => response({ meta: { next_token: "next" } }));
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("malformed-x-config"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account", paidAccessApproved: true, paidBudgetCents: 1 } });
     await expect(extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: command("malformed-x-run"), connector: "x", limit: 1 } })).rejects.toMatchObject({ code: "internal" });
     const state = await store.connectorState("x");
     expect(state?.pending).toEqual([]);
     expect(state?.checkpoints).toBeUndefined();
+    expect(state?.xDiscoveryBudget?.reservedCents).toBe(1);
+    expect(Object.values(state?.xDiscoveryBudget?.attempts ?? {}).some(attempt => attempt.status === "uncertain")).toBe(true);
   });
 
   it("persists a destination-safety outcome without fetching a forbidden bookmark URL", async () => {
@@ -357,7 +360,7 @@ describe("knowledge connectors", () => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "Blocked target", link: "http://127.0.0.1/admin", collection: { $id: 111 } }] });
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { sourceFetch: async () => { linkedFetches += 1; return new Response("must not fetch"); } });
+    }, { sourceFetch: async () => { linkedFetches += 1; return new Response("must not fetch"); } });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("blocked-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:test-account" } });
     const result = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("blocked-intake"), sourceCollection: "111", limit: 1, pilot: { id: "blocked-pilot", maxItems: 1, budgetCents: 1 } } }) as any;
     expect(linkedFetches).toBe(0); expect(result).toMatchObject({ captured: 1, pending: 1, assessmentFailed: 0 });
@@ -376,7 +379,7 @@ describe("knowledge connectors", () => {
       if (url.includes("/raindrops/123?page=0")) return response({ items: first });
       if (url.includes("/raindrops/123?page=1")) return response({ items: [{ _id: 50, title: "Duplicate", link: "https://example.com/49" }, { _id: 51, title: "Bookmark 51", link: "https://example.com/51" }] });
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { sourceFetch: async () => { linkedFetches += 1; return new Response("capture is intake-only"); } });
+    }, { sourceFetch: async () => { linkedFetches += 1; return new Response("capture is intake-only"); } });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "123", credentialRef: "connector:raindrop:test-account" } });
     const dryRun = await extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: command("discover"), connector: "raindrop", limit: 51 } }) as { discovered: number; pending: number };
     expect(dryRun.discovered).toBe(51);
@@ -575,29 +578,42 @@ describe("knowledge connectors", () => {
     expect(calls).toBe(0);
   });
 
-  it("debits every X retry attempt and refuses the request before exceeding budget", async () => {
+  it("keeps a dispatched X reservation uncertain and blocks another request", async () => {
     let calls = 0;
-    const { store, extension } = await fixture(async () => { calls += 1; return response({ error: "retry" }, 500); }, { accountId: "account-1", costCentsPerAttempt: 1, maxAttempts: 3 });
+    const { store, extension } = await fixture(async () => { calls += 1; return response({ error: "retry" }, 500); });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("x-qualified"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account", paidAccessApproved: true, paidBudgetCents: 2 } });
     await expect(extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: command("x-budget"), connector: "x", limit: 1 } })).rejects.toMatchObject({ code: "internal" });
-    expect(calls).toBe(2);
-    expect((await store.connectorState("x"))?.paidBudgetCents).toBe(0);
+    expect(calls).toBe(1);
+    const ledger = (await store.connectorState("x"))?.xDiscoveryBudget;
+    expect(ledger?.reservedCents).toBe(1);
+    expect(Object.values(ledger?.attempts ?? {}).some(attempt => attempt.status === "uncertain")).toBe(true);
+    const status = await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "x" } }) as any;
+    expect(status).toMatchObject({ capCents: 2, spentCents: 0, reservedCents: 1, availableCents: 1, uncertain: [{ reservedCents: 1 }] });
+    const attemptId = status.uncertain[0].attemptId;
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), { connector: action => extension.invoke(action) });
+    const reconcile = { action: "reconcileConnectorBudget" as const, commandId: command("x-reconcile-command"), connector: "x" as const, connectionId: "x", attemptId };
+    await expect(service.tool(reconcile)).resolves.toMatchObject({ details: { reconciledCostCents: 1 } });
+    await expect(service.tool(reconcile)).resolves.toMatchObject({ details: { reconciledCostCents: 1 } });
+    const rpcReconcile = { operation: "knowledge.connector.budget.reconcile" as const, request: { commandId: command("x-reconcile-again"), connector: "x" as const, connectionId: "x", attemptId } };
+    await expect(extension.invoke(rpcReconcile)).rejects.toMatchObject({ code: "conflict" });
+    await expect(extension.invoke({ ...rpcReconcile, request: { ...rpcReconcile.request, commandId: command("x-reconcile-missing"), attemptId: "unknown-attempt" } })).rejects.toMatchObject({ code: "conflict" });
+    expect(await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "x" } })).toMatchObject({ capCents: 2, spentCents: 1, reservedCents: 0, availableCents: 1, uncertain: [] });
   });
 
-  it("charges a fresh allowance for each repeated run command", async () => {
+  it("keeps the uncertain reservation across repeated run commands", async () => {
     let calls = 0;
-    const { store, extension } = await fixture(async () => { calls += 1; return response({ error: "rate limited" }, 429); }, { accountId: "account-1", costCentsPerAttempt: 1, maxAttempts: 1 });
+    const { store, extension } = await fixture(async () => { calls += 1; return response({ error: "provider failure" }, 500); });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("x-replay-configure"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account", paidAccessApproved: true, paidBudgetCents: 2 } });
     const run = { operation: "knowledge.connector.discover" as const, request: { commandId: command("x-replay-run"), connector: "x" as const, limit: 1 } };
     await expect(extension.invoke(run)).rejects.toMatchObject({ code: "internal" });
-    await expect(extension.invoke(run)).rejects.toMatchObject({ code: "internal" });
-    await expect(extension.invoke(run)).rejects.toMatchObject({ code: "internal" });
-    expect(calls).toBe(2);
-    expect((await store.connectorState("x"))?.paidBudgetCents).toBe(0);
+    await expect(extension.invoke(run)).rejects.toMatchObject({ code: "unsupported" });
+    await expect(extension.invoke(run)).rejects.toMatchObject({ code: "unsupported" });
+    expect(calls).toBe(1);
+    expect((await store.connectorState("x"))?.xDiscoveryBudget?.reservedCents).toBe(1);
   });
 
   it("requires trusted current Automation authority for recurring X sweeps", async () => {
-    const { extension } = await fixture(async () => response({ data: [] }), { accountId: "account-1", costCentsPerAttempt: 1, maxAttempts: 1 });
+    const { extension } = await fixture(async () => response({ data: [] }));
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("x-recurring-configure"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account", paidAccessApproved: true, paidBudgetCents: 1 } });
     await expect(withInvocationContext({ invocationId: "invocation-1", operationId: "automation:run-1" }, () => extension.invoke({ operation: "knowledge.connector.discover", request: { commandId: command("x-recurring-run"), connector: "x", limit: 1 } }))).rejects.toMatchObject({ code: "unsupported" });
   });
@@ -612,7 +628,7 @@ describe("knowledge connectors", () => {
       if (init.method === "PUT") { collection = "222"; return response({ item: { _id: 1, collection: { $id: 222 } } });
       }
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { assessment, sourceFetch: async () => new Response("Synthetic complete evidence", { headers: { "content-type": "text/plain" } }) });
+    }, { assessment, sourceFetch: async () => new Response("Synthetic complete evidence", { headers: { "content-type": "text/plain" } }) });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("intake-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:test-account", allowWrites: true } });
     const result = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("intake-run"), sourceCollection: "111", limit: 1, pilot: { id: "synthetic-pilot", maxItems: 1, budgetCents: 1 } } });
     expect(result).toMatchObject({ moved: 0, retained: 1, archived: 0, assessmentFailed: 0, budget: { approvedCeilingCents: 1, conservativeReservedCents: 1, cohortItemCap: 1, cohortSelectedItems: 1, settledItems: 1, estimatedUsageCostCents: 0.00042, usageKnownAssessments: 1, usageUnknownAssessments: 0, pendingOutsideCohortItems: 0 } });
@@ -649,7 +665,7 @@ describe("knowledge connectors", () => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "One", link: "https://example.test/one", collection: { $id: 111 } }] });
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
+    }, { assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("paid-off-intake-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:test-account" } });
     jevPolicy.configured = false;
     await expect(jevBudget.reserve("typesafe", "paid-off-tag", 0)).rejects.toMatchObject({ code: "unsupported" });
@@ -665,7 +681,7 @@ describe("knowledge connectors", () => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "One", link: "https://example.test/one", collection: { $id: 111 } }] });
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { jevCapCents: 1, assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
+    }, { jevCapCents: 1, assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("exhausted-intake-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:test-account" } });
     for (let i = 0; i < 3; i += 1) {
       const attempt = await jevBudget.reserve("typesafe", `exhaustion-seed-${i}`, 0);
@@ -684,7 +700,7 @@ describe("knowledge connectors", () => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "One", link: "https://example.test/one", collection: { $id: 111 } }, { _id: 2, title: "Two", link: "https://example.test/two", collection: { $id: 111 } }] });
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
+    }, { assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("budget-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:test-account" } });
     const request = { operation: "knowledge.raindrop.intake" as const, request: { commandId: command("budget-intake"), sourceCollection: "111", limit: 2, pilot: { id: "budget-pilot", maxItems: 2, budgetCents: 1 } } };
     const first = await extension.invoke(request) as any;
@@ -727,7 +743,7 @@ describe("knowledge connectors", () => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "One", link: "https://example.test/one", collection: { $id: 111 } }] });
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
+    }, { assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("preflight-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:test-account" } });
     const intake = (id: string) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command(id), sourceCollection: "111", limit: 1, pilot: { id: "dispatch-fence", maxItems: 1, budgetCents: 1 } } });
     await intake("preflight-failure");
@@ -766,7 +782,7 @@ describe("knowledge connectors", () => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "One", link: "https://example.test/one", collection: { $id: 111 } }] });
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
+    }, { assessment, sourceFetch: async () => new Response("complete evidence", { headers: { "content-type": "text/plain" } }) });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("cancel-reservation-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:test-account" } });
     const reservedBefore = (await jevBudget.status("typesafe")).reservedCents;
     await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("cancel-reservation-intake"), sourceCollection: "111", limit: 1, pilot: { id: "cancel-reservation", maxItems: 1, budgetCents: 1 } } }, controller.signal);
@@ -783,7 +799,7 @@ describe("knowledge connectors", () => {
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "Receipt failure", link: "https://example.test/receipt", collection: { $id: 111 } }] });
       if (url.endsWith("/raindrop/1")) { if (init.method === "PUT") collection = "222"; return response({ item: { _id: 1, collection: { $id: Number(collection) } } }); }
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { assessment, sourceFetch: async () => new Response("complete", { headers: { "content-type": "text/plain" } }) });
+    }, { assessment, sourceFetch: async () => new Response("complete", { headers: { "content-type": "text/plain" } }) });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("receipt-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", allowWrites: true, credentialRef: "connector:raindrop:test-account" } });
     const original = store.updateConnectorState.bind(store);
     const update = vi.spyOn(store, "updateConnectorState").mockImplementation(async (commandId, connector, updater) => { if (failure === "completion" && commandId.includes(":done-1")) throw new Error("synthetic local receipt failure"); return original(commandId, connector, updater); });
@@ -802,7 +818,7 @@ describe("knowledge connectors", () => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 9, title: "Standalone", link: "https://example.test/standalone", collection: { $id: 111 } }] });
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { sourceFetch: async () => new Response("captured without assessment", { headers: { "content-type": "text/plain" } }) });
+    }, { sourceFetch: async () => new Response("captured without assessment", { headers: { "content-type": "text/plain" } }) });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("no-jev-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:test-account" } });
     await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("no-jev-intake"), sourceCollection: "111", limit: 1, pilot: { id: "no-jev", maxItems: 1, budgetCents: 1 } } });
     const source = (await store.list({ kind: "source", includePending: true })).records[0];
@@ -820,7 +836,7 @@ describe("knowledge connectors", () => {
       if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "One", link: "https://example.test/one", collection: { $id: 111 } }, { _id: 2, title: "Two", link: "https://example.test/two", collection: { $id: 111 } }] });
       if (url.endsWith("/raindrop/1") || url.endsWith("/raindrop/2")) { const item = url.endsWith("/1") ? "1" : "2"; if (init.method === "PUT") collection = "222"; return response({ item: { _id: Number(item), collection: { $id: Number(collection) } } }); }
       throw new Error(`unexpected endpoint ${url}`);
-    }, undefined, { assessment, sourceFetch: async () => new Response("complete", { headers: { "content-type": "text/plain" } }) });
+    }, { assessment, sourceFetch: async () => new Response("complete", { headers: { "content-type": "text/plain" } }) });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("renew-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", allowWrites: true, credentialRef: "connector:raindrop:test-account" } });
     await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("renew-first"), sourceCollection: "111", limit: 1, pilot: { id: "frozen-pilot", maxItems: 1, budgetCents: 1 } } });
     const approved = await extension.invoke({ operation: "knowledge.connector.assessment.approve", request: { commandId: command("renew-approve"), connector: "raindrop", id: "renewed-cohort", maxItems: 1, budgetCents: 1 } });

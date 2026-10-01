@@ -59,6 +59,7 @@ describe.sequential("recent model usage", () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     const changes: string[] = [];
+    const recentChangeListeners = new Set<() => void>();
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome,
@@ -68,12 +69,19 @@ describe.sequential("recent model usage", () => {
       broadcast: () => {},
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
-      recentModelsChanged: () => changes.push("models.recentChanged"),
+      recentModelsChanged: () => {
+        changes.push("models.recentChanged");
+        for (const listener of recentChangeListeners) listener();
+        recentChangeListeners.clear();
+      },
     });
     registries.push(registry);
     await registry.initialize();
     await awaitCatalogCut(registry);
-    return { root, registry, faux, parentId: manager.getSessionId(), childId: child.getSessionId(), changes };
+    return {
+      root, registry, faux, parentId: manager.getSessionId(), childId: child.getSessionId(), changes,
+      nextRecentChange: () => new Promise<void>((resolve) => recentChangeListeners.add(resolve)),
+    };
   }
 
   async function run(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, model: { provider: string; id: string }, prompt: string): Promise<void> {
@@ -93,7 +101,9 @@ describe.sequential("recent model usage", () => {
     const modelB = fixture_.faux.getModel("recent-b")!;
     try {
       const slot = await fixture_.registry.acquire(fixture_.parentId);
+      const firstRecorded = fixture_.nextRecentChange();
       await run(slot, modelA, "first");
+      await firstRecorded;
       expect(fixture_.registry.recentModelUsage()[0]).toMatchObject({ id: "recent-a" });
       // The seeded list is already at the bound, so the newest run displaces the
       // oldest entry instead of growing the document.
@@ -101,11 +111,15 @@ describe.sequential("recent model usage", () => {
       expect(fixture_.registry.recentModelUsage().map((model) => model.id).slice(0, 3)).toEqual(["recent-a", "model-00", "model-01"]);
       expect(fixture_.registry.recentModelUsage().some((model) => model.id === "model-11")).toBe(false);
 
+      const secondRecorded = fixture_.nextRecentChange();
       await run(slot, modelB, "second");
+      await secondRecorded;
       expect(fixture_.registry.recentModelUsage().map((model) => model.id).slice(0, 3)).toEqual(["recent-b", "recent-a", "model-00"]);
 
       // Reusing a model moves it to the front instead of adding a second row.
+      const thirdRecorded = fixture_.nextRecentChange();
       await run(slot, modelA, "third");
+      await thirdRecorded;
       const usage = fixture_.registry.recentModelUsage();
       expect(usage.map((model) => model.id).slice(0, 3)).toEqual(["recent-a", "recent-b", "model-00"]);
       expect(new Set(usage.map((model) => `${model.provider}/${model.id}`)).size).toBe(usage.length);
