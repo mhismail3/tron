@@ -437,6 +437,17 @@ export function providerUsageSupported(runtime: ModelRuntime, providerId: string
   const adapter = adapterFor(runtime, providerId);
   return adapter !== undefined && (!adapter.oauthOnly || !runtime.hasConfiguredAuth(providerId) || runtime.isUsingOAuth(providerId));
 }
+/**
+ * The provider that currently presents this provider's usage as its own, if any.
+ * Clients hide a configured lender row while its borrower qualifies, so one
+ * ChatGPT plan appears once (#312); the lender stays visible on its own.
+ */
+export function providerUsageLentTo(runtime: ModelRuntime, providerId: string): string | null {
+  for (const [borrower, borrowed] of Object.entries(borrowedUsage)) {
+    if (borrowed.from === providerId && providerUsageSupported(runtime, borrower)) return borrower;
+  }
+  return null;
+}
 function loopbackHost(hostname: string): boolean {
   // URL hostnames bracket IPv6 literals, so compare the unbracketed form.
   const host = hostname.toLowerCase().replace(/^\[|\]$/gu, "");

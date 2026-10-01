@@ -6,6 +6,7 @@ function provider(id: string, name = id) {
     id,
     name,
     usageSupported: false,
+    usageLentTo: null,
     localOnly: false,
     authSource: null,
     credentialType: null,

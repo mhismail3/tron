@@ -452,7 +452,9 @@ uses OAuth and both `openai` and `openai-codex` resolve to their exact first-par
 shapes, `provider.usage` for `openai` runs the Codex `wham` read with the Codex
 credential and returns it under `openai` with `source` `openai-codex.wham`. The
 `openai` credential is never resolved for usage. A missing Codex login reports
-`unconfigured`, which clients present as a Codex sign-in prompt. Tron cannot prove
+`unconfigured`, which clients present as a Codex sign-in prompt. While OpenAI
+qualifies, `provider.list` sets `usageLentTo: "openai"` on the `openai-codex` row
+(otherwise `null`), so clients can hide the legacy row and show the plan once. Tron cannot prove
 the two logins belong to the same ChatGPT account (#312). API-key `openai` is not
 usage-supported. A change to the `openai` login or composition during the read
 answers `unavailable` instead of the lent windows. Sign in with ChatGPT receives a stable device ID from global Pi

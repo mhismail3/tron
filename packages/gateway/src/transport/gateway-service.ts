@@ -65,7 +65,7 @@ import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../auto
 import { AutomationPaginationStore } from "../automations/automation-pagination.js";
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
-import { ProviderUsageOwner, providerUsageSupported, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
+import { ProviderUsageOwner, providerUsageSupported, providerUsageLentTo, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
@@ -2314,6 +2314,7 @@ export class GatewayService {
         name: provider.name,
         configured: auth !== undefined,
         usageSupported: providerUsageSupported(modelRuntime, provider.id),
+        usageLentTo: providerUsageLentTo(modelRuntime, provider.id),
         localOnly: providerLocalOnly(modelRuntime, provider.id),
         authSource: auth?.source ?? null,
         credentialType: credentials.get(provider.id) ?? null,
@@ -2360,6 +2361,7 @@ export function validateProviderCatalog(providers: Array<{
   id: string;
   name: string;
   usageSupported: boolean;
+  usageLentTo: string | null;
   localOnly: boolean;
   authSource: string | null;
   credentialType: string | null;
@@ -2382,6 +2384,7 @@ export function validateProviderCatalog(providers: Array<{
     }
     identities.add(provider.id);
     const values = [provider.id, provider.name, ...provider.authMethods];
+    if (provider.usageLentTo) values.push(provider.usageLentTo);
     if (provider.authSource) values.push(provider.authSource);
     if (provider.credentialType) values.push(provider.credentialType);
     for (const value of values) {
