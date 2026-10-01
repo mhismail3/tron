@@ -16,7 +16,7 @@ import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { ImageContent, Model } from "@earendil-works/pi-ai";
+import { getCurrentSystemMessage, type ImageContent, type Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -1594,6 +1594,13 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
       });
+      // The transcript owns a chat's tool loadout. Pi's createAgentSession always
+      // passes its configured defaults, which skips AgentSession's own transcript
+      // restore, so a resumed, forked or reloaded chat would silently fall back
+      // to the defaults and the next prompt would persist that (#327). Apply the
+      // declared loadout here; a session without one keeps the defaults.
+      const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
+      if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
       compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir);
       created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(created.session.agent.streamFunction));
       this.compactionPolicies.set(created.session, compactionPolicy);
