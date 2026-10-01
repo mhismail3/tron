@@ -280,6 +280,14 @@
         "command": "python3 -m unittest discover -s tools/work"
       },
       {
+        "name": "work-related-issues",
+        "paths": [
+          ".agents/skills/tron-work/related-issues.js",
+          ".agents/skills/tron-work/related-issues.test.mjs"
+        ],
+        "command": "node --test .agents/skills/tron-work/related-issues.test.mjs"
+      },
+      {
         "name": "github-metadata",
         "paths": [
           ".github/workflows/**",
