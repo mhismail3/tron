@@ -6,6 +6,8 @@ struct AvailableToolRow: Identifiable, Equatable, Sendable {
     let name: String
     let title: String
     let detail: String?
+    /// The runtime's tool record, shown in full by the detail sheet.
+    let value: JSONValue
     var id: String { name }
 }
 
@@ -26,16 +28,6 @@ struct AvailableToolGroup: Identifiable, Equatable, Sendable {
         case .package(let name): name
         case .local: "Local Extensions"
         case .mcp(let server): "\(server) (MCP)"
-        }
-    }
-
-    var icon: String {
-        switch origin {
-        case .builtIn: "wrench.and.screwdriver"
-        case .tron: "sparkles"
-        case .package: "shippingbox"
-        case .local: "folder"
-        case .mcp: "server.rack"
         }
     }
 
@@ -66,7 +58,8 @@ enum AvailableToolsPresentation {
                 title: title(name: name, value: value),
                 detail: object["description"]?.stringValue
                     .map(ProjectResourceTextPresentation.readableDescription)
-                    .flatMap { $0.isEmpty ? nil : $0 }
+                    .flatMap { $0.isEmpty ? nil : $0 },
+                value: value
             )
             grouped[origin(object), default: []].append(row)
         }
@@ -128,7 +121,8 @@ enum AvailableToolsPresentation {
 
 /// Available Tools: turn individual tools on or off for this chat. Pi records
 /// the change in the chat's history; defaults for new chats live in
-/// Settings → Extensions → Default Tools.
+/// Settings → Extensions → Default Tools. Only the switch toggles a tool; the
+/// rest of the row opens the tool's full description and inputs.
 struct SessionToolPickerSheet: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
@@ -138,6 +132,7 @@ struct SessionToolPickerSheet: View {
     @State private var loadGeneration = 0
     @State private var saving: String?
     @State private var errorMessage: String?
+    @State private var selected: ProjectResourceSelection?
 
     private var groups: [AvailableToolGroup] { AvailableToolsPresentation.groups(from: model.resources) }
     private var active: Set<String> { AvailableToolsPresentation.activeNames(from: model.context) }
@@ -186,6 +181,9 @@ struct SessionToolPickerSheet: View {
                 }
             }
         }
+        .tronManagedSheet(item: $selected, identity: { _ in "chat.available-tool-detail" }) { selection in
+            ProjectResourceDetailSheet(sessionID: sessionID, selection: selection, accentOverride: .tronSessionTeal) { selected = nil }
+        }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -209,14 +207,39 @@ struct SessionToolPickerSheet: View {
         ) {
             ForEach(Array(group.tools.enumerated()), id: \.element.id) { index, tool in
                 if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
-                TronToggleRow(
-                    icon: group.icon,
+                toolRow(tool)
+            }
+        }
+    }
+
+    private func toolRow(_ tool: AvailableToolRow) -> some View {
+        let isOn = active.contains(tool.name)
+        return HStack(spacing: 0) {
+            Button {
+                selected = ProjectResourceSelection(kind: .tools, title: tool.title, value: tool.value)
+            } label: {
+                TronSettingsRow(
+                    icon: nil,
                     title: tool.title,
-                    detail: tool.detail.map { String($0.prefix(140)) },
-                    accent: .tronSessionTeal,
-                    isEnabled: saving == nil,
-                    isOn: Binding(get: { active.contains(tool.name) }, set: { set(tool, enabled: $0) })
+                    subtitle: tool.detail,
+                    subtitleLineLimit: 2,
+                    accent: .tronSessionTeal
                 )
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows the tool's description and inputs")
+            Button { set(tool, enabled: !isOn) } label: {
+                TronToggleControl(isOn: isOn, accent: .tronSessionTeal)
+                    .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                    .frame(minHeight: TronSettingsLayoutPolicy.rowMinimumHeight)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(saving != nil)
+            .opacity(saving == nil ? 1 : 0.62)
+            .accessibilityRepresentation {
+                Toggle(isOn: Binding(get: { isOn }, set: { set(tool, enabled: $0) })) { Text(tool.title) }
+                    .disabled(saving != nil)
             }
         }
     }

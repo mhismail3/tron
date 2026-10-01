@@ -28,6 +28,8 @@ When the user asks for the board, the dashboard or the work status:
    `source: { "kind": "internal_file", "path": "work-dashboard/<timestamp>.html" }`
    (the path is relative to `files/`) and `presentation.surface` `inline` or
    `sheet`.
+   The page opens on counts, then Needs you and Health, then the filterable
+   Work list (kind, visibility, status, area) and expandable epics.
 3. In chat, summarize each **Needs you** item (issue number, title and why it
    needs the user). Mention stale claims, disagreements, orphans and open
    regressions only when present. Do not act on them unless the user asks.

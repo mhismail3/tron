@@ -119,6 +119,21 @@ struct Pi099VisualEvidenceTests {
             scene("tool-read-mcp-resource", ToolDetailSheet(tool: tool("read_mcp_resource", request: .object(["uri": .string("file:///notes/today")]), response: .object(["contents": .array([.object(["text": .string("Team notes for today")])])]), content: "Team notes for today"), density: .expanded)),
             scene("tool-technical-details", ToolTechnicalDetailsSheet(tool: tool("mcp__calendar__find_events", request: .object(["query": .string("today")]), response: .object(["content": .string("Found 3 events")]), content: "Found 3 events"), presentation: ToolDetailPresentation(tool: tool("mcp__calendar__find_events", request: .object(["query": .string("today")]), response: .object(["content": .string("Found 3 events")]), content: "Found 3 events")))),
             scene("tool-picker", pickerFixture(model)),
+            scene("tool-codemode-source", CodemodeSourceSheet(source: "const [labels, issues] = await Promise.allSettled([\n  tools.bash({ command: \"gh label list --json name\" }),\n  tools.bash({ command: \"gh issue list --state all\" })\n]);\nreturn issues.value?.output;", accent: ChatSemanticPillRole.tool.accent)),
+            scene("tool-nested-call", NestedToolCallDetailSheet(call: NestedToolCallPresentation(
+                id: "call-04", toolName: "bash", status: .completed, error: nil, durationMs: 7,
+                arguments: .object(["command": .string("gh label list --limit 200 --json name -q '.[].name' 2>&1 | tr '\\n' ' '"), "timeout": .number(30)]),
+                argumentsBytes: nil
+            ), accent: ChatSemanticPillRole.tool.accent)),
+            scene("tool-resource-detail", ProjectResourceDetailSheet(sessionID: "fixture-session", selection: ProjectResourceSelection(
+                kind: .tools, title: "Run Shell Command",
+                value: .object(["name": .string("bash"), "source": .string("builtin"),
+                                "description": .string("Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first)."),
+                                "parameters": .object(["type": .string("object"), "required": .array([.string("command")]), "properties": .object([
+                                    "command": .object(["type": .string("string"), "description": .string("Bash command to execute")]),
+                                    "timeout": .object(["type": .string("number"), "description": .string("Timeout in seconds (optional, no default timeout)")])
+                                ])])])
+            ), accentOverride: .tronSessionTeal) {}.environment(model)),
             scene("tool-chips", VStack(alignment: .leading, spacing: 10) {
                 Text("Recent tools").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
                 ToolCard(data: codemode, onOpenDetails: { _ in })

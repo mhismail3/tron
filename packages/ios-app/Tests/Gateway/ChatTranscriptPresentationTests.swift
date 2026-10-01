@@ -1934,6 +1934,20 @@ struct ChatTranscriptPresentationTests {
         #expect(settled.ids == ["user", "assistant-tools", "tool-run-call-1", "assistant-final"])
     }
 
+    @Test("model attribution names the thinking level the way the selectors do, not by its wire value")
+    @MainActor
+    func modelAttributionUsesThinkingLevelTitle() throws {
+        let label = ModelDisplayFormatting.reference(provider: "openai-codex", model: "gpt-5.6-sol")
+        for (wire, title) in [("medium", "Medium"), ("xhigh", "Extra High")] {
+            let item = try message("""
+            {"id":"assistant-\(wire)","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","provider":"openai-codex","modelId":"gpt-5.6-sol","thinkingLevel":"\(wire)","content":[{"id":"answer","ordinal":0,"type":"text","text":"hello"}]}
+            """)
+            #expect(TranscriptRow(item: item).modelAttribution == "\(label) · \(title)")
+            // Presentation only: the canonical value stays as Pi wrote it.
+            #expect(item.thinkingLevel == wire)
+        }
+    }
+
     @Test("model attribution waits for message settlement across live and canonical projection")
     @MainActor
     func modelAttributionWaitsForSettlement() throws {

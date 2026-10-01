@@ -70,8 +70,8 @@ actor HostedIntegrationsGateway {
     }
 
     private func snapshot() -> JSONValue {
-        let definitions: [JSONValue] = [definition("knowledge.raindrop", "Raindrop", "knowledge-connector", [capability("read", "Read bookmarks")]),
-                                        definition("knowledge.x", "X", "knowledge-connector", [capability("read", "Read bookmarks")])]
+        let definitions: [JSONValue] = [definition("knowledge.raindrop", "Raindrop", [capability("read", "Read bookmarks")]),
+                                        definition("knowledge.x", "X", [capability("read", "Read bookmarks")])]
         let instances: [JSONValue] = [instance("raindrop-1", "knowledge.raindrop", "knowledge-connector", "raindrop-account", "ready", "Mira", collections: [.object(["collectionId": .string("63441068"), "role": .string("research")])]),
                                       instance("raindrop-2", "knowledge.raindrop", "knowledge-connector", "raindrop-second", "setup-required", nil),
                                       instance("x-1", "knowledge.x", "knowledge-connector", "x-account", "ready", "@luna")]
@@ -92,9 +92,9 @@ actor HostedIntegrationsGateway {
                         "capabilities": .array(capabilities), "stateRevision": .number(1)])
     }
 
-    private func definition(_ id: String, _ name: String, _ implementation: String, _ capabilities: [JSONValue]) -> JSONValue {
-        .object(["schemaVersion": .number(1), "id": .string(id), "implementation": .string(implementation), "displayName": .string(name),
-                 "setupMethods": .array([.string(id == "knowledge.x" ? "oauth" : (implementation == "mcp" ? "endpoint" : "token"))]),
+    private func definition(_ id: String, _ name: String, _ capabilities: [JSONValue]) -> JSONValue {
+        .object(["schemaVersion": .number(1), "id": .string(id), "implementation": .string("knowledge-connector"), "displayName": .string(name),
+                 "setupMethods": .array([.string(id == "knowledge.x" ? "oauth" : "token")]),
                  "capabilities": .array(capabilities)])
     }
     private func capability(_ id: String, _ name: String) -> JSONValue {

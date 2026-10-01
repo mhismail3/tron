@@ -767,10 +767,15 @@ class ClaimedStatusTests(LandFixture):
                                            "nodes": start_nodes}}}
 
         board_config = {
-            "project": {"title": "Work", "fields": [{"name": "Priority", "options": []}]},
+            "project": {"title": "Work", "fields": [
+                {"name": "Priority", "options": []},
+                {"name": self.config["claim"]["statusField"], "options": [{"name": "In progress"}]},
+            ]},
             "claim": self.config["claim"],
             "dashboard": {"needsYouStatus": "Needs you", "blockedStatus": "Blocked", "epicLabel": "epic",
-                          "needsYouLabels": [], "regressionLabel": "regression", "priorityField": "Priority"},
+                          "needsYouLabels": [], "regressionLabel": "regression", "priorityField": "Priority",
+                          "kindPrefix": "kind:", "visibilityPrefix": "visibility:", "areaPrefix": "area:",
+                          "ideaLabel": "kind:idea", "recentDays": 14},
         }
         snapshot = {"repository": REPO, "project_items": board_items, "labeled_issues": [], "pull_requests": [],
                     "issue_states": {}, "claims": [], "worktrees": [], "worktree_root": "/w", "checkout_parent": "/"}

@@ -1061,12 +1061,12 @@ command, query, diff, and readable result. Extension-authored Pi tool labels are
 invocation names and become the native row/detail title (for example, `subagent_wait` displays as **Subagent Wait**),
 while arbitrary extension tools may foreground only the first
 trusted common string key and otherwise lead with their result. Pi codemode uses that same tool-detail route:
-its readable result leads, the complete script is behind its dedicated source sheet, bounded nested invocations stay inside the parent detail with their own semantic status/duration and standard nested detail sheet. Recovered `unfinished` calls are terminally presented as “Didn't finish,” not as running work; bounded per-call errors remain visible in the detail sheet. `details.tronNested` attachments remain parent-owned.
+its readable result leads, the complete script is behind its dedicated source sheet, bounded nested invocations stay inside the parent detail with their own semantic status/duration and a one-line preview of their primary argument. The source and nested-call sheets share the parent's chrome (inline principal title, Done, no drag indicator, parent insets and section labels); a nested call's sheet shows its status chip, any error, its primary argument in full and its remaining arguments. Only each call's request, status and timing are recorded, so its output stays part of the script result. Recovered `unfinished` calls are terminally presented as “Didn't finish,” not as running work; bounded per-call errors remain visible in the detail sheet. `details.tronNested` attachments remain parent-owned.
 Admitted display descriptors use the existing session-bound display presentation route; no nested call becomes a
 canonical transcript row or independent receipt. MCP tool names use the projected server/tool identity, resource
 and search tools remain generic result cards. Manage Session → Available Tools turns tools on or off for one chat
 (`session.setTools`); it groups `session.resources` tools as Built-in, Tron, each package, local extensions and each
-MCP server (from the `namespace` object), omits hidden exposures, and is the only Manage Session list of tools. Routed assistant rows use physical provider/model attribution;
+MCP server (from the `namespace` object), omits hidden exposures, and is the only Manage Session list of tools. Its rows carry no icon and a two-line description; only the switch toggles a tool, and the rest of the row opens the shared resource detail sheet with the full description and the tool's declared inputs. Routed assistant rows use physical provider/model attribution;
 virtual model names are marked in the model and session selectors without replacing physical attribution. Bash keeps
 Pi's empty result empty rather than inventing `(no output)`. Bash commands wrap to the available width
 using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
@@ -1972,7 +1972,8 @@ The exact command completion plus matching canonical projection retires that cho
 failure rolls back only its exact request,
 and model/runtime replacement discards it. Reset-to-default remains distinct from no
 pending choice. Shared Thinking labels render `xhigh` and extra-high spelling/case variants
-as **Extra High** in settings, sliders, transcript notices, and typed history previews without
+as **Extra High** (and capitalize every other level) in settings, sliders, transcript notices, the
+assistant model-attribution footer, and typed history previews without
 rewriting wire values, canonical content, or authored labels.
 The blue Session container orders Current Branch, Agent Instructions, Available Tools,
 Project Resources, Session History, and Subagent History, followed by any diagnostics.
@@ -2051,7 +2052,9 @@ have no duplicate row or Context Files section there: their assembled guidance b
 Agent Instructions, which lists each file under Project Instructions. Canonical resource discovery
 is unchanged. Project Resources, Session History, and Subagent History use the originating Manage Session teal titles and
 toolbar actions to match their originating Session rows. Resource detail chrome instead
-matches its own category accent. Project Resource titles prefer authored labels, otherwise
+matches its own category accent, except a tool opened from Available Tools keeps that sheet's
+session teal. Project Resource titles prefer authored labels (a label that only repeats the
+raw name, such as Pi's `codemode` and `tool_search`, is not authored), otherwise
 humanize tool/skill/prompt/command/subagent names using the shared composer formatter. Extension titles derive
 from npm/Git package names, meaningful local entrypoints, or named inline extensions rather
 than generic `index.ts` filenames and `<inline:…>` wrappers. First-party inline names read as
