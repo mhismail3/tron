@@ -516,6 +516,7 @@
       {
         "name": "dev-lifecycle-state",
         "paths": [
+          "scripts/tron-dev",
           "scripts/tron-dev-state.mjs",
           "scripts/tron-dev-state.test.mjs"
         ],
