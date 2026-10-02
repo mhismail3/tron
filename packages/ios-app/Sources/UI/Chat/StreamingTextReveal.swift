@@ -151,12 +151,7 @@ private final class ChatStreamingTextRevealSchedule {
     func milliseconds(at instant: ContinuousClock.Instant) -> Double {
         let origin = self.origin ?? instant
         self.origin = origin
-        let elapsed = origin.duration(to: instant).components
-        return Double(elapsed.seconds) * 1_000 + Double(elapsed.attoseconds) / 1e15
-    }
-
-    func instant(atMilliseconds milliseconds: Double) -> ContinuousClock.Instant? {
-        origin.map { $0 + .milliseconds(milliseconds) }
+        return origin.duration(to: instant) / .milliseconds(1)
     }
 
     /// Arrival times of `pending` in order; a word seen for the first time
@@ -423,9 +418,8 @@ struct ChatStreamingInlineText: View {
     private func tokenOpacity(_ id: String, revealed: Set<String>, now: ContinuousClock.Instant) -> Double {
         if revealed.contains(id) { return 1 }
         guard let started = revealStarts[id] else { return 0 }
-        let elapsed = started.duration(to: now).components
         return ChatStreamingTextRevealPolicy.opacity(
-            elapsedMilliseconds: max(0, Int(elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000))
+            elapsedMilliseconds: max(0, Int(started.duration(to: now) / .milliseconds(1)))
         )
     }
 
@@ -506,7 +500,7 @@ struct ChatStreamingInlineText: View {
             }
             schedule.clock = admission.clock
             for (token, start) in zip(pending, admission.startTimes) {
-                revealStarts[token.id] = schedule.instant(atMilliseconds: start) ?? now
+                revealStarts[token.id] = now + .milliseconds(start - nowMilliseconds)
                 schedule.started(token.id)
             }
 
