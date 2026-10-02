@@ -214,10 +214,10 @@ def locked_file_is_named(lock: Path, handle: IO[str]) -> bool:
     """Whether the file this holder locked is still the one `lock` names.
 
     A holder that removes a lane (`--remove-empty-lane`, `lane-remove`, the
-    sweep reclaiming an abandoned lane) unlinks the lease file while it holds it. A command that opened the file just
-    before that locks the unlinked file once the remover lets go, while a
-    command that recreated the file holds the lane's real lease: the lock is
-    then no lease at all. `ios-test-simulator.py` checks its own takes the same
+    sweep reclaiming an abandoned lane) unlinks the lease file while it holds
+    it. A command that opened the file just before that locks the unlinked
+    file once the remover lets go, while a command that recreated the file
+    holds the lane's real lease: the lock is then no lease at all. `ios-test-simulator.py` checks its own takes the same
     way.
     """
     try:

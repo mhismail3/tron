@@ -1178,7 +1178,8 @@ def reclaim_abandoned_lanes(arguments: argparse.Namespace) -> None:
         return
     for directory in children:
         name = directory.name
-        if not (name == LANE_DIRECTORY_PREFIX or name.startswith(LANE_DIRECTORY_PREFIX + "-")):
+        suffix = name.removeprefix(LANE_DIRECTORY_PREFIX + "-")
+        if not (name == LANE_DIRECTORY_PREFIX or (suffix != name and LANE_NAME_PATTERN.fullmatch(suffix))):
             continue
         if directory.is_symlink() or not directory.is_dir() or not abandoned_lane(directory):
             continue

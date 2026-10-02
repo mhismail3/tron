@@ -3908,6 +3908,9 @@ runpy.run_path(script, run_name="__main__")
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
+        # A take that recreated the lane would leave a lease-only directory for
+        # the same sweep's reclaim to remove, hiding the bug behind `exists`.
+        self.assertNotIn("removed abandoned lane", result.stdout)
         self.assertFalse(lane.exists())
 
     def test_the_sweep_reclaims_only_marker_less_lanes_holding_nothing_but_an_idle_lease(self) -> None:
@@ -3927,6 +3930,8 @@ runpy.run_path(script, run_name="__main__")
         (notes / "notes.txt").write_text("not the tooling's\n")
         inner = lane("ios-test-outer/ios-test-inner")
         unnamed = lane("ios-e2e-other")
+        # The lane prefix, but no lane name can follow it with a dot.
+        dotted = lane("ios-test-.hidden")
         target = lane("elsewhere")
         (self.discovery_root / "ios-test-directory-link").symlink_to(target)
         lease_link = self.discovery_root / "ios-test-lease-link"
@@ -3944,7 +3949,7 @@ runpy.run_path(script, run_name="__main__")
         self.assertTrue(self.lock_holder(held / "lease.lock"))
         self.assertIn('"command": "run"', (held / "lease.lock").read_text())
         self.assertEqual(notes.joinpath("notes.txt").read_text(), "not the tooling's\n")
-        for kept in (inner / "lease.lock", unnamed / "lease.lock", target / "lease.lock", lease_link / "lease.lock", starting):
+        for kept in (inner / "lease.lock", unnamed / "lease.lock", dotted / "lease.lock", target / "lease.lock", lease_link / "lease.lock", starting):
             self.assertTrue(os.path.lexists(kept), kept)
         self.assertTrue((self.discovery_root / "ios-test-directory-link").is_symlink())
 
