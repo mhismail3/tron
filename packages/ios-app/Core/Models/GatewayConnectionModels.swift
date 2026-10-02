@@ -623,8 +623,9 @@ package struct GatewayNoPathPresentation: Equatable, Sendable {
     }
 
     package var label: String {
-        guard let interface else { return "No path to this Mac" }
-        return "No path to this Mac over \(interface)"
+        guard let interface else { return "Mac unreachable" }
+        // Failed handshakes prove failed reachability, not absence of an OS route.
+        return "Mac unreachable over \(interface)"
     }
 
     package static func interfaceLabel(from interfaces: String?) -> String? {

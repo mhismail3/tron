@@ -774,6 +774,41 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
+    @Test("manual secondary retry interrupts backoff and repeated taps keep its in-flight socket")
+    func manualSecondaryRetryWithoutCompetingSockets() async throws {
+        try await withTestWatchdog { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let clock = ManualClock()
+            let sockets = (0..<2).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            defer { pool.retire() }
+            await sockets[0].failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic transport failure", retryable: true, details: nil
+            ))
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            try await sockets[0].waitUntilClosed()
+            try await clock.waitUntilSleeping(count: 1)
+            pool.retry(profileID: "unknown")
+            #expect(factory.requests.count == 1)
+            pool.retry(profileID: profile.id)
+            try await sockets[1].waitUntilSent(count: 1)
+            for _ in 0..<10 { pool.retry(profileID: profile.id) }
+            for _ in 0..<20 { await Task.yield() }
+            #expect(factory.requests.count == 2)
+            #expect(await sockets[1].sentFrames().count == 1)
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
     @Test("dashboard retry pauses off path and resumes immediately on path return")
     func dashboardRetryPausesForUnsatisfiedPath() async throws {
         try await withTestWatchdog { @MainActor in
@@ -867,7 +902,7 @@ struct DashboardStateOwnerTests {
 
             // The profile the user sees is unreachable, not merely reconnecting.
             let states = recorder.updates.filter { $0.profileID == profile.id }.map(\.state)
-            #expect(states.contains { $0.label.hasPrefix("No path to this Mac") })
+            #expect(states.contains { $0.label.hasPrefix("Mac unreachable") })
 
             pool.retire()
             await pool.waitForRetirement()
