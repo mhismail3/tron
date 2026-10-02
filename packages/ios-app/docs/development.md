@@ -718,8 +718,20 @@ it in its device-export store; Tron copies the returned path and
 shows confirmation. If disconnected or upload fails, the same action opens the
 native share sheet with a bounded local JSONL bundle; upload failures are
 recorded as warning events. The first JSON record carries capture time, Gateway
-runtime identities, per-source statuses, and the represented log window. Use
-timestamps and request IDs to rank the slow boundary, inspect that boundary in Instruments
+runtime identities, per-source statuses, and the represented log window. Attachment
+uploads add `http.upload.requested` / `http.upload.terminal` records with one
+opaque UUID also sent in the optional `X-Tron-Request-ID` header. They record
+only the request-body byte count, route class (`saved` / `lan-pinned`), the
+connection ID captured at admission, elapsed time, and a bounded outcome. Logs
+Export request records count encoded RPC JSON bytes, not compressed/on-wire
+frame bytes; the Gateway joins that request ID through its `rpc.received` and
+`rpc.completed` records without recording the export content. Gateway
+`http.upload.phase` records distinguish authenticated route receipt from
+completed body staging; its `http.upload`
+terminal record means the response stream finished or the request failed, not
+that the phone received a receipt. No filename, MIME type, URL, token, profile
+ID, or body content is recorded, and these events add no retry or receipt
+behavior. Use timestamps and request IDs to rank the slow boundary, inspect that boundary in Instruments
 when needed, make one causal fix, and repeat the
 same interaction under matched conditions. An export is evidence for diagnosis,
 not proof of a physical-device speedup; retain the focused regression and
@@ -2125,6 +2137,19 @@ the app's own path fact, so it runs on this Mac's wired path as a Wi-Fi phone:
 # After `build`: the LAN lane is on for this fixture only.
 scripts/ios-gateway-e2e-test run-lan
 ```
+
+`RealGatewayPiBoundaryTests` declares three cases. The ordinary `run` registers
+and proves the reconnect case plus the shared-link case; the third
+`testRacesLanAndTailscaleLanes` is registered only by `run-lan`, requires the
+private-address fixture above, and is not implied by a green `run`. iOS work
+verification detects this fixture-only test owner and dispatches it through the
+canonical `ios-gateway-e2e-test all` (prepare/build/run) owner instead of the
+ordinary XCTest runner, where every case would correctly skip. Verification
+then calls that same owner to stop the fixture while preserving its result
+bundles. The default verified selection runs the two standard cases only; when
+the E-3c LAN-lane case itself is changed or claimed, run `run-lan` separately
+and record its matching private-address result. This routing does not claim all
+three cases were qualified by the shared-link run.
 
 The Gateway uses a fixture-owned home, state directory, agent directory,
 delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly

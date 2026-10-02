@@ -10,6 +10,9 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 TEST_TARGET = "TronMobileTests"
+FIXTURE_ONLY_TESTS = {
+    "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift": "scripts/ios-gateway-e2e-test",
+}
 # Focus only sources with an audited owner. Other Settings files remain full-suite
 # until their test ownership has been established.
 SETTINGS_SOURCE_PREFIX = "packages/ios-app/Sources/UI/Settings/"
@@ -182,13 +185,30 @@ def _has_deletions(merge_base: str) -> bool:
     return changed.returncode != 0 or bool(changed.stdout)
 
 
-def test_command(paths: list[str], *, has_deletions: bool = False) -> list[str]:
-    selectors = selectors_for(paths, has_deletions=has_deletions)
-    command = ["scripts/tron-ios-test", "run"]
-    if selectors is not None:
-        for selector in selectors:
-            command.extend(["--only-testing", selector])
-    return command
+def test_commands(paths: list[str], *, has_deletions: bool = False) -> list[list[str]]:
+    """Dispatch fixture-owned integration suites to their real fixture runner."""
+    fixture_runners = []
+    ordinary_paths = []
+    for raw_path in paths:
+        relative = _relative(raw_path)
+        runner = FIXTURE_ONLY_TESTS.get(relative or "")
+        if runner is None:
+            ordinary_paths.append(raw_path)
+        elif runner not in fixture_runners:
+            fixture_runners.append(runner)
+
+    commands: list[list[str]] = []
+    if ordinary_paths or has_deletions:
+        selectors = selectors_for(ordinary_paths, has_deletions=has_deletions)
+        command = ["scripts/tron-ios-test", "run"]
+        if selectors is not None:
+            for selector in selectors:
+                command.extend(["--only-testing", selector])
+        commands.append(command)
+    commands.extend([[runner, "all"] for runner in fixture_runners])
+    if not commands:
+        commands.append(["scripts/tron-ios-test", "run"])
+    return commands
 
 
 def main() -> int:
@@ -196,8 +216,24 @@ def main() -> int:
     parser.add_argument("--merge-base", required=True)
     parser.add_argument("paths", nargs="*")
     args = parser.parse_args()
-    command = test_command(args.paths, has_deletions=_has_deletions(args.merge_base))
-    return subprocess.run(command, cwd=ROOT, check=False).returncode
+    commands = test_commands(args.paths, has_deletions=_has_deletions(args.merge_base))
+    fixture_runner_started = False
+    result_code = 0
+    try:
+        for command in commands:
+            fixture_runner_started |= command[0] in FIXTURE_ONLY_TESTS.values()
+            result = subprocess.run(command, cwd=ROOT, check=False)
+            if result.returncode:
+                result_code = result.returncode
+                break
+    finally:
+        if fixture_runner_started:
+            cleanup = subprocess.run(
+                ["scripts/ios-gateway-e2e-test", "stop"], cwd=ROOT, check=False,
+            )
+            if result_code == 0:
+                result_code = cleanup.returncode
+    return result_code
 
 
 if __name__ == "__main__":

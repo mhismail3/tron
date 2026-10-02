@@ -54,6 +54,7 @@ interface Client {
 interface Fixture {
   root: string;
   faux: ReturnType<typeof fauxProvider>;
+  logRecords: Array<{ level: string; message: string; metadata: Record<string, unknown> }>;
   connect(): Promise<Client>;
   coldSession(label: string): Promise<{ id: string; file: string; entryId: string }>;
   snapshot(client: Client, sessionId: string): Promise<any>;
@@ -77,12 +78,18 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     return runtime;
   });
   const sockets: WebSocket[] = [];
+  const logRecords: Array<{ level: string; message: string; metadata: Record<string, unknown> }> = [];
   const devices = new DeviceStore(root, "fixture-machine");
   await devices.initialize();
   const invitation = await devices.ensureEnrollment();
   const paired = await devices.pair(invitation.code, "Fixture phone");
   await devices.ensureEnrollment();
 
+  const diagnosticLogger = {
+    log: (level: string, message: string, metadata: Record<string, unknown> = {}) => logRecords.push({ level, message, metadata }),
+    recent: () => [],
+    debugTail: () => [],
+  };
   let server: GatewayServer | undefined;
   const registry = new RuntimeRegistry({
     agentDir,
@@ -110,7 +117,7 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     receipts: new CommandReceiptStore(root),
     uploads,
     terminals: { belongsToSession: () => false },
-    logger: { log: () => {} },
+    logger: diagnosticLogger,
     sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
   } as never);
   server = new GatewayServer({
@@ -122,7 +129,7 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     service,
     uploads: uploads as never,
     auth: { cancelOwner: () => {}, detachClient: () => {} } as never,
-    logger: { log: () => {} } as never,
+    logger: diagnosticLogger as never,
   });
   await server.listen();
   const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
@@ -184,8 +191,34 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     expect(synced.ok, JSON.stringify(synced)).toBe(true);
     return opened.result.session;
   };
-  return { root, faux, connect, coldSession, snapshot, openSession };
+  return { root, faux, logRecords, connect, coldSession, snapshot, openSession };
 }
+
+describe("diagnostic export RPC boundary", () => {
+  it("records bounded authenticated ingress and completion without export content", async () => {
+    const fixtureValue = await fixture();
+    const client = await fixtureValue.connect();
+    const requestID = "ad8d4b12-4392-467e-b7ef-39a8198e8b12";
+    const privateContent = "synthetic-private-diagnostic-body";
+    const response = await client.request(requestID, "system.logs.export", {
+      commandId: "synthetic-command-identifier",
+      content: privateContent,
+    });
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    const records = fixtureValue.logRecords.filter(({ metadata }) => metadata.event === "rpc.received" || metadata.event === "rpc.completed");
+    const ingressRecords = records.filter(({ metadata }) => metadata.event === "rpc.received");
+    expect(ingressRecords).toHaveLength(1);
+    expect(records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: "Logs Export RPC admitted",
+        metadata: expect.objectContaining({ event: "rpc.received", requestID, method: "system.logs.export", outcome: "admitted" }),
+      }),
+    ]));
+    expect(records.some(({ metadata }) => metadata.event === "rpc.completed" && metadata.requestID === requestID && metadata.outcome === "success")).toBe(true);
+    expect(JSON.stringify(records)).not.toContain(privateContent);
+    expect(JSON.stringify(ingressRecords)).not.toContain("synthetic-command-identifier");
+  });
+});
 
 const list = async (client: Client) => {
   const response = await client.request(`list-${Math.random().toString(36).slice(2, 8)}`, "session.list", { scope: "user" });

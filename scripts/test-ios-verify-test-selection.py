@@ -9,10 +9,66 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ios_verify_test_selection import _has_deletions, selectors_for, test_command
+from ios_verify_test_selection import _has_deletions, selectors_for, test_commands
 
 
 class IOSVerifyTestSelectionTests(unittest.TestCase):
+    def test_fixture_suite_dispatch_runs_owned_runner_and_propagates_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            fixture_test = root / "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift"
+            fixture_test.parent.mkdir(parents=True)
+            source = Path(__file__).resolve().parents[1] / "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift"
+            fixture_test.write_text(source.read_text())
+            runner = root / "scripts/ios-gateway-e2e-test"
+            runner.parent.mkdir(parents=True)
+            runner.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, pathlib, sys\n"
+                "path = 'fixture-run.json' if sys.argv[1] == 'all' else 'fixture-stopped.json'\n"
+                "pathlib.Path(path).write_text(json.dumps(sys.argv[1:]))\n"
+                "raise SystemExit(23 if sys.argv[1] == 'all' else 0)\n"
+            )
+            runner.chmod(0o755)
+            import ios_verify_test_selection
+
+            arguments = [
+                "--merge-base", "unused-in-test", "packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift"
+            ]
+            with patch("ios_verify_test_selection.ROOT", root), patch(
+                "ios_verify_test_selection._has_deletions", return_value=False
+            ), patch("sys.argv", ["ios_verify_test_selection.py", *arguments]):
+                self.assertEqual(ios_verify_test_selection.main(), 23)
+            self.assertEqual(json.loads((root / "fixture-run.json").read_text()), ["all"])
+            self.assertTrue((root / "fixture-stopped.json").exists())
+
+    def test_ordinary_suite_still_uses_unit_runner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            suite = root / "packages/ios-app/Tests/Gateway/FixtureOwnerTests.swift"
+            suite.parent.mkdir(parents=True)
+            suite.write_text("class FixtureOwnerTests: XCTestCase {\n    func testOne() {}\n}\n")
+            runner = root / "scripts/tron-ios-test"
+            runner.parent.mkdir(parents=True)
+            runner.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, pathlib, sys\n"
+                "pathlib.Path('unit-run.json').write_text(json.dumps(sys.argv[1:]))\n"
+            )
+            runner.chmod(0o755)
+            import ios_verify_test_selection
+
+            arguments = ["--merge-base", "unused-in-test", "packages/ios-app/Tests/Gateway/FixtureOwnerTests.swift"]
+            with patch("ios_verify_test_selection.ROOT", root), patch(
+                "ios_verify_test_selection._has_deletions", return_value=False
+            ), patch("sys.argv", ["ios_verify_test_selection.py", *arguments]):
+                self.assertEqual(ios_verify_test_selection.main(), 0)
+            self.assertEqual(
+                json.loads((root / "unit-run.json").read_text()),
+                ["run", "--only-testing", "TronMobileTests/FixtureOwnerTests"],
+            )
+            self.assertFalse((root / "fixture-run.json").exists())
+
     def test_settings_view_selects_its_test_owners(self):
         selectors = selectors_for(["packages/ios-app/Sources/UI/Settings/SettingsView.swift"])
         self.assertEqual(
@@ -75,11 +131,11 @@ class IOSVerifyTestSelectionTests(unittest.TestCase):
             with patch("ios_verify_test_selection.ROOT", repo):
                 self.assertTrue(_has_deletions(merge_base))
                 self.assertEqual(
-                    test_command(
+                    test_commands(
                         ["packages/ios-app/Sources/UI/Settings/SettingsView.swift"],
                         has_deletions=_has_deletions(merge_base),
                     ),
-                    ["scripts/tron-ios-test", "run"],
+                    [["scripts/tron-ios-test", "run"]],
                 )
 
     def test_work_json_ios_command_runs_the_script_entry_point(self):
@@ -129,8 +185,8 @@ class IOSVerifyTestSelectionTests(unittest.TestCase):
         self.assertIsNone(selectors_for([]))
         self.assertIsNone(selectors_for(["packages/protocol-fixtures/example.json"]))
         self.assertEqual(
-            test_command(["packages/ios-app/Sources/NewArea/UnknownView.swift"]),
-            ["scripts/tron-ios-test", "run"],
+            test_commands(["packages/ios-app/Sources/NewArea/UnknownView.swift"]),
+            [["scripts/tron-ios-test", "run"]],
         )
 
 
