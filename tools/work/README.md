@@ -733,13 +733,19 @@ For a worktree that is provably done, `cleanup`:
    worktree's own tooling holds outside it. A non-zero exit or a timeout keeps
    the worktree and prints the end of the command's output;
 2. checks every condition above again, since the commands take time;
-3. runs `git worktree remove` without `--force`. Git deletes the regenerable
+3. gives the owner read, write and search permission on every directory in the
+   worktree through no-follow descriptors, so a replaced directory name cannot
+   redirect permission changes outside it. Read-only generated output (the
+   staged Mac Gateway payload is published 0555) cannot stop removal part way,
+   after Git has already dropped the registration. A directory it cannot open
+   keeps the worktree;
+4. runs `git worktree remove` without `--force`. Git deletes the regenerable
    ignored files with the worktree;
-4. deletes the local branch only if it is still at the merged head
+5. deletes the local branch only if it is still at the merged head
    (`git update-ref -d <ref> <head>`), then its `branch.<name>` settings in
    the shared Git config. The head check guards the short window after step
    2; while the branch is checked out, the recheck already covers it;
-5. deletes the remote branch with a lease on the merged head, as `land` does.
+6. deletes the remote branch with a lease on the merged head, as `land` does.
    A branch already gone is fine; a branch at any other commit is kept and
    reported.
 
@@ -763,9 +769,10 @@ and removes its fixture directory, focused DerivedData and simulator.
 `scripts/tron-ios-test clean` removes the worktree's test lane simulator, its
 runs and its products. Nothing else reclaims the E2E fixture once the
 worktree is gone. The regenerable globs cover dependency installs, build
-output, DerivedData, Python caches, the CI tool cache, test results and the
-generated iOS Xcode project. Other ignored files, such as agent state under
-`.pi/`, logs or the staged Mac Gateway payload, keep the worktree for a person
+output, DerivedData, Python caches, the CI tool cache, test results, the
+generated Xcode projects, and the staged Mac Gateway payload with its Login
+Item launcher and icon (`bundle-gateway.sh` rebuilds them). Other ignored
+files, such as agent state under `.pi/` or logs, keep the worktree for a person
 to look at.
 
 ### Failure modes
@@ -807,3 +814,9 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
 62. **One worktree's error hides the rest.** Under `--all`, a failure while
     checking one worktree keeps it with the error, and every other worktree
     is still decided and listed.
+66. **Read-only generated output strands a removal.** A merged worktree whose
+    staged Mac Gateway payload is published read-only (directories 0555, files
+    0444) is removed, under the repository's own ignore rules and regenerable
+    globs. Neither an existing symlink nor a directory swapped for a symlink
+    during permission opening changes anything outside it. A kept, dry-run,
+    failed-release or failed-recheck worktree keeps its read-only tree as it was.

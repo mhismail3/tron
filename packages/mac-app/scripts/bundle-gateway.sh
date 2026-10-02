@@ -5,7 +5,7 @@
 # Usage:
 #   bundle-gateway.sh                  build and stage everything
 #   bundle-gateway.sh --skip-install   reuse an existing gateway node_modules
-#   bundle-gateway.sh --skip-download  reuse already staged Node runtimes
+#   bundle-gateway.sh --skip-download  reuse the published Node and npm runtimes
 #   bundle-gateway.sh --clean          remove only generated payloads
 #   bundle-gateway.sh --verify-only    verify existing payload without mutation
 #   bundle-gateway.sh --allow-unconfigured-push  local development payload only
@@ -434,9 +434,27 @@ stage_xcodegen() {
     fi
 }
 
+# The staging root is private and starts empty, so --skip-download copies the
+# published runtimes in; validation then proves the copies against the pins
+# before anything is republished. Symlinks are refused rather than followed.
+seed_published_runtime() {
+    local arch="$1" source="$PUBLISHED_PAYLOAD_DIR/runtime"
+    [[ -f "$source/node-$arch" && ! -L "$source/node-$arch" ]] || {
+        echo "--skip-download requires a published Node runtime: $source/node-$arch" >&2
+        exit 2
+    }
+    [[ -d "$source/npm-$arch" && ! -L "$source/npm-$arch" ]] || {
+        echo "--skip-download requires a published npm runtime: $source/npm-$arch" >&2
+        exit 2
+    }
+    install -m 0755 "$source/node-$arch" "$RUNTIME_DIR/node-$arch"
+    /usr/bin/ditto "$source/npm-$arch" "$RUNTIME_DIR/npm-$arch"
+}
+
 stage_node() {
     local arch="$1" expected="$2" destination="$RUNTIME_DIR/node-$1"
     if ((skip_download)); then
+        seed_published_runtime "$arch"
         validate_node_runtime "$arch" "$expected"
         validate_npm_runtime "$arch"
         return
@@ -461,12 +479,8 @@ stage_node() {
     validate_npm_runtime "$arch"
 }
 
-mkdir -p "$APP_DIR/dist" "$APP_DIR/scripts" "$RUNTIME_DIR" \
-    "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources"
-# Permit replacing a previously staged immutable payload during an explicit
-# bundle operation; publication directories remain read-only afterward.
-chmod -R u+w "$PAYLOAD_DIR" 2>/dev/null || true
-rm -rf "$APP_DIR/dist" "$APP_DIR/node_modules"
+# The staging root is fresh, so nothing here replaces earlier output.
+mkdir -p "$APP_DIR/scripts" "$RUNTIME_DIR" "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources"
 cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
 cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
 cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"
