@@ -1398,7 +1398,8 @@ struct AppModelReconnectTests {
                 let initial = Task { try await coordinator.connectHosted(profile: profile, token: "token") }
                 try await sockets[0].waitUntilSent(count: 1)
                 await sockets[0].enqueue(helloFrame())
-                try await initial.value
+                defer { initial.cancel() }
+                try await valueOfOwnedTask(initial)
 
                 coordinator.requestReconnect(immediate: true)
                 try await sockets[1].waitUntilSent(count: 1)

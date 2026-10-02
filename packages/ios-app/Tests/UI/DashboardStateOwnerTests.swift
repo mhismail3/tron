@@ -689,18 +689,24 @@ struct DashboardStateOwnerTests {
                     code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
                 ))
             }
-            pool.reconcile(profiles: [remote], selectedProfileID: nil, token: { _ in "fixture" })
-            // Twelve attempts, each served by the pump's clock: this profile is
-            // unreachable after three of them, so the waits escalate to the
-            // pool's five-minute cap, and the twelfth still connects. No attempt
-            // allowance stops the retries.
-            for attempt in 1...12 {
-                try await Self.advanceTimersUntilRequest(
-                    attempt, clock: clock, factory: factory, limit: .seconds(320)
-                )
+            do {
+                pool.reconcile(profiles: [remote], selectedProfileID: nil, token: { _ in "fixture" })
+                // Twelve attempts, each served by the pump's clock: this profile is
+                // unreachable after three of them, so the waits escalate to the
+                // pool's five-minute cap, and the twelfth still connects. No attempt
+                // allowance stops the retries.
+                for attempt in 1...12 {
+                    try await Self.advanceTimersUntilRequest(
+                        attempt, clock: clock, factory: factory, limit: .seconds(320)
+                    )
+                }
+                try await sockets[11].waitUntilSent(count: 2)
+                #expect(factory.requests.count == 12)
+            } catch {
+                pool.retire()
+                await pool.waitForRetirement()
+                throw error
             }
-            try await sockets[11].waitUntilSent(count: 2)
-            #expect(factory.requests.count == 12)
             pool.retire()
             await pool.waitForRetirement()
         }

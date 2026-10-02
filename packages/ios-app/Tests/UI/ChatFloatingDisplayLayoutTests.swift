@@ -186,9 +186,11 @@ struct ChatFloatingDisplayLayoutTests {
             )
             harness.probe.presentDisplay(.showFloating(.init(sessionID: snapshot.sessionId, display: display)))
             try await operation(harness)
-        } catch { await harness.close(); throw error }
-        await harness.close()
-}
+        } catch {
+            try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in await harness.close() }
+            throw error
+        }
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in await harness.close() }
     }
 
     private func layout(_ harness: ChatViewScrollHarness) async throws -> ChatViewScrollHarness.FloatingLayout {
