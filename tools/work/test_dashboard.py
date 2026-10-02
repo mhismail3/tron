@@ -24,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 from claim import create_claim
+from dashboard import _CLEANUP_HINT as dashboard_hint
 from dashboard import build, fetch_github, render_html, render_text, run
 from gh import Gh, GhError
 
@@ -464,9 +465,9 @@ class RunTests(unittest.TestCase):
         output = self.run_dashboard()
         model = json.loads(output)
         self.assertEqual(sorted((o["path"], o["reason"]) for o in model["orphans"]["worktrees"]), [
-            ("repo-worktrees/3-local", "no remote claim branch for #3"),
+            ("repo-worktrees/3-local", "no remote claim branch for #3" + dashboard_hint),
             ("repo-worktrees/4-gone", "issue #4 does not exist"),
-            ("repo-worktrees/5-closed", "issue #5 is closed"),
+            ("repo-worktrees/5-closed", "issue #5 is closed" + dashboard_hint),
         ])
         row = model["in_progress"][0]
         self.assertEqual((row["branch"], row["session"], row["worktree"]),

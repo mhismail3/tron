@@ -297,8 +297,9 @@ and the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the procedure.
   It merges `main` in, verifies, posts the evidence, opens the pull request,
   waits for the required checks, squash-merges, and closes the issue (or hands
   it to the maintainer as Needs you).
-- **After landing:** remove the task worktree and branch with the commands
-  `land` prints. Then bring the primary checkout up to date: when it is on
+- **After landing:** run `scripts/tron work cleanup` from the task worktree;
+  it removes the worktree and both branches only once they are provably done,
+  and names why it keeps anything. Then bring the primary checkout up to date: when it is on
   `main` and clean, run `git -C <primary checkout> merge --ff-only origin/main`.
   Never reset, stash or overwrite the primary checkout to do so; report a
   divergence instead.

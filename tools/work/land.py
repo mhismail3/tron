@@ -19,7 +19,7 @@ _FORM_PREFIX = re.compile(r"^\s*\[[^\]]*\]:?\s*")
 _SUMMARY = re.compile(r"^## Summary\n\n(.*?)\n\n## Verification\n", re.DOTALL | re.MULTILINE)
 # Git's markers for an operation that has stopped half way.
 _IN_PROGRESS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
-                ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"))
+                ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"))
 # How often land re-reads a pull request GitHub has just merged before giving up.
 _MERGE_CONFIRMATIONS = 5
 
@@ -76,7 +76,7 @@ def _is_ancestor(repo: Path, ancestor: str, head: str) -> bool:
     return _git(repo, "merge-base", "--is-ancestor", ancestor, head, check=False).returncode == 0
 
 
-def _operation_in_progress(root: Path) -> Optional[str]:
+def operation_in_progress(root: Path) -> Optional[str]:
     for marker, name in _IN_PROGRESS:
         path = Path(_out(root, "rev-parse", "--path-format=absolute", "--git-path", marker))
         if path.exists():
@@ -345,7 +345,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     number = claims.claimed_issue(branch)
     if number is None:
         raise LandError(f"{branch} is not a claim branch (<type>/<issue>-<slug>)")
-    operation = _operation_in_progress(root)
+    operation = operation_in_progress(root)
     if operation:
         raise LandError(f"a {operation} is in progress; finish or abort it first")
     dirty = _dirty(root)
@@ -420,9 +420,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
                         "Run land again.")
 
     after_merge(gh, root, config, issue, pull["number"], merge_sha, head, branch, action)
-    primary = start.primary_checkout(root)
-    removal = (f"git -C {primary} worktree remove {root} && " if root.resolve() != primary.resolve() else "")
-    print(f"cleanup:  {removal}git -C {primary} branch -D {branch}")
+    print("cleanup:  run `work cleanup` from this worktree once you are done in it")
     return 0
 
 

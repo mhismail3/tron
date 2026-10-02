@@ -407,7 +407,9 @@ Sections, in order:
    authority; Status is its projection.
 9. **Orphans:** worktrees under `claim.worktreeRoot` that are not on the claim
    branch of an open issue, and remote claim branches whose issue is closed or
-   does not exist.
+   does not exist. A worktree on a claim branch whose issue is closed or whose
+   remote branch is gone says that `work cleanup --all` removes it once its
+   pull request merged at its head.
 10. **Regressions:** open issues labeled `regressionLabel`.
 
 The names it reads (statuses, labels, fields, the verify context) come from the
@@ -512,7 +514,7 @@ work is committed. The `land` section of `.github/work.json` configures it.
    - the current branch is not a claim branch on the remote, or its claim
      commit names another session (the session is resolved as in `start`);
    - the worktree has modified, staged or untracked files, HEAD is detached,
-     or a merge, rebase, cherry-pick or revert is in progress;
+     or a merge, rebase, cherry-pick, revert or bisect is in progress;
    - the issue is closed or not in the Project;
    - no pull request is open for the branch and `--summary-file` is missing;
    - the scrub command (`verify.scrubCommand`) finds anything in the title,
@@ -570,8 +572,9 @@ work is committed. The `land` section of `.github/work.json` configures it.
      that is already gone (the repository may delete merged branches) is fine;
      a branch at any other commit, including one pushed to just before the
      delete, is kept and reported.
-   - It prints the commands that remove the local worktree and branch.
-     Removing them is the cleanup command's job, not `land`'s.
+   - It prints `work cleanup`, which the owner runs from the worktree once
+     it is done there. Removing the worktree and the local branch is
+     `cleanup`'s job, not `land`'s.
 
 Running `land` again after a stop before the merge resumes: it reuses the open
 pull request and the carried checks. A stop after GitHub reports MERGED is not
@@ -619,8 +622,8 @@ Project state and records every call. The live E2E covers GitHub itself.
 32. **Another session's claim is landed.** `land` refuses unless the claim
     commit of the current remote branch names the caller's session.
 33. **A dirty or mid-merge tree is landed.** Uncommitted or untracked files, a
-    detached HEAD, or a merge, rebase, cherry-pick or revert in progress refuse
-    before any GitHub write.
+    detached HEAD, or a merge, rebase, cherry-pick, revert or bisect in
+    progress refuse before any GitHub write.
 34. **A failing or stale receipt is merged.** Nothing is pushed, posted or
     opened after a failing receipt. The merge names the verified and pushed
     head with `--match-head-commit`.
@@ -654,3 +657,111 @@ Project state and records every call. The live E2E covers GitHub itself.
 42. **A claimed status is misread.** An In review or Needs you claim is not a
     disagreement, a resumed `start` does not move it back to In progress, and
     `start` and the dashboard count the soft cap alike.
+
+## `cleanup`
+
+`scripts/tron work cleanup [--all] [--dry-run]` removes a task worktree, its
+local branch and its remote branch once the work is provably done. The owner
+runs it from its task worktree after `land`; `--all` goes through every
+worktree under `claim.worktreeRoot`. `--dry-run` reports the same decisions
+and changes nothing. The `cleanup` section of `.github/work.json` configures
+it.
+
+A worktree is provably done when all of these hold:
+
+- it is a linked worktree under `claim.worktreeRoot`, never the primary
+  checkout, on a claim branch (`<type>/<issue>-<slug>`), and not locked;
+- GitHub reports a pull request from that branch in this repository MERGED
+  into `claim.baseBranch`, and that pull request's head is the local branch
+  head. Ancestry is not used, because a squash merge leaves the branch head
+  outside the base branch;
+- the worktree has no modified, staged or untracked files, and no merge,
+  rebase, cherry-pick, revert or bisect in progress;
+- every ignored file matches a `cleanup.regenerableIgnored` glob. These are
+  Git `glob` pathspecs: `*` stays within one path segment and `**` crosses
+  segments. Any other ignored file keeps the worktree and is named;
+- no process has its working directory inside the worktree (`lsof`), other
+  than `cleanup` and its ancestors when the worktree is the one `cleanup` was
+  started from. When `lsof` fails, nothing counts as proven.
+
+For a worktree that is provably done, `cleanup`:
+
+1. runs each `cleanup.releaseCommands` entry from inside the worktree, in its
+   own process group, bounded by its `timeoutSeconds`. These release what the
+   worktree's own tooling holds outside it. A non-zero exit or a timeout keeps
+   the worktree and prints the end of the command's output;
+2. checks every condition above again, since the commands take time;
+3. runs `git worktree remove` without `--force`. Git deletes the regenerable
+   ignored files with the worktree;
+4. deletes the local branch only if it is still at the merged head
+   (`git update-ref -d <ref> <head>`), then its `branch.<name>` settings in
+   the shared Git config. The head check guards the short window after step
+   2; while the branch is checked out, the recheck already covers it;
+5. deletes the remote branch with a lease on the merged head, as `land` does.
+   A branch already gone is fine; a branch at any other commit is kept and
+   reported.
+
+Any other worktree is never touched and no release command runs for it.
+Without `--all`, `cleanup` refuses the current worktree with its reasons.
+With `--all`, each worktree under the root that is not provably done is listed
+with every reason, and an error while checking or removing one worktree, such
+as a failed `gh` call, keeps that worktree with the error and goes on to the
+next. `--all` never lists the primary checkout, and only counts the worktrees
+outside the root, leaving them to the repository's own housekeeping procedure.
+Local paths are printed relative to the checkout's parent directory.
+
+Exit status is 0 when the current worktree was removed (or would be), and with
+`--all` when every provably done worktree was removed. A blocked current
+worktree, or a removal that stopped part way, exits 1.
+
+### Tron's release commands
+
+`scripts/ios-gateway-e2e-test clean` stops the worktree's Gateway E2E fixture
+and removes its fixture directory, focused DerivedData and simulator.
+`scripts/tron-ios-test clean` removes the worktree's test lane simulator, its
+runs and its products. Nothing else reclaims the E2E fixture once the
+worktree is gone. The regenerable globs cover dependency installs, build
+output, DerivedData, Python caches, the CI tool cache, test results and the
+generated iOS Xcode project. Other ignored files, such as agent state under
+`.pi/`, logs or the staged Mac Gateway payload, keep the worktree for a person
+to look at.
+
+### Failure modes
+
+`test_cleanup.py` checks these against real temporary repositories, linked
+worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
+
+53. **Unmerged work is removed.** Only a pull request from the branch in this
+    repository, MERGED into the base branch at exactly the local head, proves
+    the work landed. No pull request, an open or closed-unmerged one, one
+    merged at an earlier head, a local commit after the merge, a fork's pull
+    request with the same head name, or a merge into another base keeps the
+    worktree.
+54. **Local data is lost with the worktree.** Modified, staged or untracked
+    files, a non-regenerable ignored file, an operation in progress, or a lock
+    keeps it. Ignored files that match the regenerable globs do not.
+55. **A live process loses its working directory.** Another process with its
+    working directory inside keeps the worktree, and so does an `lsof` that
+    fails. The caller's own shell does not block its own cleanup, but an
+    ancestor working inside another worktree blocks that one under `--all`.
+56. **Something outside the managed set is touched.** The primary checkout,
+    worktrees outside the root, detached heads and branches that are not claim
+    branches are never touched, and blocked worktrees get no release command.
+    `--all` lists each worktree under the root with its reason, never lists
+    the primary checkout, and only counts the worktrees outside the root.
+57. **A failing or hanging release command is ignored.** A non-zero exit keeps
+    the worktree, and a command past its timeout has its process group killed
+    and keeps it too.
+58. **A branch that moved is deleted.** The remote branch is deleted only
+    with a lease on the merged head. A remote branch pushed to after the
+    merge is kept and reported.
+59. **The worktree changes between the check and the removal.** A commit or a
+    new file made while the release commands run keeps the worktree.
+60. **A dry run changes something.** `--dry-run` runs no release command and
+    removes nothing.
+61. **A deleted branch leaves its settings behind.** `start` creates task
+    branches with `--track`; removing one also removes its `branch.<name>`
+    section from the shared Git config.
+62. **One worktree's error hides the rest.** Under `--all`, a failure while
+    checking one worktree keeps it with the error, and every other worktree
+    is still decided and listed.

@@ -53,6 +53,9 @@ Commands:
                                     checks, squash-merge, close or hand off the issue
   work steward [--land <issue>]     Report open claim PRs and their gate state;
                                     --land merges one that is verified and green
+  work cleanup [--all] [--dry-run]  Remove this task worktree and its branches once its
+                                    PR merged at its head; --all: every one under the
+                                    worktree root, naming why each other is kept
 
 There is no deploy command. Production deployment is manual-only.
 EOF
