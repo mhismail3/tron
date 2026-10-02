@@ -708,8 +708,12 @@ retention caps, and the privacy rules are owned by
 [observability](../../gateway/docs/observability.md). Logs retains this local
 record stream across relaunches.
 
-Choose **Settings → Logs → Export Diagnostics** once. A connected Gateway
-advertising `diagnostic-export.v1` receives the bounded JSONL bundle and saves
+Choose **Settings → Logs → Export Diagnostics** once. The action retains its
+original Mac destination across preparation and same-authority foreground
+recovery; switching Macs retires an unsubmitted action rather than writing to
+the replacement (returning to the original profile does not revive it).
+An already dispatched export is not replayed or cancelled by sheet dismissal.
+A connected original Gateway advertising `diagnostic-export.v1` receives the bounded JSONL bundle and saves
 it in its device-export store; Tron copies the returned path and
 shows confirmation. If disconnected or upload fails, the same action opens the
 native share sheet with a bounded local JSONL bundle; upload failures are

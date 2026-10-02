@@ -2846,12 +2846,17 @@ final class AppModel {
     }
 
     @discardableResult
-    func exportDiagnostics(_ text: String) async throws -> DiagnosticExportResult {
-        if diagnosticsAreReady, gatewayInfo?.capabilities.contains("diagnostic-export.v1") == true {
+    func exportDiagnostics(_ text: String, destination: KnowledgeDestinationIdentity) async throws -> DiagnosticExportResult {
+        // Preparation can suspend before this facade is entered. The gesture's
+        // stable Mac namespace, not the live selection, owns this file write.
+        guard knowledgeDestinationIdentity == destination else { throw CancellationError() }
+        if diagnosticsAreReady, gatewayInfo?.capabilities.contains("diagnostic-export.v1") == true,
+           let connectionID = gatewayConnectionID {
             do {
                 let value: JSONValue = try await client.requestValue(
                     "system.logs.export",
-                    DiagnosticExportRequest(commandId: UUID().uuidString, content: text)
+                    DiagnosticExportRequest(commandId: UUID().uuidString, content: text),
+                    expectedEpochID: connectionID
                 )
                 let result = try JSONDecoder().decode(DiagnosticExportResponse.self, from: JSONEncoder().encode(value))
                 return .saved(result.path)
@@ -2864,6 +2869,7 @@ final class AppModel {
                 )
             }
         }
+        guard knowledgeDestinationIdentity == destination else { throw CancellationError() }
         return .share(try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-diagnostics.jsonl"))
     }
 
