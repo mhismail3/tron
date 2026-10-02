@@ -18,6 +18,11 @@ struct NewSessionConfigurationLoadID: Hashable {
     }
 }
 
+struct NewSessionConfigurationReadID: Hashable {
+    let configuration: NewSessionConfigurationLoadID
+    let transport: KnowledgePresentationIdentity
+}
+
 enum NewSessionTrustPolicy {
     static func requiresDecision(_ inspection: JSONValue?) -> Bool {
         guard let value = inspection?.objectValue else { return false }
@@ -69,11 +74,14 @@ struct NewSessionConfigurationOwner: Equatable, Sendable {
     }
 }
 
-struct NewSessionCreationOwner: Equatable, Sendable {
+struct NewSessionCreationOwner: Equatable {
     private(set) var isCreating = false
+    private(set) var isRetired = false
+    private(set) var pendingRoute: AppModel.SessionNavigationRoute?
+    private(set) var pendingScope: NewSessionModelScope?
 
     mutating func begin(configurationReady: Bool) -> Bool {
-        guard configurationReady, !isCreating else { return false }
+        guard configurationReady, !isCreating, !isRetired, pendingRoute == nil else { return false }
         isCreating = true
         return true
     }
@@ -82,16 +90,46 @@ struct NewSessionCreationOwner: Equatable, Sendable {
         isCreating = false
     }
 
+    /// Typed success is not a disposable read. Hold one original route until
+    /// its foreground caller is admitted; dismissal never forces it to reopen.
+    mutating func retain(route: AppModel.SessionNavigationRoute, scope: NewSessionModelScope) -> Bool {
+        guard isCreating, !isRetired, pendingRoute == nil else { return false }
+        pendingRoute = route
+        pendingScope = scope
+        return true
+    }
+
+    mutating func takeRoute(in scope: NewSessionModelScope, navigationAdmitted: Bool) -> AppModel.SessionNavigationRoute? {
+        guard !isRetired, pendingScope == scope, navigationAdmitted, let route = pendingRoute else { return nil }
+        pendingRoute = nil
+        pendingScope = nil
+        return route
+    }
+
+    mutating func discardResultOutside(_ scope: NewSessionModelScope) -> Bool {
+        guard pendingRoute != nil, pendingScope != scope else { return false }
+        pendingRoute = nil
+        pendingScope = nil
+        return true
+    }
+
+    mutating func retire() {
+        isRetired = true
+        pendingRoute = nil
+        pendingScope = nil
+    }
+
     func modelOverride(selected: ModelRef?, configured: ModelRef?) -> ModelRef? {
         selected == configured ? nil : selected
     }
 }
 
 /// The configuration scope a model choice belongs to. A choice overrides the
-/// default of exactly one profile/workspace pair.
+/// default of exactly one original profile/lifecycle/workspace namespace.
 struct NewSessionModelScope: Hashable, Sendable {
     let profileID: String?
     let workspace: String
+    let lifecycleGeneration: Int
 }
 
 /// Explicit model intent for one configuration scope.

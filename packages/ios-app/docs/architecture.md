@@ -792,9 +792,23 @@ for the workspace being created rather than the previously selected session. Cha
 workspace or gateway profile clears the prior trust/model projection and closes creation admission
 until matching settings and trust reads complete; stale workspace/profile completions cannot reopen
 it. The toolbar identifies that preparation instead of presenting a silently inert Create action.
-One synchronous creation owner admits only one command per gesture. A confirmed create returns its
-profile/lifecycle-bound navigation route immediately; the `session.listChanged`-driven dashboard
-projection converges independently and never blocks opening canonical state. A known configured
+The New Session model and source-control choices belong to the original profile, existing lifecycle
+generation and workspace. Closing a child picker or reconnecting does not reset initialized intent;
+a genuine namespace/workspace change clears the prior choices and configuration admission. Disposable
+settings/trust/Git preparation carries managed activity, an exact transport identity and latest request
+fence; retired completions cannot install values, errors or readiness.
+One synchronous creation owner admits only one command per gesture. Submission captures the workspace,
+source-control selection, model override and unsent prompt before any await. The receipt executor owns
+uncertain commands; reconnect never automatically creates a new session. Typed terminal success survives
+same-authority background/socket retirement at `AppModel.createSession`, but still requires cancellation
+and original profile/lifecycle ownership. `NewSessionCreationOwner` holds one completed navigation route
+until the original foreground caller is admitted, then consumes it once. The global navigation/read
+fences are unchanged. Actual sheet dismissal retires that local result without reopening the sheet;
+namespace replacement never navigates or publishes the old outcome into a replacement Mac. If the user
+has changed workspace on the same Mac, the newer draft remains open with a creation notice, and the
+canonical session can be opened from Chats instead of forcing the old route over it. The
+`session.listChanged`-driven dashboard projection converges independently and never blocks opening
+canonical state. A known configured
 model default avoids a redundant follow-up mutation. If an explicit model override fails after
 canonical creation, the error remains visible but the existing route opens, so retry cannot create a
 duplicate session. Provider and model catalogs likewise use typed `.global` or `.session(id:)`

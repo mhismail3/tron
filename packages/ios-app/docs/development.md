@@ -1637,6 +1637,30 @@ scripts/tron-ios-test run \
   --only-testing TronMobileTests/SettingsDraftStoreTests
 ```
 
+### New Session draft and accepted-create boundary
+
+`TronNewSessionUITests` mounts the real managed New Session/Source Control/Workspace sheets over a
+scripted Gateway. Child Done and a real app switch retain the chosen worktree mode, branch and base;
+actual workspace/profile replacement invalidates the original checkout intent. The accepted-create
+fixture holds the real typed `session.create` result at a `HOSTED_TEST`-only facade boundary before
+releasing it on background (or after actual profile replacement). It is not a held unknown receipt:
+background success returns to the original admitted caller once, while a newer workspace keeps its
+draft and receives no forced navigation. Actual user dismissal does not reopen or create a session.
+Each journey retains a screenshot and synthetic command/callback counts in the runner's xcresult.
+`NewSessionConfigurationOwnerTests` additionally exercises single-result consumption, namespace/workspace
+rejection and retirement while creation is still pending; these controls protect local ownership rather
+than simulating transport. Run the bounded owner and hosted journeys together:
+
+```bash
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileTests/NewSessionConfigurationOwnerTests \
+  --only-testing TronMobileUITests/TronNewSessionUITests
+```
+
+This is not physical-device/weak-network qualification, held trust-mutation proof, or closure of the
+remaining first-party sheet audit. The fixture result gate never ships in production.
+
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
 feed raw HTTP response bytes and inspect the exact `/v1/pair` request.
 `AppModelPairingAttemptTests` use barriers whose late responses intentionally

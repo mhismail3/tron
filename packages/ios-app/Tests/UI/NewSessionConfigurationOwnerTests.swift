@@ -131,7 +131,7 @@ struct NewSessionConfigurationOwnerTests {
         // profile revision, trust invalidation, or presentation activity -- a
         // profile switch completing in the background, or a `trust.changed`
         // event -- and every re-run re-derived the default over the selection.
-        let scope = NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace")
+        let scope = NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace", lifecycleGeneration: 1)
         let chosen = ModelRef(provider: "deepseek", id: "deepseek-v4.1")
         let configured = ModelRef(provider: "openai-codex", id: "gpt-6-astra")
         var choice = NewSessionModelChoice()
@@ -149,15 +149,15 @@ struct NewSessionConfigurationOwnerTests {
         let chosen = ModelRef(provider: "deepseek", id: "deepseek-v4.1")
         let configured = ModelRef(provider: "openai-codex", id: "gpt-6-astra")
         var choice = NewSessionModelChoice()
-        choice.choose(chosen, scope: NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace"))
+        choice.choose(chosen, scope: NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace", lifecycleGeneration: 1))
 
         // Another server, then another directory: each drops explicit intent.
-        #expect(choice.retain(in: NewSessionModelScope(profileID: "profile-b", workspace: "/workspace/testspace")) == nil)
+        #expect(choice.retain(in: NewSessionModelScope(profileID: "profile-b", workspace: "/workspace/testspace", lifecycleGeneration: 1)) == nil)
         #expect(choice.effective(configured: configured, preferred: nil) == configured)
         #expect(choice.model == nil)
 
-        choice.choose(chosen, scope: NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace"))
-        #expect(choice.retain(in: NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/other")) == nil)
+        choice.choose(chosen, scope: NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace", lifecycleGeneration: 1))
+        #expect(choice.retain(in: NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/other", lifecycleGeneration: 1)) == nil)
     }
 
     @Test("the effective selection falls back from intent to default to preferred")
@@ -165,7 +165,7 @@ struct NewSessionConfigurationOwnerTests {
         let chosen = ModelRef(provider: "deepseek", id: "deepseek-v4.1")
         let configured = ModelRef(provider: "openai-codex", id: "gpt-6-astra")
         let preferred = ModelRef(provider: "openai-codex", id: "gpt-5.6-luna")
-        let scope = NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace")
+        let scope = NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace", lifecycleGeneration: 1)
 
         var choice = NewSessionModelChoice()
         #expect(choice.retain(in: scope) == nil)
@@ -179,6 +179,62 @@ struct NewSessionConfigurationOwnerTests {
         #expect(choice.retain(in: scope) == nil)
         #expect(choice.scope == scope)
         #expect(choice.effective(configured: configured, preferred: preferred) == configured)
+    }
+
+    @Test("accepted create result waits for original admission, publishes once, and cannot escape retirement")
+    @MainActor func acceptedResultOwnership() {
+        let route = AppModel.SessionNavigationRoute(sessionID: "created", editorText: "original prompt", gatewayProfileID: "original", gatewayLifecycleGeneration: 1)
+        let scope = NewSessionModelScope(profileID: "original", workspace: "/fixture/original", lifecycleGeneration: 1)
+        var owner = NewSessionCreationOwner()
+        let admitted = owner.begin(configurationReady: true)
+        #expect(admitted)
+        let retained = owner.retain(route: route, scope: scope)
+        #expect(retained)
+        owner.finish()
+        let backgroundRoute = owner.takeRoute(in: scope, navigationAdmitted: false)
+        #expect(backgroundRoute == nil)
+        let duplicateRejected = !owner.begin(configurationReady: true)
+        #expect(duplicateRejected)
+        let foregroundRoute = owner.takeRoute(in: scope, navigationAdmitted: true)
+        #expect(foregroundRoute == route)
+        let consumedRoute = owner.takeRoute(in: scope, navigationAdmitted: true)
+        #expect(consumedRoute == nil)
+        let nextAdmitted = owner.begin(configurationReady: true)
+        #expect(nextAdmitted)
+        owner.retire()
+        let retiredResultRejected = !owner.retain(route: route, scope: scope)
+        #expect(retiredResultRejected)
+        let retiredRoute = owner.takeRoute(in: scope, navigationAdmitted: true)
+        #expect(retiredRoute == nil)
+    }
+
+    @Test("new workspace or actual namespace generation cannot consume another creation outcome")
+    @MainActor func acceptedResultScopeReplacement() {
+        let route = AppModel.SessionNavigationRoute(sessionID: "created", editorText: nil, gatewayProfileID: "original", gatewayLifecycleGeneration: 1)
+        let scope = NewSessionModelScope(profileID: "original", workspace: "/fixture/original", lifecycleGeneration: 1)
+        var owner = NewSessionCreationOwner()
+        let initialAdmitted = owner.begin(configurationReady: true)
+        #expect(initialAdmitted)
+        let initialRetained = owner.retain(route: route, scope: scope)
+        #expect(initialRetained)
+        owner.finish()
+        let changed = NewSessionModelScope(profileID: "original", workspace: "/fixture/replacement", lifecycleGeneration: 1)
+        let foreignWorkspaceRoute = owner.takeRoute(in: changed, navigationAdmitted: true)
+        #expect(foreignWorkspaceRoute == nil)
+        let workspaceResultDiscarded = owner.discardResultOutside(changed)
+        #expect(workspaceResultDiscarded)
+        let removedRoute = owner.takeRoute(in: scope, navigationAdmitted: true)
+        #expect(removedRoute == nil)
+        let newAdmitted = owner.begin(configurationReady: true)
+        #expect(newAdmitted)
+        let originalRetained = owner.retain(route: route, scope: scope)
+        #expect(originalRetained)
+        owner.finish()
+        let generationChanged = NewSessionModelScope(profileID: "original", workspace: "/fixture/original", lifecycleGeneration: 2)
+        let foreignGenerationRoute = owner.takeRoute(in: generationChanged, navigationAdmitted: true)
+        #expect(foreignGenerationRoute == nil)
+        let generationResultDiscarded = owner.discardResultOutside(generationChanged)
+        #expect(generationResultDiscarded)
     }
 
     @Test("only an explicit model choice overrides the configured session default")

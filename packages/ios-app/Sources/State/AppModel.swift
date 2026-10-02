@@ -922,6 +922,7 @@ final class AppModel {
     }
 
     var hostedSessionOpenAdmissionOverride: Bool?
+    var hostedAfterSessionCreateResult: (@MainActor () async -> Void)?
 
     func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
         try await lifecycle.connectHosted(profile: profile, token: token)
@@ -3556,7 +3557,14 @@ final class AppModel {
         guard let admission = lifecycle.generationAdmission,
               let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
         let sessionID = try await sessionMutations.createSession(cwd: cwd, sourceControl: sourceControl)
-        try requireLifecycle(admission)
+        #if HOSTED_TEST
+        await hostedAfterSessionCreateResult?()
+        #endif
+        // The receipt owner returned typed success. Background/socket retirement
+        // suspends navigation, not the original profile's accepted create result.
+        try Task.checkCancellation()
+        guard lifecycle.currentLifecycleGeneration == admission.generation,
+              profiles.selected?.id == profileID else { throw CancellationError() }
         guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
         defaultWorkspace = cwd
         UserDefaults.standard.set(cwd, forKey: "defaultWorkspace.v1")
