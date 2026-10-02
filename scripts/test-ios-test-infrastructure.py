@@ -153,6 +153,28 @@ if _escaped_roots:
     raise SystemExit(3)
 '''
 
+# Gates belong to the fixture process, not to the lease holder: the stale-lease
+# regression deliberately kills only that holder while its test remains live.
+# Teardown cannot help after SIGKILL, so fake tools retire themselves on owner
+# death or directory removal, failing rather than continuing an install.
+FIXTURE_GATE_SOURCE = '''import time
+from pathlib import Path
+
+
+def wait_for_fixture_gate(path):
+    owner = int(os.environ["FAKE_FIXTURE_OWNER_PID"])
+    while True:
+        try:
+            os.kill(owner, 0)
+        except ProcessLookupError:
+            raise SystemExit("fixture owner exited while the fake tool was gated")
+        if not path.parent.is_dir():
+            raise SystemExit("fixture gate directory disappeared")
+        if path.exists():
+            return
+        time.sleep(0.05)
+'''
+
 # The proof `ContainedFixture.contained_environment` writes into every
 # environment a fixture builds; a launcher that starts a process without it is
 # running a tool against this Mac's own state.
@@ -289,6 +311,7 @@ class ContainedFixture:
             "TRON_IOS_E2E_DERIVED_DATA": str(root / "e2e-derived"),
             "TMPDIR": str(temporary),
             "FAKE_CONTAINMENT_ROOT": str(root),
+            "FAKE_FIXTURE_OWNER_PID": str(os.getpid()),
             "FAKE_CONTAINMENT_LOG": str(self.containment_log(root)),
         })
         environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
@@ -3148,33 +3171,20 @@ class LifecycleHarness(LaneHarness):
         so a case can kill the command that owns the lane while it is still
         building.
         """
-        xcodebuild = self.bin / "xcodebuild"
-        xcodebuild.write_text("""#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == -version ]]; then echo 'Xcode 26.6'; exit 0; fi
-derived=''
-bundle=''
-for ((i=1; i<=$#; i++)); do
-  case "${!i}" in
-    -derivedDataPath) j=$((i + 1)); derived="${!j}" ;;
-    -resultBundlePath) j=$((i + 1)); bundle="${!j}" ;;
-  esac
-done
-if [[ " $* " == *' build-for-testing '* ]]; then
-  mkdir -p "$derived/Build/Products"
-  printf 'xctestrun\\n' >"$derived/Build/Products/Tron Development_UnitTests_iOS.xctestrun"
-  if [[ -n "${FAKE_BUILD_GATE:-}" ]]; then
-    while [[ ! -e "$FAKE_BUILD_GATE" ]]; do sleep 0.05; done
-  fi
-  exit 0
-fi
-if [[ " $* " == *' test-without-building '* ]]; then
-  [[ -z "$bundle" ]] || mkdir -p "$bundle"
-  exit 0
-fi
-exit 0
-""")
-        xcodebuild.chmod(0o755)
+        self.synthetic_stub(self.bin / "xcodebuild", FIXTURE_GATE_SOURCE + '''
+arguments = sys.argv[1:]
+if arguments[:1] == ["-version"]:
+    print("Xcode 26.6"); raise SystemExit(0)
+if "build-for-testing" in arguments:
+    derived = Path(arguments[arguments.index("-derivedDataPath") + 1])
+    products = derived / "Build/Products"
+    products.mkdir(parents=True, exist_ok=True)
+    (products / "Tron Development_UnitTests_iOS.xctestrun").write_text("xctestrun\\n")
+    if os.environ.get("FAKE_BUILD_GATE"):
+        wait_for_fixture_gate(Path(os.environ["FAKE_BUILD_GATE"]))
+if "test-without-building" in arguments and "-resultBundlePath" in arguments:
+    Path(arguments[arguments.index("-resultBundlePath") + 1]).mkdir(parents=True, exist_ok=True)
+''')
 
 
 class ProfilerLifecycleFixture(LifecycleHarness, unittest.TestCase):
@@ -3537,6 +3547,33 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
         self.assertEqual(self.simctl_commands().count("delete"), 0)
         self.assertEqual(self.shutdown_targets(), [])
+
+    def test_removed_build_gate_directory_releases_the_e2e_command(self) -> None:
+        """#128: the E2E fixture's other fake build gate cannot wait forever."""
+        directory = self.root / "build-gates"
+        directory.mkdir()
+        gate = directory / "open"
+        command = subprocess.Popen(
+            [str(E2E), "build"], env={**self.environment, "FAKE_BUILD_GATE": str(gate)},
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        )
+        try:
+            products = self.root / "e2e-derived/Build/Products/Tron Development_UnitTests_iOS.xctestrun"
+            deadline = time.monotonic() + 30
+            while not products.exists() and time.monotonic() < deadline and command.poll() is None:
+                time.sleep(0.05)
+            self.assertTrue(products.exists(), "fake E2E build never reached its gate")
+            shutil.rmtree(directory)
+            _, stderr = command.communicate(timeout=5)
+            self.assertNotEqual(command.returncode, 0, stderr)
+        finally:
+            # Opening the gate also retires the known-bad control's descendants.
+            directory.mkdir(exist_ok=True)
+            gate.write_text("go\n")
+            if command.poll() is None:
+                command.kill()
+            command.communicate(timeout=30)
+            self.close_pipes(command)
 
     def test_a_killed_e2e_build_leaves_its_lane_to_the_next_sweep(self) -> None:
         """Failure mode 5: a crash leaves the lane booted and any tool reclaims it."""
@@ -4388,8 +4425,7 @@ class DevelopmentSimulatorFixture(LifecycleHarness, unittest.TestCase):
 # Shared by the synthetic tools of `DeviceLeaseFixture`: every call is logged
 # under the caller the case named, and a gated call holds its command open until
 # the case opens the gate, recording the command tree's process group first.
-DEVICE_LEASE_TOOL_SOURCE = '''import time
-from pathlib import Path
+DEVICE_LEASE_TOOL_SOURCE = FIXTURE_GATE_SOURCE + '''
 
 
 def log(line):
@@ -4403,8 +4439,7 @@ def gate():
         return
     gates = Path(os.environ["FAKE_GATES"])
     (gates / (name + ".reached")).write_text(str(os.getpgid(0)) + "\\n")
-    while not (gates / (name + ".open")).exists():
-        time.sleep(0.05)
+    wait_for_fixture_gate(gates / (name + ".open"))
 '''
 
 DEVICE_LEASE_FAKE_TOOLS = {
@@ -4717,6 +4752,136 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         admitted = self.run_tool(beta, "tron-ios-device", "launch", "--device-id", self.DEVICE_ONE, caller="beta")
         self.assertEqual(admitted.returncode, 0, admitted.stderr)
         self.assertIn("devicectl device process launch", " ".join(self.tool_calls("beta")))
+
+    def test_killed_fixture_owners_leave_no_gated_build_processes(self) -> None:
+        """#128: SIGKILL skips teardown; both helper trees must still retire."""
+        for tool in ("tron-ios-simulator", "tron-ios-device"):
+            with self.subTest(tool=tool):
+                self.check_interrupted_fixture(tool, "sigkill")
+
+    def test_timed_out_fixture_owner_leaves_no_gated_build_processes(self) -> None:
+        """#128: an unhandled real wait timeout also skips fixture teardown."""
+        self.check_interrupted_fixture("tron-ios-device", "timeout")
+
+    def check_interrupted_fixture(self, tool: str, interruption: str) -> None:
+        # Keep another real leased fixture tree gated throughout the abort. A
+        # cleanup that kills by tool name or a shared group would destroy it.
+        survivor_gate = f"survivor-{tool}-{interruption}"
+        survivor = self.start_tool(
+            self.make_worktree(survivor_gate), "tron-ios-device", "install",
+            "--device-id", self.DEVICE_TWO, caller="survivor", gate=survivor_gate,
+        )
+        survivor_group = self.wait_reached(survivor_gate)
+        record_path = self.root / f"{tool}-{interruption}.json"
+        owner_script = self.root / "interrupted-owner.py"
+        owner_script.write_text('''import json, os, runpy, sys, time
+from pathlib import Path
+module = runpy.run_path(sys.argv[1])
+fixture = module["DeviceLeaseFixture"]()
+fixture.setUp()
+worktree = fixture.make_worktree("alpha")
+tool, mode = sys.argv[3:5]
+arguments = ["install"]
+if tool == "tron-ios-device":
+    arguments += ["--device-id", fixture.DEVICE_ONE]
+holder = fixture.start_tool(worktree, tool, *arguments, caller="alpha", gate="build")
+group = fixture.wait_reached("build")
+record = Path(sys.argv[2])
+temporary = record.with_suffix(".tmp")
+temporary.write_text(json.dumps({
+    "root": str(fixture.root), "holder": holder.pid, "group": group,
+}))
+os.replace(temporary, record)
+# Intentionally no teardown: exercise the interruption that bypasses it.
+if mode == "timeout":
+    holder.wait(timeout=0.1)
+else:
+    time.sleep(60)
+''')
+        owner = subprocess.Popen(
+            [sys.executable, str(owner_script), str(Path(__file__).resolve()), str(record_path), tool, interruption],
+            env=self.contained_environment(self.root), text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        record = None
+        survivors: list[str] = []
+        try:
+            deadline = time.monotonic() + 30
+            while not record_path.exists() and time.monotonic() < deadline and owner.poll() is None:
+                time.sleep(0.05)
+            self.assertTrue(record_path.exists(), "interrupted fixture never reached its build gate")
+            record = json.loads(record_path.read_text())
+            self.assertNotIn(record["group"], (os.getpgrp(), survivor_group))
+            if interruption == "sigkill":
+                owner.kill()
+            _, stderr = owner.communicate(timeout=10)
+            if interruption == "sigkill":
+                self.assertEqual(owner.returncode, -signal.SIGKILL, stderr)
+                self.assertTrue(Path(record["root"]).is_dir(), "SIGKILL must exercise owner death, not directory removal")
+            else:
+                self.assertNotEqual(owner.returncode, 0, stderr)
+                self.assertIn("TimeoutExpired", stderr)
+
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                table = subprocess.check_output(
+                    ["/bin/ps", "-axo", "pid=,pgid=,command="],
+                    env=self.contained_environment(self.root), text=True,
+                )
+                survivors = [line.strip() for line in table.splitlines() if
+                             str(record["root"]) in line or
+                             line.split()[:1] == [str(record["holder"])] or
+                             line.split()[1:2] == [str(record["group"])]]
+                if not survivors:
+                    break
+                time.sleep(0.05)
+            retained = ROOT / "test-results/ios-infrastructure"
+            retained.mkdir(parents=True, exist_ok=True)
+            (retained / f"{tool}-{interruption}-cleanup.json").write_text(json.dumps({
+                "tool": tool, "interruption": interruption, "owner_pid": owner.pid,
+                "owner_exit": owner.returncode, **record, "surviving_processes": survivors,
+                "other_fixture_pid": survivor.pid, "other_fixture_alive": survivor.poll() is None,
+                "other_gate_closed": not (self.gates / f"{survivor_gate}.open").exists(),
+            }, indent=2) + "\n")
+            self.assertEqual(survivors, [], "gated fixture processes survived their test owner")
+            self.assertIsNone(survivor.poll(), "interruption killed another fixture's lease holder")
+            self.assertFalse((self.gates / f"{survivor_gate}.open").exists())
+            self.open_gate(survivor_gate)
+            self.assertEqual(survivor.wait(timeout=60), 0, self.output_of(survivor))
+        finally:
+            if owner.poll() is None:
+                owner.kill()
+            owner.wait(timeout=10)
+            self.close_pipes(owner)
+            if record is not None:
+                if survivors:
+                    # Negative controls must not recreate the incident. Signal
+                    # only resources still observed under this fixture's root.
+                    owned = [line.split() for line in survivors if str(record["root"]) in line]
+                    if any(fields[1] == str(record["group"]) for fields in owned):
+                        try:
+                            os.killpg(record["group"], signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    if any(fields[0] == str(record["holder"]) for fields in owned):
+                        try:
+                            os.kill(record["holder"], signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                shutil.rmtree(record["root"], ignore_errors=True)
+            self.open_gate(survivor_gate)
+            survivor.wait(timeout=60)
+
+    def test_removed_gate_directory_retires_the_build_without_installing(self) -> None:
+        """#128: temporary-directory removal must not leave an infinite gate."""
+        holder = self.start_tool(
+            self.make_worktree("alpha"), "tron-ios-device", "install",
+            "--device-id", self.DEVICE_ONE, caller="alpha", gate="build",
+        )
+        self.wait_reached("build")
+        shutil.rmtree(self.gates)
+        self.assertNotEqual(holder.wait(timeout=5), 0, self.output_of(holder))
+        self.assertFalse(any("devicectl device install" in call for call in self.tool_calls("alpha")))
 
     def test_a_device_identifier_cannot_name_a_lease_outside_the_lease_directory(self) -> None:
         """Failure mode 8."""

@@ -1218,7 +1218,19 @@ The lease serializes commands, not sessions: an app one command launched can be
 replaced by the next command that takes the lease.
 `status` and `remember` take no lease. `DeviceLeaseFixture` in
 `scripts/test-ios-test-infrastructure.py` covers contention and stale-lease
-release.
+release. Its hardware-free gated tools belong to the fixture process, not the
+lease holder: if the fixture dies or its gate directory disappears, the fake
+build/launch fails instead of waiting forever or continuing an install. This
+keeps the killed-holder regression meaningful while also bounding abandoned
+fixture trees when interruption bypasses teardown. `DeviceLeaseFixture` checks
+SIGKILL of a test owner, an unhandled subprocess wait timeout, and gate-directory
+removal against the real helper trees while another gated fixture stays live;
+`GatewayE2EFixture` covers removal of its fake build gate directory. Run
+`python3 scripts/test-ios-test-infrastructure.py DeviceLeaseFixture GatewayE2EFixture`
+to regenerate inspectable process-survival reports at
+`test-results/ios-infrastructure/*-cleanup.json`. The full hardware-free suite is
+registered in both `work verify` and the CI policy job; it does not use real
+devices or simulators.
 
 ### Test runner safety contract
 
