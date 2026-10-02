@@ -1,4 +1,4 @@
-"""Isolated checks for cleanup failure modes 53-62 in README.md.
+"""Isolated checks for cleanup failure modes 53-62 and 66 in README.md.
 
 Real temporary repositories: a local bare remote, a primary clone, and linked
 task worktrees under the configured root. GitHub is a fake `gh` (WORK_GH) that
@@ -518,6 +518,63 @@ class DryRunTests(CleanupFixture):
                 self.assertEqual(self.released_in(), [])
                 self.assert_kept(path, branch, head)
                 self.assert_kept(busy, busy_branch, busy_head)
+
+
+class ReadOnlyOutputTests(CleanupFixture):
+    """Failure mode 66, against this repository's real Mac ignore rules and regenerable globs."""
+
+    PAYLOAD = "packages/mac-app/Sources/Resources/Gateway"
+    LAUNCHER = "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+
+    def setUp(self):
+        super().setUp()
+        source = Path(__file__).resolve().parents[2]
+        self.commit(self.repo, "packages/mac-app/.gitignore", (source / "packages/mac-app/.gitignore").read_text())
+        git(self.repo, "push", "-q", REMOTE, f"HEAD:{BASE}")
+        work = json.loads((source / ".github/work.json").read_text())
+        self.config["cleanup"]["regenerableIgnored"] = work["cleanup"]["regenerableIgnored"]
+        # A symlink inside the payload points at a read-only directory outside the worktree.
+        self.outside = self.tmp / "outside"
+        self.outside.mkdir()
+        self.write(self.outside, "keep.txt", "x\n")
+        self.outside.chmod(0o555)
+        self.addCleanup(self.outside.chmod, 0o755)
+
+    def publish(self, path: Path) -> list:
+        """Publish a generated tree the way bundle-gateway.sh does: directories 0555, files 0444."""
+        self.write(path, f"{self.PAYLOAD}/app/node_modules/pkg/index.js", "x\n")
+        self.write(path, f"{self.PAYLOAD}/runtime/node-arm64", "x\n")
+        self.write(path, self.LAUNCHER, "x\n")
+        (path / self.PAYLOAD / "runtime/bin-arm64").mkdir()
+        (path / self.PAYLOAD / "runtime/bin-arm64/outside").symlink_to(self.outside)
+        payload = path / self.PAYLOAD
+        trees = [d for d, _, _ in os.walk(payload)]
+        for directory, _, files in os.walk(payload):
+            for name in files:
+                Path(directory, name).chmod(0o444)
+        for directory in reversed(trees):
+            os.chmod(directory, 0o555)
+        # The fixture removes its temporary root afterwards; a kept tree must not block that.
+        self.addCleanup(lambda: [os.chmod(d, 0o755) for d in trees if os.path.isdir(d)])
+        return trees
+
+    def test_a_merged_worktree_with_a_read_only_generated_tree_is_removed(self):
+        path, branch, _ = self.task(7)
+        self.publish(path)
+        code, out = self.cleanup(path)
+        self.assertEqual(code, 0, out)
+        self.assert_removed(path, branch)
+        self.assertEqual(self.outside.stat().st_mode & 0o777, 0o555)
+
+    def test_a_kept_or_dry_run_worktree_keeps_its_read_only_tree_as_it_was(self):
+        cases = {"dry run": {"merged": True}, "not merged": {"merged": False}}
+        for number, (name, task) in enumerate(cases.items(), start=10):
+            with self.subTest(case=name):
+                path, branch, head = self.task(number, **task)
+                trees = self.publish(path)
+                code, out = self.cleanup(path, dry_run=name == "dry run")
+                self.assert_kept(path, branch, head)
+                self.assertEqual({os.stat(d).st_mode & 0o777 for d in trees}, {0o555}, out)
 
 
 if __name__ == "__main__":
