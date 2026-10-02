@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import Synchronization
 @testable import TronMobileCore
 @testable import TronMobile
 
@@ -569,6 +570,54 @@ struct SessionMutationServiceTests {
         }
     }
 
+    @Test("a terminal unpaired recovery stops receipt polling rather than spinning the main actor")
+    func terminalReceiptRecoveryStops() async throws {
+        try await withTestWatchdog {
+            let probe = ReceiptRecoveryClockProbe()
+            let harness = try await makeHarness(executorClock: probe.clock, selectProfile: true)
+            await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "Synthetic loss", retryable: true, details: nil))
+            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session") }
+            defer { mutation.cancel() }
+            try await harness.socket.waitUntilClosed()
+            probe.startCounting()
+            var events = harness.client.events.makeAsyncIterator()
+            let delivery = try #require(await events.next())
+            await harness.lifecycle.noteDisconnected(connectionID: delivery.connectionID)
+            await harness.lifecycle.requestReconnect()
+            do { try await valueOfOwnedTask(mutation); Issue.record("Unknown command unexpectedly succeeded") }
+            catch let failure as GatewayFailure { #expect(failure.code == "outcome_unknown") }
+            #expect(probe.readCount < 10, "A stopped credential state must exit rather than poll until the 90-second deadline")
+            #expect(await harness.lifecycle.connectionState == .unpaired)
+            await harness.client.close()
+        }
+    }
+
+    @Test("a retired receipt reply is discarded and the same command is resolved on its successor socket")
+    func retiredReceiptReplyIsRequeried() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "Synthetic loss", retryable: true, details: nil))
+            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session") }
+            defer { mutation.cancel() }
+            try await reconnect(harness)
+            let stale = try await request(in: harness.replacement, frameIndex: 1)
+            let retiredID = try #require(await harness.client.activeConnectionID())
+            await harness.lifecycle.noteDisconnected(connectionID: retiredID)
+            await harness.replacement.enqueue(successResponse(id: stale.id,
+                result: .object(["status": .string("completed"), "result": .object(["updated": .bool(false)])])))
+            await harness.successor.enqueue(helloFrame())
+            try await harness.lifecycle.connectHosted(profile: harness.profile, token: "token")
+            let fresh = try await request(in: harness.successor, frameIndex: 1)
+            #expect(fresh.method == "command.status")
+            #expect(fresh.params?["commandId"] == stale.params?["commandId"])
+            await harness.successor.enqueue(successResponse(id: fresh.id,
+                result: .object(["status": .string("completed"), "result": .object(["updated": .bool(true)])])))
+            try await valueOfOwnedTask(mutation)
+            #expect(await harness.successor.sentFrames().count == 2)
+            await harness.client.close()
+        }
+    }
+
     @Test("background interruption resolves the original receipt on foreground without redispatch")
     func backgroundReceiptResolution() async throws {
         try await withTestWatchdog {
@@ -786,13 +835,55 @@ struct SessionMutationServiceTests {
         }
     }
 
+    @Test("OAuth deadline exhaustion preserves the original command for status-only reconciliation")
+    func oauthReceiptDeadlineRetainsOriginalStatusOnlyCommand() async throws {
+        try await withTestWatchdog {
+            let clock = ReceiptRecoveryClockProbe()
+            let harness = try await makeHarness(executorClock: clock.clock)
+            let integrations = await IntegrationsRPCClient(request: { method, params in
+                try await harness.client.requestValue(method, params)
+            }, mutationExecutor: harness.executor)
+            await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "lost begin response", retryable: true, details: nil))
+            let begin = Task { try await integrations.beginXOAuth(instanceID: "x-original", clientID: "fixture-client", redirectURI: "https://example.test/callback", policy: IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 100, recurringApproved: false)) }
+            defer { begin.cancel() }
+            try await reconnect(harness)
+            let status = try await request(in: harness.replacement, frameIndex: 1)
+            let command = try #require(status.params?["commandId"]?.stringValue)
+            #expect(status.params?["method"] == .string("knowledge.x.oauth.begin"))
+            clock.setElapsedTime(.seconds(100))
+            await harness.replacement.enqueue(successResponse(id: status.id, result: .object(["status": .string("pending")])))
+            do { _ = try await valueOfOwnedTask(begin); Issue.record("a pending receipt must exhaust honestly") }
+            catch let failure as GatewayFailure {
+                #expect(failure.code == "outcome_unknown" && !failure.retryable)
+                #expect(failure.details?["commandId"] == .string(command))
+                #expect(failure.details?["method"] == .string("knowledge.x.oauth.begin"))
+            }
+            let checking = Task { try await integrations.resumeXOAuthBegin(commandID: command) }
+            defer { checking.cancel() }
+            let resumed = try await request(in: harness.replacement, frameIndex: 2)
+            #expect(resumed.method == "command.status")
+            #expect(resumed.params?["commandId"] == .string(command))
+            await harness.replacement.enqueue(successResponse(id: resumed.id, result: .object([
+                "status": .string("completed"), "result": .object([
+                    "operationId": .string("original-operation"), "instanceId": .string("x-original"),
+                    "authorizationUrl": .string("https://twitter.com/i/oauth2/authorize?state=fixture"), "state": .string("fixture")])
+            ])))
+            let result = try await valueOfOwnedTask(checking)
+            #expect(result.instanceId == "x-original" && result.operationId == "original-operation")
+            #expect(await harness.replacement.sentFrames().count == 3, "hello and two status reads only")
+            await harness.client.close()
+        }
+    }
+
     private struct Harness {
         let socket: ScriptedGatewaySocket
         let replacement: ScriptedGatewaySocket
+        let successor: ScriptedGatewaySocket
         let lifecycle: GatewayLifecycleCoordinator
         let profile: GatewayProfile
         let client: GatewayClient
         let service: SessionMutationService
+        let executor: ConfirmedMutationExecutor
         let signposts: RecordingPerformanceSignposts
     }
 
@@ -802,18 +893,21 @@ struct SessionMutationServiceTests {
         let params: JSONValue?
     }
 
-    private func makeHarness() async throws -> Harness {
+    private func makeHarness(executorClock: MonotonicClock = .continuous, selectProfile: Bool = false) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
         let replacement = ScriptedGatewaySocket()
+        let successor = ScriptedGatewaySocket()
         let signposts = RecordingPerformanceSignposts()
         let client = GatewayClient(
-            socketFactory: ScriptedGatewaySocketFactory(sockets: [socket, replacement]).factory,
+            socketFactory: ScriptedGatewaySocketFactory(sockets: [socket, replacement, successor]).factory,
             performanceSignposts: signposts
         )
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let store = AutomationFixtureProfileStore()
+        let profiles = selectProfile ? GatewayProfileStore(metadata: store, tokens: store) : GatewayProfileStore(defaults: defaults)
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
-            profiles: GatewayProfileStore(defaults: defaults),
+            profiles: profiles,
             clock: .continuous,
             reconnectDelayPolicy: .standard,
             uuidSource: .random,
@@ -824,7 +918,7 @@ struct SessionMutationServiceTests {
         let executor = ConfirmedMutationExecutor(
             client: client,
             lifecycle: lifecycle,
-            clock: .continuous,
+            clock: executorClock,
             performanceSignposts: signposts
         )
         let service = SessionMutationService(
@@ -836,12 +930,13 @@ struct SessionMutationServiceTests {
             id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
             machineId: "machine", deviceId: "device"
         )
+        if selectProfile { try profiles.save(profile, token: "fixture-token") }
         await socket.enqueue(helloFrame())
         try await lifecycle.connectHosted(profile: profile, token: "token")
         signposts.reset()
         return Harness(
-            socket: socket, replacement: replacement, lifecycle: lifecycle, profile: profile,
-            client: client, service: service, signposts: signposts
+            socket: socket, replacement: replacement, successor: successor, lifecycle: lifecycle, profile: profile,
+            client: client, service: service, executor: executor, signposts: signposts
         )
     }
 
@@ -936,4 +1031,24 @@ struct SessionMutationServiceTests {
 
 private extension JSONValue {
     subscript(key: String) -> JSONValue? { objectValue?[key] }
+}
+
+/// Advance virtual deadline reads only after transport loss. This bounds the
+/// known-bad busy loop without a wall-clock threshold or starving the test runner.
+private final class ReceiptRecoveryClockProbe: Sendable {
+    private struct State { var counting = false; var reads = 0; var elapsed: Duration?; let origin = ContinuousClock().now }
+    private let state = Mutex(State())
+    var clock: MonotonicClock {
+        MonotonicClock(now: {
+            self.state.withLock { state in
+                if let elapsed = state.elapsed { return state.origin + elapsed }
+                guard state.counting else { return ContinuousClock().now }
+                state.reads += 1
+                return state.origin + .seconds(state.reads)
+            }
+        }, sleep: { try await ContinuousClock().sleep(for: $0) }, gridOrigin: ContinuousClock().now)
+    }
+    func setElapsedTime(_ elapsed: Duration) { state.withLock { $0.elapsed = elapsed } }
+    func startCounting() { state.withLock { $0.counting = true } }
+    var readCount: Int { state.withLock { $0.reads } }
 }

@@ -9,7 +9,8 @@ struct HostedIntegrationsFixtureView: View {
     @State private var model: AppModel
     @State private var ready = false
     @State private var error: String?
-    private let gateway: HostedIntegrationsGateway
+    @State private var gateway: HostedIntegrationsGateway
+    @State private var oauthCounters = "begins:0 completes:0 queries:0 mismatches:0"
     private let dark: Bool
     private let recoveryScenario: String?
 
@@ -19,7 +20,7 @@ struct HostedIntegrationsFixtureView: View {
         recoveryScenario = scenario.hasPrefix("connection-") ? scenario : nil
         dark = arguments.contains("-ui-dark-mode")
         let gateway = HostedIntegrationsGateway(scenario: scenario)
-        self.gateway = gateway
+        _gateway = State(initialValue: gateway)
         let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in HostedIntegrationsSocket(gateway: gateway) })
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
@@ -36,6 +37,8 @@ struct HostedIntegrationsFixtureView: View {
                 NavigationStack {
                     VStack {
                         IntegrationsSettingsView()
+                        Text(oauthCounters).font(.caption2).lineLimit(2).frame(height: 32)
+                            .accessibilityIdentifier("fixture.oauth-counters")
                     }
                 }
                     .environment(model)
@@ -61,6 +64,10 @@ struct HostedIntegrationsFixtureView: View {
         }
         .task {
             guard recoveryScenario == nil else { return }
+            for await value in gateway.counterUpdates() { oauthCounters = value }
+        }
+        .task {
+            guard recoveryScenario == nil else { return }
             do { try await model.connectHostedGateway(profile: profile, token: "fixture-token"); ready = true }
             catch { self.error = error.localizedDescription }
         }
@@ -72,6 +79,22 @@ actor HostedIntegrationsGateway {
     private var sockets: [HostedIntegrationsSocket] = []
     private var receipts: [String: JSONValue] = [:]
     private var oauthBegins = 0
+    private var oauthCompletes = 0
+    private var receiptQueries = 0
+    private var queryMismatches = 0
+    private var commands: [String: String] = [:]
+    private var receiptErrors: [String: JSONValue] = [:]
+    private var counterContinuations: [AsyncStream<String>.Continuation] = []
+    nonisolated func counterUpdates() -> AsyncStream<String> {
+        AsyncStream { continuation in Task { await self.addCounterContinuation(continuation) } }
+    }
+    private func addCounterContinuation(_ value: AsyncStream<String>.Continuation) {
+        counterContinuations.append(value); publishCounters()
+    }
+    private func publishCounters() {
+        let value = "begins:\(oauthBegins) completes:\(oauthCompletes) queries:\(receiptQueries) mismatches:\(queryMismatches)"
+        counterContinuations.forEach { $0.yield(value) }
+    }
     private var oauthInstanceID = ""
     private var oauthReply: CheckedContinuation<Void, Never>?
     func releaseOAuthReply() { oauthReply?.resume(); oauthReply = nil }
@@ -81,26 +104,38 @@ actor HostedIntegrationsGateway {
     func handle(method: String, params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
         if method == "connections.list" { return (snapshot(), nil) }
         if method == "command.status", let command = params["commandId"]?.stringValue {
+            receiptQueries += 1
+            if commands[command] != params["method"]?.stringValue { queryMismatches += 1 }
+            publishCounters()
+            if let error = receiptErrors[command] { return (nil, error) }
             if let value = receipts[command] {
                 return (.object(["status": .string("completed"), "result": value]), nil)
             }
             return (.object(["status": .string("missing")]), nil)
         }
         if method == "knowledge.x.oauth.begin", let command = params["commandId"]?.stringValue {
-            oauthBegins += 1
+            oauthBegins += 1; commands[command] = method; publishCounters()
             oauthInstanceID = params["instanceId"]?.stringValue ?? "fixture"
             let result: JSONValue = .object(["operationId": .string("fixture-oauth-operation"),
                 "instanceId": params["instanceId"] ?? .string("fixture"),
                 "authorizationUrl": .string("https://twitter.com/i/oauth2/authorize?state=fixture"),
                 "state": .string("fixture")])
-            receipts[command] = result
-            if scenario == "oauth-delayed" { await withCheckedContinuation { oauthReply = $0 } }
+            if scenario != "oauth-missing" { receipts[command] = result }
+            if scenario == "oauth-delayed" || scenario == "oauth-missing" { await withCheckedContinuation { oauthReply = $0 } }
             if oauthBegins != 1 { return (nil, .object(["code": .string("duplicate"), "message": .string("OAuth begin replayed"), "retryable": .bool(false)])) }
             return (result, nil)
         }
         if method == "knowledge.x.oauth.complete", let command = params["commandId"]?.stringValue {
-            let value = instance(oauthInstanceID, "knowledge.x", "knowledge-connector", "fixture-x-account", "ready", "@fixture")
+            oauthCompletes += 1; commands[command] = method; publishCounters()
+            if scenario == "oauth-expired" {
+                let error: JSONValue = .object(["code": .string("conflict"), "message": .string("X OAuth setup expired; start authorization again"), "retryable": .bool(false)])
+                receiptErrors[command] = error
+                await withCheckedContinuation { oauthReply = $0 }
+                return (nil, error)
+            }
+            let value = instance(oauthInstanceID, "knowledge.x", "knowledge-connector", "fixture-x-account", "ready", "Connected test X")
             receipts[command] = value
+            if scenario == "oauth-complete-delayed" { await withCheckedContinuation { oauthReply = $0 } }
             return (value, nil)
         }
         if method == "knowledge.x.credits" {
@@ -116,9 +151,12 @@ actor HostedIntegrationsGateway {
     private func snapshot() -> JSONValue {
         let definitions: [JSONValue] = [definition("knowledge.raindrop", "Raindrop", [capability("read", "Read bookmarks")]),
                                         definition("knowledge.x", "X", [capability("read", "Read bookmarks")])]
-        let instances: [JSONValue] = [instance("raindrop-1", "knowledge.raindrop", "knowledge-connector", "raindrop-account", "ready", "Mira", collections: [.object(["collectionId": .string("63441068"), "role": .string("research")])]),
+        var instances: [JSONValue] = [instance("raindrop-1", "knowledge.raindrop", "knowledge-connector", "raindrop-account", "ready", "Mira", collections: [.object(["collectionId": .string("63441068"), "role": .string("research")])]),
                                       instance("raindrop-2", "knowledge.raindrop", "knowledge-connector", "raindrop-second", "setup-required", nil),
                                       instance("x-1", "knowledge.x", "knowledge-connector", "x-account", "ready", "@luna")]
+        if oauthCompletes > 0, scenario != "oauth-expired" {
+            instances.append(instance(oauthInstanceID, "knowledge.x", "knowledge-connector", "fixture-x-account", "ready", "Connected test X"))
+        }
         let capabilities = instances.compactMap { item -> JSONValue? in
             guard let id = item.objectValue?["id"]?.stringValue, let definitionId = item.objectValue?["definitionId"]?.stringValue else { return nil }
             let health = item.objectValue?["health"]?.stringValue

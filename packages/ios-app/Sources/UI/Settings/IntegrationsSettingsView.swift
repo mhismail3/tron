@@ -68,7 +68,7 @@ struct IntegrationsSettingsView: View {
         .tronNavigationTitle("Connected Services", accent: .tronCyan)
         .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronCyan)
-        .task(id: PresentationActivityTaskID(source: "integrations/\(model.knowledgePresentationIdentity)", presentationActive: activity.allowsPresentationPublication)) {
+        .task(id: PresentationActivityTaskID(source: "integrations/\(model.knowledgePresentationIdentity)/\(model.connectionState)", presentationActive: activity.allowsPresentationPublication)) {
             guard activity.allowsPresentationPublication else { return }
             load()
         }
@@ -133,7 +133,9 @@ struct IntegrationsSettingsView: View {
     }
 
     private func load() {
-        guard activity.allowsPresentationPublication, !isLoading else { return }
+        guard activity.allowsPresentationPublication, !isLoading,
+              model.connectionState == .connected,
+              model.knowledgePresentationIdentity.connectionID != nil else { return }
         isLoading = true; error = nil
         let requestIdentity = model.knowledgePresentationIdentity
         let ticket = loadGeneration &+ 1; loadGeneration = ticket
@@ -341,7 +343,7 @@ private struct IntegrationSetupView: View {
     }
 
     var body: some View {
-        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, actionTitle: usesXOAuth ? (unresolvedOAuth != nil ? "Check setup status" : (xOAuthOperationID == nil ? "Authorize X" : "Complete setup")) : "Save", isWorking: mutation != nil, onAction: complete) {
+        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, actionTitle: usesXOAuth ? (unresolvedOAuth != nil ? "Check setup status" : (xOAuthOperationID == nil ? "Authorize X" : "Complete setup")) : "Save", isWorking: mutation != nil, actionDisabled: model.connectionState != .connected, onAction: complete) {
             if mutation == nil {
                 if usesXOAuth {
                     TronSettingsGroup("X developer app", accent: .tronBlue) {
@@ -385,6 +387,9 @@ private struct IntegrationSetupView: View {
             } else {
                 TronSettingsCaption("Completing setup on the selected Mac. Credentials remain in its secure store.")
                 ProgressView("Completing setup…")
+            }
+            if model.connectionState != .connected {
+                TronSettingsCaption("Reconnecting to this Mac. Your setup inputs and accepted operation are kept.")
             }
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
@@ -449,7 +454,9 @@ private struct IntegrationSetupView: View {
                 let operationID = operationID, callbackURL = xCallbackURL.isEmpty ? nil : xCallbackURL
                 let code = xAuthorizationCode.isEmpty ? nil : xAuthorizationCode, state = xOAuthState
                 mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
-                    guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
+                    guard model.knowledgeDestinationIdentity == requestIdentity,
+                          model.knowledgePresentationIdentity.lifecycleGeneration != nil,
+                          model.knowledgePresentationIdentity.connectionID != nil else { throw CancellationError() }
                     _ = try await model.integrations.completeXOAuth(operationID: operationID, callbackURL: callbackURL, code: code, state: state)
                     guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                     xOAuthCompleted = true
@@ -460,7 +467,9 @@ private struct IntegrationSetupView: View {
                 let requestIdentity = model.knowledgeDestinationIdentity
                 let instanceID = instanceID, clientID = xClientID, redirectURI = xRedirectURI, policy = policy
                 mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
-                    guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
+                    guard model.knowledgeDestinationIdentity == requestIdentity,
+                          model.knowledgePresentationIdentity.lifecycleGeneration != nil,
+                          model.knowledgePresentationIdentity.connectionID != nil else { throw CancellationError() }
                     let started = try await model.integrations.beginXOAuth(instanceID: instanceID, clientID: clientID, redirectURI: redirectURI, policy: policy)
                     guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                     xOAuthOperationID = started.operationId

@@ -29,11 +29,16 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         XCTAssertTrue(generate.waitForExistence(timeout: 10))
         generate.tap()
         XCTAssertTrue(counters(app, contain: "summarize:1"))
+        let accepted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Summary generation continues in the background.")).firstMatch
+        XCTAssertTrue(accepted.waitForExistence(timeout: 10), "Observe the accepted job before backgrounding, not only its outgoing request")
         XCUIDevice.shared.press(.home)
         app.activate()
+        let connected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH 'connected' AND NOT label CONTAINS 'socket:none'"), object: app.staticTexts["fixture.connection"])
+        XCTAssertEqual(XCTWaiter.wait(for: [connected], timeout: 10), .completed)
         app.buttons["fixture.complete-summary"].tap()
+        XCTAssertTrue(counters(app, contain: "summaryDone:1"), "The fixture must prove its server commit before testing client reconciliation. Timeline: \(app.staticTexts["fixture.counters"].value ?? "none")")
         let summary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A repository describing")).firstMatch
-        XCTAssertTrue(summary.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(summary.waitForExistence(timeout: 20), "\(app.debugDescription)\nTimeline: \(app.staticTexts["fixture.counters"].value ?? "none")")
         XCTAssertTrue(counters(app, contain: "summarize:1"), "Recovery must query the original job, never replay it")
         let archive = app.buttons["Archive"]
         scrollTo(archive, in: app)
@@ -42,6 +47,69 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         app.buttons["Unarchive"].tap()
         XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 10))
         keepScreenshot(named: "348-presented-summary-after-app-switch")
+    }
+
+    @MainActor
+    func testSummaryCommittedWhileBackgroundedReconcilesOnOriginalSheet() {
+        continueAfterFailure = false
+        let app = launch(scenario: "summary-background")
+        defer { app.terminate() }
+        let generate = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Generate AI summary")).firstMatch
+        XCTAssertTrue(generate.waitForExistence(timeout: 10))
+        generate.tap()
+        XCTAssertTrue(counters(app, contain: "summarize:1"))
+        let accepted = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Summary generation continues in the background.")).firstMatch
+        XCTAssertTrue(accepted.waitForExistence(timeout: 10), "Observe the accepted job before backgrounding, not only its outgoing request")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(counters(app, contain: "summaryDone:1"), "The remote commit occurred while presentation was inactive")
+        let summary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A repository describing")).firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 15), "Timeline: \(app.staticTexts["fixture.counters"].value ?? "none")")
+        XCTAssertTrue(counters(app, contain: "summarize:1"))
+        let timeline = XCTAttachment(string: "\(app.staticTexts["fixture.counters"].value ?? "none")")
+        timeline.name = "348-background-summary-request-timeline"; timeline.lifetime = .keepAlways
+        add(timeline)
+        keepScreenshot(named: "348-summary-committed-while-backgrounded")
+    }
+
+    @MainActor
+    func testCorrectionCompletesIntoOriginalDetailAfterReconnect() {
+        continueAfterFailure = false
+        let app = launch(scenario: "superseded")
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Knowledge record actions"].waitForExistence(timeout: 10))
+        app.buttons["Knowledge record actions"].tap()
+        app.buttons["Correct record"].tap()
+        XCTAssertTrue(app.staticTexts["Correct Knowledge"].waitForExistence(timeout: 5))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.staticTexts["Correct Knowledge"].exists)
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Save"])
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed, "Submission waits for the owning Mac to reconnect")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.staticTexts["Corrected summary from the accepted correction."].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Correct Knowledge"].exists, "The child completion must close its original sheet")
+        XCTAssertTrue(counters(app, contain: "correction:1"))
+        keepScreenshot(named: "348-correction-parent-settlement-after-reconnect")
+    }
+
+    @MainActor
+    func testLateSourceRowsCannotOverwriteNewerTagsOnSameConnection() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        let initial = app.staticTexts["Workflows"]
+        scrollTo(initial, in: app)
+        XCTAssertTrue(initial.waitForExistence(timeout: 10))
+        app.buttons["fixture.hold-rows"].tap()
+        XCTAssertTrue(counters(app, contain: "held:1"))
+        app.buttons["fixture.newer-tags"].tap()
+        XCTAssertTrue(app.staticTexts["Evaluation"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["fixture.release-rows"].tap()
+        XCTAssertTrue(counters(app, contain: "released:1"))
+        XCTAssertFalse(initial.waitForExistence(timeout: 2), "The delivered older read must not replace newer tags on the same socket")
+        XCTAssertTrue(app.staticTexts["Evaluation"].exists)
+        keepScreenshot(named: "348-late-source-read-rejected")
     }
 
     @MainActor
@@ -107,6 +175,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         // The job finishes while the link is down; reconnect re-queries it.
         app.buttons["fixture.drop-connection"].tap()
         app.buttons["fixture.complete-summary"].tap()
+        XCTAssertTrue(counters(app, contain: "summaryDone:1"), "The fixture must prove its server commit before testing client reconciliation. Timeline: \(app.staticTexts["fixture.counters"].value ?? "none")")
         let summary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A repository describing")).firstMatch
         XCTAssertTrue(summary.waitForExistence(timeout: 30), "Reconnect must surface the finished summary: \(app.debugDescription)")
         XCTAssertTrue(counters(app, contain: "summarize:1"), "Recovery must not start another summary job")

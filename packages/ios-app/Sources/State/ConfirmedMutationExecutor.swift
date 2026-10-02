@@ -126,14 +126,30 @@ final class ConfirmedMutationExecutor {
                     catch { break }
                     continue
                 }
-                guard await lifecycle.waitForConnected(until: deadline, admission: admission) else { continue }
+                guard await lifecycle.waitForConnected(until: deadline, admission: admission) else {
+                    // A background handoff may resume in this same destination;
+                    // an active unauthorized/unpaired stop cannot make progress.
+                    if !Task.isCancelled, !lifecycle.admits(admission),
+                       lifecycle.currentLifecycleGeneration == admission.generation,
+                       lifecycle.selectedProfileID == profileID { continue }
+                    break
+                }
                 guard let statusAdmission = lifecycle.admission else { continue }
                 do {
-                    let status: CommandStatusResponse = try await client.request(
-                        "command.status",
-                        CommandStatusParams(method: method, commandId: commandID)
-                    )
-                    try lifecycle.require(statusAdmission)
+                    let status: CommandStatusResponse
+                    do {
+                        status = try await client.request("command.status", CommandStatusParams(method: method, commandId: commandID))
+                        try lifecycle.require(statusAdmission)
+                    } catch is CancellationError {
+                        // Only the exact receipt read is disposable. Cancellation
+                        // from replay refusal below must retain its terminal meaning.
+                        guard !Task.isCancelled,
+                              lifecycle.currentLifecycleGeneration == admission.generation,
+                              lifecycle.selectedProfileID == profileID else {
+                            throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: lastFailure)
+                        }
+                        continue
+                    }
                     switch status.status {
                     case "completed":
                         guard let resolved = status.result else {
@@ -178,6 +194,10 @@ final class ConfirmedMutationExecutor {
                         )
                     }
                 } catch let failure as GatewayPossiblySentError {
+                    lastFailure = failure.failure
+                } catch let failure as GatewayDefinitelyNotSentError {
+                    // Socket retirement can also win before this disposable read
+                    // is emitted. It says nothing about the accepted command.
                     lastFailure = failure.failure
                 } catch let failure as GatewayFailure where failure.code == "response_too_large" {
                     throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: failure)

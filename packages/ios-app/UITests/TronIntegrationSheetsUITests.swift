@@ -52,6 +52,82 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
+    func testMissingOAuthReceiptOffersOnlyOriginalStatusQueries() {
+        continueAfterFailure = false
+        let app = launch(scenario: "oauth-missing")
+        defer { app.terminate() }
+        openXSetup(app)
+        app.buttons["Authorize X"].tap()
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1"))
+        XCUIDevice.shared.press(.home); app.activate()
+        let check = app.buttons["Check setup status"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(app.buttons["Authorize X"].exists)
+        XCTAssertEqual(app.textFields.element(boundBy: 0).value as? String, "fixture-public-client")
+        check.tap()
+        XCTAssertTrue(oauthCounters(app, contain: "queries:2"))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"))
+        XCTAssertTrue(oauthCounters(app, contain: "mismatches:0"))
+        XCTAssertTrue(check.exists)
+        keepScreenshot(app, name: "348-oauth-missing-original-status-only")
+    }
+
+    @MainActor
+    func testAcceptedOAuthCompleteSettlesOriginalReceiptAfterBackground() {
+        continueAfterFailure = false
+        let app = launch(scenario: "oauth-complete-delayed")
+        defer { app.terminate() }
+        openXSetup(app)
+        app.buttons["Authorize X"].tap()
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10))
+        let code = app.textFields.element(boundBy: 3)
+        code.tap(); code.typeText("fixture-one-time-code")
+        app.buttons["Complete setup"].tap()
+        XCTAssertTrue(oauthCounters(app, contain: "completes:1"))
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(app.staticTexts["Connected test X"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Set up X"].exists)
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:1"))
+        XCTAssertTrue(oauthCounters(app, contain: "mismatches:0"))
+        keepScreenshot(app, name: "348-oauth-complete-original-receipt")
+    }
+
+    @MainActor
+    func testExpiredOAuthCompleteKeepsInputsAndOriginalRefusal() {
+        continueAfterFailure = false
+        let app = launch(scenario: "oauth-expired")
+        defer { app.terminate() }
+        openXSetup(app)
+        app.buttons["Authorize X"].tap()
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10))
+        let code = app.textFields.element(boundBy: 3)
+        code.tap(); code.typeText("fixture-one-time-code")
+        app.buttons["Complete setup"].tap()
+        XCTAssertTrue(oauthCounters(app, contain: "completes:1"))
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(app.staticTexts["X OAuth setup expired; start authorization again"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(code.value as? String, "fixture-one-time-code")
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:1"))
+        XCTAssertFalse(app.staticTexts["Connected test X"].exists)
+        keepScreenshot(app, name: "348-oauth-expired-no-redispatch")
+    }
+
+    @MainActor
+    private func openXSetup(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["Details for X"].waitForExistence(timeout: 10))
+        app.buttons["Details for X"].tap(); app.buttons["Add another account for X"].tap()
+        XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 5))
+        app.textFields.element(boundBy: 0).tap(); app.textFields.element(boundBy: 0).typeText("fixture-public-client")
+        app.textFields.element(boundBy: 1).tap(); app.textFields.element(boundBy: 1).typeText("https://example.test/callback")
+    }
+
+    @MainActor
+    private func oauthCounters(_ app: XCUIApplication, contain expected: String) -> Bool {
+        let condition = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", expected), object: app.staticTexts["fixture.oauth-counters"])
+        return XCTWaiter.wait(for: [condition], timeout: 10) == .completed
+    }
+
+    @MainActor
     func testConfiguredAvailableCreditsAndDetails() {
         continueAfterFailure = false
         let app = launch()

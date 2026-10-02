@@ -1881,9 +1881,27 @@ balance reads and confirms MCP servers never show X credit state. Light/dark cap
 are retained in the UI-validation `.xcresult`; export them with
 `xcrun xcresulttool export attachments --path <TestResults.xcresult> --output-path <temporary-directory>`
 and inspect the exported captures. This fixture never calls the selected live Gateway or a provider.
-`SettingsLayoutStyleTests.testIntegrationMutationSettlementRejoinsAfterPresentationSuspension`
+`SettingsLayoutStyleTests.testKnowledgeMutationSettlementRejoinsAfterPresentationSuspension`
 checks that accepted success/failure settles while covered, publishes only when active again,
 and never replays the command. Global default trust retains the standard autosave error/retry notice.
+
+The #348 hosted journeys retain separate interaction and reconciliation evidence:
+`testPresentedSummaryReconcilesAfterAppSwitchWithoutReplaying` taps the real summary
+button, observes its request, backgrounds the app, waits for observed connection readiness,
+and explicitly completes the remote job. `testSummaryCommittedWhileBackgroundedReconcilesOnOriginalSheet`
+commits that accepted job on the fixture's actual background callback and rejoins the
+production sheet/read owner; it does not replace the button journey. These controls and
+bounded request/event traces exist only under `HOSTED_TEST`. Fixture metrics have stable
+geometry, and each completion asserts a server commit before testing publication: an
+unadmitted post-activation tap is not evidence of a lost response. No readiness sleeps are
+used. Both journeys retain screenshots; the background case also retains its request trace.
+`testCorrectionCompletesIntoOriginalDetailAfterReconnect` and
+`testLateSourceRowsCannotOverwriteNewerTagsOnSameConnection` protect parent settlement
+and exact latest-request admission, with guard-removal negative controls.
+The OAuth journeys cover missing receipts (original status queries only), late completion,
+and the original expiry refusal without redispatch. The focused receipt-owner deadline
+case uses an injected clock to prove bounded exhaustion and subsequent original-ID
+status-only reconciliation, which a short UI journey cannot prove.
 
 `TronSmokeUITests.testSessionArchiveConfirmationAndArchivedContainerJourney` drives the
 hosted archive fixture. It swipes the row, taps Archive, and confirms; the row must stay
