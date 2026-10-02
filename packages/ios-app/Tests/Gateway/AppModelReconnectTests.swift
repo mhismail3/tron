@@ -9,6 +9,43 @@ import Testing
 @MainActor
 @Suite("AppModel reconnect delay ownership", .serialized)
 struct AppModelReconnectTests {
+    @Test("explicit retry accelerates waiting recovery but repeated taps do not replace an in-flight socket")
+    func explicitRetryAcceleratesWithoutCompetingSockets() async throws {
+        let clock = ManualClock()
+        let logURL = FileManager.default.temporaryDirectory.appending(path: "manual-retry-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let projection = NoopGatewayLifecycleProjection()
+        try await withRecordedCoordinator(
+            sockets: (0..<3).map { _ in ScriptedGatewaySocket() },
+            clock: clock, watchdogClock: clock.clock,
+            appLog: AppLog(fileURL: logURL), projection: projection
+        ) { coordinator, client, sockets in
+            await sockets[0].enqueue(helloFrame())
+            await coordinator.start()
+            await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
+            coordinator.requestReconnect(immediate: true)
+            try await sockets[1].waitUntilSent(count: 1)
+            try await failHandshake(sockets[1])
+            try await sockets[1].waitUntilClosed()
+            try await waitForDiagnostics(projection, prefix: "reconnect.delay", count: 1)
+            coordinator.retryReconnect()
+            // No clock advancement: the user's action interrupts the backoff.
+            try await sockets[2].waitUntilSent(count: 1)
+            for _ in 0..<10 { coordinator.retryReconnect() }
+            for _ in 0..<20 { await Task.yield() }
+            #expect(await sockets[2].sentFrames().count == 1)
+            await sockets[2].enqueue(helloFrame())
+            while coordinator.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+            #expect(await sockets[2].sentFrames().count == 1, "transport retry must not replay domain RPCs")
+        }
+    }
+
     @Test("bounded jitter preserves nominal backoff progression and hard cap")
     func policyBoundsAndProgression() {
         let units = SequenceReconnectUnits([0, 0.5, 1, 0, 1, -1, 2, .nan])
@@ -754,7 +791,7 @@ struct AppModelReconnectTests {
             recoveryClock.advance(by: .seconds(2))
             for _ in 0..<10 { await Task.yield() }
             let noPathNotice = try #require(fixture.model.visibleNotices.first { $0.replacement?.key == .gatewayRecovery })
-            #expect(noPathNotice.title == "No path to this Mac")
+            #expect(noPathNotice.title == "Mac unreachable")
 
             try await clock.waitUntilSleeping(count: 1)
             await sockets[2].enqueue(helloFrame())

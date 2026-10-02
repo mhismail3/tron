@@ -79,6 +79,37 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
+    func testRetryConnectionRecoversReconnectingDetails() {
+        assertRetryRecovers(scenario: "connection-retry")
+    }
+
+    @MainActor
+    func testRetryConnectionRecoversUnreachableDetails() {
+        assertRetryRecovers(scenario: "connection-unreachable")
+    }
+
+    @MainActor
+    private func assertRetryRecovers(scenario: String) {
+        continueAfterFailure = false
+        do {
+            let app = launch(scenario: scenario)
+            defer { app.terminate() }
+            let state = scenario == "connection-unreachable" ? "Mac unreachable" : "Reconnecting"
+            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", state)).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+            let retry = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Retry Connection")).firstMatch
+            XCTAssertTrue(retry.waitForExistence(timeout: 3), app.debugDescription)
+            keepScreenshot(app, name: "\(scenario)-retry-available")
+            retry.tap()
+            XCTAssertTrue(app.otherElements["Connection status: Connected"].waitForExistence(timeout: 5)
+                || app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connection status: Connected")).firstMatch.exists,
+                "Retry must interrupt the parked delay and admit a replacement socket: \(app.debugDescription)")
+            XCTAssertFalse(retry.exists)
+            keepScreenshot(app, name: "\(scenario)-recovered")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     private func keepScreenshot(_ app: XCUIApplication, name: String) {
         let screenshot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
