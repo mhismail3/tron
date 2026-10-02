@@ -150,3 +150,27 @@ bounds. The manual Entry Detail action calls `knowledge.source.assess` with
 `assessor: "model"`; its returned recommendation is displayed but does not
 change admission. Summary jobs refuse when it is unset and never fall back to the
 observer model.
+
+## Sheet and accepted-command lifetime
+
+Knowledge and Connected Services forms distinguish their originating Mac and
+lifecycle generation (`KnowledgeDestinationIdentity`) from the disposable
+socket/request identity (`KnowledgePresentationIdentity`). App backgrounding and
+same-Mac reconnect retire reads, not form fields or accepted operation handles.
+Selecting or replacing the destination invalidates the old sheet; a draft never
+silently targets another Mac. Reads still carry activity, exact transport identity
+and a latest-request ticket through their awaits.
+
+`KnowledgeMutationObserver` observes one accepted task only while its sheet is
+active, and rejoins that same result after suspension without resubmission.
+Known results and errors settle against the original destination. The existing
+`ConfirmedMutationExecutor` owns uncertain receipt resolution within its bounded
+deadline; background removes transport admission without revoking a command's
+original destination. Receipt lookup requires a fresh admitted connection.
+
+X OAuth never recreates a PKCE operation because its receipt is missing. An
+unresolved begin or completion keeps its original command ID and offers **Check
+setup status**, which only queries `command.status`; another authorization is
+blocked while that outcome remains unknown. OAuth inputs and consent state stay
+in the presented form, not a second credential or receipt store. Tokens remain
+in the Mac's owned credential store.

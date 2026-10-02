@@ -4,6 +4,7 @@ import TronMobileCore
 
 /// Hosted Connected Services/MCP journey backed only by a scripted in-app Gateway.
 struct HostedIntegrationsFixtureView: View {
+    @Environment(\.scenePhase) private var scenePhase
     private let profile = GatewayProfile(id: "integration-fixture", label: "Studio server", host: "localhost", port: 9847, machineId: "fixture-integrations")
     @State private var model: AppModel
     @State private var ready = false
@@ -44,6 +45,16 @@ struct HostedIntegrationsFixtureView: View {
             }
         }
         .preferredColorScheme(dark ? .dark : .light)
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                model.enteredBackground()
+                Task { await gateway.releaseOAuthReply() }
+            case .inactive: model.becameInactive()
+            case .active: model.becameActive()
+            @unknown default: break
+            }
+        }
         .task {
             do { try await model.connectHostedGateway(profile: profile, token: "fixture-token"); ready = true }
             catch { self.error = error.localizedDescription }
@@ -54,11 +65,39 @@ struct HostedIntegrationsFixtureView: View {
 actor HostedIntegrationsGateway {
     private let scenario: String
     private var sockets: [HostedIntegrationsSocket] = []
+    private var receipts: [String: JSONValue] = [:]
+    private var oauthBegins = 0
+    private var oauthInstanceID = ""
+    private var oauthReply: CheckedContinuation<Void, Never>?
+    func releaseOAuthReply() { oauthReply?.resume(); oauthReply = nil }
     init(scenario: String) { self.scenario = scenario }
     func attach(_ socket: HostedIntegrationsSocket) { sockets.append(socket) }
 
     func handle(method: String, params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
         if method == "connections.list" { return (snapshot(), nil) }
+        if method == "command.status", let command = params["commandId"]?.stringValue {
+            if let value = receipts[command] {
+                return (.object(["status": .string("completed"), "result": value]), nil)
+            }
+            return (.object(["status": .string("missing")]), nil)
+        }
+        if method == "knowledge.x.oauth.begin", let command = params["commandId"]?.stringValue {
+            oauthBegins += 1
+            oauthInstanceID = params["instanceId"]?.stringValue ?? "fixture"
+            let result: JSONValue = .object(["operationId": .string("fixture-oauth-operation"),
+                "instanceId": params["instanceId"] ?? .string("fixture"),
+                "authorizationUrl": .string("https://twitter.com/i/oauth2/authorize?state=fixture"),
+                "state": .string("fixture")])
+            receipts[command] = result
+            if scenario == "oauth-delayed" { await withCheckedContinuation { oauthReply = $0 } }
+            if oauthBegins != 1 { return (nil, .object(["code": .string("duplicate"), "message": .string("OAuth begin replayed"), "retryable": .bool(false)])) }
+            return (result, nil)
+        }
+        if method == "knowledge.x.oauth.complete", let command = params["commandId"]?.stringValue {
+            let value = instance(oauthInstanceID, "knowledge.x", "knowledge-connector", "fixture-x-account", "ready", "@fixture")
+            receipts[command] = value
+            return (value, nil)
+        }
         if method == "knowledge.x.credits" {
             try? await Task.sleep(for: .milliseconds(5_000))
             if scenario == "credits-fail" {
@@ -121,11 +160,18 @@ actor HostedIntegrationsSocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
         guard frame["type"]?.stringValue == "request", let id = frame["id"]?.stringValue, let method = frame["method"]?.stringValue else { return }
-        let result = await gateway.handle(method: method, params: frame["params"]?.objectValue ?? [:])
+        Task {
+            let result = await gateway.handle(method: method, params: frame["params"]?.objectValue ?? [:])
+            await reply(id: id, result: result)
+        }
+    }
+    private func reply(id: String, result: (JSONValue?, JSONValue?)) {
+        guard !closed else { return }
         var response: [String: JSONValue] = ["type": .string("response"), "id": .string(id), "ok": .bool(result.1 == nil)]
         if let value = result.0 { response["result"] = value }
         if let error = result.1 { response["error"] = error }
-        deliver(try JSONEncoder.gateway.encode(JSONValue.object(response)))
+        guard let data = try? JSONEncoder.gateway.encode(JSONValue.object(response)) else { return }
+        deliver(data)
     }
     func ping() async throws { if closed { throw CancellationError() } }
     func receive() async throws -> Data {

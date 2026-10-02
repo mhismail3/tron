@@ -10,6 +10,8 @@ import TronMobileCore
 /// machine rather than injected view state. Events use the Gateway's exact job
 /// shape, and a dropped connection exercises the real reconnect owner.
 struct HostedKnowledgeDetailFixtureView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var presentedOrigin: KnowledgePresentationIdentity?
     private let profile = GatewayProfile(id: "knowledge-fixture", label: "Studio server", host: "localhost", port: 9847, machineId: "fixture-knowledge")
     @State private var model: AppModel
     @State private var gateway: HostedKnowledgeGateway
@@ -37,7 +39,7 @@ struct HostedKnowledgeDetailFixtureView: View {
             VStack(spacing: 0) {
                 if ready {
                     if detailMounted {
-                        KnowledgeDetailSheet(subject: .row(gateway.initialRow), origin: model.knowledgePresentationIdentity,
+                        KnowledgeDetailSheet(subject: .row(gateway.initialRow), origin: presentedOrigin ?? model.knowledgePresentationIdentity,
                                              onChanged: {}, onOpenDraft: { _ in }, onOpenSession: { _, _ in })
                             .id(detailGeneration)
 
@@ -55,9 +57,18 @@ struct HostedKnowledgeDetailFixtureView: View {
         .environment(model)
         .tronPresentation()
         .preferredColorScheme(.dark)
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: model.enteredBackground()
+            case .inactive: model.becameInactive()
+            case .active: model.becameActive()
+            @unknown default: break
+            }
+        }
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
+                presentedOrigin = model.knowledgePresentationIdentity
                 ready = true
             } catch { self.error = error.localizedDescription }
         }
@@ -80,9 +91,11 @@ struct HostedKnowledgeDetailFixtureView: View {
     private var fixtureBar: some View {
         VStack(spacing: 4) {
             Text(counters).font(.caption2.monospaced()).accessibilityIdentifier("fixture.counters")
+            Text("\(model.connectionState) · \(model.knowledgePresentationIdentity)")
+                .font(.caption2).accessibilityIdentifier("fixture.connection")
             HStack(spacing: 4) {
                 control("Close", id: "fixture.close-detail") { detailMounted = false }
-                control("Open", id: "fixture.open-detail") { detailGeneration += 1; detailMounted = true }
+                control("Open", id: "fixture.open-detail") { presentedOrigin = model.knowledgePresentationIdentity; detailGeneration += 1; detailMounted = true }
                 control("Drop", id: "fixture.drop-connection") { Task { await gateway.dropConnection() } }
             }
             HStack(spacing: 4) {
@@ -134,6 +147,7 @@ actor HostedKnowledgeGateway {
     private var pendingTags: String?
     private var nextTake = TakeMode.success
     private var nextCurationConflict = false
+    private var jobsReadCount = 0
     private var summarizeCount = 0
     private var takeCount = 0
     private var tagCount = 0
@@ -160,7 +174,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount)"
+        let value = "summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount)"
         counterContinuations.forEach { $0.yield(value) }
     }
 
@@ -245,6 +259,7 @@ actor HostedKnowledgeGateway {
         case "knowledge.read":
             return (record(), nil)
         case "knowledge.curation.jobs":
+            jobsReadCount += 1; publishCounters()
             let running = jobs.filter { $0.objectValue?["status"]?.stringValue == "running" }.count
             let failed = jobs.filter { $0.objectValue?["status"]?.stringValue == "failed" }.count
             return (.object(["jobs": .array(Array(jobs.prefix(25))), "running": .number(Double(running)), "failed": .number(Double(failed))]), nil)

@@ -6,6 +6,51 @@ import XCTest
 /// - a failed X credit read leaves an error line in the list;
 /// - a setup-required instance is incorrectly repeated under Available.
 final class TronIntegrationSheetsUITests: XCTestCase {
+    /// Replacing the foreground transport must not destroy an unsubmitted form.
+    @MainActor
+    func testXSetupDraftSurvivesBackgroundReconnect() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Details for X"].waitForExistence(timeout: 10))
+        app.buttons["Details for X"].tap()
+        app.buttons["Add another account for X"].tap()
+        XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 5))
+        let client = app.textFields.element(boundBy: 0)
+        client.tap(); client.typeText("fixture-public-client")
+        let callback = app.textFields.element(boundBy: 1)
+        callback.tap(); callback.typeText("https://example.test/callback")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(client.value as? String, "fixture-public-client")
+        XCTAssertEqual(callback.value as? String, "https://example.test/callback")
+        keepScreenshot(app, name: "348-x-draft-after-background-reconnect")
+    }
+
+    @MainActor
+    func testAcceptedXBeginResolvesOriginalReceiptAfterBackground() {
+        continueAfterFailure = false
+        let app = launch(scenario: "oauth-delayed")
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Details for X"].waitForExistence(timeout: 10))
+        app.buttons["Details for X"].tap()
+        app.buttons["Add another account for X"].tap()
+        XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 5))
+        app.textFields.element(boundBy: 0).tap()
+        app.textFields.element(boundBy: 0).typeText("fixture-public-client")
+        app.textFields.element(boundBy: 1).tap()
+        app.textFields.element(boundBy: 1).typeText("https://example.test/callback")
+        app.buttons["Authorize X"].tap()
+        XCTAssertTrue(app.staticTexts["Completing setup…"].waitForExistence(timeout: 5))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.buttons["Complete setup"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.buttons["Open X consent"].exists)
+        XCTAssertEqual(app.textFields.element(boundBy: 0).value as? String, "fixture-public-client")
+        keepScreenshot(app, name: "348-accepted-x-begin-recovered-from-receipt")
+    }
+
     @MainActor
     func testConfiguredAvailableCreditsAndDetails() {
         continueAfterFailure = false

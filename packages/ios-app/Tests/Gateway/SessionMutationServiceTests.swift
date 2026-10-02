@@ -569,6 +569,30 @@ struct SessionMutationServiceTests {
         }
     }
 
+    @Test("background interruption resolves the original receipt on foreground without redispatch")
+    func backgroundReceiptResolution() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session") }
+            defer { mutation.cancel() }
+            let sent = try await request(in: harness.socket, frameIndex: 1)
+            await harness.lifecycle.enteredBackground()
+            try await harness.socket.waitUntilClosed()
+            await harness.lifecycle.becameActive()
+            await harness.replacement.enqueue(helloFrame())
+            try await harness.lifecycle.connectHosted(profile: harness.profile, token: "token")
+            let status = try await request(in: harness.replacement, frameIndex: 1)
+            #expect(status.method == "command.status")
+            #expect(status.params?["commandId"] == sent.params?["commandId"])
+            await harness.replacement.enqueue(successResponse(id: status.id,
+                result: .object(["status": .string("completed"), "result": .object(["updated": .bool(true)])])))
+            try await valueOfOwnedTask(mutation)
+            #expect(await harness.socket.sentFrames().count == 2)
+            #expect(await harness.replacement.sentFrames().count == 2)
+            await harness.client.close()
+        }
+    }
+
     @Test("confirmed missing replays the exact command ID once")
     func stableCommandIDReplay() async throws {
         try await withTestWatchdog {

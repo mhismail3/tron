@@ -73,8 +73,11 @@ struct IntegrationsSettingsView: View {
             load()
         }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
-            loadGeneration &+= 1; isLoading = false; snapshot = nil
-            selectedInstance = nil; setupDefinition = nil; credits.begin(clear: true); load()
+            loadGeneration &+= 1; isLoading = false
+            credits.begin(clear: true); load()
+        }
+        .onChange(of: model.knowledgeDestinationIdentity) { _, _ in
+            selectedInstance = nil; setupDefinition = nil; snapshot = nil
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
             if !active { loadGeneration &+= 1; isLoading = false; credits.begin(clear: true) }
@@ -166,38 +169,6 @@ struct IntegrationsSettingsView: View {
 
 }
 
-/// The receipt executor owns the accepted command. The sheet retains only its
-/// task handle; activity-scoped observers may leave/rejoin without replaying it.
-struct IntegrationMutation {
-    let id = UUID()
-    let identity: KnowledgePresentationIdentity
-    let task: Task<Void, Error>
-}
-
-struct IntegrationMutationObserver: ViewModifier {
-    @Environment(AppModel.self) private var model
-    @Environment(\.tronPresentationActivity) private var activity
-    @Binding var mutation: IntegrationMutation?
-    @Binding var error: String?
-    let completed: () -> Void
-
-    func body(content: Content) -> some View {
-        content.task(id: PresentationActivityTaskID(source: mutation?.id, presentationActive: activity.allowsPresentationPublication)) {
-            guard activity.allowsPresentationPublication, let accepted = mutation else { return }
-            let result = await accepted.task.result
-            guard !Task.isCancelled, activity.allowsPresentationPublication,
-                  model.knowledgePresentationIdentity == accepted.identity,
-                  mutation?.id == accepted.id else { return }
-            mutation = nil
-            switch result {
-            case .success: completed()
-            case .failure(let failure):
-                if !(failure is CancellationError) { error = failure.localizedDescription }
-            }
-        }
-    }
-}
-
 private struct IntegrationInstanceView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -208,7 +179,7 @@ private struct IntegrationInstanceView: View {
     let addAccount: () -> Void
     let onChanged: () -> Void
     @State private var policy: IntegrationPolicy
-    @State private var mutation: IntegrationMutation?
+    @State private var mutation: KnowledgeMutation?
     @State private var error: String?
 
     init(instance: IntegrationInstance, definition: IntegrationDefinition?, statuses: [IntegrationCapabilityStatus], addAccount: @escaping () -> Void, onChanged: @escaping () -> Void) {
@@ -270,7 +241,7 @@ private struct IntegrationInstanceView: View {
             .buttonStyle(TronActionButtonStyle(role: .destructive))
             .disabled(mutation != nil)
         }
-        .modifier(IntegrationMutationObserver(mutation: $mutation, error: $error) {
+        .modifier(KnowledgeMutationObserver(mutation: $mutation, error: $error) {
             onChanged()
             dismiss()
         })
@@ -321,10 +292,10 @@ private struct IntegrationInstanceView: View {
         guard mutation == nil, activity.allowsPresentationPublication else { return }
         guard policy != instance.policy else { dismiss(); return }
         error = nil
-        let identity = model.knowledgePresentationIdentity
+        let identity = model.knowledgeDestinationIdentity
         let submitted = policy
-        mutation = IntegrationMutation(identity: identity, task: Task { @MainActor in
-            guard model.knowledgePresentationIdentity == identity else { throw CancellationError() }
+        mutation = KnowledgeMutation(identity: identity, task: Task { @MainActor in
+            guard model.knowledgeDestinationIdentity == identity else { throw CancellationError() }
             _ = try await model.integrations.updatePolicy(instanceID: instance.id, expectedSetupRevision: instance.setupRevision, policy: submitted)
         })
     }
@@ -332,9 +303,9 @@ private struct IntegrationInstanceView: View {
     private func disconnect() {
         guard mutation == nil, activity.allowsPresentationPublication else { return }
         error = nil
-        let identity = model.knowledgePresentationIdentity
-        mutation = IntegrationMutation(identity: identity, task: Task { @MainActor in
-            guard model.knowledgePresentationIdentity == identity else { throw CancellationError() }
+        let identity = model.knowledgeDestinationIdentity
+        mutation = KnowledgeMutation(identity: identity, task: Task { @MainActor in
+            guard model.knowledgeDestinationIdentity == identity else { throw CancellationError() }
             _ = try await model.integrations.disconnect(instanceID: instance.id)
         })
     }
@@ -359,8 +330,9 @@ private struct IntegrationSetupView: View {
     @State private var xOAuthOperationID: String?
     @State private var xAuthorizationURL: URL?
     @State private var xOAuthCompleted = false
+    @State private var unresolvedOAuth: GatewayFailure?
     @State private var policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
-    @State private var mutation: IntegrationMutation?
+    @State private var mutation: KnowledgeMutation?
     @State private var error: String?
 
     init(definition: IntegrationDefinition, onFinished: @escaping () -> Void) {
@@ -369,7 +341,7 @@ private struct IntegrationSetupView: View {
     }
 
     var body: some View {
-        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, actionTitle: usesXOAuth ? (xOAuthOperationID == nil ? "Authorize X" : "Complete setup") : "Save", isWorking: mutation != nil, onAction: complete) {
+        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, actionTitle: usesXOAuth ? (unresolvedOAuth != nil ? "Check setup status" : (xOAuthOperationID == nil ? "Authorize X" : "Complete setup")) : "Save", isWorking: mutation != nil, onAction: complete) {
             if mutation == nil {
                 if usesXOAuth {
                     TronSettingsGroup("X developer app", accent: .tronBlue) {
@@ -416,7 +388,11 @@ private struct IntegrationSetupView: View {
             }
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
-        .modifier(IntegrationMutationObserver(mutation: $mutation, error: $error) {
+        .modifier(KnowledgeMutationObserver(mutation: $mutation, error: $error, failed: { failure in
+            if let failure = failure as? GatewayFailure, failure.code == "outcome_unknown" {
+                unresolvedOAuth = failure
+            }
+        }) {
             if !usesXOAuth || xOAuthCompleted { onFinished(); dismiss() }
         })
     }
@@ -444,24 +420,49 @@ private struct IntegrationSetupView: View {
     private func complete() {
         guard mutation == nil, activity.allowsPresentationPublication else { return }
         if usesXOAuth {
+            if let unresolvedOAuth {
+                guard let commandID = unresolvedOAuth.details?.objectValue?["commandId"]?.stringValue,
+                      let method = unresolvedOAuth.details?.objectValue?["method"]?.stringValue else {
+                    error = "The original setup outcome is unknown. Do not start another authorization."
+                    return
+                }
+                let destination = model.knowledgeDestinationIdentity
+                mutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
+                    guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
+                    if method == "knowledge.x.oauth.begin" {
+                        let started = try await model.integrations.resumeXOAuthBegin(commandID: commandID)
+                        guard model.knowledgeDestinationIdentity == destination, started.instanceId == self.instanceID else { throw CancellationError() }
+                        xOAuthOperationID = started.operationId; xOAuthState = started.state
+                        xAuthorizationURL = URL(string: started.authorizationUrl)
+                    } else if method == "knowledge.x.oauth.complete" {
+                        _ = try await model.integrations.resumeXOAuthComplete(commandID: commandID)
+                        guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
+                        xOAuthCompleted = true
+                    } else { throw CancellationError() }
+                    self.unresolvedOAuth = nil
+                })
+                return
+            }
             if let operationID = xOAuthOperationID {
                 guard !xCallbackURL.isEmpty || (!xAuthorizationCode.isEmpty && xOAuthState != nil) else { error = "Paste the redirected URL or its authorization code after consent."; return }
-                let requestIdentity = model.knowledgePresentationIdentity
+                let requestIdentity = model.knowledgeDestinationIdentity
                 let operationID = operationID, callbackURL = xCallbackURL.isEmpty ? nil : xCallbackURL
                 let code = xAuthorizationCode.isEmpty ? nil : xAuthorizationCode, state = xOAuthState
-                mutation = IntegrationMutation(identity: requestIdentity, task: Task { @MainActor in
-                    guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
+                mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
+                    guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                     _ = try await model.integrations.completeXOAuth(operationID: operationID, callbackURL: callbackURL, code: code, state: state)
+                    guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                     xOAuthCompleted = true
                 })
             } else {
                 guard !instanceID.isEmpty, !xClientID.isEmpty, !xRedirectURI.isEmpty else { error = "Instance ID, public X client ID, and registered callback URL are required."; return }
                 error = nil
-                let requestIdentity = model.knowledgePresentationIdentity
+                let requestIdentity = model.knowledgeDestinationIdentity
                 let instanceID = instanceID, clientID = xClientID, redirectURI = xRedirectURI, policy = policy
-                mutation = IntegrationMutation(identity: requestIdentity, task: Task { @MainActor in
-                    guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
+                mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
+                    guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                     let started = try await model.integrations.beginXOAuth(instanceID: instanceID, clientID: clientID, redirectURI: redirectURI, policy: policy)
+                    guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                     xOAuthOperationID = started.operationId
                     xOAuthState = started.state
                     xAuthorizationURL = URL(string: started.authorizationUrl)
@@ -471,15 +472,15 @@ private struct IntegrationSetupView: View {
         }
         guard !instanceID.isEmpty, !accountID.isEmpty, !credentialRef.isEmpty else { error = "Instance ID, account/server identity, and an opaque credential reference are required."; return }
         error = nil
-        let requestIdentity = model.knowledgePresentationIdentity
+        let requestIdentity = model.knowledgeDestinationIdentity
         let instanceID = instanceID, accountID = accountID, scope = scope, credentialRef = credentialRef
         let method = method, policy = policy
-        mutation = IntegrationMutation(identity: requestIdentity, task: Task { @MainActor in
-                guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
+        mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
+                guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                 let begun = try await model.integrations.beginSetup(instanceID: instanceID, definitionID: definition.id, method: method)
                 // Begin's receipt remains owned even after dismissal. Completion
                 // is a separate command: never send it to a replacement Gateway.
-                guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
+                guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                 _ = try await model.integrations.completeSetup(operationID: begun.operationId, instanceID: instanceID, providerAccountID: accountID, scope: scope.nilIfEmpty, credentialRef: credentialRef, policy: policy)
         })
     }

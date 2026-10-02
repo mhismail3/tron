@@ -21,6 +21,30 @@ import XCTest
 /// `KnowledgeDetailInteractionTests`.
 final class TronKnowledgeDetailUITests: XCTestCase {
     @MainActor
+    func testPresentedSummaryReconcilesAfterAppSwitchWithoutReplaying() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        let generate = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Generate AI summary")).firstMatch
+        XCTAssertTrue(generate.waitForExistence(timeout: 10))
+        generate.tap()
+        XCTAssertTrue(counters(app, contain: "summarize:1"))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        app.buttons["fixture.complete-summary"].tap()
+        let summary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A repository describing")).firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(counters(app, contain: "summarize:1"), "Recovery must query the original job, never replay it")
+        let archive = app.buttons["Archive"]
+        scrollTo(archive, in: app)
+        archive.tap()
+        XCTAssertTrue(app.buttons["Unarchive"].waitForExistence(timeout: 10), "Curation after reconnect must settle and refresh its new revision")
+        app.buttons["Unarchive"].tap()
+        XCTAssertTrue(app.buttons["Archive"].waitForExistence(timeout: 10))
+        keepScreenshot(named: "348-presented-summary-after-app-switch")
+    }
+
+    @MainActor
     func testArchiveAndUnarchiveRoundTripUsesAdmissionLabels() {
         continueAfterFailure = false
         let app = launch()

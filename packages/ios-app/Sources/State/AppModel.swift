@@ -199,6 +199,12 @@ final class AppModel {
     let performanceSignposts: any PerformanceSignposting
     let appLog: AppLog
     var diagnosticConnectionID: Int? { gatewayConnectionID }
+    /// Backgrounding and socket replacement retire reads, not the form's Mac.
+    var knowledgeDestinationIdentity: KnowledgeDestinationIdentity {
+        KnowledgeDestinationIdentity(profileID: lifecycle.selectedProfileID,
+                                     lifecycleGeneration: lifecycle.currentLifecycleGeneration)
+    }
+
     var knowledgePresentationIdentity: KnowledgePresentationIdentity {
         KnowledgePresentationIdentity(profileID: lifecycle.selectedProfileID, lifecycleGeneration: lifecycle.generationAdmission?.generation, connectionID: gatewayConnectionID)
     }

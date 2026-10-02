@@ -322,10 +322,14 @@ struct KnowledgeDashboardView: View {
             loadGeneration += 1
             loadingMore = false
             coverageStore.reset()
-            coverageSheet = false
-            page = nil; selectedSubject = nil; selectedIdentity = nil; pendingDetailAction = nil
+            page = nil
             error = nil
             model.knowledgePreviews.removeAll()
+        }
+        .onChange(of: model.knowledgeDestinationIdentity) { _, _ in
+            coverageSheet = false
+            selectedSubject = nil; selectedIdentity = nil; pendingDetailAction = nil
+            configSheet = false; captureSheet = false; noteSheet = false
         }
         // A committed Knowledge mutation refreshes only what changed. The
         // covered page keeps its rows and scroll position unless the Gateway
@@ -741,7 +745,7 @@ struct KnowledgeDashboardView: View {
     }
 
     private func stageDetailAction(_ action: DetailAction) {
-        guard model.knowledgePresentationIdentity == selectedIdentity, pendingDetailAction == nil else { return }
+        guard model.knowledgeDestinationIdentity == selectedIdentity?.destinationIdentity, pendingDetailAction == nil else { return }
         // The existing session/new-session owner must not present through an
         // observation sheet that is still dismissing.
         pendingDetailAction = action
@@ -757,7 +761,7 @@ struct KnowledgeDashboardView: View {
     }
 
     private func stageCoverageNavigation(_ action: DetailAction) {
-        guard model.knowledgePresentationIdentity == selectedIdentity, pendingDetailAction == nil else { return }
+        guard model.knowledgeDestinationIdentity == selectedIdentity?.destinationIdentity, pendingDetailAction == nil else { return }
         pendingDetailAction = action
         coverageSheet = false
     }
@@ -769,7 +773,7 @@ struct KnowledgeDashboardView: View {
         let action = pendingDetailAction
         pendingDetailAction = nil
         defer { selectedIdentity = nil }
-        guard model.knowledgePresentationIdentity == selectedIdentity else { return }
+        guard model.knowledgeDestinationIdentity == selectedIdentity?.destinationIdentity else { return }
         switch action {
         case .draft(let record): onOpenDraft(record)
         case .session(let sessionID, let entryID): onOpenSession(sessionID, entryID)
@@ -874,6 +878,7 @@ private struct KnowledgeCoverageSheetHost: View {
     @State private var requestGeneration = 0
     @State private var mutationError: String?
     @State private var clearingID: String?
+    @State private var mutation: KnowledgeMutation?
     @State private var detent: PresentationDetent = .medium
     @Environment(\.dismiss) private var dismiss
 
@@ -925,6 +930,12 @@ private struct KnowledgeCoverageSheetHost: View {
         .onChange(of: activity.allowsPresentationPublication) { _, active in
             if !active { store.suspend() }
         }
+        .modifier(KnowledgeMutationObserver(mutation: $mutation, error: $mutationError) {
+            requestGeneration &+= 1
+        })
+        .onChange(of: mutation?.id) { _, next in
+            if next == nil { clearingID = nil }
+        }
         .onDisappear { store.suspend() }
         .onChange(of: identity) { _, _ in
             status = nil
@@ -974,23 +985,13 @@ private struct KnowledgeCoverageSheetHost: View {
     }
 
     @MainActor private func clear(_ cut: KnowledgeObservationCoverage) {
-        guard activity.allowsPresentationPublication, clearingID == nil else { return }
-        let requestIdentity = identity
-        clearingID = cut.id
-        mutationError = nil
-        Task { @MainActor in
-            defer { if model.knowledgePresentationIdentity == requestIdentity { clearingID = nil } }
-            do {
-                _ = try await model.knowledge.dismissCoverage(cut, capabilities: model.gatewayInfo?.capabilities ?? [])
-                guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }
-                requestGeneration &+= 1
-            } catch is CancellationError {
-                return
-            } catch {
-                guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }
-                mutationError = error.localizedDescription
-            }
-        }
+        guard activity.allowsPresentationPublication, mutation == nil, model.connectionState == .connected else { return }
+        let destination = model.knowledgeDestinationIdentity
+        clearingID = cut.id; mutationError = nil
+        mutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
+            guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
+            _ = try await model.knowledge.dismissCoverage(cut, capabilities: model.gatewayInfo?.capabilities ?? [])
+        })
     }
 }
 
@@ -1197,7 +1198,7 @@ struct KnowledgeEntryLoadView: View {
                 loadingBody
             }
         }
-        .task(id: "entry-\(row.id):\(row.revisionId):\(origin.profileID ?? "none"):\(origin.lifecycleGeneration ?? -1):\(origin.connectionID ?? -1):\(requestGeneration)") {
+        .task(id: "entry-\(row.id):\(row.revisionId):\(model.knowledgePresentationIdentity):\(activity.allowsPresentationPublication):\(requestGeneration)") {
             await load()
         }
     }
@@ -1250,7 +1251,8 @@ struct KnowledgeEntryLoadView: View {
     }
 
     private func load() async {
-        guard activity.allowsPresentationPublication else { return }
+        guard activity.allowsPresentationPublication,
+              model.knowledgeDestinationIdentity == origin.destinationIdentity else { return }
         let generation = requestGeneration
         let requestedIdentity = model.knowledgePresentationIdentity
         do {
@@ -1310,8 +1312,11 @@ struct KnowledgeDetailView: View {
     @State private var summaryError: String?
     @State private var summaryCommandID: String?
     @State private var sourceConfig: KnowledgeConfig?
-    @State private var verdictSaving = false
-    @State private var scopeSaving = false
+    @State private var curationMutation: KnowledgeMutation?
+    private var verdictSaving: Bool { curationMutation != nil && retryScope == nil && retryAdmission == nil }
+    private var scopeSaving: Bool { curationMutation != nil && !verdictSaving }
+    @State private var sourceRowsRequestGeneration = 0
+    @State private var supersededRowsRequestGeneration = 0
     @State private var verdictError: String?
     @State private var retryVerdict: KnowledgeSourceVerdict?
     @State private var retryClearVerdict = false
@@ -1357,7 +1362,8 @@ struct KnowledgeDetailView: View {
     @State private var linkedReader = KnowledgeLinkedRecordReaderStore()
     @State private var citationTitles: [String: String] = [:]
     @State private var externalPageURL: URL?
-    private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin && activity.allowsPresentationPublication }
+    private var admitsDestination: Bool { model.knowledgeDestinationIdentity == origin.destinationIdentity }
+    private var admitsOrigin: Bool { admitsDestination && model.connectionState == .connected && activity.allowsPresentationPublication }
     /// The preview is content-addressed and shared with the catalogue row the
     /// entry was opened from, so an already-seen image is presented without a
     /// read.
@@ -1473,6 +1479,14 @@ struct KnowledgeDetailView: View {
                 .accessibilityLabel("Knowledge record actions")
             }
         }
+        .modifier(KnowledgeMutationObserver(mutation: $curationMutation, error: $verdictError) {
+            retryVerdict = nil; retryClearVerdict = false; retryReplacementID = nil
+            retryScope = nil; retryAdmission = nil
+            Task { @MainActor in await refreshSourceRow(); await onChanged() }
+        })
+        .onChange(of: verdictError) { _, value in
+            if value != nil { Task { @MainActor in await refreshSourceRow() } }
+        }
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsLayout()
         .task(id: "citations-\(currentRecord.id):\(currentRecord.revisionId)") { await loadCitationTitles() }
@@ -1487,6 +1501,10 @@ struct KnowledgeDetailView: View {
         }
         .task(id: "source-config-\(origin.profileID ?? "none")-\(String(describing: model.connectionState))-\(model.knowledgeInvalidationRevision)") { await loadSourceConfig() }
         .task(id: "source-row-\(currentRecord.id)") { await refreshSourceRow(); await refreshSupersededRow() }
+        .onChange(of: model.knowledgePresentationIdentity) { _, _ in
+            jobsRequestGeneration &+= 1
+            Task { @MainActor in await loadCitationTitles(); await refreshSourceRow(); await refreshSupersededRow() }
+        }
         .onChange(of: model.knowledgeInvalidationRevision) { _, _ in
             jobsRequestGeneration &+= 1
             Task { @MainActor in await refreshSourceRow(); await refreshSupersededRow() }
@@ -1952,7 +1970,7 @@ struct KnowledgeDetailView: View {
         }
     }
     private func originatingSessionTitle(_ sessionID: String) -> String {
-        guard model.knowledgePresentationIdentity == origin else { return "Originating session" }
+        guard admitsDestination else { return "Originating session" }
         // Session names are disposable catalog copy. Navigation still uses the
         // exact Gateway/session/entry citation even when the row is off-page.
         return model.sessions.first(where: { $0.id == sessionID })?.title ?? "Originating session"
@@ -1960,11 +1978,12 @@ struct KnowledgeDetailView: View {
     /// One bounded rows request resolves every related-entry title this detail
     /// shows; a title is a convenience, so a failure leaves the fallback label.
     private func loadCitationTitles() async {
+        guard admitsOrigin else { return }
         let related = relatedRecordIDs.filter { id in
             citationTitles[id] == nil && !citationTitles.keys.contains { $0.hasPrefix("\(id)|") }
         }
         guard !related.isEmpty else { return }
-        let requestedIdentity = origin
+        let requestedIdentity = model.knowledgePresentationIdentity
         do {
             let page = try await model.knowledge.sourceRows(ids: Array(related.prefix(KnowledgeChangeGating.maximumRecordIDs)), includeArchived: true, includePending: true)
             guard !Task.isCancelled, model.knowledgePresentationIdentity == requestedIdentity,
@@ -1979,7 +1998,7 @@ struct KnowledgeDetailView: View {
         guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
         guard !navigationAncestors.contains(id) else { evidenceMessage = "This source is already open. Use Back to return to it."; return }
         guard navigationAncestors.count < 32 else { evidenceMessage = "Return to the library to open another source."; return }
-        let requestIdentity = origin
+        let requestIdentity = model.knowledgePresentationIdentity
         Task { @MainActor in
             await linkedReader.load(id: id, revisionID: revisionID,
                 request: { id, revision in
@@ -1999,33 +2018,32 @@ struct KnowledgeDetailView: View {
         mutationInFlight = true
         reflectionRequestGeneration &+= 1
         let requestGeneration = reflectionRequestGeneration
-        let requestIdentity = origin
+        let requestIdentity = model.knowledgeDestinationIdentity
         Task { @MainActor in
-            guard requestGeneration == reflectionRequestGeneration, model.knowledgePresentationIdentity == requestIdentity else { return }
+            guard requestGeneration == reflectionRequestGeneration, model.knowledgeDestinationIdentity == requestIdentity else { return }
             do {
                 let result = try await model.knowledge.reflect(sessionID: observation.range.sessionId, sourceRevisionIDs: [currentRecord.revisionId])
-                guard requestGeneration == reflectionRequestGeneration, model.knowledgePresentationIdentity == requestIdentity,
-                      activity.allowsPresentationPublication else { return }
+                guard requestGeneration == reflectionRequestGeneration, model.knowledgeDestinationIdentity == requestIdentity else { return }
                 if case .note = result.record.content { reflectedHandoff = result.record; message = "Reflected handoff generated; verify it before acting." } else { message = "Reflected handoff updated." }
                 mutationInFlight = false
-            } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return }
-            catch { guard requestGeneration == reflectionRequestGeneration, model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription }
+            } catch is CancellationError { if model.knowledgeDestinationIdentity == requestIdentity { mutationInFlight = false }; return }
+            catch { guard requestGeneration == reflectionRequestGeneration, model.knowledgeDestinationIdentity == requestIdentity else { return }; mutationInFlight = false; message = error.localizedDescription }
         }
     }
     private func startSummary(retry: Bool = false) {
-        guard model.knowledgePresentationIdentity == origin else { summaryError = "Gateway changed; reopen this entry."; return }
+        guard admitsDestination else { summaryError = "Gateway changed; reopen this entry."; return }
         if summaryJob?.status == "running" { return }
         let commandID = retry || summaryJob?.status == "done" || summaryJob?.status == "failed"
             ? UUID().uuidString.lowercased() : (summaryCommandID ?? UUID().uuidString.lowercased())
         summaryCommandID = commandID
         summaryError = nil
-        let identity = origin
+        let identity = model.knowledgeDestinationIdentity
         let sourceID = currentRecord.id
         let revision = currentRecord.revisionId
         Task { @MainActor in
             do {
                 let started = try await model.knowledge.summarize(sourceID: sourceID, expectedRevision: revision, commandID: commandID)
-                guard model.knowledgePresentationIdentity == identity else { return }
+                guard model.knowledgeDestinationIdentity == identity else { return }
                 summaryJob = started.job
                 jobsRequestGeneration &+= 1
                 if activity.allowsPresentationPublication {
@@ -2033,7 +2051,7 @@ struct KnowledgeDetailView: View {
                     await onChanged()
                 }
             } catch {
-                guard model.knowledgePresentationIdentity == identity else { return }
+                guard model.knowledgeDestinationIdentity == identity else { return }
                 summaryError = error.localizedDescription
                 summaryJob = nil
             }
@@ -2044,7 +2062,7 @@ struct KnowledgeDetailView: View {
     /// its command ID, so the Gateway observes one job and one charge.
     private func startRetag() {
         guard admitsOrigin else { retagError = "Gateway changed; reopen this entry."; return }
-        let identity = origin
+        let identity = model.knowledgeDestinationIdentity
         let command = retagCommandID ?? UUID().uuidString.lowercased()
         retagCommandID = command
         retagError = nil
@@ -2052,11 +2070,11 @@ struct KnowledgeDetailView: View {
         Task { @MainActor in
             do {
                 let job = try await model.knowledge.retag(sourceID: sourceID, expectedRevision: revision, commandID: command)
-                guard model.knowledgePresentationIdentity == identity, currentRecord.id == sourceID else { return }
+                guard model.knowledgeDestinationIdentity == identity, currentRecord.id == sourceID else { return }
                 taggingJob = job
                 retagCommandID = nil
             } catch {
-                guard model.knowledgePresentationIdentity == identity, currentRecord.id == sourceID else { return }
+                guard model.knowledgeDestinationIdentity == identity, currentRecord.id == sourceID else { return }
                 retagError = error.localizedDescription
                 if (error as? GatewayFailure)?.code != "outcome_unknown" { retagCommandID = nil }
             }
@@ -2064,8 +2082,8 @@ struct KnowledgeDetailView: View {
     }
 
     private func observeCurationJobs() async {
-        guard model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
-        let identity = origin
+        guard admitsOrigin else { return }
+        let identity = model.knowledgePresentationIdentity
         do {
             let response = try await model.knowledge.curationJobs(sourceID: currentRecord.id)
             guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
@@ -2089,7 +2107,7 @@ struct KnowledgeDetailView: View {
     }
 
     private func saveTakeDraft() async {
-        guard !takeSaving, model.knowledgePresentationIdentity == origin,
+        guard !takeSaving, admitsDestination,
               case .source(let source) = currentRecord.content,
               takeDraft != (source.take?.text ?? "") else { return }
         takeSaving = true
@@ -2100,7 +2118,7 @@ struct KnowledgeDetailView: View {
         let revision = takeExpectedRevision
         do {
             let result = try await model.knowledge.saveTake(sourceID: currentRecord.id, expectedRevision: revision, text: submitted, commandID: commandID)
-            guard model.knowledgePresentationIdentity == origin else { return }
+            guard admitsDestination else { return }
             if case .source(let saved) = result.record.content {
                 currentRecord = result.record
                 takeExpectedRevision = result.record.revisionId
@@ -2127,7 +2145,7 @@ struct KnowledgeDetailView: View {
             await onChanged()
             await refreshSourceRow()
         } catch {
-            guard model.knowledgePresentationIdentity == origin else { return }
+            guard admitsDestination else { return }
             takeSaving = false
             if let failure = error as? GatewayFailure, failure.code == "conflict" {
                 let details = failure.details?.objectValue ?? [:]
@@ -2145,7 +2163,8 @@ struct KnowledgeDetailView: View {
     }
 
     private func loadSourceConfig() async {
-        let identity = origin
+        guard admitsOrigin else { return }
+        let identity = model.knowledgePresentationIdentity
         do {
             let value = try await model.knowledge.status()
             guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
@@ -2154,116 +2173,81 @@ struct KnowledgeDetailView: View {
     }
 
     private func refreshSupersededRow() async {
+        guard admitsOrigin else { return }
         guard case .source(let source) = currentRecord.content,
               source.verdict?.verdict == .superseded,
               let id = source.verdict?.supersededBy else { supersededReplacementRow = nil; return }
-        let identity = origin
+        supersededRowsRequestGeneration &+= 1
+        let requestGeneration = supersededRowsRequestGeneration
+        let identity = model.knowledgePresentationIdentity
         do {
             let page = try await model.knowledge.sourceRows(ids: [id], includeArchived: true, includePending: true)
-            guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
+            guard !Task.isCancelled, requestGeneration == supersededRowsRequestGeneration, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
             supersededReplacementRow = page.rows.first
         } catch { return }
     }
 
     private func refreshSourceRow() async {
-        let identity = origin
+        guard admitsOrigin else { return }
+        sourceRowsRequestGeneration &+= 1
+        let requestGeneration = sourceRowsRequestGeneration
+        let identity = model.knowledgePresentationIdentity
         do {
             let page = try await model.knowledge.sourceRows(ids: [currentRecord.id], includeArchived: true, includePending: true)
-            guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
+            guard !Task.isCancelled, requestGeneration == sourceRowsRequestGeneration, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
             sourceRow = page.rows.first
             tagsStale = page.rows.first?.tagsStale ?? tagsStale
             if let row = page.rows.first, row.revisionId != currentRecord.revisionId,
                case .source(let source) = currentRecord.content, takeDraft == (source.take?.text ?? ""),
                let updated = try await model.knowledge.read(id: row.id, revisionID: row.revisionId, includeArchived: row.admission == .archived, includePending: row.admission == .pending),
-               !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication {
+               !Task.isCancelled, requestGeneration == sourceRowsRequestGeneration, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication {
                 currentRecord = updated
             }
         } catch { return }
     }
 
     private func setVerdict(_ verdict: KnowledgeSourceVerdict? = nil, clear: Bool = false, replacementID: String? = nil) {
-        guard admitsOrigin, !verdictSaving else { return }
-        retryVerdict = verdict; retryClearVerdict = clear; retryReplacementID = replacementID; retryScope = nil; retryAdmission = nil
-        verdictSaving = true; verdictError = nil
-        let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
-        Task { @MainActor in
-            do {
-                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "verdict", verdict: verdict, clearVerdict: clear, supersededBy: replacementID, commandID: UUID().uuidString.lowercased())
-                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication,
-                      let newRevision = response.outcomes.first?.revisionId else { return }
-                if case .source(let currentSource) = currentRecord.content,
-                   let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision, includeArchived: currentSource.admission?.status == .archived) { currentRecord = updated }
-                verdictSaving = false; verdictError = nil; retryVerdict = nil; retryClearVerdict = false; await onChanged(); await refreshSourceRow()
-            } catch {
-                guard model.knowledgePresentationIdentity == identity else { return }
-                verdictSaving = false
-                if let failure = error as? GatewayFailure, failure.code == "conflict",
-                   let revision = failure.details?.objectValue?["currentRevision"]?.stringValue,
-                   let latest = try? await model.knowledge.read(id: sourceID, revisionID: revision, includeArchived: true, includePending: true) { currentRecord = latest }
-                verdictError = error.localizedDescription
-            }
-        }
+        curateSource(operation: "verdict", verdict: verdict, clear: clear, replacementID: replacementID)
     }
 
     private func setScope(_ scope: KnowledgeScope) {
-        guard admitsOrigin, scope != currentRecord.scope, !scopeSaving else { return }
-        retryScope = scope; retryVerdict = nil; retryClearVerdict = false; retryAdmission = nil
-        scopeSaving = true; verdictError = nil
-        let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
-        Task { @MainActor in
-            do {
-                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "placement", scope: scope, commandID: UUID().uuidString.lowercased())
-                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication,
-                      let newRevision = response.outcomes.first?.revisionId else { return }
-                if let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision) { currentRecord = updated }
-                scopeSaving = false; verdictError = nil; retryScope = nil; await onChanged(); await refreshSourceRow()
-            } catch {
-                guard model.knowledgePresentationIdentity == identity else { return }
-                scopeSaving = false
-                if let failure = error as? GatewayFailure, failure.code == "conflict",
-                   let revision = failure.details?.objectValue?["currentRevision"]?.stringValue,
-                   let latest = try? await model.knowledge.read(id: sourceID, revisionID: revision, includeArchived: true, includePending: true) { currentRecord = latest }
-                verdictError = error.localizedDescription
-            }
-        }
+        guard scope != currentRecord.scope else { return }
+        curateSource(operation: "placement", scope: scope)
     }
 
     private func setAdmission(_ admission: KnowledgeSourceAdmission) {
-        guard admitsOrigin, !scopeSaving else { return }
-        retryAdmission = admission; retryVerdict = nil; retryClearVerdict = false; retryScope = nil
-        scopeSaving = true; verdictError = nil
-        let identity = origin; let sourceID = currentRecord.id; let revision = currentRecord.revisionId
-        Task { @MainActor in
-            do {
-                let response = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision, operation: "placement", admission: admission, commandID: UUID().uuidString.lowercased())
-                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication,
-                      let newRevision = response.outcomes.first?.revisionId else { return }
-                if let updated = try await model.knowledge.read(id: sourceID, revisionID: newRevision, includeArchived: admission == .archived) { currentRecord = updated }
-                scopeSaving = false; verdictError = nil; retryAdmission = nil; await onChanged(); await refreshSourceRow()
-            } catch {
-                guard model.knowledgePresentationIdentity == identity else { return }
-                scopeSaving = false
-                if let failure = error as? GatewayFailure, failure.code == "conflict",
-                   let revision = failure.details?.objectValue?["currentRevision"]?.stringValue,
-                   let latest = try? await model.knowledge.read(id: sourceID, revisionID: revision, includeArchived: true, includePending: true) { currentRecord = latest }
-                verdictError = error.localizedDescription
-            }
-        }
+        curateSource(operation: "placement", admission: admission)
+    }
+
+    private func curateSource(operation: String, verdict: KnowledgeSourceVerdict? = nil,
+                              clear: Bool = false, replacementID: String? = nil,
+                              scope: KnowledgeScope? = nil, admission: KnowledgeSourceAdmission? = nil) {
+        guard admitsOrigin, curationMutation == nil else { return }
+        retryVerdict = verdict; retryClearVerdict = clear; retryReplacementID = replacementID
+        retryScope = scope; retryAdmission = admission; verdictError = nil
+        let destination = model.knowledgeDestinationIdentity
+        let sourceID = currentRecord.id, revision = currentRecord.revisionId
+        curationMutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
+            guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
+            _ = try await model.knowledge.curate(sourceID: sourceID, expectedRevision: revision,
+                operation: operation, verdict: verdict, clearVerdict: clear, supersededBy: replacementID,
+                scope: scope, admission: admission, commandID: UUID().uuidString.lowercased())
+        })
     }
 
     private func searchReplacement() async {
         guard KnowledgeSearchPolicy.admitsQuery(replacementQuery), admitsOrigin else { replacementRows = []; return }
-        let identity = origin
+        let identity = model.knowledgePresentationIdentity
         do {
             let page = try await model.knowledge.searchSourceRows(query: replacementQuery, includeArchived: true, includePending: true, limit: 12)
             guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
             replacementRows = page.rows.filter { $0.id != currentRecord.id }
         } catch { guard !Task.isCancelled else { return }; replacementRows = [] }
     }
-    private func assessSource() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.assess(sourceID: currentRecord.id, expectedRevision: currentRecord.revisionId, assessor: .model); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.source; mutationInFlight = false; message = "Assessment updated: \(result.assessment.recommendation?.rawValue.capitalized ?? "pending") · \(result.assessment.freshness.rawValue)." } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
-    private func saveNote(_ note: KnowledgeNoteContent) { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.updateNote(id: currentRecord.id, expectedRevision: currentRecord.revisionId, record: KnowledgeRecordDraft(id: currentRecord.id, createdAt: currentRecord.createdAt, updatedAt: nil, kind: .note, scope: currentRecord.scope, provenance: currentRecord.provenance, temporal: currentRecord.temporal, relations: currentRecord.relations, content: .note(KnowledgeNoteContent(title: note.title, body: noteBody, fields: note.fields, role: note.role, confirmed: note.confirmed, contraryEvidence: note.contraryEvidence, freshness: note.freshness, privacyScope: note.privacyScope, usageConstraint: note.usageConstraint))), confirmedByUser: note.confirmed); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.record; mutationInFlight = false; message = "Saved"; await onChanged() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
-    private func exclude() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.setExclusion(recordID: currentRecord.id, expectedRevision: currentRecord.revisionId, excluded: true); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
-    private func forget() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.forget(id: currentRecord.id, expectedRevision: currentRecord.revisionId, reason: "Forgotten from iOS"); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
+    private func assessSource() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = model.knowledgeDestinationIdentity; Task { @MainActor in guard model.knowledgeDestinationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.assess(sourceID: currentRecord.id, expectedRevision: currentRecord.revisionId, assessor: .model); guard model.knowledgeDestinationIdentity == requestIdentity else { return }; currentRecord = result.source; mutationInFlight = false; message = "Assessment updated: \(result.assessment.recommendation?.rawValue.capitalized ?? "pending") · \(result.assessment.freshness.rawValue)." } catch is CancellationError { if model.knowledgeDestinationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgeDestinationIdentity == requestIdentity else { return }; mutationInFlight = false; message = error.localizedDescription } } }
+    private func saveNote(_ note: KnowledgeNoteContent) { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = model.knowledgeDestinationIdentity; Task { @MainActor in guard model.knowledgeDestinationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.updateNote(id: currentRecord.id, expectedRevision: currentRecord.revisionId, record: KnowledgeRecordDraft(id: currentRecord.id, createdAt: currentRecord.createdAt, updatedAt: nil, kind: .note, scope: currentRecord.scope, provenance: currentRecord.provenance, temporal: currentRecord.temporal, relations: currentRecord.relations, content: .note(KnowledgeNoteContent(title: note.title, body: noteBody, fields: note.fields, role: note.role, confirmed: note.confirmed, contraryEvidence: note.contraryEvidence, freshness: note.freshness, privacyScope: note.privacyScope, usageConstraint: note.usageConstraint))), confirmedByUser: note.confirmed); guard model.knowledgeDestinationIdentity == requestIdentity else { return }; currentRecord = result.record; mutationInFlight = false; message = "Saved"; await onChanged() } catch is CancellationError { if model.knowledgeDestinationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgeDestinationIdentity == requestIdentity else { return }; mutationInFlight = false; message = error.localizedDescription } } }
+    private func exclude() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = model.knowledgeDestinationIdentity; Task { @MainActor in guard model.knowledgeDestinationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.setExclusion(recordID: currentRecord.id, expectedRevision: currentRecord.revisionId, excluded: true); guard model.knowledgeDestinationIdentity == requestIdentity else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgeDestinationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgeDestinationIdentity == requestIdentity else { return }; mutationInFlight = false; message = error.localizedDescription } } }
+    private func forget() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = model.knowledgeDestinationIdentity; Task { @MainActor in guard model.knowledgeDestinationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.forget(id: currentRecord.id, expectedRevision: currentRecord.revisionId, reason: "Forgotten from iOS"); guard model.knowledgeDestinationIdentity == requestIdentity else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgeDestinationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgeDestinationIdentity == requestIdentity else { return }; mutationInFlight = false; message = error.localizedDescription } } }
 }
 
 /// Controlled-vocabulary tag labels as wrapping chips.
@@ -2292,9 +2276,10 @@ struct KnowledgeConfigurationView: View {
     @State private var chosenKnowledgeModel: ModelRef?
     @State private var knowledgeModelChanged = false
     @State private var interestsText = ""
-    @State private var saving = false
+    @State private var mutation: KnowledgeMutation?
+    private var saving: Bool { mutation != nil }
     @State private var error: String?
-    @State private var identity: KnowledgePresentationIdentity?
+    @State private var destination: KnowledgeDestinationIdentity?
     private var supportsGlobalObservation: Bool { model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.globalObservationCapability) == true }
     private var catalogModels: [ModelSummary] { model.providerCatalog(for: .global)?.models ?? [] }
 
@@ -2350,15 +2335,19 @@ struct KnowledgeConfigurationView: View {
             .tronSettingsCaption("One interest per line, up to 50. Interests guide source assessment and do not enable observation.")
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
-        .task { await load() }
+        .modifier(KnowledgeMutationObserver(mutation: $mutation, error: $error) { dismiss() })
+        .task(id: PresentationActivityTaskID(source: model.knowledgePresentationIdentity,
+                                             presentationActive: activity.allowsPresentationPublication)) {
+            if config == nil { await load() }
+        }
     }
 
     private func load() async {
         let requestIdentity = model.knowledgePresentationIdentity
         do {
             let loaded = try await model.knowledge.status()
-            guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity, requestIdentity.profileID != nil else { return }
-            identity = requestIdentity
+            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity, requestIdentity.profileID != nil else { return }
+            destination = model.knowledgeDestinationIdentity
             config = loaded.config
             interestsText = loaded.config.currentInterests.joined(separator: "\n")
             if let value = loaded.config.observation.model {
@@ -2370,33 +2359,28 @@ struct KnowledgeConfigurationView: View {
                 if parts.count == 2 { chosenKnowledgeModel = ModelRef(provider: parts[0], id: parts[1]) }
             }
         } catch {
-            guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
             self.error = error.localizedDescription
         }
     }
 
     private func save() {
         guard !saving, var config else { return }
-        let requestIdentity = identity ?? model.knowledgePresentationIdentity
-        guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { error = "Gateway changed; reopen configuration."; return }
+        let requestDestination = destination ?? model.knowledgeDestinationIdentity
+        guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgeDestinationIdentity == requestDestination, model.connectionState == .connected else { error = "Reconnect to this Mac before saving; your draft is kept."; return }
         if let chosenModel { config.observation.model = chosenModel.contextWindowKey }
         if knowledgeModelChanged { config.knowledgeModel = chosenKnowledgeModel.map { KnowledgeModel(model: $0.contextWindowKey, maxInputChars: config.knowledgeModel?.maxInputChars ?? 48_000, maxOutputChars: config.knowledgeModel?.maxOutputChars ?? 8_000) } }
         if config.observation.enabled && !KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: config.observation.model != nil, supportsGlobalObservation: supportsGlobalObservation) {
             error = config.observation.model == nil ? "Choose a model before enabling observation." : "Update this Gateway before enabling all-session observation."
             return
         }
-        saving = true
         config = KnowledgeObservationConfigurationPolicy.applyingGlobalGrant(config, enabled: config.observation.enabled)
         config.currentInterests = interestsText.split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.prefix(50).map { String($0.prefix(500)) }
-        Task { @MainActor in
-            guard model.knowledgePresentationIdentity == requestIdentity else { return }
-            do {
-                _ = try await model.knowledge.configure(config, capabilities: model.gatewayInfo?.capabilities ?? [])
-                guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
-                saving = false; dismiss()
-            } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { saving = false } }
-            catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; self.error = error.localizedDescription }
-        }
+        let submitted = config
+        mutation = KnowledgeMutation(identity: requestDestination, task: Task { @MainActor in
+            guard model.knowledgeDestinationIdentity == requestDestination else { throw CancellationError() }
+            _ = try await model.knowledge.configure(submitted, capabilities: model.gatewayInfo?.capabilities ?? [])
+        })
     }
 }
 
@@ -2408,7 +2392,9 @@ private struct KnowledgeCorrectionView: View {
     let origin: KnowledgePresentationIdentity
     let onComplete: (KnowledgeRecord) async -> Void
     @State private var text: String
-    @State private var saving = false
+    @State private var mutation: KnowledgeMutation?
+    @State private var correctedRecord: KnowledgeRecord?
+    private var saving: Bool { mutation != nil }
     @State private var error: String?
 
     init(record: KnowledgeRecord, origin: KnowledgePresentationIdentity, onComplete: @escaping (KnowledgeRecord) async -> Void) {
@@ -2424,19 +2410,24 @@ private struct KnowledgeCorrectionView: View {
             .tronSettingsCaption("This creates a new immutable revision and preserves the original as corrected evidence.")
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
+        .modifier(KnowledgeMutationObserver(mutation: $mutation, error: $error) {
+            guard let correctedRecord else { return }
+            Task { @MainActor in await onComplete(correctedRecord) }
+        })
     }
     private func save() {
         guard !saving else { return }
-        guard model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { error = "Gateway changed; reopen this entry."; return }
-        saving = true
+        guard model.knowledgeDestinationIdentity == origin.destinationIdentity, model.connectionState == .connected, activity.allowsPresentationPublication else { error = "Gateway changed; reopen this entry."; return }
         let replacement = KnowledgeRecordDraft(id: record.id, createdAt: record.createdAt, updatedAt: nil, kind: record.kind, scope: record.scope, provenance: KnowledgeCorrectionPolicy.provenance(for: record), temporal: record.temporal, relations: record.relations, content: KnowledgeCorrectionPolicy.content(for: record, replacementText: text))
         let relation = KnowledgeRelation(type: .corrects, recordId: record.id, revisionId: record.revisionId, field: nil)
-        Task { @MainActor in
-            guard model.knowledgePresentationIdentity == origin else { return }
-            do { let result = try await model.knowledge.correct(id: record.id, expectedRevision: record.revisionId, replacement: replacement, relation: relation, confirmedByUser: true); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == origin else { return }; saving = false; await onComplete(result.record) }
-            catch is CancellationError { if model.knowledgePresentationIdentity == origin { saving = false }; return }
-            catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == origin else { return }; saving = false; self.error = error.localizedDescription }
-        }
+        let destination = model.knowledgeDestinationIdentity
+        mutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
+            guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
+            let result = try await model.knowledge.correct(id: record.id, expectedRevision: record.revisionId,
+                replacement: replacement, relation: relation, confirmedByUser: true)
+            guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
+            correctedRecord = result.record
+        })
     }
 }
 
