@@ -707,8 +707,8 @@ With `--all`, each worktree under the root that is not provably done is listed
 with every reason, and an error while checking or removing one worktree, such
 as a failed `gh` call, keeps that worktree with the error and goes on to the
 next. `--all` never lists the primary checkout, and only counts the worktrees
-outside the root, leaving them to the repository's own housekeeping procedure. Local paths are
-printed relative to the checkout's parent directory.
+outside the root, leaving them to the repository's own housekeeping procedure.
+Local paths are printed relative to the checkout's parent directory.
 
 Exit status is 0 when the current worktree was removed (or would be), and with
 `--all` when every provably done worktree was removed. A blocked current
