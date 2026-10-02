@@ -4763,18 +4763,24 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         """#128: an unhandled real wait timeout also skips fixture teardown."""
         self.check_interrupted_fixture("tron-ios-device", "timeout")
 
+    def test_repeated_interruptions_preserve_preexisting_build_logs(self) -> None:
+        """PID reuse must not authorize deleting a historical build log."""
+        for attempt in range(2):
+            with self.subTest(attempt=attempt):
+                self.check_interrupted_fixture("tron-ios-device", "sigkill")
+
     def check_interrupted_fixture(self, tool: str, interruption: str) -> None:
         # Keep another real leased fixture tree gated throughout the abort. A
         # cleanup that kills by tool name or a shared group would destroy it.
-        survivor_gate = f"survivor-{tool}-{interruption}"
+        survivor_gate = f"survivor-{tool}-{interruption}-{len(self.started)}"
         survivor = self.start_tool(
             self.make_worktree(survivor_gate), "tron-ios-device", "install",
             "--device-id", self.DEVICE_TWO, caller="survivor", gate=survivor_gate,
         )
         survivor_group = self.wait_reached(survivor_gate)
-        record_path = self.root / f"{tool}-{interruption}.json"
+        record_path = self.root / f"{survivor_gate}.json"
         owner_script = self.root / "interrupted-owner.py"
-        owner_script.write_text('''import json, os, runpy, sys, time
+        owner_script.write_text('''import json, os, runpy, sys, tempfile, time
 from pathlib import Path
 module = runpy.run_path(sys.argv[1])
 fixture = module["DeviceLeaseFixture"]()
@@ -4786,11 +4792,16 @@ if tool == "tron-ios-device":
     arguments += ["--device-id", fixture.DEVICE_ONE]
 holder = fixture.start_tool(worktree, tool, *arguments, caller="alpha", gate="build")
 group = fixture.wait_reached("build")
+# Model a retained log from an earlier invocation with this recycled group ID.
+# Exclusive creation gives this regression ownership of only its stand-in.
+fd, historical_log = tempfile.mkstemp(prefix="xcode-0-", suffix=f"-{group}.log", dir="/tmp")
+with os.fdopen(fd, "w") as handle:
+    handle.write("retained historical build log\\n")
 record = Path(sys.argv[2])
 temporary = record.with_suffix(".tmp")
 temporary.write_text(json.dumps({
     "root": str(fixture.root), "holder": holder.pid, "group": group,
-    "build_logs": [str(path) for path in Path("/tmp").glob(f"xcode-*-{group}.log")],
+    "historical_log": historical_log,
 }))
 os.replace(temporary, record)
 # Intentionally no teardown: exercise the interruption that bypasses it.
@@ -4869,14 +4880,24 @@ else:
                             os.kill(record["holder"], signal.SIGKILL)
                         except ProcessLookupError:
                             pass
-                # Device builds log outside TMPDIR. The shell's PID is its
-                # leased process group; the child captured only its own logs
-                # before interruption could delete the fixture's output file.
-                for log in record["build_logs"]:
-                    Path(log).unlink(missing_ok=True)
+                # Device builds log outside TMPDIR. Leave logs without an
+                # invocation-owned path: a recycled PID cannot prove ownership.
                 shutil.rmtree(record["root"], ignore_errors=True)
             self.open_gate(survivor_gate)
             survivor.wait(timeout=60)
+            if record is not None:
+                historical_log = Path(record["historical_log"])
+                preserved = historical_log.exists() and historical_log.read_text() == "retained historical build log\n"
+                try:
+                    report_path = ROOT / f"test-results/ios-infrastructure/{tool}-{interruption}-cleanup.json"
+                    if report_path.exists():
+                        report = json.loads(report_path.read_text())
+                        report["historical_log_preserved"] = preserved
+                        report_path.write_text(json.dumps(report, indent=2) + "\n")
+                    self.assertTrue(preserved, "interrupted fixture cleanup deleted or changed a historical build log")
+                finally:
+                    # Only the exclusively created regression stand-in is ours.
+                    historical_log.unlink(missing_ok=True)
 
     def test_removed_gate_directory_retires_the_build_without_installing(self) -> None:
         """#128: temporary-directory removal must not leave an infinite gate."""

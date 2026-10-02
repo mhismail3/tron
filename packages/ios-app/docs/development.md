@@ -1225,7 +1225,11 @@ keeps the killed-holder regression meaningful while also bounding abandoned
 fixture trees when interruption bypasses teardown. `DeviceLeaseFixture` checks
 SIGKILL of a test owner, an unhandled subprocess wait timeout, and gate-directory
 removal against the real helper trees while another gated fixture stays live;
-`GatewayE2EFixture` covers removal of its fake build gate directory. Run
+`GatewayE2EFixture` covers removal of its fake build gate directory. Interrupted
+fixture cleanup preserves historical device build logs, including across repeated
+runs: a PID in a `/tmp` filename cannot prove invocation ownership. Logs without
+an invocation-owned path are retained, not discovered and removed by PID glob.
+Run
 `python3 scripts/test-ios-test-infrastructure.py DeviceLeaseFixture GatewayE2EFixture`
 to regenerate inspectable process-survival reports at
 `test-results/ios-infrastructure/*-cleanup.json`. The full hardware-free suite is
