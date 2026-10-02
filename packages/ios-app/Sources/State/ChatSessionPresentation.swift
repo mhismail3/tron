@@ -162,15 +162,19 @@ final class ChatSessionPresentation {
         photos = []
     }
 
-    private func suspendTransientInteractions() {
+    private func suspendTransientInteractions(preservingReadonlyPreviews: Bool) {
         attachmentPresentationTask?.cancel()
         attachmentPresentationTask = nil
         attachmentDestination = nil
         queuedAttachmentDestination = nil
         cancelImports()
-        displaySheet = nil
+        if !preservingReadonlyPreviews || displaySheet.map({ !Self.isReadonlyAttachment($0) }) == true { displaySheet = nil }
         floatingDisplay = nil
         pendingFloatingDisplay = nil
+    }
+
+    private static func isReadonlyAttachment(_ route: DisplayRoute) -> Bool {
+        route.display.artifact != nil && [.image, .markdown, .text, .code, .pdf, .document].contains(route.display.kind)
     }
 
     /// Backgrounding retires only disposable UI work. An admitted composer
@@ -265,7 +269,13 @@ final class ChatSessionPresentation {
     func suspendForBackground() {
         cancelOpeningTask()
         earlierMessagesOperation.cancel()
-        suspendTransientInteractions()
+        suspendTransientInteractions(preservingReadonlyPreviews: true)
+    }
+
+    func retirePresentation() {
+        cancelOpeningTask()
+        earlierMessagesOperation.cancel()
+        suspendTransientInteractions(preservingReadonlyPreviews: false)
     }
 
 }

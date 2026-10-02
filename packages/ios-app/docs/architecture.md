@@ -2206,6 +2206,22 @@ square previews with dedicated image sheets. A pending photo is a stable,
 non-morphing preview target; its separate remove control has a 22-point visible circle
 inside a 30-point target centered on the 64-point preview's top-trailing corner. The
 preview alone owns rounded glass clipping, leaving the half-offset remove control visible.
+Downloaded readonly attachment **sheet** selection belongs to the original profile/lifecycle
+and chat presentation, not socket/foreground admission. Transcript image/file routes and
+artifact-backed static display sheets retain their decoded image/document and mounted native
+viewport across same-Mac background/reconnect; an already prepared image is not replaced
+merely to rejoin transport. `chatMediaDestinationIdentity` derives that selection namespace
+without changing `chatMediaIdentity` or loader read admission. Unfinished preparation follows
+managed activity, exact transport identity, readiness and latest-source/load fences; retirement
+cannot publish a stale result/error or mark the source complete. Actual profile/lifecycle or
+chat-presentation replacement closes the original selection. Camera/photo/file pickers,
+imports, browser/AV/live routes and floating displays still retire; suspension does not restore
+security references or reactivate leases. Floating readonly renderer continuity is separate,
+unproved coverage, not implied by the sheet contract.
+`TronReadonlyAttachmentUITests` exercises downloaded transcript/display sheets through real
+scene/lifecycle transitions and native zoom, offset and text selection, plus held preparation
+and actual profile/session replacement. `ChatSessionPresentationTests` protects picker/import
+cancellation, readonly sheet suspension versus actual retirement, and browser retirement.
 Sent prompt attachment strips add three points of vertical breathing room without
 changing the 64-point image/file chip geometry. Pending and sent photo chips share the historical medium-detent,
 concentrically rounded preview with native pinch and double-tap zoom. Earlier-history loading, context summaries, and unread-response navigation share one

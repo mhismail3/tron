@@ -840,6 +840,14 @@ final class AppModel {
         try await client.openLiveView(kind: kind, viewId: viewId, generation: generation, sessionID: sessionID, profileID: profileID)
     }
 
+    /// Readonly selection belongs to the destination, not foreground read
+    /// admission. Fetch/preparation still uses chatMediaIdentity and its loader.
+    func chatMediaDestinationIdentity(blobID: String, sessionID: String? = nil) -> ChatMediaIdentity? {
+        guard let profileID = lifecycle.selectedProfileID else { return nil }
+        return ChatMediaIdentity(profileID: profileID, lifecycleGeneration: lifecycle.currentLifecycleGeneration,
+                                 blobID: blobID, sessionID: sessionID)
+    }
+
     func chatMediaIdentity(blobID: String, sessionID: String? = nil) -> ChatMediaIdentity? {
         guard let admission = lifecycle.generationAdmission,
               let profileID = lifecycle.selectedProfileID else { return nil }

@@ -1870,6 +1870,28 @@ configuration `Test`, and plan `UIValidation`, under `scripts/ios-test-lock.py` 
 `scripts/ios-test-simulator.py validate`. Use `-only-testing:TronMobileUITests/TronSmokeUITests/<test>`
 for focused interaction checks rather than running every journey during diagnosis.
 
+`TronReadonlyAttachmentUITests` launches `-tron-readonly-attachment-fixture` against a
+`HOSTED_TEST` scripted Gateway/media owner, then drives real `ChatView`, sheet controls,
+Home/background and foreground reconnect. It waits for downloaded native viewports (not a
+sleep), changes zoom/scroll/text selection, and compares native instance plus viewport state.
+Separate held preparation and actual profile/session replacement journeys prove stale work
+cannot attach to the retained or replacement selection, including deliberately reused blob IDs.
+The fixture emits synthetic counters and native geometry/selection indices only, never file
+contents or user credentials. Screenshots and content-free viewport/counter attachments stay
+in the retained `.xcresult`; they are not physical-device qualification. Regenerate with:
+
+```bash
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests \
+  --only-testing TronMobileTests/ChatSessionPresentationTests
+```
+
+Floating/browser/live/AV retirement is not a readonly-sheet replay mechanism. Remaining
+queued/pending/workspace preview admission, PDF pagination, source replacement during file
+preparation and other sheet owners require their own behavioral qualification; this suite is
+not the ALL-sheet acceptance gate.
+
 `TronKnowledgeDetailUITests` drives Entry Detail against the hosted scripted
 Gateway (`-tron-knowledge-detail-fixture`): summary jobs across a double tap,
 close/reopen and reconnect; take autosave, conflict and failure retry; re-tag

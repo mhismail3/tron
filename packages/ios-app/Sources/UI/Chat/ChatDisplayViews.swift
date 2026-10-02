@@ -1589,16 +1589,17 @@ struct DisplaySheet: View {
                 .presentationDragIndicator(.hidden)
         } else if let artifact = route.display.artifact,
                   route.display.kind == .image,
-           let identity = model.chatMediaIdentity(blobID: artifact.id, sessionID: route.sessionID) {
+           let identity = model.chatMediaDestinationIdentity(blobID: artifact.id, sessionID: route.sessionID) {
             AttachmentImagePreviewSheet(
                 remote: identity,
                 leaseID: imageLeaseID,
                 title: route.display.title,
-                accessibilityLabel: route.display.altText
+                accessibilityLabel: route.display.altText,
+                initialImage: nil
             )
         } else if let artifact = route.display.artifact,
                   [.markdown, .text, .code, .pdf, .document].contains(route.display.kind),
-                  let identity = model.chatMediaIdentity(blobID: artifact.id, sessionID: route.sessionID) {
+                  let identity = model.chatMediaDestinationIdentity(blobID: artifact.id, sessionID: route.sessionID) {
             AttachmentFilePreviewSheet(
                 name: artifact.name,
                 mimeType: artifact.mimeType,

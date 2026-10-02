@@ -985,7 +985,6 @@ private struct TranscriptImageChip: View {
     let blobID: String
     @State private var thumbnail: UIImage?
     @State private var thumbnailIdentity: ChatMediaIdentity?
-    @State private var previewImage: UIImage?
     @State private var previewRequest: PreviewRequest?
     @State private var failedLoadKey: LoadKey?
     @State private var loadAttempt = 0
@@ -994,8 +993,10 @@ private struct TranscriptImageChip: View {
         model.chatMediaIdentity(blobID: blobID)
     }
 
+    private var selectionIdentity: ChatMediaIdentity? { model.chatMediaDestinationIdentity(blobID: blobID) }
+
     private var currentThumbnail: UIImage? {
-        guard let identity else { return nil }
+        guard let identity = selectionIdentity else { return nil }
         if thumbnailIdentity == identity, let thumbnail { return thumbnail }
         return model.chatMedia.cachedThumbnail(for: identity)
     }
@@ -1010,8 +1011,7 @@ private struct TranscriptImageChip: View {
 
     var body: some View {
         Button {
-            if let currentThumbnail, let identity {
-                previewImage = currentThumbnail
+            if let currentThumbnail, let identity = selectionIdentity {
                 previewRequest = PreviewRequest(
                     identity: identity,
                     leaseID: UUID(),
@@ -1075,33 +1075,16 @@ private struct TranscriptImageChip: View {
                 failedLoadKey = requestedKey
             }
         }
-        .onChange(of: identity) { _, _ in
-            previewImage = nil
-            previewRequest = nil
-        }
+        .onChange(of: selectionIdentity) { _, _ in previewRequest = nil }
         .accessibilityHint(currentThumbnail == nil ? "Loads the unavailable image again" : "Opens a photo preview")
         .tronManagedSheet(
             item: $previewRequest,
             identity: { "chat.image-preview.\($0.id)" }
         ) { request in
-            AttachmentImagePreviewSheet(image: previewImage ?? request.initialImage)
-                .task(id: request.id) {
-                    guard let full = try? await model.chatMedia.fullPreview(
-                        for: request.identity,
-                        leaseID: request.leaseID
-                    ), !Task.isCancelled,
-                       previewRequest?.id == request.id,
-                       self.identity == request.identity else { return }
-                    previewImage = full
-                }
-                .onDisappear {
-                    model.chatMedia.cancelFullPreview(
-                        for: request.identity,
-                        leaseID: request.leaseID
-                    )
-                    if previewRequest?.id == request.id { previewRequest = nil }
-                    previewImage = nil
-                }
+            AttachmentImagePreviewSheet(remote: request.identity, leaseID: request.leaseID,
+                                        title: "Photo", accessibilityLabel: "Preview photo",
+                                        initialImage: request.initialImage)
+                .onDisappear { if previewRequest?.id == request.id { previewRequest = nil } }
         }
     }
 }
@@ -1126,6 +1109,10 @@ struct TranscriptFileChip: View {
         blobID.flatMap { model.chatMediaIdentity(blobID: $0) }
     }
 
+    private var selectionIdentity: ChatMediaIdentity? {
+        blobID.flatMap { model.chatMediaDestinationIdentity(blobID: $0) }
+    }
+
     private var currentThumbnail: UIImage? {
         guard let identity else { return nil }
         if thumbnailIdentity == identity, let thumbnail { return thumbnail }
@@ -1134,7 +1121,7 @@ struct TranscriptFileChip: View {
 
     var body: some View {
         Button {
-            previewRequest = FilePreviewRequest(identity: identity)
+            previewRequest = FilePreviewRequest(identity: selectionIdentity)
         } label: {
             AttachmentThumbnailSurface(image: currentThumbnail, name: name, mimeType: mimeType)
         }
@@ -1157,7 +1144,7 @@ struct TranscriptFileChip: View {
             thumbnail = loaded
             thumbnailIdentity = identity
         }
-        .onChange(of: identity) { _, _ in previewRequest = nil }
+        .onChange(of: selectionIdentity) { _, _ in previewRequest = nil }
         .tronManagedSheet(
             item: $previewRequest,
             identity: { "chat.file-preview.\($0.id)" }

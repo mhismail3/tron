@@ -101,6 +101,8 @@ struct TronMobileApp: App {
         WindowGroup {
             if ProcessInfo.processInfo.arguments.contains("-tron-subagent-sheet-fixture") {
                 HostedSubagentSheetFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-readonly-attachment-fixture") {
+                HostedReadonlyAttachmentFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {
                 HostedChatDisplayFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {

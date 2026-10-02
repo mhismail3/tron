@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import TronMobileCore
 @testable import TronMobile
 
@@ -52,6 +53,40 @@ struct ChatSessionPresentationTests {
         #expect(owner.open.epoch == epoch)
         #expect(owner.open.phase == .ready)
         #expect(!owner.needsOpeningResume)
+    }
+
+    @Test("readonly artifact selection survives suspension but actual retirement closes it and abandons imports")
+    func readonlyPreviewRetirement() throws {
+        let rows = try JSONDecoder.gateway.decode([TranscriptItem].self, from: HostedChatDisplayFixture.imageTranscriptData)
+        let display = try #require(rows.last?.display)
+        let route = DisplayRoute(sessionID: "session-a", display: display)
+        let owner = ChatSessionPresentation(sessionID: "session-a")
+        owner.presentDisplay(.showSheet(route))
+        owner.suspendForBackground()
+        #expect(owner.displaySheet?.id == route.id)
+        let importTask = Task<Void, Never> {}
+        owner.pastedImageImports[UUID()] = importTask
+        owner.attachmentDestination = .camera
+        owner.retirePresentation()
+        #expect(owner.displaySheet == nil)
+        #expect(owner.attachmentDestination == nil)
+        #expect(importTask.isCancelled)
+    }
+
+    @Test("external browser selection is retired rather than automatically restored after background")
+    func browserPreviewRetirement() throws {
+        var rows = try #require(JSONSerialization.jsonObject(with: HostedChatDisplayFixture.imageTranscriptData) as? [[String: Any]])
+        var metadata = try #require(rows[1]["display"] as? [String: Any])
+        metadata["kind"] = "webpage"; metadata.removeValue(forKey: "artifact")
+        metadata["remoteURL"] = "https://example.test/readonly-fixture"
+        metadata["eligibleSurfaces"] = ["sheet"]
+        rows[1]["display"] = metadata
+        let decoded = try JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
+        let route = DisplayRoute(sessionID: "session-a", display: try #require(decoded.last?.display))
+        let owner = ChatSessionPresentation(sessionID: "session-a")
+        owner.presentDisplay(.showSheet(route))
+        owner.suspendForBackground()
+        #expect(owner.displaySheet == nil)
     }
 
     @Test("opening task reservation is singular and exact-generation owned")
