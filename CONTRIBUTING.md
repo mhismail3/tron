@@ -132,7 +132,10 @@ non-ignored files) is recorded only as `sourceDirty` and a `-dirty` marker in
 the free-form version label, never in the revision. The tree is measured before
 the build (the label reflects only this) and again when the record is written
 after it; `sourceDirty` is true if either measurement is dirty or `HEAD` moved
-while the candidate built.
+while the candidate built. Both measurements read the tree, not the payload, so
+an edit the build compiled in and then reverted before the record is written
+(with `HEAD` unchanged) still records clean; do not edit a worktree while it
+builds a candidate meant for handoff.
 `start`/`restart` record the worktree, branch and dirtiness they built from against the
 staged candidate's runtime epoch (eight records, always keeping the running
 one); status resolves them from the epoch that reached readiness, so a failed
