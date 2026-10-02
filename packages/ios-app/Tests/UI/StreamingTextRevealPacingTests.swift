@@ -146,7 +146,7 @@ struct RevealSimulation {
 
     private static let fade = Double(ChatStreamingTextRevealPolicy.fadeMilliseconds)
 
-    static func current(arrivals: [Double]) -> RevealSimulation {
+    static func current(arrivals: [Double], tickDelay: Double = 0) -> RevealSimulation {
         let policy = ChatStreamingTextRevealPolicy.self
         var result = RevealSimulation()
         var clock: Double?
@@ -184,7 +184,7 @@ struct RevealSimulation {
             }
             let fading = (result.starts.last ?? -.infinity) + fade > now
             wake = admission.nextStart != nil || fading
-                ? now + policy.tickMilliseconds(now: now, nextStart: admission.nextStart)
+                ? now + policy.tickMilliseconds(now: now, nextStart: admission.nextStart) + tickDelay
                 : nil
         }
         return result

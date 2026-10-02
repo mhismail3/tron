@@ -1292,12 +1292,17 @@ curves with `ManualClock.advanceToNextDeadline()` (one step per registered timer
 `DashboardStateOwnerTests.secondaryReconnectHasNoAttemptBudget` does), prove reuse or skipped work
 from work reports rather than elapsed time (`ChatTranscriptPresentationStoreTests.textStreamingReusesCanonicalProjection`),
 await the exact outcome a race owes instead of ending the test first (`AppModelReconnectTests.falseRestoreRejectsDeadEpochAfterRefresh`
-waits for the replacement attempt its dead epoch starts), sample time-driven presentation on an
-injected clock (`StreamingTextRevealContinuityTests` drives `chatStreamingRevealClock`), and bound
-display-driven settling in display frames (`ChatFloatingDisplayLayoutTests.keyboardAndAccessories`).
-To check a change for speed dependence, run the owning suites while only your lane's test app is
-slowed, for example by duty-cycling that one process with `SIGSTOP`/`SIGCONT`, and continue it
-afterwards. Test-owned unstructured tasks
+waits for the replacement attempt its dead epoch starts), and bound display-driven settling in
+finite display-frame phases (`ChatFloatingDisplayLayoutTests.keyboardAndAccessories`). The floating
+oracle checks every sampled native frame and each keyboard/accessory/draft/restored milestone;
+it does not assume the host samples a particular intermediate animation instant. Streaming
+continuity exercises the existing admission/opacity policies with virtual-time schedules (including
+restarts and late ticks), then mounts the actual view and records glyph ink through each source
+revision until convergence. Its `mounted-reveal-ink.json` attachment is retained in the runner's
+xcresult. Policy simulation does not prove native frame-by-frame throughput; temporal/performance
+qualification requires a controlled host or device measurement. Each of the 31 maximum-page
+projection installs has the original ten-second hang bound, with fixture/reference work outside it;
+completed installs never spend a shared wall-time allowance. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
 the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
 bytes; they must not implement protocol decoding, session state, receipt policy,

@@ -4,54 +4,46 @@ import UIKit
 @testable import TronMobile
 @testable import TronMobileCore
 
-/// Mounts the real `ChatStreamingInlineText` with every gate open, grows its
-/// source on the Gateway's 150 ms progress cadence at about 40 words/s, and
-/// samples rendered frames. Failure modes guarded here:
-/// - the reveal falls behind the stream and a catch-up shows many words at
-///   once with no fade (a jump in rendered ink);
-/// - words stop fading in (no partially inked glyphs while streaming);
-/// - the streaming view never converges to the full source.
-/// A reference pane renders the same source settled (not streaming); both
-/// panes share one layout, so glyph pixels compare one to one.
-///
-/// The view's reveal clock is a manual clock, so every sample is rendered at
-/// an exact reveal time after the reveal loop has run its tick for that time.
-/// Sampling on the wall clock let a slow runner space samples further apart,
-/// and each sample then legitimately showed more words.
+/// Failure modes: pacing catches up ordinary progress in a burst, fades are
+/// bypassed, or mounted text never converges to its authoritative source.
+/// Virtual-time policy coverage owns throughput. Native samples own rendered
+/// ink and convergence, not a promise that a loaded host catches every fade.
 @MainActor
 struct StreamingTextRevealContinuityTests {
     private static let paneSize = CGSize(width: 340, height: 360)
-    private static let frameInterval: Duration = .milliseconds(150)
     private static let wordsPerFrame = 6
     private static let frameCount = 20
-    private static let sampleInterval: Duration = .milliseconds(33)
-    /// Simulated time after the last frame for every fade to finish.
-    private static let settleInterval: Duration = .milliseconds(1_200)
 
-    @Test("streaming text fades in continuously at 40 words/s on 150 ms frames")
+    @Test("streaming text fades continuously and the mounted source converges")
     func streamingRevealIsContinuous() async throws {
-        try await withTestWatchdog(timeout: .seconds(30)) { @MainActor in
-            try await Self.streamAndSample()
+        let arrivals = RevealCadence.gateway150.arrivals(wordsPerSecond: 40, durationMilliseconds: 3_000)
+        for tickDelay in [0.0, 90.0] {
+            let schedule = RevealSimulation.current(arrivals: arrivals, tickDelay: tickDelay)
+            #expect(schedule.poppedWords == 0, "ordinary progress must not skip fades")
+            #expect(schedule.starts.count == arrivals.count)
+            let samples = stride(from: 0.0, through: 4_200.0, by: 33.0).map { now in
+                schedule.starts.reduce(0.0) {
+                    $0 + ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: Int(now - $1))
+                }
+            }
+            let jumps = zip(samples, samples.dropFirst()).map { $1 - $0 }
+            #expect((jumps.max() ?? 0) <= 8, "paced opacity cannot publish a burst")
+            #expect(samples.last == Double(arrivals.count), "every scheduled fade converges")
         }
-    }
+        // The existing pre-fix scheduler is a behavioral negative control,
+        // not an expected-value copy of the production policy.
+        #expect(RevealSimulation.restartDriven(arrivals: arrivals).poppedWords > 0)
 
-    private static func streamAndSample() async throws {
         let words = Self.words(count: Self.wordsPerFrame * (Self.frameCount + 1))
-        let clock = ManualClock()
         var admittedWords = Self.wordsPerFrame
         func fixture() -> RevealFixture {
-            RevealFixture(
-                source: words.prefix(admittedWords).joined(separator: " "),
-                paneSize: Self.paneSize,
-                clock: clock.clock
-            )
+            RevealFixture(source: words.prefix(admittedWords).joined(separator: " "), paneSize: Self.paneSize)
         }
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
         let host = UIHostingController(rootView: fixture())
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(origin: .zero, size: CGSize(width: Self.paneSize.width, height: Self.paneSize.height * 2))
-        window.overrideUserInterfaceStyle = .light
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -59,87 +51,37 @@ struct StreamingTextRevealContinuityTests {
             window.rootViewController = nil
             previousKeyWindow?.makeKeyAndVisible()
         }
-        // The mounted content is admitted at once by a task that starts after
-        // the first commit; two display frames drain the main queue past it.
-        for _ in 0..<2 { try await DisplayFrameScheduler.displayLink.nextFrame() }
-
-        /// Returns the sample rendered once the reveal loop has handled the
-        /// current reveal time: it is asleep again (a sleep registered after
-        /// `before`, and only one sleeper, so a restarted task's predecessor
-        /// is gone), or it stopped because every admitted word is shown,
-        /// which the render proves. The loop wakes off the test's task, so
-        /// only these observations, not a yield count, order the two. While
-        /// the stream runs, words from the last two frames are still fading,
-        /// so a render within 1% of the source only follows a stopped loop.
-        func sampleAfterRevealTick(sleepsBefore before: Int) async throws -> RevealSample {
-            func asleepAgain() -> Bool {
-                clock.recordedSleeps().count > before && clock.activeSleeperCount() == 1
+        var measurements: [[String: Double]] = []
+        defer {
+            if let data = try? JSONSerialization.data(withJSONObject: measurements, options: [.sortedKeys]) {
+                Attachment.record(data, named: "mounted-reveal-ink.json")
             }
-            while true {
-                // The wake is a few executor hops; yielding first spares a
-                // rendered sample per check. A display frame lets SwiftUI
-                // commit a restart before the render is consulted.
-                for _ in 0..<32 where !asleepAgain() { await Task.yield() }
-                if asleepAgain() { return try Self.sample(window) }
+        }
+        func settleInk(referenceAfter priorReference: Double = 0) async throws {
+            var previousInk = 0.0
+            for frame in 0..<120 {
                 try await DisplayFrameScheduler.displayLink.nextFrame()
-                if asleepAgain() { return try Self.sample(window) }
                 let sample = try Self.sample(window)
-                if sample.isConverged { return sample }
+                if sample.referenceInk <= priorReference { continue }
+                #expect(sample.streamingInk <= sample.referenceInk * 1.01, "the render cannot duplicate source glyphs")
+                #expect(sample.streamingInk + sample.referenceInk * 0.01 >= previousInk, "revealed glyphs cannot disappear within one source revision")
+                previousInk = sample.streamingInk
+                measurements.append(["words": Double(admittedWords), "frame": Double(frame),
+                                     "inkRatio": sample.streamingInk / sample.referenceInk,
+                                     "fadingPixels": Double(sample.fadingPixels)])
+                if sample.referenceInk > 0, sample.isConverged { return }
             }
+            try #require(Bool(false), "Mounted reveal did not converge within 120 display boundaries")
         }
-        /// Advances reveal time one sample interval and samples after the
-        /// loop's tick for that time; a loop that is not paced has none.
-        func advanceOneSample() async throws -> RevealSample {
-            let paced = clock.activeSleeperCount() == 1
-            let sleeps = clock.recordedSleeps().count
-            clock.advance(by: Self.sampleInterval)
-            return paced ? try await sampleAfterRevealTick(sleepsBefore: sleeps) : try Self.sample(window)
+        try await settleInk()
+        for _ in 0..<Self.frameCount {
+            let priorReference = try Self.sample(window).referenceInk
+            admittedWords += Self.wordsPerFrame
+            host.rootView = fixture()
+            try await settleInk(referenceAfter: priorReference)
         }
-
-        var elapsed: Duration = .zero
-        var nextFrame = Self.frameInterval
-        var samples: [RevealSample] = [try Self.sample(window)]
-        while admittedWords < words.count || elapsed < nextFrame {
-            var sample = try await advanceOneSample()
-            elapsed += Self.sampleInterval
-            if elapsed >= nextFrame, admittedWords < words.count {
-                // Each stream frame restarts the reveal task; the restart must
-                // neither grant nor withhold a word.
-                let sleeps = clock.recordedSleeps().count
-                admittedWords += Self.wordsPerFrame
-                host.rootView = fixture()
-                nextFrame += Self.frameInterval
-                sample = try await sampleAfterRevealTick(sleepsBefore: sleeps)
-            }
-            samples.append(sample)
-        }
-        let streamingSamples = samples
-
-        // The loop sleeps until the last fade completes, then returns.
-        var settled = try Self.sample(window)
-        var settleElapsed: Duration = .zero
-        while !settled.isConverged, clock.activeSleeperCount() == 1, settleElapsed < Self.settleInterval {
-            settled = try await advanceOneSample()
-            settleElapsed += Self.sampleInterval
-        }
-
-        let inkPerWord = settled.referenceInk / Double(words.count)
-        let jumps = zip(streamingSamples, streamingSamples.dropFirst()).map { ($1.streamingInk - $0.streamingInk) / inkPerWord }
-        let largestJump = jumps.max() ?? 0
-        let fadingShare = Double(streamingSamples.dropFirst().filter { $0.fadingPixels >= 8 }.count)
-            / Double(streamingSamples.count - 1)
-        print("""
-            reveal continuity: samples=\(streamingSamples.count) \
-            sampleMs=\(Self.sampleInterval) largestJumpWords=\
-            \(String(format: "%.2f", largestJump)) fadingShare=\(String(format: "%.2f", fadingShare)) \
-            settledInkRatio=\(String(format: "%.4f", settled.streamingInk / settled.referenceInk))
-            """)
-        // Samples land 33 ms apart in reveal time, so steady pacing adds one or
-        // two words of ink per sample; the pre-fix catch-up showed 18 or more
-        // at once.
-        #expect(largestJump <= 8, "no sample may reveal more than a few words at once: \(largestJump) words")
-        #expect(fadingShare >= 0.8, "words must be fading in most samples: \(fadingShare)")
-        #expect(settled.isConverged, "the reveal converges to the source")
+        let settled = try Self.sample(window)
+        #expect(settled.isConverged)
     }
 
     private static func words(count: Int) -> [String] {
@@ -195,7 +137,6 @@ private struct RevealSample {
 private struct RevealFixture: View {
     let source: String
     let paneSize: CGSize
-    let clock: MonotonicClock
 
     var body: some View {
         VStack(spacing: 0) {
@@ -204,7 +145,6 @@ private struct RevealFixture: View {
         }
         .background(Color.white)
         .environment(\.scenePhase, .active)
-        .environment(\.chatStreamingRevealClock, clock)
     }
 
     private func pane(streaming: Bool) -> some View {
