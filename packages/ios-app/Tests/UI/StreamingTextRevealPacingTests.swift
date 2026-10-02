@@ -141,6 +141,8 @@ enum RevealCadence: CaseIterable, CustomStringConvertible {
 /// pending or fading.
 struct RevealSimulation {
     var starts: [Double] = []
+    /// Includes source-arrival restarts as well as scheduled (possibly late) ticks.
+    var tickTimes: [Double] = []
     var poppedWords = 0
     var maximumStartLatency = 0.0
 
@@ -158,6 +160,7 @@ struct RevealSimulation {
             let frame = frameIndex < frames.count ? frames[frameIndex] : .infinity
             let now = min(frame, wake ?? .infinity)
             guard now.isFinite else { break }
+            result.tickTimes.append(now)
             if frame <= now {
                 frameIndex += 1
                 while admitted < arrivals.count, arrivals[admitted] <= now { admitted += 1 }

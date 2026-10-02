@@ -6,8 +6,9 @@ import UIKit
 
 /// Failure modes: pacing catches up ordinary progress in a burst, fades are
 /// bypassed, or mounted text never converges to its authoritative source.
-/// Virtual-time policy coverage owns throughput. Native samples own rendered
-/// ink and convergence, not a promise that a loaded host catches every fade.
+/// Virtual-time policy coverage owns admission and fractional fade progression.
+/// Native samples own rendered ink and convergence, not a promise that a loaded
+/// host catches every fade or that native bookkeeping matches the simulation.
 @MainActor
 struct StreamingTextRevealContinuityTests {
     private static let paneSize = CGSize(width: 340, height: 360)
@@ -17,10 +18,54 @@ struct StreamingTextRevealContinuityTests {
     @Test("streaming text fades continuously and the mounted source converges")
     func streamingRevealIsContinuous() async throws {
         let arrivals = RevealCadence.gateway150.arrivals(wordsPerSecond: 40, durationMilliseconds: 3_000)
+        var fadeMeasurements: [[String: Double]] = []
+        defer {
+            if let data = try? JSONSerialization.data(withJSONObject: fadeMeasurements, options: [.sortedKeys]) {
+                Attachment.record(data, named: "virtual-reveal-opacity.json")
+            }
+        }
         for tickDelay in [0.0, 90.0] {
             let schedule = RevealSimulation.current(arrivals: arrivals, tickDelay: tickDelay)
             #expect(schedule.poppedWords == 0, "ordinary progress must not skip fades")
             #expect(schedule.starts.count == arrivals.count)
+            let fadeDuration = ChatStreamingTextRevealPolicy.fadeMilliseconds
+            try #require(fadeDuration > 4, "A fade needs intermediate opacity samples")
+            // Aggregate ink jumps can pass when every word is immediately
+            // opaque. Inspect fractional progression independently of admission.
+            let opacities = (-1...fadeDuration + 1).map {
+                ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: $0)
+            }
+            #expect(opacities.allSatisfy { $0.isFinite && (0...1).contains($0) })
+            #expect(opacities[0] == 0 && opacities[1] == 0, "A word is hidden until its scheduled start")
+            #expect(opacities.suffix(2).allSatisfy { $0 == 1 }, "A completed fade stays fully visible")
+            let interior = Array(opacities.dropFirst(2).dropLast(2))
+            #expect(interior.allSatisfy { $0 > 0 && $0 < 1 }, "An admitted word must actually fade, not pop")
+            #expect(zip(interior, interior.dropFirst()).allSatisfy { $0 < $1 }, "A fade must keep progressing")
+            let steps = zip(opacities, opacities.dropFirst()).map { $1 - $0 }
+            #expect(steps.allSatisfy { $0 >= 0 && $0 <= 0.01 }, "No millisecond may jump more than 1% opacity")
+
+            var restartProbes = 0
+            var tickProbes = 0
+            let restartTimes = Array(Set(arrivals)).sorted()
+            for (word, start) in schedule.starts.enumerated() {
+                // Probe either side of real simulated task boundaries while
+                // this word is fading. Restarts/late wakes must not reset its
+                // elapsed fade or introduce a discontinuity.
+                for (times, isRestart) in [(restartTimes, true), (schedule.tickTimes, false)] {
+                    for now in times where now - start >= 2 && now - start < Double(fadeDuration - 1) {
+                        let elapsed = Int(now - start)
+                        let before = ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: elapsed - 1)
+                        let after = ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: elapsed + 1)
+                        #expect(before > 0 && after < 1 && after > before)
+                        #expect(after - before <= 0.02, "A task boundary cannot pop or restart a fading word")
+                        if isRestart { restartProbes += 1 } else { tickProbes += 1 }
+                        fadeMeasurements.append(["tickDelay": tickDelay, "word": Double(word), "start": start,
+                                                 "boundary": now, "restart": isRestart ? 1 : 0,
+                                                 "before": before, "after": after])
+                    }
+                }
+            }
+            #expect(restartProbes > 0 && tickProbes > 0, "Both progress restarts and reveal ticks must intersect fades")
             let samples = stride(from: 0.0, through: 4_200.0, by: 33.0).map { now in
                 schedule.starts.reduce(0.0) {
                     $0 + ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: Int(now - $1))

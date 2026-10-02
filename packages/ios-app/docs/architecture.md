@@ -1696,8 +1696,10 @@ time since the last scheduled start, never by how often progress frames restart 
 slowest that starts each pending word within 180 ms of its arrival, clamped to 8–55 ms (exactly 55 ms at a backlog of
 three or fewer), with several words per tick when shorter than a tick. Only a real stall (more than 125 pending words
 or a word waiting over a second) catches up without a fade. `StreamingTextRevealPacingTests` replays 150 ms, 75 ms, and
-bursty cadences at 10–80 words/s; `StreamingTextRevealContinuityTests` checks deterministic policy opacity
-progression including late ticks, then records native glyph ink until the mounted source converges.
+bursty cadences at 10–80 words/s; `StreamingTextRevealContinuityTests` checks fractional policy opacity
+bounds, strict progression and continuity across simulated progress restarts and late ticks, separately
+from admission and convergence. It then records native glyph ink until the mounted source converges.
+The policy simulation does not prove native bookkeeping; sampled native frames may miss fades.
 Native frame throughput is a controlled-host/device qualification, not a wall-clock test assertion.
 Rendered text is concatenated once per
 token revision; a reveal tick reuses the memoized fully revealed prefix and rebuilds only the pending or fading tail.

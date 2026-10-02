@@ -1297,10 +1297,13 @@ finite display-frame phases (`ChatFloatingDisplayLayoutTests.keyboardAndAccessor
 oracle checks every sampled native frame and each keyboard/accessory/draft/restored milestone;
 it does not assume the host samples a particular intermediate animation instant. Streaming
 continuity exercises the existing admission/opacity policies with virtual-time schedules (including
-restarts and late ticks), then mounts the actual view and records glyph ink through each source
-revision until convergence. Its `mounted-reveal-ink.json` attachment is retained in the runner's
-xcresult. Policy simulation does not prove native frame-by-frame throughput; temporal/performance
-qualification requires a controlled host or device measurement. Each of the 31 maximum-page
+restarts and late ticks). Aggregate jump/convergence bounds do not prove fading: the oracle also
+requires bounded fractional opacity throughout every fade, strict progression, and no discontinuity
+around simulated restart/tick boundaries. `virtual-reveal-opacity.json` records those probes.
+It then mounts the actual view and records glyph ink through each source revision until convergence
+in `mounted-reveal-ink.json`. Both attachments are retained in the runner's xcresult. Policy simulation
+does not prove native bookkeeping or frame-by-frame throughput; native samples may miss intermediate
+fades on a loaded host. Temporal/performance qualification requires a controlled host or device measurement. Each of the 31 maximum-page
 projection installs has the original ten-second hang bound, with fixture/reference work outside it;
 completed installs never spend a shared wall-time allowance. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
