@@ -517,6 +517,144 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     /// the pin is checked by the socket's own trust evaluation, so every leg runs
     /// production code end to end.
     ///
+    func testSharedLinkUploadAndWebSocketLiveness() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let portText = environment["TRON_E2E_PORT"],
+              let port = Int(portText),
+              let code = environment["TRON_E2E_CODE"],
+              let proxyToken = environment["TRON_E2E_PROXY_TOKEN"] else {
+            throw XCTSkip("Run through scripts/ios-gateway-e2e-test to provide the real Gateway fixture.")
+        }
+        let invitation = PairingInvitation(
+            host: "127.0.0.1",
+            port: port,
+            code: code,
+            machineId: "tron-ios-e2e",
+            label: "Tron iOS E2E"
+        )
+        let (profile, token) = try await GatewayPairer().pair(invitation, deviceName: "Shared link test")
+        let client = makeClient()
+        _ = try await client.connect(profile: profile, token: token)
+        let connectedID = await client.activeConnectionID()
+        let originalConnectionID = try XCTUnwrap(connectedID)
+        let payload = Data(repeating: 0x78, count: 298_013)
+
+        // One FIFO shaper owns the actual HTTP and WebSocket proxy paths. It
+        // includes HTTP body/header and WS data/control-frame overhead; it has
+        // no transport priority. The observation spans two existing 10 s ping
+        // ticks without changing the GatewayClient's 8 s pong deadline.
+        try await control(
+            "shape", port: port, token: proxyToken,
+            rateBytesPerSecond: 65_536, latencyMilliseconds: 30, maximumQueuedBytes: 1_048_576
+        )
+        let clock = ContinuousClock()
+        let uploadStarted = clock.now
+        let upload = Task {
+            let id = try await client.upload(name: "synthetic.bin", mimeType: "application/octet-stream", data: payload)
+            return (id, uploadStarted.duration(to: clock.now))
+        }
+        let observationDeadline = clock.now + .seconds(24)
+        var rpcCount = 0
+        while clock.now < observationDeadline {
+            _ = try await client.requestValue("system.info", EmptyParams(), timeout: .seconds(8))
+            rpcCount += 1
+            try await Task.sleep(for: .seconds(2))
+        }
+        XCTAssertGreaterThanOrEqual(rpcCount, 8)
+        let (firstUploadID, completedUploadDuration) = try await upload.value
+        XCTAssertFalse(firstUploadID.isEmpty)
+        let uploadDuration = completedUploadDuration.components
+        let uploadDurationMilliseconds = Int(uploadDuration.seconds * 1_000 + uploadDuration.attoseconds / 1_000_000_000_000_000)
+        XCTAssertGreaterThanOrEqual(uploadDurationMilliseconds, 4_000, "The transfer should experience the declared aggregate 64 KiB/s capacity")
+        XCTAssertLessThan(uploadDurationMilliseconds, 12_000, "The bounded healthy transfer must complete without exceeding its phase deadline")
+        let afterShapedUploadID = await client.activeConnectionID()
+        XCTAssertEqual(afterShapedUploadID, originalConnectionID)
+
+        let shaped = try await controlValue("link-stats", port: port, token: proxyToken)
+        XCTAssertGreaterThanOrEqual(shaped.objectValue?["forwardedWebSocketPings"]?.intValue ?? 0, 2)
+        XCTAssertGreaterThanOrEqual(shaped.objectValue?["forwardedWebSocketPongs"]?.intValue ?? 0, 2)
+        let heartbeatRTTs = shaped.objectValue?["heartbeatRoundTripMilliseconds"]?.arrayValue?.compactMap(\.intValue) ?? []
+        XCTAssertGreaterThanOrEqual(heartbeatRTTs.count, 2)
+        XCTAssertTrue(heartbeatRTTs.allSatisfy { $0 < 8_000 }, "Observed real Gateway pong round trips must meet the unchanged 8 s client bound")
+        XCTAssertEqual(shaped.objectValue?["uploadBodyBytes"]?.intValue, payload.count)
+        XCTAssertGreaterThanOrEqual(shaped.objectValue?["dispatchedRPCs"]?.intValue ?? 0, rpcCount)
+        XCTAssertGreaterThanOrEqual(shaped.objectValue?["settledRPCs"]?.intValue ?? 0, rpcCount)
+        XCTAssertEqual(shaped.objectValue?["originalAuthority"]?.stringValue, "127.0.0.1:\(port)")
+        XCTAssertEqual(shaped.objectValue?["scheduleOverflows"]?.intValue, 0)
+        XCTAssertLessThanOrEqual(shaped.objectValue?["queueHighWaterBytes"]?.intValue ?? Int.max, 1_048_576)
+        XCTAssertEqual(shaped.objectValue?["queuedPayloadBytes"]?.intValue, 0)
+        let initialStaging = try await client.requestValue("uploads.status", EmptyParams())
+        XCTAssertEqual(initialStaging.objectValue?["unclaimedCount"]?.intValue, 1)
+
+        // The Gateway consumes and stages a second real body, but the proxy
+        // holds its HTTP response. RPCs and heartbeat control frames still use
+        // the same FIFO schedule; the held HTTP response gets no priority.
+        try await control("hold-http-response", port: port, token: proxyToken)
+        let heldUpload = Task { try await client.upload(name: "held.bin", mimeType: "application/octet-stream", data: Data(repeating: 0x68, count: 32_768)) }
+        try await control("await-http-held", port: port, token: proxyToken)
+        let heldStaging = try await client.requestValue("uploads.status", EmptyParams())
+        XCTAssertEqual(heldStaging.objectValue?["unclaimedCount"]?.intValue, 2,
+                       "The Gateway must commit the actual body before its held HTTP receipt is released")
+        let heldConnectionID = await client.activeConnectionID()
+        _ = try await client.requestValue("system.info", EmptyParams(), timeout: .seconds(8))
+        let stillHeldConnectionID = await client.activeConnectionID()
+        XCTAssertEqual(stillHeldConnectionID, heldConnectionID)
+        try await control("pass", port: port, token: proxyToken)
+        let secondUploadID = try await heldUpload.value
+        XCTAssertFalse(secondUploadID.isEmpty)
+        try await client.discardUpload(firstUploadID)
+        try await client.discardUpload(secondUploadID)
+        let afterCleanup = try await client.requestValue("uploads.status", EmptyParams())
+        XCTAssertEqual(afterCleanup.objectValue?["unclaimedCount"]?.intValue, 0)
+        let heldStagedCount = heldStaging.objectValue?["unclaimedCount"]?.intValue ?? -1
+
+        // A common-path interruption is an expected outage control, not a RED:
+        // both protocols are blackholed, then the same original authority works
+        // again once the test-owned path is restored.
+        try await control("blackhole", port: port, token: proxyToken, httpBlackhole: true)
+        var commonLinkTimeoutObserved = false
+        do {
+            _ = try await client.requestValue("system.info", EmptyParams(), timeout: .milliseconds(350))
+            XCTFail("An unavailable common link unexpectedly returned an RPC")
+        } catch is GatewayPossiblySentError { commonLinkTimeoutObserved = true }
+        XCTAssertTrue(commonLinkTimeoutObserved)
+        try await control("pass", port: port, token: proxyToken)
+        _ = try await client.requestValue("system.info", EmptyParams(), timeout: .seconds(8))
+        let afterRecoveryConnectionID = await client.activeConnectionID()
+        XCTAssertEqual(afterRecoveryConnectionID, originalConnectionID)
+
+        // Separate below-frame-limit diagnostic JSON control, without HTTP
+        // traffic or shaping, using synthetic content only.
+        try await control("unshape", port: port, token: proxyToken)
+        let exported = try await client.requestValue("system.logs.export", JSONValue.object([
+            "commandId": .string(UUID().uuidString),
+            "content": .string(String(repeating: "x", count: 262_144)),
+        ]), timeout: .seconds(15))
+        XCTAssertFalse(exported.objectValue?.isEmpty ?? true)
+        let logsWire = try await controlValue("link-stats", port: port, token: proxyToken)
+        let logsFrameBytes = logsWire.objectValue?["logsExportRequestBytes"]?.intValue ?? 0
+        XCTAssertGreaterThan(logsFrameBytes, 262_144)
+        XCTAssertLessThan(logsFrameBytes, 1_048_576)
+        XCTAssertGreaterThan(logsWire.objectValue?["logsExportResponseBytes"]?.intValue ?? 0, 0)
+        let diagnostics = await client.diagnostics()
+        XCTAssertFalse(diagnostics.contains { $0.outcome == .failure && $0.stage == .liveness })
+        let finalConnectionID = await client.activeConnectionID()
+        XCTAssertEqual(finalConnectionID, originalConnectionID)
+        let attachment = XCTAttachment(string: [
+            "authority=paired fixture Gateway through owned shared proxy",
+            "uploadBytes=\(payload.count) uploadDurationMs=\(uploadDurationMilliseconds) periodicRPCs=\(rpcCount)",
+            "originalConnectionID=\(originalConnectionID)",
+            "heldHTTPResponse=held; stagedUploads=\(heldStagedCount); RPC=healthy; connectionPreserved=\(stillHeldConnectionID == heldConnectionID)",
+            "commonLinkOutage=expectedPossiblySentTimeout; restoredRPC=success; connectionPreserved=\(afterRecoveryConnectionID == originalConnectionID)",
+            "proxySchedule=\(shaped)",
+            "largeLogsInputBytes=262144 wireFrameBytes=\(logsFrameBytes) result=\(exported.objectValue?.keys.sorted().joined(separator: ",") ?? "none")",
+            "stagingCleanup=pending:0",
+        ].joined(separator: "\n"))
+        attachment.name = "shared-link-transport-observations"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     /// Done when: the saved leg blackholed for 90 s is invisible to the
     /// connection the LAN lane carries — WebSocket and HTTP routes alike; a
     /// blocked LAN lane falls back to the saved lane within the stagger plus one
@@ -1213,17 +1351,32 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         return client
     }
 
-    private func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil, httpBlackhole: Bool = false) async throws {
+    private func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil, httpBlackhole: Bool = false, rateBytesPerSecond: Int? = nil, latencyMilliseconds: Int? = nil, maximumQueuedBytes: Int? = nil) async throws {
         try await Self.control(
             mode, port: port, token: token, commandID: commandID, status: status,
-            closeCode: closeCode, bytes: bytes, httpBlackhole: httpBlackhole
+            closeCode: closeCode, bytes: bytes, httpBlackhole: httpBlackhole,
+            rateBytesPerSecond: rateBytesPerSecond, latencyMilliseconds: latencyMilliseconds,
+            maximumQueuedBytes: maximumQueuedBytes
         )
     }
 
     /// The isolated fault proxy's control plane. It is static so the blackhole
     /// helper can drive the proxy without carrying the test case into a
     /// main-actor function.
-    private static func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil, httpBlackhole: Bool = false) async throws {
+    private static func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil, httpBlackhole: Bool = false, rateBytesPerSecond: Int? = nil, latencyMilliseconds: Int? = nil, maximumQueuedBytes: Int? = nil) async throws {
+        _ = try await Self.controlValue(
+            mode, port: port, token: token, commandID: commandID, status: status,
+            closeCode: closeCode, bytes: bytes, httpBlackhole: httpBlackhole,
+            rateBytesPerSecond: rateBytesPerSecond, latencyMilliseconds: latencyMilliseconds,
+            maximumQueuedBytes: maximumQueuedBytes
+        )
+    }
+
+    private func controlValue(_ mode: String, port: Int, token: String) async throws -> JSONValue {
+        try await Self.controlValue(mode, port: port, token: token)
+    }
+
+    private static func controlValue(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil, httpBlackhole: Bool = false, rateBytesPerSecond: Int? = nil, latencyMilliseconds: Int? = nil, maximumQueuedBytes: Int? = nil) async throws -> JSONValue {
         let url = URL(string: "http://127.0.0.1:\(port)/_fixture/control")!
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
@@ -1233,12 +1386,16 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         if let status { values["status"] = .number(Double(status)) }
         if let closeCode { values["code"] = .number(Double(closeCode)) }
         if let bytes { values["bytes"] = .number(Double(bytes)) }
+        if let rateBytesPerSecond { values["rateBytesPerSecond"] = .number(Double(rateBytesPerSecond)) }
+        if let latencyMilliseconds { values["latencyMilliseconds"] = .number(Double(latencyMilliseconds)) }
+        if let maximumQueuedBytes { values["maximumQueuedBytes"] = .number(Double(maximumQueuedBytes)) }
         if httpBlackhole { values["http"] = .bool(true) }
         request.httpBody = try JSONEncoder.gateway.encode(values)
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw BoundaryFailure.invalidFixture("Isolated fault control did not acknowledge \(mode)")
         }
+        return try JSONDecoder.gateway.decode(JSONValue.self, from: data)
     }
 
     private func waitForDisconnectReason(client: GatewayClient) async throws -> String? {

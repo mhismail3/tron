@@ -2070,7 +2070,7 @@ active-form screenshots support visual inspection of these details.
 `HOSTED_TEST` is absent from Release
 configuration and the fixture source is guarded accordingly.
 
-The hosted real-Gateway boundary test owns one narrow integration contract: the
+The hosted real-Gateway boundary tests own one narrow integration contract: the
 iOS pairing and transport clients connect to the selected Pi runtime, accepted
 work survives transport retirement, a new connection decodes canonical
 completion, extension interactions round-trip, a parallel tool group settles
@@ -2079,12 +2079,30 @@ once, and the Agent Instructions projection decodes with the fixture workspace
 `agent-instructions-outline` attachment). Its foreground-reconnect case restarts the private Gateway while the
 session is active, then verifies lifecycle auto-reconnect, one canonical copy of
 the accepted prompt, the session snapshot, and exactly one settled catalog row.
-It deliberately excludes SwiftUI, visual, settings, picker, navigation, and
-general accessibility coverage.
+The shared-link case sends synthetic 298,013-byte HTTP upload traffic and actual
+RPC/ping/pong frames through the same bounded FIFO proxy schedule (64 KiB/s
+application-payload capacity, 30 ms per scheduled item, 1 MiB queue bound).
+It records the original loopback authority, scheduled HTTP/WebSocket bytes,
+forwarded ping/pong counts and observed RTTs, actual upload/RPC dispatch and
+settlement, and staging cleanup in the retained test attachment. The 24-second
+observation covers two unchanged 10-second GatewayClient ping ticks and keeps
+its existing 8-second pong deadline. HTTP header lengths come from Node's parsed
+request/response headers; WebSocket message sizes are decoded payload lengths
+plus estimated uncompressed frame overhead because `ws` hides compressed wire
+lengths. Thus this synthetic schedule is a reproducible shared application
+payload control, not a cellular capacity guarantee. A separate common-proxy
+blackhole is only the expected-outage/recovery control; a synthetic 256 KiB
+`system.logs.export` JSON RPC runs without the shaper or an HTTP upload. The
+fixture reports counts/bytes but never stores or prints authorization values,
+file bytes, filenames, or log-export content. These tests deliberately exclude
+SwiftUI, visual, settings, picker, navigation, and general accessibility
+coverage.
 
-Preparation and the first build happen once; `run` renews the one-use Gateway
-fixture, then executes the focused hosted test without reinstalling dependencies
-or rebuilding:
+Preparation and the first build happen once; `run` renews an independent one-use
+Gateway fixture for each registered boundary case while retaining one owned
+simulator lease and separate `.xcresult` artifacts. Tests therefore do not depend
+on XCTest order or reuse a consumed pairing invitation. It runs the focused
+hosted tests without reinstalling dependencies or rebuilding:
 
 ```bash
 scripts/ios-gateway-e2e-test prepare

@@ -69,7 +69,10 @@ proxy_script="$repo_root/scripts/ios-gateway-fault-proxy.mjs"
 # LAN lane (E-3c). `run` keeps the lane off, so the fault proxy owns every leg
 # the boundary test drives; `run-lan` turns it on, because the two-lane cases
 # dial the lane itself.
-e2e_test_filter="TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
+e2e_test_filters=(
+  "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
+  "TronMobileTests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"
+)
 e2e_lan_endpoint="off"
 simulator_args=(
   --marker "$simulator_marker"
@@ -502,52 +505,55 @@ run_test() {
   [[ -f "$xctestrun" ]] || die "test products are not built; run '$0 build'"
   python3 "$identity_owner" verify --worktree "$repo_root" --derived-data "$derived_data" \
     || die "run '$0 build' in this worktree before running the E2E"
-  start_fresh_fixture
-  load_state
-  patch_xctestrun "$xctestrun"
-
-  local started=$SECONDS status simulator_id destination attempt_id attempt_dir result_bundle
+  local started=$SECONDS status=0 simulator_id destination attempt_id attempt_dir result_bundle test_filter
   simulator_id="$(provision_test_simulator)"
   destination="platform=iOS Simulator,id=$simulator_id"
   mkdir -p "$run_root/results"
-  attempt_dir="$(mktemp -d "$run_root/results/$(date -u '+%Y%m%dT%H%M%SZ')-run.XXXXXX")"
-  attempt_id="$(basename "$attempt_dir")"
-  result_bundle="$attempt_dir/FocusedE2E.xcresult"
-  # 600 s overall and 300 s of allowed silence: the C-1 file's 90 s blackhole
-  # leg plus its second outage are deliberately quiet for minutes at a time, and
-  # a timeout hides which leg hung.
-  if run_bounded "results/$attempt_id/test" 65 "${TRON_IOS_E2E_RUN_TIMEOUT_SECONDS:-600}" \
-    "${TRON_IOS_E2E_RUN_NO_OUTPUT_SECONDS:-300}" "$result_bundle" \
-    xcodebuild test-without-building \
-      -xctestrun "$xctestrun" \
-      -destination "$destination" \
-      -only-testing:"$e2e_test_filter" \
-      -parallel-testing-enabled NO \
-      -collect-test-diagnostics never \
-      -resultBundlePath "$result_bundle"; then
-    status=0
-  else
-    status=$?
-  fi
-  ln -sfn "$attempt_dir" "$run_root/results/latest"
-  if ((status == 0)); then
-    # A missing fixture must not turn XCTest's conditional skip into a green
-    # cross-layer qualification receipt.
-    if ! xcrun xcresulttool get test-results summary --path "$result_bundle" >"$attempt_dir/summary.json" \
-      || ! python3 - "$attempt_dir/summary.json" <<'PY'
+  # Pairing invitations are one-use. Each independently registered real-Gateway
+  # test receives a newly owned private fixture and pairing code; the simulator
+  # lane stays leased to this command while Gateway state is renewed between
+  # cases, so XCTest order never decides which case owns the invitation.
+  for test_filter in "${e2e_test_filters[@]}"; do
+    start_fresh_fixture
+    load_state
+    patch_xctestrun "$xctestrun"
+    attempt_dir="$(mktemp -d "$run_root/results/$(date -u '+%Y%m%dT%H%M%SZ')-run.XXXXXX")"
+    attempt_id="$(basename "$attempt_dir")"
+    result_bundle="$attempt_dir/FocusedE2E.xcresult"
+    # The reconnect case has a 90 s blackhole leg plus a second outage; each
+    # case retains its own bounded timeout and result bundle.
+    if run_bounded "results/$attempt_id/test" 65 "${TRON_IOS_E2E_RUN_TIMEOUT_SECONDS:-600}" \
+      "${TRON_IOS_E2E_RUN_NO_OUTPUT_SECONDS:-300}" "$result_bundle" \
+      xcodebuild test-without-building \
+        -xctestrun "$xctestrun" \
+        -destination "$destination" \
+        "-only-testing:$test_filter" \
+        -parallel-testing-enabled NO \
+        -collect-test-diagnostics never \
+        -resultBundlePath "$result_bundle"; then
+      status=0
+    else
+      status=$?
+    fi
+    ln -sfn "$attempt_dir" "$run_root/results/latest"
+    if ((status == 0)); then
+      # A missing fixture must not turn XCTest's conditional skip into a green
+      # cross-layer qualification receipt.
+      if ! xcrun xcresulttool get test-results summary --path "$result_bundle" >"$attempt_dir/summary.json" \
+        || ! python3 - "$attempt_dir/summary.json" <<'PY'
 import json,sys
 with open(sys.argv[1]) as handle: result=json.load(handle)
 assert result.get('passedTests')==1 and result.get('failedTests')==0 and result.get('skippedTests')==0 and result.get('totalTestCount')==1, 'boundary case did not execute and pass exactly once'
 PY
-    then
-      echo "error: isolated boundary test was skipped, missing, or failed" >&2
-      status=65
+      then
+        echo "error: isolated boundary test was skipped, missing, or failed ($test_filter)" >&2
+        status=65
+      fi
     fi
-  fi
-  echo "Focused E2E run completed in $((SECONDS - started))s (status $status); artifacts: $attempt_dir"
-  if ((status != 0)) && [[ -d "$result_bundle" ]]; then
-    xcrun xcresulttool get test-results tests --path "$result_bundle" 2>/dev/null \
-      | python3 -c 'import json,sys
+    echo "Focused E2E case $test_filter completed in $((SECONDS - started))s (status $status); artifacts: $attempt_dir"
+    if ((status != 0)) && [[ -d "$result_bundle" ]]; then
+      xcrun xcresulttool get test-results tests --path "$result_bundle" 2>/dev/null \
+        | python3 -c 'import json,sys
 try: document=json.load(sys.stdin)
 except Exception: raise SystemExit(0)
 def walk(value):
@@ -558,7 +564,10 @@ def walk(value):
     elif isinstance(value, list):
         for child in value: walk(child)
 walk(document)' 2>/dev/null || true
-  fi
+      break
+    fi
+  done
+  echo "Focused E2E run completed in $((SECONDS - started))s (status $status); artifacts: $run_root/results"
   return "$status"
 }
 
@@ -582,7 +591,7 @@ show_status() {
 
 case "$command" in
   run-lan)
-    e2e_test_filter="TronMobileTests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"
+    e2e_test_filters=("TronMobileTests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes")
     e2e_lan_endpoint="on"
     ;;
 esac
