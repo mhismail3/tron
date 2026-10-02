@@ -4790,6 +4790,7 @@ record = Path(sys.argv[2])
 temporary = record.with_suffix(".tmp")
 temporary.write_text(json.dumps({
     "root": str(fixture.root), "holder": holder.pid, "group": group,
+    "build_logs": [str(path) for path in Path("/tmp").glob(f"xcode-*-{group}.log")],
 }))
 os.replace(temporary, record)
 # Intentionally no teardown: exercise the interruption that bypasses it.
@@ -4868,6 +4869,11 @@ else:
                             os.kill(record["holder"], signal.SIGKILL)
                         except ProcessLookupError:
                             pass
+                # Device builds log outside TMPDIR. The shell's PID is its
+                # leased process group; the child captured only its own logs
+                # before interruption could delete the fixture's output file.
+                for log in record["build_logs"]:
+                    Path(log).unlink(missing_ok=True)
                 shutil.rmtree(record["root"], ignore_errors=True)
             self.open_gate(survivor_gate)
             survivor.wait(timeout=60)
