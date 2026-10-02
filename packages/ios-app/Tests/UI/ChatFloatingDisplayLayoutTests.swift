@@ -28,7 +28,8 @@ struct ChatFloatingDisplayLayoutTests {
 
     /// Failure modes: the floating panel leaves the band between the toolbar
     /// and the composer (or is remounted) on some frame while the keyboard,
-    /// accessory chips or a taller draft move the composer; or it settles at the wrong placement after an accessory change.
+    /// accessory chips or a taller draft move the composer; or it settles at
+    /// the wrong placement after an accessory change.
     /// Every phase waits for its own settled layout, bounded in display frames:
     /// fixed 90-frame waits cost more wall time than the watchdog allowed on a
     /// slow runner.
@@ -45,20 +46,21 @@ struct ChatFloatingDisplayLayoutTests {
                 abs(frame.composer.minY - frame.frame.maxY - 8) <= 2
             }
             initial.marker.move?(.bottomTrailing)
-            let docked = try await settleLayout(harness, until: dockedAboveComposer).final
+            let docked = try await settleLayout(harness, until: dockedAboveComposer)
             try harness.focusComposer(true)
             let keyboard = try await settleLayout(harness, each: withinBand) {
                 // A genuine keyboard-driven inset, not a synthetic notification.
                 $0.composer.minY < docked.composer.minY - 100
-            }.final
+            }
             #expect(keyboard.marker === initial.marker, "The native keyboard must not remove the panel")
             #expect(dockedAboveComposer(keyboard))
             try harness.setComposerAccessories(true)
-            let (chips, _) = try await settleLayout(harness, each: withinBand) {
+            let chips = try await settleLayout(harness, each: withinBand) {
                 $0.composer.height > keyboard.composer.height + 50
             }
+            #expect(dockedAboveComposer(chips))
             try harness.setComposerDraftText(String(repeating: "Type into the taller composer. ", count: 12))
-            let tall = try await settleLayout(harness) { $0.composer.height > chips.composer.height }.final
+            let tall = try await settleLayout(harness, each: withinBand) { $0.composer.height > chips.composer.height }
             #expect(tall.marker === initial.marker)
             #expect(tall.frame.minY >= tall.toolbarBottom + 7)
             #expect(dockedAboveComposer(tall))
@@ -66,7 +68,7 @@ struct ChatFloatingDisplayLayoutTests {
             try harness.setComposerDraftText("")
             try harness.setComposerAccessories(false)
             try harness.focusComposer(false)
-            let restored = try await settleLayout(harness) { $0.composer.minY >= docked.composer.minY - 2 }.final
+            let restored = try await settleLayout(harness, each: withinBand) { $0.composer.minY >= docked.composer.minY - 2 }
             #expect(restored.marker === initial.marker)
             #expect(dockedAboveComposer(restored))
         }
@@ -196,7 +198,7 @@ struct ChatFloatingDisplayLayoutTests {
     private func layout(_ harness: ChatViewScrollHarness) async throws -> ChatViewScrollHarness.FloatingLayout {
         for _ in 0..<120 {
             if harness.floatingLayout() != nil {
-                return try await settleLayout(harness) { _ in true }.final
+                return try await settleLayout(harness) { _ in true }
             }
             try await DisplayFrameScheduler.displayLink.nextFrame()
         }
@@ -212,23 +214,23 @@ struct ChatFloatingDisplayLayoutTests {
         frameBudget: Int = 240,
         each check: (ChatViewScrollHarness.FloatingLayout) -> Void = { _ in },
         until condition: (ChatViewScrollHarness.FloatingLayout) -> Bool
-    ) async throws -> (final: ChatViewScrollHarness.FloatingLayout, frames: [ChatViewScrollHarness.FloatingLayout]) {
-        var frames: [ChatViewScrollHarness.FloatingLayout] = []
+    ) async throws -> ChatViewScrollHarness.FloatingLayout {
+        var previous: ChatViewScrollHarness.FloatingLayout?
         var unchanged = 0
         for _ in 0..<frameBudget {
             try await DisplayFrameScheduler.displayLink.nextFrame()
             let frame = try #require(harness.floatingLayout(), "The panel must stay mounted")
             check(frame)
-            if let previous = frames.last, previous.marker === frame.marker, previous.frame == frame.frame,
+            if let previous, previous.marker === frame.marker, previous.frame == frame.frame,
                previous.composer == frame.composer, previous.toolbarBottom == frame.toolbarBottom {
                 unchanged += 1
             } else {
                 unchanged = 0
             }
-            frames.append(frame)
-            if unchanged >= 2, condition(frame) { return (frame, frames) }
+            previous = frame
+            if unchanged >= 2, condition(frame) { return frame }
         }
-        throw FloatingLayoutDidNotSettle(frameBudget: frameBudget, last: frames.last)
+        throw FloatingLayoutDidNotSettle(frameBudget: frameBudget, last: previous)
     }
 
     private func settle() async throws {
