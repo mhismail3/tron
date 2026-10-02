@@ -1,4 +1,4 @@
-"""Isolated checks for land and steward failure modes 32-42 in README.md.
+"""Isolated checks for land and steward failure modes 32-42, 64 and 65 in README.md.
 
 Real temporary repositories with a local bare remote. GitHub is a fake `gh`
 (WORK_GH) that keeps pull request, check, status, issue and Project state in a
@@ -150,8 +150,6 @@ FAKE_GH = textwrap.dedent(
     if command == ["pr", "list"]:
         wanted = (arg("--state") or "open").upper()
         pulls = [p for p in state["pulls"] if p["state"] == wanted and p["headRefName"] == arg("--head")]
-        if arg("--jq") == ".[].number":
-            done("\\n".join(str(p["number"]) for p in pulls))
         done([{"number": p["number"], "title": p["title"], "body": p["body"], "isCrossRepository": p.get("fork", False),
                "headRefOid": head_of(p), "baseRefName": p.get("base", state["base"]),
                "mergeCommit": p["mergeCommit"], "url": "https://github.com/%s/pull/%d" % (repo, p["number"])}

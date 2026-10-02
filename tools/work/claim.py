@@ -120,13 +120,12 @@ def _remote_heads(repo: Path, remote: str) -> dict:
     return heads
 
 
-def _claim_session(repo: Path, remote: str, base: str, branch: str, number: int) -> Optional[str]:
+def claim_session(repo: Path, base_ref: str, head: str, number: int) -> Optional[str]:
+    """The session named by the claim commit of `number` in `base_ref..head`, if any."""
     # Branch-only commits, oldest first; the first carrying this issue's
     # trailer is the claim. Merges from the base branch add only base commits.
     trailers = f"%(trailers:key={ISSUE_TRAILER},key={SESSION_TRAILER},valueonly,separator=%x00)"
-    log = _git(
-        repo, "log", "--reverse", f"--format={trailers}%x1e", f"{remote}/{base}..{remote}/{branch}",
-    ).stdout
+    log = _git(repo, "log", "--reverse", f"--format={trailers}%x1e", f"{base_ref}..{head}").stdout
     for record in log.split("\x1e"):
         values = [v.strip() for v in record.strip().split("\x00") if v.strip()]
         if len(values) == 2 and values[0] == str(number):
@@ -139,7 +138,8 @@ def _read_claims(repo: Path, remote: str, base: str, heads: dict) -> List[Claim]
         return []
     refspecs = [f"+refs/heads/{b}:refs/remotes/{remote}/{b}" for b in heads]
     _git(repo, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}", *refspecs)
-    return [Claim(b, heads[b], _claim_session(repo, remote, base, b, claimed_issue(b))) for b in sorted(heads)]
+    return [Claim(b, heads[b], claim_session(repo, f"{remote}/{base}", f"{remote}/{b}", claimed_issue(b)))
+            for b in sorted(heads)]
 
 
 def existing_claims(repo: Path, remote: str, base: str, number: int) -> List[Claim]:

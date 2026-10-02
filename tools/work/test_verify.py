@@ -1,4 +1,4 @@
-"""Isolated checks for verify failure modes 12-19 in README.md.
+"""Isolated checks for verify failure modes 12-19 and 63 in README.md.
 
 Real temporary repositories with a local bare remote; GitHub is a fake `gh`
 (WORK_GH) that records every call so posting order can be asserted.
@@ -40,11 +40,7 @@ FAKE_GH = textwrap.dedent(
         print("acme/widget")
     elif args[0] == "pr":
         # FAKE_GH_PR: the open pull requests for the head branch, as JSON.
-        pulls = json.loads(os.environ.get("FAKE_GH_PR") or "[]")
-        if "--jq" in args:
-            print("\\n".join(str(p["number"]) for p in pulls))
-        else:
-            print(json.dumps(pulls))
+        print(os.environ.get("FAKE_GH_PR") or "[]")
     elif args[0] == "api":
         method, path = args[args.index("-X") + 1], args[3]
         if fail and fail in path:
