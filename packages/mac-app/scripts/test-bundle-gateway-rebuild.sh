@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# Two real Gateway bundle builds in this checkout, the second reusing the
-# published runtimes with --skip-download exactly as scripts/tron-dev does, then
-# a tampered published runtime that --skip-download must refuse without changing
-# the published payload. Leaves a valid published payload behind.
-#
-# Needs network for the first build's pinned Node downloads. The log is kept at
-# packages/mac-app/test-results/bundle-gateway-rebuild.log.
+# Two real builds, then refused runtime mutations. Runs in this checkout and
+# restores the valid published runtimes on every exit. The first build downloads
+# Node; --skip-download skips runtime downloads, not production npm installation.
+# Retains packages/mac-app/test-results/bundle-gateway-rebuild.log.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -22,18 +19,31 @@ mkdir -p "$RESULTS_DIR"
 : > "$LOG"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tron-bundle-rebuild.XXXXXX")"
 tampered=0
+restore_runtime() {
+    chmod u+w "$PAYLOAD_DIR/runtime"
+    rm -f "$PAYLOAD_DIR/runtime/node-x64"
+    local npm="$PAYLOAD_DIR/runtime/npm-x64"
+    if [[ -L "$npm" ]]; then
+        unlink "$npm"
+    else
+        # find's default physical walk leaves symlink targets untouched.
+        find "$npm" -type d -exec chmod u+w {} +
+        rm -rf "$npm"
+    fi
+    cp -p "$TMP/node-x64" "$PAYLOAD_DIR/runtime/node-x64"
+    /usr/bin/ditto "$TMP/npm-x64" "$npm"
+    chmod a-w "$PAYLOAD_DIR/runtime"
+    tampered=0
+}
 restore() {
     local status=$?
-    if ((tampered)); then
-        chmod u+w "$PAYLOAD_DIR/runtime"
-        rm -f "$PAYLOAD_DIR/runtime/node-x64"
-        cp -p "$TMP/node-x64" "$PAYLOAD_DIR/runtime/node-x64"
-        chmod a-w "$PAYLOAD_DIR/runtime"
-    fi
+    if ((tampered)); then restore_runtime; fi
+    find "$TMP" -type d -exec chmod u+w {} +
     rm -rf "$TMP"
     exit "$status"
 }
 trap restore EXIT
+trap 'exit 130' INT TERM HUP
 
 step() { printf '==> %s\n' "$*" | tee -a "$LOG"; }
 fail() { printf 'FAIL: %s (log: %s)\n' "$*" "$LOG" | tee -a "$LOG" >&2; exit 1; }
@@ -43,12 +53,31 @@ manifest_field() {
 }
 sha() { shasum -a 256 "$1" | awk '{print $1}'; }
 leftovers() { find "$RESOURCES_DIR" -maxdepth 1 -name '.tron-gateway-*' -print; }
+snapshot() {
+    # Independent oracle for the whole published tree, including symlink targets
+    # and permissions. A rejected build must not replace even an invalid tree.
+    python3 - "$PAYLOAD_DIR" <<'PY'
+import hashlib, os, stat, sys
+root = sys.argv[1]
+digest = hashlib.sha256()
+for directory, dirs, files in os.walk(root, followlinks=False):
+    for name in sorted(['.'] + dirs + files):
+        path = os.path.join(directory, name)
+        mode = os.lstat(path).st_mode
+        digest.update(os.path.relpath(path, root).encode() + b'\0')
+        digest.update(str(mode).encode() + b'\0')
+        if stat.S_ISLNK(mode):
+            digest.update(os.readlink(path).encode() + b'\0')
+        elif stat.S_ISREG(mode):
+            with open(path, 'rb') as stream:
+                digest.update(stream.read())
+    dirs.sort()
+print(digest.hexdigest())
+PY
+}
 
-# scripts/tron-dev always builds with --skip-install; install once if this
-# checkout has no Gateway build to reuse.
 install_args=(--skip-install)
 [[ -d "$GATEWAY_DIR/node_modules" && -f "$GATEWAY_DIR/dist/index.js" ]] || install_args=()
-
 step "first build downloads the pinned runtimes"
 bundle ${install_args[@]+"${install_args[@]}"} || fail "first build failed"
 first_epoch="$(manifest_field runtimeEpoch)"
@@ -61,29 +90,66 @@ bundle --verify-only || fail "second build published a payload that does not ver
 [[ "$(sha "$PAYLOAD_DIR/runtime/node-x64")" == "$TRON_NODE_X64_RUNTIME_SHA256" ]] || fail "x64 runtime is not the pinned one"
 [[ -z "$(leftovers)" ]] || fail "staging or backup roots were left: $(leftovers)"
 
-step "a published runtime that does not match its pin is refused"
 cp -p "$PAYLOAD_DIR/runtime/node-x64" "$TMP/node-x64"
-tampered=1
-chmod u+w "$PAYLOAD_DIR/runtime"
-rm -f "$PAYLOAD_DIR/runtime/node-x64"
-# A real Mach-O with the wrong hash and architecture.
-cp -p "$PAYLOAD_DIR/runtime/node-arm64" "$PAYLOAD_DIR/runtime/node-x64"
-chmod a-w "$PAYLOAD_DIR/runtime"
-published_manifest="$(sha "$PAYLOAD_DIR/manifest.json")"
-set +e
-bundle --skip-install --skip-download
-status=$?
-set -e
-[[ $status -eq 3 ]] || fail "tampered runtime was not refused with status 3 (status $status)"
-grep -q 'Node x64 binary checksum mismatch' "$LOG" || fail "refusal did not name the x64 checksum"
-[[ "$(sha "$PAYLOAD_DIR/manifest.json")" == "$published_manifest" ]] || fail "refused build changed the published manifest"
-[[ "$(sha "$PAYLOAD_DIR/runtime/node-x64")" == "$TRON_NODE_ARM64_RUNTIME_SHA256" ]] || fail "refused build changed the published runtime"
-[[ -z "$(leftovers)" ]] || fail "refused build left staging or backup roots: $(leftovers)"
-
-chmod u+w "$PAYLOAD_DIR/runtime"
-rm -f "$PAYLOAD_DIR/runtime/node-x64"
-cp -p "$TMP/node-x64" "$PAYLOAD_DIR/runtime/node-x64"
-chmod a-w "$PAYLOAD_DIR/runtime"
-tampered=0
+/usr/bin/ditto "$PAYLOAD_DIR/runtime/npm-x64" "$TMP/npm-x64"
+for mutation in node-hash node-symlink npm-version npm-content npm-root-symlink npm-child-symlink; do
+    step "refuse $mutation without changing the published tree"
+    tampered=1
+    chmod u+w "$PAYLOAD_DIR/runtime"
+    npm="$PAYLOAD_DIR/runtime/npm-x64"
+    case "$mutation" in
+        node-hash)
+            rm -f "$PAYLOAD_DIR/runtime/node-x64"
+            cp -p "$PAYLOAD_DIR/runtime/node-arm64" "$PAYLOAD_DIR/runtime/node-x64"
+            expected_status=3; diagnostic='Node x64 binary checksum mismatch' ;;
+        node-symlink)
+            rm -f "$PAYLOAD_DIR/runtime/node-x64"
+            ln -s "$TMP/node-x64" "$PAYLOAD_DIR/runtime/node-x64"
+            expected_status=2; diagnostic='requires a published Node runtime' ;;
+        npm-version)
+            chmod u+w "$npm/package.json"
+            python3 - "$npm/package.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as stream:
+    data = json.load(stream)
+data['version'] = '0.0.0'
+with open(path, 'w') as stream:
+    json.dump(data, stream)
+PY
+            chmod a-w "$npm/package.json"
+            expected_status=2; diagnostic='staged npm runtime version is not pinned' ;;
+        npm-content)
+            chmod u+w "$npm/README.md"
+            printf '\ntampered\n' >> "$npm/README.md"
+            chmod a-w "$npm/README.md"
+            expected_status=2; diagnostic='staged npm runtime content is not from the pinned Node archive' ;;
+        npm-root-symlink)
+            find "$npm" -type d -exec chmod u+w {} +
+            rm -rf "$npm"
+            ln -s "$TMP/npm-x64" "$npm"
+            expected_status=2; diagnostic='requires a published npm runtime' ;;
+        npm-child-symlink)
+            chmod u+w "$npm"
+            find "$npm/lib" -type d -exec chmod u+w {} +
+            rm -rf "$npm/lib"
+            ln -s "$TMP/npm-x64/lib" "$npm/lib"
+            chmod a-w "$npm"
+            expected_status=2; diagnostic='staged npm runtime contains unsafe content' ;;
+    esac
+    chmod a-w "$PAYLOAD_DIR/runtime"
+    published_snapshot="$(snapshot)"
+    attempt_log="$TMP/$mutation.log"
+    set +e
+    "$SCRIPT_DIR/bundle-gateway.sh" --skip-install --skip-download >"$attempt_log" 2>&1
+    status=$?
+    set -e
+    cat "$attempt_log" >> "$LOG"
+    [[ $status -eq $expected_status ]] || fail "$mutation was not refused with status $expected_status (status $status)"
+    grep -q "$diagnostic" "$attempt_log" || fail "$mutation refusal did not name its cause"
+    [[ "$(snapshot)" == "$published_snapshot" ]] || fail "$mutation refusal changed the published tree"
+    [[ -z "$(leftovers)" ]] || fail "$mutation refusal left private roots: $(leftovers)"
+    restore_runtime
+done
 bundle --verify-only || fail "restored payload does not verify"
-step "passed: a second build reuses verified published runtimes and refuses a tampered one"
+step "passed: second build reuses exact pinned runtimes; Node/npm tampering and symlinks are refused atomically"

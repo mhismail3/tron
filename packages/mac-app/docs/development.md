@@ -139,8 +139,9 @@ Useful iteration options:
 packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push --skip-install
 
 # Reuse the published payload's Node and npm runtimes too; they are copied into
-# the private staging root and must still match their pins (scripts/tron-dev
-# does this once a payload is published)
+# the private staging root and must still match their exact binary/tree hashes
+# and versions. Symlinks are refused. This skips runtime downloads, not the
+# independent production npm install (scripts/tron-dev uses it after publication).
 packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push --skip-install --skip-download
 
 # Remove generated payloads only
@@ -166,9 +167,10 @@ packages/mac-app/scripts/test-tron-gateway-npm.sh
 # Manifest fingerprint rewrite (preserves launcher-sensitive JSON strings)
 packages/mac-app/scripts/test-update-payload-fingerprint.sh
 
-# Two real builds in this checkout, the second with --skip-download, and a
-# tampered published runtime refused (downloads Node; rebuilds the payload;
-# log in packages/mac-app/test-results/bundle-gateway-rebuild.log)
+# Two real builds in this checkout, the second with --skip-download; Node/npm
+# pin violations and symlinks refused without changing published bytes or modes.
+# Downloads Node and rebuilds the payload; retains the log at
+# packages/mac-app/test-results/bundle-gateway-rebuild.log.
 packages/mac-app/scripts/test-bundle-gateway-rebuild.sh
 ```
 

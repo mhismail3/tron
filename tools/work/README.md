@@ -733,8 +733,9 @@ For a worktree that is provably done, `cleanup`:
    worktree's own tooling holds outside it. A non-zero exit or a timeout keeps
    the worktree and prints the end of the command's output;
 2. checks every condition above again, since the commands take time;
-3. gives the owner write and search permission on every directory in the
-   worktree, without following symlinks, so read-only generated output (the
+3. gives the owner read, write and search permission on every directory in the
+   worktree through no-follow descriptors, so a replaced directory name cannot
+   redirect permission changes outside it. Read-only generated output (the
    staged Mac Gateway payload is published 0555) cannot stop removal part way,
    after Git has already dropped the registration. A directory it cannot open
    keeps the worktree;
@@ -816,5 +817,6 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
 66. **Read-only generated output strands a removal.** A merged worktree whose
     staged Mac Gateway payload is published read-only (directories 0555, files
     0444) is removed, under the repository's own ignore rules and regenerable
-    globs, and a symlink inside it opens nothing outside. A kept or dry-run
-    worktree keeps its read-only tree as it was.
+    globs. Neither an existing symlink nor a directory swapped for a symlink
+    during permission opening changes anything outside it. A kept, dry-run,
+    failed-release or failed-recheck worktree keeps its read-only tree as it was.

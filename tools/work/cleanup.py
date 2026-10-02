@@ -238,24 +238,26 @@ def _open_directories(path: Path) -> Optional[str]:
     Only directories: unlinking needs the parent's write bit, not the file's. Symlinks are
     neither followed nor changed, so nothing outside the worktree is touched.
     """
-    def open_directory(directory: str) -> None:
-        mode = os.lstat(directory).st_mode
-        if stat.S_ISDIR(mode) and mode & stat.S_IRWXU != stat.S_IRWXU:
-            os.chmod(directory, stat.S_IMODE(mode) | stat.S_IRWXU)
+    def open_directory(directory: str, parent: Optional[int] = None) -> None:
+        # A name may be replaced after inspection. Keep chmod and traversal on
+        # the same no-follow descriptor, never on the newly resolved path.
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        try:
+            mode = os.fstat(fd).st_mode
+            if mode & stat.S_IRWXU != stat.S_IRWXU:
+                os.fchmod(fd, stat.S_IMODE(mode) | stat.S_IRWXU)
+            with os.scandir(fd) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        open_directory(entry.name, fd)
+        finally:
+            os.close(fd)
 
     try:
         open_directory(str(path))
-        # Top-down: each subdirectory is opened before the walk lists it.
-        for directory, subdirectories, _ in os.walk(path, onerror=_raise):
-            for name in subdirectories:
-                open_directory(os.path.join(directory, name))
     except OSError as error:
         return f"cannot open {error.filename or path} for removal: {error.strerror or error}"
     return None
-
-
-def _raise(error: OSError) -> None:
-    raise error
 
 
 def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:

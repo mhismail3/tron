@@ -21,6 +21,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import claim as claims
 import cleanup
@@ -555,7 +556,7 @@ class ReadOnlyOutputTests(CleanupFixture):
         for directory in reversed(trees):
             os.chmod(directory, 0o555)
         # The fixture removes its temporary root afterwards; a kept tree must not block that.
-        self.addCleanup(lambda: [os.chmod(d, 0o755) for d in trees if os.path.isdir(d)])
+        self.addCleanup(lambda: [os.chmod(d, 0o755) for d in trees if os.path.isdir(d) and not os.path.islink(d)])
         return trees
 
     def test_a_merged_worktree_with_a_read_only_generated_tree_is_removed(self):
@@ -565,6 +566,87 @@ class ReadOnlyOutputTests(CleanupFixture):
         self.assertEqual(code, 0, out)
         self.assert_removed(path, branch)
         self.assertEqual(self.outside.stat().st_mode & 0o777, 0o555)
+
+    def test_a_directory_swapped_for_a_symlink_during_opening_never_changes_its_target(self):
+        path, branch, _ = self.task(7)
+        self.publish(path)
+        directory = path / self.PAYLOAD / "runtime"
+        original = directory.with_name("runtime-original")
+        swapped = False
+        real_lstat, real_open = os.lstat, os.open
+
+        def swap():
+            nonlocal swapped
+            if not swapped:
+                directory.parent.chmod(0o755)
+                directory.rename(original)
+                directory.symlink_to(self.outside)
+                swapped = True
+
+        def lstat_then_swap(target, *args, **kwargs):
+            result = real_lstat(target, *args, **kwargs)
+            if str(target) == str(directory):
+                swap()
+            return result
+
+        def open_then_swap(target, *args, **kwargs):
+            fd = real_open(target, *args, **kwargs)
+            if str(target) in (str(directory), "runtime"):
+                swap()
+            return fd
+
+        # Exercise the exact observation/mutation window with a real rename.
+        # The old path-based chmod follows the replacement; an opened descriptor
+        # still belongs to the original directory even after its name changes.
+        with mock.patch.object(os, "lstat", side_effect=lstat_then_swap), \
+                mock.patch.object(os, "open", side_effect=open_then_swap):
+            code, out = self.cleanup(path)
+        self.assertTrue(swapped, "the controlled filesystem race must execute")
+        self.assertEqual(self.outside.stat().st_mode & 0o777, 0o555)
+        self.assertEqual((self.outside / "keep.txt").read_text(), "x\n")
+        self.assertEqual(code, 0, out)
+        self.assert_removed(path, branch)
+
+    def test_a_symlink_replacement_before_directory_open_stops_removal(self):
+        path, branch, head = self.task(7)
+        self.publish(path)
+        directory = path / self.PAYLOAD / "runtime"
+        real_open = os.open
+        swapped = False
+
+        def swap_then_open(target, *args, **kwargs):
+            nonlocal swapped
+            if str(target) == "runtime" and not swapped:
+                directory.parent.chmod(0o755)
+                directory.rename(directory.with_name("runtime-original"))
+                directory.symlink_to(self.outside)
+                swapped = True
+            return real_open(target, *args, **kwargs)
+
+        with mock.patch.object(os, "open", side_effect=swap_then_open):
+            code, out = self.cleanup(path)
+        self.assertTrue(swapped)
+        self.assertEqual(code, 1, out)
+        self.assertIn("cannot open", out)
+        self.assertTrue(path.is_dir())
+        self.assertIn(str(path), self.registered())
+        self.assertEqual(self.local_branch(branch), head)
+        self.assertEqual(self.remote_branch(branch), head)
+        self.assertEqual(self.outside.stat().st_mode & 0o777, 0o555)
+        self.assertEqual((self.outside / "keep.txt").read_text(), "x\n")
+
+    def test_a_failed_release_or_final_recheck_does_not_open_read_only_output(self):
+        cases = {"failed release": "exit 73", "new file": "echo late > late.txt"}
+        for number, (name, command) in enumerate(cases.items(), start=10):
+            with self.subTest(case=name):
+                path, branch, head = self.task(number)
+                trees = self.publish(path)
+                self.config["cleanup"]["releaseCommands"] = [
+                    {"name": name, "command": command, "timeoutSeconds": 10}]
+                code, out = self.cleanup(path)
+                self.assertEqual(code, 1, out)
+                self.assert_kept(path, branch, head)
+                self.assertEqual({os.stat(d).st_mode & 0o777 for d in trees}, {0o555}, out)
 
     def test_a_kept_or_dry_run_worktree_keeps_its_read_only_tree_as_it_was(self):
         cases = {"dry run": {"merged": True}, "not merged": {"merged": False}}
