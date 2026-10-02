@@ -141,12 +141,14 @@ enum RevealCadence: CaseIterable, CustomStringConvertible {
 /// pending or fading.
 struct RevealSimulation {
     var starts: [Double] = []
+    /// Includes source-arrival restarts as well as scheduled (possibly late) ticks.
+    var tickTimes: [Double] = []
     var poppedWords = 0
     var maximumStartLatency = 0.0
 
     private static let fade = Double(ChatStreamingTextRevealPolicy.fadeMilliseconds)
 
-    static func current(arrivals: [Double]) -> RevealSimulation {
+    static func current(arrivals: [Double], tickDelay: Double = 0) -> RevealSimulation {
         let policy = ChatStreamingTextRevealPolicy.self
         var result = RevealSimulation()
         var clock: Double?
@@ -158,6 +160,7 @@ struct RevealSimulation {
             let frame = frameIndex < frames.count ? frames[frameIndex] : .infinity
             let now = min(frame, wake ?? .infinity)
             guard now.isFinite else { break }
+            result.tickTimes.append(now)
             if frame <= now {
                 frameIndex += 1
                 while admitted < arrivals.count, arrivals[admitted] <= now { admitted += 1 }
@@ -184,7 +187,7 @@ struct RevealSimulation {
             }
             let fading = (result.starts.last ?? -.infinity) + fade > now
             wake = admission.nextStart != nil || fading
-                ? now + policy.tickMilliseconds(now: now, nextStart: admission.nextStart)
+                ? now + policy.tickMilliseconds(now: now, nextStart: admission.nextStart) + tickDelay
                 : nil
         }
         return result

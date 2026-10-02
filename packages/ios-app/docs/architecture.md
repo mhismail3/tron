@@ -1730,8 +1730,15 @@ completion shows the full source without replay. `ChatStreamingTextRevealPolicy.
 time since the last scheduled start, never by how often progress frames restart the reveal task: the spacing is the
 slowest that starts each pending word within 180 ms of its arrival, clamped to 8–55 ms (exactly 55 ms at a backlog of
 three or fewer), with several words per tick when shorter than a tick. Only a real stall (more than 125 pending words
-or a word waiting over a second) catches up without a fade. `StreamingTextRevealPacingTests` replays 150 ms, 75 ms, and
-bursty cadences at 10–80 words/s; `StreamingTextRevealContinuityTests` samples the mounted view for ink jumps. Rendered text is concatenated once per
+or a word waiting over a second) catches up without a fade. An admitted word's opacity ramps linearly
+from zero to one over the policy fade duration (220 ms). `StreamingTextRevealPacingTests` replays
+150 ms, 75 ms, and bursty cadences at 10–80 words/s; `StreamingTextRevealContinuityTests` checks
+fractional policy opacity bounds, strict progression and duration-bounded slope, with representative
+samples around simulated progress restarts and late wakes, separately from admission and convergence. It then appends mounted progress without per-revision settlement, checks sampled prefix ink against
+unchanged reference glyph cores, and requires final source convergence. Neither policy simulation
+nor final convergence proves native timestamp preservation; sampled native frames may miss fades.
+Native frame throughput is a controlled-host/device qualification, not a wall-clock test assertion.
+Rendered text is concatenated once per
 token revision; a reveal tick reuses the memoized fully revealed prefix and rebuilds only the pending or fading tail.
 Settling text that is not streaming writes no view state; the settled words are recorded lazily and folded in only if
 the same inline later streams, so they still never fade. The eager Markdown block stack publishes its exact wrapped vertical ideal even when its

@@ -393,9 +393,11 @@
           "scripts/validate-push-service-config.sh",
           "config/PushService.xcconfig",
           "scripts/gateway-payload-deploy.mjs",
+          "scripts/hash-npm-runtime.py",
+          "config/ci-toolchain.env",
           ".node-version"
         ],
-        "command": "packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh"
+        "command": "packages/mac-app/scripts/test-tron-gateway-launcher.sh && packages/mac-app/scripts/test-update-payload-fingerprint.sh && packages/mac-app/scripts/test-push-product-config.sh && packages/mac-app/scripts/test-tron-gateway-npm.sh && packages/mac-app/scripts/test-bundle-gateway-rebuild.sh"
       },
       {
         "name": "mac-native-computer-control",
@@ -583,7 +585,10 @@
       "**/.DS_Store",
       ".ci-tools/**",
       "packages/ios-app/TronMobile.xcodeproj/**",
-      "packages/mac-app/TronMac.xcodeproj/**"
+      "packages/mac-app/TronMac.xcodeproj/**",
+      "packages/mac-app/Sources/Resources/Gateway/**",
+      "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
+      "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources/AppIcon.icns"
     ],
     "releaseCommands": [
       {

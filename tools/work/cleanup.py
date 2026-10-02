@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -229,6 +230,36 @@ def _drop_branch_settings(primary: Path, branch: str) -> str:
     return "" if dropped.returncode == 0 else f", its settings kept ({dropped.stderr.strip()})"
 
 
+def _open_directories(path: Path) -> Optional[str]:
+    """Give the owner rwx on every directory in the worktree; None when done, else why not.
+
+    Generated output can be published read-only (the Mac Gateway payload is 0555), and
+    `git worktree remove` drops the registration before it fails part way on such a tree.
+    Only directories: unlinking needs the parent's write bit, not the file's. Symlinks are
+    neither followed nor changed, so nothing outside the worktree is touched.
+    """
+    def open_directory(directory: str, parent: Optional[int] = None) -> None:
+        # A name may be replaced after inspection. Keep chmod and traversal on
+        # the same no-follow descriptor, never on the newly resolved path.
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        try:
+            mode = os.fstat(fd).st_mode
+            if mode & stat.S_IRWXU != stat.S_IRWXU:
+                os.fchmod(fd, stat.S_IMODE(mode) | stat.S_IRWXU)
+            with os.scandir(fd) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        open_directory(entry.name, fd)
+        finally:
+            os.close(fd)
+
+    try:
+        open_directory(str(path))
+    except OSError as error:
+        return f"cannot open {error.filename or path} for removal: {error.strerror or error}"
+    return None
+
+
 def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
     """Release, recheck, then remove the worktree, the local branch and the remote branch."""
     for entry in settings.releases:
@@ -239,6 +270,10 @@ def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
     reasons = _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
     if reasons:
         return False, "; ".join(reasons)
+    # Only now that everything left is proven committed or regenerable.
+    unopened = _open_directories(tree.path)
+    if unopened:
+        return False, unopened
     removed = _git(settings.primary, "worktree", "remove", str(tree.path), check=False)
     if removed.returncode != 0:
         return False, f"git worktree remove refused: {removed.stderr.strip()}"

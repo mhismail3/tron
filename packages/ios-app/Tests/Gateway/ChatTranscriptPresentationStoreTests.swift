@@ -1259,48 +1259,61 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    /// Failure mode: token updates rebuild a maximum canonical page rather
+    /// than reuse it. Work reports, not elapsed time, prove bounded suffix work.
+    /// Each install owns its hang bound; fixture/reference construction and
+    /// the number of completed updates cannot consume a shared timing budget.
     @Test("text streaming reuses one maximum-page canonical projection")
     func textStreamingReusesCanonicalProjection() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
-            let builder = SessionScenarioBuilder(seed: 1_209)
-            var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
-            let totalEntries = 10_000
-            snapshot.transcript = builder.pagedMixedSession(totalEntries: totalEntries).page(
-                before: totalEntries,
-                count: totalEntries
-            )
-            snapshot.transcriptStart = 0
-            snapshot.transcriptTotal = totalEntries
-            let signposts = RecordingPerformanceSignposts()
-            let store = ChatTranscriptPresentationStore(performanceSignposts: signposts)
-            var tag = ChatTranscriptProjectionTag(
-                snapshot: snapshot,
-                presentationGeneration: 14,
-                canonicalGeneration: 40,
-                timelineGeneration: 0
-            )
-            store.submit(snapshot: snapshot, tag: tag)
-            _ = try await store.waitForInstall(of: tag)
-
-            for update in 1...30 {
-                snapshot.streaming = try streamingMessage(update: update)
-                tag = ChatTranscriptProjectionTag(
-                    snapshot: snapshot,
-                    presentationGeneration: 14,
-                    canonicalGeneration: 40,
-                    timelineGeneration: update
-                )
+        let builder = SessionScenarioBuilder(seed: 1_209)
+        var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
+        let totalEntries = 10_000
+        snapshot.transcript = builder.pagedMixedSession(totalEntries: totalEntries).page(
+            before: totalEntries, count: totalEntries
+        )
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = totalEntries
+        let reports = StoreProjectionWorkRecorder()
+        let signposts = RecordingPerformanceSignposts()
+        let store = ChatTranscriptPresentationStore(
+            performanceSignposts: signposts, workRecorder: reports.record
+        )
+        defer { store.reset() }
+        var tag = ChatTranscriptProjectionTag(
+            snapshot: snapshot, presentationGeneration: 14,
+            canonicalGeneration: 40, timelineGeneration: 0
+        )
+        func install(_ snapshot: SessionSnapshot, tag: ChatTranscriptProjectionTag) async throws {
+            try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
                 store.submit(snapshot: snapshot, tag: tag)
                 _ = try await store.waitForInstall(of: tag)
             }
-
-            let installed = try #require(store.installed)
-            let cold = ChatTranscriptPresentation.timeline(in: snapshot)
-            #expect(installed.timeline == cold)
-            #expect(installed.timeline.items.canonical.count == cold.items.count - 1)
-            #expect(installed.timeline.items.live.count == 1)
-            #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 31)
         }
+        try await install(snapshot, tag: tag)
+        for update in 1...30 {
+            snapshot.streaming = try streamingMessage(update: update)
+            tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot, presentationGeneration: 14,
+                canonicalGeneration: 40, timelineGeneration: update
+            )
+            try await install(snapshot, tag: tag)
+        }
+        let installed = try #require(store.installed)
+        #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 31)
+        let work = reports.values
+        #expect(work.count == 31)
+        #expect(work.first?.mode == .cold)
+        #expect(work.first?.sourceEntriesExamined == totalEntries)
+        let streamingWork = work.dropFirst()
+        #expect(streamingWork.count == 30)
+        #expect(
+            streamingWork.allSatisfy { $0.mode == .isolatedStreamingSuffix && $0.sourceEntriesExamined == 1 },
+            "every streaming update appends its live suffix: \(streamingWork.map(\.mode))"
+        )
+        let cold = ChatTranscriptPresentation.timeline(in: snapshot)
+        #expect(installed.timeline == cold)
+        #expect(installed.timeline.items.canonical.count == cold.items.count - 1)
+        #expect(installed.timeline.items.live.count == 1)
     }
 
     @Test("hidden thinking label changes rebuild row preparation in the same scope")

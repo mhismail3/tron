@@ -1218,7 +1218,23 @@ The lease serializes commands, not sessions: an app one command launched can be
 replaced by the next command that takes the lease.
 `status` and `remember` take no lease. `DeviceLeaseFixture` in
 `scripts/test-ios-test-infrastructure.py` covers contention and stale-lease
-release.
+release. Its hardware-free gated tools belong to the fixture process, not the
+lease holder: if the fixture dies or its gate directory disappears, the fake
+build/launch fails instead of waiting forever or continuing an install. This
+keeps the killed-holder regression meaningful while also bounding abandoned
+fixture trees when interruption bypasses teardown. `DeviceLeaseFixture` checks
+SIGKILL of a test owner, an unhandled subprocess wait timeout, and gate-directory
+removal against the real helper trees while another gated fixture stays live;
+`GatewayE2EFixture` covers removal of its fake build gate directory. Interrupted
+fixture cleanup preserves historical device build logs, including across repeated
+runs: a PID in a `/tmp` filename cannot prove invocation ownership. Logs without
+an invocation-owned path are retained, not discovered and removed by PID glob.
+Run
+`python3 scripts/test-ios-test-infrastructure.py DeviceLeaseFixture GatewayE2EFixture`
+to regenerate inspectable process-survival reports at
+`test-results/ios-infrastructure/*-cleanup.json`. The full hardware-free suite is
+registered in both `work verify` and the CI policy job; it does not use real
+devices or simulators.
 
 ### Test runner safety contract
 
@@ -1286,7 +1302,33 @@ background/foreground convergence, and responsive-socket preservation. `Dashboar
 cached/stale/live activity, ID-index integrity, and retention of existing dashboard buckets
 when a background transport is retired. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
 waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
-wait or a clock that collapses liveness sleeps into a hot loop. Test-owned unstructured tasks
+wait or a clock that collapses liveness sleeps into a hot loop. The watchdog bounds a hang, never
+the test's own work: a test must not need a fast machine to finish inside it. Walk long backoff
+curves with `ManualClock.advanceToNextDeadline()` (one step per registered timer, as
+`DashboardStateOwnerTests.secondaryReconnectHasNoAttemptBudget` does), prove reuse or skipped work
+from work reports rather than elapsed time (`ChatTranscriptPresentationStoreTests.textStreamingReusesCanonicalProjection`),
+await the exact outcome a race owes instead of ending the test first (`AppModelReconnectTests.falseRestoreRejectsDeadEpochAfterRefresh`
+waits for the replacement attempt its dead epoch starts), and bound display-driven settling in
+finite display-frame phases (`ChatFloatingDisplayLayoutTests.keyboardAndAccessories`). The floating
+oracle checks every sampled native frame and each keyboard/accessory/draft/restored milestone;
+it does not assume the host samples a particular intermediate animation instant. Streaming
+continuity exercises the existing admission/opacity policies with virtual-time schedules (including
+restarts and late ticks). Aggregate jump/convergence bounds do not prove fading: the oracle also
+requires bounded fractional opacity throughout the policy's linear fade, strict progression, and a
+slope bounded by the fade duration. Representative early/middle/late samples around simulated
+restart/wake times use simulation-assigned starts; `virtual-reveal-opacity.json` records those probes.
+They do not observe the view's `revealStarts` and cannot reject a native start-time reset on restart.
+It then mounts the actual view, appends progress on display boundaries without waiting for each
+revision to settle, and records glyph ink in `mounted-reveal-ink.json`. Prefix monotonicity compares
+unchanged reference glyph cores, rejecting layout drift rather than letting added glyphs hide loss.
+The final authoritative source must converge; convergence alone cannot detect timestamp resets.
+Both attachments are retained in the runner's xcresult. The former native largest-jump threshold
+could detect reset-induced bursts on a fast host but also rejected valid rendering when the hosted
+runner missed fade frames. Sampled monotonicity does not guarantee native timestamp preservation
+or temporal smoothness: samples may miss intermediate fades on a loaded host. Policy simulation does
+not prove native bookkeeping. Native timing qualification requires a controlled host or device measurement. Each of the 31 maximum-page
+projection installs has the original ten-second hang bound, with fixture/reference work outside it;
+completed installs never spend a shared wall-time allowance. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
 the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
 bytes; they must not implement protocol decoding, session state, receipt policy,

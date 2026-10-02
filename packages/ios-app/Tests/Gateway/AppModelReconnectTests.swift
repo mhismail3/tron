@@ -1391,6 +1391,13 @@ struct AppModelReconnectTests {
         }
     }
 
+    /// Failure mode: a deferred projection that finishes after its socket died
+    /// trusts the coordinator's stale connection ID (the disconnect event is
+    /// still queued) and leaves the lifecycle `.connected` on a dead epoch
+    /// instead of settling the aggregate and recovering at once. The test
+    /// awaits the aggregate settlement and the replacement attempt it owes; it
+    /// used to end at teardown and crash whenever the immediate replacement
+    /// won that race on a slow runner.
     @Test("false mounted restore cannot publish connected after its socket dies during refresh")
     func falseRestoreRejectsDeadEpochAfterRefresh() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1404,13 +1411,17 @@ struct AppModelReconnectTests {
             )
             defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
             defaults.set(profile.id, forKey: "selectedGateway.v1")
-            let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+            // The third socket serves the replacement the dead epoch owes. The
+            // manual clock never advances, so no delayed retry or transport
+            // deadline can act while the test runs.
+            let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket(), ScriptedGatewaySocket()]
             let factory = ScriptedGatewaySocketFactory(sockets: sockets)
-            let client = GatewayClient(socketFactory: factory.factory)
+            let clock = ManualClock()
+            let client = GatewayClient(socketFactory: factory.factory, clock: clock.clock)
             let coordinator = GatewayLifecycleCoordinator(
                 client: client,
                 profiles: GatewayProfileStore(defaults: defaults),
-                clock: .continuous,
+                clock: clock.clock,
                 reconnectDelayPolicy: .standard,
                 uuidSource: .random,
                 pairer: GatewayPairer(),
@@ -1420,24 +1431,36 @@ struct AppModelReconnectTests {
             let projection = FailFirstMountedRestoreProjection(blockRefresh: true)
             coordinator.delegate = projection
 
-            let initial = Task { try await coordinator.connectHosted(profile: profile, token: "token") }
-            try await sockets[0].waitUntilSent(count: 1)
-            await sockets[0].enqueue(helloFrame())
-            try await initial.value
+            do {
+                let initial = Task { try await coordinator.connectHosted(profile: profile, token: "token") }
+                try await sockets[0].waitUntilSent(count: 1)
+                await sockets[0].enqueue(helloFrame())
+                defer { initial.cancel() }
+                try await valueOfOwnedTask(initial)
 
-            coordinator.requestReconnect(immediate: true)
-            try await sockets[1].waitUntilSent(count: 1)
-            await sockets[1].enqueue(helloFrame())
-            for _ in 0..<50 where !projection.refreshStarted { await Task.yield() }
-            #expect(projection.refreshStarted)
-            await sockets[1].failPendingReceivers(CancellationError())
-            try await sockets[1].waitUntilClosed()
-            #expect(await client.activeConnectionID() == nil)
-            // Deliberately leave transport.disconnected queued: the coordinator
-            // still has its stale ID until the event reducer catches up.
+                coordinator.requestReconnect(immediate: true)
+                try await sockets[1].waitUntilSent(count: 1)
+                await sockets[1].enqueue(helloFrame())
+                await projection.waitUntilRefreshStarted()
+                await sockets[1].failPendingReceivers(CancellationError())
+                try await sockets[1].waitUntilClosed()
+                #expect(await client.activeConnectionID() == nil)
+                // Deliberately leave transport.disconnected queued: no event reducer
+                // runs here, so the coordinator keeps its stale ID and only the
+                // projection's own client check can see the dead socket.
+                projection.releaseRefresh()
+                await projection.waitForAggregateCompletion(count: 1)
+                #expect(projection.aggregateCompletions == [false])
+                #expect(coordinator.connectionState != .connected)
+                try await sockets[2].waitUntilSent(count: 1)
+                #expect(factory.requests.count == 3)
+            } catch {
+                projection.releaseRefresh()
+                await coordinator.teardown()
+                await client.close()
+                throw error
+            }
             projection.releaseRefresh()
-            for _ in 0..<50 where coordinator.connectionState == .connected { await Task.yield() }
-            #expect(coordinator.connectionState != .connected)
             await coordinator.teardown()
             await client.close()
         }
@@ -2753,9 +2776,10 @@ private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDe
 private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectionDelegate {
     private(set) var restoreCount = 0
     private(set) var aggregateCompletions: [Bool] = []
-    private var aggregateWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    private let aggregateEvents = AsyncStream<Int>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private let blockRefresh: Bool
-    private(set) var refreshStarted = false
+    private var refreshStarted = false
+    private let refreshEvents = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
     private var releaseRefreshContinuation: CheckedContinuation<Void, Never>?
 
     init(blockRefresh: Bool = false) { self.blockRefresh = blockRefresh }
@@ -2768,24 +2792,29 @@ private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectio
         succeeded: Bool
     ) {
         aggregateCompletions.append(succeeded)
-        let ready = aggregateWaiters.filter { aggregateCompletions.count >= $0.count }
-        aggregateWaiters.removeAll { aggregateCompletions.count >= $0.count }
-        for waiter in ready { waiter.continuation.resume() }
+        aggregateEvents.continuation.yield(aggregateCompletions.count)
     }
 
     func waitForAggregateCompletion(count: Int) async {
         if aggregateCompletions.count >= count { return }
-        await withCheckedContinuation { continuation in
-            aggregateWaiters.append((count: count, continuation: continuation))
+        for await completed in aggregateEvents.stream {
+            if completed >= count { return }
         }
     }
 
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard blockRefresh else { return }
         refreshStarted = true
+        refreshEvents.continuation.yield(())
         await withCheckedContinuation { continuation in
             releaseRefreshContinuation = continuation
         }
+    }
+
+    func waitUntilRefreshStarted() async {
+        if refreshStarted { return }
+        var iterator = refreshEvents.stream.makeAsyncIterator()
+        _ = await iterator.next()
     }
 
     func releaseRefresh() {
