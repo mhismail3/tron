@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fauxAssistantMessage, fauxProvider, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { knowledgeModelFailureSummary, KnowledgeModelOutputError } from "./knowledge-model-output.js";
 import { ModelRuntimeKnowledgeModel } from "./knowledge-service.js";
 
 const input = {
@@ -50,5 +51,48 @@ describe("Knowledge model completion errors", () => {
     await expect(model.reflect(input)).rejects.toMatchObject(expected);
     await expect(model.synthesize(input)).rejects.toMatchObject(expected);
     await expect(model.assess({ title: "fixture", text: "fixture", interests: [] }, input.signal)).rejects.toMatchObject(expected);
+  });
+});
+
+// Synthetic reply shape from #292; no captured model/source text.
+describe("Knowledge single-object JSON contract", () => {
+  it("summarizes the Luna leading-prose reply shape without interpreting prose as evidence", async () => {
+    const text = 'A quoted "claim", a backslash \\, braces {like this}, and [uncertainty].';
+    const json = JSON.stringify({ text, extra: { nested: [1, { ok: true }] } });
+    const raw = "Here is the saved-source summary.\n" + json + "\nEnd of summary.";
+    const { model } = adapter(fauxAssistantMessage(raw));
+    await expect(model.summarizeSource(input)).resolves.toEqual({ text });
+  });
+
+  it("assesses a prose-wrapped object while preserving assessment validation", async () => {
+    const assessment = { summary: "Bounded summary", evidenceQuality: "low", freshness: "unknown", recommendation: "pending", confidence: 0.4, classification: "Research" };
+    const { model } = adapter(fauxAssistantMessage("Assessment follows.\n" + JSON.stringify(assessment)));
+    await expect(model.assess({ title: "fixture", text: "fixture", interests: [] }, input.signal)).resolves.toEqual(assessment);
+  });
+
+  it.each([
+    '[{"text":"array"}]',
+    'Here: {"text":"first"} then {"text":"second"}',
+    'Here: {"text":"complete"} then {"text":',
+    'Here: {"text":"unfinished"',
+    'Here: {"text":"bad",}',
+    'Here: {"text":"complete"} ]',
+    'Here: [ {"text":"nested"} ]',
+    'No JSON here.',
+    'Here: {"text":"unterminated}',
+  ])("rejects ambiguous or incomplete reply %s with shape-only diagnostics", async raw => {
+    const { model } = adapter(fauxAssistantMessage(raw));
+    await expect(model.summarizeSource(input)).rejects.toMatchObject({ code: "model-output-invalid" });
+  });
+
+  it("emits each invalid-output diagnostic field once in the failure reason", async () => {
+    const { model } = adapter(fauxAssistantMessage("private malformed output"));
+    const error = await model.summarizeSource(input).catch(error => error);
+    expect(error).toBeInstanceOf(KnowledgeModelOutputError);
+    const failure = knowledgeModelFailureSummary(error);
+    for (const key of ["stopReason", "parts", "textLength", "codeFence", "leadingProse"]) {
+      expect(failure.reason.split(`${key}=`)).toHaveLength(2);
+    }
+    expect(failure.reason).not.toContain("private malformed output");
   });
 });
