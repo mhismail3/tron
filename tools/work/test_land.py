@@ -1,4 +1,4 @@
-"""Isolated checks for land and steward failure modes 32-42 in README.md.
+"""Isolated checks for land and steward failure modes 32-42, 64 and 65 in README.md.
 
 Real temporary repositories with a local bare remote. GitHub is a fake `gh`
 (WORK_GH) that keeps pull request, check, status, issue and Project state in a
@@ -148,15 +148,17 @@ FAKE_GH = textwrap.dedent(
             done({"html_url": "https://example.invalid/comment"})
         done("{}")
     if command == ["pr", "list"]:
-        pulls = [p for p in state["pulls"] if p["state"] == "OPEN" and p["headRefName"] == arg("--head")]
-        if arg("--jq") == ".[].number":
-            done("\\n".join(str(p["number"]) for p in pulls))
+        wanted = (arg("--state") or "open").upper()
+        pulls = [p for p in state["pulls"] if p["state"] == wanted and p["headRefName"] == arg("--head")]
         done([{"number": p["number"], "title": p["title"], "body": p["body"], "isCrossRepository": p.get("fork", False),
-               "url": "https://github.com/%s/pull/%d" % (repo, p["number"])} for p in pulls])
+               "headRefOid": head_of(p), "baseRefName": p.get("base", state["base"]),
+               "mergeCommit": p["mergeCommit"], "url": "https://github.com/%s/pull/%d" % (repo, p["number"])}
+              for p in pulls])
     if command == ["pr", "create"]:
         number = 100 + len(state["pulls"])
         state["pulls"].append({"number": number, "headRefName": arg("--head"), "title": arg("--title"),
-                               "body": stdin, "state": "OPEN", "headRefOid": None, "mergeCommit": None})
+                               "base": arg("--base"), "body": stdin, "state": "OPEN", "headRefOid": None,
+                               "mergeCommit": None})
         done("https://github.com/%s/pull/%d" % (repo, number))
     if command == ["pr", "edit"]:
         p = pull(args[2])
@@ -194,6 +196,9 @@ FAKE_GH = textwrap.dedent(
             git("update-ref", "-d", "refs/heads/" + p["headRefName"])
         done("")
     if args[0] == "issue":
+        # failIssue: issue subcommands GitHub refuses, as an outage after the merge would.
+        if args[1] in state.get("failIssue", []):
+            fail("gh: Bad Gateway (HTTP 502)")
         issue = state["issues"][args[2]]
         if args[1] == "close":
             issue["state"] = "CLOSED"
@@ -202,8 +207,6 @@ FAKE_GH = textwrap.dedent(
         elif args[1] == "reopen":
             issue["state"] = "OPEN"
         elif args[1] == "comment":
-            if state.get("failIssueComment"):
-                fail("gh: Bad Gateway (HTTP 502)")
             issue["comments"].append(stdin)
         elif args[1] == "edit":
             issue["labels"].append(arg("--add-label"))
@@ -346,9 +349,9 @@ class LandFixture(unittest.TestCase):
             return []
         return [json.loads(line) for line in self.gh_log.read_text().splitlines()]
 
-    def writes(self) -> list:
+    def writes(self, since: int = 0) -> list:
         out = []
-        for call in self.calls():
+        for call in self.calls()[since:]:
             args = call["args"]
             if tuple(args[:2]) in _WRITES:
                 out.append(" ".join(args[:2]))
@@ -656,7 +659,7 @@ class HandoffTests(LandFixture):
 
     def test_a_failure_after_the_merge_keeps_the_action_text(self):
         action = "Run `scripts/example restart`, then check that status names this branch."
-        self.set_state(failIssueComment=True)
+        self.set_state(failIssue=["comment"])
         with self.assertRaises(land.LandError) as raised:
             self.land(validation=action)
         pull = self.state()["pulls"][0]
@@ -666,6 +669,110 @@ class HandoffTests(LandFixture):
         self.assertIn(action, str(raised.exception))
         self.assertIn("#100", str(raised.exception))
         self.assertFalse(any(action in comment for comment in self.issue()["comments"]))
+
+
+class ResumeTests(LandFixture):
+    # Failure mode 65.
+    ACTION = "Run `scripts/example restart`, then check that status names this branch."
+
+    def stopped_after_merge(self, failing: list, validation=None) -> None:
+        """Land until GitHub reports MERGED, then stop as an outage would."""
+        self.set_state(failIssue=failing)
+        with self.assertRaises(land.LandError):
+            self.land(validation=validation)
+        self.assertEqual(self.state()["pulls"][0]["state"], "MERGED")
+        self.set_state(failIssue=[])
+        self.before = len(self.calls())
+        self.runs = self.counts.read_text().count("run")
+
+    def assert_nothing_redone(self) -> None:
+        later = self.writes(since=self.before)
+        for redone in ("pr create", "pr edit", "pr merge"):
+            self.assertNotIn(redone, later)
+        self.assertFalse([write for write in later if "/statuses/" in write or "/comments" in write], later)
+        self.assertEqual(self.counts.read_text().count("run"), self.runs, "no check ran again")
+
+    def test_rerun_closes_the_issue_even_when_github_deleted_the_branch(self):
+        self.set_state(deleteOnMerge=True)
+        self.stopped_after_merge(["close"])
+        self.assertEqual(self.issue()["state"], "OPEN")
+        self.assertEqual(self.land(summary=False), 0)
+        merge = self.state()["pulls"][0]["mergeCommit"]["oid"]
+        self.assertEqual((self.issue()["state"], self.issue()["status"]), ("CLOSED", "Done"))
+        self.assertIn(merge[:12], self.issue()["comments"][-1])
+        self.assertEqual(self.remote_head(), "")
+        self.assert_nothing_redone()
+
+    def test_rerun_deletes_the_branch_at_the_merged_head(self):
+        self.stopped_after_merge(["close"])
+        self.assertEqual(self.remote_head(), git(self.repo, "rev-parse", "HEAD"))
+        self.assertEqual(self.land(), 0)
+        self.assertEqual(self.remote_head(), "")
+        self.assert_nothing_redone()
+
+    def test_rerun_hands_off_once_with_the_merged_text(self):
+        # The handoff comment was posted; adding the label failed.
+        self.stopped_after_merge(["edit"], validation=self.ACTION)
+        self.assertEqual(self.land(summary=False), 0)
+        issue = self.issue()
+        self.assertEqual(sum(self.ACTION in comment for comment in issue["comments"]), 1)
+        self.assertIn("needs-user-validation", issue["labels"])
+        self.assertEqual((issue["state"], issue["status"]), ("OPEN", "Needs you"))
+        self.assert_nothing_redone()
+
+    def test_rerun_with_the_same_text_finishes_the_handoff(self):
+        self.stopped_after_merge(["comment"], validation=self.ACTION)
+        self.assertEqual(self.land(validation=self.ACTION), 0)
+        self.assertEqual(sum(self.ACTION in comment for comment in self.issue()["comments"]), 1)
+        self.assertEqual(self.issue()["status"], "Needs you")
+        self.assert_nothing_redone()
+
+    def test_rerun_after_a_finished_handoff_keeps_the_maintainers_close(self):
+        self.assertEqual(self.land(validation=self.ACTION), 0)
+        self.set_state(issues={str(NUMBER): dict(self.issue(), state="CLOSED", status="Done")})
+        before = len(self.calls())
+        self.assertEqual(self.land(summary=False), 0)
+        self.assertEqual(self.writes(since=before), [])
+        self.assertEqual((self.issue()["state"], self.issue()["status"]), ("CLOSED", "Done"))
+
+    def test_rerun_after_a_finished_land_keeps_the_maintainers_reopen(self):
+        self.assertEqual(self.land(), 0)
+        self.set_state(issues={str(NUMBER): dict(self.issue(), state="OPEN", status="Ready")})
+        before = len(self.calls())
+        self.assertEqual(self.land(summary=False), 0)
+        self.assertEqual(self.writes(since=before), [])
+        self.assertEqual((self.issue()["state"], self.issue()["status"]), ("OPEN", "Ready"))
+
+    def test_rerun_refusals(self):
+        self.stopped_after_merge(["close"])
+        cases = {
+            "another session": dict(session="session-b"),
+            "validation the merge did not ask for": dict(validation=self.ACTION),
+        }
+        for name, kwargs in cases.items():
+            with self.subTest(case=name):
+                with self.assertRaises(land.LandError):
+                    self.land(**kwargs)
+        self.assertEqual(self.writes(since=self.before), [])
+        self.assertEqual(self.issue()["state"], "OPEN")
+        self.assertEqual(self.remote_head(), git(self.repo, "rev-parse", "HEAD"))
+
+    def test_a_contradicting_validation_text_is_refused(self):
+        self.stopped_after_merge(["comment"], validation=self.ACTION)
+        with self.assertRaises(land.LandError):
+            self.land(validation="Something else entirely.")
+        self.assertFalse(any(self.ACTION in comment for comment in self.issue()["comments"]))
+
+    def test_a_merge_at_an_older_head_or_from_a_fork_is_not_resumed(self):
+        head = git(self.repo, "rev-parse", "HEAD")
+        fork = {"number": 90, "headRefName": BRANCH, "title": "fork", "body": "Closes #7\n", "state": "MERGED",
+                "fork": True, "headRefOid": head, "mergeCommit": {"oid": head}}
+        older = dict(fork, number=91, fork=False, headRefOid=self.claim_sha)
+        self.set_state(pulls=[fork, older])
+        self.assertEqual(self.land(), 0)
+        self.assertIn("pr create", self.writes())
+        [merge] = self.merges()
+        self.assertEqual(merge[2], "102")
 
 
 class StewardFixture(LandFixture):
@@ -703,7 +810,6 @@ class StewardTests(StewardFixture):
             "verify failed": dict(statuses={self.head: {"test/verify": "FAILURE"}}),
             "check red": dict(checks={"policy": "FAILURE"}),
             "check pending": dict(pendingViews=10 ** 6),
-            "validation handoff": dict(pulls=[dict(state["pulls"][0], body="Refs #7\n")]),
             "closes another issue": dict(pulls=[dict(state["pulls"][0], body="Closes #70\n")]),
         }
         for name, change in cases.items():
@@ -729,6 +835,50 @@ class StewardTests(StewardFixture):
         [row] = rows
         self.assertEqual((row["issue"], row["pr"], row["checks"], row["unresolved"]), (NUMBER, 100, "success", 1))
         self.assertEqual(row["session"], SESSION)
+        self.assertEqual(self.writes(), [])
+
+
+class StewardHandoffTests(StewardFixture):
+    # Failure mode 64.
+    ACTION = "Restart the dev Gateway, then check that status names this branch."
+
+    def body(self, keyword: str, action) -> str:
+        receipt = {"head": self.head, "base": {"ref": BASE, "sha": self.head}, "required": ["policy"],
+                   "checks": {"policy": {"exitCode": 0, "seconds": 1, "carriedFrom": None}}}
+        # A summary heading with the section's name is not the validation text.
+        summary = "Adds the widget.\n\n## Maintainer validation\n\nNot this."
+        return land.pull_body(keyword, NUMBER, summary, receipt, action)
+
+    def with_body(self, body: str) -> None:
+        pulls = self.state()["pulls"]
+        pulls[0]["body"] = body
+        self.set_state(pulls=pulls)
+
+    def test_validation_handoff_is_landed_with_its_exact_text(self):
+        self.with_body(self.body("Refs", self.ACTION).replace("\n", "\r\n"))
+        self.assertEqual(self.steward_land(), 0)
+        pull = self.state()["pulls"][0]
+        self.assertEqual(pull["squash"][1], "Refs #7")
+        issue = self.issue()
+        self.assertIn(self.ACTION, issue["comments"][-1])
+        self.assertNotIn("Not this.", issue["comments"][-1])
+        self.assertIn("needs-user-validation", issue["labels"])
+        self.assertEqual((issue["state"], issue["status"]), ("OPEN", "Needs you"))
+        self.assertEqual(self.remote_head(), "")
+
+    def test_handoff_without_usable_text_is_refused_before_the_merge(self):
+        cases = {
+            "no section": "Refs #7\n",
+            "empty section": self.body("Refs", ""),
+            "closes and asks for validation": self.body("Closes", self.ACTION),
+            "text the scrub refuses": self.body("Refs", "FORBIDDEN action"),
+        }
+        for name, body in cases.items():
+            with self.subTest(case=name):
+                self.with_body(body)
+                with self.assertRaises(land.LandError):
+                    self.steward_land()
+        self.assertEqual(self.merges(), [])
         self.assertEqual(self.writes(), [])
 
 

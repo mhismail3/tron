@@ -205,8 +205,10 @@ branch and writes a receipt for that exact commit.
    head.
 2. It sets the commit status `verify.statusContext` to `pending` on the head,
    replacing any earlier status there before any other lookup can fail.
-3. The target is the open pull request for the branch, otherwise the issue
-   whose number is in the branch name (`<type>/<issue>-<slug>`).
+3. The target is the open pull request for the branch whose head is in this
+   repository, otherwise the issue whose number is in the branch name
+   (`<type>/<issue>-<slug>`). A fork's pull request with the same head name
+   never counts.
 4. Full logs and the receipt go only to the evidence repository
    `<owner>/<repo><verify.evidenceRepositorySuffix>`, derived at run time,
    under `<issue>/<head>/`. They are not scrubbed and hold local paths, so
@@ -324,6 +326,10 @@ covers the GitHub side.
     an empty diff, an unclassified path, or an unresolved base run it. The
     workflow logs the decision. `scripts/test-ci-ios-infra-scope.py` covers the
     path classification.
+63. **A fork's pull request receives a branch's verify evidence.** Claim branch
+    names are public, so a fork can open a pull request with the same head
+    name. `--post` comments on the branch's own pull request, or on the issue
+    when only a fork's exists.
 
 ## `dashboard`
 
@@ -577,11 +583,31 @@ work is committed. The `land` section of `.github/work.json` configures it.
      `cleanup`'s job, not `land`'s.
 
 Running `land` again after a stop before the merge resumes: it reuses the open
-pull request and the carried checks. A stop after GitHub reports MERGED is not
-resumed, because the claim branch may already be gone. The error names the
-steps left to do by hand (close the issue or hand it off, set Status, delete
-the branch) and, with `--needs-user-validation`, repeats the text, which is
-also in the pull request body.
+pull request and the carried checks.
+
+Running `land` again after a stop once GitHub reported MERGED finishes step 8
+and nothing else. Before the claim check it looks for a pull request from the
+branch in this repository that GitHub merged into the base branch at exactly
+the local head. When there is one:
+
+- the claim commit is read from the local history, because the remote branch
+  may already be gone;
+- the merged pull request's body decides the outcome: `Closes #N` closes the
+  issue, and `Refs #N` hands it off with the text of its Maintainer validation
+  section. A `--needs-user-validation` text that differs from the body is
+  refused; `--title` and `--summary-file` are ignored;
+- nothing is verified, pushed, posted or merged again, and a handoff comment
+  already on the issue for that pull request is not posted twice;
+- an outcome an earlier run finished and the maintainer changed since is left
+  alone: a handed-off issue that has the handoff comment and is closed, or a
+  closed issue that has its `Landed in #<pull>` comment and is open again.
+  Only the branch is still deleted.
+
+The error of a stop after the merge says that running `land` again finishes
+it, and also names the steps left to do by hand (close the issue or hand it
+off, set Status, delete the branch). With `--needs-user-validation` it repeats
+the text, which is also in the pull request body. A stop after a
+`steward --land` merge names only the steps by hand.
 
 ## `steward`
 
@@ -599,15 +625,18 @@ branch in this repository, it lists:
 - whether a local worktree has the branch checked out.
 
 `--land <issue>` merges that issue's pull request as `land` would (steps 7 and
-8, without validation handoff), but only when all of these hold:
+8), but only when all of these hold:
 
 - the verify status and every required check succeed on the pull request's
   head;
 - the head contains the base branch tip;
 - the remote branch is at that head;
 - any local worktree on the branch is clean and at the same commit;
-- the body starts with `Closes #N`. A `Refs #N` body is a validation handoff,
-  which only `land` performs.
+- the body starts with `Closes #N` or `Refs #N`, as `land` writes it. A
+  `Refs #N` body is a validation handoff: it merges with `Refs #N` and hands
+  the issue off with the text of the body's Maintainer validation section,
+  which must be present and pass the scrub command before the merge. A
+  `Closes #N` body with that section is refused.
 
 The steward never runs checks, merges the base branch or pushes commits. That
 work belongs to the owner's worktree. A pull request that needs any of it has to be
@@ -652,11 +681,24 @@ Project state and records every call. The live E2E covers GitHub itself.
 41. **The steward lands without a passing receipt.** `steward --land` merges
     only a head with a successful verify status and required checks, that
     contains the base tip, that no local worktree has moved past, and whose
-    body closes that issue and not one whose number starts with it. It never
-    runs checks.
+    body closes or refers to that issue and not one whose number starts with
+    it. It never runs checks.
 42. **A claimed status is misread.** An In review or Needs you claim is not a
     disagreement, a resumed `start` does not move it back to In progress, and
     `start` and the dashboard count the soft cap alike.
+64. **The steward loses, invents or skips a validation handoff.** A `Refs #N`
+    pull request merges with `Refs #N`, keeps the issue open and hands it off
+    with the exact text of its Maintainer validation section, not a summary
+    heading of the same name. A `Refs #N` body without that text, a `Closes #N`
+    body that has it, and text the scrub refuses stop before the merge.
+65. **A land stopped after the merge cannot finish, finishes twice or finishes
+    the wrong thing.** Run again, it finishes from the merged body even when
+    GitHub deleted the branch, without verifying, pushing, posting or merging
+    again, and posts the handoff comment once. It does not reopen a handed-off
+    issue the maintainer closed or close one the maintainer reopened after an
+    earlier run finished it. Another session's claim and a
+    validation text that contradicts the merged body are refused. A merge at
+    an older head or from a fork is not a resume.
 
 ## `cleanup`
 
