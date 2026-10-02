@@ -149,7 +149,8 @@ class CleanupFixture(unittest.TestCase):
 
     def add_pull(self, branch: str, head: str, **fields) -> None:
         pull = {"number": 100 + len(self.pulls), "headRefName": branch, "headRefOid": head, "baseRefName": BASE,
-                "isCrossRepository": False, "state": "MERGED", "url": "https://example.invalid/pull"}
+                "isCrossRepository": False, "state": "MERGED", "url": "https://example.invalid/pull",
+                "body": f"Closes #{claims.claimed_issue(branch)}\n", "mergeCommit": {"oid": head}}
         pull.update(fields)
         self.pulls.append(pull)
         self.save_pulls()

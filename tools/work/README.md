@@ -597,7 +597,11 @@ the local head. When there is one:
   section. A `--needs-user-validation` text that differs from the body is
   refused; `--title` and `--summary-file` are ignored;
 - nothing is verified, pushed, posted or merged again, and a handoff comment
-  already on the issue for that pull request is not posted twice.
+  already on the issue for that pull request is not posted twice;
+- an outcome an earlier run finished and the maintainer changed since is left
+  alone: a handed-off issue that has the handoff comment and is closed, or a
+  closed issue that has its `Landed in #<pull>` comment and is open again.
+  Only the branch is still deleted.
 
 The error of a stop after the merge says that running `land` again finishes
 it, and also names the steps left to do by hand (close the issue or hand it
@@ -690,7 +694,9 @@ Project state and records every call. The live E2E covers GitHub itself.
 65. **A land stopped after the merge cannot finish, finishes twice or finishes
     the wrong thing.** Run again, it finishes from the merged body even when
     GitHub deleted the branch, without verifying, pushing, posting or merging
-    again, and posts the handoff comment once. Another session's claim and a
+    again, and posts the handoff comment once. It does not reopen a handed-off
+    issue the maintainer closed or close one the maintainer reopened after an
+    earlier run finished it. Another session's claim and a
     validation text that contradicts the merged body are refused. A merge at
     an older head or from a fork is not a resume.
 

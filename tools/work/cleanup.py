@@ -104,18 +104,15 @@ def _scope(tree: Worktree, settings: Settings) -> Optional[str]:
 
 def _merged_head(gh: Gh, branch: str, head: str, base: str) -> Tuple[Optional[str], Optional[str]]:
     """(the pull request that merged exactly `head`, None) or (None, why none did)."""
-    pulls = json.loads(gh.run("pr", "list", "--head", branch, "--state", "merged", "--limit", "100",
-                              "--json", "number,headRefOid,baseRefName,isCrossRepository"))
-    # Claim branch names are public; a fork can open a pull request with the same head name.
-    own = [p for p in pulls if not p["isCrossRepository"] and p["baseRefName"] == base]
+    pulls = land.merged_pulls(gh, branch)
+    own = [p for p in pulls if p["baseRefName"] == base]
     for pull in own:
         if pull["headRefOid"] == head:
             return f"#{pull['number']}", None
     if own:
         merged = ", ".join(f"#{p['number']} at {p['headRefOid'][:12]}" for p in own)
         return None, f"merged {merged}, not at the local head {head[:12]}"
-    others = [f"#{p['number']} into {p['baseRefName']}" for p in pulls
-              if not p["isCrossRepository"] and p["baseRefName"] != base]
+    others = [f"#{p['number']} into {p['baseRefName']}" for p in pulls if p["baseRefName"] != base]
     return None, "no pull request from it is merged into " + base + (f" (merged {', '.join(others)})" if others else "")
 
 
