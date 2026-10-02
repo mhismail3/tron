@@ -825,6 +825,17 @@ async function makeImmutable(root) {
   await visit(root);
 }
 
+// Moves a validated staging tree into versions/ as a sealed version. macOS 15
+// refuses to rename a directory its owner cannot write (EACCES; macOS 26
+// permits it), so the root stays writable across the rename and is sealed in
+// place before any caller records the version as a candidate or selection.
+async function publishImmutablePayload(temporary, target) {
+  await makeImmutable(temporary);
+  await chmod(temporary, 0o755);
+  await rename(temporary, target);
+  await chmod(target, 0o555);
+}
+
 async function assertStoreRoots(paths) {
   // Never let mkdir/read/lock follow an attacker-created projection link. The
   // updater is not a sandbox, but its owned roots must not silently redirect
@@ -1545,8 +1556,7 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
       payloadManifest(manifest, { channel, version: targetVersion });
       await atomicJson(join(temporary, "manifest.json"), manifest);
       await validatePayload(temporary, { channel, version: targetVersion, payloadFingerprint: stagedFingerprint }, true);
-      await makeImmutable(temporary);
-      await rename(temporary, target);
+      await publishImmutablePayload(temporary, target);
       return markCandidateResult({ root: target, manifest, reused: false });
     } catch (error) {
       await makeMutable(temporary).catch(() => {});
@@ -2399,16 +2409,10 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
             if (error?.code !== "ENOENT") throw error;
           }
           await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
-          await makeImmutable(temporary);
-          // The rename removes the entry from its private parent; keep the tree
-          // root writable until it has reached versions/, then seal it there.
-          await chmod(temporary, 0o755);
-          await chmod(stagingParent, 0o700);
-          try { await rename(temporary, target); } catch (error) {
+          try { await publishImmutablePayload(temporary, target); } catch (error) {
             if (error?.code === "EEXIST") throw new Error(`version ${version} already exists`);
             throw error;
           }
-          await chmod(target, 0o555);
           await writeState(paths, {
             state: "prepared", channel: paths.channel, version, payloadFingerprint: fingerprint,
             sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
@@ -2463,9 +2467,13 @@ export function proveDebugHandoffIdentity(before, after, manifest) {
 }
 
 /** Copy the exact selected and authenticated Debug payload into Stable as an
- * inactive candidate. Stable current.json and the 9847 process are untouched. */
+ * inactive candidate. Stable current.json and the 9847 process are untouched.
+ * `version`/`expectedFingerprint` are the candidate `tron-dev-state.mjs
+ * handoff-admission` admitted from its clean source record (#124); admission
+ * runs before this lock, so the selection is re-checked against it here, where
+ * a concurrent Debug apply or rollback can no longer change it. */
 export async function handoffDebugCandidate({
-  devHome, stableHome, stableBundledRoot, host, port = 9848, token,
+  devHome, stableHome, stableBundledRoot, version, expectedFingerprint, host, port = 9848, token,
   timeoutMs = 10_000, requestInfo, preflight = preflightPayload,
 }) {
   if (!isAbsolute(stableBundledRoot ?? "")) throw new Error("Debug handoff requires the installed Stable bundled payload root");
@@ -2474,6 +2482,9 @@ export async function handoffDebugCandidate({
   return withOperationLock(devPaths, () => withOperationLock(stablePaths, async () => {
     const selected = await currentSelection(devPaths);
     if (!selected) throw new Error("Debug handoff requires a selected immutable dev payload");
+    if (selected.version !== version || selected.payloadFingerprint !== expectedFingerprint) {
+      throw new Error(`Debug selection changed to ${selected.version} after handoff admitted ${version}; run scripts/tron dev handoff again`);
+    }
     const devRoot = join(devPaths.versionsRoot, selected.version);
     const devManifest = await validatePayload(devRoot, {
       channel: "dev", version: selected.version, payloadFingerprint: selected.payloadFingerprint,
@@ -2771,7 +2782,10 @@ async function main() {
     const requested = argument("--host") ?? "127.0.0.1";
     const host = resolveDeploymentHost(requested);
     const token = await readLocalCredential(join(devHome, "gateway", "local-auth.json"));
-    const result = await handoffDebugCandidate({ devHome, stableHome, stableBundledRoot, host, token });
+    const result = await handoffDebugCandidate({
+      devHome, stableHome, stableBundledRoot, host, token,
+      version: argument("--version"), expectedFingerprint: argument("--fingerprint"),
+    });
     console.log(JSON.stringify({ command, ...result }));
     return;
   }

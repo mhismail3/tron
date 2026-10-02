@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { KnowledgeCurationRefusal, type KnowledgeAssessmentApprovalRequest, type KnowledgeConnectorConfigurationRequest, type KnowledgeConnectorDiscoverRequest, type KnowledgeConnectorQueueRequest, type KnowledgeConnectorAckRequest, type KnowledgeRaindropMoveRequest, type KnowledgeConnectorState, type KnowledgeConnectorStatus, type KnowledgeAction, type KnowledgeXOAuthStartRequest, type KnowledgeXOAuthCompleteRequest, type KnowledgeRecord, type KnowledgeRaindropRequest, type KnowledgeRaindropIntakeRequest, type KnowledgeSourceIngestRequest } from "./knowledge-contract.js";
+import { KnowledgeCurationRefusal, type KnowledgeAssessmentApprovalRequest, type KnowledgeConnectorBudgetReconcileRequest, type KnowledgeConnectorConfigurationRequest, type KnowledgeConnectorDiscoverRequest, type KnowledgeConnectorQueueRequest, type KnowledgeConnectorAckRequest, type KnowledgeRaindropMoveRequest, type KnowledgeConnectorState, type KnowledgeConnectorStatus, type KnowledgeAction, type KnowledgeXOAuthStartRequest, type KnowledgeXOAuthCompleteRequest, type KnowledgeRecord, type KnowledgeRaindropRequest, type KnowledgeRaindropIntakeRequest, type KnowledgeSourceIngestRequest } from "./knowledge-contract.js";
 import { captureSource, isVerifiedSourceCapture, recoverProviderSaveTime } from "./source-capture.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
@@ -13,6 +13,7 @@ import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
 import { JEV_DEFAULT_MODEL } from "./jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
+import { availablePaidBudgetCents, hasOpenPaidBudgetAttempt, markPaidBudgetDispatch, paidBudgetMonth, reconcilePaidBudgetAttempt, releaseUndispatchedPaidBudgetAttempt, reservePaidBudgetAttempt, rollPaidBudget, settlePaidBudgetAttempt } from "./paid-budget-ledger.js";
 import { normalizeProviderDisplayName, validateConnectionPolicy, type ConnectionInstance, type ProviderAdmissionObservation } from "../integrations/connection-contract.js";
 import { FixedHostBodyTooLarge, requestFixedHost } from "./fixed-host-transport.js";
 
@@ -40,8 +41,6 @@ export interface KnowledgeConnectorOptions {
   resolveHost?: ConnectorResolveHost;
   sleep?: (milliseconds: number) => Promise<void>;
   now?: () => string;
-  /** Host-qualified X allowance; unknown price/account remains unsupported. */
-  xPricing?: { accountId: string; costCentsPerAttempt: number; maxAttempts: number };
   /** Optional bounded Jev decision adapter; absence fails intake closed. */
   assessment?: SourceAssessmentModel;
   /** Queues owned summary work after a source's save-time and extraction recovery; never awaited by intake. */
@@ -92,7 +91,7 @@ async function defaultHTTP(input: string, init: { method?: "GET" | "PUT" | "POST
   });
 }
 
-async function requestJson(http: ConnectorHTTP, endpoint: string, token: string | (() => Promise<string>), options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void>; onUnauthorized?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
+async function requestJson(http: ConnectorHTTP, endpoint: string, token: string | (() => Promise<string>), options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void>; onSuccess?: (value: any) => Promise<void>; onNonBillableResponse?: (status: number) => Promise<void>; onUnauthorized?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
   const retrySafe = !options.method || options.method === "GET";
   const maxAttempts = retrySafe ? (options.maxAttempts ?? RETRIES) : 1;
   let refreshedAfterUnauthorized = false;
@@ -119,8 +118,10 @@ async function requestJson(http: ConnectorHTTP, endpoint: string, token: string 
     if (result.body) { try { value = JSON.parse(result.body); } catch { value = undefined; } }
     if (result.status >= 200 && result.status < 300) {
       if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).result === false) throw new ConnectorAPIError();
+      await options.onSuccess?.(value);
       return { status: result.status, value, headers: result.headers };
     }
+    if (result.status >= 400 && result.status < 500) await options.onNonBillableResponse?.(result.status);
     if (result.status === 401 && options.onUnauthorized && !refreshedAfterUnauthorized) {
       refreshedAfterUnauthorized = true;
       await options.onUnauthorized();
@@ -163,6 +164,9 @@ function policyDefaults(request: KnowledgeConnectorConfigurationRequest, fallbac
 }
 function stateStatus(state: KnowledgeConnectorState | undefined, connector: Connector, authority?: ConnectionInstance): KnowledgeConnectorStatus {
   const value = state ?? initial(connector);
+  const month = paidBudgetMonth();
+  const xBudget = connector === "x" ? rollPaidBudget(value.xDiscoveryBudget, month) : undefined;
+  const capCents = authority?.policy.paidBudgetCents ?? value.paidBudgetCents;
   // ConnectionOwner is the sole authority for account admission. Knowledge
   // keeps domain progress, but persisted observations cannot make a policy-reset
   // or successor instance ready.
@@ -177,7 +181,7 @@ function stateStatus(state: KnowledgeConnectorState | undefined, connector: Conn
   const accountId = authority?.providerAccountId ?? value.accountId;
   const scope = connector === "raindrop" && authority?.raindropCollections ? undefined : authority?.scope ?? value.scope;
   const policy = authority?.policy;
-  return { connector, ...(authority?.id ?? value.connectionId ? { connectionId: authority?.id ?? value.connectionId } : {}), configured, enabled, health, credentialAvailability, providerIdentity, ...(accountId ? { accountId } : {}), ...(scope ? { scope } : {}), ...(authority?.raindropCollections ? { raindropCollections: authority.raindropCollections } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: connector === "x" ? value.paidBudgetCents : policy?.paidBudgetCents ?? value.paidBudgetCents, allowWrites: policy?.allowWrites ?? value.allowWrites, recurringApproved: policy?.recurringApproved ?? value.recurringApproved, paidAccessApproved: policy?.paidAccessApproved ?? value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentPilots ? { assessmentPilots: value.assessmentPilots } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
+  return { connector, ...(authority?.id ?? value.connectionId ? { connectionId: authority?.id ?? value.connectionId } : {}), configured, enabled, health, credentialAvailability, providerIdentity, ...(accountId ? { accountId } : {}), ...(scope ? { scope } : {}), ...(authority?.raindropCollections ? { raindropCollections: authority.raindropCollections } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, capCents, ...(xBudget ? { month, spentCents: xBudget.spentCents, reservedCents: xBudget.reservedCents, availableCents: availablePaidBudgetCents(capCents, xBudget), uncertain: Object.entries(xBudget.attempts).filter(([, attempt]) => attempt.status === "reserved" || attempt.status === "uncertain").map(([attemptId, attempt]) => ({ attemptId, month: attempt.month, reservedCents: attempt.reservedCents })) } : {}), allowWrites: policy?.allowWrites ?? value.allowWrites, recurringApproved: policy?.recurringApproved ?? value.recurringApproved, paidAccessApproved: policy?.paidAccessApproved ?? value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentPilots ? { assessmentPilots: value.assessmentPilots } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
 }
 function parseCollection(item: RaindropItemDTO): string | undefined {
   if (!item.collection || typeof item.collection !== "object") return undefined;
@@ -309,6 +313,7 @@ export class KnowledgeConnectorExtension {
     });
     if (action.operation === "knowledge.x.credits") return this.lane("x", action.request.connectionId).run(() => this.readXCredits(action.request.connectionId, signal));
     if (action.operation === "knowledge.connector.status") return this.store.withConnectorContext(request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector, request.connectionId), action.request.connector, await this.connectionFor(request.connectionId, action.request.connector, Boolean(this.options.connections), true)));
+    if (action.operation === "knowledge.connector.budget.reconcile") return this.lane("x", action.request.connectionId).run(() => this.reconcileBudget(action.request));
     if (action.operation === "knowledge.connector.discover") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.discoverQueue(action.request, signal)));
     if (action.operation === "knowledge.connector.queue") return this.withConnection(action.request.connector, request.connectionId, () => this.queue(action.request));
     if (action.operation === "knowledge.connector.ack") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.ack(action.request)));
@@ -947,7 +952,7 @@ export class KnowledgeConnectorExtension {
             };
             try {
               const assessmentConnectionId = jevConnectionId;
-              if (!assessmentConnectionId) throw new GatewayError("unsupported", "Jev intake assessment requires exactly one enabled knowledge.jev connection with approved paid access");
+              if (!assessmentConnectionId) throw new GatewayError("unsupported", "Jev intake assessment requires the configured TypeSafe provider credential");
               const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => {
                 monthlyAttempt = await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot!, sourceCollection, assessmentConnectionId, cohortId);
               }, onDispatch: async () => {
@@ -1067,8 +1072,7 @@ export class KnowledgeConnectorExtension {
     const state = await this.store.connectorState("raindrop", request.connectionId);
     const authority = await this.connectionFor(request.connectionId, "raindrop", Boolean(this.options.connections));
     const mappings = authority?.raindropCollections ?? [];
-    const sourceCollection = source.content.collectionId;
-    if (!state?.allowWrites || !authority?.policy.enabled || !authority.policy.allowWrites || authority.providerAccountId !== state.accountId || !sourceCollection) return { status: "unsupported" };
+    if (!state?.allowWrites || !authority?.policy.enabled || !authority.policy.allowWrites || authority.providerAccountId !== state.accountId) return { status: "unsupported" };
     const admission = source.content.admission?.status;
     const role = admission === "archived" ? "archive" : source.scope;
     const home = mappings.find(item => item.role === role);
@@ -1078,6 +1082,20 @@ export class KnowledgeConnectorExtension {
     const accountId = identity?.provider === "raindrop" ? identity.accountId : source.content.origins?.find(origin => origin.identity?.provider === "raindrop")?.identity?.accountId;
     if (!itemId || !accountId || itemId !== request.itemId || accountId !== state.accountId) return { status: "conflict" };
     return this.moveRaindrop({ commandId: request.commandId, itemId, source, expectedRevision: request.expectedRevision, identity: { provider: "raindrop", accountId, itemId }, connectionId: request.connectionId, expectedSetupRevision: authority.setupRevision }, signal);
+  }
+
+  private async reconcileBudget(request: KnowledgeConnectorBudgetReconcileRequest): Promise<{ connectionId: string; attemptId: string; reconciledCostCents: number }> {
+    if (!request.commandId || !request.connectionId || !request.attemptId) throw bad("X budget reconciliation requires a command, connection, and attempt ID");
+    let reconciledCostCents = 0;
+    const month = paidBudgetMonth();
+    const saved = await this.store.updateConnectorState(request.commandId, "x", state => {
+      if (!state?.xDiscoveryBudget) throw new GatewayError("not_found", "X discovery budget attempt is unavailable");
+      const result = reconcilePaidBudgetAttempt(state.xDiscoveryBudget, request.attemptId, month);
+      reconciledCostCents = result.reconciledCostCents;
+      return { ...state, xDiscoveryBudget: result.ledger };
+    }, { stage: "x-budget-reconcile", connectionId: request.connectionId, attemptId: request.attemptId }, request.connectionId);
+    reconciledCostCents ||= saved.xDiscoveryBudget?.attempts[request.attemptId]?.actualCostCents ?? 0;
+    return { connectionId: request.connectionId, attemptId: request.attemptId, reconciledCostCents };
   }
 
   private async discoverQueue(request: KnowledgeConnectorDiscoverRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -1095,20 +1113,9 @@ export class KnowledgeConnectorExtension {
     const expectedSetupRevision = authority?.setupRevision;
     this.assertCredentialNamespace(connector, current.credentialRef);
     if (connector === "raindrop" && !/^\d+$/.test(current.accountId)) throw new GatewayError("invalid_request", "Raindrop accountId must be the numeric user _id");
-    // X access requires a host-qualified account price and an explicit user
-    // allowance. Charge immediately before every possible paid HTTP attempt;
-    // this covers pagination, provider retries, and a fresh replay without
-    // allowing an over-budget request to leave the Gateway.
-    const xPricing = connector === "x" ? this.options.xPricing : undefined;
     const invocation = currentInvocationContext();
     if (invocation?.operationId?.startsWith("automation:") && !current.recurringApproved) {
       throw new GatewayError("unsupported", `Knowledge ${connector} recurrence is not approved`);
-    }
-    if (connector === "x") {
-      if (!xPricing || xPricing.accountId !== current.accountId || !current.paidAccessApproved
-        || !Number.isSafeInteger(xPricing.costCentsPerAttempt) || xPricing.costCentsPerAttempt < 1
-        || !Number.isSafeInteger(xPricing.maxAttempts) || xPricing.maxAttempts < 1
-        || xPricing.maxAttempts > RETRIES) throw new GatewayError("unsupported", "X connector pricing or allowance is unavailable");
     }
     if (connector === "raindrop" && current.paidBudgetCents > 0) throw new GatewayError("unsupported", "Paid connector operations are unavailable without a priced operation");
     if (current.pendingRemote) {
@@ -1116,6 +1123,14 @@ export class KnowledgeConnectorExtension {
       const reconciled = await this.store.connectorState(connector);
       if (reconciled?.pendingRemote) throw new GatewayError("conflict", "Connector has an unresolved remote effect");
     }
+    const limit = Math.min(request.limit ?? MAX_ITEMS, MAX_ITEMS); if (!Number.isSafeInteger(limit) || limit < 1) throw bad("Connector limit is invalid");
+    // X bills $0.001 per returned resource. The connection policy is a monthly
+    // cap; Knowledge's per-connection ledger owns usage and open reservations.
+    const firstPageReservation = Math.ceil(Math.min(limit, MAX_PAGE) / 10);
+    const xMonth = paidBudgetMonth();
+    const xLedger = connector === "x" ? rollPaidBudget(current.xDiscoveryBudget, xMonth) : undefined;
+    const xCapCents = authority?.policy.paidBudgetCents ?? current.paidBudgetCents;
+    if (connector === "x" && (!current.paidAccessApproved || hasOpenPaidBudgetAttempt(xLedger!) || availablePaidBudgetCents(xCapCents, xLedger!) < firstPageReservation)) throw new GatewayError("unsupported", "X paid access is not approved or its monthly budget cannot cover one bookmark page");
     const token = connector === "x" && authority && request.connectionId
       ? await this.xAccessToken(request.connectionId, current.credentialRef, expectedSetupRevision!, externalSignal ?? new AbortController().signal)
       : await this.options.credentials.read(current.credentialRef);
@@ -1138,7 +1153,6 @@ export class KnowledgeConnectorExtension {
       if (!fresh) { credentialUnavailable = true; throw missingCredential(connector, live.credentialRef); }
       return fresh;
     };
-    const limit = Math.min(request.limit ?? MAX_ITEMS, MAX_ITEMS); if (!Number.isSafeInteger(limit) || limit < 1) throw bad("Connector limit is invalid");
     await this.store.updateConnectorState(command(request.commandId, "start"), connector, state => { const next = { ...(state ?? current), health: "running" as const, lastRunAt: this.now(), remaining: state?.pending.length ?? 0 }; delete next.lastError; return next; });
     const abort = new AbortController();
     const signal = externalSignal ? AbortSignal.any([abort.signal, externalSignal]) : abort.signal;
@@ -1146,27 +1160,51 @@ export class KnowledgeConnectorExtension {
     deadline.unref?.();
     try {
       let xAttempt = 0;
-      const beforeXAttempt = xPricing ? async () => {
+      let xAttemptId: string | undefined;
+      const beforeXAttempt = connector === "x" ? async (pageLimit: number) => {
         xAttempt += 1;
-        const attemptID = `${request.commandId}:x-attempt:${xAttempt}:${randomUUID()}`;
-        await this.store.updateConnectorState(attemptID, "x", state => {
+        const attemptId = command(request.commandId, `x-page-attempt:${xAttempt}:${randomUUID()}`);
+        xAttemptId = attemptId;
+        const month = paidBudgetMonth();
+        const reservedCents = Math.ceil(pageLimit / 10);
+        await this.store.updateConnectorState(command(attemptId, "reserve"), "x", state => {
           const next = state ?? current;
-          if (next.accountId !== xPricing.accountId || !next.paidAccessApproved || next.paidBudgetCents < xPricing.costCentsPerAttempt) throw new GatewayError("conflict", "X connector allowance exhausted or changed");
-          return { ...next, paidBudgetCents: next.paidBudgetCents - xPricing.costCentsPerAttempt };
-        });
+          if (next.accountId !== current.accountId || !next.paidAccessApproved) throw new GatewayError("conflict", "X connector paid-access authority changed");
+          const ledger = reservePaidBudgetAttempt(next.xDiscoveryBudget, attemptId, month, reservedCents, xCapCents);
+          return { ...next, xDiscoveryBudget: ledger };
+        }, { stage: "x-page-reserve", attemptId, reservedCents }, request.connectionId);
+        try {
+          await this.store.updateConnectorState(command(attemptId, "dispatch"), "x", state => {
+            if (!state?.xDiscoveryBudget) throw new GatewayError("conflict", "X page reservation is missing");
+            return { ...state, xDiscoveryBudget: markPaidBudgetDispatch(state.xDiscoveryBudget, attemptId, month) };
+          }, { stage: "x-page-dispatch", attemptId }, request.connectionId);
+        } catch (error) {
+          await this.store.updateConnectorState(command(attemptId, "release"), "x", state => state?.xDiscoveryBudget ? { ...state, xDiscoveryBudget: releaseUndispatchedPaidBudgetAttempt(state.xDiscoveryBudget, attemptId, paidBudgetMonth()) } : state ?? current, { stage: "x-page-release-undispatched", attemptId }, request.connectionId).catch(() => {});
+          throw error;
+        }
       } : undefined;
-      const beforeProviderAttempt = async (): Promise<void> => {
+      const settleXAttempt = connector === "x" ? async (value: any, pageLimit: number): Promise<void> => {
+        if (!Array.isArray(value?.data) || value.data.length > pageLimit || !xAttemptId) throw new ConnectorShapeError();
+        const actualCents = Math.ceil(value.data.length / 10);
+        const attemptId = xAttemptId;
+        const month = paidBudgetMonth();
+        await this.store.updateConnectorState(command(attemptId, "settle"), "x", state => {
+          if (!state?.xDiscoveryBudget) throw new GatewayError("conflict", "X page budget reservation is missing");
+          return { ...state, xDiscoveryBudget: settlePaidBudgetAttempt(state.xDiscoveryBudget, attemptId, month, actualCents) };
+        }, { stage: "x-page-settle", attemptId, actualCents }, request.connectionId);
+      } : undefined;
+      const beforeProviderAttempt = async (pageLimit: number): Promise<void> => {
         await assertCurrentAuthority();
-        await beforeXAttempt?.();
+        await beforeXAttempt?.(pageLimit);
       };
       // The provider account fence precedes generic sweep discovery. It is
       // intentionally separate from the configured account label and from the
       // source URL capture policy.
       if (connector === "raindrop") {
-        const profile = await this.verifyRaindropAccount(current, currentToken, signal, beforeProviderAttempt);
+        const profile = await this.verifyRaindropAccount(current, currentToken, signal, async () => assertCurrentAuthority());
         await this.recordAdmission(current, "available", "admitted", request.commandId, expectedSetupRevision, profile);
       }
-      const discovered = await this.discover(request.commandId, connector, selectedCollection ? { ...current, scope: selectedCollection } : current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt, connector === "x" && authority && request.connectionId ? () => this.refreshXToken(request.connectionId!, current.credentialRef!, expectedSetupRevision!, signal) : undefined);
+      const discovered = await this.discover(request.commandId, connector, selectedCollection ? { ...current, scope: selectedCollection } : current, currentToken, limit, signal, beforeProviderAttempt, connector === "x" ? (value, pageLimit) => settleXAttempt!(value, pageLimit) : undefined, connector === "x" ? async (_status, pageLimit) => settleXAttempt!({ data: [] }, pageLimit) : undefined, connector === "x" && authority && request.connectionId ? () => this.refreshXToken(request.connectionId!, current.credentialRef!, expectedSetupRevision!, signal) : undefined);
       let state = await this.store.connectorState(connector) ?? current;
       const scopedPending = connector === "raindrop" ? state.pending.filter(item => item.collectionId === selectedCollection) : state.pending;
       state = await this.store.updateConnectorState(command(request.commandId, "finish"), connector, value => ({ ...(value ?? state), health: "ready", lastRunAt: this.now(), remaining: value?.pending.length ?? state.pending.length }));
@@ -1183,7 +1221,7 @@ export class KnowledgeConnectorExtension {
     }
   }
 
-  private async discover(commandId: string, connector: Connector, state: KnowledgeConnectorState, token: string | (() => Promise<string>), limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>, onUnauthorized?: () => Promise<void>): Promise<{ discovered: number }> {
+  private async discover(commandId: string, connector: Connector, state: KnowledgeConnectorState, token: string | (() => Promise<string>), limit: number, signal: AbortSignal, beforeAttempt?: (pageLimit: number) => Promise<void>, onSuccess?: (value: any, pageLimit: number) => Promise<void>, onNonBillableResponse?: (status: number, pageLimit: number) => Promise<void>, onUnauthorized?: () => Promise<void>): Promise<{ discovered: number }> {
     const checkpointKey = state.scope ?? "default";
     // Raindrop pagination is offset-based: moving an item shrinks earlier
     // pages, so a persisted page number can skip newly exposed items. Restart
@@ -1195,7 +1233,8 @@ export class KnowledgeConnectorExtension {
       ? new Set([...state.pending.filter(item => item.collectionId === state.scope).map(item => item.id), ...state.capturedIds.filter(id => state.capturedCollections?.[id] === state.scope), ...processedIds])
       : new Set([...state.pending.map(item => item.id), ...state.capturedIds, ...processedIds]);
     for (let page = 0; page < 10 && discovered < limit; page += 1) {
-      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal, ...(beforeAttempt === undefined ? {} : { beforeAttempt }) }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(maxAttempts === undefined ? {} : { maxAttempts }), ...(beforeAttempt === undefined ? {} : { beforeAttempt }), ...(onUnauthorized === undefined ? {} : { onUnauthorized }) });
+      const pageLimit = Math.min(MAX_PAGE, limit - discovered);
+      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal, ...(beforeAttempt === undefined ? {} : { beforeAttempt: () => beforeAttempt(MAX_PAGE) }) }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${pageLimit}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(beforeAttempt === undefined ? {} : { beforeAttempt: () => beforeAttempt(pageLimit) }), ...(onSuccess === undefined ? {} : { onSuccess: value => onSuccess(value, pageLimit) }), ...(onNonBillableResponse === undefined ? {} : { onNonBillableResponse: status => onNonBillableResponse(status, pageLimit) }), ...(onUnauthorized === undefined ? {} : { onUnauthorized }) });
       const parsed = connector === "raindrop" ? parseRaindrop(result.value) : parseX(result.value);
       // The requested collection endpoint is authoritative when an item omits
       // its collection field. A contradictory provider field is never routed.
@@ -1286,16 +1325,14 @@ export class KnowledgeConnectorExtension {
     // JS record cannot bypass forget/exclusion or a source correction.
     let source: KnowledgeRecord | null;
     try { source = await this.store.read(input.source.id, input.expectedRevision, false, true); } catch { return { status: "conflict" }; }
-    if (!source || source.kind !== "source" || !isVerifiedSourceCapture(source) || !["retained", "archived"].includes(source.content.admission?.status ?? "")) return { status: "unsupported" };
-    const sourceCollection = source.content.collectionId;
+    if (!source || source.kind !== "source" || !["retained", "archived"].includes(source.content.admission?.status ?? "")) return { status: "unsupported" };
     const targetRole = source.content.admission?.status === "archived" ? "archive" : source.scope;
     const initialAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
     const destination = initialAuthority?.raindropCollections?.find(mapping => mapping.role === targetRole)?.collectionId;
-    if (!sourceCollection || !destination) return { status: "unsupported" };
-    // The source head's object reference is part of movement authority; a
-    // dangling object must never be acknowledged as a successfully captured
-    // item merely because readable text remains in the revision.
-    if (!source.content.object || !(await this.store.readObject(source.content.object, { recordId: source.id, revisionId: source.revisionId, includeArchived: true }))) return { status: "conflict" };
+    if (!destination) return { status: "unsupported" };
+    // Captured content may be partial or absent: admission plus the live
+    // provider item establish movement authority. Object authorization is
+    // checked below only when a remote move is actually needed.
     const moveAuthorityCurrent = async (): Promise<boolean> => {
       if (this.options.connections) {
         const instance = await this.connectionFor(input.connectionId, "raindrop", true);
@@ -1323,7 +1360,7 @@ export class KnowledgeConnectorExtension {
     // source forget/correction must win over the preflight snapshot.
     const latestState = await this.store.connectorState("raindrop");
     const latestSource = await this.store.read(source.id, undefined, false, true).catch(() => null);
-    if (!latestState?.enabled || !latestState.allowWrites || latestState.accountId !== input.identity.accountId || latestState.credentialRef !== state.credentialRef || !(await moveAuthorityCurrent()) || latestState.paidBudgetCents > 0 || !latestSource || latestSource.kind !== "source" || latestSource.revisionId !== input.expectedRevision || !isVerifiedSourceCapture(latestSource)) return { status: "conflict" };
+    if (!latestState?.enabled || !latestState.allowWrites || latestState.accountId !== input.identity.accountId || latestState.credentialRef !== state.credentialRef || !(await moveAuthorityCurrent()) || latestState.paidBudgetCents > 0 || !latestSource || latestSource.kind !== "source" || latestSource.revisionId !== input.expectedRevision || !["retained", "archived"].includes(latestSource.content.admission?.status ?? "")) return { status: "conflict" };
     await this.verifyRaindropAccount(latestState, token, signal);
     const remoteItemId = id(preflight.value?.item?._id ?? preflight.value?._id, "Raindrop item");
     const originalCollectionId = String(preflight.value?.item?.collection?.$id ?? preflight.value?.collection?.$id ?? "");
@@ -1334,6 +1371,10 @@ export class KnowledgeConnectorExtension {
     // home is "already-home", except when this same operation's move is the
     // durable pending effect (a crash after the PUT): that is its completion.
     if (originalCollectionId === destination) return { status: latestState.pendingRemote?.operationId === input.commandId ? "moved" : "already-home" };
+    // A remote mutation may rely on captured object evidence; if it exists,
+    // verify that the exact source revision owns it. Already-home is a no-op
+    // determined from live provider state and needs no captured object.
+    if (latestSource.content.object && !(await this.store.readObject(latestSource.content.object, { recordId: latestSource.id, revisionId: latestSource.revisionId, includeArchived: true }))) return { status: "conflict" };
     const liveAuthority = await this.connectionFor(input.connectionId, "raindrop", Boolean(this.options.connections));
     if (!liveAuthority?.raindropCollections?.some(mapping => mapping.collectionId === originalCollectionId)) return { status: "conflict" };
     const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: latestSource.id, basisRevisionId: latestSource.revisionId, provider: input.identity.provider, accountId: input.identity.accountId, originalCollectionId, destination, createdAt: this.now() };

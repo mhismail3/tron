@@ -17,11 +17,9 @@ const response = (value: unknown, status = 200): ConnectorHTTPResponse => ({ sta
 async function fixture(options: { failFirstMove?: boolean; initialScope?: string; links?: Record<string, string>; sourceFetch?: (url: string) => Promise<Response> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-intake-safety-")); roots.push(root);
   const owner = new ConnectionOwner(root);
-  const setup = await owner.execute({ kind: "setup.begin", commandId: "safety-jev-begin", instanceId: "safety-jev", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
-  await owner.execute({ kind: "setup.complete", commandId: "safety-jev-complete", operationId: setup.operationId, instanceId: "safety-jev", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
-  const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"], ["connector:jev:personal", "synthetic-jev"]]));
+  const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]]));
   const store = new KnowledgeStore(new TronWorkspace(root));
-  const jevBudget = new KnowledgeTaggingBudget(store, owner, credentials);
+  const jevBudget = new KnowledgeTaggingBudget(store, () => true);
   const observed = { assessmentCalls: 0, moves: [] as string[] };
   const remote = new Map([["1", options.initialScope ?? "111"], ["2", options.initialScope ?? "111"]]);
   const extension = new KnowledgeConnectorExtension(store, {
@@ -30,7 +28,7 @@ async function fixture(options: { failFirstMove?: boolean; initialScope?: string
     resolveHost: async () => ["93.184.216.34"],
     sourceFetch: options.sourceFetch ?? (async url => new Response(`Distinct complete source evidence for ${url}`, { headers: { "content-type": "text/plain" } })),
     sleep: async () => {},
-    assessment: { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); observed.assessmentCalls += 1; return { summary: "Synthetic classification", evidenceQuality: "none", freshness: "unknown", recommendation: "retained", model: "jev-1.13.0" }; } },
+    assessment: { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); observed.assessmentCalls += 1; return { summary: "Synthetic classification", evidenceQuality: "none", freshness: "unknown", recommendation: "retained", model: "jev-latest" }; } },
     http: async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       const list = new URL(url).pathname.match(/\/raindrops\/(\d+)$/);

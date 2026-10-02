@@ -107,7 +107,6 @@ struct ChatCommittedLedgerTests {
                 installationTag: installed.tag,
                 toolPayloadRevision: installed.toolPayloadRevision(for: item),
                 resolveToolDetails: { _ in nil },
-                recordEvaluation: {},
                 recordToolChip: { _ in }
             )
         }

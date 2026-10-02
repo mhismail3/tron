@@ -8,10 +8,11 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import claim as claims
 import start
@@ -19,6 +20,7 @@ from gh import Gh
 
 # Workflow rule: a claim with no push or comment for this long is flagged.
 STALE_AFTER = timedelta(hours=48)
+_HEX = re.compile(r"[0-9a-fA-F]{6}")
 
 
 class DashboardError(RuntimeError):
@@ -28,7 +30,7 @@ class DashboardError(RuntimeError):
 # ------------------------------------------------------------------ GitHub
 
 _ISSUE_FIELDS = """
-  number title url state
+  number title url state closedAt
   repository { nameWithOwner }
   labels(first: 30) { nodes { name } }
   parent { number }
@@ -195,6 +197,7 @@ def _issue(content: dict, status: Optional[str], priority: Optional[str], rank: 
         "sub_issues": content["subIssuesSummary"],
         "open_blockers": sorted(b["number"] for b in content["blockedBy"]["nodes"] if b["state"] == "OPEN"),
         "last_comment": _last_comment(content),
+        "closed_at": _time(content.get("closedAt")),
         "status": status,
         "priority": priority,
         "rank": rank,
@@ -320,7 +323,7 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
 
     in_progress = []
     for issue in open_issues:
-        if issue["status"] != rules["claimedStatus"] or not claimable(issue):
+        if not claims.is_active(issue["state"], issue["labels"], issue["status"], rules):
             continue
         owned = claims_by_issue.get(issue["number"], [])
         winner = owned[0] if owned else None  # smallest ref name wins (claim.resolve_race)
@@ -363,19 +366,24 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         issue = issues.get(number)
         status = issue["status"] if issue else None
         base = _ref(issue) if issue else {"number": number, "title": None, "url": None}
-        if status != rules["claimedStatus"]:
-            disagreements.append({**base, "kind": "claimed-not-in-progress",
+        if status not in rules["claimedStatuses"]:
+            disagreements.append({**base, "kind": "claim-without-claimed-status",
                                   "detail": f"claim branch {owned[0]['branch']}; Status is "
                                             + (status or "unset or not in the Project")})
         if len(owned) > 1:
             disagreements.append({**base, "kind": "multiple-claims",
                                   "detail": "claim branches " + ", ".join(c["branch"] for c in owned)})
+    # Needs you is not active: merged work awaiting validation has no branch.
     for row in in_progress:
         if row["branch"] is None:
             disagreements.append({**{k: row[k] for k in ("number", "title", "url")},
-                                  "kind": "in-progress-without-claim",
-                                  "detail": f"Status is {rules['claimedStatus']} but no claim branch exists"})
+                                  "kind": "active-without-claim",
+                                  "detail": f"Status is {row['status']} but no claim branch exists"})
     disagreements.sort(key=lambda d: (d["number"], d["kind"]))
+
+    vocabulary = _vocabulary(config)
+    work = _work(issues, vocabulary, config, ready, now)
+    classification = _classification(open_issues, vocabulary, config)
 
     return {
         "generated_at": _stamp(now),
@@ -392,8 +400,113 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         "disagreements": disagreements,
         "orphans": {"worktrees": orphan_worktrees, "branches": orphan_branches},
         "regressions": [_ref(i) for i in open_issues if board["regressionLabel"] in i["labels"]],
+        "classification": classification,
+        "work": work,
+        "priority_order": priority_order,
+        "recent_days": board["recentDays"],
+        "vocabulary": vocabulary,
         "ignored_items": ignored,
     }
+
+
+def _slug(value: str) -> str:
+    return "-".join("".join(c if c.isalnum() else " " for c in value.lower()).split())
+
+
+def _vocabulary(config: dict) -> dict:
+    """Filter tokens, from declared labels and Status options only (failure mode 46)."""
+    board = config["dashboard"]
+    declared = config.get("labels", [])
+
+    def group(prefix: str) -> List[dict]:
+        return [{"label": label["name"], "token": _slug(label["name"][len(prefix):]),
+                 "color": label["color"] if _HEX.fullmatch(label.get("color", "")) else None,
+                 "description": label.get("description", "")}
+                for label in declared if label["name"].startswith(prefix)]
+
+    status_field = next(f for f in config["project"]["fields"] if f["name"] == config["claim"]["statusField"])
+    return {
+        "kinds": group(board["kindPrefix"]),
+        "visibilities": group(board["visibilityPrefix"]),
+        "areas": group(board["areaPrefix"]),
+        "statuses": [{"label": o["name"], "token": _slug(o["name"])} for o in status_field["options"]],
+    }
+
+
+def _status_order(config: dict) -> List[str]:
+    rules, board = config["claim"], config["dashboard"]
+    first = [board["needsYouStatus"], *rules["activeStatuses"], rules["readyStatus"], board["blockedStatus"]]
+    status_field = next(f for f in config["project"]["fields"] if f["name"] == rules["statusField"])
+    rest = [o["name"] for o in status_field["options"] if o["name"] not in first]
+    return first + rest
+
+
+def _work(issues: Dict[int, dict], vocabulary: dict, config: dict, ready: List[dict], now: datetime) -> List[dict]:
+    """Every open non-epic issue once, plus those closed in the last recentDays (failure mode 45)."""
+    board = config["dashboard"]
+    since = now - timedelta(days=board["recentDays"])
+    queue = {entry["number"]: position for position, entry in enumerate(ready, 1)}
+    order = _status_order(config)
+    statuses = {s["label"]: s["token"] for s in vocabulary["statuses"]}
+
+    def single(labels: List[str], group: List[dict]) -> Optional[str]:
+        found = [g["token"] for g in group if g["label"] in labels]
+        return found[0] if len(found) == 1 else None
+
+    rows = []
+    for issue in issues.values():
+        if board["epicLabel"] in issue["labels"]:
+            continue
+        closed = issue["state"] != "OPEN"
+        if closed and not (issue["closed_at"] and issue["closed_at"] >= since):
+            continue
+        rows.append({
+            **_ref(issue),
+            "state": issue["state"],
+            "status_token": "closed" if closed else statuses.get(issue["status"] or "", ""),
+            "kind": single(issue["labels"], vocabulary["kinds"]),
+            "visibility": single(issue["labels"], vocabulary["visibilities"]),
+            "areas": [g["token"] for g in vocabulary["areas"] if g["label"] in issue["labels"]],
+            "epic": issue["parent"],
+            "open_blockers": issue["open_blockers"],
+            "queue": queue.get(issue["number"]),
+            "closed_at": _stamp(issue["closed_at"]) if closed else None,
+        })
+
+    def key(row: dict):
+        if row["state"] != "OPEN":
+            return (len(order) + 1, -(_time(row["closed_at"]) or now).timestamp(), row["number"])
+        rank = order.index(row["status"]) if row["status"] in order else len(order)
+        return (rank, row["queue"] or 0, row["number"])
+
+    return sorted(rows, key=key)
+
+
+def _classification(open_issues: List[dict], vocabulary: dict, config: dict) -> List[dict]:
+    """Missing, repeated or undeclared kind/visibility labels, and committed ideas (failure mode 44)."""
+    board, rules = config["dashboard"], config["claim"]
+    committed = {rules["readyStatus"], *rules["claimedStatuses"]}
+    problems = []
+    for issue in open_issues:
+        if board["epicLabel"] in issue["labels"]:
+            continue
+        found = []
+        for prefix, group, noun in ((board["kindPrefix"], vocabulary["kinds"], "kind"),
+                                    (board["visibilityPrefix"], vocabulary["visibilities"], "visibility")):
+            declared = {g["label"] for g in group}
+            present = [label for label in issue["labels"] if label.startswith(prefix)]
+            undeclared = [label for label in present if label not in declared]
+            if undeclared:
+                found.append("undeclared " + ", ".join(undeclared))
+            if not present:
+                found.append(f"no {noun} label")
+            elif len(present) > 1:
+                found.append(f"{len(present)} {noun} labels: " + ", ".join(present))
+        if board["ideaLabel"] in issue["labels"] and issue["status"] in committed:
+            found.append(f"{board['ideaLabel']} while {issue['status']}")
+        if found:
+            problems.append({**_ref(issue), "problem": "; ".join(found)})
+    return problems
 
 
 def _absence(number: int, state: str) -> str:
@@ -404,16 +517,6 @@ def _absence(number: int, state: str) -> str:
 
 
 # ---------------------------------------------------------------- rendering
-
-
-def _idle(hours: Optional[float]) -> str:
-    if hours is None:
-        return "no activity"
-    if hours < 1:
-        return f"{int(hours * 60)}m ago"
-    if hours < 48:
-        return f"{int(hours)}h ago"
-    return f"{int(hours // 24)}d ago"
 
 
 def render_text(model: dict) -> str:
@@ -427,7 +530,7 @@ def render_text(model: dict) -> str:
     section("Needs you", [f"#{e['number']} {e['title']} [{', '.join(e['reasons'])}]" for e in model["needs_you"]])
     section("Epics", [f"#{e['number']} {e['title']} {e['completed']}/{e['total']}" for e in model["epics"]])
     section(f"In progress, soft cap {cap['cap']}" + (" EXCEEDED" if cap["over"] else ""), [
-        f"#{r['number']} {r['branch'] or '(no claim branch)'} session {r['session'] or '?'} "
+        f"#{r['number']} {r['status']} {r['branch'] or '(no claim branch)'} session {r['session'] or '?'} "
         f"{_idle(r['idle_hours'])}" + (f" PR #{r['pr']['number']} checks {r['pr']['checks'] or '-'} "
                                         f"verify {r['pr']['verify'] or '-'}" if r["pr"] else "")
         + (" STALE" if r["stale"] else "")
@@ -442,6 +545,7 @@ def render_text(model: dict) -> str:
     section("Orphans", [f"worktree {o['path']}: {o['reason']}" for o in orphans["worktrees"]]
             + [f"branch {o['branch']}: {o['reason']}" for o in orphans["branches"]])
     section("Regressions", [f"#{e['number']} {e['title']}" for e in model["regressions"]])
+    section("Classification", [f"#{p['number']} {p['problem']}" for p in model["classification"]])
     if model["ignored_items"]:
         lines.append(f"Ignored {model['ignored_items']} Project item(s) without an issue of this repository")
     return "\n".join(lines) + "\n"
@@ -452,30 +556,86 @@ def _numbers(numbers: List[int]) -> str:
 
 
 _CSS = """
-:root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--muted:#59636e;--card:#f6f8fa;--line:#d1d9e0;
---accent:#0969da;--good:#1a7f37;--warn:#9a6700;--bad:#cf222e}
-@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#9198a1;--card:#151b23;
---line:#3d444d;--accent:#4493f8;--good:#3fb950;--warn:#d29922;--bad:#f85149}}
+:root{color-scheme:light dark;--bg:#f2eee4;--panel:#fbf8f1;--ink:#1c1a16;--muted:#6d675b;--rule:#d9d1c0;
+--accent:#d4500f;--hot:#c0392b;--warm:#b7791f;--good:#2e7d4f;--cool:#1b7c83;--chip:#ebe5d7;
+--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#12110e;--panel:#1b1a16;--ink:#ede6d5;--muted:#9c9586;
+--rule:#353129;--accent:#ff8a3d;--hot:#ff6b5b;--warm:#f2b84b;--good:#7bd389;--cool:#5cc6c9;--chip:#26241f}}
 *{box-sizing:border-box}
-body{margin:0 auto;max-width:760px;padding:12px;background:var(--bg);color:var(--fg);
-font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;overflow-wrap:anywhere}
-h1{font-size:19px;margin:4px 0}
-h2{font-size:15px;margin:20px 0 8px;display:flex;gap:8px;align-items:center}
-.sub,.empty,.meta{color:var(--muted);font-size:13px}
-.count{font-size:12px;font-weight:600;border:1px solid var(--line);border-radius:10px;padding:0 7px}
-ul{list-style:none;margin:0;padding:0}
-li{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:0 0 6px}
-li.flag{border-left:4px solid var(--warn)}
-li.alert{border-left:4px solid var(--bad)}
-a{color:var(--accent);text-decoration:none}
-.num{font-weight:600;margin-right:4px}
-.meta{margin-top:3px;display:flex;flex-wrap:wrap;gap:4px 10px}
-code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
-.chip{font-size:12px;border:1px solid var(--line);border-radius:10px;padding:0 6px}
-.over{color:var(--bad)}
-.SUCCESS{color:var(--good)}.FAILURE,.ERROR{color:var(--bad)}.PENDING,.EXPECTED{color:var(--warn)}
-.bar{height:6px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden}
+html{-webkit-text-size-adjust:100%}
+body{margin:0 auto;max-width:980px;padding:16px 14px 48px;background:var(--bg);color:var(--ink);
+font:15px/1.45 var(--sans);overflow-wrap:anywhere}
+a{color:inherit;text-decoration:none}
+a:hover,a:focus-visible{color:var(--accent)}
+.mono,code,.num,.k,h2,.tile b,.chip,.tag{font-family:var(--mono)}
+header{padding:6px 2px 14px}
+.brand{font:700 12px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--accent)}
+h1{font:700 24px/1.15 var(--mono);letter-spacing:-.01em;margin:8px 0 4px}
+.sub{color:var(--muted);font-size:13px}
+.stripe{height:5px;margin-top:12px;border-radius:3px;background:linear-gradient(90deg,var(--hot) 0 25%,
+var(--accent) 25% 50%,var(--warm) 50% 75%,var(--cool) 75%)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin:4px 0 6px}
+.tile{display:block;background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:10px 11px 9px}
+.tile b{display:block;font-size:26px;line-height:1.05;font-weight:700}
+.tile span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tile.hot{border-color:var(--hot);box-shadow:3px 3px 0 var(--hot)}.tile.hot b{color:var(--hot)}
+section{margin-top:26px}
+h2{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;letter-spacing:.16em;
+text-transform:uppercase;margin:0 0 10px;color:var(--ink)}
+h2::after{content:"";flex:1;height:1px;background:var(--rule)}
+h2 .count{font-weight:600;letter-spacing:0;color:var(--muted)}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:12px;overflow:hidden}
+ul,ol{list-style:none;margin:0;padding:0}
+.rows>li{border-top:1px solid var(--rule)}.rows>li:first-child{border-top:0}
+.line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;padding:10px 12px}
+.line .t{flex:1 1 220px;min-width:0}
+.num{font-size:13px;font-weight:700;color:var(--accent)}
+.tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.tag{font-size:11px;line-height:18px;padding:0 6px;border-radius:5px;background:var(--chip);color:var(--muted);
+max-width:100%}
+.tag.p0{background:var(--hot);color:#fff}.tag.p1{background:var(--warm);color:#1c1a16}
+.tag.bad{background:var(--hot);color:#fff}.tag.warn{background:var(--warm);color:#1c1a16}
+.tag.ok{color:var(--good)}
+.k{display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--k,var(--muted));
+flex:none;transform:translateY(-1px)}
+details>summary{list-style:none;cursor:pointer}
+details>summary::-webkit-details-marker{display:none}
+details>summary .line::after{content:"+";font:700 14px var(--mono);color:var(--muted);margin-left:auto}
+details[open]>summary .line::after{content:"\\2212"}
+.more{padding:0 12px 12px 29px;color:var(--muted);font-size:13px;display:grid;gap:3px}
+.more a{color:var(--accent)}
+.more .key{font-weight:600;color:var(--ink)}
+.alert{border-left:4px solid var(--hot)}
+.flag{border-left:4px solid var(--warm)}
+.group{padding:8px 12px 2px;font:700 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.clear{color:var(--good);font:13px var(--mono);padding:10px 12px}
+.matrix{width:100%;border-collapse:collapse;font:13px var(--mono);overflow-wrap:normal}
+.matrix th,.matrix td{padding:7px 8px;text-align:right;border-top:1px solid var(--rule);white-space:nowrap}
+.matrix tr:first-child th{border-top:0;color:var(--muted);font-weight:600;font-size:11px;letter-spacing:.06em}
+.matrix th:first-child{text-align:left}
+.matrix td.z{color:var(--rule)}
+.matrix tr.total td,.matrix tr.total th{font-weight:700}
+.matrix label{cursor:pointer;display:inline-flex;gap:7px;align-items:center}
+.filters{display:grid;gap:6px;margin:10px 0}
+.frow{display:flex;gap:6px;align-items:center;overflow-x:auto;scrollbar-width:none;padding:1px 24px 1px 0;
+-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
+.frow::-webkit-scrollbar{display:none}
+.flabel{flex:none;width:70px;font:700 10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.chip{position:relative;flex:none;display:inline-flex;gap:6px;align-items:center;font-size:12px;line-height:28px;
+padding:0 10px;border:1px solid var(--rule);border-radius:15px;background:var(--panel);cursor:pointer;
+user-select:none;-webkit-user-select:none}
+.chip input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
+.chip small{color:var(--muted);font-size:11px}
+.chip:has(input:checked){background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip:has(input:checked) small{color:inherit;opacity:.7}
+.chip:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.bar{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;flex:1 1 80px;max-width:160px;align-self:center}
 .bar span{display:block;height:100%;background:var(--good)}
+.empty{color:var(--muted);font-size:13px;padding:10px 12px}
+footer{margin-top:28px;color:var(--muted);font-size:12px}
+@media (max-width:520px){h1{font-size:20px}.tile b{font-size:22px}.flabel{width:58px}
+.line .t{flex-basis:100%}}
 """
 
 
@@ -483,129 +643,286 @@ def _e(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-def _link(url: Optional[str], text: str) -> str:
+def _link(url: Optional[str], text: str, css: str = "") -> str:
     # Only GitHub's own https URLs become links; anything else is plain text.
+    cls = f' class="{css}"' if css else ""
     if url and url.startswith("https://"):
-        return f'<a href="{_e(url)}">{_e(text)}</a>'
-    return _e(text)
+        return f'<a{cls} href="{_e(url)}">{_e(text)}</a>'
+    return f"<span{cls}>{_e(text)}</span>"
 
 
-def _head(entry: dict) -> str:
+def _num(entry: dict) -> str:
+    return _link(entry.get("url"), f"#{entry['number']}", "num")
+
+
+def _title(entry: dict) -> str:
     title = entry.get("title")
-    return (f'<div><span class="num">{_link(entry.get("url"), "#" + str(entry["number"]))}</span>'
-            + (_e(title) if title else '<span class="sub">not in the Project</span>') + "</div>")
+    return f'<span class="t">{_e(title)}</span>' if title else '<span class="t sub">not in the Project</span>'
 
 
-def _meta(*parts: str) -> str:
-    kept = [p for p in parts if p]
-    return f'<div class="meta">{"".join(kept)}</div>' if kept else ""
+def _tag(text: str, css: str = "") -> str:
+    return f'<span class="tag {_e(css)}">{_e(text)}</span>' if text else ""
 
 
-def _chip(text: str, css: str = "") -> str:
-    return f'<span class="chip {_e(css)}">{_e(text)}</span>'
+def _tags(*parts: str) -> str:
+    kept = "".join(p for p in parts if p)
+    return f'<span class="tags">{kept}</span>' if kept else ""
 
 
-def _state(label: str, state: Optional[str]) -> str:
-    return _chip(f"{label} {state.lower() if state else 'none'}", state or "")
+def _line(entry: Optional[dict], *parts: str, head: str = "") -> str:
+    return f'<div class="line">{head or (_num(entry) + _title(entry))}{_tags(*parts)}</div>'
 
 
-def _code(value: Optional[str]) -> str:
-    return f"<code>{_e(value)}</code>" if value else ""
+def _section(anchor: str, title: str, body: str, count: str = "") -> str:
+    extra = f'<span class="count">{_e(count)}</span>' if count else ""
+    return f'<section id="{anchor}"><h2>{_e(title)}{extra}</h2>{body}</section>'
 
 
-def _span(text: str) -> str:
-    return f"<span>{_e(text)}</span>"
+def _rows(items: List[str], empty: str = "None") -> str:
+    if not items:
+        return f'<div class="panel"><p class="empty">{_e(empty)}</p></div>'
+    return '<ul class="panel rows">' + "".join(items) + "</ul>"
 
 
-def _labels(entry: dict) -> str:
-    return "".join(_chip(label) for label in entry.get("labels", []))
+def _idle(hours: Optional[float]) -> str:
+    if hours is None:
+        return "no activity"
+    if hours < 1:
+        return f"{int(hours * 60)}m ago"
+    if hours < 48:
+        return f"{int(hours)}h ago"
+    return f"{int(hours // 24)}d ago"
 
 
-def _item(entry: Optional[dict], *meta: object, css: str = "", head: str = "", tail: str = "") -> str:
-    """One card: a heading line, one meta line per argument (a string or a tuple of parts), then tail."""
-    lines = [head or _head(entry)] + [_meta(*line) if isinstance(line, tuple) else _meta(line) for line in meta]
-    return f'<li class="{css}">' + "".join(lines) + tail + "</li>"
+def _check(label: str, state: Optional[str]) -> str:
+    css = {"SUCCESS": "ok", "FAILURE": "bad", "ERROR": "bad", "PENDING": "warn", "EXPECTED": "warn"}.get(state or "", "")
+    return _tag(f"{label} {(state or 'none').lower()}", css)
 
 
-def _section(title: str, items: List[str], note: str = "") -> str:
-    body = "<ul>" + "".join(items) + "</ul>" if items else '<p class="empty">None</p>'
-    extra = f'<span class="sub">{_e(note)}</span>' if note else ""
-    return f'<section><h2>{_e(title)} <span class="count">{len(items)}</span>{extra}</h2>{body}</section>'
+def _priority(name: Optional[str], order: List[str]) -> str:
+    if not name:
+        return ""
+    index = order.index(name) if name in order else len(order)
+    return _tag(name, "p0" if index == 0 else "p1" if index == 1 else "")
 
 
-def _rank(rank: Optional[float]) -> str:
-    return _chip(f"rank {rank:g}") if rank is not None else ""
+def _kind_mark(vocabulary: dict, token: Optional[str]) -> str:
+    kind = next((k for k in vocabulary["kinds"] if k["token"] == token), None)
+    style = f' style="--k:#{kind["color"]}"' if kind and kind["color"] else ""
+    title = _e(kind["label"]) if kind else "unclassified"
+    return f'<span class="k" title="{title}"{style}></span>'
 
 
-def _in_progress(row: dict) -> str:
-    pr = row["pr"]
-    claim_line = (
-        _code(row["branch"]) if row["branch"] else _chip("no claim branch", "FAILURE"),
-        _code(row["worktree"]),
-        "<span>session " + (_code(row["session"]) or "unknown") + "</span>",
-        _span(_idle(row["idle_hours"])),
-        _chip("stale", "PENDING") if row["stale"] else "",
-    )
-    if pr:
-        pr_line = (_link(pr["url"], f"PR #{pr['number']}"), _chip("draft") if pr["draft"] else "",
-                   _state("checks", pr["checks"]), _state("verify", pr["verify"]))
-    else:
-        pr_line = (_span("no PR"),)
-    return _item(row, claim_line, pr_line, css="flag" if row["stale"] else "")
+def _needs_you(model: dict) -> str:
+    rows = [f'<li class="alert">{_line(e, *[_tag(r, "warn") for r in e["reasons"]])}</li>' for e in model["needs_you"]]
+    return _section("needs-you", "Needs you", _rows(rows, "Nothing needs you"), str(len(rows)))
+
+
+def _health(model: dict) -> str:
+    cap = model["soft_cap"]
+    over = f"{cap['in_progress']} in progress, over the soft cap of {cap['cap']}"
+    orphans = model["orphans"]
+    groups = [
+        ("Stale claims", [f'<li class="flag">{_line(r, _tag(r["branch"] or ""), _tag(_idle(r["idle_hours"]), "warn"))}</li>'
+                          for r in model["stale"]]),
+        ("Disagreements", [f'<li class="alert">{_line(d, _tag(d["kind"], "bad"), _tag(d["detail"]))}</li>'
+                           for d in model["disagreements"]]),
+        ("Orphans", [f'<li class="flag">{_line(None, _tag(o["reason"]), head="<code>" + _e(o["path"]) + "</code>")}</li>'
+                     for o in orphans["worktrees"]]
+         + [f'<li class="flag">{_line(None, _tag(o["reason"]), head="<code>" + _e(o["branch"]) + "</code>")}</li>'
+            for o in orphans["branches"]]),
+        ("Regressions", [f'<li class="alert">{_line(e)}</li>' for e in model["regressions"]]),
+        ("Classification", [f'<li class="flag">{_line(p, _tag(p["problem"], "warn"))}</li>'
+                            for p in model["classification"]]),
+        ("Soft cap", [f'<li class="alert">{_line(None, head=_e(over))}</li>'] if cap["over"] else []),
+    ]
+    total = sum(len(items) for _, items in groups)
+    clear = [title.lower() for title, items in groups if not items]
+    body = ""
+    for title, items in groups:
+        if items:
+            body += f'<div class="group">{_e(title)} · {len(items)}</div>' + "".join(items)
+    if clear:
+        body += f'<div class="clear">✓ clear: {_e(", ".join(clear))}</div>'
+    return _section("health", "Health", f'<div class="panel rows">{body}</div>', f"{total} alert{'s' * (total != 1)}")
+
+
+def _in_progress(model: dict, order: List[str]) -> str:
+    cap = model["soft_cap"]
+    rows = []
+    for r in model["in_progress"]:
+        pr = r["pr"]
+        detail = [
+            f"<div><span class=key>branch</span> <code>{_e(r['branch'])}</code></div>" if r["branch"] else "<div><span class=key>no claim branch</span></div>",
+            f"<div><span class=key>worktree</span> <code>{_e(r['worktree'])}</code></div>" if r["worktree"] else "",
+            f"<div><span class=key>session</span> <code>{_e(r['session'] or 'unknown')}</code></div>",
+            f"<div><span class=key>last activity</span> {_e(_idle(r['idle_hours']))}</div>",
+            (f"<div><span class=key>pull request</span> {_link(pr['url'], '#' + str(pr['number']) + ' ' + pr['title'])}"
+             + (" (draft)" if pr["draft"] else "") + "</div>") if pr else "<div><span class=key>no pull request</span></div>",
+        ]
+        tags = (_tag(r["status"]), _priority(r.get("priority"), order),
+                _check("checks", pr["checks"]) if pr else "", _check("verify", pr["verify"]) if pr else "",
+                _tag("stale", "warn") if r["stale"] else _tag(_idle(r["idle_hours"])))
+        rows.append(f'<li class="{"flag" if r["stale"] else ""}"><details><summary>{_line(r, *tags)}</summary>'
+                    f'<div class="more">{"".join(detail)}</div></details></li>')
+    count = f"{cap['in_progress']} / cap {cap['cap']}"
+    return _section("in-progress", "In progress", _rows(rows, "Nothing in progress"), count)
+
+
+def _work_row(row: dict, vocabulary: dict, order: List[str]) -> str:
+    vis = row["visibility"] or ""
+    status = "closed" if row["state"] != "OPEN" else (row["status"] or "no status")
+    queue = f" · {row['queue']}" if row["queue"] else ""
+    tags = (_priority(row["priority"], order), _tag(status + queue, "ok" if row["state"] != "OPEN" else ""),
+            _tag("user-facing" if vis == "user-facing" else vis))
+    kind = next((k["label"] for k in vocabulary["kinds"] if k["token"] == row["kind"]), "unclassified")
+    detail = [
+        f"<div>{_link(row['url'], 'Open on GitHub ↗')}</div>",
+        f"<div><span class=key>kind</span> {_e(kind)} · <span class=key>visibility</span> {_e(vis or 'unclassified')}</div>",
+        f"<div><span class=key>area</span> {_e(', '.join(row['areas']) or 'none')}</div>",
+        f"<div><span class=key>epic</span> #{_e(row['epic'])}</div>" if row["epic"] else "",
+        f"<div><span class=key>waits on</span> {_e(', '.join('#' + str(n) for n in row['open_blockers']))}</div>"
+        if row["open_blockers"] else "",
+        f"<div><span class=key>closed</span> {_e(row['closed_at'][:10])}</div>" if row["closed_at"] else "",
+        f"<div><span class=key>labels</span> {_e(', '.join(row['labels']))}</div>" if row["labels"] else "",
+    ]
+    attrs = (f'data-n="{int(row["number"])}" data-kind="{_e(row["kind"] or "")}" data-vis="{_e(vis)}" '
+             f'data-status="{_e(row["status_token"])}" data-area="{_e(" ".join(row["areas"]))}"')
+    head = _kind_mark(vocabulary, row["kind"]) + _num(row) + _title(row)
+    return (f'<li class="w" {attrs}><details><summary>{_line(row, *tags, head=head)}</summary>'
+            f'<div class="more">{"".join(detail)}</div></details></li>')
+
+
+def _chip(group: str, token: str, text: str, count: int, checked: bool = False) -> str:
+    ident = f"f{group}-{token or 'none'}"
+    return (f'<label class="chip"><input type="radio" name="f{group}" id="{_e(ident)}"'
+            f'{" checked" if checked else ""}><span>{_e(text)}</span><small>{count}</small></label>')
+
+
+def _work_section(model: dict, order: List[str]) -> Tuple[str, str]:
+    vocabulary = model["vocabulary"]
+    rows = model["work"]
+    open_rows = [r for r in rows if r["state"] == "OPEN"]
+    kinds = [(k["token"], k["token"]) for k in vocabulary["kinds"]]
+    if any(r["kind"] is None for r in rows):
+        kinds.append(("", "unclassified"))
+    visibilities = [(v["token"], v["token"]) for v in vocabulary["visibilities"]]
+    if any(r["visibility"] is None for r in rows):
+        visibilities.append(("", "unclassified"))
+
+    # Overview: open work by kind and visibility. Row headers set the kind filter.
+    head = ("<tr><th>open</th>" + "".join(f'<th title="{_e(v)}">{_e(v.split("-")[0] if t else "none")}</th>' for t, v in visibilities)
+            + "<th>all</th></tr>")
+    body = ""
+    for token, text in kinds:
+        of_kind = [r for r in open_rows if (r["kind"] or "") == token]
+        cells = "".join(
+            (lambda n: f'<td class="{"z" if not n else ""}">{n or "·"}</td>')(
+                sum(1 for r in of_kind if (r["visibility"] or "") == v)) for v, _ in visibilities)
+        mark = _kind_mark(vocabulary, token or None)
+        body += (f'<tr><th><label for="fk-{_e(token or "none")}">{mark}{_e(text)}</label></th>{cells}'
+                 f"<td>{len(of_kind)}</td></tr>")
+    totals = "".join(f"<td>{sum(1 for r in open_rows if (r['visibility'] or '') == v)}</td>" for v, _ in visibilities)
+    body += f'<tr class="total"><th>total</th>{totals}<td>{len(open_rows)}</td></tr>'
+    matrix = f'<div class="panel"><table class="matrix">{head}{body}</table></div>'
+
+    def count(pred) -> int:
+        return sum(1 for r in rows if pred(r))
+
+    statuses = [(s["token"], s["label"]) for s in vocabulary["statuses"]
+                if any(r["status_token"] == s["token"] for r in rows) and s["token"] != "closed"]
+    # Kind, visibility and area counts are of open work, matching the default status filter.
+    def open_count(pred) -> int:
+        return sum(1 for r in open_rows if pred(r))
+
+    filters = [
+        ("kind", [_chip("k", "all", "all", len(open_rows), True)]
+         + [_chip("k", t, x, open_count(lambda r, t=t: (r["kind"] or "") == t)) for t, x in kinds]),
+        ("visible", [_chip("v", "all", "all", len(open_rows), True)]
+         + [_chip("v", t, x, open_count(lambda r, t=t: (r["visibility"] or "") == t)) for t, x in visibilities]),
+        ("status", [_chip("s", "open", "open", len(open_rows), True)]
+         + [_chip("s", t, x.lower(), count(lambda r, t=t: r["status_token"] == t)) for t, x in statuses]
+         + [_chip("s", "closed", f"closed {model['recent_days']}d", count(lambda r: r["state"] != "OPEN")),
+            _chip("s", "all", "all", len(rows))]),
+        ("area", [_chip("a", "all", "all", len(open_rows), True)]
+         + [_chip("a", a["token"], a["token"], open_count(lambda r, t=a["token"]: t in r["areas"]))
+            for a in vocabulary["areas"] if any(a["token"] in r["areas"] for r in rows)]),
+    ]
+    bar = '<div class="filters">' + "".join(
+        f'<div class="frow" role="radiogroup" aria-label="{_e(name)}"><span class="flabel">{_e(name)}</span>'
+        + "".join(chips) + "</div>" for name, chips in filters) + "</div>"
+
+    # Filtering is CSS only: each checked radio hides the rows it excludes.
+    rules = ['body:has(#fs-open:checked) .w[data-status="closed"]{display:none}']
+    for token, _ in kinds:
+        rules.append(f'body:has(#fk-{token or "none"}:checked) .w:not([data-kind="{token}"]){{display:none}}')
+    for token, _ in visibilities:
+        rules.append(f'body:has(#fv-{token or "none"}:checked) .w:not([data-vis="{token}"]){{display:none}}')
+    for token, _ in statuses + [("closed", "")]:
+        rules.append(f'body:has(#fs-{token}:checked) .w:not([data-status="{token}"]){{display:none}}')
+    for area in vocabulary["areas"]:
+        rules.append(f'body:has(#fa-{area["token"]}:checked) .w:not([data-area~="{area["token"]}"]){{display:none}}')
+
+    items = [_work_row(r, vocabulary, order) for r in rows]
+    listing = _rows(items, "No work")
+    body_html = matrix + bar + listing
+    return _section("work", "Work", body_html, f"{len(open_rows)} open"), "\n".join(rules)
+
+
+def _epics(model: dict) -> str:
+    by_epic: Dict[int, List[dict]] = {}
+    for row in model["work"]:
+        if row["epic"]:
+            by_epic.setdefault(row["epic"], []).append(row)
+    items = []
+    for e in model["epics"]:
+        percent = round(100 * e["completed"] / e["total"]) if e["total"] else 0
+        children = by_epic.get(e["number"], [])
+        child_html = "".join(
+            f'<div>{_link(c["url"], "#" + str(c["number"]))} {_e(c["title"])} '
+            f'<span class="tag">{_e("closed" if c["state"] != "OPEN" else (c["status"] or "no status"))}</span></div>'
+            for c in children) or "<div>No open or recently closed tasks on the board</div>"
+        rank = _tag(f"rank {e['rank']:g}") if e["rank"] is not None else ""
+        bar = f'<span class="bar"><span style="width:{percent}%"></span></span>'
+        line = _line(e, rank, _tag(f"{e['completed']}/{e['total']}"), head=_num(e) + _title(e) + bar)
+        items.append(f'<li><details><summary>{line}</summary><div class="more">{child_html}</div></details></li>')
+    return _section("epics", "Epics", _rows(items, "No epics"), str(len(items)))
 
 
 def render_html(model: dict) -> str:
+    order = model.get("priority_order", [])
     cap = model["soft_cap"]
-    needs_you = [_item(e, tuple(_chip(r) for r in e["reasons"]) + (_labels(e),), css="alert")
-                 for e in model["needs_you"]]
-    epics = []
-    for e in model["epics"]:
-        percent = round(100 * e["completed"] / e["total"]) if e["total"] else 0
-        bar = f'<div class="bar"><span style="width:{percent}%"></span></div>'
-        epics.append(_item(e, (_rank(e["rank"]), _chip(e["status"] or "no status"),
-                               _span(f"{e['completed']}/{e['total']} done")), tail=bar))
-    ready = [
-        _item(e, (_chip(e["priority"]) if e["priority"] else "", _rank(e["rank"]),
-                  _span(f"epic #{e['epic']}") if e["epic"] else "",
-                  _chip("waits on " + _numbers(e["open_blockers"]), "PENDING") if e["open_blockers"] else ""))
-        for e in model["ready"]
-    ]
-    blocked = [_item(e, _labels(e), css="flag") for e in model["blocked"]]
-    stale = [_item(r, (_code(r["branch"]), _span(r["session"] or ""), _span(_idle(r["idle_hours"]))), css="flag")
-             for r in model["stale"]]
-    disagreements = [_item(d, (_chip(d["kind"]), _span(d["detail"])), css="alert") for d in model["disagreements"]]
-    orphans = (
-        [_item(None, (_code(o["branch"]) or _span("detached"), _span(o["reason"])), css="flag",
-               head="<div>worktree " + _code(o["path"]) + "</div>")
-         for o in model["orphans"]["worktrees"]]
-        + [_item(None, _span(o["reason"]), css="flag", head="<div>branch " + _code(o["branch"]) + "</div>")
-           for o in model["orphans"]["branches"]]
-    )
-    regressions = [_item(e, _labels(e), css="alert") for e in model["regressions"]]
-    over = " - over the cap" if cap["over"] else ""
-    cap_line = (f'<p class="{"over" if cap["over"] else "sub"}">{cap["in_progress"]} in progress, '
-                f'soft cap {cap["cap"]}{over}</p>')
-    ignored = (f'<p class="sub">Ignored {model["ignored_items"]} Project item(s) without an issue of this '
-               "repository.</p>" if model["ignored_items"] else "")
+    alerts = (len(model["stale"]) + len(model["disagreements"]) + len(model["orphans"]["worktrees"])
+              + len(model["orphans"]["branches"]) + len(model["regressions"]) + len(model["classification"])
+              + int(cap["over"]))
+    open_work = sum(1 for r in model["work"] if r["state"] == "OPEN")
+    closed = len(model["work"]) - open_work
+
+    def tile(anchor: str, value: object, label: str, hot: bool = False) -> str:
+        return (f'<a class="tile{" hot" if hot else ""}" href="#{anchor}"><b>{_e(value)}</b>'
+                f"<span>{_e(label)}</span></a>")
+
+    tiles = ('<nav class="tiles" aria-label="Overview">'
+             + tile("needs-you", len(model["needs_you"]), "needs you", bool(model["needs_you"]))
+             + tile("health", alerts, "alerts", bool(alerts))
+             + tile("in-progress", f"{cap['in_progress']}/{cap['cap']}", "in progress", cap["over"])
+             + tile("work", open_work, "open work")
+             + tile("work", closed, f"closed {model['recent_days']}d")
+             + tile("epics", len(model["epics"]), "epics") + "</nav>")
+    work, rules = _work_section(model, order)
+    stamp = model["generated_at"].replace("T", " ").replace("Z", " UTC")
+    ignored = (f'<footer>Ignored {model["ignored_items"]} Project item(s) without an issue of this '
+               "repository.</footer>" if model["ignored_items"] else "")
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<meta name="color-scheme" content="light dark">'
-        f"<title>{_e(model['repository'])} work</title><style>{_CSS}</style></head><body>"
-        f"<header><h1>{_e(model['repository'])}</h1>"
-        f'<p class="sub">Project {_e(model["project"])} - {_e(model["generated_at"])}</p></header>'
-        + _section("Needs you", needs_you)
-        + _section("Epics", epics)
-        + _section("In progress", [_in_progress(r) for r in model["in_progress"]])
-        + _section("Ready queue", ready)
-        + _section("Blocked", blocked)
-        + _section("Stale claims", stale, "no push or comment for 48h")
-        + f"<section><h2>Soft cap</h2>{cap_line}</section>"
-        + _section("Disagreements", disagreements)
-        + _section("Orphans", orphans)
-        + _section("Regressions", regressions)
-        + ignored
-        + "</body></html>\n"
+        f"<title>{_e(model['repository'])} work</title><style>{_CSS}{rules}</style></head><body>"
+        f'<header><div class="brand">{_e(model["project"])} · work</div><h1>{_e(model["repository"])}</h1>'
+        f'<div class="sub">Snapshot {_e(stamp)} · live from GitHub and Git when generated</div>'
+        '<div class="stripe"></div></header>'
+        + tiles + _needs_you(model) + _health(model) + _in_progress(model, order) + work + _epics(model)
+        + ignored + "</body></html>\n"
     )
 
 

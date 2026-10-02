@@ -18,7 +18,7 @@ export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, too
       ? "Use files/ under the internal workspace for ordinary durable documents. state/<owner>/ is reserved for capability-owned data; use its owning interface rather than editing managed state directly. Create subdirectories only when needed."
       : "Do not recreate or substitute for the unavailable internal workspace. Explain the limitation and continue unrelated work in the current directory when safe.",
     "Keep canonical sessions, settings, credentials, installed resources, and existing extension stores with their current owners. Do not store secrets here, automatically collect project contents, or load the internal workspace as global instructions. It is not a sandbox or extra authorization.",
-    "Perform authorized routine Mac work with available tools, and communicate results in chat. Explicit authorization and existing safety restrictions still apply. Gateway rebuilds, restarts, updates, rollbacks, promotions, and deployments remain manual user actions; never initiate them yourself.",
+    "Perform authorized routine Mac work with available tools, and communicate results in chat. Explicit authorization and existing safety restrictions still apply. Rebuilds, restarts, updates, rollbacks, promotions, and deployments of the Gateway hosting this session, or of any Stable or production Gateway, remain manual user actions; never initiate them yourself. A repository's own instructions may permit managing an isolated development Gateway.",
   ];
   if (tools.includes("display")) lines.push("Use display for useful visual/document results. source.kind=internal_file resolves relative to the internal workspace's files/ directory; source.kind=path remains relative to this session directory.");
   if (tools.includes("computer")) lines.push("Use computer only for authorized Mac interaction: inspect the full desktop before foreground actions when system dialogs may block the target, use fresh observations and element references, never approve system prompts, and never replay refused or uncertain results.");
@@ -38,7 +38,7 @@ export function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescr
     const end = task.indexOf(HANDOFF_END);
     if (end >= 0) task = task.slice(end + HANDOFF_END.length);
   }
-  const handoff = `${HANDOFF_START}You are a delegated worker for Tron. Keep the working directory supplied by your launcher. Tron's separate internal workspace is ${JSON.stringify(workspace.root)} (${workspace.available ? "available" : "unavailable; do not recreate or substitute for it"}). Ordinary durable global documents belong in files/; state/<owner>/ is capability-owned. Do not copy projects, sessions, settings, credentials, or existing extension stores here. Read-only tasks remain read-only. Use only tools actually supplied; report to your parent rather than assuming iOS presentation tools. Pass these workspace facts to any further delegated tasks. Gateway lifecycle transitions remain manual user actions.${HANDOFF_END}`;
+  const handoff = `${HANDOFF_START}You are a delegated worker for Tron. Keep the working directory supplied by your launcher. Tron's separate internal workspace is ${JSON.stringify(workspace.root)} (${workspace.available ? "available" : "unavailable; do not recreate or substitute for it"}). Ordinary durable global documents belong in files/; state/<owner>/ is capability-owned. Do not copy projects, sessions, settings, credentials, or existing extension stores here. Read-only tasks remain read-only. Use only tools actually supplied; report to your parent rather than assuming iOS presentation tools. Pass these workspace facts to any further delegated tasks. Lifecycle transitions of the hosting or any Stable/production Gateway remain manual user actions; follow repository instructions for an isolated development Gateway.${HANDOFF_END}`;
   if (Buffer.byteLength(handoff, "utf8") > 2_048) throw new Error("Tron workspace handoff exceeds its 2 KiB bound; supply explicit child context instead");
   return handoff + task;
 }
@@ -72,7 +72,7 @@ export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe
       pi.registerTool({
         name: "connections",
         label: "Connections",
-        description: "Inspect Tron's configured integration definitions, account instances, capability availability, and setup status. This read-only projection contains no credential values or references; setup and policy changes remain exact owner-typed Gateway commands.",
+        description: "Inspect Tron-managed provider connection definitions, account instances, capability availability, and setup status. MCP servers are configured separately through Pi's agent-directory mcp.json. This read-only projection contains no credential values or references; setup and policy changes remain exact owner-typed Gateway commands.",
         promptSnippet: "Inspect connection status before using a provider capability. A configured account is not automatically admitted into this session.",
         parameters: CONNECTIONS_TOOL_PARAMETERS,
         executionMode: "sequential",

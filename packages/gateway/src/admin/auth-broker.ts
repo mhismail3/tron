@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { request as httpRequest } from "node:http";
-import type { AuthEvent, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
+import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
@@ -25,6 +25,7 @@ interface OAuthCallbackCapture {
 
 interface AuthOperation {
   id: string;
+  target?: JsonValue;
   ownerIdentity: string;
   deliveryClientId: string | undefined;
   providerId: string;
@@ -42,6 +43,7 @@ interface AuthOperation {
   work?: GatewayWorkHandle;
   /** Settles when Pi's login promise for this exact operation settles. */
   settled: Promise<void>;
+  notify?: (event: AuthEvent) => void;
 }
 
 /** Result of `auth.begin`: either a new admission or the recovered active
@@ -91,6 +93,11 @@ const MAX_CALLBACK_QUERY_BYTES = 16 * 1_024;
 const CALLBACK_RELAY_TIMEOUT_MS = 35_000;
 const MAX_CALLBACK_RESPONSE_BYTES = 64 * 1_024;
 const DEFAULT_PREDECESSOR_SETTLE_TIMEOUT_MS = 30_000;
+
+function isMcpTarget(value: JsonValue | undefined): value is { kind: "mcp"; sessionId: string; server: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return value.kind === "mcp" && typeof value.sessionId === "string" && typeof value.server === "string";
+}
 
 function recoveryKey(ownerIdentity: string, providerId: string, authType: AuthType, targetKey: string): string {
   return `${ownerIdentity}\0${providerId}\0${authType}\0${targetKey}`;
@@ -171,10 +178,11 @@ export class AuthBroker {
   private readonly operations = new Map<string, AuthOperation>();
   private readonly retiredOperations = new Map<string, RetiredAuthOperation>();
   private readonly beginReceipts = new Map<string, BeginReceipt>();
-  /** Latest Pi login promise per recovery key whose operation may still be
-   * settling. A successor for the same key starts its provider login only after
-   * this settles, so replacement never races its predecessor's resources. */
+  /** Latest Pi login promise per serialized provider resource. A successor
+   * starts only after its predecessor settles, so shared callback listeners
+   * and replacement operations never race their predecessor's resources. */
   private readonly unsettledLogins = new Map<string, Promise<void>>();
+  private readonly getDeviceId: (() => string) | undefined;
 
   private readonly maximumOperations: number;
   private readonly maximumOperationsPerClient: number;
@@ -196,6 +204,7 @@ export class AuthBroker {
       operationTimeoutMs?: number;
       predecessorSettleTimeoutMs?: number;
       workRegistry?: GatewayWorkRegistry;
+      getDeviceId?: () => string;
       log?: AuthLifecycleLog;
     } = {},
   ) {
@@ -205,6 +214,7 @@ export class AuthBroker {
     this.operationTimeoutMs = options.operationTimeoutMs ?? DEFAULT_AUTH_OPERATION_TIMEOUT_MS;
     this.predecessorSettleTimeoutMs = options.predecessorSettleTimeoutMs ?? DEFAULT_PREDECESSOR_SETTLE_TIMEOUT_MS;
     this.workRegistry = options.workRegistry;
+    this.getDeviceId = options.getDeviceId;
     if (!Number.isSafeInteger(this.maximumOperations) || this.maximumOperations < 1
       || !Number.isSafeInteger(this.maximumOperationsPerClient) || this.maximumOperationsPerClient < 1
       || this.maximumOperationsPerClient > this.maximumOperations
@@ -223,6 +233,33 @@ export class AuthBroker {
   requestGlobalProviderRefresh(refresh: () => Promise<void>): void {
     this.pendingGlobalProviderRefresh = refresh;
     this.drainGlobalProviderRefresh();
+  }
+
+  startMcp(
+    clientId: string,
+    ownerIdentity: string,
+    commandId: string,
+    sessionId: string,
+    server: string,
+    run: (interaction: AuthInteraction, operationId: string) => Promise<void>,
+  ): AuthAdmission {
+    const target = { kind: "mcp", sessionId, server } as unknown as JsonValue;
+    return this.start(
+      clientId, "mcp", "oauth", this.modelRuntime, ownerIdentity, commandId,
+      `mcp:${sessionId}:${server}`, undefined, run, target,
+    );
+  }
+
+  /** Publish Pi's provider-authored authorization URL through the operation. */
+  openMcpAuthorizationUrl(operationId: string, url: string, sessionId: string, server: string): void {
+    const operation = this.operations.get(operationId);
+    const target = operation?.target as { kind?: unknown; sessionId?: unknown; server?: unknown } | undefined;
+    if (!operation || operation.providerId !== "mcp" || target?.kind !== "mcp"
+      || target.sessionId !== sessionId || target.server !== server) {
+      throw new GatewayError("conflict", "MCP sign-in has no active Tron authorization operation");
+    }
+    operation.notify?.({ type: "auth_url", url });
+    this.log("info", "MCP authorization URL was routed to its session operation", "mcp.auth-url.routed");
   }
 
   /**
@@ -247,6 +284,8 @@ export class AuthBroker {
     commandId?: string,
     targetKey = "global",
     replaceOperationId?: string,
+    customLogin?: (interaction: AuthInteraction, operationId: string) => Promise<void>,
+    target?: JsonValue,
   ): AuthAdmission {
     this.pruneRetainedState();
     const receiptKey = commandId ? `${ownerIdentity}\0${commandId}` : undefined;
@@ -270,6 +309,12 @@ export class AuthBroker {
     }
 
     const key = recoveryKey(ownerIdentity, providerId, authType, targetKey);
+    // Pi's ChatGPT and Codex legacy OAuth listeners both bind port 1455.
+    // Serialize those provider logins process-wide so the second flow cannot
+    // start in fallback/manual mode while the first owns the callback listener.
+    const loginKey = authType === "oauth" && (providerId === "openai" || providerId === "openai-codex")
+      ? "oauth-callback-port-1455"
+      : key;
     if (replaceOperationId !== undefined) {
       const replaced = this.operations.get(replaceOperationId);
       if (replaced) {
@@ -294,13 +339,15 @@ export class AuthBroker {
     if (targetKey === "global" && (this.pendingGlobalProviderRefresh || this.runningGlobalProviderRefresh)) {
       throw new GatewayError("busy", "Global provider resources are refreshing; retry authentication shortly", true);
     }
-    const provider = modelRuntime.getProvider(providerId);
-    if (!provider) throw new GatewayError("not_found", "Provider is not registered in Tron");
-    if (authType === "api_key" && !provider.auth.apiKey?.login) {
-      throw new GatewayError("unsupported", "Provider does not offer interactive API-key setup");
-    }
-    if (authType === "oauth" && !provider.auth.oauth) {
-      throw new GatewayError("unsupported", "Provider does not offer OAuth setup");
+    if (!customLogin) {
+      const provider = modelRuntime.getProvider(providerId);
+      if (!provider) throw new GatewayError("not_found", "Provider is not registered in Tron");
+      if (authType === "api_key" && !provider.auth.apiKey?.login) {
+        throw new GatewayError("unsupported", "Provider does not offer interactive API-key setup");
+      }
+      if (authType === "oauth" && !provider.auth.oauth) {
+        throw new GatewayError("unsupported", "Provider does not offer OAuth setup");
+      }
     }
     if (this.operations.size >= this.maximumOperations
       || [...this.operations.values()].filter((operation) => operation.ownerIdentity === ownerIdentity).length
@@ -308,7 +355,7 @@ export class AuthBroker {
       throw new GatewayError("busy", "Concurrent authentication operations reached their bounded capacity", true);
     }
 
-    const predecessor = this.unsettledLogins.get(key);
+    const predecessor = this.unsettledLogins.get(loginKey);
     let operation!: AuthOperation;
     const controller = new AbortController();
     const work = this.workRegistry?.begin({
@@ -323,6 +370,7 @@ export class AuthBroker {
     timer.unref();
     operation = {
       id: randomUUID(),
+      ...(target === undefined ? {} : { target }),
       ownerIdentity,
       deliveryClientId: clientId,
       providerId,
@@ -343,35 +391,41 @@ export class AuthBroker {
     if (receiptKey) this.recordReceipt(receiptKey, operation, replaceOperationId, false);
     this.log("info", `Provider login started for ${providerId} (${authType})`, "auth.login.started");
 
-    const interaction = {
+    const notify = (event: AuthEvent) => {
+      if (this.operations.get(operation.id) !== operation) return;
+      // A fixed provider callback port can be held by another active login.
+      // Relaying this operation's callback there would deliver its code to
+      // the wrong listener, so withhold the capture and keep manual entry.
+      let capture = callbackCapture(event);
+      if (capture && [...this.operations.values()].some((other) => other !== operation
+        && other.callback?.host === capture!.host && other.callback.port === capture!.port)) capture = undefined;
+      if (capture) operation.callback = capture;
+      if (event.type !== "progress") operation.completing = false;
+      const payload = {
+        operationId: operation.id,
+        ...(operation.target === undefined ? {} : { target: operation.target }),
+        event,
+        ...(capture ? { callbackCapture: callbackProjection(capture) } : {}),
+      } as unknown as JsonValue;
+      requireBoundedProjection(payload, "event");
+      operation.latestEvent = payload;
+      this.emitToOperation(operation, "auth.event", payload);
+    };
+    operation.notify = notify;
+    const interaction: AuthInteraction = {
       signal: operation.controller.signal,
       prompt: (prompt: AuthPrompt) => this.prompt(operation, prompt),
-      notify: (event: AuthEvent) => {
-        if (this.operations.get(operation.id) !== operation) return;
-        // A fixed provider callback port can be held by another active login.
-        // Relaying this operation's callback there would deliver its code to
-        // the wrong listener, so withhold the capture and keep manual entry.
-        let capture = callbackCapture(event);
-        if (capture && [...this.operations.values()].some((other) => other !== operation
-          && other.callback?.host === capture!.host && other.callback.port === capture!.port)) capture = undefined;
-        if (capture) operation.callback = capture;
-        if (event.type !== "progress") operation.completing = false;
-        const payload = {
-          operationId: operation.id,
-          event,
-          ...(capture ? { callbackCapture: callbackProjection(capture) } : {}),
-        } as unknown as JsonValue;
-        requireBoundedProjection(payload, "event");
-        operation.latestEvent = payload;
-        this.emitToOperation(operation, "auth.event", payload);
-      },
+      notify,
     };
     operation.settled = this.awaitPredecessor(predecessor)
-      .then(() => {
+      .then(async () => {
         if (this.operations.get(operation.id) !== operation) {
           throw new GatewayError("cancelled", "Authentication operation ended");
         }
-        return modelRuntime.login(providerId, authType, interaction);
+        if (customLogin) return customLogin(interaction, operation.id);
+        await modelRuntime.login(providerId, authType, interaction, {
+          ...(this.getDeviceId ? { getDeviceId: this.getDeviceId } : {}),
+        });
       })
       .then(
         () => this.complete(operation, true),
@@ -379,13 +433,13 @@ export class AuthBroker {
       )
       .finally(() => {
         operation.work?.settle();
-        if (this.unsettledLogins.get(key) === operation.settled) this.unsettledLogins.delete(key);
+        if (this.unsettledLogins.get(loginKey) === operation.settled) this.unsettledLogins.delete(loginKey);
         if (operation.targetKey === "global") {
           this.unsettledGlobalAuthOperations.delete(operation);
           this.drainGlobalProviderRefresh();
         }
       });
-    this.unsettledLogins.set(key, operation.settled);
+    this.unsettledLogins.set(loginKey, operation.settled);
     return { operationId: operation.id, recovered: false };
   }
 
@@ -433,6 +487,7 @@ export class AuthBroker {
     const id = randomUUID();
     const payload = {
       operationId: operation.id,
+      ...(operation.target === undefined ? {} : { target: operation.target }),
       promptId: id,
       prompt: wirePrompt,
     } as unknown as JsonValue;
@@ -501,7 +556,13 @@ export class AuthBroker {
     // the provider listener accepted the one-use code and closed before its
     // response reached us, so replay must never issue a second callback GET.
     capture.claimed = true;
-    await this.relayCallback(capture, query);
+    try {
+      await this.relayCallback(capture, query);
+      if (isMcpTarget(operation.target)) this.log("info", "MCP callback relay completed", "mcp.callback-relay.succeeded");
+    } catch (error) {
+      if (isMcpTarget(operation.target)) this.log("warning", "MCP callback relay failed", "mcp.callback-relay.failed");
+      throw error;
+    }
     this.markCompleting(operation);
     return true;
   }
@@ -513,7 +574,7 @@ export class AuthBroker {
       this.requireOwner(operation, ownerIdentity);
       operation.deliveryClientId = clientId;
       this.replay(operation);
-      return { state: "active", operationId, providerId: operation.providerId };
+      return { state: "active", operationId, providerId: operation.providerId, ...(operation.target === undefined ? {} : { target: operation.target }) };
     }
     const retired = this.retiredOperations.get(operationId);
     if (!retired || retired.ownerIdentity !== ownerIdentity) {
@@ -562,12 +623,21 @@ export class AuthBroker {
       const completion: AuthCompletion = {
         operationId: operation.id,
         providerId: operation.providerId,
+        ...(operation.target === undefined ? {} : { target: operation.target }),
         success: false,
         error: "Tron is restarting. Start the login again after it reconnects.",
       };
       const deliveryClientId = operation.deliveryClientId;
       if (!this.retire(operation, "Gateway restart cancelled a waiting login", completion)) continue;
       if (deliveryClientId) this.emit(deliveryClientId, "auth.completed", completion as unknown as JsonValue);
+    }
+  }
+
+  cancelSession(sessionId: string): void {
+    for (const operation of [...this.operations.values()]) {
+      if (!isMcpTarget(operation.target) || operation.target.sessionId !== sessionId) continue;
+      operation.controller.abort();
+      this.retire(operation, "MCP session was closed");
     }
   }
 
@@ -675,6 +745,7 @@ export class AuthBroker {
     const completion: AuthCompletion = {
       operationId: operation.id,
       providerId: operation.providerId,
+      ...(operation.target === undefined ? {} : { target: operation.target }),
       success: false,
       error: "Authentication timed out",
     };
@@ -687,6 +758,7 @@ export class AuthBroker {
     const completion: AuthCompletion = {
       operationId: operation.id,
       providerId: operation.providerId,
+      ...(operation.target === undefined ? {} : { target: operation.target }),
       success,
       ...(success ? {} : { error: boundedError(error) }),
     };

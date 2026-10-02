@@ -481,12 +481,14 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x" | "j
       if (!itemId || !attempt || typeof attempt !== "object" || ((attempt as Record<string, unknown>).itemId !== undefined && (typeof (attempt as Record<string, unknown>).itemId !== "string" || !(attempt as Record<string, unknown>).itemId)) || ((attempt as Record<string, unknown>).cohortId !== undefined && (typeof (attempt as Record<string, unknown>).cohortId !== "string" || !(attempt as Record<string, unknown>).cohortId)) || !["dispatched", "settled"].includes((attempt as Record<string, unknown>).status as string) || !Number.isSafeInteger((attempt as Record<string, unknown>).chargeCents) || ((attempt as Record<string, unknown>).chargeCents as number) < 1 || ((attempt as Record<string, unknown>).inputTokens !== undefined && (!Number.isSafeInteger((attempt as Record<string, unknown>).inputTokens) || (attempt as Record<string, unknown>).inputTokens as number < 0)) || ((attempt as Record<string, unknown>).outputTokens !== undefined && (!Number.isSafeInteger((attempt as Record<string, unknown>).outputTokens) || (attempt as Record<string, unknown>).outputTokens as number < 0)) || ((attempt as Record<string, unknown>).estimatedCostCents !== undefined && (typeof (attempt as Record<string, unknown>).estimatedCostCents !== "number" || !Number.isFinite((attempt as Record<string, unknown>).estimatedCostCents) || (attempt as Record<string, unknown>).estimatedCostCents as number < 0))) throw new KnowledgeStoreError("invalid", "Invalid connector assessment attempt");
     }
   }
-  if (state.taggingBudget !== undefined) {
-    const ledger = state.taggingBudget as Record<string, unknown>;
-    if (!ledger || typeof ledger !== "object" || !/^[0-9]{4}-[0-9]{2}$/.test(ledger.month as string) || !Number.isFinite(ledger.spentCents) || (ledger.spentCents as number) < 0 || !Number.isFinite(ledger.reservedCents) || (ledger.reservedCents as number) < 0 || !ledger.attempts || typeof ledger.attempts !== "object" || Array.isArray(ledger.attempts) || Object.keys(ledger.attempts).length > 4_096) throw new KnowledgeStoreError("invalid", "Invalid Knowledge Jev tagging budget");
+  for (const [field, label] of [["taggingBudget", "Jev tagging"], ["xDiscoveryBudget", "X discovery"]] as const) {
+    const rawLedger = state[field];
+    if (rawLedger === undefined) continue;
+    const ledger = rawLedger as Record<string, unknown>;
+    if (!ledger || typeof ledger !== "object" || !/^[0-9]{4}-[0-9]{2}$/.test(ledger.month as string) || !Number.isFinite(ledger.spentCents) || (ledger.spentCents as number) < 0 || !Number.isFinite(ledger.reservedCents) || (ledger.reservedCents as number) < 0 || !ledger.attempts || typeof ledger.attempts !== "object" || Array.isArray(ledger.attempts) || Object.keys(ledger.attempts).length > 4_096) throw new KnowledgeStoreError("invalid", `Invalid ${label} budget`);
     for (const [id, raw] of Object.entries(ledger.attempts as Record<string, unknown>)) {
       const attempt = raw as Record<string, unknown>;
-      if (!id || id.length > 200 || !attempt || !/^[0-9]{4}-[0-9]{2}$/.test(attempt.month as string) || !["reserved", "settled", "uncertain"].includes(attempt.status as string) || !Number.isFinite(attempt.reservedCents) || (attempt.reservedCents as number) <= 0 || ((attempt.actualCostCents !== undefined) && (!Number.isFinite(attempt.actualCostCents) || (attempt.actualCostCents as number) < 0)) || ((attempt.inputTokens !== undefined) && (!Number.isSafeInteger(attempt.inputTokens) || (attempt.inputTokens as number) < 0)) || ((attempt.outputTokens !== undefined) && (!Number.isSafeInteger(attempt.outputTokens) || (attempt.outputTokens as number) < 0))) throw new KnowledgeStoreError("invalid", "Invalid Jev tagging reservation");
+      if (!id || id.length > 200 || !attempt || !/^[0-9]{4}-[0-9]{2}$/.test(attempt.month as string) || !["reserved", "settled", "uncertain"].includes(attempt.status as string) || !Number.isFinite(attempt.reservedCents) || (attempt.reservedCents as number) <= 0 || ((attempt.actualCostCents !== undefined) && (!Number.isFinite(attempt.actualCostCents) || (attempt.actualCostCents as number) < 0)) || ((attempt.inputTokens !== undefined) && (!Number.isSafeInteger(attempt.inputTokens) || (attempt.inputTokens as number) < 0)) || ((attempt.outputTokens !== undefined) && (!Number.isSafeInteger(attempt.outputTokens) || (attempt.outputTokens as number) < 0))) throw new KnowledgeStoreError("invalid", `Invalid ${label} reservation`);
     }
   }
   for (const key of ["accountId", "scope", "credentialRef", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
@@ -1142,8 +1144,7 @@ export class KnowledgeStore {
       const value = state.connectors?.[stateKey];
       if (!value) return undefined;
       const next = structuredClone(value);
-      const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
-      if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
+      const envelope = await this.connectorAuthority(connector, key);
       if (envelope) Object.assign(next, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
       return next;
     });
@@ -1167,6 +1168,17 @@ export class KnowledgeStore {
     });
   }
 
+  /** Raindrop and X state belongs to a ConnectionOwner account envelope. The
+   * Jev ledger is keyed by the `typesafe` provider identity and its authority
+   * (configured key, fixed monthly cap) is checked by KnowledgeTaggingBudget,
+   * so it has no connection envelope to resolve. */
+  private async connectorAuthority(connector: "raindrop" | "x" | "jev", key: string | undefined) {
+    if (!this.connectorEnvelope || connector === "jev") return undefined;
+    const envelope = key ? await this.connectorEnvelope(key) : undefined;
+    if (!envelope) throw conflict("Connector connection authority is unavailable");
+    return envelope;
+  }
+
   /** Connector operational state shares the knowledge owner’s serialized state;
    * this update never accepts or persists a credential value. */
   async updateConnectorState(commandId: string, connector: "raindrop" | "x" | "jev", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }, connectionId?: string): Promise<KnowledgeConnectorState> {
@@ -1181,9 +1193,7 @@ export class KnowledgeStore {
     const receiptPayload = { ...(payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : { payload }), connectionId: stateKey };
     return this.mutate(receiptOperation, commandId, receiptPayload, async state => {
       let current = state.connectors?.[stateKey] ? structuredClone(state.connectors[stateKey]) : undefined;
-      const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
-      if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
-      if (envelope && !current && connector === "jev") current = { connector: "jev", ...(key ? { connectionId: key } : {}), enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved, pending: [], capturedIds: [], health: "setup-required", remaining: 0 };
+      const envelope = await this.connectorAuthority(connector, key);
       if (current && envelope) Object.assign(current, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
       const next = update(current);
       if (key) next.connectionId = key;

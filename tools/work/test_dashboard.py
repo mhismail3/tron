@@ -1,4 +1,4 @@
-"""Isolated checks for dashboard failure modes 20-31 in README.md.
+"""Isolated checks for dashboard failure modes 20-31 and 42 in README.md.
 
 Inputs are GitHub-shaped responses in the form the dashboard's queries return
 them (recorded from the live API, including a deleted-content Project item and
@@ -50,13 +50,26 @@ CONFIG = {
     "claim": {
         "remote": "origin", "baseBranch": "main", "worktreeRoot": "../repo-worktrees",
         "readyStatus": "Ready", "claimedStatus": "In progress", "statusField": "Status",
+        "claimedStatuses": ["In progress", "In review", "Needs you"], "activeStatuses": ["In progress", "In review"],
         "excludeLabels": ["epic"], "softCap": 2,
     },
     "dashboard": {
         "needsYouStatus": "Needs you", "blockedStatus": "Blocked", "epicLabel": "epic",
         "needsYouLabels": ["needs-decision"], "regressionLabel": "regression",
         "priorityField": "Priority", "rankField": "Epic rank", "verifyContext": "ci/verify",
+        "kindPrefix": "kind:", "visibilityPrefix": "visibility:", "areaPrefix": "area:",
+        "ideaLabel": "kind:idea", "recentDays": 14,
     },
+    "labels": [
+        {"name": "epic", "color": "5319e7", "description": "Epic"},
+        {"name": "kind:bug", "color": "d1242f", "description": "Bug"},
+        {"name": "kind:idea", "color": "f9c513", "description": "Idea"},
+        # A declared color that is not six hex digits must never reach a style.
+        {"name": "kind:chore", "color": "red;}body{display:none", "description": "Chore"},
+        {"name": "visibility:user-facing", "color": "fb8f44", "description": "Seen"},
+        {"name": "visibility:internal", "color": "d0d7de", "description": "Unseen"},
+        {"name": "area:app", "color": "bfd4f2", "description": "App"},
+    ],
 }
 
 
@@ -65,8 +78,9 @@ def iso(hours_ago: float) -> str:
 
 
 def issue(number, title=None, state="OPEN", labels=(), parent=None, sub=(0, 0), blocked_by=(),
-          comment_hours_ago=None, repo=REPO):
+          comment_hours_ago=None, repo=REPO, closed_hours_ago=None):
     return {
+        "closedAt": iso(closed_hours_ago) if closed_hours_ago is not None else None,
         "__typename": "Issue",
         "number": number,
         "title": title or f"Issue {number}",
@@ -218,7 +232,7 @@ class ForkPullTests(unittest.TestCase):
 
 
 class DisagreementTests(unittest.TestCase):
-    # Failure mode 23.
+    # Failure modes 23 and 42.
     def test_each_kind_is_reported(self):
         model = model_of(
             items=[
@@ -226,17 +240,24 @@ class DisagreementTests(unittest.TestCase):
                 item(issue(2), status="In progress"),   # In progress without a claim
                 item(issue(3), status="In progress"),   # two claim branches
                 item(issue(4), status="In progress"),   # consistent
+                item(issue(5), status="In review"),     # consistent: landing
+                item(issue(6), status="Needs you"),     # consistent: waiting on the maintainer mid-claim
+                item(issue(7), status="Needs you"),     # consistent: merged, branch deleted, awaiting validation
+                item(issue(8), status="In review"),     # In review without a claim
             ],
-            claims=[claim("feat/1-a"), claim("feat/3-b"), claim("fix/3-a", session="session-b"), claim("feat/4-d")],
+            claims=[claim("feat/1-a"), claim("feat/3-b"), claim("fix/3-a", session="session-b"), claim("feat/4-d"),
+                    claim("feat/5-e"), claim("feat/6-f")],
         )
         kinds = sorted((d["number"], d["kind"]) for d in model["disagreements"])
-        self.assertEqual(kinds, [(1, "claimed-not-in-progress"), (2, "in-progress-without-claim"),
-                                 (3, "multiple-claims")])
+        self.assertEqual(kinds, [(1, "claim-without-claimed-status"), (2, "active-without-claim"),
+                                 (3, "multiple-claims"), (8, "active-without-claim")])
+        self.assertEqual([row["number"] for row in model["in_progress"]], [2, 3, 4, 5, 8])
+        self.assertEqual(model["soft_cap"]["in_progress"], 5)
 
     def test_claim_of_issue_outside_the_project_disagrees(self):
         model = model_of(claims=[claim("feat/5-e")], states={5: "OPEN"})
         self.assertEqual([(d["number"], d["kind"]) for d in model["disagreements"]],
-                         [(5, "claimed-not-in-progress")])
+                         [(5, "claim-without-claimed-status")])
 
     def test_in_progress_row_uses_the_winning_claim(self):
         model = model_of(items=[item(issue(3), status="In progress")],
@@ -459,3 +480,111 @@ class RunTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+CLASSIFIED = ("kind:bug", "visibility:internal")
+
+
+class _Visible(__import__("html.parser").parser.HTMLParser):
+    """Collects issue numbers linked at least once outside every closed <details>."""
+
+    def __init__(self):
+        super().__init__()
+        self.open_stack: list = []
+        self.visible: set = set()
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "details":
+            self.open_stack.append("open" in attrs)
+        href = attrs.get("href") or ""
+        if tag == "a" and "/issues/" in href and all(self.open_stack):
+            self.visible.add(int(href.rsplit("/", 1)[1]))
+
+    def handle_endtag(self, tag):
+        if tag == "details" and self.open_stack:
+            self.open_stack.pop()
+
+
+class AttentionVisibilityTests(unittest.TestCase):
+    # Failure mode 43.
+    def test_needs_you_and_alerts_are_never_collapsed(self):
+        model = model_of(items=[
+            item(issue(1, labels=["needs-decision", *CLASSIFIED]), status="Ready"),
+            item(issue(2, labels=["regression", *CLASSIFIED]), status="Ready"),
+            item(issue(3, labels=["kind:bug"]), status="Ready"),  # no visibility label
+            item(issue(4, labels=CLASSIFIED), status="Blocked"),
+            item(issue(5, labels=CLASSIFIED), status="Ready"),  # claimed, but Status says Ready
+        ], claims=[claim("fix/5-claimed")])
+        walk = _Visible()
+        walk.feed(render_html(model))
+        # Needs you, regression, classification problem, disagreement.
+        for number in (1, 2, 3, 5):
+            self.assertIn(number, walk.visible, f"#{number} is only behind a collapsed section")
+
+
+class ClassificationTests(unittest.TestCase):
+    # Failure mode 44.
+    def test_each_problem_is_reported_and_a_clean_issue_is_not(self):
+        model = model_of(items=[
+            item(issue(1, labels=CLASSIFIED), status="Ready"),
+            item(issue(2, labels=["visibility:internal"]), status="Ready"),
+            item(issue(3, labels=["kind:bug", "kind:idea", "visibility:internal"]), status="Proposed"),
+            item(issue(4, labels=["kind:bug"]), status="Proposed"),
+            item(issue(5, labels=["kind:bug", "visibility:internal", "visibility:user-facing"]), status="Proposed"),
+            item(issue(6, labels=["kind:idea", "visibility:internal"]), status="Ready"),
+            item(issue(7, labels=["kind:idea", "visibility:internal"]), status="Proposed"),
+            item(issue(8, labels=["kind:typo", "visibility:internal"]), status="Proposed"),
+            item(issue(9, labels=["epic"]), status="Ready"),
+            item(issue(10, state="CLOSED", closed_hours_ago=2), status="Done"),
+        ])
+        problems = {p["number"]: p["problem"] for p in model["classification"]}
+        self.assertEqual(sorted(problems), [2, 3, 4, 5, 6, 8])
+        self.assertIn("kind", problems[2])
+        self.assertIn("kind:bug", problems[3]); self.assertIn("kind:idea", problems[3])
+        self.assertIn("visibility", problems[4])
+        self.assertIn("visibility:user-facing", problems[5])
+        self.assertIn("Ready", problems[6])
+        self.assertIn("kind:typo", problems[8])
+
+
+class WorkListTests(unittest.TestCase):
+    # Failure mode 45.
+    def test_each_open_issue_once_and_only_recent_closed(self):
+        model = model_of(
+            items=[
+                item(issue(1, labels=CLASSIFIED), status="Ready", rank=1),
+                item(issue(2, labels=CLASSIFIED), status="Proposed"),
+                item(issue(3, labels=["epic"]), status="Ready"),
+                item(issue(4, state="CLOSED", labels=CLASSIFIED, closed_hours_ago=24 * 13), status="Done"),
+                item(issue(5, state="CLOSED", labels=CLASSIFIED, closed_hours_ago=24 * 15), status="Done"),
+            ],
+            labeled=[issue(1, labels=CLASSIFIED), issue(6, labels=["needs-decision", *CLASSIFIED])],
+        )
+        numbers = [row["number"] for row in model["work"]]
+        self.assertEqual(sorted(numbers), [1, 2, 4, 6])
+        self.assertEqual(len(numbers), len(set(numbers)))
+        row = next(r for r in model["work"] if r["number"] == 1)
+        self.assertEqual((row["kind"], row["visibility"], row["queue"]), ("bug", "internal", 1))
+        page = render_html(model)
+        self.assertEqual(page.count('data-n="1"'), 1)
+
+
+class FilterTokenTests(unittest.TestCase):
+    # Failure mode 46.
+    HOSTILE = 'kind:x" onmouseover="alert(1)'
+
+    def test_only_declared_vocabulary_becomes_a_token_or_style(self):
+        model = model_of(items=[
+            item(issue(1, labels=[self.HOSTILE, "visibility:internal", "area:<b>"]), status="Ready"),
+            item(issue(2, labels=["kind:chore", "visibility:internal", "area:app"]), status="Ready"),
+        ])
+        page = render_html(model)
+        self.assertNotIn("onmouseover", page.replace("&quot; onmouseover=&quot;", ""))
+        tokens = set(re.findall(r'data-(?:kind|vis|status|area)="([^"]*)"', page))
+        allowed = {"", "bug", "idea", "chore", "user-facing", "internal", "app",
+                   "proposed", "ready", "in-progress", "in-review", "needs-you", "blocked", "done", "closed"}
+        for token in tokens:
+            self.assertTrue(set(token.split()) <= allowed, token)
+        self.assertNotIn("display:none;}", page.split("</style>", 1)[1])
+        self.assertNotIn("red;}body", page)

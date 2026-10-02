@@ -5,7 +5,7 @@ import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import type { AuthBroker } from "./auth-broker.js";
 
 type ExtensionRuntime = ReturnType<DefaultResourceLoader["getExtensions"]>["runtime"];
-type RegistrationKind = "provider" | "native";
+type RegistrationKind = "provider" | "native" | "virtual";
 
 interface ProviderRegistration {
   providerId: string;
@@ -118,6 +118,13 @@ export class GlobalProviderResources {
       runtime,
       register: () => this.modelRuntime.registerNativeProvider(provider),
     }));
+    const freshVirtualModels: ProviderRegistration[] = runtime.pendingVirtualModelRegistrations.map(({ definition, extensionPath }) => ({
+      providerId: `${definition.provider}/${definition.id}`,
+      extensionPath,
+      kind: "virtual",
+      runtime,
+      register: () => this.modelRuntime.registerVirtualModel(definition),
+    }));
     const failedPaths = new Set(loaded.errors.map(({ path }) => path));
     const failures: string[] = [];
 
@@ -125,23 +132,30 @@ export class GlobalProviderResources {
     // prior global extension layer, then replay every current contribution in the same
     // provider-then-native order used by createAgentSessionServices. This makes removal
     // and reorder equivalent to a fresh SDK load without disturbing built-in providers.
-    const previousProviderIds = new Set(previous.map(({ providerId }) => providerId));
+    const previousProviderIds = new Set(previous.filter(({ kind }) => kind !== "virtual").map(({ providerId }) => providerId));
     for (const providerId of previousProviderIds) this.modelRuntime.unregisterProvider(providerId);
+    for (const { providerId, kind } of previous) {
+      if (kind !== "virtual") continue;
+      const separator = providerId.indexOf("/");
+      this.modelRuntime.unregisterVirtualModel(providerId.slice(0, separator), providerId.slice(separator + 1));
+    }
     // DefaultResourceLoader does not expose the combined package/local resource path
     // order. Resolve the same authoritative set through the SDK's public package API;
     // skip missing packages here because loader.reload already owns installation policy.
     const resolved = await this.packageManager.resolve(async () => "skip");
     const extensionOrder = resolved.extensions.filter(({ enabled }) => enabled).map(({ path }) => path);
-    for (const path of [...loaded.errors.map(({ path }) => path), ...freshProviders.map(({ extensionPath }) => extensionPath), ...freshNativeProviders.map(({ extensionPath }) => extensionPath), ...previous.map(({ extensionPath }) => extensionPath)]) {
+    for (const path of [...loaded.errors.map(({ path }) => path), ...freshProviders.map(({ extensionPath }) => extensionPath), ...freshNativeProviders.map(({ extensionPath }) => extensionPath), ...freshVirtualModels.map(({ extensionPath }) => extensionPath), ...previous.map(({ extensionPath }) => extensionPath)]) {
       if (!extensionOrder.includes(path)) extensionOrder.push(path);
     }
     const nextContributions = [
       ...this.replayContributions("provider", freshProviders, previous, extensionOrder, failedPaths, failures),
       ...this.replayContributions("native", freshNativeProviders, previous, extensionOrder, failedPaths, failures),
+      ...this.replayContributions("virtual", freshVirtualModels, previous, extensionOrder, failedPaths, failures),
     ];
 
     runtime.pendingProviderRegistrations = [];
     runtime.pendingNativeProviderRegistrations = [];
+    runtime.pendingVirtualModelRegistrations = [];
     this.providerContributions = nextContributions;
     this.activeRuntime = runtime;
     const retainedRuntimes = new Set(nextContributions.map(({ runtime: owner }) => owner));

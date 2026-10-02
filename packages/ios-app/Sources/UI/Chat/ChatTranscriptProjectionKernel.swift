@@ -192,7 +192,10 @@ enum ChatTranscriptProjectionKernel {
                         request: previous.request,
                         response: terminal.response,
                         content: terminal.content,
-                        fallbackContent: terminal.fallbackContent
+                        fallbackContent: terminal.fallbackContent,
+                        nestedCalls: terminal.nestedCalls,
+                        details: terminal.details,
+                        usage: terminal.usage
                     )
                 )
             } else {
@@ -1696,6 +1699,9 @@ enum ChatTranscriptProjectionKernel {
             subtitle: subtitle, request: canonical.request ?? live.arguments,
             response: response, content: content,
             fallbackContent: fallbackContent,
+            nestedCalls: canonical.nestedCalls ?? live.nestedCalls,
+            details: canonical.details ?? live.result?.objectValue?["details"],
+            usage: canonical.usage ?? live.result?.objectValue?["usage"],
             error: error, startedAt: canonical.startedAt ?? live.startedAt,
             completedAt: canonical.completedAt ?? live.completedAt,
             // Canonical and live values are both monotonic Gateway samples when
@@ -1725,6 +1731,9 @@ enum ChatTranscriptProjectionKernel {
             subtitle: liveToolSubtitle(tool.status),
             request: tool.arguments, response: response, content: tool.output ?? "",
             fallbackContent: tool.output == nil && response == nil ? tool.arguments : nil,
+            nestedCalls: tool.nestedCalls,
+            details: response?.objectValue?["details"],
+            usage: response?.objectValue?["usage"],
             error: tool.isError, startedAt: tool.startedAt, completedAt: tool.completedAt,
             durationMs: tool.durationMs, durationSampleAnchor: tool.durationSampleAnchor,
             lastProgressAt: tool.lastProgressAt ?? tool.updatedAt,
@@ -1808,6 +1817,9 @@ enum ChatTranscriptProjectionKernel {
                         subtitle: result.isError == true ? "Failed" : "Completed", request: part.arguments,
                         response: result.details, content: result.text,
                         fallbackContent: result.text.isEmpty ? result.details : nil,
+                        nestedCalls: result.nestedCalls,
+                        details: result.details,
+                        usage: result.usage,
                         error: result.isError == true, startedAt: result.startedAt ?? item.timestamp,
                         completedAt: result.completedAt ?? result.timestamp,
                         // Keep missing runtime metadata distinguishable from an
@@ -1843,6 +1855,7 @@ enum ChatTranscriptProjectionKernel {
             id: item.toolCallId ?? item.id, title: item.toolLabel ?? item.toolName ?? "Tool result",
             toolName: item.toolName, subtitle: item.isError == true ? "Failed" : "Completed", request: nil,
             response: item.details, content: item.text, fallbackContent: item.text.isEmpty ? item.details : nil,
+            nestedCalls: item.nestedCalls, details: item.details, usage: item.usage,
             error: item.isError == true, startedAt: item.startedAt,
             completedAt: item.completedAt ?? item.timestamp, durationMs: item.durationMs,
             lastProgressAt: item.lastProgressAt, progressSequence: item.progressSequence,

@@ -3,14 +3,13 @@ import Testing
 @testable import TronMobileCore
 @testable import TronMobile
 
-/// Failure modes: a Gateway module list this client cannot decode would leave
-/// the Tron Modules container empty, and a themes projection that still read
-/// every resolved category would put skills and prompts back into a sheet the
-/// plan removed them from.
+/// Failure modes: an undecodable modules projection would leave the loaded
+/// module inventory empty, and a themes projection that read every resolved
+/// category would put skills and prompts back into a sheet that excludes them.
 @Suite("Extensions sheet containers")
 struct ExtensionsCatalogPresentationTests {
 
-    @Test("modules.list decodes the module rows and MCP tool sources")
+    @Test("modules.list decodes loaded Tron modules")
     func moduleListDecoding() throws {
         let value: JSONValue = .object([
             "modules": .array([.object([
@@ -19,18 +18,12 @@ struct ExtensionsCatalogPresentationTests {
                 "tools": .array([.string("knowledge"), .string("connections"), .string("jev")]),
                 "commands": .array([]),
             ])]),
-            "connections": .array([.object([
-                "id": .string("mcp-1"), "definitionId": .string("mcp.remote-http"), "health": .string("ready"),
-            ])]),
         ])
         let list = try value.decode(TronModuleList.self)
         #expect(list.modules.map(\.name) == ["tron-core"])
         #expect(list.modules.first?.purpose == "Tron core extension")
         #expect(list.modules.first?.tools == ["knowledge", "connections", "jev"])
-        // No Tron module registers a command today; an empty list stays empty.
         #expect(list.modules.first?.commands.isEmpty == true)
-        #expect(list.connections.map(\.id) == ["mcp-1"])
-        #expect(IntegrationHealthPresentation.label(list.connections[0].health) == "Ready")
         #expect(IntegrationHealthPresentation.label("setup-required") == "Setup required")
     }
 

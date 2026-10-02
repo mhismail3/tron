@@ -1,30 +1,34 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
+import { KnowledgeCurationJobs } from "./knowledge-curation.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { KnowledgeTaggingBudget } from "./knowledge-tagger.js";
+import * as durableJson from "../util/durable-json.js";
 
 const roots: string[] = [];
 const command = (value: string) => `k5-intake-${value}`;
 const headers = () => new Headers();
 function response(value: unknown): ConnectorHTTPResponse { return { status: 200, headers: headers(), body: JSON.stringify(value) }; }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true}))); });
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true}))); });
 
 /** Failure modes: a model or tagging failure blocks other items; unapproved
  * tagging drops the summary; intake waits on model latency; a rerun re-charges;
  * summary and tagging race admission; partial captures (every X post) never
  * get a summary. This drives the actual connector and KnowledgeService owners
- * with local model/Jev fakes, never live credentials or paid providers; its
- * outcome JSON is written under test temp. */
+ * with local model/Jev fakes, never live credentials or paid providers. Its
+ * outcome JSON is kept at packages/gateway/test-results/knowledge-intake-outcome.json
+ * inside the worktree that ran it, so concurrent runs in two worktrees keep two
+ * artifacts instead of overwriting one shared temp file. */
 describe("K5 Raindrop intake enrichment", () => {
   it("keeps a summary when Jev is unapproved, reports the skip, and lets another item survive model failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-k5-failure-e2e-")); roots.push(root);
@@ -40,8 +44,8 @@ describe("K5 Raindrop intake enrichment", () => {
     const tagCalls: string[] = [];
     const unapprovedTagging = {
       engine: { async decide(record: { id: string }) { tagCalls.push(record.id); throw new Error("must not call Jev when approval is false"); } },
-      budget: {} as never,
-      connections: { async snapshot() { return { instances: [{ id: "jev-disabled", definitionId: "knowledge.jev", policy: { enabled: true, paidAccessApproved: false, paidBudgetCents: 500 } }] }; } } as never,
+      budget: { async gate() { return { ok: false, code: "unavailable", reason: "TypeSafe provider credential is not configured" }; } },
+
     };
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel, undefined, undefined, undefined, unapprovedTagging as never);
     const failing = await store.captureSource({ commandId: "k5-failed-item", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Failure item", text: "FAIL_MODEL readable text", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
@@ -83,21 +87,18 @@ describe("K5 Raindrop intake enrichment", () => {
       async summarizeSource(input) { sequence.push(`summary:${input.sessionId}`); await modelGate.promise; summariesSettled += 1; return { text: `Summary of ${input.sessionId}` }; },
       async assess() { return { summary: "assessment", evidenceQuality: "high", freshness: "current" }; },
     };
-    const jevConnection = { id: "fixture-jev", definitionId: "knowledge.jev", policy: { enabled: true, paidAccessApproved: true, paidBudgetCents: 500 } };
     const tagging = {
       engine: { async decide(record: { id: string }, vocabulary: { revision: number }) { sequence.push(`tags:${record.id}`); return { tagIds: ["workflow"], model: "fixture/jev", vocabularyRevision: vocabulary.revision, inputsDigest: "a".repeat(64), estimatedCostCents: 0, callCount: 1 }; } },
-      budget: {} as never,
-      connections: { async snapshot() { return { instances: [jevConnection] }; } } as never,
+      budget: { async gate() { return { ok: true }; } },
+
     };
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel, undefined, undefined, undefined, tagging as never);
     let userLookup = false;
     const items = Array.from({ length: 10 }, (_, index) => ({ _id: index + 1, title: `Saved source ${index + 1}`, link: `https://example.test/item-${index + 1}`, created: "2026-09-28T00:00:00Z", collection: { $id: 111 } }));
     const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); await context?.onDispatch?.(); return { summary: "Jev admission assessment", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 3, estimatedCostCents: 0.00042, pricing: "fixture" } }; } };
     const owner = new ConnectionOwner(root);
-    const jevSetup = await owner.execute({ kind: "setup.begin", commandId: command("jev-budget-begin"), instanceId: "jev-budget", definitionId: "knowledge.jev", method: "token" }) as { operationId: string };
-    await owner.execute({ kind: "setup.complete", commandId: command("jev-budget-complete"), operationId: jevSetup.operationId, instanceId: "jev-budget", providerAccountId: "personal", credentialRef: "connector:jev:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: true, paidBudgetCents: 500, recurringApproved: false } });
-    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"], ["connector:jev:personal", "synthetic-jev"]]));
-    const jevBudget = new KnowledgeTaggingBudget(store, owner, credentials);
+    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]]));
+    const jevBudget = new KnowledgeTaggingBudget(store, () => true);
     const extension = new KnowledgeConnectorExtension(store, {
       credentials,
       jevBudget,
@@ -146,9 +147,8 @@ describe("K5 Raindrop intake enrichment", () => {
       commandId: command("run"), items: latestSources.map((record, index) => ({ itemId: intake.outcomes[index]!.itemId, sourceId: record?.id, revisionId: record?.revisionId, summary: record?.content.summary?.text, tagIds: record?.content.tags?.tagIds, jobs: finalJobs.jobs.filter(job => job.sourceId === record?.id).map(({ operation, status }) => ({ operation, status })) })),
       sequence,
     };
-    const artifactDirectory = join(tmpdir(), "tron-k5-test-results");
-    await mkdir(artifactDirectory, { recursive: true });
-    const artifact = join(artifactDirectory, "knowledge-intake-outcome.json");
+    const artifact = join(process.cwd(), "test-results", "knowledge-intake-outcome.json");
+    await mkdir(dirname(artifact), { recursive: true });
     await writeFile(artifact, `${JSON.stringify(report, null, 2)}\n`);
     console.info(`K5 intake outcome artifact: ${artifact}`);
     const persisted = JSON.parse(await readFile(artifact, "utf8")) as typeof report;
@@ -161,14 +161,34 @@ describe("K5 Raindrop intake enrichment", () => {
     const store = new KnowledgeStore(new TronWorkspace(root));
     const initial = await store.config();
     await store.configure("k5-partial-config", { ...initial, knowledgeModel: { model: "fixture/deepseek", maxInputChars: 48_000, maxOutputChars: 8_000 } });
-    const summarized: string[] = [];
+    const modelStarted = deferred<void>();
     const fakeModel: KnowledgeGenerationModel = {
       async reflect() { return "reflect"; }, async synthesize() { return "synthesis"; },
-      async summarizeSource(input) { summarized.push(input.sessionId); return { text: "Partial summary" }; },
+      async summarizeSource() { modelStarted.resolve(); return { text: "Partial summary" }; },
       async assess() { return { summary: "assessment", evidenceQuality: "high", freshness: "current" }; },
     };
-    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel);
     const items = [{ _id: 7, title: "A repository", link: "https://github.com/example/repository", created: "2026-09-28T00:00:00Z", collection: { $id: 111 } }];
+    const writeStarted = deferred<void>();
+    const releaseWrite = deferred<void>();
+    let summaryRecordId: string | undefined;
+    const terminalSummary = deferred<{ operation: string; status: string; sourceId: string }>();
+    const jobs = new KnowledgeCurationJobs(64, 120_000, job => {
+      if (job.operation === "summary" && job.sourceId === summaryRecordId) terminalSummary.resolve(job);
+    });
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => fakeModel, undefined, undefined, jobs);
+    let blocked = false;
+    const originalWrite = durableJson.durableAtomicWriteJson;
+    const writeSpy = vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementation((path, value, mode) => originalWrite(path, value, mode, {
+      mkdir, open, rm,
+      rename: async (from, to) => {
+        if (!blocked && summaryRecordId && to.includes(`/records/${summaryRecordId}/`)) {
+          blocked = true;
+          writeStarted.resolve();
+          await releaseWrite.promise;
+        }
+        await rename(from, to);
+      },
+    }));
     const extension = new KnowledgeConnectorExtension(store, {
       credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:fixture", "local-token"]])),
       resolveHost: async () => ["93.184.216.34"],
@@ -180,17 +200,31 @@ describe("K5 Raindrop intake enrichment", () => {
         if (url.includes("/raindrops/111")) return response({ items });
         throw new Error(`Unexpected fake provider endpoint ${url}`);
       },
-      queueSummary: source => service.queueIntakeSummary(source),
+      queueSummary: source => { summaryRecordId = source.id; service.queueIntakeSummary(source); },
       sleep: async () => {}, now: () => "2026-09-29T00:00:00.000Z",
     });
-    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("partial-config"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:fixture" } });
-    const intake = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("partial-run"), sourceCollection: "111", dryRun: false, limit: 1, pilot: { id: "partial-pilot", maxItems: 1, budgetCents: 10 } } }) as { outcomes: Array<{ sourceId?: string }> };
-    const sourceId = intake.outcomes[0]?.sourceId;
-    const captured = await store.read(sourceId!, undefined, false, true, true);
-    expect(captured?.kind === "source" && captured.content.captureDisposition).not.toBe("complete");
-    expect(captured?.kind === "source" && captured.content.text).toBeTruthy();
-    for (let attempt = 0; attempt < 400 && summarized.length === 0; attempt += 1) await new Promise(resolve => setTimeout(resolve, 5));
-    expect(summarized).toEqual([sourceId]);
+    try {
+      await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("partial-config"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", credentialRef: "connector:raindrop:fixture" } });
+      const intake = await extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command("partial-run"), sourceCollection: "111", dryRun: false, limit: 1, pilot: { id: "partial-pilot", maxItems: 1, budgetCents: 10 } } }) as { outcomes: Array<{ sourceId?: string }> };
+      const sourceId = intake.outcomes[0]?.sourceId;
+      const captured = await store.read(sourceId!, undefined, false, true, true);
+      expect(captured?.kind === "source" && captured.content.captureDisposition).not.toBe("complete");
+      expect(captured?.kind === "source" && captured.content.text).toBeTruthy();
+      expect(summaryRecordId).toBe(sourceId);
+      await modelStarted.promise;
+      await writeStarted.promise;
+      // This is where the old test returned after observing model dispatch:
+      // the summary job is still running and its temp file is in the fixture.
+      const inFlight = await service.invoke({ operation: "knowledge.curation.jobs", request: { sourceId } }) as { jobs: Array<{ operation: string; status: string; sourceId: string }> };
+      expect(inFlight.jobs).toContainEqual(expect.objectContaining({ operation: "summary", sourceId, status: "running" }));
+      releaseWrite.resolve();
+      const summaryJob = await terminalSummary.promise;
+      expect(summaryJob).toMatchObject({ sourceId, status: "done" });
+      expect((await store.read(sourceId!, undefined, false, true, true))?.content.summary?.text).toBe("Partial summary");
+    } finally {
+      releaseWrite.resolve();
+      writeSpy.mockRestore();
+    }
   });
 });
 

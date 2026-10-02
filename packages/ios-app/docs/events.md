@@ -61,15 +61,17 @@ catch-up instead of disconnecting the transport or consuming their cursor. A qua
 advance the reducer cursor rejects the suffix before baseline publication and triggers the
 bounded authoritative retry path.
 
-Provider authentication is the deliberate exception to ordinary transport-scoped presentation work.
+Provider and MCP authentication are deliberate exceptions to ordinary transport-scoped presentation work.
 `auth.event` and `auth.prompt` remain bounded disposable projections, but the Gateway operation belongs
-to the authenticated device identity. A socket loss clears the presented prompt and foreground
+to the authenticated device identity. MCP auth events additionally target `{ kind: "mcp", sessionId, server }`;
+provider events retain their provider target. A socket loss clears the presented prompt and foreground
 `auth.resume` rebinds delivery without starting a second Pi login; `auth.completed` may therefore be
 replayed from a bounded Gateway tombstone. An `auth_url` can also carry a Gateway-derived
 `callbackCapture` descriptor containing only an opaque callback ID and exact loopback host/port/path.
 The authorization code/state remain in the iOS listener's memory and travel either as the existing
 Pi manual-code response or as the query-only `auth.callback` relay; they never enter snapshots, caches,
-logs, or durable events.
+logs, or durable events. MCP callback relay is accepted only for the active session-bound `/mcp login`
+operation and only to the loopback listener named by Pi's authorization URL.
 
 `models.catalogChanged` is a global, payload-free invalidation broadcast after the Gateway's live
 release-date catalog changes. The provider-auth coordinator reloads each already materialized
@@ -168,7 +170,7 @@ admits and reduces mounted-session topics:
   canonical user entry arrives. Gateway binds that entry's
   bounded `presentationId` to the prompt operation ID, which iOS consumes before legacy text
   matching. Once the operation ID is known, text/attachment equivalence is never accepted as causal settlement. `session.operationFailed` surfaces a sequenced operation failure. For prompt admission, it identifies an exact operation proven unable to produce canonical input; only that matching ID retires and restores the admission. Automatic-compaction failures instead carry their separate compaction operation ID, never the prompt ID, and show a failure notice without restoring the prompt. Exhausted overflow recovery can fail without a new compaction start; its notice has no operation ID and cannot settle an admission. Cancellation is not a failure notice. Receipt, binding, and runtime failures after queue or user-message disposition remain non-settling `session.diagnostic` events. A queued Pi call that rejects before either disposition is definitive RPC failure and releases its exact admission. Submission transport ownership is profile/session scoped across route generations, so leaving and reopening projects the same sending/accepted row without replaying the RPC. If the authoritative runtime generation changes before an accepted operation reaches canonical delivery, the coordinator retires any remaining optimistic row, restores its draft for review, and posts an outcome-unknown notice; Tron never automatically replays that prompt. One bounded local handoff preserves the same recovery after exact queue evidence has already retired the optimistic row. One unified physical row namespace spans committed, live/runtime, lifecycle, and queue content: Gateway projection binds the compaction operation ID to its canonical compaction entry, so the spinner and canonical pill update under one operation-based physical ID even when transcript bounds move from inexact to exact. The canonical entry ID remains its semantic identity. An exact operation-bound canonical handoff may likewise reuse the prior lifecycle's physical ID while retaining its canonical semantic ID. Skill, prompt-template, and extension selection travels as one bounded typed `resourceInvocation` rather than editor command text. The Gateway validates exact live `(source,name)` identity and extension precedence, retains the visible arguments in pending/queue projections, and removes Pi's expanded skill envelope during bounded transcript projection. Canonical binding receipts restore the resource chip after reconnect without exposing skill contents or private paths. Picker metadata comes from the bounded catalog; opening one resource detail performs a separate exact `session.commandDetail` read for that current `source:name`, bounded source body, and truncation facts. `session.resourcesChanged` revokes command-catalog readiness and starts one generation-gated reload for the exact mounted subscription before retained resource state can reconcile. An active upload for the exact presentation closes send admission synchronously; stale UI actions retain the draft, attachments, and selected resource until upload completion. Its initial role-aware entrance remains one-shot; composer collapse and the outgoing graft share one pre-mutation viewport generation. Every outgoing prompt is installed at full natural height using the canonical user row's full-width proposal and final horizontal alignment, then the complete text/resource/attachment row receives only a 20-point, 280 ms vertical translation and fade. Long text therefore keeps identical wrapping through canonical replacement. There is no source/destination measurement, row-height interpolation, overlay bridge, or handoff wait. Canonical authority may replace the payload atomically beneath the exact aliased physical row's retained transform owner without truncating or replaying the entrance. All sends use the same revision-current composer-height owner instead of a frame-count settlement guess. Optimistic composer settlement consumes every
-  authoritative session-reducer publication directly rather than waiting for delayed transcript formatting. Lifecycle/queue-to-canonical header, status, attachment, resource, and container payloads install atomically and without prompt-container animation in the persistent physical host. Unrelated transcript updates do not inherit that transaction. An ordinary full-height outgoing prompt is measured as the one eager terminal row and leases the established 12-point tail marker through settlement; its canonical alias retains that host until a different physical row becomes terminal. Nonordinary and fully collapsed entrances retain exact-row materialization through settlement, with the same total tail affordance split across row and marker while that target is owned. For queued steering/follow-up, the returned prompt operation ID is also the Gateway's
+  authoritative session-reducer publication directly rather than waiting for delayed transcript formatting. Lifecycle/queue-to-canonical header, status, attachment, resource, and container payloads install atomically and without prompt-container animation in the persistent physical host. Unrelated transcript updates do not inherit that transaction. New pinned rows and outgoing prompts settle through the native size-change anchor without an app-issued row-target command. For queued steering/follow-up, the returned prompt operation ID is also the Gateway's
   stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission. That exact
 operation identity may coalesce the optimistic queue-kind row with its newly admitted authoritative queue card; baseline
 operation IDs are never reused for aliasing, and aliases retire when authoritative queue items disappear. The queue row
@@ -299,9 +301,8 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
   inherit no stack-wide animation. Already-mounted streaming assistant rows instead own one bounded local height transition for ordinary new thinking/response lines, while newly admitted tool and content rows keep their one-shot measured entrance even when lazy geometry admission precedes child mounting. The stable transcript transaction runs only when the installed projection identity changes and still admits explicit entrance/tool-chip markers; native-control touch-down and drag transactions do not cross that projection-only transform. Thinking height/tail motion is row-local downstream of that boundary. Authority-only changes whose bounded transcript/stream/tool/queue/runtime layout identity is unchanged take a synchronous metadata path and cannot arm settlement. The sole composer inset exposes one bottom-aligned measured height; a generation captured before structural mutation keeps pinned tail coupling nonanimated, preserves a detached semantic locus with zero tail commands, coalesces retargets, and yields immediately to direct interaction. Reduce Motion removes spatial transitions. Tool status text
   updates inside its stable row. Ordinary pinned growth and shrink remain coupled by one
-  mode-qualified native bottom size-change anchor. A genuinely new lazy physical row may
-  request one disabled exact-row materialization lease; payload, progress, completion,
-  and canonical settlement create no command stream. Native
+  mode-qualified native bottom size-change anchor. New pinned rows and outgoing prompts remain under the native size-change anchor; payload, progress, completion,
+  and canonical settlement do not create a row-target command stream. Native
   bottom distance is bounded for display only: a visible rect beyond the physical content edge is
   not tail settlement. A deliberately detached reader retains the same viewport authority;
 - structure/context/resource invalidations reload an already-presented History,
@@ -351,22 +352,17 @@ projection: content that arrived while iOS was backgrounded is shown in place, n
 burst of row animations or automatic scroll writes. Its monotonic reconciliation
 generation is carried through delayed projection work and consumed once at installation,
 so a fast network completion cannot reclassify the same suspended rows as fresh later.
-After the authoritative two-phase handshake completes, the projection remains behind
-the opaque opening surface until the exact physical marker after transcript and queue rows intersects
-a plausible native bottom viewport. One leased bottom-edge command realizes a missing lazy tail; submitted commands,
-clamped negative bottom distance, auxiliary rows, transient boundary geometry, and overflow overshoot are
-not settlement evidence. The native geometry observation identity includes the opening epoch and phase, so
-entering positioning replays current geometry even when SwiftUI would coalesce equal numeric fields. Exact-ID
-realization can proceed without a geometry sample. If physical proof still cannot settle within 750 milliseconds, the
-bounded attempt fails closed and the opening surface presents its retry path; elapsed time never substitutes for
-viewport evidence. The physical positioning lift resolves behind the opaque surface while the tail binding remains
-owned through its completion, current non-lifted marker/geometry evidence, two unchanged display frames, and the exact target-release callback. A separate visual entrance then installs for one covered frame and crossfades that surface into the settled transcript's slight upward motion. The opening lease continues to exclude repair, paging, submission, and live projection until animation completion and the first ready frame; only then is the transcript interactive. A separate two-second post-reveal deadline retires the stale target and fails behind the opening surface; it cannot certify missing evidence or expose a displaced transcript. Direct user or accessibility interaction
-cancels that arm. The composer
-remains visible throughout opening, while sending stays disabled until readiness. Opening tail
-positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
-phase. Automatic live projection intake remains coalesced through that phase and its applied target release, then submits only the newest desired cut. Ordinary pinned growth, shrink, streaming, and existing-row settlement create no command ownership. A genuinely new lazy physical row may own one exact-row materialization lease until fresh row geometry arrives; a one-second failure boundary releases missing geometry back to native pinning. Explicit
-opening, catch-up, semantic restore, prepend, retained resume, and the bounded physical-tail repair remain distinct command owners; after they release, pinned mode
-keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Repair is admitted only from current signed marker evidence and is cancelled by interaction or a newer layout epoch.
+After the authoritative two-phase handshake completes, the exact-origin projection remains behind
+the opaque opening surface for one covered display frame, then enters its cosmetic reveal. Opening
+issues no tail-positioning command and waits for no physical-tail marker, settlement deadline, or
+correction loop. The current opening epoch, viewport activation, active scene, presentation activity,
+and mounted runtime authority are revalidated across each asynchronous boundary. The composer
+remains visible throughout opening, while sending, interaction, paging, extension routes, and live
+projection intake stay gated until a current first-ready frame; only then is the transcript
+interactive. Automatic live projection intake remains coalesced through that opening transaction,
+then submits only the newest desired cut. Ordinary pinned growth, shrink, streaming, existing-row
+settlement, and new-row insertion remain owned by native size-change anchoring. Catch-up, semantic restore, prepend, and retained resume remain distinct command owners; opening is presentation-owned and issues no scroll command. After those commands release, pinned mode
+keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Ordinary pinned growth and shrink need no estimate-based correction command.
 Short-content alignment remains bottom-owned by the native anchor; blank space stays above the tail. Editor-only composer height changes install atomically;
 attachment, selected-skill, and resource-result identity changes use one value-scoped 240 ms smooth
 host-height transition, disabled under Reduce Motion. Direct user movement away from the tail and

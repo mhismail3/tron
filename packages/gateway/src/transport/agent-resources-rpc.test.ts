@@ -11,16 +11,6 @@ const client: ClientContext = {
   isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 };
 
-function mcpInstance(id: string, overrides: Record<string, unknown> = {}) {
-  return {
-    id, definitionId: "mcp.remote-http", implementation: "mcp", providerAccountId: id,
-    policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0 },
-    health: "ready", createdAt: "2026-09-25T00:00:00.000Z", updatedAt: "2026-09-25T00:00:00.000Z",
-    setupRevision: 1, credentialConfigured: false, credentialAvailability: "unknown", providerIdentity: "unknown",
-    ...overrides,
-  };
-}
-
 const emptyHooks: HookRegistrationProjection = {
   extensions: [],
   extensionLoadErrors: [],
@@ -36,25 +26,15 @@ const emptyHooks: HookRegistrationProjection = {
 
 function service() {
   const openSession = vi.fn(async () => { throw new Error("Agent resource reads must not open a session"); });
-  const connectionSnapshot = vi.fn(async () => ({
-    definitions: [], setupOperations: [], capabilities: [], stateRevision: 1,
-    instances: [
-      mcpInstance("mcp-a"),
-      mcpInstance("mcp-disabled", { policy: { enabled: false, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0 } }),
-      mcpInstance("mcp-disconnected", { health: "disconnected" }),
-      mcpInstance("raindrop-a", { definitionId: "knowledge.raindrop", implementation: "knowledge-connector" }),
-    ],
-  }));
   const listHooks = vi.fn(async () => emptyHooks);
   const dependencies = {
     config: { machineId: "machine", machineName: "Mac", tronHome: "/tmp/tron-agent-resources-rpc" },
     updateService: { channel: "stable", isUsable: false },
     iosDeviceInstallService: { isUsable: false },
     sessions: { acquire: openSession },
-    connections: { snapshot: connectionSnapshot },
     hookResources: { list: listHooks },
   } as unknown as GatewayServiceDependencies;
-  return { instance: new GatewayService(dependencies), connectionSnapshot, openSession, listHooks };
+  return { instance: new GatewayService(dependencies), openSession, listHooks };
 }
 
 describe("Tron module listing RPC", () => {
@@ -79,24 +59,7 @@ describe("Tron module listing RPC", () => {
     expect(fixture.openSession).not.toHaveBeenCalled();
   });
 
-  it("lists the MCP instances a session would admit, and nothing else", async () => {
-    const fixture = service();
-    const result = (await fixture.instance.invoke(client, "modules.list", {})) as any;
-    expect(result.connections).toEqual([{ id: "mcp-a", definitionId: "mcp.remote-http", health: "ready" }]);
-    expect(fixture.connectionSnapshot).toHaveBeenCalledTimes(1);
-    expect(fixture.openSession).not.toHaveBeenCalled();
-  });
-
-  it("reports no tool source when the connections owner is unconfigured", async () => {
-    const instance = new GatewayService({
-      config: { machineId: "machine", machineName: "Mac", tronHome: "/tmp/tron-agent-resources-rpc" },
-      updateService: { channel: "stable", isUsable: false },
-      iosDeviceInstallService: { isUsable: false },
-    } as unknown as GatewayServiceDependencies);
-    await expect(instance.invoke(client, "modules.list", {})).resolves.toMatchObject({ connections: [] });
-  });
-
-  it("advertises both listing capabilities under the existing additive naming", () => {
+  it("advertises module listing under the existing additive naming", () => {
     const capabilities = (service().instance.info() as any).capabilities as string[];
     expect(capabilities).toContain("modules.v1");
     expect(capabilities).toContain("hooks.v1");

@@ -41,7 +41,7 @@ export class HookResources {
           tools: extension.tools.keys(),
           commands: extension.commands.keys(),
           handlers: extension.handlers,
-        })), loaded.errors);
+        })), loaded.errors, loaded.warnings);
       });
     } finally {
       work?.settle();

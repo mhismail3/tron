@@ -150,7 +150,7 @@ package struct ProviderUsageSnapshot: Codable, Hashable, Sendable, Identifiable 
     package let providerId: String
     package var id: String { providerId }
     package let status: ProviderUsageStatus
-    let source: String?
+    package let source: String?
     let scope: ProviderUsageScope?
     package let updatedAt: String?
     package let retryAt: String?
@@ -234,6 +234,17 @@ package struct ProviderUsageResponse: Codable, Sendable {
 }
 
 package enum ProviderUsageOrdering {
+    /// One plan appears once: a configured row whose usage another configured row
+    /// presents is hidden. The Gateway names the borrower only while it qualifies,
+    /// so a lender that is the only login, or sits beside an API-key borrower,
+    /// stays visible, and a signed-out lender stays available to sign in.
+    package static func visible(_ providers: [ProviderSummary]) -> [ProviderSummary] {
+        let configured = Set(providers.filter(\.configured).map(\.id))
+        return providers.filter { provider in
+            !(provider.configured && provider.usageLentTo.map(configured.contains) == true)
+        }
+    }
+
     package static func sorted(_ providers: [ProviderSummary]) -> [ProviderSummary] {
         providers.sorted {
             if $0.configured != $1.configured { return $0.configured && !$1.configured }

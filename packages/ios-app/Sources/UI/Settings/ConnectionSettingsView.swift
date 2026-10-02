@@ -382,7 +382,6 @@ enum AdministrativeDrainPresentation {
         case .automationDispatch: singular = "automation dispatch"
         case .automationTerminalPersistence: singular = "automation completion"
         case .knowledgeObservation: singular = "knowledge observation"
-        case .mcpToolCall: singular = "MCP tool call"
         }
         return "\(count) \(singular)\(count == 1 ? "" : "s")"
     }
@@ -648,11 +647,7 @@ struct GatewayConnectionDetailView: View {
         .tronNavigationTitle(currentProfile.label)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button { showingServerInfo = true } label: {
-                    Image(systemName: "info.circle")
-                        .tronSettingsAccent()
-                }
-                .accessibilityLabel("Server info")
+                TronSheetInfoButton(accessibilityLabel: "Server info") { showingServerInfo = true }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button { dismiss() } label: {

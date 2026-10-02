@@ -61,7 +61,8 @@ Commands:
                        worktrees that no longer exist. Touches no simulator, so it takes
                        no lease. Every sweep prunes too.
   clean                Delete this lane's owned test simulator and runs, and this
-                       worktree's test products. The shared results root is never removed.
+                       worktree's test products, then the lane directory once only its
+                       lease file is left. The shared results root is never removed.
 
 Selectors:
   --only-testing OWNER  Repeat without shell-generated command fragments, for example:
@@ -166,6 +167,32 @@ owned_directory() {
   validate_owned_directory_path "$directory"
   mkdir -p "$directory"
   printf 'tron.ios-test-owned.v1\n' >"$directory/.tron-ios-test-owned"
+}
+
+seed_primary_compiler_caches() {
+  local common_git_dir primary_root primary_key primary_products name source destination staging clone
+  common_git_dir="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  primary_root="$(dirname "$common_git_dir")"
+  [[ "$primary_root" != "$ROOT" ]] || return 0
+  primary_key="$(python3 "$IDENTITY" worktree-key --worktree "$primary_root" 2>/dev/null)" || return 0
+  [[ -n "$primary_key" && "$primary_key" != "$WORKTREE_KEY" ]] || return 0
+  primary_products="$PRODUCTS_ROOT/$primary_key"
+  [[ -d "$primary_products" && ! -L "$primary_products" \
+    && -f "$primary_products/.tron-ios-test-owned" && ! -L "$primary_products/.tron-ios-test-owned" ]] || return 0
+
+  for name in ModuleCache.noindex SDKStatCaches.noindex; do
+    source="$primary_products/$name"
+    destination="$DERIVED_DATA/$name"
+    [[ -d "$source" && ! -L "$source" && ! -e "$destination" && ! -L "$destination" ]] || continue
+    staging="$(mktemp -d "$DERIVED_DATA/.tron-cache-seed.XXXXXX" 2>/dev/null)" || continue
+    if cp -cR "$source" "$staging" >/dev/null 2>&1; then
+      clone="$staging/$name"
+      if [[ -d "$clone" && ! -e "$destination" && ! -L "$destination" ]]; then
+        mv "$clone" "$destination" 2>/dev/null || true
+      fi
+    fi
+    rm -rf -- "$staging" || true
+  done
 }
 
 clean_owned_directory() {
@@ -413,13 +440,16 @@ PY
   exit 0
 fi
 
-mkdir -p "$STATE_ROOT"
-chmod 700 "$STATE_ROOT"
+# Only the lease holder creates the lane's state directory, so a command refused
+# for the lease it inherited leaves no marker-less directory that no sweep reclaims.
 if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
   # The holder releases this lane's simulator when the command ends, so no
   # simulator outlives the command that booted it.
   locker_arguments=(--lock "$LOCK" --marker "$MARKER" --development-state "$DEVELOPMENT_STATE")
   ((keep_booted)) && locker_arguments+=(--keep-booted)
+  # `clean` empties the lane down to its lease file, which only the holder can
+  # remove safely: it still holds the lease once the command tree has ended.
+  [[ "$command" == clean ]] && locker_arguments+=(--remove-empty-lane)
   # This lane travels with the command: the holder leases and releases the lane
   # the command runs in, and the command re-derives every lane path - state
   # directory, marker, device name - from its own arguments. Re-exec'ing without
@@ -431,12 +461,9 @@ if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
 else
   # A descendant of a leased command inherits the lease's own name. One that
   # names another lane would use that lane's simulator while holding no lease on
-  # it, so refuse rather than run unleased. The lease's lock file exists by now,
-  # so compare the files rather than the spellings: the same path reaches this
-  # command with or without a trailing slash, `./` or `//`, and every leased
-  # command would be refused on a spelling difference alone.
-  [[ -n "${TRON_IOS_TEST_LEASE_LOCK:-}" && "$TRON_IOS_TEST_LEASE_LOCK" -ef "$LOCK" ]] \
-    || die "this command names lane $LANE_LABEL, whose lease is $LOCK, but the inherited iOS test lease covers ${TRON_IOS_TEST_LEASE_LOCK:-no lane}; refusing to run on a lane this process does not hold"
+  # it, so refuse (74) rather than run unleased. The lease owner decides, for
+  # every lane tool alike.
+  python3 "$LOCKER" --lock "$LOCK" --verify-inherited "$LANE_LABEL" || exit $?
 fi
 
 if [[ "$command" == clean ]]; then
@@ -481,6 +508,9 @@ simulator_id="$(python3 "$SIMULATOR" provision "${simulator_args[@]}")" || {
 destination="platform=iOS Simulator,id=$simulator_id"
 
 owned_directory "$DERIVED_DATA"
+case "$command" in
+  build|checkpoint|prepare) seed_primary_compiler_caches ;;
+esac
 owned_directory "$RESULTS_ROOT"
 # One measurement per command: the same identity stamps the products a build
 # produces and lands in every metadata record of that command.

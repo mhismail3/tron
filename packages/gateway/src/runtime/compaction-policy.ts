@@ -106,8 +106,11 @@ export class CompactionOperationPolicy {
   }
 
   private resolve(configuration: CompactionConfiguration): ResolvedCompactionConfiguration {
-    const model = this.session.model;
-    const requestedThinkingLevel = configuration.thinkingLevel === "inherit" ? this.session.thinkingLevel : configuration.thinkingLevel;
+    const selected = this.session.model;
+    const model = selected?.api === "pi-virtual" ? this.session.routedModel?.model ?? selected : selected;
+    const requestedThinkingLevel = configuration.thinkingLevel === "inherit"
+      ? (selected?.api === "pi-virtual" ? this.session.routedModel?.thinkingLevel ?? this.session.thinkingLevel : this.session.thinkingLevel)
+      : configuration.thinkingLevel;
     return {
       ...configuration,
       ...(model ? { model: { provider: model.provider, id: model.id } } : {}),

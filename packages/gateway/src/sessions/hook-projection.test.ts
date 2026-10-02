@@ -28,7 +28,7 @@ describe("hook registration projection", () => {
     expect(result.extensions).toHaveLength(1);
     expect(result.extensions[0]).toMatchObject({ name: second.name, tools: ["second-tool"], handlers: [{ event: "session_start", count: 1 }] });
     expect(result.hookInventory.extensions).toEqual({ total: 2, retained: 1, omitted: 1 });
-    expect(result.hookInventory.encodedBytes).toBe(Buffer.byteLength(JSON.stringify({ extensions: result.extensions, extensionLoadErrors: result.extensionLoadErrors })));
+    expect(result.hookInventory.encodedBytes).toBe(Buffer.byteLength(JSON.stringify({ extensions: result.extensions, extensionLoadErrors: result.extensionLoadErrors, extensionLoadWarnings: result.extensionLoadWarnings })));
   });
   it("retains every existing extension row and exact identity while bounding additions", () => {
     const registrations = projectHookRegistrations([
@@ -61,6 +61,7 @@ describe("hook registration projection", () => {
       Buffer.byteLength(JSON.stringify({
         extensions: registrations.extensions,
         extensionLoadErrors: registrations.extensionLoadErrors,
+        extensionLoadWarnings: registrations.extensionLoadWarnings,
       })),
     );
     expect(registrations.hookInventory.encodedBytes).toBeLessThanOrEqual(MAX_HOOK_PROJECTION_BYTES);

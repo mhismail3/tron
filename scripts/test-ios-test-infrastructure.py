@@ -936,6 +936,22 @@ fi
 exit 0
 """)
         xcodebuild.chmod(0o755)
+        cp = self.bin / "cp"
+        cp.write_text("""#!/usr/bin/env python3
+import os, shutil, sys
+from pathlib import Path
+args = sys.argv[1:]
+if args[:1] == ['-cR']:
+    args = args[1:]
+source, destination = map(Path, args[-2:])
+clone = destination / source.name
+if os.environ.get('FAKE_CP_FAIL'):
+    clone.mkdir(parents=True, exist_ok=True)
+    (clone / 'partial').write_text('partial clone')
+    raise SystemExit(1)
+shutil.copytree(source, clone)
+""")
+        cp.chmod(0o755)
         self.tools_environment = self.install_synthetic_xcodegen(self.root)
         self.derived = self.root / "derived"
         self.results = self.root / "results"
@@ -974,6 +990,7 @@ exit 0
         extra_args: list[str] | None = None,
         lane: str | None = None, discovery_root: Path | None = None,
         override: dict[str, str] | None = None,
+        runner_root: Path = ROOT,
     ) -> subprocess.CompletedProcess[str]:
         environment = self.contained_environment(self.root)
         environment.update(self.reader_environment())
@@ -1011,7 +1028,7 @@ exit 0
             environment.pop("TRON_IOS_TEST_RESULTS_DIR", None)
             environment["HOME"] = str(home)
         return subprocess.run(
-            [str(RUNNER), command, *(extra_args or [])],
+            [str(runner_root / "scripts/tron-ios-test"), command, *(extra_args or [])],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
@@ -1172,6 +1189,101 @@ exit 0
         self.assertEqual(result.returncode, 74, result.stderr)
         self.assertIn("carry no build identity", result.stderr)
         self.assertIn("before running tests", result.stderr)
+
+    def primary_products(self) -> Path:
+        common_dir = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            env=self.contained_environment(self.root), check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+        primary = Path(common_dir).parent
+        key = subprocess.run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(primary)],
+            env=self.contained_environment(self.root), check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+        return self.root / "home/Library/Developer/Tron/ios/test-derived-data" / key
+
+    def add_runner_worktree(self) -> Path:
+        runner_root = self.root / "runner-worktree"
+        subprocess.run(
+            ["git", "-C", str(ROOT), "worktree", "add", "--detach", str(runner_root), "HEAD"],
+            env=self.contained_environment(self.root), check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            [sys.executable, str(IDENTITY), "write", "--worktree", str(runner_root),
+             "--derived-data", str(self.derived)],
+            env=self.contained_environment(self.root), check=True,
+            input=json.dumps(self.source_identity(runner_root)), text=True,
+            stdout=subprocess.DEVNULL,
+        )
+        return runner_root
+
+    def remove_runner_worktree(self, runner_root: Path) -> None:
+        subprocess.run(
+            ["git", "-C", str(ROOT), "worktree", "remove", "--force", str(runner_root)],
+            env=self.contained_environment(self.root), check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    def test_build_seeds_only_primary_compiler_caches_into_owned_products(self) -> None:
+        # A temporary linked checkout ensures the runner has a distinct primary
+        # checkout, even when this suite itself runs from an ordinary clone.
+        runner_root = self.add_runner_worktree()
+        try:
+            primary = self.primary_products()
+            primary.mkdir(parents=True)
+            (primary / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+            (primary / "ModuleCache.noindex").mkdir(parents=True)
+            (primary / "ModuleCache.noindex/module.pcm").write_text("primary module")
+            (primary / "SDKStatCaches.noindex").mkdir()
+            (primary / "SDKStatCaches.noindex/sdk.cache").write_text("primary SDK")
+            (primary / "Build/Products/Foreign.app").mkdir(parents=True)
+            result = self.invoke(command="build", runner_root=runner_root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((self.derived / "ModuleCache.noindex/module.pcm").read_text(), "primary module")
+            self.assertEqual((self.derived / "SDKStatCaches.noindex/sdk.cache").read_text(), "primary SDK")
+            self.assertFalse((self.derived / "Build/Products/Foreign.app").exists())
+            self.assertTrue((self.derived / "build-identity.json").is_file())
+            (self.derived / "ModuleCache.noindex/module.pcm").write_text("worktree module")
+            self.assertEqual((primary / "ModuleCache.noindex/module.pcm").read_text(), "primary module")
+
+            (primary / "ModuleCache.noindex/module.pcm").write_text("primary rebuilt")
+            result = self.invoke(command="build", runner_root=runner_root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((self.derived / "ModuleCache.noindex/module.pcm").read_text(), "worktree module")
+        finally:
+            self.remove_runner_worktree(runner_root)
+
+    def test_run_does_not_seed_compiler_caches(self) -> None:
+        primary = self.primary_products()
+        primary.mkdir(parents=True)
+        (primary / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+        (primary / "ModuleCache.noindex").mkdir(parents=True)
+        (primary / "ModuleCache.noindex/module.pcm").write_text("primary module")
+
+        result = self.invoke(command="run")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.derived / "ModuleCache.noindex").exists())
+
+    def test_build_stays_cold_when_cache_clone_fails_and_removes_staging(self) -> None:
+        runner_root = self.add_runner_worktree()
+        try:
+            primary = self.primary_products()
+            primary.mkdir(parents=True)
+            (primary / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+            (primary / "ModuleCache.noindex").mkdir(parents=True)
+            (primary / "ModuleCache.noindex/module.pcm").write_text("primary module")
+
+            result = self.invoke(command="build", override={"FAKE_CP_FAIL": "1"}, runner_root=runner_root)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((self.derived / "ModuleCache.noindex").exists())
+            self.assertFalse(list(self.derived.glob(".tron-cache-seed.*")))
+            self.assertTrue((self.derived / "build-identity.json").is_file())
+        finally:
+            self.remove_runner_worktree(runner_root)
 
     def test_build_stamps_products_and_records_source_in_metadata(self) -> None:
         (self.derived / "build-identity.json").unlink()
@@ -1370,13 +1482,13 @@ exit 0
     # 2. A descendant of a leased command that names another lane runs on that
     #    lane's simulator while holding no lease on it, because it inherits the
     #    holder's `TRON_IOS_TEST_LOCK_HELD` and skips the locker entirely.
-    # 3. The holder's command compares its own lane path against the lease's
-    #    spelling instead of the file both name, so a state directory written
-    #    with a trailing slash, `//` or `./` is refused even though it is this
-    #    lane's own lease.
+    # 3. A state directory written with a trailing slash, `//` or `./` is
+    #    refused as another lane's lease even though it is this lane's own.
     #
     # Failure mode 3 was added after the review of the first attempt, which
-    # compared strings and refused every such spelling.
+    # compared strings and refused every such spelling. The lane selector now
+    # normalises the state directory before the inherited-lease check sees it,
+    # so this case guards the outcome, not how the check compares paths.
     def test_a_lane_named_on_the_command_line_is_the_lane_that_provisions(self) -> None:
         """Failure mode 1: the holder's command keeps the lane it was given."""
         owner = ["--only-testing", "TronMobileTests/StubTests"]
@@ -1399,12 +1511,10 @@ exit 0
         self.assertFalse((self.state / "lease.lock").exists())
 
     def test_a_state_directory_spelled_differently_is_still_this_lanes_lease(self) -> None:
-        """Failure mode 3: the guard compares files, not the spellings of paths."""
-        # The locker tidies `--lock` through pathlib, so the child's own
-        # `$STATE_ROOT/lease.lock` reaches it with a trailing slash, `//` or
-        # `./` intact. Every leased command (build, run, checkpoint, prepare,
-        # diagnose, clean) would be refused if the guard compared strings.
-        # `$TMPDIR` on macOS ends in `/`, so this is the common spelling.
+        """Failure mode 3: any spelling of this lane's state directory is its lease."""
+        # Every leased command (build, run, checkpoint, prepare, diagnose,
+        # clean) would be refused if one spelling reached the check as another
+        # lane. `$TMPDIR` on macOS ends in `/`, so this is the common spelling.
         spellings = [
             f"{self.state}/",
             f"{self.state.parent}//{self.state.name}",
@@ -3453,6 +3563,250 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
                 command.kill()
                 command.wait(timeout=30)
             self.close_pipes(command)
+
+
+class InheritedLeaseFixture(LifecycleHarness, unittest.TestCase):
+    """W-34 (issue #126): every lane tool honours the lease it inherits, and
+    `clean` leaves no lane directory behind.
+
+    Failure modes these cases target, written before the code:
+
+    1. The Gateway E2E harness or the profiler, started by a descendant of a
+       leased command (so it inherits `TRON_IOS_TEST_LOCK_HELD`) and naming a
+       lane that lease does not cover, provisions, boots or deletes that lane's
+       simulator while holding no lease on it, because it only skips taking a
+       lease it inherits.
+    2. Their refusal differs from the runner's - another exit status or another
+       message - so a caller that handles the runner's refusal (74) mistakes
+       theirs for a test or destination failure; a copied check also drifts
+       from the runner's (it compares spellings, or accepts no inherited lease).
+    3. `clean` deletes the lane's simulator and marker but leaves the lane
+       directory holding only its lease file, which no sweep reclaims because
+       the sweep removes only marker-owned state.
+    4. Removing that directory takes something that is not the emptied lane's
+       own lease: a file or a nested lane inside it, or a lease file a command
+       that started in the lane meanwhile created and holds, so two commands
+       would hold the lane at once.
+    5. A lane whose directory `clean` removed cannot be used again.
+    6. A command opens the lane's lease file just before another holder
+       unlinks it (the holder of `clean`, or `lane-remove`), locks the unlinked
+       file, and runs - or removes the lane - while a command that recreated
+       the lease file holds the lane too: two owners of one simulator, and the
+       inherited-lease check cannot tell, because the path still names a lease.
+    7. A command refused for the lease it inherited leaves the directory of the
+       lane it named behind, empty and marker-less, where no sweep reclaims it.
+    """
+
+    REFUSAL = "error: this command names lane "
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.install_fake_xcodebuild()
+        self.environment = {
+            **self.environment,
+            **self.install_synthetic_xcodegen(self.root),
+            "TRON_IOS_E2E_STATE_DIR": str(self.root / "e2e-state"),
+            "TRON_IOS_E2E_DERIVED_DATA": str(self.root / "e2e-derived"),
+            "TRON_PROFILE_IOS_DERIVED_DATA": str(self.root / "profile-derived"),
+            "TRON_PROFILE_RESULTS_DIR": str(self.root / "profile-results"),
+        }
+        for inherited in ("TRON_IOS_TEST_LOCK_HELD", "TRON_IOS_TEST_LEASE_FD", "TRON_IOS_TEST_LEASE_LOCK"):
+            self.environment.pop(inherited, None)
+
+    def tool(self, tool: Path, *arguments: str, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(tool), *arguments], env=environment or self.environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180,
+        )
+
+    def refusal(self, result: subprocess.CompletedProcess[str]) -> str:
+        lines = [line for line in result.stderr.splitlines() if line.startswith(self.REFUSAL)]
+        self.assertEqual(len(lines), 1, result.stderr)
+        return lines[0]
+
+    def test_every_lane_tool_refuses_an_inherited_lease_for_another_lane_as_the_runner_does(self) -> None:
+        """Failure modes 1 and 2: one refusal, 74, before any simulator is touched."""
+        other = self.discovery_root / "ios-test-other/lease.lock"
+        commands = (
+            (RUNNER, ("run", "--only-testing", "TronMobileTests/StubTests")),
+            (E2E, ("build",)),
+            (E2E, ("clean",)),
+            (PROFILER, ("--scenario", "control", "--no-build")),
+        )
+        for inherited in ({"TRON_IOS_TEST_LEASE_LOCK": str(other)}, {}):
+            environment = {**self.environment, "TRON_IOS_TEST_LOCK_HELD": "1", **inherited}
+            refusals: dict[str, str] = {}
+            for tool, arguments in commands:
+                with self.subTest(tool=tool.name, arguments=arguments, inherited=inherited):
+                    # Each case starts from both lanes intact, so a tool that
+                    # fails to refuse is the one reported, not the cases after it.
+                    self.owned_lane("ios-test", UDID_A)
+                    self.owned_lane("ios-test-other", UDID_B, device_name="Tron iOS Tests (other)")
+                    other.write_text("")
+                    self.log_path.unlink(missing_ok=True)
+                    result = self.tool(tool, *arguments, environment=environment)
+                    self.assertEqual(result.returncode, 74, result.stderr)
+                    line = self.refusal(result)
+                    self.assertIn(str(self.state / "lease.lock"), line)
+                    self.assertIn(str(other) if inherited else "covers no lane", line)
+                    refusals[f"{tool.name} {arguments[0]}"] = line
+                    self.assertEqual(self.simctl_commands(), [])
+                    self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+                    self.assertEqual(self.device_entry(UDID_B)["state"], "Booted")
+                    self.assertTrue((self.state / "simulator.json").exists())
+                    self.assertFalse((self.root / "e2e-derived/Build/Products").exists())
+            self.assertEqual(len(set(refusals.values())), 1, refusals)
+
+    def test_a_refused_command_leaves_no_directory_for_the_lane_it_named(self) -> None:
+        """Failure mode 7: the refusal comes before the lane directory is made."""
+        other = self.owned_lane("ios-test-other", UDID_B, device_name="Tron iOS Tests (other)") / "lease.lock"
+        other.write_text("")
+        environment = {
+            **self.environment, "TRON_IOS_TEST_STATE_DIR": "",
+            "TRON_IOS_TEST_LOCK_HELD": "1", "TRON_IOS_TEST_LEASE_LOCK": str(other),
+        }
+        for index, (tool, arguments) in enumerate((
+            (RUNNER, ("run", "--only-testing", "TronMobileTests/StubTests")),
+            (E2E, ("build",)),
+            (E2E, ("clean",)),
+            (PROFILER, ("--scenario", "control", "--no-build")),
+        )):
+            with self.subTest(tool=tool.name, arguments=arguments):
+                # A lane of its own per case: a directory one tool leaves
+                # behind is never charged to the next.
+                fresh = self.discovery_root / f"ios-test-fresh{index}"
+                result = self.tool(tool, *arguments, "--lane", f"fresh{index}", environment=environment)
+                self.assertEqual(result.returncode, 74, result.stderr)
+                self.assertIn(str(fresh / "lease.lock"), self.refusal(result))
+                self.assertFalse(fresh.exists())
+
+    def test_clean_removes_the_lane_directory_it_emptied_and_the_lane_is_usable_again(self) -> None:
+        """Failure modes 3 and 5: nothing of the lane survives `clean` in either tool."""
+        for tool, name in ((RUNNER, "alpha"), (E2E, "beta")):
+            with self.subTest(tool=tool.name):
+                environment = {**self.environment, "TRON_IOS_TEST_STATE_DIR": ""}
+                udid = UDID_C if name == "alpha" else UDID_D
+                lane = self.owned_lane(f"ios-test-{name}", udid, device_name=f"Tron iOS Tests ({name})")
+
+                cleaned = self.tool(tool, "clean", "--lane", name, environment=environment)
+                self.assertEqual(cleaned.returncode, 0, cleaned.stderr)
+                self.assertFalse(lane.exists(), sorted(path.name for path in lane.iterdir()) if lane.exists() else None)
+                self.assertFalse(self.present(udid))
+
+                again = self.tool(E2E, "build", "--lane", name, environment=environment)
+                self.assertEqual(again.returncode, 0, again.stderr)
+                marker = json.loads((lane / "simulator.json").read_text())
+                self.assertEqual(marker["name"], f"Tron iOS Tests ({name})")
+                self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+
+    def test_clean_keeps_a_lane_directory_that_holds_more_than_its_lease(self) -> None:
+        """Failure mode 4: only a directory holding nothing but the lease goes."""
+        notes = self.state / "notes.txt"
+        nested = self.discovery_root / "ios-test/ios-test-inner"
+        for tool in (RUNNER, E2E):
+            for kept in ("a file", "a nested lane"):
+                with self.subTest(tool=tool.name, kept=kept):
+                    self.owned_lane("ios-test", UDID_A)
+                    if kept == "a file":
+                        notes.write_text("not the tooling's\n")
+                    else:
+                        self.owned_lane("ios-test/ios-test-inner", UDID_B, device_name="Tron iOS Tests (inner)")
+                    result = self.tool(tool, "clean")
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((self.state / "simulator.json").exists())
+                    self.assertTrue((self.state / "lease.lock").exists())
+                    if kept == "a file":
+                        self.assertEqual(notes.read_text(), "not the tooling's\n")
+                        notes.unlink()
+                    else:
+                        self.assertTrue((nested / "simulator.json").exists())
+                        self.assertTrue(self.present(UDID_B))
+                        shutil.rmtree(nested)
+
+    def test_a_lease_file_another_command_now_holds_is_never_removed(self) -> None:
+        """Failure mode 4: the emptied lane's own lease, and no one else's, is removed."""
+        lane = self.discovery_root / "ios-test-race"
+        lane.mkdir()
+        removed, go = self.root / "removed", self.root / "go"
+        # The command loses the lane's lease file, and a command that starts in
+        # the lane meanwhile creates a new one and holds it.
+        holder = subprocess.Popen(
+            [
+                sys.executable, str(LOCK), "--lock", str(lane / "lease.lock"),
+                "--marker", str(lane / "simulator.json"),
+                "--development-state", str(self.development_marker), "--remove-empty-lane", "--",
+                "/bin/sh", "-c", 'rm -f "$1/lease.lock"; echo removed >"$2"; while [ ! -e "$3" ]; do sleep 0.05; done',
+                "sh", str(lane), str(removed), str(go),
+            ],
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        try:
+            self.wait_for(removed)
+            self.hold_lease(lane, command="run")
+            go.write_text("go\n")
+            _, stderr = holder.communicate(timeout=60)
+            self.assertEqual(holder.returncode, 0, stderr)
+            self.assertTrue(self.lock_holder(lane / "lease.lock"))
+            self.assertIn('"command": "run"', (lane / "lease.lock").read_text())
+        finally:
+            if holder.poll() is None:
+                holder.kill()
+                holder.wait(timeout=30)
+            self.close_pipes(holder)
+
+    # Runs one owner as a real process, but replaces the lease file between the
+    # owner's open and its lock, as a holder that unlinks it and a command that
+    # recreates and holds it would; no timing of real processes can pin that
+    # interleaving down.
+    LEASE_RACE = """
+import fcntl, os, runpy, sys
+script, lock = sys.argv[1], sys.argv[2]
+take = fcntl.flock
+kept = []
+def flock(descriptor, operation):
+    if operation & fcntl.LOCK_EX and not kept and os.path.exists(lock):
+        opened, named = os.fstat(descriptor), os.stat(lock)
+        if (opened.st_dev, opened.st_ino) == (named.st_dev, named.st_ino):
+            os.unlink(lock)
+            kept.append(open(lock, "a+"))
+            take(kept[0].fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return take(descriptor, operation)
+fcntl.flock = flock
+sys.argv = [script, *sys.argv[3:]]
+runpy.run_path(script, run_name="__main__")
+"""
+
+    def raced(self, script: Path, lock: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-c", self.LEASE_RACE, str(script), str(lock), *arguments],
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+        )
+
+    def test_a_command_that_locked_an_unlinked_lease_file_never_runs(self) -> None:
+        """Failure mode 6: the lease taken is the file the lane's path names."""
+        lane = self.discovery_root / "ios-test-race"
+        lane.mkdir()
+        ran = self.root / "ran"
+        result = self.raced(
+            LOCK, lane / "lease.lock", "--lock", str(lane / "lease.lock"), "--",
+            "/bin/sh", "-c", 'echo ran >"$1"', "sh", str(ran),
+        )
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertIn("already leased", result.stderr)
+        self.assertFalse(ran.exists())
+
+    def test_lane_removal_that_locked_an_unlinked_lease_file_removes_nothing(self) -> None:
+        """Failure mode 6: the lane's owner takes its own leases the same way."""
+        lane = self.owned_lane("ios-test-alpha", UDID_A)
+        (lane / "lease.lock").write_text("")
+        result = self.raced(
+            SIMULATOR, lane / "lease.lock", "lane-remove", "--lane-dir", str(lane),
+            "--discovery-root", str(self.discovery_root), "--default-state-dir", str(self.state),
+            "--development-state", str(self.development_marker),
+        )
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertTrue((lane / "simulator.json").exists())
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
 
 
 class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):

@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import type { ConnectorCredentialStore } from "./connector-credentials.js";
 import type { SourceAssessment } from "./knowledge-contract.js";
 import type { SourceAssessmentModel, SourceAssessmentModelInput, SourceAssessmentDispatchContext } from "./source-capture.js";
-import { JevDecisionClient, JEV_DEFAULT_MODEL, JEV_MAX_BODY_BYTES, JEV_MAX_STATE_BYTES, JEV_MAX_STATE_QUESTION_BYTES, type JevHTTP, type JevChoiceAnswer, type JevScoreAnswer, type JevQuestion } from "./jev-client.js";
+import { JevDecisionClient, JEV_DEFAULT_MODEL, JEV_MAX_ESTIMATED_CHARGE_CENTS, JEV_MAX_BODY_BYTES, JEV_MAX_STATE_BYTES, JEV_MAX_STATE_QUESTION_BYTES, type JevChoiceAnswer, type JevScoreAnswer, type JevQuestion } from "./jev-client.js";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 const JEV_PROFILE_VERSION = "tron-source-profile-v2";
 export const JEV_RUBRIC_VERSION = "tron-source-rubric-v3";
-const PRICING = "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" as const;
+const PRICING = "typesafe-jev-latest-input-0.042-usd-per-million-output-free-estimate" as const;
 
 type AssessmentCoverage = "full" | "sampled";
 const MIN_SAMPLED_EVIDENCE_CHARACTERS = 64;
@@ -62,12 +62,12 @@ export interface JevAssessmentResult extends Omit<SourceAssessment, "generatedAt
 /** Knowledge's narrow rubric adapter over the reusable typed Jev transport. */
 export class JevSourceAssessmentModel implements SourceAssessmentModel {
   private readonly client: JevDecisionClient;
-  constructor(credentials: ConnectorCredentialStore, http?: JevHTTP) { this.client = new JevDecisionClient(credentials, http); }
+  constructor(runtime: ModelRuntime, fetchImpl?: typeof fetch) { this.client = new JevDecisionClient(runtime, fetchImpl); }
   async assess(input: Parameters<SourceAssessmentModel["assess"]>[0], signal: AbortSignal, context?: SourceAssessmentDispatchContext): Promise<JevAssessmentResult> {
     if (signal.aborted) throw new Error("Jev assessment cancelled");
     const interests = input.interests.slice(0, 50).map(value => bounded(value, 500));
     const prepared = prepareJevAssessmentInput(input, interests);
-    const result = await this.client.evaluate({ model: JEV_DEFAULT_MODEL, state: prepared.state, questions: prepared.questions }, signal, ...(context?.beforeDispatch || context?.onDispatch || context?.maxChargeCents !== undefined ? [{ ...(context.maxChargeCents !== undefined ? { maxChargeCents: context.maxChargeCents } : {}), ...(context.beforeDispatch ? { beforeDispatch: context.beforeDispatch } : {}), ...(context.onDispatch ? { onDispatch: context.onDispatch } : {}) }] : []));
+    const result = await this.client.evaluate({ model: JEV_DEFAULT_MODEL, state: prepared.state, questions: prepared.questions }, signal, { maxChargeCents: context?.maxChargeCents ?? JEV_MAX_ESTIMATED_CHARGE_CENTS, ...(context?.beforeDispatch ? { beforeDispatch: context.beforeDispatch } : {}), ...(context?.onDispatch ? { onDispatch: context.onDispatch } : {}) });
     const admission = result.answers.admission as JevChoiceAnswer; const topic = result.answers.topic as JevChoiceAnswer; const usefulness = result.answers.score as JevScoreAnswer;
     // A sampled excerpt cannot support a destructive archive decision. It is
     // still useful for classification, but uncertainty favors retention.

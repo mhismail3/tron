@@ -13,8 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bootstrap  # noqa: E402
 import claim  # noqa: E402
 import dashboard  # noqa: E402
+import issues  # noqa: E402
+import land  # noqa: E402
 import start  # noqa: E402
 import verify  # noqa: E402
+import warm  # noqa: E402
 from gh import Gh, GhError  # noqa: E402
 
 
@@ -40,6 +43,19 @@ def main(argv: list) -> int:
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
+    corpus = commands.add_parser("issues", help="print every open issue as a bounded JSON corpus for related-issue checks")
+    corpus.add_argument("--closed", action="store_true", help="also include recently updated closed issues")
+    corpus.add_argument("--closed-limit", type=int, default=200, metavar="N",
+                        help=f"closed issues to include with --closed (default 200, max {issues.CLOSED_LIMIT_MAX})")
+    landing = commands.add_parser("land", help="update, verify, open the pull request, wait for checks, merge")
+    landing.add_argument("--title", help="pull request title (default: '<type>: <issue title>' or the current one)")
+    landing.add_argument("--summary-file", type=Path, help="Markdown for the Summary section (required to open)")
+    landing.add_argument("--needs-user-validation", metavar="TEXT",
+                        help="exact maintainer-only action and check; the issue stays open as Needs you")
+    landing.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
+    stewardship = commands.add_parser("steward", help="report open claim pull requests; --land one whose owner is gone")
+    stewardship.add_argument("--land", type=int, metavar="ISSUE",
+                         help="merge this issue's pull request if its head is verified, green and up to date")
     args = parser.parse_args(argv)
 
     root = repository_root()
@@ -59,8 +75,15 @@ def main(argv: list) -> int:
             return 0 if receipt["passed"] else 1
         if args.command == "dashboard":
             return dashboard.run(Gh(root), Path.cwd(), config, args.html, args.json)
-    except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError,
-            FileNotFoundError, json.JSONDecodeError) as error:
+        if args.command == "issues":
+            return issues.run(Gh(root), config, args.closed_limit if args.closed else 0)
+        if args.command == "land":
+            return land.land(Gh(root), root, config, args.session, args.title, args.summary_file,
+                             args.needs_user_validation)
+        if args.command == "steward":
+            return land.steward(Gh(root), root, config, args.land)
+    except (GhError, bootstrap.BootstrapError, claim.ClaimError, verify.VerifyError, dashboard.DashboardError, issues.IssuesError,
+            land.LandError, warm.WarmError, FileNotFoundError, json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1
     return 64

@@ -336,7 +336,11 @@ struct TranscriptRow: View, Equatable {
               }),
               let provider = item.provider,
               let modelName = item.modelId else { return nil }
-        return ModelDisplayFormatting.reference(provider: provider, model: modelName)
+        let physical = ModelDisplayFormatting.reference(provider: provider, model: modelName)
+        if let thinking = item.thinkingLevel, !thinking.isEmpty {
+            return "\(physical) · \(ThinkingLevelPresentation.title(thinking))"
+        }
+        return physical
     }
 
     private var displayedMessageParts: [ChatMessagePart] {

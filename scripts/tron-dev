@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # Developer-owned immutable Gateway lifecycle for port 9848.
 set -euo pipefail
+# Agents run this from shells that inherit the Stable Gateway's environment
+# (PI_SUBAGENTS_TEMP_ROOT, TRON_GATEWAY_CHANNEL=stable, payload identity, session
+# ids). None of it may reach the Debug build, deploy helper, supervisor or child,
+# so every mode re-runs once under the minimal environment launchd gives Stable,
+# plus the toolchain selections this script honours (#144).
+if [[ "${TRON_DEV_CLEAN_ENVIRONMENT:-}" != 1 ]]; then
+  clean=(TRON_DEV_CLEAN_ENVIRONMENT=1 "HOME=$HOME" "PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin")
+  for name in USER LOGNAME SHELL TMPDIR LANG LC_ALL LC_CTYPE TERM SSH_AUTH_SOCK __CF_USER_TEXT_ENCODING NVM_DIR TRON_NODE_BIN TRON_CI_TOOLS_DIR; do
+    [[ -n "${!name:-}" ]] && clean+=("$name=${!name}")
+  done
+  exec /usr/bin/env -i "${clean[@]}" /bin/bash "${BASH_SOURCE[0]}" "$@"
+fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY="$ROOT/scripts/gateway-payload-deploy.mjs"
 NODE_VERSION_FILE="$ROOT/.node-version"
@@ -66,6 +78,13 @@ LOG_FILE="$STATE_DIR/dev.log"
 COMMAND_LOCK="$STATE_DIR/command.lock"
 COMMAND_LOCK_HELD=no
 STATE_HELPER="$ROOT/scripts/tron-dev-state.mjs"
+# The Gateway refuses to start unless its gateway/ state directory is owner-only
+# (notification grants live there), and on a fresh Debug home this script
+# creates that directory first, so it must create it owner-only (#144).
+ensure_state_dir() {
+  (umask 077 && mkdir -p "$STATE_DIR")
+  chmod 700 "$STATE_DIR"
+}
 LAUNCHER="/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 require_installed_launcher() {
   [[ -x "$LAUNCHER" ]] || {
@@ -135,7 +154,7 @@ stop_dev() {
 supervise() {
   local failures=0 child="" child_identity="" supervisor_identity expected_epoch expected_revision expected_fingerprint terminating=0
   require_installed_launcher
-  mkdir -p "$STATE_DIR"
+  ensure_state_dir
   supervisor_identity="$("$NODE_BIN" "$STATE_HELPER" pid-start "$$")"
   "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" starting expectedHost="$HOST" expectedPort=9848 expectedHome="$HOME/.tron-dev" supervisorPid="$$" supervisorStartIdentity="$supervisor_identity" intentionalExit=false restartCount=0
   handle_termination() {
@@ -231,7 +250,7 @@ case "$command" in
 esac
 case "$command" in
   start|restart|stop|handoff)
-    mkdir -p "$STATE_DIR"
+    ensure_state_dir
     acquire_command_lock || exit $?
     ;;
 esac
@@ -242,7 +261,11 @@ case "$command" in
   handoff)
     supervisor_live || { echo "Debug Gateway is not supervised and ready" >&2; exit 1; }
     [[ "$(status)" == *'"readiness":"ready"'* ]] || { echo "Debug Gateway is not ready" >&2; exit 1; }
-    "$NODE_BIN" "$DEPLOY" handoff-debug --host "$HOST" --dev-home "$HOME/.tron-dev" --stable-home "$HOME/.tron" --stable-bundled-root /Applications/Tron.app/Contents/Resources/Gateway
+    # Stable only receives a candidate recorded as built from a clean tree;
+    # handoff-debug re-checks that exact admitted identity under its lock.
+    admitted="$("$NODE_BIN" "$STATE_HELPER" handoff-admission "$STATE_FILE" "$HOME/.tron-dev")" || exit 1
+    read -r admitted_version admitted_fingerprint <<<"$admitted"
+    "$NODE_BIN" "$DEPLOY" handoff-debug --host "$HOST" --dev-home "$HOME/.tron-dev" --stable-home "$HOME/.tron" --stable-bundled-root /Applications/Tron.app/Contents/Resources/Gateway --version "$admitted_version" --fingerprint "$admitted_fingerprint"
     ;;
   start|restart)
     # Measure the source before building; a dirty tree still stages its full

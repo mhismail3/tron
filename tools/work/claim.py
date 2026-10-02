@@ -67,6 +67,12 @@ def ineligibility(issue: dict, rules: dict) -> List[str]:
     return reasons
 
 
+def is_active(state: str, labels: List[str], status: Optional[str], rules: dict) -> bool:
+    """Whether an issue counts toward the soft cap; `start` and the dashboard both count with this."""
+    return (state == "OPEN" and status in rules["activeStatuses"]
+            and not set(labels) & set(rules["excludeLabels"]))
+
+
 def claim_comment(session: str, branch: str, worktree: str, base: str) -> str:
     # The repository may be public: only paths relative to the checkout's
     # parent directory are published.

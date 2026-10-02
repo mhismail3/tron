@@ -143,12 +143,14 @@ export class SessionContextWindowPolicy {
   }
 
   private resolve(model: RuntimeModel, override = this.overrides.get(contextModelKey(model)) ?? null): ContextWindowPolicy | undefined {
-    const limits = contextWindowLimits(model, this.session.settingsManager.getCompactionSettings());
+    const physical = this.session.routedModel?.model ?? model;
+    const limitsModel = model.api === "pi-virtual" ? physical : model;
+    const limits = contextWindowLimits(limitsModel, this.session.settingsManager.getCompactionSettings());
     if (!limits) return undefined;
     const key = contextModelKey(model);
     const global = this.global[key];
     const project = this.project[key];
-    const configured = project ?? global ?? model.contextWindow;
+    const configured = project ?? global ?? limitsModel.contextWindow;
     const defaultWindow = Math.max(limits.minimum, Math.min(limits.maximum, configured));
     const requested = override ?? configured;
     const effective = Math.max(limits.minimum, Math.min(limits.maximum, requested));
@@ -186,7 +188,7 @@ export class SessionContextWindowPolicy {
     const warnings = [state.warning];
     const file = this.session.sessionManager.getSessionFile();
     if (state.override !== null && file && !existsSync(file)) {
-      warnings.push("This new session and its context override are not yet saved to disk; they persist after the first assistant response.");
+      warnings.push("This new session and its context override are not yet saved to disk; they persist after the first user or assistant message.");
     }
     if (state.effective !== selected.contextWindow) {
       warnings.push("Model metadata changed; the current bounds will apply on the next turn.");
@@ -216,7 +218,7 @@ export class SessionContextWindowPolicy {
     if (value !== null && !this.overrides.has(key) && this.overrides.size >= MAX_CONTEXT_PREFERENCES) throw new GatewayError("conflict", "Too many session context preferences");
     const entry: ContextEntry = { version: 1, provider: model.provider, modelId: model.id, contextWindow: value };
     // The SDK stages an entry in memory before its synchronous disk append.
-    // Brand-new sessions retain its documented first-assistant persistence.
+    // Brand-new sessions persist this override with their first message.
     const previousLeaf = this.session.sessionManager.getLeafId();
     try {
       this.session.sessionManager.appendCustomEntry(CONTEXT_WINDOW_ENTRY, entry);

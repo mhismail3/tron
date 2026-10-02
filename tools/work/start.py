@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 
 import claim as claims
 from gh import Gh
+import warm
 
 _ISSUE = """
 query($owner: String!, $name: String!, $number: Int!) {
@@ -37,13 +38,16 @@ query($owner: String!, $name: String!, $number: Int!) {
 }
 """
 
-_STATUS_COUNT = """
+_ACTIVE_COUNT = """
 query($project: ID!, $field: String!, $cursor: String) {
   node(id: $project) {
     ... on ProjectV2 {
       items(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { name } } }
+        nodes {
+          fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          content { __typename ... on Issue { state repository { nameWithOwner } labels(first: 30) { nodes { name } } } }
+        }
       }
     }
   }
@@ -81,14 +85,14 @@ def _worktree_branch(repo: Path, path: Path) -> Optional[str]:
     return list_worktrees(repo).get(path.resolve())
 
 
-def _session(explicit: Optional[str]) -> str:
+def session_of(explicit: Optional[str]) -> str:
     for value in (explicit, os.environ.get("WORK_SESSION_ID"), os.environ.get("PI_SESSION_ID")):
         if value and value.strip():
             return value.strip()
     raise claims.ClaimError("no session identity: pass --session or set WORK_SESSION_ID")
 
 
-def _load_issue(gh: Gh, owner: str, name: str, number: int, rules: dict, project_title: str) -> dict:
+def load_issue(gh: Gh, owner: str, name: str, number: int, rules: dict, project_title: str) -> dict:
     query = _ISSUE.replace("__FIELD__", rules["statusField"])
     raw = gh.graphql(query, owner=owner, name=name, number=number)["repository"]["issue"]
     if raw is None:
@@ -109,17 +113,27 @@ def _load_issue(gh: Gh, owner: str, name: str, number: int, rules: dict, project
     }
 
 
-def _count_status(gh: Gh, project_id: str, field: str, status: str) -> int:
+def count_active(gh: Gh, project_id: str, rules: dict, repository: str) -> int:
+    """Open, non-excluded issues of this repository in an active Status (claim.is_active)."""
     count, cursor = 0, None
     while True:
-        items = gh.graphql(_STATUS_COUNT, project=project_id, field=field, cursor=cursor)["node"]["items"]
-        count += sum(1 for n in items["nodes"] if (n.get("fieldValueByName") or {}).get("name") == status)
+        items = gh.graphql(_ACTIVE_COUNT, project=project_id, field=rules["statusField"],
+                           cursor=cursor)["node"]["items"]
+        for node in items["nodes"]:
+            # A deleted issue leaves an item with null content; drafts and other
+            # repositories' issues are not this repository's work.
+            content = node.get("content") or {}
+            if content.get("__typename") != "Issue" or content["repository"]["nameWithOwner"] != repository:
+                continue
+            status = (node.get("fieldValueByName") or {}).get("name")
+            labels = [label["name"] for label in content["labels"]["nodes"]]
+            count += claims.is_active(content["state"], labels, status, rules)
         if not items["pageInfo"]["hasNextPage"]:
             return count
         cursor = items["pageInfo"]["endCursor"]
 
 
-def _set_status(gh: Gh, item: dict, status: str) -> None:
+def set_status(gh: Gh, item: dict, status: str) -> None:
     field = item["project"]["field"]
     option = next((o["id"] for o in field["options"] if o["name"] == status), None)
     if option is None:
@@ -135,9 +149,9 @@ def _set_status(gh: Gh, item: dict, status: str) -> None:
 def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]) -> int:
     rules = config["claim"]
     remote, base = rules["remote"], rules["baseBranch"]
-    session = _session(session_arg)
+    session = session_of(session_arg)
     owner, name = gh.run("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip().split("/")
-    issue = _load_issue(gh, owner, name, number, rules, config["project"]["title"])
+    issue = load_issue(gh, owner, name, number, rules, config["project"]["title"])
 
     existing = claims.existing_claims(cwd, remote, base, number)
     mine = [c for c in existing if c.session == session]
@@ -179,8 +193,9 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     item = issue["item"]
     if item is None:
         raise claims.ClaimError(f"#{number} left the Project; add it back and re-run start")
-    if issue["status"] != rules["claimedStatus"]:
-        _set_status(gh, item, rules["claimedStatus"])
+    # A resumed claim that is already In review or Needs you keeps that Status.
+    if issue["status"] not in rules["claimedStatuses"]:
+        set_status(gh, item, rules["claimedStatus"])
     published = os.path.relpath(worktree, primary.parent)
     marker = f"<!-- work:claim session={session} branch={branch} -->"
     if not any(marker in body for body in issue["comments"]):
@@ -198,9 +213,13 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
         else:
             _git(cwd, "worktree", "add", "--track", "-b", branch, str(worktree), f"{remote}/{branch}")
 
-    in_progress = _count_status(gh, item["project"]["id"], rules["statusField"], rules["claimedStatus"])
-    if in_progress > rules["softCap"]:
-        print(f"warning: {in_progress} items are {rules['claimedStatus']} (soft cap {rules['softCap']})",
+    # Warm only independently-owned dependency installs; iOS products belong to
+    # scripts/tron-ios-test and are seeded only when that runner starts a build.
+    warm.seed_node_modules(primary, worktree)
+
+    active = count_active(gh, item["project"]["id"], rules, f"{owner}/{name}")
+    if active > rules["softCap"]:
+        print(f"warning: {active} issues are {' or '.join(rules['activeStatuses'])} (soft cap {rules['softCap']})",
               file=sys.stderr)
     print(f"issue:    {issue['url']}")
     print(f"branch:   {branch}")

@@ -117,7 +117,8 @@ is not required.
 Debug Gateway lifecycle uses the signed launcher from `/Applications/Tron.app`.
 Install the Mac app first; source-built local replacements must follow the
 manual [local Release reinstall runbook](packages/mac-app/docs/development.md#reinstall-a-local-release-build).
-Gateway lifecycle transitions remain user-initiated.
+Agents may run the Debug Gateway; Stable and production transitions remain
+maintainer actions.
 
 The [iOS build matrix](packages/ios-app/docs/development.md#build-matrix) lists
 the five configurations with their schemes, identities, and routes.
@@ -175,7 +176,7 @@ The pinned `pi-agent-browser-native` package keeps its global configuration at i
 - [Mac architecture](packages/mac-app/docs/architecture.md)
 - [Mac development and packaging](packages/mac-app/docs/development.md)
 - [Contributing](CONTRIBUTING.md)
-- [Work plans and history](docs/plans/README.md)
+- Work tracking: GitHub Issues and the Tron Project (see [AGENTS.md](AGENTS.md#work-tracking))
 
 CI validates source but does not publish production artifacts. iOS/TestFlight
 and App Store delivery, Mac signing/notarization, and production deployment are

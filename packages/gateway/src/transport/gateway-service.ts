@@ -41,6 +41,8 @@ import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
 import type { GlobalProviderResources } from "../admin/global-provider-resources.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
+import { withMcpAuthInteraction } from "../extensions/extension-adapters.js";
+import type { McpAdminService, McpScope } from "../admin/mcp-admin-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
   IOS_DEVICE_INSTALL_CAPABILITY,
@@ -63,13 +65,12 @@ import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../auto
 import { AutomationPaginationStore } from "../automations/automation-pagination.js";
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
-import { ProviderUsageOwner, providerUsageSupported, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
+import { ProviderUsageOwner, providerUsageSupported, providerUsageLentTo, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
-import { mcpToolSourceInstances } from "../integrations/mcp-adapter.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
 
@@ -209,7 +210,7 @@ const restartDrainMethods = new Set([
   "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
-  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
+  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel", "mcp.auth.start", "mcp.auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
   "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate", "knowledge.tags.retag-needed", "knowledge.connector.status", "knowledge.connector.queue", "knowledge.raindrop.read", "knowledge.x.credits",
@@ -291,6 +292,7 @@ export interface GatewayServiceDependencies {
   sessionSearch?: SessionSearchService;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
+  mcpAdmin?: McpAdminService;
 }
 
 export class GatewayService {
@@ -484,6 +486,58 @@ export class GatewayService {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "connections.list accepts no parameters");
         return safeJson(await this.dependencies.connections.invoke({ operation: method, request: {} } as ConnectionAction));
       }
+      case "mcp.list": {
+        const scope = await this.mcpScope(params);
+        const work = this.workRegistry?.begin({ kind: "rpc-mutation", method, hostEpoch: this.workRegistry.runtimeEpoch });
+        try { return safeJson(await this.requireMcpAdmin().list(scope)); }
+        finally { work?.settle(); }
+      }
+      case "mcp.add":
+      case "mcp.remove":
+      case "mcp.logout":
+        return this.mutation(client, method, params, async () => {
+          const scope = await this.mcpScope(params);
+          const server = string(params.server, "server", { min: 1, max: 128 });
+          if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
+          let args: string[];
+          if (method === "mcp.add") {
+            const transport = oneOf(params.transport, "transport", ["stdio", "http"] as const);
+            const exposure = params.exposure === undefined ? undefined : oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
+            if (transport === "http") {
+              const url = string(params.url, "url", { min: 1, max: 4_096 });
+              let parsed: URL; try { parsed = new URL(url); } catch { throw new GatewayError("invalid_request", "MCP URL is invalid"); }
+              if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new GatewayError("invalid_request", "MCP URL must use HTTP or HTTPS");
+              args = [server, "--url", url, ...(exposure ? ["--exposure", exposure] : [])];
+            } else {
+              const command = string(params.command, "command", { min: 1, max: 1_024 });
+              const argv = params.args === undefined ? [] : arrayOfStrings(params.args, "args", 64);
+              args = [server, ...(exposure ? ["--exposure", exposure] : []), "--", command, ...argv];
+            }
+          } else args = [server];
+          const result = await this.requireMcpAdmin().mutate(scope, method === "mcp.add" ? "add" : method === "mcp.remove" ? "remove" : "logout", args, server);
+          return safeJson({ ...(result as object), reloadRequired: method !== "mcp.logout", reloadMessage: method === "mcp.logout" ? undefined : "Existing sessions load server configuration after /reload or a new session." });
+        });
+      case "mcp.update":
+        return this.mutation(client, method, params, async () => {
+          const scope = await this.mcpScope(params);
+          const server = string(params.server, "server", { min: 1, max: 128 });
+          rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "enabled", "exposure"], method);
+          if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
+          const patch: { enabled?: boolean; exposure?: import("../admin/mcp-admin-service.js").McpExposure } = {};
+          if (params.enabled !== undefined) patch.enabled = boolean(params.enabled, "enabled");
+          if (params.exposure !== undefined) patch.exposure = oneOf(params.exposure, "exposure", ["codemode", "codemode-deferred", "deferred", "direct", "hidden"] as const);
+          if (Object.keys(patch).length === 0) throw new GatewayError("invalid_request", "MCP update requires enabled or exposure");
+          return safeJson(await this.requireMcpAdmin().update(scope, server, patch));
+        });
+      case "mcp.token.set":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "token"], method);
+          const scope = await this.mcpScope(params);
+          const server = string(params.server, "server", { min: 1, max: 128 });
+          if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
+          const token = string(params.token, "token", { min: 1, max: 16_384 });
+          return safeJson(await this.requireMcpAdmin().storeBearer(scope, server, token));
+        });
       case "knowledge.config":
       case "knowledge.tags.configure":
       case "knowledge.tags.reconcile":
@@ -496,6 +550,7 @@ export class GatewayService {
       case "knowledge.source.tag":
       case "knowledge.tags.run":
       case "knowledge.tags.budget.reconcile":
+      case "knowledge.connector.budget.reconcile":
       case "knowledge.source.curate":
       case "knowledge.source.take":
       case "knowledge.source.admission":
@@ -1675,6 +1730,44 @@ export class GatewayService {
         if (!admission) throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
         return { operationId: admission.operationId, recovered: admission.recovered };
       }
+      case "mcp.auth.start": {
+        rejectUnknownFields(params, ["sessionId", "server", "commandId"], method);
+        const sessionId = string(params.sessionId, "sessionId", { min: 1, max: 200 });
+        const server = string(params.server, "server", { min: 1, max: 128 });
+        const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
+        if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
+        const slot = await this.openedSlot(client, { sessionId });
+        if (!slot.hasBuiltinMcpCommand()) throw new GatewayError("unsupported", "This session does not own Pi's built-in MCP login command");
+        const start = () => this.dependencies.auth.startMcp(
+          client.id,
+          client.identity,
+          commandId,
+          sessionId,
+          server,
+          async (interaction, operationId) => {
+            await new Promise<void>((resolve, reject) => {
+              const aborted = () => reject(new GatewayError("cancelled", "MCP sign-in was cancelled"));
+              interaction.signal?.addEventListener("abort", aborted, { once: true });
+              const finish = (error?: unknown) => {
+                interaction.signal?.removeEventListener("abort", aborted);
+                error ? reject(error) : resolve();
+              };
+              withMcpAuthInteraction(operationId, interaction, () => {
+                void slot.prompt(`/mcp login ${server}`).catch(finish);
+              }, finish, { sessionId, server });
+            });
+          },
+        );
+        const admission = client.isLocal
+          ? start()
+          : await this.dependencies.devices.admitDevice(client.identity, start);
+        if (!admission) throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
+        return { operationId: admission.operationId, recovered: admission.recovered };
+      }
+      case "mcp.auth.cancel": {
+        rejectUnknownFields(params, ["operationId"], method);
+        return { cancelled: this.dependencies.auth.cancel(client.identity, string(params.operationId, "operationId", { max: 100 })) };
+      }
       case "auth.respond": {
         const answered = this.dependencies.auth.respond(
           client.identity,
@@ -1765,20 +1858,7 @@ export class GatewayService {
         return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
       case "modules.list": {
         rejectUnknownFields(params, [], "Module listing");
-        // Names the installed modules and where MCP tools come from. A source row
-        // never carries transport configuration or credential references, and an
-        // individual MCP tool name is only knowable inside a session runtime.
-        const sources = this.dependencies.connections
-          ? mcpToolSourceInstances(await this.dependencies.connections.snapshot())
-          : [];
-        return safeJson({
-          modules: tronModuleSummaries(),
-          connections: sources.map((instance) => ({
-            id: instance.id,
-            definitionId: instance.definitionId,
-            health: instance.health,
-          })),
-        });
+        return safeJson({ modules: tronModuleSummaries() });
       }
       case "hooks.list":
         rejectUnknownFields(params, ["cwd"], "Hook listing");
@@ -2205,6 +2285,21 @@ export class GatewayService {
     }
   }
 
+  private requireMcpAdmin(): McpAdminService {
+    if (!this.dependencies.mcpAdmin) throw new GatewayError("unsupported", "MCP administration is unavailable");
+    return this.dependencies.mcpAdmin;
+  }
+
+  private async mcpScope(params: Record<string, unknown>): Promise<McpScope> {
+    const scope = params.scope === undefined ? "global" : oneOf(params.scope, "scope", ["global", "project"] as const);
+    if (scope === "global") return { scope };
+    const cwd = optionalString(params.cwd, "cwd", 4_096);
+    if (!cwd) throw new GatewayError("invalid_request", "Project MCP scope requires cwd");
+    const resolved = await this.dependencies.trust.requireResolved(cwd);
+    if (!resolved.trusted) throw new GatewayError("unauthenticated", "Project MCP servers require a trusted project");
+    return { scope, cwd: resolved.cwd, trusted: true };
+  }
+
   private async modelRuntime(params: Record<string, unknown>): Promise<ModelRuntime> {
     if (params.sessionId === undefined) return this.dependencies.modelRuntime;
     return (await this.dependencies.sessions.acquire(string(params.sessionId, "sessionId", { max: 200 }))).modelRuntime;
@@ -2219,6 +2314,7 @@ export class GatewayService {
         name: provider.name,
         configured: auth !== undefined,
         usageSupported: providerUsageSupported(modelRuntime, provider.id),
+        usageLentTo: providerUsageLentTo(modelRuntime, provider.id),
         localOnly: providerLocalOnly(modelRuntime, provider.id),
         authSource: auth?.source ?? null,
         credentialType: credentials.get(provider.id) ?? null,
@@ -2245,6 +2341,7 @@ export class GatewayService {
           provider: model.provider,
           id: model.id,
           name: model.name,
+          virtual: model.api === "pi-virtual",
           reasoning: model.reasoning,
           input: model.input,
           contextWindow: model.contextWindow,
@@ -2264,6 +2361,7 @@ export function validateProviderCatalog(providers: Array<{
   id: string;
   name: string;
   usageSupported: boolean;
+  usageLentTo: string | null;
   localOnly: boolean;
   authSource: string | null;
   credentialType: string | null;
@@ -2286,6 +2384,7 @@ export function validateProviderCatalog(providers: Array<{
     }
     identities.add(provider.id);
     const values = [provider.id, provider.name, ...provider.authMethods];
+    if (provider.usageLentTo) values.push(provider.usageLentTo);
     if (provider.authSource) values.push(provider.authSource);
     if (provider.credentialType) values.push(provider.credentialType);
     for (const value of values) {

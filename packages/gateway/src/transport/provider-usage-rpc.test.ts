@@ -45,16 +45,21 @@ describe("provider.list usage support", () => {
   const ollamaModels = [
     { provider: "ollama", id: "llama3", api: "openai-completions", baseUrl: "http://127.0.0.1:11434/v1" },
   ];
+  const openaiModels = [{ provider: "openai", id: "gpt-test", api: "openai-responses", baseUrl: "https://api.openai.com/v1" }];
+  const codexModels = [{ provider: "openai-codex", id: "gpt-codex-test", api: "openai-codex-responses", baseUrl: "https://chatgpt.com/backend-api" }];
   let anthropicOAuth = true;
+  let openaiOAuth = false;
   const runtime = {
     getProviders: () => [
       { id: "opencode-go", name: "OpenCode Go", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => goModels },
       { id: "anthropic", name: "Anthropic (CortexKit)", auth: { apiKey: {}, oauth: {} }, baseUrl: undefined, getModels: () => anthropicModels },
       { id: "ollama", name: "Ollama", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => ollamaModels },
+      { id: "openai", name: "OpenAI", auth: { apiKey: { login: () => {} }, oauth: {} }, baseUrl: undefined, getModels: () => openaiModels },
+      { id: "openai-codex", name: "OpenAI Codex (legacy)", auth: { oauth: {} }, baseUrl: undefined, getModels: () => codexModels },
     ],
-    getModels: (id: string) => id === "opencode-go" ? goModels : id === "anthropic" ? anthropicModels : id === "ollama" ? ollamaModels : [],
-    getProvider: (id: string) => ({ id, baseUrl: undefined, auth: { apiKey: {}, oauth: id === "anthropic" ? {} : undefined } }),
-    isUsingOAuth: (id: string) => id === "anthropic" && anthropicOAuth,
+    getModels: (id: string) => id === "opencode-go" ? goModels : id === "anthropic" ? anthropicModels : id === "ollama" ? ollamaModels : id === "openai" ? openaiModels : id === "openai-codex" ? codexModels : [],
+    getProvider: (id: string) => ({ id, baseUrl: undefined, auth: { apiKey: {}, oauth: id === "anthropic" || id === "openai" || id === "openai-codex" ? {} : undefined } }),
+    isUsingOAuth: (id: string) => (id === "anthropic" && anthropicOAuth) || (id === "openai" && openaiOAuth) || id === "openai-codex",
     hasConfiguredAuth: () => true,
     checkAuth: async () => ({ source: "stored" }),
     listCredentials: async () => [{ providerId: "opencode-go", type: "api_key" }, { providerId: "anthropic", type: "oauth" }],
@@ -71,9 +76,30 @@ describe("provider.list usage support", () => {
       expect.objectContaining({ id: "anthropic", usageSupported: true, localOnly: false, credentialType: "oauth" }),
       // Loopback-only models are unmetered, so the row is local rather than usage-backed.
       expect.objectContaining({ id: "ollama", usageSupported: false, localOnly: true }),
+      expect.objectContaining({ id: "openai", name: "OpenAI", usageSupported: false, authMethods: ["api_key", "oauth"] }),
+      expect.objectContaining({ id: "openai-codex", name: "OpenAI Codex (legacy)", authMethods: ["oauth"] }),
     ]);
     anthropicOAuth = false;
+    openaiOAuth = false;
     const apiKeyResult = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean }> };
     expect(apiKeyResult.providers.find((provider) => provider.id === "anthropic")).toMatchObject({ usageSupported: false });
+  });
+
+  it("names the provider that presents the Codex login's usage only while OpenAI uses ChatGPT OAuth", async () => {
+    // Clients hide a lender row whose usage another configured row presents; an
+    // API-key or absent OpenAI login must leave the Codex row as it is.
+    const service = new GatewayService({
+      modelRuntime: runtime,
+      globalProviderResources: { withStableSnapshot: (read: () => Promise<unknown>) => read() },
+    } as unknown as GatewayServiceDependencies);
+    const lentTo = async () => {
+      const result = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean; usageLentTo: string | null }> };
+      return Object.fromEntries(result.providers.map((provider) => [provider.id, [provider.usageSupported, provider.usageLentTo]]));
+    };
+    openaiOAuth = false;
+    expect(await lentTo()).toMatchObject({ openai: [false, null], "openai-codex": [true, null] });
+    openaiOAuth = true;
+    expect(await lentTo()).toMatchObject({ openai: [true, null], "openai-codex": [true, "openai"], anthropic: [expect.any(Boolean), null] });
+    openaiOAuth = false;
   });
 });

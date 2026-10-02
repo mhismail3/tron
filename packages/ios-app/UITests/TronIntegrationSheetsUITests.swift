@@ -1,11 +1,10 @@
 import XCTest
 
-/// Connected Services and MCP sheets against the in-app scripted connection owner.
+/// Connected Services sheets against the in-app scripted connection owner.
 /// Failure modes this E2E journey protects:
 /// - the delayed X credit read blocks the rest of the configured/available list;
 /// - a failed X credit read leaves an error line in the list;
-/// - a setup-required instance is incorrectly repeated under Available;
-/// - an MCP server receives an X-only credit line.
+/// - a setup-required instance is incorrectly repeated under Available.
 final class TronIntegrationSheetsUITests: XCTestCase {
     @MainActor
     func testConfiguredAvailableCreditsAndDetails() {
@@ -15,21 +14,15 @@ final class TronIntegrationSheetsUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Configured"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Raindrop"].exists)
-        XCTAssertTrue(app.staticTexts["Jev"].exists)
-        XCTAssertEqual(app.staticTexts.matching(identifier: "Jev").count, 1)
         XCTAssertFalse(app.staticTexts["Available"].exists, "Configured services must not be duplicated in Available")
         XCTAssertTrue(app.staticTexts["X"].exists)
-        XCTAssertFalse(app.staticTexts["Jev tagging"].exists)
-        XCTAssertFalse(app.staticTexts["jev-account"].exists)
         XCTAssertTrue(app.staticTexts["Account"].exists)
-        XCTAssertTrue(app.staticTexts["MCP server"].exists == false)
         XCTAssertTrue(app.staticTexts["Setup required"].exists)
         XCTAssertTrue(app.staticTexts["Setup required"].exists, "Rows remain available while credits load")
         XCTAssertTrue(app.staticTexts.matching(identifier: "integration-credit-pending").firstMatch.waitForExistence(timeout: 2),
                       "The delayed X read reserves a pending row without blocking other entries")
         let credit = app.staticTexts["$4.20 available"]
         XCTAssertTrue(credit.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "MCP · $" )).firstMatch.exists)
         keepScreenshot(app, name: "c29-connected-services-light-x-credits")
         let darkServices = launch(scenario: "credits-dark", dark: true)
         defer { darkServices.terminate() }
@@ -61,7 +54,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertFalse(failing.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] %@", "failed")).firstMatch.exists)
         XCTAssertTrue(failing.staticTexts["Raindrop"].exists, "Failed credits do not block other rows")
         keepScreenshot(failing, name: "c29-x-credit-failure-dark")
-        failing.buttons["Details for Raindrop"].tap()
+        failing.buttons.matching(identifier: "Details for Raindrop").firstMatch.tap()
         XCTAssertTrue(failing.staticTexts["Capabilities"].waitForExistence(timeout: 5))
         XCTAssertTrue(failing.staticTexts["Raindrop collections"].waitForExistence(timeout: 3))
         XCTAssertTrue(failing.staticTexts["Research home"].exists)
@@ -70,44 +63,15 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         let lightRaindrop = launch(scenario: "credits-fail-light")
         defer { lightRaindrop.terminate() }
         XCTAssertTrue(lightRaindrop.staticTexts["Configured"].waitForExistence(timeout: 10))
-        lightRaindrop.buttons["Details for Raindrop"].tap()
+        lightRaindrop.buttons.matching(identifier: "Details for Raindrop").firstMatch.tap()
         XCTAssertTrue(lightRaindrop.staticTexts["Raindrop collections"].waitForExistence(timeout: 5))
         keepScreenshot(lightRaindrop, name: "c29-raindrop-detail-light")
     }
 
     @MainActor
-    func testMCPServerUsesConfiguredAvailableGroupsWithoutCredits() {
-        continueAfterFailure = false
-        let light = launch(surface: "mcp")
-        defer { light.terminate() }
-        XCTAssertTrue(light.staticTexts["Configured"].waitForExistence(timeout: 10))
-        keepScreenshot(light, name: "c29-mcp-servers-light")
-        let app = launch(surface: "mcp", dark: true)
-        defer { app.terminate() }
-        XCTAssertTrue(app.staticTexts["Configured"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Available"].exists)
-        XCTAssertTrue(app.staticTexts["local-search"].exists)
-        keepScreenshot(app, name: "c29-mcp-servers-dark")
-        XCTAssertTrue(app.buttons["Add another server for MCP server"].exists)
-        XCTAssertTrue(app.staticTexts["Not configured"].exists, "An addable service reads like Providers' Available rows")
-        XCTAssertFalse(app.staticTexts["Setup required"].exists, "Setup required is reserved for a configured account needing attention")
-        XCTAssertFalse(app.staticTexts["Remote MCP"].exists)
-        XCTAssertFalse(app.staticTexts["Loading credits…"].exists)
-        XCTAssertFalse(app.staticTexts["$4.20 available"].exists)
-        app.buttons["Details for MCP server"].tap()
-        XCTAssertTrue(app.staticTexts["Capabilities"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Add another server for MCP server"].exists)
-        keepScreenshot(app, name: "c29-mcp-detail-dark")
-        app.buttons["Cancel"].tap()
-        app.buttons["Add another server for MCP server"].tap()
-        XCTAssertTrue(app.staticTexts["Set up MCP server"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Remote endpoint"].exists)
-    }
-
-    @MainActor
-    private func launch(scenario: String = "default", surface: String = "services", dark: Bool = false) -> XCUIApplication {
+    private func launch(scenario: String = "default", dark: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-integrations-fixture", "-integrations-surface", surface, "-integrations-scenario", scenario,
+        app.launchArguments = ["-tron-integrations-fixture", "-integrations-scenario", scenario,
                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         if dark { app.launchArguments += ["-ui-dark-mode"] }
         app.launch()

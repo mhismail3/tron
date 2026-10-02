@@ -6,6 +6,7 @@ import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import { GatewayError } from "../errors.js";
 import { BROWSER_LIVE_VIEW_SCHEMA, type BrowserLiveViewRegistry } from "./browser-live-view.js";
 import { NATIVE_LIVE_VIEW_SCHEMA } from "./native-live-view.js";
+import { registerNestedPresentationHandlers } from "./nested-presentation-extension.js";
 
 const presentationSchema = Type.Object({
   surface: Type.Union([Type.Literal("sheet"), Type.Literal("inline"), Type.Literal("floating")]),
@@ -76,6 +77,7 @@ export function createTronDisplayExtension(input: {
   internalFilesRoot?: () => Promise<string>;
 }): ExtensionFactory {
   return (pi) => {
+    registerNestedPresentationHandlers(pi);
     pi.registerTool({
       name: "display",
       label: "Display",

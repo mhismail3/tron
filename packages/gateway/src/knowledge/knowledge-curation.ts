@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { KnowledgeModelOutputError, knowledgeModelFailureSummary } from "./knowledge-model-output.js";
 import {
   KNOWLEDGE_CURATION_MAX_BATCH_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_ITEMS, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS,
   KnowledgeCurationRefusal,
@@ -60,6 +61,10 @@ export function curationItemRefusal(operation: KnowledgeCurationOperation, item:
  * of the batch still has work to attempt. */
 export function curationFailureOutcome(item: KnowledgeCurationItem, error: unknown): KnowledgeCurationOutcome {
   const message = error instanceof Error ? error.message : "Knowledge curation failed";
+  if (error instanceof KnowledgeModelOutputError) {
+    const failure = knowledgeModelFailureSummary(error);
+    return { recordId: item.recordId, status: "failed", code: failure.code, reason: failure.reason };
+  }
   if (error instanceof KnowledgeCurationRefusal) {
     return {
       recordId: item.recordId,
@@ -75,6 +80,7 @@ export function curationFailureOutcome(item: KnowledgeCurationItem, error: unkno
 /** Terminal reason for a job that failed, kept typed for the caller. */
 export function curationJobFailure(error: unknown, aborted: boolean, cancellationReason?: unknown): { code: KnowledgeCurationCode; reason: string } {
   if (error instanceof KnowledgeCurationRefusal) return { code: error.code, reason: error.message };
+  if (error instanceof KnowledgeModelOutputError) return knowledgeModelFailureSummary(error);
   if (aborted) return { code: "cancelled", reason: cancellationReason instanceof Error ? cancellationReason.message : "Knowledge curation job was cancelled" };
   return { code: "unavailable", reason: error instanceof Error ? error.message : "Knowledge curation job failed" };
 }

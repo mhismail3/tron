@@ -60,6 +60,78 @@ app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
 calls the product and agent **Tron**; source may use Pi-specific names only where
 it identifies the backing SDK contract.
 
+## Pi SDK boundary map
+
+The SDK host composes Pi's `codemode`, `tool-search`, and `mcp` built-in
+extension factories for session runtimes and session-free resource loads; the
+SDK does not load these factories automatically. Scoped `-builtin:<name>`
+settings control the shared list. MCP may activate codemode or tool-search when
+server exposure requires them, even when they are not `defaultTools` entries.
+
+Pi owns nested execution and canonical session JSONL. Nested tool calls remain
+children of the parent result, never independent transcript rows or receipts.
+New sessions materialize at the first user or assistant message; setup-only
+state before that remains in memory, and receipts appended before first-message
+materialization flush with that message. `runtime-registry.integration.test.ts`
+covers first-message persistence and cold reopen.
+
+Pi's built-in MCP extension and its `mcp.json` files are the only MCP client and
+configuration authority. Gateway binds global config and credentials to its
+agent directory and admits project config only through the trust owner. The
+session-bound sign-in relay routes Pi's own authorization URL and loopback
+callback; see [MCP servers](docs/mcp.md) for accepted transport and credential
+deltas.
+
+`GlobalProviderResources` replays virtual-model registrations. The picker marks
+them virtual, while routed physical responses own effective context limits and
+usage/cost attribution. Process-global Pi markdown/select/settings helpers pin
+the `dark` theme because the Gateway has no terminal and the SDK exposes no
+per-instance global setter; the host-owned RPC callback palette is separate.
+P99-19 tracks an upstream setter request.
+
+Jev uses Pi `ModelRuntime.classify()` with TypeSafe's catalog `jev-latest` for
+Knowledge, session search, and the first-party tool. Tron retains bounded input,
+qualified pre-dispatch price ceilings, assessment versions, and dispatch
+certainty; credentials remain in Pi's provider store. TypeSafe model behavior
+and actual pricing can change without a Tron release.
+
+## Pi SDK boundary map
+
+`RuntimeSlot` composes Pi's `codemode`, `tool-search`, and `mcp` built-in
+extension factories for session runtimes; session-free hook/package loads use
+the same composition. The SDK does not load these built-ins automatically.
+Scoped `-builtin:<name>` settings decide whether each is enabled. MCP can
+activate codemode or tool-search for its exposure needs even when neither is a
+`defaultTools` entry.
+
+Pi owns nested execution and canonical session JSONL. Nested tool calls remain
+children of their parent result, not independent transcript rows or receipts.
+New sessions materialize at the first user or assistant message; earlier
+setup-only state remains in memory, while accepted receipts appended before
+that message are flushed with the first persisted message. The
+`runtime-registry.integration.test.ts` materialization/reopen cases own this
+boundary.
+
+Pi's built-in MCP extension is the sole MCP client and its `mcp.json` files are
+the configuration authority. The Gateway binds global config and credentials
+to its agent directory, reads trusted-project config only after TrustService
+approval, and relays sign-in through the authenticated session operation. See
+[ MCP servers](docs/mcp.md) for accepted transport and credential deltas.
+
+Virtual model registrations are replayed by `GlobalProviderResources`; the
+picker marks them virtual while assistant rows and effective context limits use
+Pi's routed physical model. Usage and cost remain attached to Pi's physical
+responses. The process-global Pi markdown/select/settings helpers explicitly
+pin the `dark` theme because the Gateway has no terminal and Pi exposes no
+per-instance global theme setter; the host-owned RPC callback palette is
+independent. P99-19 tracks an upstream setter request.
+
+Jev uses Pi `ModelRuntime.classify()` with TypeSafe's catalog `jev-latest` for
+Knowledge, session search, and the `jev` tool. Tron retains input bounds,
+qualified pre-dispatch price ceilings, assessment versions, and dispatch
+certainty; TypeSafe provider credentials remain Pi-owned. Actual TypeSafe model
+behavior and price may change without a Tron release.
+
 ## Connection boundaries
 
 `ConnectionOwner` owns the generic account envelope for multi-account
@@ -209,8 +281,8 @@ navigable parent. Imported entries remain self-contained for reopen and context.
 profile before attachments, `read` results and tool-result images enter history;
 Gateway must preserve the source upload and avoid pre-resizing prompt images a
 second time. Update focused owner tests and this boundary map when ownership
-changes. Keep a candidate's detailed version matrix in its active `docs/plans/`
-entry until closeout; do not turn this paragraph into a second change tracker.
+changes. Keep a candidate's detailed version matrix in its GitHub epic until
+closeout; do not turn this paragraph into a second change tracker.
 
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
@@ -260,15 +332,9 @@ attribution headers.
 session. It returns one row per entry of the single `TRON_MODULES` definition
 that `RuntimeSlot` also registers (`tron-modules.ts`: stable name, one-line
 purpose, declared tool and command names), so the installed list cannot name a
-module a session does not load or omit one it does. `connections` names the MCP
-instances a session runtime would admit tools from, using the same admission
-rule as the MCP adapter; it carries only the connection identity, its definition
-and health, and an unconfigured Connections owner yields an empty list. An
-individual MCP tool name is only discoverable inside a session runtime, so this
-read never opens a server, resolves credentials or admits a runtime binding.
-The `modules.v1` capability advertises the method. It is a bounded read: the
-module rows come from a fixed definition, and the connection rows are the
-already-redacted `connections.list` projection.
+module a session does not load or omit one it does. MCP servers are managed only
+through the explicit `mcp.*` methods below; they are not projected as Tron
+connection instances.
 
 `hooks.list` serves the same hook fields `session.resources` returns
 (`extensions`, `extensionLoadErrors`, `hookInventory`) for one scope without a
@@ -295,6 +361,41 @@ the subagent catalog and that same session-free extension load, capped at 256
 names per kind: a failed extension load or failed subagent discovery leaves the
 kinds that did resolve in place and adds one bounded `providesDiagnostic`
 instead of failing the read.
+
+### MCP administration
+
+`mcp.list` is an explicit request (never a poll) that runs the bundled `pi mcp
+list --json` CLI out of process. `scope` is `global` or `project`; project scope
+requires a canonical trusted `cwd`. Output is bounded to 1 MiB and the process
+timeout is 30 seconds. The CLI exits 1 while any server is unhealthy; its JSON
+is still projected. Each row is `{ name, state, scope, enabled, exposure,
+transport, tools, error? }` with Pi's `state` values (`connected`, `needs-auth`,
+`failed`, `disabled`, …); Pi's `source` path stays on the Mac and `error` is
+bounded to 2 KiB. `mcp.add`, `mcp.remove`, `mcp.logout`, `mcp.update` and
+`mcp.token.set` require a `commandId` and use the bounded command receipt store.
+Add/remove report the affected server and require `/reload` or a new session for
+configuration changes; sign-out and new credentials are observed by running
+sessions at the next turn. `mcp.update` patches only `enabled` and `exposure` on
+an existing entry in the scope's `mcp.json`, under a file lock, retaining all
+other JSON keys and failing closed on malformed or oversized files.
+
+`mcp.token.set` stores bearer credentials through the host Keychain credential
+owner and writes only a `!command` reference in `mcp.json`; token values are
+never returned or logged. `mcp.auth.start` takes `{ sessionId, server,
+commandId }` and starts Pi's own `/mcp login <server>` extension command through
+the attached session's normal prompt admission. It returns `{ operationId,
+recovered }`; `mcp.auth.cancel` takes `{ operationId }`. The authenticated device
+owns the operation. One operation is active per device/session/server, with the
+same 15-minute timeout, cancellation, tombstone and `auth.resume` replay rules
+as provider authentication. Events retain the standard `auth.event`,
+`auth.prompt` and `auth.completed` shapes and add target
+`{ kind: "mcp", sessionId, server }`. The per-session MCP `openUrl` hook routes
+only the authorization URL for that active operation into the auth event; an
+unowned request fails closed and never opens the Mac browser. Callback capture
+is parsed only from Pi's authorization URL and relay is restricted to its
+provider-authored loopback listener. Pi's pasted-redirect prompt is delivered
+through the same operation. Closing or evicting the session cancels its MCP
+auth operation.
 
 ### Agent home
 
@@ -341,6 +442,25 @@ observations are cached for 60 seconds and failed/rate-limited reads use bounded
 negative backoff. Cache and in-flight identity include the effective provider and
 authentication fingerprint, so logout, reauthentication, and account changes cannot
 reuse another account's usage. Raw credentials and response bodies remain local.
+
+`provider.list` exposes OpenAI's API-key and OAuth login methods, and labels the
+separate Codex provider `OpenAI Codex (legacy)`. Sign in with ChatGPT tokens are
+audience-bound to `api.openai.com/v1`, carry no ChatGPT account claim, and OpenAI
+forbids sending them to ChatGPT backend endpoints, so no first-party endpoint
+reports usage for them. OpenAI usage is therefore borrowed: only while `openai`
+uses OAuth and both `openai` and `openai-codex` resolve to their exact first-party
+shapes, `provider.usage` for `openai` runs the Codex `wham` read with the Codex
+credential and returns it under `openai` with `source` `openai-codex.wham`. The
+`openai` credential is never resolved for usage. A missing Codex login reports
+`unconfigured`, which clients present as a Codex sign-in prompt. While OpenAI
+qualifies, `provider.list` sets `usageLentTo: "openai"` on the `openai-codex` row
+(otherwise `null`), so clients can hide the legacy row and show the plan once. Tron cannot prove
+the two logins belong to the same ChatGPT account (#312). API-key `openai` is not
+usage-supported. A change to the `openai` login or composition during the read
+answers `unavailable` instead of the lent windows. Sign in with ChatGPT receives a stable device ID from global Pi
+settings. AuthBroker serializes OpenAI and Codex legacy OAuth operations because
+both SDK flows use callback port 1455; live sign-in remains a manual acceptance
+gate.
 
 A native executor adapter must retain its tool promise through actual native
 cleanup, not reject it when only its client waiter stops. The existing Pi/slot
@@ -445,13 +565,14 @@ Every run durably snapshots its target and concrete execution-session ID before
 dispatch. Existing targets reuse their session ID; workspace runs receive a new
 predetermined UUID and create that exact identity through
 `RuntimeRegistry`/`RuntimeSlot`. A live-only generated slot carries an exact
-operation-owned lease until Pi persists its first assistant entry. Restart
-recovery always consults the run snapshot and concrete session identity. Because
-the pinned Pi runtime has no owner-safe eager flush for a brand-new session, a
-restart after workspace admission without canonical evidence becomes
-`outcomeUnknown`; Tron never creates a second session or writes Pi's JSONL
-itself. Ordinary per-session serialization, runtime capacity, project resources,
-settings, credentials, and model selection remain authoritative.
+operation-owned lease until Pi persists its first user or assistant message.
+Restart recovery always consults the run snapshot and concrete session identity.
+A new session with no user or assistant message remains memory-only; after the
+first user message, Pi persists the transcript and any earlier canonical
+invocation receipts together. Restart recovery after workspace admission without
+that evidence becomes `outcomeUnknown`; Tron never creates a second session or
+writes Pi's JSONL itself. Ordinary per-session serialization, runtime capacity,
+project resources, settings, credentials, and model selection remain authoritative.
 
 Scheduled prompts never steer or enqueue into an active turn, so a busy existing
 target waits durably while unrelated sessions may proceed. Resource actions
@@ -664,7 +785,7 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
 
 The first-party inline Pi extension reserves `notify({message})`; RuntimeSlot owns automatic terminal alerts. Pi 0.87 defines `agent_before_settle` as the final actionable boundary (entries plus one `continue: true` request) and `agent_settled` as notification-only after automatic work is finished. `pi.sendMessage(..., { triggerTurn: true })` from an `agent_settled` handler remains available but starts a distinct SDK run/operation with different receipt and notification semantics; it is not equivalent to an in-run `agent_before_settle` continuation. Candidate fixtures exercise `agent_before_settle`. A bounded installed-extension review found no equivalent old-style continuation consumer: `pi-subagents@0.59` uses `agent_settled` to resume widgets (its `triggerTurn` use belongs to `session_compact`), `pi-web-access@0.22` triggers turns from async fetch/command paths, and no `agent_settled` consumer was found in pi-goal, browser, or pi-sub-anthropic. Arbitrary project extensions were not exhaustively inspected, so review them before adoption if present; no compatibility shim is provided. Only Pi's final `agent_settled` at idle is terminal, so automatic retries, compaction retries, queued follow-ups, recoverable tool errors, and extension continuations do not announce an intermediate response. RuntimeSlot matches the exact final run's canonical assistant object and queues fixed, outcome-specific copy for normal completion, output limits, terminal errors (including retry exhaustion), aborts, or a tool/agent stop without a final response. Exact Gateway abort ownership overrides the last assistant reason, including cancellation during retry backoff. It never searches backward for an earlier successful answer or infers an outcome from error prose. The assistant entry ID remains the durable deduplication source and also keys one bounded RuntimeSlot observation disposition shared with successful-response attention state. Without a canonical assistant, the existing invocation terminal receipt ID is the source; a Gateway-derived run without an invocation uses its exact operation identity. An exact mobile subscription may publish `session.presentation.set` only after synchronization; monotonically revisioned visible/hidden updates are token-bound, one per connection, removed on close/replacement/disconnect/rekey/delete, and visible leases expire after 45 seconds unless iOS renews them. If that disposition observes an active chat, RuntimeSlot does not invoke notification enqueue: NotificationService writes only a durable `suppressed` receipt for the completion, creates no relay intent or inbox row, and excludes it from delivery quota. Terminal alerts otherwise carry the bounded session title plus the exact Gateway machine/session route; tapping is therefore profile-qualified rather than inferred from whichever server is selected on iOS. The extension receives only a narrow enqueue closure: the model cannot choose a device, APNs token, environment, topic, relay origin, request ID, priority, badge, payload dictionary, or presentation policy. Admission is persisted before dispatch, expires after fifteen minutes, and returns `queued`, `suppressed`, `rate_limited`, or `unavailable`; APNs acceptance is never described as user delivery. Durable abuse ceilings admit up to 240 intents per session per hour and 480 intents per day globally or per target. Rate-limited attempts are returned synchronously but are not persisted, consume no quota, and cannot extend their own lockout. Preview-disabled grants still replace model-authored `notify` text with fixed generic copy; automatic terminal body copy is fixed by Tron rather than the model. The session title is the product-required terminal-alert title and is therefore shown independently of that model-text preview flag.
 
-Automatic notification admission follows the owning canonical terminal receipt. As with invocation admission generally, the pinned SDK buffers a brand-new session until its first assistant entry: a pre-assistant failure receipt is canonical in memory but has no public eager-flush durability guarantee. Tron does not write the SDK's JSONL or create a second receipt journal to bypass that limitation. The same reasoning applies to a failed append on an already-flushed session: because the SDK inserts an entry into its live branch before the physical append, an entry that exists only in memory after a failure is never announced as a durable canonical receipt. Gateway fails closed with an unknown outcome for that exact identity rather than reporting success from memory, and a retry cannot repair it by appending a contradictory duplicate. Admitted prompt preflight/runtime failures and drain-cutoff interruptions use that same notification boundary even if Pi never creates an assistant. A rejected continuation following a successful response retains that response's already-owned terminal receipt rather than overwriting it with a contradictory failure; the stopped alert uses the preceding exact assistant source. Synthetic progress after rejection is not another admitted run. A queued follow-up's failure receives its own terminal receipt and exact marker retirement even when an earlier successful answer is still committing attention; that earlier receipt cannot substitute for the failed owner. In all cases, requests rejected before Gateway admission, handled commands/inputs, maintenance, and pending user interactions are not agent completions. Orderly shutdown of active foreground work preserves its marker, records `outcomeUnknown`, and attempts one interruption alert. Observation is latched before terminal receipt I/O so navigation during persistence cannot change the suppression decision. The persisted/wire kind `agent_finished` is a neutral terminal category, not success evidence; iOS labels it “Agent finished” with a stop icon and displays the reason-specific body. Push admission failure is diagnostic only and cannot fail canonical settlement. This is best-effort notification of observed lifecycle events, not a crash outbox: abrupt process/Mac loss or failed admission can lose an alert, and restart does not replay historical terminal events. Already admitted notification intents retain their existing durable dispatch/retry behavior. Focused coverage is in `runtime-terminal-notifications.integration.test.ts` and `tron-notify-extension.test.ts`.
+Automatic notification admission follows the owning canonical terminal receipt. Pi persists a brand-new session on its first user or assistant message, so canonical invocation and notification receipts appended before the first user message are flushed with it. A failure before any user or assistant message remains memory-only. Tron does not write the SDK's JSONL or create a second receipt journal to bypass that boundary. The same reasoning applies to a failed append on an already-flushed session: because the SDK inserts an entry into its live branch before the physical append, an entry that exists only in memory after a failure is never announced as a durable canonical receipt. Gateway fails closed with an unknown outcome for that exact identity rather than reporting success from memory, and a retry cannot repair it by appending a contradictory duplicate. Admitted prompt preflight/runtime failures and drain-cutoff interruptions use that same notification boundary even if Pi never creates an assistant. A rejected continuation following a successful response retains that response's already-owned terminal receipt rather than overwriting it with a contradictory failure; the stopped alert uses the preceding exact assistant source. Synthetic progress after rejection is not another admitted run. A queued follow-up's failure receives its own terminal receipt and exact marker retirement even when an earlier successful answer is still committing attention; that earlier receipt cannot substitute for the failed owner. In all cases, requests rejected before Gateway admission, handled commands/inputs, maintenance, and pending user interactions are not agent completions. Orderly shutdown of active foreground work preserves its marker, records `outcomeUnknown`, and attempts one interruption alert. Observation is latched before terminal receipt I/O so navigation during persistence cannot change the suppression decision. The persisted/wire kind `agent_finished` is a neutral terminal category, not success evidence; iOS labels it “Agent finished” with a stop icon and displays the reason-specific body. Push admission failure is diagnostic only and cannot fail canonical settlement. This is best-effort notification of observed lifecycle events, not a crash outbox: abrupt process/Mac loss or failed admission can lose an alert, and restart does not replay historical terminal events. Already admitted notification intents retain their existing durable dispatch/retry behavior. Focused coverage is in `runtime-terminal-notifications.integration.test.ts` and `tron-notify-extension.test.ts`.
 
 The Gateway also owns a bounded 512-entry user-facing notification inbox in the same owner-only state transaction as delivery admission. A visible `queued` inbox row proves durable admission, not relay or APNs acceptance. New notification content, exact session route, per-target APNs request identities, delivery outcome, and global read state are canonical there; the iOS cache is only a bounded disposable projection. The inbox is part of the version-1 document shape; a document without it is rejected as malformed. `notification.inbox.list` takes `filter` (`all`, the default, or `unread`), an opaque keyset `cursor`, and `limit` (1 through 50, default 50), and rejects unknown keys. Rows order by `createdAt` descending then `id` ascending; `nextCursor` encodes the exact `(createdAt, id)` of the last returned row as `<createdAtEpochMs>.<id>`, and the next page returns rows strictly after it, so a page request never fails because the inbox changed and `unread` pages under the same keyset. The response carries the whole-inbox `revision` and the total `unreadCount` across every row, not the filtered page. A malformed cursor is `invalid_request`. `notification.inbox.read` accepts exactly one public inbox ID or APNs request ID and is idempotent: a row already read, or one evicted by the bound, answers `{ changed: false }` instead of failing. `notification.inbox.readAll` requires `through`, the keyset key of the newest row the user has seen, and marks only unread rows at or older than that key, so alerts newer than the cut stay unread. All three are ordinary command-receipt mutations. Reading the inbox is otherwise read-only: no admission, list, read, or read-all path rewrites the credential document unless it actually changed an inbox row. Retention evicts the oldest read rows before any unread row, so an unread alert is never dropped while a read row still occupies the bound. Every committed inbox mutation coalesces into one trailing `notification.inbox.changed` within about 250ms carrying `{ revision, unreadCount }` of that committed state, which lets a client skip a redundant refetch and project the bell immediately. Unknown, unavailable, suppressed, and rate-limited attempts create no inbox row. Preview-disabled explicit model text remains generic in both APNs and inbox storage.
 
@@ -947,10 +1068,12 @@ advertise byte ranges; malformed or unsatisfiable multi-range requests fail clos
 The retired `/engine` protocol is not exposed.
 
 Gateway updates are an explicit, bounded control-plane contract. Rebuild, update,
-rollback, promotion, and restart mutations are user-initiated operations: repository
-agents and automation may prepare and validate source or artifacts, but must not submit
-those RPCs or run a mutating Gateway lifecycle helper. The user or maintainer performs
-the confirmed action that transitions the running Gateway. `gateway.update.status`
+rollback, promotion, and restart mutations of Stable are maintainer operations:
+repository agents and automation may prepare and validate source or artifacts, but
+must not submit those RPCs or run `scripts/tron dev handoff`. Agents may start,
+restart and stop the isolated Debug Gateway (`scripts/tron dev`, port 9848) to
+validate their changes (AGENTS.md rule 8). The maintainer performs the confirmed
+action that transitions Stable. `gateway.update.status`
 projects only the selected channel's `deployment-state.json`, `current.json`,
 `previous.json`, and version manifests (each document is capped at 64 KiB); malformed
 or oversized state fails closed. `gateway.update` accepts only `channel` (`stable` or `dev`), `mode` (`source`,
@@ -974,7 +1097,10 @@ and its retention scan. Full payload copies use `/bin/cp -c -R` to request APFS
 clone-on-write; macOS `cp` falls back to a byte copy when cloning is unavailable.
 Post-copy fingerprints remain the integrity check. A per-channel source-build lock keeps cleanup of crash-left
 staging directories from touching a live build; validated staging is atomically
-renamed into `versions/` inside the store-locked publication transaction. The trusted
+renamed into `versions/` inside the store-locked publication transaction. Every
+publication seals the staged tree but keeps its root writable across that rename,
+because macOS 15 refuses to rename a directory its owner cannot write; the root is
+sealed in `versions/` before any candidate state names the version. The trusted
 source checkout must already have its lockfile-pinned Gateway development dependencies
 installed (prepare them with `cd packages/gateway && npm ci`
 before requesting a source rebuild); the helper never installs dependencies or contacts the
@@ -1118,7 +1244,10 @@ finishes the completed receipt write while retaining the command lane and its
 Gateway drain owner. Same-command duplicates join that lane and receive the
 stored result. Process loss or a failed completion write in this response window
 leaves the pending receipt as an outcome-unknown replay fence; prompts are never
-re-run automatically. Every other receipt-backed method still persists its
+re-run automatically. The receipt-store owner closes admission and joins accepted
+receipt persistence, including completion writes and definitive-rejection cleanup,
+before releasing its state directory; this drain does not wait for the command's
+operation to settle. Every other receipt-backed method still persists its
 completed receipt before responding because its acknowledgement boundary has
 not been approved to move. A mutation whose owner reports an unknown
 outcome keeps its pending receipt even though the operation threw, so the
@@ -1396,6 +1525,33 @@ frame is projected only while its explicit Gateway presentation identity remains
 canonical binding retires that identity, a briefly retained Pi `streamingMessage` cannot create
 a second stream identity or duplicate finalized tool groups in a settlement snapshot.
 
+Pi nested tool calls keep their `<parent>/<n>` identity under the model-issued call; they are
+never independent transcript rows, invocation receipts, segments, or extension activities.
+Live parent progress and the canonical parent result carry the same bounded child list: every
+call Pi records (`NESTED_CALL_LIMIT`, Pi's own 256), with each call's arguments at most 1 KiB and
+all of a parent's arguments together at most 32 KiB (Pi's total); an argument outside either bound
+is replaced by its byte count and clears the `complete` flag. Child failures use `failed` even when the tool returns `isError` instead of
+throwing; Pi's `unfinished` child status remains an explicit terminal presentation state when
+recovered from history, and each child error is projected to at most 512 UTF-8 bytes. Opaque
+`structuredContent` is not forwarded by generic live tool-result projection.
+The integration E2E in `runtime-registry.integration.test.ts` exercises a faux-provider codemode
+script with parallel `read`, `bash`, and non-throwing failure calls; it retains
+`test-results/pi-sdk-099-nested-calls.json` for live and cold-reload inspection.
+
+Nested `display` artifacts and trusted `agent_browser` live-view receipts have a separate
+presentation seam because Pi's canonical `nestedCalls` summaries intentionally omit tool-result
+payloads. Tron's first-party display extension observes nested `tool_result` events and retains
+only validated display descriptors plus sealed browser receipt metadata, keyed to the parent call
+ID. It caps the stash at 32 descriptors per parent and 16 KiB, reports `complete: false` when
+bounded data is dropped, and clears it on parent completion, agent end/abort, or runtime shutdown.
+It enriches the parent's Pi-owned tool result through `details.tronNested` only; Pi content and
+`structuredContent` remain unchanged, and neither child rows nor independent child receipts exist.
+Browser receipts are resealed to the parent's canonical tool-call ID, so the ordinary canonical
+admission check remains authoritative. Display artifact bytes remain in the existing artifact
+store. Transcript projection reads the same persisted parent details live and after cold reload;
+`details.tronNested` is an additive Gateway wire field that older iOS decoders ignore.
+The accepted P99-23 seam is exercised by `codemode-nested-presentation.integration.test.ts`.
+
 Active message queues are projected with stable per-entry IDs, delivery behavior,
 display text, total attachment count, optional photo/file counts, optional bounded upload descriptors,
 and a monotonic queue revision. Descriptors contain only upload/blob ID, safe name, MIME type, and size;
@@ -1607,8 +1763,9 @@ Existing saved preferences that no longer fit a model's current capacity or
 compaction headroom are bounded with an explicit warning, not treated as proof of
 unsupported capacity. As with other native session choices, a brand-new session
 is only durable after the SDK's first-assistant persistence boundary; the snapshot
-and Manage Session explicitly warn when the override is not yet saved to disk.
-Already-materialized sessions persist idle changes without needing another turn.
+and Manage Session explicitly warn when the override is not yet saved to disk;
+Pi persists it with the first user or assistant message. Already-materialized
+sessions persist idle changes without needing another turn.
 No direct JSONL writer or separate preference journal bypasses the SDK. If native
 append stages an entry but disk persistence fails, the RPC reports an uncertain
 outcome and publishes the actual live projection rather than fabricating rollback
@@ -1744,7 +1901,9 @@ category `provider-login`. Accepting `gateway.restart` cancels every login that 
 (prompt, browser, or device code) and sends it a failed `auth.completed`; a login whose answer or callback
 was already submitted keeps its work entry, so the drain waits only for credential completion. Start, recovery,
 and each ending (with provider ID, method, age, and reason, never prompt values) are logged under source
-`auth` with `auth.login.*` events. A WebSocket disconnect
+`auth` with `auth.login.*` events. MCP relay lifecycle outcomes use
+`mcp.auth-url.routed`, `mcp.callback-relay.succeeded` and
+`mcp.callback-relay.failed`. A WebSocket disconnect
 only detaches event delivery: `auth.resume` rebinds the same stable-device-owned operation to a
 replacement connection and replays its latest bounded event/prompt or terminal tombstone. Current
 clients send a `commandId` with `auth.begin`; a bounded in-memory admission receipt returns the
@@ -2128,17 +2287,14 @@ queue operation ID. Explicit removal appends an interrupted terminal receipt rat
 accepted orphan, so later canonical binding and cold projection describe the text Pi actually receives. Receipt construction never silently truncates semantic data; persistence/binding diagnostics
 are not operation failures and cannot retire an accepted composer row.
 
-One upstream durability boundary remains for the first turn of a brand-new Pi session. The pinned
-`SessionManager` admits `appendCustomEntry` into its canonical in-memory branch but intentionally
-does not create/flush the JSONL until the first assistant entry. An abrupt Gateway-process or machine
-failure after first-prompt admission but before that entry can therefore lose the new session, user
-message, and invocation receipts together; iOS disconnect alone does not trigger this window, and
-sessions with any assistant history append receipts immediately. Gateway must not poll for the file
-(the first assistant cannot run while admission is blocked), write Pi's JSONL directly, fabricate an
-assistant entry, or create a second receipt journal. Closing this boundary requires a pinned upstream
-public eager-flush/durable-append API that preserves Pi ordering and internal state; acceptance requires
-a crash/reopen integration test proving the first start receipt is disk-visible before provider or
-extension execution.
+A new Pi session remains memory-only until it receives its first user or assistant message.
+`appendCustomEntry` receipts recorded before that point are persisted together when the first user
+message is appended; a crash before any user or assistant message can still lose the entire new
+session and those in-memory receipts. Once the first user message is appended, its invocation receipt
+survives a Gateway runtime teardown and reopen from the canonical JSONL. iOS disconnect alone does
+not trigger this window, and sessions with a persisted message append receipts immediately. Gateway
+must not poll for the file, write Pi's JSONL directly, fabricate an assistant entry, or create a second
+receipt journal.
 
 Canonical mobile projection recognizes
 only Pi's exact 4 MiB-bounded persisted skill envelope, strips the private skill body/path, and
@@ -2235,7 +2391,9 @@ terminal admission atomically only after proving no PTY is live, so an already-d
 The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
 separate Debug lifecycle on 9848 through the same immutable payload store and launcher.
 Its loopback-by-default handoff copies only an authenticated, selected Debug
-artifact into Stable as an inactive candidate after proving the same exact Debug
+artifact whose version and fingerprint match the clean candidate `scripts/tron dev`
+admitted (re-checked under the Debug payload lock)
+into Stable as an inactive candidate after proving the same exact Debug
 identity before and after the copy; it never selects or restarts Stable. Compatibility
 is checked against the actual installed/active Stable runtime, and Node/helper drift
 requires a manual Mac app replacement. Promotion pins version and fingerprint,
@@ -2286,12 +2444,19 @@ publishes a change in the visible order so an open picker can refetch. The
 document lives at `gateway/model-recents.json`, is owner-only, and is a
 disposable preference: a malformed or oversized document is replaced with an
 empty one instead of failing Gateway startup, because no canonical evidence
-exists to rebuild it from.
+exists to rebuild it from. Registry shutdown drains admitted recency writes
+before releasing its state directory.
 
 `model.list` items also carry an optional `cost` of `{input, output}` in USD per
 million tokens, copied from the pinned SDK catalog for the picker's rail cards.
 An all-zero SDK price means the price is unset, not that the model is free, so
-the field is omitted; cache rates and tiered pricing are not projected.
+the field is omitted; cache rates and tiered pricing are not projected. The
+`virtual` boolean identifies Pi virtual-model registrations in the picker;
+virtual models with unset limits retain unknown limits until a physical response
+establishes the SDK's routed limits. Assistant transcript rows continue to name
+the physical response's `provider`/`modelId` and now carry optional
+`thinkingLevel` from Pi's canonical response. Virtual router state remains an
+SDK custom session entry and is excluded from transcript rows.
 
 `model.list` items carry an optional `releaseDate` (`YYYY-MM-DD`) that backs the
 picker's Latest rail; models with no known date omit the field and appear only
@@ -2395,6 +2560,17 @@ passes `--max-old-space-size=4096` to the Gateway's Node process
 below that limit. `runtime.loaded` and `runtime.evicted` record each transition
 with the session, its reason (`heap` for the heap-pressure pass `G-12` added),
 its transcript bytes and the charge, as named `counts`.
+
+A chat's tool loadout (`session.setTools`) lives only in its canonical
+transcript, as the system messages' `toolsAdded`/`toolsRemoved`. Every runtime
+the Gateway creates for an existing transcript (cold open, reopen after idle or
+capacity eviction, restart, fork, previous-runtime restore) applies the loadout
+the transcript declares; only a transcript that declares none gets the
+configured `defaultTools`. Pi's `createAgentSession` always supplies the
+defaults and so skips its own transcript restore, which made an enabled tool
+such as `codemode` disappear after a reload and the next prompt persist the
+defaults. `runtime-tool-loadout.integration.test.ts` covers a reopen and the
+next prompt.
 
 Catalog membership is one owner's index, so nothing coalesces a second
 discovery: a live persisted `RuntimeSlot` proves membership for
@@ -2507,12 +2683,12 @@ transport only places JSON in `PI_SUBAGENT_EXTENSION_BINDINGS`; it does not load
 an extension or append that value to the child's prompt. Its public request
 schema has no per-call `extensions`/`subagentOnlyExtensions` override. The
 `subagents.defaultExtensions` setting configures `extensions` only, and
-`runtimeSnapshotHost` snapshots runtime MCP servers only. Tron’s Mac-owned MCP
-adapter is separate from that snapshot feature: it uses the pinned official
-MCP SDK, admits bounded tools from explicit ConnectionOwner instances, and
-keeps resources, prompts, OAuth refresh, elicitation, tasks, and Apps
-unsupported. See `docs/mcp.md` for endpoint, stdio, credential, and unknown
-outcome boundaries. Tron therefore does not mutate Pi settings, agent
+`runtimeSnapshotHost` snapshots runtime MCP servers only. Pi's built-in MCP
+configuration is shared through the Gateway agent directory for ordinary CLI
+children; explicit child extension lists disable Pi built-ins and MCP server
+snapshots are bounded to the child's supported configuration. See
+`docs/mcp.md` for the MCP authority and transport boundaries. Tron therefore
+does not mutate Pi settings, agent
 definitions, or workflow scripts to force-load
 `tron-core`, and must not claim automatic identity/workspace propagation to an
 arbitrary child. A public mutable `tool_call` hook prefixes direct model-facing

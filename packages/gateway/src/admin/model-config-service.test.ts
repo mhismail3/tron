@@ -17,6 +17,22 @@ describe("ModelConfigService", () => {
     await expect(readFile(join(root, "models.json"), "utf8")).rejects.toThrow();
   });
 
+  it("validates image and classifier model variants against Pi's discriminated models.json schema", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-model-config-types-"));
+    const service = new ModelConfigService(root);
+
+    await expect(service.validate({ providers: {
+      cortexkit: {
+        baseUrl: "https://cortexkit.invalid/v1",
+        api: "openai-completions",
+        models: [
+          { type: "image", id: "image-model", name: "Image model", api: "openai-images", input: ["text"], output: ["image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+          { type: "classifier", id: "classifier-model", name: "Classifier model", api: "typesafe-system-one", input: ["text"], contextWindow: 32_000, cost: { input: 0.042, output: 0, cacheRead: 0, cacheWrite: 0 } },
+        ],
+      },
+    } })).resolves.toMatchObject({ valid: true, providerCount: 1 });
+  });
+
   it("preserves canonical secret values when a redacted document is updated", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-model-config-"));
     await writeFile(join(root, "models.json"), `${JSON.stringify({

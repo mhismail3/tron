@@ -199,6 +199,7 @@ package struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     package let arguments: JSONValue
     package let partialResult: JSONValue?
     package let result: JSONValue?
+    package let nestedCalls: JSONValue?
     package let output: String?
     package let outputTruncated: Bool?
     package let isError: Bool
@@ -222,7 +223,7 @@ package struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
 
     package init(
         toolCallId: String, toolName: String, toolLabel: String? = nil, order: Int? = nil, status: Status,
-        arguments: JSONValue, partialResult: JSONValue?, result: JSONValue?,
+        arguments: JSONValue, partialResult: JSONValue?, result: JSONValue?, nestedCalls: JSONValue? = nil,
         output: String? = nil, outputTruncated: Bool? = nil,
         isError: Bool, startedAt: String, updatedAt: String,
         lastProgressAt: String? = nil, completedAt: String? = nil,
@@ -244,6 +245,7 @@ package struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         self.arguments = arguments
         self.partialResult = partialResult
         self.result = result
+        self.nestedCalls = nestedCalls
         self.output = output
         self.outputTruncated = outputTruncated
         self.isError = isError
@@ -266,7 +268,7 @@ package struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case toolCallId, toolName, toolLabel, order, status, arguments, partialResult, result,
+        case toolCallId, toolName, toolLabel, order, status, arguments, partialResult, result, nestedCalls,
              output, outputTruncated, isError, startedAt, updatedAt, lastProgressAt,
              completedAt, durationMs, progressSequence, extensionOrigin, extensionActivity,
              liveActivityRevision, extensionActivityAsOf, toolSegmentId,
@@ -283,6 +285,7 @@ package struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         arguments = try values.decode(JSONValue.self, forKey: .arguments)
         partialResult = try values.decodeIfPresent(JSONValue.self, forKey: .partialResult)
         result = try values.decodeIfPresent(JSONValue.self, forKey: .result)
+        nestedCalls = try values.decodeIfPresent(JSONValue.self, forKey: .nestedCalls)
         output = try values.decodeIfPresent(String.self, forKey: .output)
         outputTruncated = try values.decodeIfPresent(Bool.self, forKey: .outputTruncated)
         isError = try values.decode(Bool.self, forKey: .isError)
@@ -336,6 +339,7 @@ package struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         try values.encode(arguments, forKey: .arguments)
         try values.encodeIfPresent(partialResult, forKey: .partialResult)
         try values.encodeIfPresent(result, forKey: .result)
+        try values.encodeIfPresent(nestedCalls, forKey: .nestedCalls)
         try values.encodeIfPresent(output, forKey: .output)
         try values.encodeIfPresent(outputTruncated, forKey: .outputTruncated)
         try values.encode(isError, forKey: .isError)

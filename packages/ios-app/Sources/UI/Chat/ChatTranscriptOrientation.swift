@@ -1,13 +1,7 @@
 import SwiftUI
 import TronMobileCore
 
-/// The one owner of the transcript's vertical orientation (CT-23).
-///
-/// Today's transcript puts the newest row at the end of a `LazyVStack`, so the
-/// pinned bottom it keeps depends on that stack's own content estimate. CT-23
-/// flips the transcript's scroll view so the newest row is at the exact content
-/// origin, which the lazy stack lays out exactly; history it has not loaded lies
-/// beyond the viewport, where an estimate only sizes the scroll range.
+/// The transcript's origin-anchored layout: newest row at the exact content origin.
 ///
 /// Everything that has to agree about which end is newest lives here: the render
 /// flip on the scroll view, the counter-flip each element applies, the order the
@@ -17,70 +11,15 @@ import TronMobileCore
 /// that holds the newest row, `.top` the visual top where older history lives —
 /// or ask the semantic questions below. None of them branches on the flip.
 enum ChatTranscriptOrientation: Equatable, Sendable {
-    /// The newest row sits at the content end, which is a lazy estimate.
-    case newestAtEnd
-    /// The newest row sits at the content origin, which is exact.
     case newestAtOrigin
-
-    #if TRON_TRANSCRIPT_ORIENTATION_EVALUATION
-    // LocalDevice-only preference and Settings row retire together at CT-19.
-    static let evaluationDefaultsKey = "tron.transcript.flippedEvaluation"
-    #endif
-
-    /// One selection per launch. Hosted runs keep their environment override;
-    /// LocalDevice evaluation defaults to origin; Release keeps today's path.
-    static let selected: ChatTranscriptOrientation = {
-        #if HOSTED_TEST
-        return ProcessInfo.processInfo.environment["TRON_CHAT_TRANSCRIPT_ORIENTATION"] == "origin"
-            ? .newestAtOrigin : .newestAtEnd
-        #elseif TRON_TRANSCRIPT_ORIENTATION_EVALUATION
-        return (UserDefaults.standard.object(forKey: evaluationDefaultsKey) as? Bool ?? true)
-            ? .newestAtOrigin : .newestAtEnd
-        #else
-        return .newestAtEnd
-        #endif
-    }()
 
     /// The vertical render scale the transcript applies. Every element of the
     /// transcript's content applies the same value as its outermost modifier:
     /// that counter-flip cancels the transcript's flip for the element's own
     /// content while leaving its position in the origin-anchored order, so
     /// row-local transforms (the entrance rise, streaming growth, the queued
-    /// card's shrink) render exactly as they do today.
-    fileprivate var verticalScale: CGFloat { self == .newestAtOrigin ? -1 : 1 }
-
-    // MARK: Semantic questions the product asks
-
-    /// Whether the transcript's content spine presents the newest row first.
-    /// The origin-anchored transcript's first content element is the newest row
-    /// and its last is the oldest loaded history.
-    var presentsNewestRowFirst: Bool { self == .newestAtOrigin }
-
-    /// Whether the newest row arrives with the content's first layout pass, with
-    /// no lazy realization of its own. The origin-anchored transcript's first
-    /// element is laid out before anything the reader can see, so nothing has to
-    /// materialize it and no materialization lease exists to certify the
-    /// entrance that owes a layout transaction.
-    var mountsNewestRowWithContent: Bool { self == .newestAtOrigin }
-
-    /// Whether the transcript suppresses the automatic scroll edge effect at its
-    /// pinned end.
-    ///
-    /// iOS 26 derives that effect from the scroll view's own content origin: the
-    /// origin-anchored transcript pins the newest row exactly at that origin, and
-    /// UIKit then draws the whole soft effect over the whole viewport instead of a
-    /// band, washing the transcript's text out (measured on the owned simulator's
-    /// own screen, CT-23 stage 2: the parity region's frames differ by 0.105 with
-    /// the effect and 0.018 with it suppressed, and the pinned newest row is
-    /// inside the wash). Today's transcript pins at the far end of its content, so
-    /// its own top edge effect is the normal band it has always been. The chat's
-    /// top blur is drawn by the transcript itself and is the same on both paths.
-    var suppressesPinnedEndScrollEdgeEffect: Bool { self == .newestAtOrigin }
-
-    /// Whether the pinned newest end depends on the lazy stack's estimate.
-    /// Materialization and repair mechanisms are retained only on this path
-    /// until CT-19 removes them with their owning regressions.
-    var pinsToEstimatedOrigin: Bool { self == .newestAtEnd }
+    /// card's shrink) render upright in their natural direction.
+    fileprivate var verticalScale: CGFloat { -1 }
 
     // MARK: The layout the transcript's own ends map to
 
@@ -114,8 +53,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
 
     /// The transcript-relative viewport frame for the `ScrollView` frame a row
     /// or the tail marker reports: `0` at the visual top of the visible
-    /// transcript, increasing downward, exactly as today's transcript reports
-    /// its own frames.
+    /// transcript, increasing downward.
     ///
     /// The origin-anchored transcript renders its content mirrored, so its
     /// reported frames measure *upward* from the visual bottom: the pinned
@@ -129,7 +67,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// returned unchanged.
     func transcriptFrame(_ frame: CGRect, geometry: ChatTranscriptGeometry) -> CGRect {
         let containerHeight = geometry.containerHeight + geometry.bottomInset
-        guard self == .newestAtOrigin, containerHeight > 0 else { return frame }
+        guard containerHeight > 0 else { return frame }
         return CGRect(
             x: frame.minX,
             y: containerHeight - frame.maxY,
@@ -142,33 +80,19 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// `visualOffset` is the anchor's own movement down the visible transcript
     /// since the reader's position was captured.
     ///
-    /// Today's model offset is the scroll view's own content offset, so it moves
-    /// with the content and is clamped at the content's top. The origin-anchored
-    /// transcript's model offset is the reflection of that offset, so it moves
-    /// against the content, and its legal ends are the native scroll view's own
-    /// — which clamps an out-of-range target itself.
+    /// The model offset reflects the scroll view's native offset, so it moves
+    /// against the content; its legal ends are the native scroll view's own,
+    /// which clamps an out-of-range target.
     func correctedOffsetY(
         currentModelOffsetY: CGFloat,
         visualOffset: CGFloat
     ) -> CGFloat {
-        switch self {
-        case .newestAtEnd:
-            return max(0, currentModelOffsetY + visualOffset)
-        case .newestAtOrigin:
-            return currentModelOffsetY - visualOffset
-        }
+        currentModelOffsetY - visualOffset
     }
 
-    /// The scroll view's own `scrollTo(y:)` offset for a point in the model the
-    /// coordinator reasons in.
-    ///
-    /// Today's transcript reports the scroll view's offset as its model offset.
-    /// The origin-anchored transcript reports the reflection of it, so a command
-    /// computed in the model — the staged catch-up's point, a correction's
-    /// target — has to be reflected back before it reaches the scroll view, or
-    /// it becomes a jump of the same size in the opposite direction: thousands
-    /// of points into the oldest loaded history instead of a point near the
-    /// newest row.
+    /// The native `scrollTo(y:)` offset for a point in the coordinator's model.
+    /// Its coordinate is reflected, so a catch-up or correction target must be
+    /// reflected back before it reaches the scroll view or it jumps into old history.
     ///
     /// The model's own `distanceFromBottom` is the reverse of its offset, so the
     /// two share one anchor — the model offset at the pinned end — and a target's
@@ -179,7 +103,7 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
         forModelOffsetY modelOffsetY: CGFloat,
         geometry: ChatTranscriptGeometry
     ) -> CGFloat {
-        guard self == .newestAtOrigin, geometry.isValid else { return modelOffsetY }
+        guard geometry.isValid else { return modelOffsetY }
         let pinnedModelOffsetY = geometry.offsetY + geometry.distanceFromBottom
         return (pinnedModelOffsetY - modelOffsetY)
     }
@@ -188,7 +112,6 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     /// two content clearances are lazy-layout items; only scroll indicators use
     /// margins. No component supplies a second height or curve.
     func layoutClearance(for safeAreaInsets: EdgeInsets) -> EdgeInsets {
-        guard self == .newestAtOrigin else { return .init() }
         return EdgeInsets(
             top: safeAreaInsets.bottom,
             leading: 0,
@@ -197,34 +120,18 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
         )
     }
 
-    /// The accessibility sort priority for the element at `spinePosition` of the
-    /// transcript's content spine, which makes VoiceOver read the transcript in
-    /// the order the reader sees it.
-    ///
-    /// VoiceOver reads a container's elements in the accessibility tree's own
-    /// order, and that order follows the view order. Today's spine presents the
-    /// oldest row first, which is also its visual order, so its elements need no
-    /// priority at all (every element keeps the default `0`, and today's path is
-    /// untouched). The origin-anchored spine presents the newest row first, so
-    /// its view order is the reverse of its visual order: VoiceOver would read
-    /// the transcript bottom-up and scroll it backwards. A sort priority is
-    /// relative within the element's own accessibility container and sorts
-    /// highest-first, so the spine's own position is the value that puts the
-    /// oldest element first and the newest last.
+    /// The origin spine presents the newest row first, the reverse of VoiceOver's
+    /// desired oldest-to-newest reading order. Sort priority is relative within
+    /// the accessibility container and sorts highest-first, so the spine's own
+    /// position puts the oldest element first and the newest last.
     func voiceOverSortPriority(forSpinePosition spinePosition: Int) -> Double {
-        guard presentsNewestRowFirst else { return 0 }
-        return Double(spinePosition)
+        Double(spinePosition)
     }
 
-    /// The transcript position a spine index reports: a row's position counted
-    /// from the transcript's visual top, which is the position every diagnostic
-    /// that names a row's place in the transcript reports. Today's spine presents
-    /// the oldest row first, so its own index is that position; the
-    /// origin-anchored spine presents the newest row first, so its positions are
-    /// reversed.
+    /// The visual position of a row in the origin-anchored spine, counted from
+    /// the oldest end at the visual top.
     func visualPosition(ofSpinePosition position: Int, count: Int) -> Int {
-        guard self == .newestAtOrigin else { return position }
-        return count - 1 - position
+        count - 1 - position
     }
 
     /// Native geometry plus the declared newest-edge spacer. The native sample
@@ -234,20 +141,11 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     ///
     /// The spacer is layout, not scroll-content inset. Remove it from the model's
     /// content and usable viewport heights, report it as bottom obstruction, and
-    /// reflect the native visible rect. Thus distanceFromBottom is exactly the
-    /// native distance from content origin, independent of every lazy estimate.
+    /// reflect the native visible rect. On this path, `distanceFromBottom` then
+    /// cancels the reflected content height and is exactly `visibleRect.minY`:
+    /// distance from the native content origin, independent of the lazy estimate.
     func coordinatorGeometry(_ geometry: ScrollGeometry, obstruction: CGFloat = 0) -> ChatTranscriptGeometry {
         let contentHeight = geometry.contentSize.height
-        guard self == .newestAtOrigin else {
-            return ChatTranscriptGeometry(
-                offsetY: geometry.contentOffset.y,
-                contentHeight: contentHeight,
-                containerHeight: geometry.containerSize.height,
-                bottomInset: geometry.contentInsets.bottom,
-                visibleTopY: geometry.visibleRect.minY,
-                visibleBottomY: geometry.visibleRect.maxY
-            )
-        }
         let visibleTop = geometry.visibleRect.minY
         let visibleBottom = geometry.visibleRect.maxY
         return ChatTranscriptGeometry(
@@ -261,7 +159,6 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     }
 
     private func layoutEdge(_ transcriptEdge: Edge) -> Edge {
-        guard self == .newestAtOrigin else { return transcriptEdge }
         switch transcriptEdge {
         case .top: return .bottom
         case .bottom: return .top
@@ -270,7 +167,6 @@ enum ChatTranscriptOrientation: Equatable, Sendable {
     }
 
     private func layoutAnchor(_ transcriptAnchor: UnitPoint) -> UnitPoint {
-        guard self == .newestAtOrigin else { return transcriptAnchor }
         switch transcriptAnchor {
         case .top: return .bottom
         case .bottom: return .top
@@ -309,20 +205,15 @@ extension ChatTranscriptOrientation {
 /// the transformed scroll view. Merely ignoring safe areas on the flip can still
 /// shrink its native clip when keyboard + accessories cross the viewport center.
 struct ChatTranscriptViewport<Content: View>: View {
-    let orientation: ChatTranscriptOrientation
     @ViewBuilder let content: (EdgeInsets) -> Content
 
     @ViewBuilder var body: some View {
-        if orientation.presentsNewestRowFirst {
-            GeometryReader { insets in
-                GeometryReader { viewport in
-                    content(insets.safeAreaInsets)
-                        .frame(width: viewport.size.width, height: viewport.size.height)
-                }
-                .ignoresSafeArea(.all, edges: .vertical)
+        GeometryReader { insets in
+            GeometryReader { viewport in
+                content(insets.safeAreaInsets)
+                    .frame(width: viewport.size.width, height: viewport.size.height)
             }
-        } else {
-            content(.init())
+            .ignoresSafeArea(.all, edges: .vertical)
         }
     }
 }
@@ -352,25 +243,21 @@ final class ChatTranscriptViewportGeometry {
 
     func update(
         native: ScrollGeometry? = nil,
-        previousNative: ScrollGeometry? = nil,
         obstruction: CGFloat,
         orientation: ChatTranscriptOrientation
     ) -> (previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry)? {
         if let native { self.native = native }
         self.obstruction = obstruction
         guard let applied = self.native else { return nil }
-        let previous = previousNative.flatMap { sample in
-            orientation.pinsToEstimatedOrigin ? orientation.coordinatorGeometry(sample) : nil
-        } ?? published
+        let previous = published
         let current = orientation.coordinatorGeometry(applied, obstruction: self.obstruction)
         published = current
         return (previous, current)
     }
 }
 
-/// The CT-23 accessibility order applies in both orientations. Today's owner
-/// returns priority zero, preserving the default ordering, while the
-/// origin-anchored owner supplies the reversed spine's visual order.
+/// The origin-anchored spine supplies the accessibility order matching the
+/// reader's oldest-to-newest visual order.
 private struct ChatTranscriptVoiceOverOrderModifier: ViewModifier {
     let priority: Double
 
@@ -388,20 +275,16 @@ private struct ChatTranscriptViewportModifier: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if orientation.presentsNewestRowFirst {
-            let margins = orientation.layoutClearance(for: safeAreaInsets)
-            content
-                .ignoresSafeArea(.container, edges: .vertical)
-                .ignoresSafeArea(.keyboard, edges: .vertical)
-                .contentMargins(.top, 0, for: .scrollContent)
-                .contentMargins(.bottom, 0, for: .scrollContent)
-                .contentMargins(.top, margins.top, for: .scrollIndicators)
-                .contentMargins(.bottom, margins.bottom, for: .scrollIndicators)
-                .chatTranscriptOrientation(orientation)
-                .ignoresSafeArea(.all, edges: .vertical)
-        } else {
-            content
-        }
+        let margins = orientation.layoutClearance(for: safeAreaInsets)
+        content
+            .ignoresSafeArea(.container, edges: .vertical)
+            .ignoresSafeArea(.keyboard, edges: .vertical)
+            .contentMargins(.top, 0, for: .scrollContent)
+            .contentMargins(.bottom, 0, for: .scrollContent)
+            .contentMargins(.top, margins.top, for: .scrollIndicators)
+            .contentMargins(.bottom, margins.bottom, for: .scrollIndicators)
+            .chatTranscriptOrientation(orientation)
+            .ignoresSafeArea(.all, edges: .vertical)
     }
 }
 
@@ -411,32 +294,25 @@ private struct ChatTranscriptOrientationModifier: ViewModifier {
     let orientation: ChatTranscriptOrientation
 
     func body(content: Content) -> some View {
-        if orientation.presentsNewestRowFirst {
-            content.scaleEffect(x: 1, y: orientation.verticalScale)
-        } else {
-            content
-        }
+        content.scaleEffect(x: 1, y: orientation.verticalScale)
     }
 }
 
 extension View {
-    /// Today's UIKit behavior stays untouched; only the reflected viewport needs
-    /// a separate system-tap recipient. Mount inside its content for exact ancestry.
+    /// The reflected viewport needs a separate system-tap recipient. Mount inside
+    /// its content for exact ancestry.
     func chatTranscriptStatusBar(
-        _ orientation: ChatTranscriptOrientation,
         active: Bool,
         scrollToOldest: @escaping () -> Void
     ) -> some View {
         background {
-            if orientation.presentsNewestRowFirst {
-                ChatTranscriptStatusBar(active: active, scrollToOldest: scrollToOldest)
-                    .frame(width: 0, height: 0)
-            }
+            ChatTranscriptStatusBar(active: active, scrollToOldest: scrollToOldest)
+                .frame(width: 0, height: 0)
         }
     }
 
     /// Native anchoring and edge effects are shared by main and child transcripts.
-    /// The sheet retains its visual-top underflow alignment; chat uses newest.
+    /// `underflowAt` lets a short read-only child sheet remain top-aligned.
     func chatTranscriptScrollBehavior(
         _ orientation: ChatTranscriptOrientation,
         sizeChangesPinned: Bool,
@@ -447,7 +323,7 @@ extension View {
             .defaultScrollAnchor(edge == .bottom ? orientation.newestEndAnchor : orientation.oldestEndAnchor, for: .alignment)
             .defaultScrollAnchor(sizeChangesPinned ? orientation.newestEndAnchor : orientation.oldestEndAnchor, for: .sizeChanges)
             .scrollPosition(position)
-            .scrollEdgeEffectHidden(orientation.suppressesPinnedEndScrollEdgeEffect, for: Edge.Set(orientation.newestEdge))
+            .scrollEdgeEffectHidden(true, for: Edge.Set(orientation.newestEdge))
     }
 
     /// Renders this view in the transcript's orientation. The transcript applies

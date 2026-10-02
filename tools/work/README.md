@@ -89,16 +89,50 @@ workspace:
    posts a claim comment giving the session, the branch, and the worktree path
    relative to the checkout's parent directory, never an absolute path.
 4. **Worktree.** `start` creates `<worktreeRoot>/<issue>-<slug>` on the branch.
+   `worktreeRoot` is relative to the primary checkout, so `start` gives the
+   same path when run from any worktree.
+5. **Warm local dependencies.** On a new or resumed worktree, `start` copy-on-write
+   clones `packages/gateway/node_modules` and `packages/push-relay/node_modules`
+   only when the corresponding lockfile bytes exactly match the primary
+   checkout and npm verifies that its dependency tree is complete. A missing or
+   incomplete source install, lock mismatch, or clone failure falls back to
+   `npm ci` in that worktree. iOS build caches are owned and seeded by
+   the build-bearing commands of `scripts/tron-ios-test` (`build`, `checkpoint`
+   and `prepare`), not by `start`.
 
 The session is `--session`, then `WORK_SESSION_ID`, then `PI_SESSION_ID`.
 
 The branch type comes from the first matching label in `claim.branchTypes`,
 otherwise from `defaultBranchType`. After claiming, `start` warns when the number of
-In-progress items exceeds `claim.softCap`; the claim still proceeds.
+active claims exceeds `claim.softCap`; the claim still proceeds.
 
 Re-running `start` in the same session resumes a claim that is already made.
 It fills in whatever is missing (Status, comment, worktree) and never makes a
 second claim. A different session is refused, and the refusal names the owner.
+
+### Warm-worktree failure modes
+
+`test_warm.py` covers dependency seeding: exact lock match plus a complete npm
+hidden lock and dependency tree clones independent files; mismatch, missing or
+incomplete primary dependencies uses `npm ci`; and failed clones remove partial
+output before installing. `scripts/test-ios-test-infrastructure.py` covers
+runner-owned iOS cache seeding and cleanup of failed cache clones. Neither tool
+shares mutable build products or trusts an incomplete dependency tree.
+
+### Claimed and active statuses
+
+A claim moves through several Statuses, all listed in the `claim` section:
+
+- `claimedStatus` (In progress) is the Status `start` sets.
+- `claimedStatuses` (In progress, In review, Needs you) are the Statuses a
+  claim branch may validly have. `land` moves a claim to In review, and a
+  merged claim that waits for maintainer-only validation to Needs you. A
+  resumed `start` never moves a claim in one of these back to In progress.
+- `activeStatuses` (In progress, In review) are the Statuses of work an agent
+  is doing. The soft cap counts open issues in an active Status that do not
+  carry an `excludeLabels` label. `start` and the dashboard count them with
+  the same code. An issue in an active Status needs a claim branch; Needs you
+  does not, because it also holds merged work and undecided questions.
 
 The remote branch is the authority for who owns an issue. Project Status and
 comments are projections of it, and the dashboard reports any disagreement
@@ -208,11 +242,31 @@ in `AGENTS.md` and `CONTRIBUTING.md`. The prelude puts the Node pinned by
   full suite instead, because `vitest related` cannot select a test that still
   imports a deleted module and the build excludes tests.
 - **iOS** runs the source, build-matrix and archive-privacy policy scripts,
-  `scripts/tron-ios-test build` and the complete unit target. Focused owners cannot be derived from paths: suite names are not
-  file names, and an `--only-testing` selector that names no suite runs zero
-  tests and passes. The simulator admission and lease rules of
-  `scripts/tron-ios-test` still apply, so a busy Mac fails the check with exit
-  73; verify again once memory is free.
+  then `scripts/tron-ios-test build`. For changed test files, verify derives
+  their declared suites only when every non-private top-level declaration is a
+  test suite; shared helpers or unrecognized syntax force the complete unit
+  target. Audited Settings UI sources select their explicit owning suites.
+  Any deletion or rename anywhere in the branch diff forces the complete unit
+  target because `{paths}` omits files that do not exist at HEAD. Unmapped
+  source paths and empty selections also run the full target. Do not infer a
+  suite from a filename: an `--only-testing` selector that names no suite runs
+  zero tests and passes. The full hosted suite
+  remains in CI's heavy run and explicit checkpoints. The simulator admission
+  and lease rules of `scripts/tron-ios-test` still apply, so a busy Mac fails
+  the check with exit 73; verify again once memory is free.
+- **CI policy's iOS infrastructure test** uses
+  `scripts/ci_ios_infra_scope.py` to skip only for recognized non-iOS paths.
+  The workflow compares the available base and head trees directly (two-dot
+  `git diff`); it logs the selected value and reason. iOS-app, runner/toolchain,
+  CI-workflow, unknown and empty path sets run the infrastructure suite. If the
+  base commit cannot be resolved or path classification fails, the workflow
+  runs it. This does not change CI's hosted iOS unit suite.
+- **The related-issue check** (`.agents/skills/tron-work/related-issues.js`)
+  has its own `work-related-issues` check, a Node test that runs the script as
+  codemode does against a Jev stand-in enforcing Jev's request bounds.
+- **iOS selector tooling** has its own `work-selector-tests` check, so owner
+  selection and CI path-classification tests run locally when their sources
+  change, not only in GitHub Actions.
 - **Mac** regenerates the project with `scripts/generate-xcode-project mac`
   (what `scripts/tron mac generate` runs) and runs `build-for-testing` and
   `test-without-building` for `TronMacTests`, as in the Mac development guide.
@@ -257,6 +311,19 @@ covers the GitHub side.
 19. **A receipt describes content that is not the committed head.** Dirty
     worktrees are refused, and a head or worktree that changes during the run
     discards the receipt.
+47. **A narrowed iOS run misses deleted inputs or shared owners.** The selector
+    owns deletion detection and forces the full iOS suite for any deletion. A
+    changed test file focuses its declared suites only when every non-private
+    top-level declaration is a test suite and no other test file references
+    those suites as `SuiteName.`; shared helpers, external references and
+    unknown syntax therefore run the full target. Owner-map and the configured
+    command-line invocation are covered by
+    `scripts/test-ios-verify-test-selection.py`.
+48. **The policy job skips iOS infrastructure for a relevant or unknown path.**
+    Only recognized non-iOS changes skip that test; iOS/toolchain/workflow paths,
+    an empty diff, an unclassified path, or an unresolved base run it. The
+    workflow logs the decision. `scripts/test-ci-ios-infra-scope.py` covers the
+    path classification.
 
 ## `dashboard`
 
@@ -266,6 +333,38 @@ local Git, and it keeps no cache or registry. Without flags it prints a short
 text summary. `--html` writes one self-contained HTML file with inline CSS, no
 external assets and no script, readable in a narrow phone sheet and in dark
 mode. `--json` writes the same model as JSON for tests and other tools.
+
+### Classification
+
+Every open issue that is not an epic carries exactly one label with the
+`dashboard.kindPrefix` (the kind of work, for example a bug or an idea) and
+exactly one with the `dashboard.visibilityPrefix` (whether the maintainer would
+notice it while using the product). The labels themselves, with their meanings,
+are declared in the `labels` block of `.github/work.json`; the dashboard reads
+the vocabulary from there, so a label is defined in one place. The issue that
+files work sets both; triage corrects them. An idea (`dashboard.ideaLabel`) that
+reaches the Ready status or a claimed status is reported, because approving an
+idea makes it committed work with another kind.
+
+### The HTML page
+
+The page is an overview first and a drill-down second, with no script:
+
+- a summary strip of counts that link to their sections;
+- **Needs you** and **Health** (stale claims, disagreements, orphans,
+  regressions, classification problems and the soft cap). Their items are
+  never inside a collapsed section;
+- **In progress**, one expandable row per claim with its branch, worktree,
+  session and pull request checks;
+- **Work**, every open issue that is not an epic plus those closed in the last
+  `dashboard.recentDays`, under a kind-by-visibility count matrix. Filters for
+  kind, visibility, status and area are radio buttons that CSS `:has()` applies;
+  where `:has()` is unsupported the filters do nothing and every row shows.
+  Ready rows keep their queue position;
+- **Epics**, each expandable to its open and recently closed tasks by status.
+
+Filter tokens come only from the declared vocabulary and Project options, never
+from raw label text, and kind colors come from the declared label colors.
 
 It reads, in a bounded number of calls:
 
@@ -289,9 +388,10 @@ Sections, in order:
    Status `needsYouStatus`.
 2. **Epics:** open issues labeled `epicLabel`, by Epic rank, with sub-issue
    progress.
-3. **In progress:** issues with Status `claim.claimedStatus`, with the claim
-   branch, the worktree relative to the checkout's parent directory, the owning
-   session, last activity, the pull request, its checks and its verify status.
+3. **In progress:** issues with an active Status (`claim.activeStatuses`),
+   with the Status, the claim branch, the worktree relative to the checkout's
+   parent directory, the owning session, last activity, the pull request, its
+   checks and its verify status.
 4. **Ready queue:** Ready issues that are not epics. They are ordered by the
    Epic rank of their parent epic (or their own Epic rank when they have no
    ranked parent; unranked last), then by Priority in the order the options are
@@ -300,10 +400,11 @@ Sections, in order:
 6. **Stale claims:** In-progress issues with no push to their claim branch and
    no comment on the issue or its pull request for 48 hours. They are only
    flagged, never reset.
-7. **Soft cap:** the number of In-progress issues against `claim.softCap`.
-8. **Disagreements:** a claim branch whose open issue is not In progress, an
-   In-progress issue without a claim branch, or an issue with more than one
-   claim branch. The branch is the authority; Status is its projection.
+7. **Soft cap:** the number of issues in section 3 against `claim.softCap`.
+8. **Disagreements:** a claim branch whose open issue is not in one of
+   `claim.claimedStatuses`, an issue in an active Status without a claim
+   branch, or an issue with more than one claim branch. The branch is the
+   authority; Status is its projection.
 9. **Orphans:** worktrees under `claim.worktreeRoot` that are not on the claim
    branch of an open issue, and remote claim branches whose issue is closed or
    does not exist.
@@ -354,3 +455,202 @@ The names it reads (statuses, labels, fields, the verify context) come from the
     issues.** GitHub answers a lookup of a missing number with a `NOT_FOUND`
     error and exit status 1; that issue is reported as missing. A `NOT_FOUND`
     on the repository itself still fails the run.
+43. **Something that needs attention is hidden.** Needs-you items and every
+    health alert render outside any collapsed `<details>`, whatever the
+    filters' default state.
+44. **A classification problem goes unreported.** A missing kind or
+    visibility, two of either, an undeclared label with either prefix, and an
+    idea in the Ready status or a claimed status are each reported under
+    Health; a correctly labeled issue is not.
+45. **The work list drops, repeats or mislabels an issue.** Each open non-epic
+    issue appears once; an issue closed within `dashboard.recentDays` appears
+    and an older one does not; epics stay in their own section.
+46. **GitHub text reaches a filter or a style.** Undeclared or hostile labels
+    never become filter tokens or class names, and a label color is used only
+    when it is six hex digits.
+
+## `issues`
+
+`scripts/tron work issues [--closed [--closed-limit <n>]]` prints one JSON
+document to stdout: every open issue, and with `--closed` the `n` most recently
+updated closed issues (default 200, at most 500). Each entry has the number,
+state, close reason, an epic flag (`dashboard.epicLabel`), the title, the
+labels and a body excerpt with issue-form scaffolding (HTML comments, headings,
+unanswered fields) removed. It is the input of a related-issue check, so it must
+be complete or fail: an agent reads it back through a tool that merges stderr
+into stdout and truncates at 1 MiB.
+
+Titles are capped at 200 characters, bodies at 1,000, and the document at
+900,000 bytes. Tron's related-issue check, which classifies the corpus with Jev
+through Tron's codemode tool, belongs to the harness, not to this tooling. It
+lives with the [tron-work skill](../../.agents/skills/tron-work/SKILL.md).
+
+### Failure modes
+
+`test_issues.py` runs `cli.py issues` in a real Git checkout against a stand-in
+`gh` executable that honors `--state` and `--limit`.
+
+49. **A truncated open list reads as complete.** It asks for one more than its
+    limit of 500 open issues and refuses when GitHub returns that many, so a
+    check never reports "nothing related" for an issue it did not see.
+50. **Closed issues leak into the default corpus, or lose their state.** Closed
+    issues are queried only with `--closed`, newest update first, and each
+    keeps `state` and `stateReason`.
+51. **The corpus overruns the agent's output bound.** A document over 900,000
+    bytes is refused with nothing on stdout, never cut off mid-JSON.
+52. **Success output is not pure JSON.** On success stderr is empty and stdout
+    holds only the bounded corpus.
+
+## `land`
+
+`scripts/tron work land [--title <title>] [--summary-file <path>]
+[--needs-user-validation <text>] [--session <id>]` merges the current claim
+branch. The agent that owns the claim runs it from its task worktree once the
+work is committed. The `land` section of `.github/work.json` configures it.
+
+1. **Gates.** Before any GitHub write, `land` refuses when:
+   - the current branch is not a claim branch on the remote, or its claim
+     commit names another session (the session is resolved as in `start`);
+   - the worktree has modified, staged or untracked files, HEAD is detached,
+     or a merge, rebase, cherry-pick or revert is in progress;
+   - the issue is closed or not in the Project;
+   - no pull request is open for the branch and `--summary-file` is missing;
+   - the scrub command (`verify.scrubCommand`) finds anything in the title,
+     the summary or the validation text.
+2. **Update.** It fetches the remote base branch and, when the branch does not
+   contain its tip, merges it in. It merges rather than rebases, so the
+   incremental re-verify can carry over checks whose inputs did not change. On
+   a conflict it stops and leaves the merge for the agent to resolve and
+   commit; running `land` again continues.
+3. **Receipt.** It runs `verify` and stops on a failing receipt. It then
+   pushes the branch (fast-forward only) and posts the receipt as
+   `verify --post` does.
+4. **Pull request.** It opens one pull request for the branch, or updates the
+   open one. A pull request from a fork never counts.
+   - The title is `--title`. Otherwise a new pull request is titled
+     `<type>: <issue title>`, where `<type>` is the branch type, and an
+     existing one keeps its title.
+   - The body is `Closes #N`, a Summary section and a Verification section.
+     The summary is the Markdown in `--summary-file`; an update without it
+     keeps the current summary. The Verification section lists each receipt
+     check with its result, wall time and the commit it was carried from.
+   - With `--needs-user-validation` the body says `Refs #N` instead, so the
+     merge does not close the issue. It also ends with a Maintainer validation
+     section holding the text, so the text is on GitHub before the merge.
+   - The body holds only text the scrub command has passed: the title,
+     summary and validation text in step 1, and receipt fields that the
+     receipt comment's scrub passed. The issue's Project Status becomes
+     `land.reviewStatus`.
+5. **Wait.** It polls the pull request every `land.pollSeconds`, for at most
+   `land.waitSeconds`. It waits until every check run named in
+   `land.requiredChecks` and the `verify.statusContext` status succeed on the
+   pull request's head, and that head is the commit it pushed. A required check
+   that fails stops `land` and names the check. A timeout also stops it.
+   Neither merges.
+6. **Base moves.** Once the checks pass, it fetches the base branch again.
+   When the head no longer contains its tip, steps 2 to 5 repeat, at most
+   `land.maxRounds` times in all. Until a branch rule requires up-to-date
+   branches, this check is the only guard, and a move in the second between it
+   and the merge call is not caught.
+7. **Merge.** It squash-merges with `--match-head-commit`, so GitHub merges
+   only the commit that was verified. The subject is the pull request title
+   plus ` (#N)` unless the title already has it, and the body is `Closes #N` or
+   `Refs #N`. `land` never uses `gh pr merge --delete-branch`, which checks out
+   the base branch and fails in a linked worktree. Once the branch ruleset
+   requires up-to-date branches and these checks, GitHub auto-merge could
+   replace the wait in step 5; `land` does not rely on it.
+8. **After the merge.** Once GitHub reports the pull request as MERGED:
+   - With `--needs-user-validation`, it reopens the issue if GitHub closed it.
+     It then comments the exact text, adds `land.userValidationLabel` and sets
+     Status to `dashboard.needsYouStatus`. The issue stays open until the
+     maintainer confirms.
+   - Otherwise, it closes the issue if GitHub has not, with a comment naming the
+     pull request and the merge commit. Status becomes `land.doneStatus`.
+   - It deletes the remote branch with a lease on the merged head. A branch
+     that is already gone (the repository may delete merged branches) is fine;
+     a branch at any other commit, including one pushed to just before the
+     delete, is kept and reported.
+   - It prints the commands that remove the local worktree and branch.
+     Removing them is the cleanup command's job, not `land`'s.
+
+Running `land` again after a stop before the merge resumes: it reuses the open
+pull request and the carried checks. A stop after GitHub reports MERGED is not
+resumed, because the claim branch may already be gone. The error names the
+steps left to do by hand (close the issue or hand it off, set Status, delete
+the branch) and, with `--needs-user-validation`, repeats the text, which is
+also in the pull request body.
+
+## `steward`
+
+`scripts/tron work steward [--land <issue>]` looks after pull requests whose
+owner session may have ended. It runs only when someone asks; there is no
+schedule.
+
+Without `--land` it only reports. For each open pull request from a claim
+branch in this repository, it lists:
+
+- the issue, branch and claim session;
+- the state of the required checks and the verify status on the head;
+- unresolved review threads;
+- the age of the head commit;
+- whether a local worktree has the branch checked out.
+
+`--land <issue>` merges that issue's pull request as `land` would (steps 7 and
+8, without validation handoff), but only when all of these hold:
+
+- the verify status and every required check succeed on the pull request's
+  head;
+- the head contains the base branch tip;
+- the remote branch is at that head;
+- any local worktree on the branch is clean and at the same commit;
+- the body starts with `Closes #N`. A `Refs #N` body is a validation handoff,
+  which only `land` performs.
+
+The steward never runs checks, merges the base branch or pushes commits. That
+work belongs to the owner's worktree. A pull request that needs any of it has to be
+resumed by a session that claims it.
+
+### Failure modes
+
+`test_land.py` checks these against real temporary repositories, local bare
+remotes and a fake `gh` (`WORK_GH`) that keeps pull request, check, issue and
+Project state and records every call. The live E2E covers GitHub itself.
+
+32. **Another session's claim is landed.** `land` refuses unless the claim
+    commit of the current remote branch names the caller's session.
+33. **A dirty or mid-merge tree is landed.** Uncommitted or untracked files, a
+    detached HEAD, or a merge, rebase, cherry-pick or revert in progress refuse
+    before any GitHub write.
+34. **A failing or stale receipt is merged.** Nothing is pushed, posted or
+    opened after a failing receipt. The merge names the verified and pushed
+    head with `--match-head-commit`.
+35. **A red or pending required check is merged.** `land` merges only after
+    every required check run and the verify status succeed on the pushed head.
+    A failure or a timeout stops `land` without merging.
+36. **The base branch moves between the check and the merge.** A base tip
+    the head lacks once the checks pass starts another round, and the merge
+    names the new head. A conflict stops `land` with the merge left in
+    progress and nothing pushed.
+37. **A pull request body leaks personal data.** The scrub command sees the
+    title, summary and validation text before any GitHub write. The rest of
+    the body is receipt fields that already passed the scrub of the receipt
+    comment, which is posted first.
+38. **The issue is left open or wrongly closed after the merge.** Without
+    validation, an issue GitHub left open is closed. With validation, the body
+    says `Refs #N` and a closed issue is reopened.
+39. **The remote branch is deleted before the merge or at a moved head.** The
+    branch is deleted only after GitHub reports MERGED, and only with a lease
+    on the merged head, so a push between the check and the delete keeps it.
+40. **The Needs-you handoff loses the action text.** The exact text is in the
+    pull request body before the merge and is commented on the issue with the
+    label and Status. It is scrubbed before the merge, so the scrub cannot
+    refuse it afterwards, and a failure after the merge repeats it in the
+    error.
+41. **The steward lands without a passing receipt.** `steward --land` merges
+    only a head with a successful verify status and required checks, that
+    contains the base tip, that no local worktree has moved past, and whose
+    body closes that issue and not one whose number starts with it. It never
+    runs checks.
+42. **A claimed status is misread.** An In review or Needs you claim is not a
+    disagreement, a resumed `start` does not move it back to In progress, and
+    `start` and the dashboard count the soft cap alike.

@@ -1142,6 +1142,39 @@ describe("transcript projection", () => {
     expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThanOrEqual(24_000);
   });
 
+  it("omits opaque structured tool payloads and bounds nested result summaries", () => {
+    const result = projectToolResult({
+      content: [{ type: "text", text: "ok" }],
+      structuredContent: { secretLikePayload: "x".repeat(100_000) },
+    });
+    expect(result).not.toHaveProperty("structuredContent");
+    const nested = projectMessage(
+      "nested-result", "assistant", "2026-01-01T00:00:00Z",
+      {
+        role: "toolResult", toolCallId: "outer", toolName: "codemode", isError: false,
+        content: [{ type: "text", text: "done" }], timestamp: 1,
+        nestedCalls: {
+          complete: true,
+          calls: [
+            { id: "outer/1", name: "read", status: "ok", arguments: { path: "README.md" }, durationMs: 12 },
+            { id: "outer/2", name: "bash", status: "error", arguments: { command: "false" }, error: "exit 1" },
+            { id: "outer/3", name: "subagent", status: "unfinished", error: "x".repeat(600) },
+          ],
+        },
+      },
+      new BlobStore(),
+    );
+    expect(nested).toMatchObject({
+      role: "toolResult",
+      nestedCalls: { complete: false, calls: [
+        { id: "outer/1", parentToolCallId: "outer", toolName: "read", status: "completed", arguments: { path: "README.md" } },
+        { id: "outer/2", parentToolCallId: "outer", toolName: "bash", status: "failed", error: "exit 1" },
+        { id: "outer/3", parentToolCallId: "outer", toolName: "subagent", status: "unfinished", error: "x".repeat(512) },
+      ] },
+    });
+    expect(Buffer.byteLength(JSON.stringify(nested))).toBeLessThan(10_000);
+  });
+
   it("replaces live output frames in place while empty updates preserve readable output", () => {
     const first = mergeLiveToolOutput(undefined, { output: "waiting\nworker: thinking", outputTruncated: true });
     expect(mergeLiveToolOutput(first, {})).toEqual(first);
@@ -1220,6 +1253,11 @@ describe("transcript projection", () => {
       snapshot.transcript.slice(removedTranscriptRows).map((item) => item.id),
     );
 
+    // Argument details are removed at the large-live-detail stage; these shared
+    // outputs remain just over the 8 KB tail bound and force the final output
+    // tail removal stage under the 800 KB snapshot budget.
+    const maximumToolArguments = "x".repeat(8_000);
+    const liveOutput = "z".repeat(9 * 1_024);
     const maximumToolSnapshot: SessionSnapshot = {
       ...snapshot,
       transcript: Array.from({ length: 20 }, (_, index) => ({
@@ -1231,8 +1269,8 @@ describe("transcript projection", () => {
       transcriptTotal: 20,
       toolExecutions: Array.from({ length: 256 }, (_, index) => ({
         toolCallId: `maximum-tool-${index}`, toolName: "bash", order: index,
-        status: "running" as const, arguments: { command: "x".repeat(150_000) },
-        partialResult: { output: "y".repeat(150_000) }, output: "z".repeat(96 * 1_024),
+        status: "running" as const, arguments: { command: maximumToolArguments },
+        partialResult: { output: maximumToolArguments }, output: liveOutput,
         isError: false, startedAt: new Date(index).toISOString(), updatedAt: new Date(index).toISOString(),
         lastProgressAt: new Date(index).toISOString(), progressSequence: index + 1,
       })),
@@ -1242,6 +1280,7 @@ describe("transcript projection", () => {
     expect(maximumToolFitted.toolExecutions.map((tool) => tool.toolCallId)).toEqual(
       maximumToolSnapshot.toolExecutions.map((tool) => tool.toolCallId),
     );
+    expect(maximumToolFitted.toolExecutions.every((tool) => tool.output === undefined)).toBe(true);
     expect(maximumToolFitted.transcript.filter(
       (item) => !(item.kind === "message" && item.role === "toolResult"),
     )).toHaveLength(20);

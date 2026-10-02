@@ -9,14 +9,11 @@ struct HostedIntegrationsFixtureView: View {
     @State private var ready = false
     @State private var error: String?
     private let gateway: HostedIntegrationsGateway
-    private let surface: IntegrationsSettingsView.Surface
     private let dark: Bool
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         let scenario = arguments.drop(while: { $0 != "-integrations-scenario" }).dropFirst().first ?? "default"
-        let surfaceName = arguments.drop(while: { $0 != "-integrations-surface" }).dropFirst().first ?? "services"
-        surface = surfaceName == "mcp" ? .mcpServers : .connectedServices
         dark = arguments.contains("-ui-dark-mode")
         let gateway = HostedIntegrationsGateway(scenario: scenario)
         self.gateway = gateway
@@ -33,7 +30,7 @@ struct HostedIntegrationsFixtureView: View {
             if ready {
                 NavigationStack {
                     VStack {
-                        IntegrationsSettingsView(surface: surface)
+                        IntegrationsSettingsView()
                     }
                 }
                     .environment(model)
@@ -73,18 +70,15 @@ actor HostedIntegrationsGateway {
     }
 
     private func snapshot() -> JSONValue {
-        let definitions: [JSONValue] = [definition("knowledge.raindrop", "Raindrop", "knowledge-connector", [capability("read", "Read bookmarks")]),
-                                        definition("knowledge.jev", "Jev", "knowledge-connector", [capability("tag", "Tag sources")]),
-                                        definition("knowledge.x", "X", "knowledge-connector", [capability("read", "Read bookmarks")]),
-                                        definition("mcp.remote-http", "MCP server", "mcp", [capability("tools", "Tools")])]
+        let definitions: [JSONValue] = [definition("knowledge.raindrop", "Raindrop", [capability("read", "Read bookmarks")]),
+                                        definition("knowledge.x", "X", [capability("read", "Read bookmarks")])]
         let instances: [JSONValue] = [instance("raindrop-1", "knowledge.raindrop", "knowledge-connector", "raindrop-account", "ready", "Mira", collections: [.object(["collectionId": .string("63441068"), "role": .string("research")])]),
-                                      instance("jev-1", "knowledge.jev", "knowledge-connector", "jev-account", "setup-required", nil),
-                                      instance("x-1", "knowledge.x", "knowledge-connector", "x-account", "ready", "@luna"),
-                                      instance("mcp-1", "mcp.remote-http", "mcp", "local-search", "ready", "local-search")]
+                                      instance("raindrop-2", "knowledge.raindrop", "knowledge-connector", "raindrop-second", "setup-required", nil),
+                                      instance("x-1", "knowledge.x", "knowledge-connector", "x-account", "ready", "@luna")]
         let capabilities = instances.compactMap { item -> JSONValue? in
             guard let id = item.objectValue?["id"]?.stringValue, let definitionId = item.objectValue?["definitionId"]?.stringValue else { return nil }
-            let capabilityID = definitionId == "knowledge.jev" ? "tag" : (definitionId == "mcp.remote-http" ? "tools" : "read")
-            return .object(["id": .string(capabilityID), "availability": .string(definitionId == "knowledge.jev" ? "requires-setup" : "available"),
+            let health = item.objectValue?["health"]?.stringValue
+            return .object(["id": .string("read"), "availability": .string(health == "setup-required" ? "requires-setup" : "available"),
                             "effects": .array([.string("read")]), "definitionId": .string(definitionId), "connectionId": .string(id),
                             "provenance": .object(["owner": .string("connection"), "definitionId": .string(definitionId), "connectionId": .string(id)])])
         }
@@ -98,9 +92,9 @@ actor HostedIntegrationsGateway {
                         "capabilities": .array(capabilities), "stateRevision": .number(1)])
     }
 
-    private func definition(_ id: String, _ name: String, _ implementation: String, _ capabilities: [JSONValue]) -> JSONValue {
-        .object(["schemaVersion": .number(1), "id": .string(id), "implementation": .string(implementation), "displayName": .string(name),
-                 "setupMethods": .array([.string(id == "knowledge.x" ? "oauth" : (implementation == "mcp" ? "endpoint" : "token"))]),
+    private func definition(_ id: String, _ name: String, _ capabilities: [JSONValue]) -> JSONValue {
+        .object(["schemaVersion": .number(1), "id": .string(id), "implementation": .string("knowledge-connector"), "displayName": .string(name),
+                 "setupMethods": .array([.string(id == "knowledge.x" ? "oauth" : "token")]),
                  "capabilities": .array(capabilities)])
     }
     private func capability(_ id: String, _ name: String) -> JSONValue {

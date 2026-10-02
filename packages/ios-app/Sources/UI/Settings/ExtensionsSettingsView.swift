@@ -83,6 +83,7 @@ struct ExtensionsSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 resolutionSection
+                BuiltinExtensionsSettingsSection(projectCWD: projectCWD)
 
                 if let packageError {
                     TronSettingsNotice(message: packageError, retry: reload)
@@ -243,15 +244,14 @@ struct ExtensionsSettingsView: View {
         !Task.isCancelled && presentationActivity.allowsPresentationPublication && request == loadID
     }
 
-    /// The read-only module list: the built-in extensions this Gateway loads
-    /// and the MCP connections it would admit tools from.
+    /// The read-only module list reported by the Gateway.
     private var modulesSection: some View {
         TronSettingsGroup("Tron Modules", detail: modulesDetail, accent: .tronPurple, surfaceStyle: .glass) {
             if let modules {
-                if modules.modules.isEmpty && modules.connections.isEmpty {
+                if modules.modules.isEmpty {
                     TronPlaceholderState(
                         title: "No modules reported",
-                        detail: "This Gateway reported neither built-in modules nor MCP tool sources.",
+                        detail: "This Gateway did not report any loaded Tron modules.",
                         icon: "shippingbox"
                     )
                 } else {
@@ -259,10 +259,6 @@ struct ExtensionsSettingsView: View {
                         ForEach(Array(modules.modules.enumerated()), id: \.element.id) { index, module in
                             if index > 0 { TronSettingsDivider(accent: .tronPurple) }
                             moduleRow(module)
-                        }
-                        ForEach(Array(modules.connections.enumerated()), id: \.element.id) { index, source in
-                            if index > 0 || !modules.modules.isEmpty { TronSettingsDivider(accent: .tronPurple) }
-                            toolSourceRow(source)
                         }
                     }
                 }
@@ -282,12 +278,8 @@ struct ExtensionsSettingsView: View {
     }
 
     private var modulesDetail: String {
-        guard let modules else { return "Built-in Tron extensions and MCP tool sources" }
-        var values = ["\(modules.modules.count) loaded module\(modules.modules.count == 1 ? "" : "s")"]
-        if !modules.connections.isEmpty {
-            values.append("\(modules.connections.count) MCP tool source\(modules.connections.count == 1 ? "" : "s")")
-        }
-        return values.joined(separator: " · ")
+        guard let modules else { return "Built-in Tron extensions" }
+        return "\(modules.modules.count) loaded module\(modules.modules.count == 1 ? "" : "s")"
     }
 
     /// No Tron module registers a command today, so tools carry the row and
@@ -302,20 +294,6 @@ struct ExtensionsSettingsView: View {
             subtitleLineLimit: 3,
             titleIsIdentifier: true,
             accent: .tronPurple,
-            subtitleColor: .tronTextSecondary
-        )
-    }
-
-    /// One MCP connection a session would admit tools from. Individual tool
-    /// names need that session's runtime and are not claimed here.
-    private func toolSourceRow(_ source: McpToolSource) -> some View {
-        TronSettingsRow(
-            icon: "server.rack",
-            title: source.id,
-            subtitle: "MCP tool source · \(source.definitionId) · \(IntegrationHealthPresentation.label(source.health))",
-            subtitleLineLimit: 2,
-            titleIsIdentifier: true,
-            accent: .tronBlue,
             subtitleColor: .tronTextSecondary
         )
     }

@@ -32,6 +32,7 @@ enum ToolExecutionStatePolicy {
             // previously readable live/partial evidence was withdrawn.
             partialResult: candidate.partialResult ?? current.partialResult,
             result: candidate.result ?? current.result,
+            nestedCalls: candidate.nestedCalls ?? current.nestedCalls,
             output: output,
             outputTruncated: outputTruncated,
             isError: candidate.isError,

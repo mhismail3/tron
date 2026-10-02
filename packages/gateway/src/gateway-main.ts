@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
@@ -14,6 +15,7 @@ import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
 import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
+import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
 import { GlobalProviderResources } from "./admin/global-provider-resources.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
 import { GatewayWorkRegistry } from "./sessions/gateway-work-registry.js";
@@ -28,6 +30,7 @@ import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-di
 import { requestsCompetingForLoop } from "./transport/request-span.js";
 import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
+import { applyJevModelPricing } from "./providers/jev-model-pricing.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
@@ -57,7 +60,6 @@ import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./se
 import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import type { KnowledgeRecord } from "./knowledge/knowledge-contract.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
-import { McpAdapter } from "./integrations/mcp-adapter.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./sessions/delegated-root-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
@@ -75,17 +77,6 @@ await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
 // extensions. No source or installed package is rewritten at startup.
 delegatedProviderEnvironment(delegatedRoot);
-// Paid X access is only qualified when the host explicitly supplies the
-// provider/account price and retry ceiling. Missing or malformed values keep
-// the connector unavailable; no default price is inferred in production.
-const xPricing = (() => {
-  const accountId = process.env.TRON_X_ACCOUNT_ID?.trim();
-  const costCentsPerAttempt = Number(process.env.TRON_X_COST_CENTS_PER_ATTEMPT);
-  const maxAttempts = Number(process.env.TRON_X_MAX_ATTEMPTS);
-  if (!accountId || !Number.isSafeInteger(costCentsPerAttempt) || costCentsPerAttempt < 1
-    || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3) return undefined;
-  return { accountId, costCentsPerAttempt, maxAttempts };
-})();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 // Pi installs its private agent-bin projection while loading settings. Apply
 // the supervised immutable command contract afterward, before extension or
@@ -157,14 +148,15 @@ const notifications = new NotificationService(
 await notifications.initialize();
 startupCheckpoint("notifications");
 
-const modelRuntime = installKimiK3Policy(await ModelRuntime.create({
+const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
   modelsPath: join(config.agentDir, "models.json"),
   modelsStorePath: join(config.agentDir, "models-store.json"),
   refreshOnCreate: true,
   allowModelNetwork: false,
-}));
+})));
 startupCheckpoint("model-runtime");
+const globalSettingsManager = SettingsManager.create(homedir(), config.agentDir, { projectTrusted: false });
 const trust = new TrustService(config.agentDir);
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
@@ -180,7 +172,11 @@ const auth = new AuthBroker(
   modelRuntime,
   (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload),
   (topic, payload) => transport?.broadcast(topic, payload),
-  { workRegistry, log: (level, message, event) => logger.log(level, message, { event, source: "auth" }) },
+  {
+    workRegistry,
+    getDeviceId: () => globalSettingsManager.getOrCreateDeviceId(),
+    log: (level, message, event) => logger.log(level, message, { event, source: "auth" }),
+  },
 );
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
@@ -192,10 +188,13 @@ const globalProviderResources = await GlobalProviderResources.create({
   broadcast: () => transport?.broadcast("providers.changed", {}),
 });
 startupCheckpoint("global-provider-resources");
-const connections = new ConnectionOwner(config.tronHome);
+const connections = new ConnectionOwner(config.tronHome, undefined, (instanceIds) => logger.log(
+  "info",
+  "Retired unsupported legacy Jev connection instances",
+  { event: "connection.legacy-jev-retired", source: "connections", instanceIds },
+));
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
-const jevClient = new JevDecisionClient(knowledgeCredentials);
-const mcp = new McpAdapter({ connections, credentials: knowledgeCredentials, workRegistry });
+const jevClient = new JevDecisionClient(modelRuntime);
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
 // One sampler for the process: the transport records its own traffic and logs
@@ -211,6 +210,7 @@ const sessions = new RuntimeRegistry({
   tronHome: config.tronHome,
   resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
+  mcpAuth: { openUrl: (operationId, url, sessionId, server) => auth.openMcpAuthorizationUrl(operationId, url, sessionId, server) },
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
   trust,
@@ -221,7 +221,10 @@ const sessions = new RuntimeRegistry({
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
   beforeSessionRekey: (previousId, nextId) => automations.rekeySessionTarget(previousId, nextId),
   beforeSessionDelete: (sessionId) => automations.blockSessionTarget(sessionId),
-  sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
+  sessionClosed: (sessionId) => {
+    auth.cancelSession(sessionId);
+    transport?.revokeSessionTerminals(sessionId);
+  },
   persistenceDiagnostic: (sessionId, code) => logger.log("warning", "Session persistence diagnostic", {
     event: code, source: "session", sessionId,
   }),
@@ -268,12 +271,16 @@ const sessions = new RuntimeRegistry({
     `Session compaction ${diagnostic.outcome}`,
     { event: "session.compaction.completed", source: "session", ...diagnostic },
   ),
+  codemodeDiagnostic: (diagnostic) => logger.log(
+    diagnostic.outcome === "completed" ? "info" : "warning",
+    `Codemode execution ${diagnostic.outcome}`,
+    { event: "codemode.execution.completed", source: "session", ...diagnostic },
+  ),
   machineId: config.machineId,
   notifications,
   browserLiveViews,
   workRegistry,
   connections,
-  mcp,
   jev: jevClient,
   scheduleToolOperations: {
     execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),
@@ -345,17 +352,16 @@ const knowledgeStore = new KnowledgeStore(
   async (connectionId) => connections.resolveInstance(connectionId).catch(() => undefined),
 );
 let queueKnowledgeSummary: (source: KnowledgeRecord & { kind: "source" }) => void = () => {};
-const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, connections, knowledgeCredentials);
-const jevSourceAssessment = new JevSourceAssessmentModel(knowledgeCredentials);
+const knowledgeTaggingBudget = new KnowledgeTaggingBudget(knowledgeStore, () => modelRuntime.getProviderAuthStatus("typesafe").configured);
+const jevSourceAssessment = new JevSourceAssessmentModel(modelRuntime);
 const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   credentials: knowledgeCredentials,
   queueSummary: source => queueKnowledgeSummary(source),
   assessment: jevSourceAssessment,
   jevBudget: knowledgeTaggingBudget,
-  ...(xPricing ? { xPricing } : {}),
   connections,
 });
-const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(knowledgeCredentials), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, connections, assessment: jevSourceAssessment };
+const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(modelRuntime), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, assessment: jevSourceAssessment };
 const knowledge = new KnowledgeService(
   knowledgeStore,
   new KnowledgeObservationService(
@@ -382,12 +388,18 @@ const knowledge = new KnowledgeService(
   workRegistry,
   async operation => {
     if (operation !== "tags") return { ok: true };
-    const configured = (await connections.snapshot()).instances.filter(instance => instance.definitionId === "knowledge.jev" && instance.policy.enabled);
-    return knowledgeTaggingBudget.gate(configured.length === 1 ? configured[0]!.id : undefined);
+    return knowledgeTaggingBudget.gate("typesafe");
   },
   // The event carries the whole job, the same shape `knowledge.curation.jobs`
   // returns, so one client decoder serves both.
-  new KnowledgeCurationJobs(64, 120_000, job => transport?.broadcast("knowledge.curation.job", { ...job })),
+  new KnowledgeCurationJobs(64, 120_000, job => {
+    transport?.broadcast("knowledge.curation.job", { ...job });
+    if (job.status === "failed" && (job.code === "model-error" || job.code === "model-output-invalid")) logger.log(
+      "warning",
+      "Knowledge model completion failed",
+      { event: "knowledge.model-failed", source: "knowledge", code: job.code, ...(job.reason ? { reason: job.reason } : {}) },
+    );
+  }),
   knowledgeTagging,
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
@@ -511,6 +523,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     sessionSearchWarmTask = undefined;
     await shutdownStep("search-close", async () => { await sessionSearch?.close(); }, recordShutdownStep);
     await shutdownStep("sessions-dispose", () => sessions.dispose(), recordShutdownStep);
+    await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     clearTimeout(forced);
     recordStopped(exitCode);
@@ -634,6 +647,12 @@ const service = new GatewayService({
   automations,
   knowledge,
   connections,
+  mcpAdmin: new McpAdminService(
+    config.agentDir,
+    join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"),
+    new MacKeychainMcpCredentialOwner(),
+    (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
+  ),
   ...(sessionSearch ? { sessionSearch } : {}),
 });
 transport = new GatewayServer({

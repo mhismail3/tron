@@ -202,18 +202,9 @@ package struct TronModuleSummary: Codable, Hashable, Identifiable, Sendable {
     package var id: String { name }
 }
 
-/// One MCP connection a session would admit tools from. It names the source
-/// only: individual MCP tool names exist inside that session's runtime.
-package struct McpToolSource: Codable, Hashable, Identifiable, Sendable {
-    package let id: String
-    package let definitionId: String
-    package let health: String
-}
-
-/// `modules.list`: the installed Tron modules and the MCP tool sources.
+/// `modules.list`: the installed Tron modules.
 package struct TronModuleList: Codable, Hashable, Sendable {
     package let modules: [TronModuleSummary]
-    package let connections: [McpToolSource]
 }
 
 package struct PackageUpdate: Codable, Hashable, Identifiable, Sendable {
@@ -352,10 +343,27 @@ package struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     /// never applies. Optional so a Gateway that predates the field simply
     /// presents no local indicator.
     let localOnly: Bool?
+    /// The provider whose row currently presents this provider's account usage
+    /// (OpenAI's ChatGPT sign-in borrows the Codex login's plan usage). Absent
+    /// from Gateways that predate the field.
+    package let usageLentTo: String?
     package let authSource: String?
     package let credentialType: String?
     package let authMethods: [String]
     let modelCount: Int
+
+    package init(id: String, name: String, configured: Bool, usageSupported: Bool?, localOnly: Bool?, authSource: String?, credentialType: String?, authMethods: [String], modelCount: Int, usageLentTo: String? = nil) {
+        self.id = id
+        self.name = name
+        self.configured = configured
+        self.usageSupported = usageSupported
+        self.localOnly = localOnly
+        self.usageLentTo = usageLentTo
+        self.authSource = authSource
+        self.credentialType = credentialType
+        self.authMethods = authMethods
+        self.modelCount = modelCount
+    }
 
     package var supportsUsage: Bool { usageSupported == true }
     package var isLocalOnly: Bool { localOnly == true }
@@ -407,6 +415,8 @@ package struct ModelSummary: Codable, Hashable, Identifiable, Sendable {
     /// USD per million tokens from the pinned SDK catalog. Absent when the
     /// Gateway has no price, which is not the same as free.
     package var cost: ModelTokenPrice? = nil
+    /// Present only when the Gateway reports that Pi routes this virtual model.
+    package var virtual: Bool? = nil
 
     package var ref: ModelRef { ModelRef(provider: provider, id: id) }
 }

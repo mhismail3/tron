@@ -1110,9 +1110,19 @@ struct ModelPicker: View {
                     )
                     .frame(width: 22)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(model.displayName)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
+                    HStack(spacing: 6) {
+                        Text(model.displayName)
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronTextPrimary)
+                        if model.virtual == true {
+                            Text("Virtual route")
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.tronCyan.opacity(0.12), in: Capsule())
+                        }
+                    }
                     // One line each keeps rows a uniform height, so the lazy
                     // stack's estimates for unbuilt rows stay right and the
                     // scroll position does not jump when scrolling back.

@@ -47,7 +47,7 @@ export const extensionPresentationCompatibility = {
   custom: entry("remote-component", "components.custom", "Foundation-only: one exclusive non-overlay custom owner is bounded in the dormant harness; overlay UX, input routing, and production activation are deferred."),
   addAutocompleteProvider: entry("remote-component", "editor.autocomplete", "Phase 4."),
   setEditorComponent: entry("remote-component", "editor.component", "Phase 4."), getEditorComponent: entry("remote-component", "editor.component", "Phase 4."),
-  theme: entry("explicit-fallback", "theme.baseline", "Pinned Pi has no public per-session process-global theme injection seam."),
+  theme: entry("native-semantic", "theme.baseline", "RPC callbacks receive the host-owned 256-color dark baseline; process-global Pi helpers are pinned to dark because the Gateway has no terminal and Pi exposes no public per-instance global setter."),
   getAllThemes: entry("remote-component", "theme.registry", "Phase 4."), getTheme: entry("remote-component", "theme.registry", "Phase 4."),
   setTheme: entry("remote-component", "theme.switch", "Phase 4."),
 } satisfies Record<keyof ExtensionUIContext, CompatibilityEntry>;
@@ -68,6 +68,7 @@ export const extensionEventCompatibility = {
   turn_start: entry("pi-runtime", "event.turn-start"), turn_end: entry("pi-runtime", "event.turn-end"),
   message_start: entry("pi-runtime", "event.message-start"), message_update: entry("pi-runtime", "event.message-update"), message_end: entry("pi-runtime", "event.message-end"),
   tool_execution_start: entry("pi-runtime", "event.tool-start"), tool_execution_update: entry("pi-runtime", "event.tool-update"), tool_execution_end: entry("pi-runtime", "event.tool-end"),
+  mcp_servers_change: entry("pi-runtime", "event.mcp-servers-change"), provider_stream_event: entry("pi-runtime", "event.provider-stream-event"),
   model_select: entry("pi-runtime", "event.model-select"), thinking_level_select: entry("pi-runtime", "event.thinking-select"),
   user_bash: entry("pi-runtime", "event.user-bash"), input: entry("pi-runtime", "event.input"), tool_call: entry("pi-runtime", "event.tool-call"), tool_result: entry("pi-runtime", "event.tool-result"),
 } satisfies Record<ExtensionEvent["type"], CompatibilityEntry>;
@@ -96,7 +97,11 @@ export const extensionAPICompatibility = {
   setSessionName: entry("pi-runtime", "control.session-name"), getSessionName: entry("pi-runtime", "control.session-name"), setLabel: entry("pi-runtime", "control.label"),
   exec: entry("pi-runtime", "control.exec"), getActiveTools: entry("pi-runtime", "control.tools"), getAllTools: entry("pi-runtime", "control.tools"), setActiveTools: entry("pi-runtime", "control.tools"),
   getCommands: entry("pi-runtime", "control.commands"), setModel: entry("pi-runtime", "control.model"), getThinkingLevel: entry("pi-runtime", "control.thinking"), setThinkingLevel: entry("pi-runtime", "control.thinking"),
-  registerProvider: entry("pi-runtime", "registration.providers"), unregisterProvider: entry("pi-runtime", "registration.providers"), events: entry("pi-runtime", "registration.event-bus"),
+  registerProvider: entry("pi-runtime", "registration.providers"), unregisterProvider: entry("pi-runtime", "registration.providers"),
+  getSettings: entry("pi-runtime", "control.settings"), registerMcpServer: entry("pi-runtime", "registration.mcp-servers"),
+  unregisterMcpServer: entry("pi-runtime", "registration.mcp-servers"), getMcpServers: entry("pi-runtime", "control.mcp-servers"),
+  registerVirtualModel: entry("pi-runtime", "registration.virtual-models"), unregisterVirtualModel: entry("pi-runtime", "registration.virtual-models"),
+  events: entry("pi-runtime", "registration.event-bus"),
 } satisfies Record<keyof ExtensionAPI, CompatibilityEntry>;
 
 type PublicToolRenderContext = Parameters<NonNullable<ToolDefinition["renderCall"]>>[2];
@@ -105,7 +110,8 @@ export const toolDefinitionCompatibility = {
   name: "pi-runtime", label: "pi-runtime", description: "pi-runtime", promptSnippet: "pi-runtime",
   promptGuidelines: "pi-runtime", parameters: "pi-runtime", constrainedSampling: "pi-runtime",
   renderShell: "renderer", prepareArguments: "pi-runtime", executionMode: "pi-runtime", execute: "pi-runtime",
-  renderCall: "renderer", renderResult: "renderer",
+  renderCall: "renderer", renderResult: "renderer", outputSchema: "pi-runtime", exposure: "pi-runtime",
+  namespace: "pi-runtime", annotations: "pi-runtime", defaultActive: "pi-runtime", prepareLoadout: "pi-runtime",
 } satisfies Record<keyof ToolDefinition, "pi-runtime" | "renderer">;
 
 export const remoteTuiFeasibilityCompatibility = {
@@ -122,7 +128,7 @@ export const remoteTuiFeasibilityCompatibility = {
 
 export const rendererThemeCompatibility = {
   callbackInjectedTheme: entry("renderer", "renderer.callback-theme", "The public callback theme is authoritative for renderer execution."),
-  processGlobalHelpers: entry("explicit-fallback", "renderer.global-theme-helpers", "Pi exposes initialization but no public per-session process-global synchronization seam."),
+  processGlobalHelpers: entry("explicit-fallback", "renderer.global-theme-helpers", "Pi global markdown/select/settings helpers use its deterministic dark theme; this may differ from Tron's callback-injected 256-color RPC baseline until Pi root-exports a per-instance theme setter."),
 } as const;
 
 export const rendererContractCompatibility = {

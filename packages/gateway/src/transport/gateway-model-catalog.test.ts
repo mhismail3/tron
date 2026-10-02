@@ -25,12 +25,12 @@ describe("model catalog transport", () => {
     if (root) await rm(root, { recursive: true, force: true });
     root = "";
   });
-  const dated = { provider: "anthropic", id: "claude-fable-5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", name: "Claude Fable 5",
+  const dated = { provider: "anthropic", id: "pi-sdk-fixture", api: "anthropic-messages", baseUrl: "https://api.anthropic.com", name: "Claude Fable 5",
     contextWindow: 200_000, maxTokens: 32_000, reasoning: true, input: ["text"], cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 } };
   const undated = { provider: "custom-router", id: "local-model", api: "openai-responses", baseUrl: "http://127.0.0.1", name: "Local Model",
     contextWindow: 8_000, maxTokens: 1_000, reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
   const usage = [
-    { provider: "anthropic", id: "claude-fable-5", lastUsedAt: "2026-09-25T12:00:00.000Z" },
+    { provider: "anthropic", id: "pi-sdk-fixture", lastUsedAt: "2026-09-25T12:00:00.000Z" },
     { provider: "custom-router", id: "local-model", lastUsedAt: "2026-09-24T12:00:00.000Z" },
   ];
 
@@ -47,20 +47,20 @@ describe("model catalog transport", () => {
     await expect(service().invoke(client, "model.recent", {})).resolves.toEqual({ models: usage });
   });
 
-  it("projects release dates only for snapshot-known models", async () => {
+  it("omits release dates for models absent from the snapshot", async () => {
     const result = await service().invoke(client, "model.list", {}) as { models: Array<Record<string, unknown>> };
-    const datedRow = result.models.find((model) => model.id === "claude-fable-5")!;
+    const datedRow = result.models.find((model) => model.id === "pi-sdk-fixture")!;
     const undatedRow = result.models.find((model) => model.id === "local-model")!;
-    expect(datedRow.releaseDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect("releaseDate" in datedRow).toBe(false);
     expect("releaseDate" in undatedRow).toBe(false);
   });
 
   it("refreshes release dates, broadcasts catalog changes, persists them, and isolates fetch failure", async () => {
     root = await mkdtemp(join(tmpdir(), "gateway-model-catalog-"));
     const broadcast = vi.fn();
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ anthropic: { models: { "claude-sonnet-5-5": { release_date: "2026-09-28" } } } }), { status: 200 }));
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ anthropic: { models: { "pi-sdk-fixture": { release_date: "2026-09-28" } } } }), { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
-    const newlyReleased = { ...dated, id: "claude-sonnet-5-5" };
+    const newlyReleased = { ...dated };
     const runtime = {
       getModels: () => [newlyReleased], getAvailable: async () => [newlyReleased],
       getProviders: () => [{ id: "anthropic" }],
@@ -80,13 +80,13 @@ describe("model catalog transport", () => {
     expect(refresh.releaseDates).toEqual({ updated: expect.any(Number) });
     expect(broadcast).toHaveBeenCalledWith("models.catalogChanged", {});
     const after = await gateway.invoke(client, "model.list", {}) as { models: Array<Record<string, unknown>> };
-    expect(after.models[0].releaseDate).toBe("2026-09-28");
+    expect(after.models.find(model => model.id === "pi-sdk-fixture")?.releaseDate).toBe("2026-09-28");
     gateway.dispose();
 
     const restored = new GatewayService(dependencies);
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down"); }));
     const persisted = await restored.invoke(client, "model.list", {}) as { models: Array<Record<string, unknown>> };
-    expect(persisted.models[0].releaseDate).toBe("2026-09-28");
+    expect(persisted.models.find(model => model.id === "pi-sdk-fixture")?.releaseDate).toBe("2026-09-28");
     const failed = await restored.invoke(client, "models.refresh", { commandId: "catalog-refresh-002", force: true }) as Record<string, unknown>;
     expect(failed.aborted).toBe(false);
     expect(failed.releaseDates).toMatchObject({ updated: 0, error: expect.any(String) });
@@ -95,7 +95,7 @@ describe("model catalog transport", () => {
 
   it("projects input/output prices only for priced models", async () => {
     const result = await service().invoke(client, "model.list", {}) as { models: Array<Record<string, unknown>> };
-    expect(result.models.find((model) => model.id === "claude-fable-5")!.cost).toEqual({ input: 10, output: 50 });
+    expect(result.models.find((model) => model.id === "pi-sdk-fixture")!.cost).toEqual({ input: 10, output: 50 });
     expect("cost" in result.models.find((model) => model.id === "local-model")!).toBe(false);
   });
 });

@@ -3,10 +3,9 @@ import type { JsonValue } from "../protocol/types.js";
 
 export const CONNECTION_STATE_SCHEMA_VERSION = 1 as const;
 export const CONNECTION_DEFINITION_SCHEMA_VERSION = 1 as const;
-export const RUNTIME_BINDING_SCHEMA_VERSION = 1 as const;
 
-export type ConnectionSetupMethod = "oauth" | "token" | "local-command" | "endpoint" | "browser";
-export type ConnectionImplementationKind = "knowledge-connector" | "mcp";
+export type ConnectionSetupMethod = "oauth" | "token" | "browser";
+export type ConnectionImplementationKind = "knowledge-connector";
 export type ConnectionHealth = "unconfigured" | "setup-required" | "ready" | "disabled" | "auth-error" | "error" | "disconnected";
 export type ConnectionCapabilityAvailability = "available" | "unavailable" | "requires-setup" | "disabled" | "unsupported";
 export type CredentialAvailability = "available" | "unavailable" | "unknown";
@@ -35,20 +34,9 @@ export interface ConnectionPolicy {
   enabled: boolean;
   allowWrites: boolean;
   paidAccessApproved: boolean;
+  /** User-approved monthly paid-spend cap; consumers own usage ledgers separately. */
   paidBudgetCents: number;
   recurringApproved: boolean;
-}
-
-/** Generic account envelope only. Provider checkpoints, evidence, cohorts and
- * remote-effect receipts remain with the provider/Knowledge adapter. */
-export interface McpConnectionConfiguration {
-  transport: "http" | "stdio";
-  endpoint?: string;
-  command?: string;
-  args?: string[];
-  cwd?: string;
-  /** Environment names/values explicitly supplied for the trusted stdio child. */
-  env?: Record<string, string>;
 }
 
 export interface RaindropCollectionMapping {
@@ -63,7 +51,6 @@ export interface ConnectionInstance {
   providerAccountId: string;
   scope?: string;
   credentialRef: string;
-  configuration?: McpConnectionConfiguration;
   /** Raindrop intake routing is connection-owned setup/policy, never connector progress state. */
   raindropCollections?: RaindropCollectionMapping[];
   policy: ConnectionPolicy;
@@ -79,7 +66,7 @@ export interface ConnectionInstance {
   lastError?: string;
 }
 
-export type ConnectionInstanceProjection = Omit<ConnectionInstance, "credentialRef" | "configuration"> & { credentialConfigured: boolean };
+export type ConnectionInstanceProjection = Omit<ConnectionInstance, "credentialRef"> & { credentialConfigured: boolean };
 
 export interface ConnectionCapabilityStatus {
   id: string;
@@ -89,18 +76,6 @@ export interface ConnectionCapabilityStatus {
   connectionId?: string;
   provenance: { owner: "connection"; definitionId: string; connectionId?: string };
   detail?: string;
-}
-
-/** Runtime admission is an ephemeral projection checked by the runtime owner;
- * the connection owner does not persist bindings or grant child inheritance. */
-export interface RuntimeBinding {
-  schemaVersion: typeof RUNTIME_BINDING_SCHEMA_VERSION;
-  integrationId: string;
-  connectionId?: string;
-  capabilityId: string;
-  sessionId: string;
-  runtimeGeneration: number;
-  provider: { owner: "connection"; definitionId: string; connectionId?: string };
 }
 
 export interface ConnectionSetupOperation {
@@ -122,7 +97,7 @@ export interface ProviderAdmissionObservation {
 
 export type ConnectionCommand =
   | { kind: "setup.begin"; commandId: string; instanceId: string; definitionId: string; method: ConnectionSetupMethod }
-  | { kind: "setup.complete"; commandId: string; operationId: string; instanceId: string; providerAccountId: string; scope?: string; credentialRef: string; policy: ConnectionPolicy; configuration?: McpConnectionConfiguration; raindropCollections?: RaindropCollectionMapping[] }
+  | { kind: "setup.complete"; commandId: string; operationId: string; instanceId: string; providerAccountId: string; scope?: string; credentialRef: string; policy: ConnectionPolicy; raindropCollections?: RaindropCollectionMapping[] }
   | { kind: "setup.cancel"; commandId: string; operationId: string; instanceId: string }
   | { kind: "policy.update"; commandId: string; instanceId: string; expectedSetupRevision: number; policy: ConnectionPolicy; raindropCollections?: RaindropCollectionMapping[] }
   | { kind: "disconnect"; commandId: string; instanceId: string };
@@ -200,9 +175,9 @@ export function validateIntegrationDefinition(value: unknown): asserts value is 
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Integration definition is invalid");
   const item = value as Record<string, unknown>;
   if (item.schemaVersion !== CONNECTION_DEFINITION_SCHEMA_VERSION) throw new Error("Unsupported integration definition schema");
-  assertDefinitionId(item.id); if (!["knowledge-connector", "mcp"].includes(item.implementation as string)) throw new Error("Integration implementation is invalid");
+  assertDefinitionId(item.id); if (item.implementation !== "knowledge-connector") throw new Error("Integration implementation is invalid");
   bounded(item.displayName, "Integration display name", 160);
-  if (!Array.isArray(item.setupMethods) || item.setupMethods.length < 1 || item.setupMethods.some(method => !["oauth", "token", "local-command", "endpoint", "browser"].includes(method as string))) throw new Error("Integration setup methods are invalid");
+  if (!Array.isArray(item.setupMethods) || item.setupMethods.length < 1 || item.setupMethods.some(method => !["oauth", "token", "browser"].includes(method as string))) throw new Error("Integration setup methods are invalid");
   if (!Array.isArray(item.capabilities) || item.capabilities.length > 64) throw new Error("Integration capabilities are invalid");
   for (const capability of item.capabilities) {
     if (!capability || typeof capability !== "object" || Array.isArray(capability)) throw new Error("Integration capability is invalid");
@@ -214,7 +189,8 @@ export function validateIntegrationDefinition(value: unknown): asserts value is 
 export function validateConnectionInstance(value: unknown): asserts value is ConnectionInstance {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Connection instance is invalid");
   const item = value as Record<string, unknown>; assertConnectionId(item.id); assertDefinitionId(item.definitionId);
-  if (!["knowledge-connector", "mcp"].includes(item.implementation as string)) throw new Error("Connection implementation is invalid");
+  if (item.implementation === "mcp") throw new Error(`MCP connection instance ${String(item.id)} is unsupported; configure MCP through Pi mcp.json`);
+  if (item.implementation !== "knowledge-connector") throw new Error("Connection implementation is invalid");
   bounded(item.providerAccountId, "Provider account", 256); if (item.scope !== undefined) bounded(item.scope, "Connection scope", 512);
   assertCredentialReference(item.credentialRef); validateConnectionPolicy(item.policy);
   if (item.credentialAvailability !== undefined && !["available", "unavailable", "unknown"].includes(item.credentialAvailability as string) || item.providerIdentity !== undefined && !["admitted", "mismatch", "unknown"].includes(item.providerIdentity as string)) throw new Error("Connection admission observation is invalid");
@@ -224,10 +200,7 @@ export function validateConnectionInstance(value: unknown): asserts value is Con
     if (item.scope !== undefined) throw new Error("Raindrop collection mappings replace the single connector scope");
     validateRaindropCollectionMappings(item.raindropCollections);
   }
-  if (item.configuration !== undefined) {
-    if (item.implementation !== "mcp") throw new Error("Only MCP instances may contain transport configuration");
-    validateMcpConnectionConfiguration(item.configuration);
-  }
+  if (item.configuration !== undefined) throw new Error(`MCP connection instance ${String(item.id)} is unsupported; configure MCP through Pi mcp.json`);
   if (!["unconfigured", "setup-required", "ready", "disabled", "auth-error", "error", "disconnected"].includes(item.health as string)) throw new Error("Connection health is invalid");
   for (const key of ["createdAt", "updatedAt"] as const) bounded(item[key], `Connection ${key}`, 64);
   if (!Number.isSafeInteger(item.setupRevision) || (item.setupRevision as number) < 0) throw new Error("Connection setup revision is invalid");
@@ -252,29 +225,6 @@ export function validateRaindropCollectionMappings(value: unknown): asserts valu
   }
 }
 
-export function validateMcpConnectionConfiguration(value: unknown): asserts value is McpConnectionConfiguration {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("MCP connection configuration is invalid");
-  const config = value as Record<string, unknown>;
-  if (config.transport !== "http" && config.transport !== "stdio") throw new Error("MCP transport is invalid");
-  if (config.transport === "http") {
-    bounded(config.endpoint, "MCP endpoint", 2_048);
-    try { const url = new URL(config.endpoint as string); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash) throw new Error("MCP endpoint is invalid"); }
-    catch (error) { throw new Error(error instanceof Error && error.message === "MCP endpoint is invalid" ? error.message : "MCP endpoint is invalid"); }
-    if (config.command !== undefined || config.args !== undefined || config.cwd !== undefined || config.env !== undefined) throw new Error("HTTP MCP configuration contains stdio fields");
-    return;
-  }
-  bounded(config.command, "MCP executable", 1_024);
-  if (config.endpoint !== undefined) throw new Error("stdio MCP configuration contains an endpoint");
-  if (config.args !== undefined && (!Array.isArray(config.args) || config.args.length > 64 || config.args.some(arg => typeof arg !== "string" || arg.length > 2_048 || /[\u0000-\u001f\u007f]/.test(arg)))) throw new Error("MCP arguments are invalid");
-  if (config.cwd !== undefined) bounded(config.cwd, "MCP working directory", 2_048);
-  if (config.env !== undefined) {
-    if (!config.env || typeof config.env !== "object" || Array.isArray(config.env) || Object.keys(config.env).length > 32) throw new Error("MCP environment is invalid");
-    for (const [key, value] of Object.entries(config.env)) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || typeof value !== "string" || value.length > 8_192 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error("MCP environment is invalid");
-    }
-  }
-}
-
 export function validateConnectionState(value: unknown): asserts value is ConnectionOwnerState {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Connection owner state is invalid");
   const state = value as Record<string, unknown>;
@@ -285,18 +235,11 @@ export function validateConnectionState(value: unknown): asserts value is Connec
     assertConnectionId(id, "setup operation id");
     if (!operation || typeof operation !== "object" || Array.isArray(operation)) throw new Error("Setup operation is invalid");
     const item = operation as Record<string, unknown>; assertConnectionId(item.operationId, "setup operation id"); assertConnectionId(item.instanceId); assertDefinitionId(item.definitionId); bounded(item.method, "Setup method", 32);
-    if (!["oauth", "token", "local-command", "endpoint", "browser"].includes(item.method as string) || !["pending", "completed", "cancelled"].includes(item.status as string)) throw new Error("Setup operation is invalid");
+    if (!["oauth", "token", "browser"].includes(item.method as string) || !["pending", "completed", "cancelled"].includes(item.status as string)) throw new Error("Setup operation is invalid");
     bounded(item.createdAt, "Setup createdAt", 64); bounded(item.updatedAt, "Setup updatedAt", 64);
     if (id !== item.operationId) throw new Error("Setup operation map key does not match its ID");
   }
   for (const receipt of Object.values(state.receipts)) {
     if (!receipt || typeof receipt !== "object" || Array.isArray(receipt) || typeof (receipt as ConnectionOwnerReceipt).operation !== "string" || typeof (receipt as ConnectionOwnerReceipt).requestHash !== "string" || typeof (receipt as ConnectionOwnerReceipt).createdAt !== "string" || !("result" in receipt)) throw new Error("Connection receipt is invalid");
   }
-}
-
-export function validateRuntimeBinding(value: unknown): asserts value is RuntimeBinding {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Runtime binding is invalid");
-  const binding = value as Record<string, unknown>; if (binding.schemaVersion !== RUNTIME_BINDING_SCHEMA_VERSION) throw new Error("Unsupported runtime binding schema");
-  assertDefinitionId(binding.integrationId); if (binding.connectionId !== undefined) assertConnectionId(binding.connectionId); assertConnectionId(binding.capabilityId, "capability id"); assertConnectionId(binding.sessionId, "session id");
-  if (!Number.isSafeInteger(binding.runtimeGeneration) || (binding.runtimeGeneration as number) < 0) throw new Error("Runtime generation is invalid");
 }

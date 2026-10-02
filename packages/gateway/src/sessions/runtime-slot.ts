@@ -16,7 +16,7 @@ import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { ImageContent, Model } from "@earendil-works/pi-ai";
+import { getCurrentSystemMessage, type ImageContent, type Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -36,6 +36,8 @@ import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { tronModuleFactories } from "../extensions/tron-modules.js";
+import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
+import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
 import type {
   ChatOrigin,
   CommandDetail,
@@ -57,6 +59,7 @@ import type {
   SessionSummaryUpdate,
   SessionTreeNode,
   ToolExecutionState,
+  NestedToolExecutionState,
   ResourceInvocation,
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -81,6 +84,9 @@ import {
   boundCommandContent,
   boundStreamingProgressItem,
   fitSessionSnapshot,
+  NESTED_ARGUMENT_CALL_BYTES,
+  NESTED_ARGUMENT_TOTAL_BYTES,
+  NESTED_CALL_LIMIT,
   projectJson,
   projectMessage,
   mergeLiveToolOutput,
@@ -99,7 +105,7 @@ import {
 } from "./projection.js";
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
-import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
+import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
@@ -127,14 +133,15 @@ import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { tronContext } from "../workspace/tron-core-extension.js";
 import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
 import { admitToolDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
+import { admitBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import type { JevDecisionClient } from "../knowledge/jev-client.js";
+import { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
-import type { McpAdapter } from "../integrations/mcp-adapter.js";
 import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
+import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
@@ -395,6 +402,7 @@ export interface RuntimeSlotDependencies {
   agentDir: string;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
+  mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
   createModelRuntime: () => Promise<ModelRuntime>;
   trust: TrustService;
   blobs: BlobStore;
@@ -406,7 +414,6 @@ export interface RuntimeSlotDependencies {
   knowledge?: KnowledgeService;
   jev?: JevDecisionClient;
   connections?: ConnectionOwner;
-  mcp?: McpAdapter;
   workspace: TronWorkspace;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
@@ -426,6 +433,7 @@ export interface RuntimeSlotDependencies {
   runtimeDisposalTimedOut?: (graceMs: number) => void;
   persistenceDiagnostic?: (sessionId: string, code: string) => void;
   compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
+  codemodeDiagnostic?: (diagnostic: { sessionId: string; outcome: "completed" | "failed" | "aborted" | "timeout"; durationMs: number; nestedCallCount: number; complete: boolean }) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
   /** Bounded recency for the shared model picker. Called once per admitted
@@ -521,8 +529,6 @@ export class RuntimeSlot {
   private readonly runtimeGeneration = randomUUID();
   /** Stable runtime-only catalog identity for a new session before Pi creates JSONL. */
   private readonly createdAt = new Date().toISOString();
-  /** Canonical parent identity retained while a fresh fork has no JSONL yet. */
-  private liveForkParentSessionId: string | undefined;
   /** Disposable derived annotation; canonical JSONL remains the authority. */
   private forkBoundary: ForkBoundaryAnchor | undefined;
   private revision = 0;
@@ -588,6 +594,8 @@ export class RuntimeSlot {
   private readonly toolProgressPublishedAt = new Map<string, number>();
   /** Monotonic invocation starts keep duration independent of wall-clock changes. */
   private readonly toolStartedAtMonotonicMs = new Map<string, number>();
+  private readonly nestedToolRoots = new Map<string, string>();
+  private readonly nestedToolStartedAt = new Map<string, number>();
   private activeOperationId: string | undefined;
   /** Display lineage survives tool-only agent continuations even when lifecycle
    * settlement rotates the operation owner. User, visible content, and compaction
@@ -955,6 +963,9 @@ export class RuntimeSlot {
 
   get id(): string {
     return this.sessionManager.getSessionId();
+  }
+  hasBuiltinMcpCommand(): boolean {
+    return isBuiltinMcpCommand(this.runtime.session.extensionRunner.getCommand("mcp"));
   }
 
   /** Read-only owner seam for bounded derived projections; callers never
@@ -1437,11 +1448,8 @@ export class RuntimeSlot {
     return this.runtime.session.sessionFile;
   }
 
-  /** Canonical parent identity retained while Pi has only reserved the fork path. */
-  get catalogParentSessionId(): string | undefined { return this.liveForkParentSessionId; }
-
-  /** Pi may reserve a future JSONL path before writing its first canonical
-   * entry. Catalog membership treats only an existing file as persisted. */
+  /** Pi may reserve a future JSONL path before writing its first user or
+   * assistant message. Catalog membership treats only an existing file as persisted. */
   get persistedSessionFile(): string | undefined {
     const path = this.runtime.session.sessionFile;
     return path && existsSync(path) ? path : undefined;
@@ -1457,8 +1465,19 @@ export class RuntimeSlot {
       this.browserLiveReferences.clear();
       for (const entry of branch) {
         if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
-        const display = admitToolDisplayProjection(entry.message.toolName, entry.message.details, entry.message.toolCallId, manager.getSessionId());
+        const details = entry.message.details;
+        const display = admitToolDisplayProjection(entry.message.toolName, details, entry.message.toolCallId, manager.getSessionId());
         if (display?.liveView) this.browserLiveReferences.add(`${display.liveView.viewId}\0${display.liveView.generation}`);
+        const nested = details && typeof details === "object" && !Array.isArray(details)
+          ? (details as Record<string, unknown>).tronNested : undefined;
+        const browserLiveViews = nested && typeof nested === "object" && !Array.isArray(nested)
+          ? (nested as Record<string, unknown>).browserLiveViews : undefined;
+        if (Array.isArray(browserLiveViews)) for (const item of browserLiveViews) {
+          if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+          const reference = admitBrowserToolReference("agent_browser", entry.message.toolCallId,
+            { tronBrowserReference: (item as Record<string, unknown>).receipt }, manager.getSessionId());
+          if (reference) this.browserLiveReferences.add(`${reference.descriptor.viewId}\0${reference.descriptor.generation}`);
+        }
       }
       this.displayArtifactReferenceKey = key;
     }
@@ -1512,16 +1531,23 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
-      const mcpFactories = this.dependencies.mcp
-        ? await this.dependencies.mcp.extensionFactories(this.id, this.runtimeGeneration)
-        : [];
       const services = await createAgentSessionServices({
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {
           extensionFactories: [
-            ...mcpFactories.map((factory, index) => ({ name: `tron-mcp-${index}`, factory })),
+            ...piBuiltinExtensions(this.dependencies.agentDir, (url) => {
+              const operationId = currentMcpAuthOperationId();
+              if (!operationId || !this.dependencies.mcpAuth) {
+                throw new Error("MCP authorization URL has no active Tron sign-in operation");
+              }
+              const target = currentMcpAuthTarget();
+              if (!target?.sessionId || !target.server || target.sessionId !== this.id) {
+                throw new Error("MCP authorization URL does not match the active session operation");
+              }
+              this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
+            }),
             ...tronModuleFactories({
               sessionId: () => this.id,
               cwd: () => this.cwd,
@@ -1539,7 +1565,7 @@ export class RuntimeSlot {
                 || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
               compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
               ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
-              ...(this.dependencies.jev ? { jev: this.dependencies.jev } : {}),
+              jev: new JevDecisionClient(modelRuntime),
               ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
               ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
               ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
@@ -1571,6 +1597,13 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
       });
+      // The transcript owns a chat's tool loadout. Pi's createAgentSession always
+      // passes its configured defaults, which skips AgentSession's own transcript
+      // restore, so a resumed, forked or reloaded chat would silently fall back
+      // to the defaults and the next prompt would persist that (#327). Apply the
+      // declared loadout here; a session without one keeps the defaults.
+      const declared = getCurrentSystemMessage(sessionManager.buildSessionContext().messages);
+      if (declared) created.session.setActiveToolsByName((declared.toolsAdded ?? []).map((tool) => tool.name));
       compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir);
       created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(created.session.agent.streamFunction));
       this.compactionPolicies.set(created.session, compactionPolicy);
@@ -2047,6 +2080,141 @@ export class RuntimeSlot {
     }
   }
 
+  private nestedToolCallsFromDetails(value: unknown): ToolExecutionState["nestedCalls"] | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const details = (value as Record<string, unknown>).details;
+    if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
+    const sourceCalls = (details as Record<string, unknown>).calls;
+    if (!Array.isArray(sourceCalls)) return undefined;
+    let complete = sourceCalls.length <= NESTED_CALL_LIMIT;
+    let argumentBudget = NESTED_ARGUMENT_TOTAL_BYTES;
+    const calls = sourceCalls.slice(0, NESTED_CALL_LIMIT).flatMap((candidate): NestedToolExecutionState[] => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+      const item = candidate as Record<string, unknown>;
+      if (typeof item.id !== "string" || typeof item.name !== "string") return [];
+      const status: NestedToolExecutionState["status"] = item.status === "ok" ? "completed"
+        : item.status === "error" || item.status === "cancelled" ? "failed"
+          : item.status === "unfinished" ? "unfinished" : "running";
+      if (status === "unfinished") complete = false;
+      const error = typeof item.error === "string" ? boundedUtf8Prefix(item.error, 512) : undefined;
+      const args = typeof item.args === "string" ? item.args : "";
+      let argumentsValue: JsonValue | undefined;
+      let argumentsBytes: number | undefined;
+      if (args) {
+        try {
+          const parsed: unknown = JSON.parse(args);
+          const bytes = Buffer.byteLength(JSON.stringify(parsed));
+          if (bytes <= NESTED_ARGUMENT_CALL_BYTES && bytes <= argumentBudget) {
+            argumentsValue = projectJson(parsed, NESTED_ARGUMENT_CALL_BYTES);
+            argumentBudget -= bytes;
+          } else { argumentsBytes = Buffer.byteLength(args); complete = false; }
+        } catch { argumentsBytes = Buffer.byteLength(args); complete = false; }
+      }
+      const id = item.id.slice(0, 512);
+      const durationMs = typeof item.durationMs === "number" && Number.isFinite(item.durationMs)
+        ? Math.max(0, Math.round(item.durationMs)) : undefined;
+      return [{
+        id, parentToolCallId: id.slice(0, Math.max(0, id.lastIndexOf("/"))),
+        toolName: item.name.slice(0, 256), status,
+        ...(error === undefined ? {} : { error }),
+        ...(argumentsValue === undefined ? {} : { arguments: argumentsValue }),
+        ...(argumentsBytes === undefined ? {} : { argumentsBytes }),
+        ...(durationMs === undefined ? {} : { durationMs }),
+      }];
+    });
+    return { calls, complete };
+  }
+
+  private updateNestedExtensionActivity(
+    event: { toolCallId: string; toolName: string },
+    status: "running" | "completed" | "failed",
+    value?: unknown,
+  ): void {
+    const now = new Date().toISOString();
+    const startedAt = this.extensionActivities.get(event.toolCallId)?.startedAt ?? now;
+    const activity = this.updateExtensionActivity(
+      event.toolCallId,
+      event.toolName,
+      this.extensionToolOrigin(event.toolName),
+      status,
+      startedAt,
+      now,
+      value,
+      status === "running" ? undefined : now,
+      undefined,
+      false,
+    );
+    if (activity) this.publishProcessesForToolCall(event.toolCallId);
+  }
+
+  private projectNestedToolExecution(
+    event: { toolCallId: string; toolName: string; args?: unknown; parentToolCallId?: string },
+    status: NestedToolExecutionState["status"],
+  ): void {
+    if (!event.parentToolCallId) return;
+    const rootToolCallId = this.nestedToolRoots.get(event.parentToolCallId) ?? event.parentToolCallId;
+    const parent = this.toolExecutions.get(rootToolCallId);
+    if (!parent) return;
+    const calls = parent.nestedCalls?.calls ?? [];
+    const existing = calls.find((call) => call.id === event.toolCallId);
+    if (!existing && calls.length >= NESTED_CALL_LIMIT) {
+      this.toolExecutions.set(rootToolCallId, {
+        ...parent,
+        nestedCalls: { calls, complete: false },
+        updatedAt: new Date().toISOString(),
+        progressSequence: parent.progressSequence + 1,
+      });
+      this.publishToolProgress(this.toolExecutions.get(rootToolCallId)!);
+      return;
+    }
+    let argumentsValue: JsonValue | undefined;
+    let argumentsBytes: number | undefined;
+    let complete = parent.nestedCalls?.complete ?? true;
+    if (event.args !== undefined) {
+      let encodedBytes = 0;
+      try { encodedBytes = Buffer.byteLength(JSON.stringify(event.args)); } catch { encodedBytes = Number.MAX_SAFE_INTEGER; }
+      // The budget left is what this parent's other calls have not used.
+      const usedBytes = calls.reduce((total, call) => call.id === event.toolCallId || call.arguments === undefined
+        ? total : total + Buffer.byteLength(JSON.stringify(call.arguments)), 0);
+      if (encodedBytes <= NESTED_ARGUMENT_CALL_BYTES && usedBytes + encodedBytes <= NESTED_ARGUMENT_TOTAL_BYTES) {
+        argumentsValue = projectJson(event.args);
+      } else {
+        argumentsBytes = encodedBytes;
+        complete = false;
+      }
+    }
+    const started = this.nestedToolStartedAt.get(event.toolCallId);
+    if (!existing && status === "running") {
+      this.nestedToolStartedAt.set(event.toolCallId, performance.now());
+      this.nestedToolRoots.set(event.toolCallId, rootToolCallId);
+    }
+    const nested: NestedToolExecutionState = {
+      id: event.toolCallId,
+      parentToolCallId: event.parentToolCallId,
+      toolName: event.toolName,
+      status,
+      ...(argumentsValue === undefined ? (existing?.arguments === undefined ? {} : { arguments: existing.arguments }) : { arguments: argumentsValue }),
+      ...(argumentsBytes === undefined ? (existing?.argumentsBytes === undefined ? {} : { argumentsBytes: existing.argumentsBytes }) : { argumentsBytes }),
+      ...(status === "running" || started === undefined
+        ? (existing?.durationMs === undefined ? {} : { durationMs: existing.durationMs })
+        : { durationMs: Math.max(0, Math.round(performance.now() - started)) }),
+    };
+    const nextCalls = existing
+      ? calls.map((call) => call.id === event.toolCallId ? nested : call)
+      : [...calls, nested];
+    this.toolExecutions.set(rootToolCallId, {
+      ...parent,
+      nestedCalls: { calls: nextCalls, complete },
+      updatedAt: new Date().toISOString(),
+      progressSequence: parent.progressSequence + 1,
+    });
+    if (status !== "running") {
+      this.nestedToolStartedAt.delete(event.toolCallId);
+      this.nestedToolRoots.delete(event.toolCallId);
+    }
+    this.publishToolProgress(this.toolExecutions.get(rootToolCallId)!);
+  }
+
   private clearProcessActivities(): void {
     for (const processId of this.processActivities.keys()) this.dependencies.processActivityRecency.remove(processId);
     this.processActivities.clear();
@@ -2105,9 +2273,10 @@ export class RuntimeSlot {
       }
       this.processActivities.set(candidate.processId, admitted.activity);
       const operationId = this.operation?.id;
+      const parentToolCallId = this.nestedToolRoots.get(toolCallId) ?? toolCallId;
       if (admitted.activity.executionMode === "synchronous"
         && isActiveProcessLifecycle(admitted.activity.lifecycle)
-        && this.toolExecutions.get(toolCallId)?.status === "running"
+        && this.toolExecutions.get(parentToolCallId)?.status === "running"
         && operationId) {
         this.processOperationIDs.set(candidate.processId, operationId);
       } else {
@@ -2806,13 +2975,10 @@ export class RuntimeSlot {
     return owner.waiter;
   }
 
-  // The pinned Pi SessionManager keeps a brand-new session in memory until its
-  // first assistant entry. appendCustomEntry therefore has no public pre-assistant
-  // flush/durability acknowledgement to await here. Do not poll the JSONL (the
-  // assistant cannot run while this owner is blocked), write Pi's file directly,
-  // or add a second receipt journal. Once Pi exposes an owner-safe eager flush,
-  // require it here before provider or extension execution and add a crash/reopen
-  // integration test for the first invocation in a new session.
+  // Pi materializes a brand-new session when its first user or assistant message
+  // is appended. Receipts written before that boundary become durable with the
+  // message; receipts written before any message remain memory-only. Never write
+  // Pi's JSONL directly or add a second receipt journal to bypass that boundary.
   /** Pi stages before appending. If a failed append left an entry in memory,
    * the enclosing durable-write owner fences the runtime; neither replay nor
    * memory-only presence can replace the missing canonical persistence proof. */
@@ -3726,6 +3892,11 @@ export class RuntimeSlot {
       }
       case "tool_execution_start": {
         if (!this.hasActiveAgentRun) break;
+        if ("parentToolCallId" in event && event.parentToolCallId) {
+          this.updateNestedExtensionActivity(event, "running");
+          this.projectNestedToolExecution(event, "running");
+          break;
+        }
         if (this.canonicalToolResultHandoffs.has(event.toolCallId)) break;
         this.ensureAgentProjection();
         const now = new Date().toISOString();
@@ -3782,6 +3953,11 @@ export class RuntimeSlot {
       }
       case "tool_execution_update": {
         if (!this.hasActiveAgentRun) break;
+        if ("parentToolCallId" in event && event.parentToolCallId) {
+          this.updateNestedExtensionActivity(event, "running", event.partialResult);
+          this.projectNestedToolExecution(event, "running");
+          break;
+        }
         if (this.canonicalToolResultHandoffs.has(event.toolCallId)) break;
         this.ensureAgentProjection();
         const now = new Date().toISOString();
@@ -3795,6 +3971,7 @@ export class RuntimeSlot {
           performance.now()
         );
         const extensionOrigin = this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin;
+        const nestedCalls = this.nestedToolCallsFromDetails(event.partialResult) ?? existing?.nestedCalls;
         const toolLabel = existing?.toolLabel ?? this.toolLabel(event.toolName);
         const extensionActivity = this.updateExtensionActivity(
           event.toolCallId, event.toolName, extensionOrigin, "running", startedAt, now, event.partialResult, undefined, durationMs
@@ -3807,6 +3984,7 @@ export class RuntimeSlot {
           status: "running",
           arguments: projectJson(event.args),
           partialResult: projectToolResult(event.partialResult),
+          ...(nestedCalls ? { nestedCalls } : {}),
           ...(output.output === undefined
             ? (existing?.output === undefined ? {} : {
                 output: existing.output,
@@ -3831,6 +4009,23 @@ export class RuntimeSlot {
       }
       case "tool_execution_end": {
         if (!this.hasActiveAgentRun) break;
+        if (!("parentToolCallId" in event && event.parentToolCallId) && event.toolName === "codemode") {
+          const details = event.result && typeof event.result === "object" && "details" in event.result
+            ? event.result.details as Record<string, unknown> | undefined : undefined;
+          const nestedState = this.toolExecutions.get(event.toolCallId)?.nestedCalls;
+          const status = typeof details?.status === "string" ? details.status : undefined;
+          const outcome = status === "aborted" || status === "timeout" ? status : event.isError ? "failed" : "completed";
+          const retained = this.toolMetadata.get(event.toolCallId);
+          const startedAt = this.toolStartedAtMonotonicMs.get(event.toolCallId);
+          const durationMs = startedAt === undefined ? retained?.durationMs ?? 0 : Math.max(0, performance.now() - startedAt);
+          const complete = nestedState?.complete ?? (typeof details?.complete === "boolean" ? details.complete : true);
+          this.dependencies.codemodeDiagnostic?.({ sessionId: this.id, outcome, durationMs, nestedCallCount: nestedState?.calls.length ?? 0, complete });
+        }
+        if ("parentToolCallId" in event && event.parentToolCallId) {
+          this.updateNestedExtensionActivity(event, event.isError ? "failed" : "completed", event.result);
+          this.projectNestedToolExecution(event, event.isError ? "failed" : "completed");
+          break;
+        }
         this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
@@ -3861,6 +4056,7 @@ export class RuntimeSlot {
         const extensionOrigin = this.extensionToolOrigin(event.toolName)
           ?? existing?.extensionOrigin
           ?? retained?.extensionOrigin;
+        const nestedCalls = this.nestedToolCallsFromDetails(event.result) ?? existing?.nestedCalls;
         const toolLabel = existing?.toolLabel ?? retained?.toolLabel ?? this.toolLabel(event.toolName);
         const extensionActivity = this.updateExtensionActivity(
           event.toolCallId, event.toolName, extensionOrigin, event.isError ? "failed" : "completed", startedAt, now, event.result, now, durationMs
@@ -3874,6 +4070,7 @@ export class RuntimeSlot {
           arguments: existing?.arguments ?? null,
           ...(existing?.partialResult === undefined ? {} : { partialResult: existing.partialResult }),
           result: projectToolResult(event.result),
+          ...(nestedCalls ? { nestedCalls } : {}),
           ...(output.output === undefined
             ? (existing?.output === undefined ? {} : {
                 output: existing.output,
@@ -5242,6 +5439,7 @@ export class RuntimeSlot {
     value: unknown,
     completedAt?: string,
     durationMs?: number,
+    persistReceipt = true,
   ): ExtensionRunActivity | undefined {
     // The native supervisor is ordinary control-tool activity, not a new
     // delegated execution, even when its receipt includes the target runId.
@@ -5262,7 +5460,7 @@ export class RuntimeSlot {
       if (status === "running") return current;
       const requestedTerminal = status === "failed" ? "failed" : "completed";
       if (requestedTerminal !== current.lifecycle.state) return current;
-      void this.appendExtensionActivityReceipt(current).catch(() => {});
+      if (persistReceipt) void this.appendExtensionActivityReceipt(current).catch(() => {});
       return current;
     }
     const sequence = (this.extensionActivitySequences.get(activityKey) ?? current?.lifecycle?.sequence ?? 0) + 1;
@@ -5305,8 +5503,8 @@ export class RuntimeSlot {
       childIdentityStrategy,
     }), value, childIdentityStrategy);
     if (admitExtensionRunActivity(current, activity) === current) return current;
-    const terminalReceiptOwner = terminal ? this.claimExtensionReceiptOwnership(activityKey) : undefined;
-    if (terminal && !terminalReceiptOwner) return current;
+    const terminalReceiptOwner = terminal && persistReceipt ? this.claimExtensionReceiptOwnership(activityKey) : undefined;
+    if (terminal && persistReceipt && !terminalReceiptOwner) return current;
     if (activity.runId && !this.bindExtensionRunOwnership(activity.runId, {
       toolCallId,
       ...(asyncDir === undefined ? {} : { asyncDir }),
@@ -5365,7 +5563,7 @@ export class RuntimeSlot {
     if (asyncDir && retainedActivity.status === "running") this.startExtensionActivityWatcher(toolCallId, asyncDir);
     if (retainedActivity.status !== "running") {
       this.stopExtensionActivityWatcher(toolCallId);
-      void this.appendExtensionActivityReceipt(retainedActivity).catch((error) => this.emit("session.extensionError", safeJson(error)));
+      if (persistReceipt) void this.appendExtensionActivityReceipt(retainedActivity).catch((error) => this.emit("session.extensionError", safeJson(error)));
     }
     return retainedActivity;
   }
@@ -6316,12 +6514,14 @@ export class RuntimeSlot {
     }
 
     if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
+    const toolCallId = `tron-stop-${randomUUID()}`;
+    const signal = new AbortController().signal;
     const result = await tool.execute(
-      `tron-stop-${randomUUID()}`,
+      toolCallId,
       { action: "stop", id: route.runId, childId: route.childId },
-      new AbortController().signal,
+      signal,
       undefined,
-      this.runtime.session.extensionRunner.createContext(),
+      this.runtime.session.extensionRunner.createToolContext(toolCallId, signal),
     );
     if ((result as typeof result & { isError?: boolean }).isError === true) {
       const message = result.content.find(content => content.type === "text")?.text;
@@ -6665,6 +6865,7 @@ export class RuntimeSlot {
       const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
       let sdkRun: Promise<void>;
       let preflightFailure: GatewayError | undefined;
+      let handledWithoutAgent = false;
       let queueDisposition: Promise<QueueAdmissionDisposition> | undefined;
       let resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
       let queueDispositionFailure: unknown;
@@ -6781,25 +6982,27 @@ export class RuntimeSlot {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
           source: "rpc",
-          preflightResult: (accepted) => {
+          preflightResult: (disposition) => {
+            // Pi calls back only after it has handled, queued, or started the
+            // prompt. Rejections do not call this hook; the SDK promise's
+            // rejection handler below resolves admission as false.
+            handledWithoutAgent = disposition === "handled";
             // Pi has no active Agent signal during pre-prompt compaction. Stop
             // must also revoke this exact pending prompt at SDK admission; an
             // aborted summary alone does not prevent Agent.prompt() starting.
-            if (accepted) {
-              if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)) {
-                preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
-              } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
-                preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
-              }
-              if (preflightFailure) {
-                acceptedResolve(false);
-                throw preflightFailure;
-              }
-              // agent_start can fire synchronously before this Gateway promise
-              // resumes. Record the SDK's disposition now, not one turn later.
-              this.invocations.set(invocationId, { ...invocation, lifecycle: "accepted" });
+            if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)) {
+              preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
+            } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
+              preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
             }
-            acceptedResolve(accepted);
+            if (preflightFailure) {
+              acceptedResolve(false);
+              throw preflightFailure;
+            }
+            // agent_start can fire synchronously before this Gateway promise
+            // resumes. Record the SDK's disposition now, not one turn later.
+            this.invocations.set(invocationId, { ...invocation, lifecycle: "accepted" });
+            acceptedResolve(true);
           },
         }));
         // Pi awaits an extension command handler before invoking its preflight
@@ -6854,7 +7057,6 @@ export class RuntimeSlot {
       }
       let runSettled = false;
       let commandSettled = false;
-      let handledWithoutAgent = false;
       let terminalReceiptPersisted = false;
       let admissionAccepted = false;
       let finalizeAdmission!: () => void;
@@ -6949,8 +7151,10 @@ export class RuntimeSlot {
         message: error instanceof Error ? error.message : String(error),
       })));
 
-      // Pi's callback is authoritative. A local timeout could reject while the
-      // same uncancelled input handler later accepts canonical work.
+      // Successful Pi dispositions are reported by the callback; rejected
+      // prompts do not call it and are resolved by the SDK promise rejection
+      // handler. A local timeout could reject while an input handler later
+      // accepts canonical work, so admission remains callback/rejection-owned.
       const admitted = await accepted;
       if (queuesIntoActiveRun && admitted) {
         this.reconcileQueuedMessages();
@@ -7064,9 +7268,7 @@ export class RuntimeSlot {
       if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
       else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
       else if (handledWithoutAgent) {
-        await this.terminalizeInvocation(operationId, "completed", undefined, operationWork);
-        this.lifecycle.cancelPreflight(operationId);
-        this.settleOperationWork(operationId);
+        await settleWithoutAgent();
       } else if (!runSettled) {
         operationWork.transition("foreground-agent-operation");
         const markerWrite = this.enqueueMarkerOwnership(operationId);
@@ -7434,13 +7636,15 @@ export class RuntimeSlot {
       }
 
       let rebuildError: unknown;
+      let handledItems = new Set<string>();
       this.suppressQueueEvents = true;
       try {
         session.clearQueue();
-        const queued = next.map((item) => item.behavior === "steer"
+        const dispositions = await Promise.all(next.map((item) => item.behavior === "steer"
           ? session.steer(item.runtimeText, item.images)
-          : session.followUp(item.runtimeText, item.images));
-        await Promise.all(queued);
+          : session.followUp(item.runtimeText, item.images)));
+        handledItems = new Set(next.flatMap((item, index) =>
+          dispositions[index] === "handled" ? [item.id] : []));
       } catch (error) {
         rebuildError = error;
         // Queue replacement is one mutation. Do not retain a partially rebuilt
@@ -7468,7 +7672,7 @@ export class RuntimeSlot {
       };
       const survivors: RuntimeQueuedMessage[] = [];
       for (const behavior of ["steer", "followUp"] as const) {
-        const desired = next.filter((item) => item.behavior === behavior);
+        const desired = next.filter((item) => item.behavior === behavior && !handledItems.has(item.id));
         const texts = actual[behavior];
         const retained = desired.slice(Math.max(0, desired.length - texts.length));
         const aligned = retained.slice(Math.max(0, retained.length - texts.length));
@@ -7535,7 +7739,11 @@ export class RuntimeSlot {
         });
       }
       for (const item of removed) {
-        await this.terminalizeInvocation(item.id, "interrupted", "queue-replaced");
+        await this.terminalizeInvocation(
+          item.id,
+          handledItems.has(item.id) ? "completed" : "interrupted",
+          handledItems.has(item.id) ? undefined : "queue-replaced",
+        );
         this.settleOperationWork(item.id);
       }
       this.queuedMessages = survivors.sort((left, right) => left.behavior === right.behavior
@@ -7591,9 +7799,12 @@ export class RuntimeSlot {
   async setTools(toolNames: string[], initiatingWorkToken?: string): Promise<void> {
     await this.lane.run(() => {
       this.assertIdle(false, initiatingWorkToken);
-      const known = new Set(this.runtime.session.getAllTools().map((tool) => tool.name));
+      const tools = this.runtime.session.getAllTools();
+      const known = new Set(tools.map((tool) => tool.name));
       const unknown = toolNames.filter((name) => !known.has(name));
       if (unknown.length > 0) throw new GatewayError("invalid_request", `Unknown agent tools: ${unknown.join(", ")}`);
+      const hidden = toolNames.filter((name) => tools.find((tool) => tool.name === name)?.exposure === "hidden");
+      if (hidden.length > 0) throw new GatewayError("invalid_request", `Hidden agent tools cannot be activated: ${hidden.join(", ")}`);
       this.runtime.session.setActiveToolsByName(toolNames);
       this.revision += 1;
       this.emit("session.contextChanged", {});
@@ -7865,7 +8076,6 @@ export class RuntimeSlot {
       const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
       const next = this.id;
-      this.liveForkParentSessionId = parentSessionId;
       this.summaryContentDirty = true;
       this.revision += 1;
       this.emit("session.structureChanged", { branchChanged: true });
@@ -8029,7 +8239,11 @@ export class RuntimeSlot {
       contextUsage: session.getContextUsage(),
       stats: session.getSessionStats(),
       activeTools: session.getActiveToolNames(),
-      availableTools: session.getAllTools(),
+      availableTools: session.getAllTools().map((tool) => ({
+        ...tool,
+        ...(tool.namespace ? { namespace: tool.namespace } : {}),
+        ...(tool.annotations ? { annotations: tool.annotations } : {}),
+      })),
       commands: this.commands(),
       ...this.resourcesValue(),
       diagnostics: this.runtime.diagnostics,
@@ -8080,6 +8294,7 @@ export class RuntimeSlot {
     const loader = session.resourceLoader;
     const allExtensions = loader.getExtensions().extensions;
     const allLoadErrors = loader.getExtensions().errors;
+    const allLoadWarnings = loader.getExtensions().warnings ?? [];
     const hookProjection = projectHookRegistrations(
       allExtensions.map((extension) => ({
         name: basename(extension.path),
@@ -8093,6 +8308,7 @@ export class RuntimeSlot {
         handlers: extension.handlers,
       })),
       allLoadErrors,
+      allLoadWarnings,
     );
     const extensionValues = hookProjection.extensions;
     const loadErrorValues = hookProjection.extensionLoadErrors;
@@ -8104,6 +8320,9 @@ export class RuntimeSlot {
           name: tool.name,
           ...(this.toolLabel(tool.name) ? { label: this.toolLabel(tool.name)! } : {}),
           description: tool.description,
+          exposure: tool.exposure,
+          ...(tool.namespace ? { namespace: tool.namespace } : {}),
+          ...(tool.annotations ? { annotations: tool.annotations } : {}),
           scope: tool.sourceInfo.scope,
           source: tool.sourceInfo.source,
           ...(distribution ? { distribution } : {}),

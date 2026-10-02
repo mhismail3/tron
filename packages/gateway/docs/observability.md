@@ -212,6 +212,7 @@ Conventions used in the rows:
 | event | level | owner (file) | emitted when | key fields | added because |
 | --- | --- | --- | --- | --- | --- |
 | `gateway.fatal-startup` | error | `packages/gateway/src/index.ts` | loading the Gateway module graph or startup throws before the logger exists | `error` (one wrapped cause), `runtimeEpoch`, `payloadVersion` | The 2026-09-23 rebuild crashed in 0.3 s with `ERR_MODULE_NOT_FOUND` and wrote nothing |
+| `knowledge.model-failed` | warning | `packages/gateway/src/gateway-main.ts`, raised by `packages/gateway/src/knowledge/knowledge-curation.ts` | a Knowledge summary job fails because the model errored or returned an invalid contract | `code`, bounded `reason` prefixed by model ID and containing stop reason, content part types, text length, code-fence and leading-prose flags; never reply/source text | A model provider failure previously surfaced as a misleading JSON parse error, and the Luna reply was discarded without identifying its shape |
 | `gateway.started` | info | `packages/gateway/src/gateway-main.ts` | once per process, as the first record | `durationMs` since process start; pid, Node version and source revision in the message | A restart had no record at process start, so stop → listening could not be measured |
 | `gateway.startup-step` | info | `packages/gateway/src/gateway-main.ts` | at each startup checkpoint | `step`, `durationMs` | Stop → bound (7.6–25.5 s) and bound → listening (10–26 s) had no records at all |
 | `gateway.startup-budget` | info, or warning past `STARTUP_LISTEN_BUDGET_MS` (5,000 ms) | `packages/gateway/src/gateway-main.ts`; constant owner `packages/gateway/src/lifecycle/startup-budget.ts` | once per process, the moment the Gateway is serving | `durationMs` (process start to listening), `step` (the step that owns most of it), and `budgetMs`/`stepMs`/`overBudgetMs` in the message | The per-step records name the stages but not a bound. It is this process's own start, not the wait a restarting client sees — that client counts from its own socket's close, which comes before the predecessor is down — so `scripts/tron-profile-gateway` reads this record (and its `budgetMs`) for the start and judges G-13's restart criterion on its own close → listening budget |
@@ -243,6 +244,7 @@ Conventions used in the rows:
 | `connection.inbound-resumed` | info | `packages/gateway/src/transport/server.ts` | the first inbound frame after a silence episode | `connectionId`, `peerClientId`, `peerAttemptId`, `peerEpoch`, `silentMs` | The pair with `connection.inbound-silent` gives the episode its duration without the phone's log |
 | `connection.outbound-capacity` | warning | `packages/gateway/src/transport/server.ts` | the connection's outbound queue reaches its frame or byte bound | `connectionId`, `peerClientId`, `peerAttemptId`, `peerEpoch` (the peer's hello correlation key, when sent); queue counts, high-water marks, `oldestTopic` (the frame the socket was writing or waiting to write), `nextTopic`/`nextBytes` (the frame that did not fit), socket buffer and process pressure in the message | The close is caused by the bound, not by the client, and the counters prove which. Frames that a newer snapshot's own state superseded were dropped before this point, so a close here means the state that remained was genuinely too much |
 | `connection.write-error` | error | `packages/gateway/src/transport/server.ts` | a socket write fails | `connectionId`, `peerClientId`, `peerAttemptId`, `peerEpoch` (the peer's hello correlation key, when sent), `error`; completed/accepted frame counts, excluding frames a newer frame superseded before they were written, in the message | A failed write silently ended a connection before |
+| `connection.legacy-jev-retired` | info | `packages/gateway/src/integrations/connection-owner.ts`, emitted by `packages/gateway/src/gateway-main.ts` | the first accepted connection write after load removes persisted unsupported `knowledge.jev` instances | sorted `instanceIds`; no credentials or setup payload | A deliberate retirement must be distinguishable from rows disappearing as a side effect of a later connection write; emitted once after the persisted retirement succeeds |
 | `connection.rejected` | info (with `reason`) while warming up or shutting down; warning for an unauthenticated upgrade | `packages/gateway/src/transport/server.ts` | an upgrade arrives before readiness, or without a valid credential | `reason` (`warming_up` / `shutting_down`) at the info site | Warmup rejections are an expected transient state, but an unauthenticated upgrade is a notable rejection |
 | `connection.capacity` | warning | `packages/gateway/src/transport/server.ts` | global or per-identity connection capacity is full | connection counts and limits in the message | A refusal for capacity must be distinguishable from an auth refusal |
 | `connection.projection-rejected` | warning when a frame exceeds the limit and is replaced by a bounded preview; error when encoding throws | `packages/gateway/src/transport/server.ts` | an outbound frame cannot be encoded, or exceeds the frame limit | type, topic, byte count and node bounds in the message; never the payload or the exception | A client that loses a projection needs to know whether it was oversized or unencodable |
@@ -295,10 +297,21 @@ Conventions used in the rows:
 | `session_operation_busy` | warning reason on `rpc.error` | `packages/gateway/src/transport/server.ts`, raised at `packages/gateway/src/sessions/runtime-slot.ts` and `runtime-registry.ts` | a model, delete or archive mutation is rejected by real active session work | standard RPC correlation plus reason | The reason distinguishes a true foreground/deletion/archive blocker from self-accounting work or detached child activity; archive admission that is only waiting on another request's entry or an export reports retryable `busy` without it |
 | `session.compaction.completed` | error for failure, info for success/cancellation | `packages/gateway/src/gateway-main.ts`, raised from `packages/gateway/src/sessions/runtime-slot.ts` | each SDK compaction ends | `sessionId`, `operationId`, `reason`, `outcome`, bounded/redacted `errorMessage` on failure | Failed automatic summaries were silently dropped, so transient retries could not be correlated to session or operation |
 | `knowledge-observation-admission-rejected` | warning | `packages/gateway/src/knowledge/knowledge-observation.ts` | prospective knowledge observation cuts are not retained | dropped and queued counts in the message | No durable coverage is claimed when cuts are dropped, so the bounding has to be recorded |
+| `mcp.startup.problem` | warning | `packages/gateway/src/admin/mcp-admin-service.ts` | an explicit `mcp.list` detects CLI/configuration failure or a server problem | bounded `reason` and `scope`; no URL, stderr, or credentials | Configuration errors and failed MCP connections must be distinguishable without logging server output; `packages/gateway/src/admin/mcp-admin-service.test.ts` |
+| `mcp.auth-url.routed` | info | `packages/gateway/src/admin/auth-broker.ts` | a provider-authored MCP authorization URL is emitted to its active session operation | fixed message only; no URL, server name, or callback data | Detects that sign-in reached the phone-owned operation without retaining OAuth material; `packages/gateway/src/admin/auth-broker.test.ts` |
+| `mcp.callback-relay.succeeded` | info | `packages/gateway/src/admin/auth-broker.ts` | Pi's captured MCP callback was relayed to its loopback listener | fixed message only | Distinguishes a completed callback delivery from an authorization URL that was merely presented; `packages/gateway/src/admin/auth-broker.test.ts` |
+| `mcp.callback-relay.failed` | warning | `packages/gateway/src/admin/auth-broker.ts` | the captured MCP callback could not be delivered to its loopback listener | fixed message only; no host, port, query, code, or token | Diagnoses the boundary failure without leaking authorization data; `packages/gateway/src/admin/auth-broker.test.ts` |
+| `codemode.execution.completed` | info for success, warning for failure/abort/timeout | `packages/gateway/src/gateway-main.ts`, raised at `packages/gateway/src/sessions/runtime-slot.ts` | a top-level codemode tool execution ends | `sessionId`, outcome, `durationMs`, nested-call count, `complete`; never script, arguments or output | Makes script failure and incomplete nested execution diagnosable without recording user code; `packages/gateway/src/sessions/codemode-nested-presentation.integration.test.ts` |
 | `auth.login.started` | info | `packages/gateway/src/admin/auth-broker.ts` | a provider login operation is admitted | provider and auth type in the message | An interrupted login must be explainable from the timeline alone |
 | `auth.login.recovered` | info | `packages/gateway/src/admin/auth-broker.ts` | an existing login operation is reattached to a new client | provider and auth type in the message | — |
 | `auth.login.succeeded` | info | `packages/gateway/src/admin/auth-broker.ts` | the operation retired with a stored credential, or the credential was stored after it ended | provider and auth type in the message | — |
 | `auth.login.ended` | warning | `packages/gateway/src/admin/auth-broker.ts` | the operation retired without a stored credential, with its reason | provider, auth type and elapsed seconds in the message | A login that ends without a credential is a caller stop or a timeout, not a success |
+
+Pi's public runtime API does not expose the number of MCP stdio child processes
+owned by a runtime, so Tron does not claim or log that count. The P99-22 MCP
+fixture's process-group cleanup checks are the available lifecycle evidence;
+see `runtime-registry.integration.test.ts` for shutdown and capacity-eviction
+PID assertions.
 
 One Gateway name is not written as a literal. The `code` passed to the session's
 persistence diagnostic is used directly as the event, which is why the
@@ -390,8 +403,12 @@ duration is at or above `slowOperationThresholdMilliseconds` (250 ms), else info
 
 The 256-record, content-free in-memory ring described in the streams table: it is
 merged into the existing Logs destination on demand and reserved first inside a
-`device-exports/` bundle. Its event prefix is `chat.`; the row below is the
-catalogued warning an operator reads when the app recovered a viewport itself.
+`device-exports/` bundle. Its event prefix is `chat.`. The ring carries informational records (`chat.geometry.*`,
+`chat.viewport.transition`, `chat.submission.checkpoint`, `chat.context.*`,
+`chat.composer.availability`), warning records (`chat.tail.first-displacement`,
+`chat.projection.removed`, `chat.layout.abandoned`, `chat.layout.overflow`), and
+`chat.anomaly.*`, `chat.opening.failed`, and `chat.submission.*` failure records
+at error level; warnings and errors are evicted last.
 
 Ring pressure reclaims slots in this order: an unchanged `chat.composer.availability`
 repeat is never stored, then the oldest `chat.composer.availability` samples go
@@ -400,10 +417,6 @@ before the `chat.geometry.*`, `chat.viewport.transition` and
 `chat.context.begin` outlives all of them and warnings and errors are evicted
 only as a last resort. A composer flag missing from an export was therefore a
 repeat, or was reclaimed ahead of geometry — not a control the app never sampled.
-
-| event | level | owner (file) | emitted when | key fields | added because |
-| --- | --- | --- | --- | --- | --- |
-| `chat.tail.past-end-repair` | warning | `packages/ios-app/Sources/UI/Chat/ChatScrollCoordinator.swift`; writer `packages/ios-app/Core/Support/ChatInteractionTrace.swift` | one correction is admitted for a pinned viewport that is still past its legal content bottom at a display-frame boundary; emitted as the command is issued | `pastEndBy` (points past the legal bottom) plus the standard trace state — `offset`, `content`, `container`, `inset`, `pastBottom`, `mode`, `command` | A resumed session's lazy estimate collapse on 2026-09-25 left the viewport at offset 101,281.7 over 99,830 pt of content (`pastBottom=1`) and the reader saw a blank transcript until they dragged; marker evidence is absent in that state and the two-attempt marker-repair budget cannot fire, so the recovery needs its own signal |
 
 ## Getting a diagnostic bundle
 

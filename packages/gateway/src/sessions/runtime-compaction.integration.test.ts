@@ -349,7 +349,7 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     try {
       await item.slot.setModel(model.provider, model.id, selfMutation.token);
       expect(item.session.model).toMatchObject({ provider: model.provider, id: model.id });
-      for (const kind of ["foreground-agent-operation", "mcp-tool-call", "compaction-export", "terminal-receipt-persistence"] as const) {
+      for (const kind of ["foreground-agent-operation", "compaction-export", "terminal-receipt-persistence"] as const) {
         const parentWork = registry.begin({ kind, sessionId: item.slot.id, hostEpoch: registry.runtimeEpoch });
         try {
           await expect(item.slot.setModel(model.provider, model.id, selfMutation.token)).rejects.toMatchObject({ code: "busy", diagnosticReason: "session_operation_busy" });

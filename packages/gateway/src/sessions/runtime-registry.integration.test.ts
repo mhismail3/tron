@@ -1,6 +1,7 @@
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
@@ -137,6 +138,7 @@ function catalogOwner(registry: RuntimeRegistry): SessionCatalog {
 describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
+  const syntheticTranscriptSizes = new Map<string, number>();
 
   async function coldFixture(label: string, options: {
     nested?: boolean;
@@ -226,9 +228,18 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   }
 
   afterEach(async () => {
-    await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    try {
+      const transcripts = [...syntheticTranscriptSizes];
+      await Promise.all(transcripts.map(([path, size]) => truncate(path, size)));
+      for (const [path, size] of transcripts) {
+        expect((await fsPromises.stat(path)).size).toBe(size);
+      }
+      syntheticTranscriptSizes.clear();
+    } finally {
+      await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
   });
 
   it("rejects malformed or incomplete cold JSONL before branch projection", async () => {
@@ -772,7 +783,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const deleteRPC = works.begin({
       kind: "rpc-mutation", method: "session.delete", sessionId: session.id, hostEpoch: works.runtimeEpoch,
     });
-    const child = works.begin({ kind: "mcp-tool-call", sessionId: session.id, hostEpoch: works.runtimeEpoch });
+    const child = works.begin({ kind: "foreground-agent-operation", sessionId: session.id, hostEpoch: works.runtimeEpoch });
     try {
       await expect(fixture.registry.delete(session.id, deleteRPC.token)).rejects.toMatchObject({ code: "busy", diagnosticReason: "session_operation_busy" });
     } finally { child.settle(); }
@@ -7112,7 +7123,7 @@ export default function (pi) {
     const session = (slot as unknown as {
       runtime: { session: { prompt: (
         text: string,
-        options?: { preflightResult?: (accepted: boolean) => void },
+        options?: { preflightResult?: (disposition: "handled" | "queued" | "started") => void },
       ) => Promise<void> } };
     }).runtime.session;
     let startedResolve!: () => void;
@@ -7120,7 +7131,7 @@ export default function (pi) {
     vi.spyOn(session, "prompt").mockImplementationOnce(async (_text, options) => {
       startedResolve();
       await new Promise((resolve) => setTimeout(resolve, 6_000));
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
     });
 
     vi.useFakeTimers();
@@ -7180,7 +7191,7 @@ export default function (pi) {
         readonly isStreaming: boolean;
         prompt: (text: string, options?: {
           streamingBehavior?: "steer" | "followUp";
-          preflightResult?: (accepted: boolean) => void;
+          preflightResult?: (disposition: "handled" | "queued" | "started") => void;
         }) => Promise<void>;
         getSteeringMessages: () => readonly string[];
       } };
@@ -7205,7 +7216,7 @@ export default function (pi) {
       invoked = true;
       expect(options?.streamingBehavior).toBe("steer");
       queued = true;
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
     });
 
     const prompting = slot.prompt("after compaction", [], "steer");
@@ -7521,7 +7532,7 @@ export default function (pi) {
         readonly isStreaming: boolean;
         prompt: (text: string, options?: {
           streamingBehavior?: "steer" | "followUp";
-          preflightResult?: (accepted: boolean) => void;
+          preflightResult?: (disposition: "handled" | "queued" | "started") => void;
         }) => Promise<void>;
         getSteeringMessages: () => readonly string[];
       } };
@@ -7535,7 +7546,7 @@ export default function (pi) {
     vi.spyOn(internal.runtime.session, "getSteeringMessages").mockReturnValue([]);
     vi.spyOn(internal.runtime.session, "prompt").mockImplementationOnce(async (_text, options) => {
       expect(options?.streamingBehavior).toBe("steer");
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
       throw new Error("queue admission failed");
     });
 
@@ -7566,11 +7577,11 @@ export default function (pi) {
     const session = (slot as unknown as {
       runtime: { session: { prompt: (
         text: string,
-        options?: { preflightResult?: (accepted: boolean) => void },
+        options?: { preflightResult?: (disposition: "handled" | "queued" | "started") => void },
       ) => Promise<void> } };
     }).runtime.session;
     vi.spyOn(session, "prompt").mockImplementationOnce(async (_text, options) => {
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
       throw new Error("accepted prompt failed");
     });
 
@@ -7603,7 +7614,7 @@ export default function (pi) {
       publishSnapshot: () => void;
       runtime: { session: { prompt: (
         text: string,
-        options?: { preflightResult?: (accepted: boolean) => void },
+        options?: { preflightResult?: (disposition: "handled" | "queued" | "started") => void },
       ) => Promise<void> } };
     };
     internal.phase = "running";
@@ -7614,7 +7625,7 @@ export default function (pi) {
     let invoked = false;
     vi.spyOn(internal.runtime.session, "prompt").mockImplementationOnce(async (_text, options) => {
       invoked = true;
-      options?.preflightResult?.(true);
+      options?.preflightResult?.("started");
     });
 
     const prompting = slot.prompt("after settlement");
@@ -7911,6 +7922,7 @@ export default function (pi) {
     fixture.manager.appendMessage(fauxAssistantMessage("abandoned html branch"));
     fixture.manager.branch(branchRoot.id);
     fixture.manager.appendMessage({ role: "user", content: "html snapshot marker", timestamp: Date.now() });
+    fixture.manager.appendMessage({ role: "custom_message", customType: "hidden-export-marker", content: "hidden custom export marker", display: false, timestamp: Date.now() });
     fixture.manager.appendMessage(fauxAssistantMessage("html snapshot response"));
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as { phase: "running" | "idle" };
@@ -7932,7 +7944,14 @@ export default function (pi) {
       const sessionData = Buffer.from(encoded!, "base64").toString("utf8");
       expect(sessionData).toContain("html snapshot marker");
       expect(sessionData).toContain("html snapshot response");
+      expect(sessionData).toContain("hidden custom export marker");
+      expect(exported).toContain("const hidden = entry.display === false");
+      expect(exported).toContain("hook-message-hidden");
+      expect(exported).toContain("Hidden in terminal");
       expect(sessionData).not.toContain("abandoned html branch");
+      const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-html-export.json");
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, `${JSON.stringify({ format: "html", mimeType: artifact.mimeType, size: artifact.size, visibleMarkers: ["html snapshot marker", "html snapshot response"], hiddenMarkerRenderedHidden: exported.includes('class="hook-message hook-message-hidden"'), abandonedBranchOmitted: !sessionData.includes("abandoned html branch") }, null, 2)}\n`);
     } finally {
       internal.phase = "idle";
     }
@@ -7956,6 +7975,104 @@ export default function (pi) {
     }
     expect(bytes).toBe(artifact.size);
   }, 30_000);
+
+  it("routes virtual models across resume, fork, retry and compaction in a RuntimeRegistry session", async () => {
+    const fixture = await coldFixture("virtual-model-lifecycle");
+    const provider = "tron-p99-virtual-lifecycle";
+    await mkdir(join(fixture.cwd, ".pi", "extensions"), { recursive: true });
+    await writeFile(join(fixture.cwd, ".pi", "extensions", "virtual-router.ts"), `
+      export default function (pi) {
+        pi.registerVirtualModel({
+          provider: ${JSON.stringify(provider)}, id: "router", name: "Fixture router", contextWindow: 1,
+          route(request, ctx) {
+            const routeCount = request.state?.routeCount ?? 0;
+            const useWide = request.reason === "direct" || Boolean(request.failed) || routeCount % 2 === 1;
+            const physical = ctx.modelRegistry.find(${JSON.stringify(provider)}, useWide ? "wide" : "small");
+            return { model: physical, thinkingLevel: useWide ? "high" : "low",
+              state: { routeCount: routeCount + 1, lastReason: request.reason, lastModel: physical.id, failed: Boolean(request.failed) } };
+          },
+        });
+      }
+    `);
+    await new TrustService(fixture.agentDir).set(fixture.cwd, true);
+    await writeFile(join(fixture.agentDir, "settings.json"), JSON.stringify({ retry: { enabled: true, maxRetries: 2, baseDelayMs: 1 }, compaction: { enabled: false, keepRecentTokens: 1 } }));
+    const faux = fauxProvider({ provider, tokensPerSecond: 10_000, models: [
+      { id: "small", name: "Small physical", reasoning: true, input: ["text"], contextWindow: 4096, maxTokens: 1024, cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
+      { id: "wide", name: "Wide physical", reasoning: true, input: ["text"], contextWindow: 16384, maxTokens: 2048, cost: { input: 3, output: 4, cacheRead: 0, cacheWrite: 0 } },
+    ] });
+    const responseModels: string[] = [];
+    const response = (text: string) => (_context: unknown, _options: unknown, _state: unknown, model: any) => {
+      responseModels.push(model.id);
+      return fauxAssistantMessage(text, { provider: model.provider, model: model.id });
+    };
+    faux.setResponses([
+      fauxAssistantMessage("", { stopReason: "error", errorMessage: "fetch failed" }),
+      response("retried on physical wide"),
+      response("continued on physical small"),
+      response("alternate physical wide"),
+      response("compact summary on physical wide"),
+      response("after compaction on virtual"),
+      ...Array.from({ length: 5 }, (_, index) => response(`post-compaction continuation ${index + 1}`)),
+    ]);
+    const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    modelRuntime.registerNativeProvider(faux.provider);
+    fixture.runtimeFactory.mockResolvedValue(modelRuntime);
+    let slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    await slot.setModel(provider, "router");
+    await slot.prompt("trigger automatic retry");
+    await waitUntil(() => !slot!.isBusy);
+    const retried = slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant");
+    expect(retried.at(-1)).toMatchObject({ provider, modelId: "wide", thinkingLevel: "high" });
+    expect(faux.state.callCount).toBe(2);
+
+    const branchEntries = slot.runtime.session.sessionManager.getBranch();
+    expect(branchEntries.some((entry: any) => entry.type === "custom" && entry.customType === "pi.virtual-model-state")).toBe(true);
+    const userEntry = slot.history(slot.snapshot().runtimeGeneration).nodes.find((node: any) => node.role === "user");
+    expect(userEntry).toBeDefined();
+    await fixture.registry.dispose();
+    registries.splice(registries.indexOf(fixture.registry), 1);
+    const resumedRegistry = new RuntimeRegistry({
+      agentDir: fixture.agentDir, tronHome: join(fixture.root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => { const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }); runtime.registerNativeProvider(faux.provider); return runtime; },
+      trust: new TrustService(fixture.agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(resumedRegistry);
+    await initializeRegistry(resumedRegistry);
+    slot = await resumedRegistry.acquire(fixture.manager.getSessionId());
+    expect(slot.runtime.session.model?.id).toBe("router");
+    expect(slot.snapshot().transcript.some((item) => item.kind === "message" && item.role === "assistant" && item.provider === provider && item.modelId === "wide" && item.thinkingLevel === "high")).toBe(true);
+    expect(slot.runtime.session.sessionManager.getBranch().some((entry: any) => entry.type === "custom" && entry.customType === "pi.virtual-model-state")).toBe(true);
+    const restoredState = slot.runtime.session.sessionManager.getBranch().filter((entry: any) => entry.type === "custom" && entry.customType === "pi.virtual-model-state");
+    expect(restoredState.length).toBeGreaterThan(0);
+    expect(restoredState.at(-1)).toMatchObject({ data: { state: { routeCount: 2, lastReason: "retry", lastModel: "wide", failed: true } } });
+
+    const forkPoint = slot.runtime.session.sessionManager.getLeafId();
+    const fork = await slot.fork(forkPoint!, "at");
+    const forkSlot = await resumedRegistry.acquire(fork.sessionId);
+    const forkRouterState = forkSlot.runtime.session.sessionManager.getBranch().filter((entry: any) => entry.type === "custom" && entry.customType === "pi.virtual-model-state");
+    expect(forkRouterState.at(-1)?.data).toEqual(restoredState.at(-1)?.data);
+    await forkSlot.prompt("fork continues through router");
+    await waitUntil(() => !forkSlot.isBusy);
+    expect(forkSlot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant").at(-1)).toMatchObject({ provider, modelId: "small", thinkingLevel: "low" });
+
+    await slot.setModel(provider, "router");
+    await slot.prompt(`route to the alternate physical model ${"context ".repeat(5000)}`);
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant").at(-1)).toMatchObject({ provider, modelId: "wide", thinkingLevel: "high" });
+    expect(slot.snapshot().contextUsage?.contextWindow).toBe(16384);
+    await slot.compact("keep the router selection");
+    await slot.prompt("after compaction");
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.runtime.session.model?.id).toBe("router");
+    const postCompactionAssistant = slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant").at(-1);
+    expect(postCompactionAssistant).toMatchObject({ provider, modelId: responseModels.at(-1), stopReason: "stop" });
+    expect(responseModels.slice(0, 4)).toEqual(["wide", "small", "wide", "wide"]);
+    expect(responseModels.length).toBeGreaterThan(4);
+    expect(slot.snapshot().contextUsage?.contextWindow).toBe(4096);
+    const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-virtual-lifecycle.json");
+    await mkdir(join(process.cwd(), "test-results"), { recursive: true });
+    await writeFile(artifactPath, `${JSON.stringify({ selectedModel: slot.runtime.session.model?.id, retry: { calls: faux.state.callCount, assistant: retried.at(-1), persistedState: restoredState.at(-1)?.data }, resumed: { model: "router", stateEntries: restoredState.length }, fork: { sessionId: fork.sessionId, routerState: forkRouterState.at(-1)?.data }, responseModels, routedRows: slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "assistant"), contextUsage: slot.snapshot().contextUsage, compacted: slot.snapshot().transcript.some((item) => item.kind === "compaction") }, null, 2)}\n`);
+  }, 60_000);
 
   it("projects resumed retry attempts as running before their assistant response completes", async () => {
     const fixture = await coldFixture("retry-resumption");
@@ -8193,7 +8310,11 @@ export default function (pi) {
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const skillDir = join(agentDir, "skills", "review");
-    await Promise.all([mkdir(skillDir, { recursive: true }), mkdir(cwd)]);
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(skillDir, { recursive: true }), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "handled-queue.ts"), `export default function (pi) {
+      pi.on("input", (event) => event.text === "handled during rebuild" ? { action: "handled" } : undefined);
+    }\n`);
     await writeFile(
       join(skillDir, "SKILL.md"),
       "---\nname: review\ndescription: Review carefully\n---\nReview the requested change.\n",
@@ -8215,12 +8336,14 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
       modelRuntimeFactory: createModels,
-      trust: new TrustService(agentDir),
+      trust,
       broadcast: () => {},
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
@@ -8312,11 +8435,17 @@ export default function (pi) {
     )).toBe(true);
     await expect(slot.replaceQueue(queued.queueRevision, [])).rejects.toMatchObject({ code: "conflict" });
 
-    const removed = await slot.replaceQueue(replaced.queueRevision, [replaced.items[1]!]);
-    expect(removed.items).toHaveLength(1);
-    expect(removed.items[0]?.id).toBe(followUp!.id);
-    const afterReplaceEntries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
-    expect(afterReplaceEntries.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+    const handledReplacement = await slot.replaceQueue(replaced.queueRevision, [
+      { ...replaced.items[1]!, text: "handled during rebuild" },
+      replaced.items[0]!,
+    ]);
+    expect(handledReplacement.items.map(({ id }) => id)).toEqual([duplicate!.id]);
+    const afterHandledRebuild = (slot as any).runtime.session.sessionManager.getEntries() as any[];
+    expect(afterHandledRebuild.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.operationId === followUp!.id
+      && entry.data?.receiptKind === "terminal"
+      && entry.data?.lifecycle === "completed")).toBe(true);
+    expect(afterHandledRebuild.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
       && entry.data?.operationId === skill!.id
       && entry.data?.receiptKind === "terminal"
       && entry.data?.lifecycle === "interrupted")).toBe(true);
@@ -8325,11 +8454,11 @@ export default function (pi) {
     expect(slot.snapshot().queuedItems).toEqual([]);
     const afterClearEntries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
     expect(afterClearEntries.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
-      && entry.data?.operationId === followUp!.id
+      && entry.data?.operationId === duplicate!.id
       && entry.data?.receiptKind === "terminal"
       && entry.data?.lifecycle === "interrupted"
       && entry.data?.errorCode === "queue-cleared")).toBe(true);
-    await expect(slot.replaceQueue(removed.queueRevision, removed.items))
+    await expect(slot.replaceQueue(handledReplacement.queueRevision, []))
       .rejects.toMatchObject({ code: "conflict" });
 
     releaseResponse();
@@ -9539,6 +9668,589 @@ export default function (pi) {
     expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
   });
 
+  it("projects codemode nested calls live and after a cold reload", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-nested-tools-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const extensions = join(cwd, ".pi", "extensions");
+    await Promise.all([
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd),
+    ]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await Promise.all([
+      writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
+      writeFile(join(extensions, "failing-tool.ts"), `export default function (pi) { pi.registerTool({ name: "test_fail", label: "Fail fixture", description: "Fails without throwing", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "expected failure" }], details: {}, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.125 } }, isError: true }) }); }\n`),
+      writeFile(join(cwd, "read-me.txt"), "faux-provider nested read\n"),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-nested-tools", tokensPerSecond: 10_000 });
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const script = `const results = await Promise.all([\n      tools.read({ path: "read-me.txt" }),\n      tools.bash({ command: "sleep 0.2; printf nested-bash" }),\n      tools.test_fail({}).catch((error) => String(error)),\n    ]); return results.map((result) => text(result)).join("\\n");`;
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: script }, { id: "codemode-parent" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("test_fail", {}, { id: "top-level-fail" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("done"),
+    ]);
+    const events: Array<{ topic: string; payload: any }> = [];
+    const makeRegistry = () => new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels, trust,
+      broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    let registry = makeRegistry();
+    registries.push(registry);
+    await initializeRegistry(registry);
+    let slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const prompting = slot.prompt("run nested tools");
+    await waitUntil(() => slot.snapshot().toolExecutions.some((tool) =>
+      tool.toolCallId === "codemode-parent" && (tool.nestedCalls?.calls.length ?? 0) === 3));
+    const live = slot.snapshot();
+    const liveParent = live.toolExecutions.find((tool) => tool.toolCallId === "codemode-parent");
+    expect(liveParent?.nestedCalls?.calls.map((call) => call.toolName).sort()).toEqual(["bash", "read", "test_fail"]);
+    expect(live.toolExecutions.map((tool) => tool.toolCallId)).toEqual(["codemode-parent"]);
+    await prompting;
+    await waitUntil(() => !slot.isBusy);
+    const settled = slot.snapshot();
+    const canonicalParent = settled.transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-parent");
+    expect(canonicalParent).toMatchObject({
+      kind: "message", role: "toolResult", isError: false,
+      usage: { cost: { total: 0.125 } },
+      nestedCalls: { complete: true, calls: [
+        { id: "codemode-parent/1", toolName: "read", status: "completed" },
+        { id: "codemode-parent/2", toolName: "bash", status: "completed" },
+        { id: "codemode-parent/3", toolName: "test_fail", status: "failed" },
+      ] },
+    });
+    expect(settled.stats.cost).toBeGreaterThanOrEqual(0.125);
+    expect(settled.transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "top-level-fail"))
+      .toMatchObject({ isError: true });
+    expect(events.some((event) => event.topic === "session.toolProgress"
+      && event.payload.data?.toolCallId === "top-level-fail"
+      && event.payload.data?.status === "failed")).toBe(true);
+    const liveSnapshot = JSON.parse(JSON.stringify(live));
+    await registry.dispose();
+    registry = makeRegistry();
+    registries.push(registry);
+    await initializeRegistry(registry);
+    slot = await registry.acquire(slot.id);
+    const reloaded = slot.snapshot();
+    const reloadedParent = reloaded.transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-parent");
+    expect(reloadedParent).toMatchObject({
+      role: "toolResult",
+      nestedCalls: { complete: true, calls: [
+        { id: "codemode-parent/1", status: "completed" },
+        { id: "codemode-parent/2", status: "completed" },
+        { id: "codemode-parent/3", status: "failed" },
+      ] },
+    });
+    expect(reloaded.toolExecutions).toEqual([]);
+    const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-nested-calls.json");
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await writeFile(artifactPath, `${JSON.stringify({ live: liveSnapshot, reloaded: reloadedParent }, null, 2)}\n`);
+  });
+
+  it("projects every nested call Pi records, live and after a cold reload, within one argument budget", async () => {
+    // Failure modes: the Gateway drops calls Pi kept (it projected only the
+    // first 32 of Pi's 256), so a long script's call list is cut short; or a
+    // long list of calls with large arguments makes every live frame unbounded.
+    const root = await mkdtemp(join(tmpdir(), "tron-nested-call-list-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const extensions = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd)]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await Promise.all([
+      writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
+      writeFile(join(extensions, "echo-tool.ts"), `export default function (pi) { pi.registerTool({ name: "test_echo", label: "Echo fixture", description: "Returns ok", parameters: { type: "object", properties: { note: { type: "string" } } }, execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }) }); }\n`),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-nested-call-list", tokensPerSecond: 10_000 });
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    // 48 small calls, then 40 calls whose ~900-byte arguments pass the
+    // per-call bound but together exceed the 32 KiB argument budget.
+    const script = `for (let i = 0; i < 48; i++) await tools.test_echo({ note: "small " + i });\n`
+      + `for (let i = 0; i < 40; i++) await tools.test_echo({ note: "x".repeat(900) + i });\nreturn "done";`;
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: script }, { id: "codemode-list" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("done"),
+    ]);
+    const liveFrames: Array<{ calls: Array<{ arguments?: unknown }>; complete: boolean }> = [];
+    const makeRegistry = () => new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory: createModels, trust,
+      broadcast: (_sessionId, topic, payload: any) => {
+        if (topic === "session.toolProgress" && payload.data?.toolCallId === "codemode-list" && payload.data.nestedCalls) {
+          liveFrames.push(payload.data.nestedCalls);
+        }
+      },
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    let registry = makeRegistry();
+    registries.push(registry);
+    await initializeRegistry(registry);
+    let slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("run many nested calls");
+    await waitUntil(() => !slot.isBusy);
+
+    const argumentBytes = (calls: Array<{ arguments?: unknown }>) =>
+      calls.reduce((total, call) => total + (call.arguments === undefined ? 0 : Buffer.byteLength(JSON.stringify(call.arguments))), 0);
+    const largestLive = liveFrames.reduce((most, frame) => frame.calls.length > most.calls.length ? frame : most, liveFrames[0]!);
+    expect(largestLive.calls).toHaveLength(88);
+    expect(liveFrames.every((frame) => argumentBytes(frame.calls) <= 32 * 1024)).toBe(true);
+    const parentOf = (snapshot: ReturnType<typeof slot.snapshot>) => snapshot.transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-list");
+    const canonical = parentOf(slot.snapshot());
+    const canonicalCalls = canonical?.kind === "message" ? canonical.nestedCalls?.calls ?? [] : [];
+    expect(canonicalCalls).toHaveLength(88);
+    expect(canonicalCalls.slice(0, 48).every((call) => call.arguments !== undefined)).toBe(true);
+    expect(argumentBytes(canonicalCalls)).toBeLessThanOrEqual(32 * 1024);
+    expect(canonicalCalls.some((call) => call.arguments === undefined && typeof call.argumentsBytes === "number")).toBe(true);
+
+    await registry.dispose();
+    registry = makeRegistry();
+    registries.push(registry);
+    await initializeRegistry(registry);
+    slot = await registry.acquire(slot.id);
+    const reloaded = parentOf(slot.snapshot());
+    const reloadedCalls = reloaded?.kind === "message" ? reloaded.nestedCalls?.calls ?? [] : [];
+    expect(reloadedCalls.map((call) => call.id)).toEqual(canonicalCalls.map((call) => call.id));
+  });
+
+  it("returns Pi structured bash output through nested codemode calls", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-codemode-bash-output-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const extensions = join(cwd, ".pi", "extensions");
+    await Promise.all([
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }), mkdir(cwd),
+    ]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`);
+    const faux = fauxProvider({ provider: "tron-codemode-bash-output", tokensPerSecond: 10_000 });
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const script = [
+      'const large = await tools.bash({ command: "yes x | head -c 1100000" });',
+      'const empty = await tools.bash({ command: "true" });',
+      'const failed = await tools.bash({ command: "printf failed-output; exit 7" }).catch((error) => ({ error: String(error) }));',
+      'return JSON.stringify({ large: { outputLength: large.output.length, truncated: large.truncated, full_output_path: large.full_output_path, exit_code: large.exit_code, wall_time_seconds: large.wall_time_seconds }, empty, failed });',
+    ].join("\n");
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: script }, { id: "codemode-bash-output" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("done"),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("inspect structured bash results");
+    await waitUntil(() => !slot.isBusy);
+    const parent = slot.snapshot().transcript.find((item) =>
+      item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-bash-output");
+    expect(parent).toMatchObject({
+      role: "toolResult",
+      nestedCalls: { complete: true, calls: [
+        { toolName: "bash", status: "completed" },
+        { toolName: "bash", status: "completed" },
+        { toolName: "bash", status: "failed" },
+      ] },
+    });
+    const parentText = parent?.kind === "message" ? contentText(parent.content) : "";
+    const outputMarker = "Output:\n";
+    const structured = JSON.parse(parentText.slice(parentText.indexOf(outputMarker) + outputMarker.length)) as {
+      large: { outputLength: number; truncated: boolean; full_output_path?: string; exit_code: number; wall_time_seconds: number };
+      empty: { output: string; truncated: boolean; exit_code: number; wall_time_seconds: number };
+      failed: { output: string; truncated: boolean; exit_code: number; wall_time_seconds: number };
+    };
+    expect(structured.large.outputLength).toBeGreaterThan(1_048_576);
+    expect(structured.large).toMatchObject({ truncated: true, exit_code: 0 });
+    expect(structured.large.full_output_path).toBeTypeOf("string");
+    expect(structured.large.wall_time_seconds).toBeGreaterThanOrEqual(0);
+    expect(structured.empty).toMatchObject({ output: "", truncated: false, exit_code: 0 });
+    expect(structured.empty.wall_time_seconds).toBeGreaterThanOrEqual(0);
+    expect(structured.failed).toMatchObject({ output: "failed-output", truncated: false, exit_code: 7 });
+    expect(structured.failed.wall_time_seconds).toBeGreaterThanOrEqual(0);
+    const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-bash-structured-output.json");
+    await mkdir(dirname(artifactPath), { recursive: true });
+    await writeFile(artifactPath, `${JSON.stringify({ structured, parent }, null, 2)}\n`);
+  });
+
+  it("aborts a nested codemode bash process tree", async () => {
+    if (process.platform === "win32") return;
+    const root = await mkdtemp(join(tmpdir(), "tron-codemode-bash-abort-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    const extensions = join(cwd, ".pi", "extensions");
+    await Promise.all([
+      mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
+    ]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, defaultTools: ["+codemode"] }));
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`);
+    const pidPath = join(cwd, "nested.pid");
+    const childProgram = "setInterval(() => {}, 1000)";
+    const commandProgram = [
+      "const { spawn } = require('node:child_process');",
+      "const { writeFileSync } = require('node:fs');",
+      `const child = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(childProgram)}], { detached: true, stdio: 'ignore' });`,
+      `writeFileSync(${JSON.stringify(pidPath)}, String(child.pid));`,
+      "setInterval(() => {}, 1000);",
+    ].join(" ");
+    const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(commandProgram)}`;
+    const faux = fauxProvider({ provider: "tron-codemode-bash-abort", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage([fauxToolCall(
+      "codemode", { code: `await tools.bash({ command: ${JSON.stringify(command)} }); return "unexpected";` }, { id: "codemode-bash-abort" },
+    )], { stopReason: "toolUse" })]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust, broadcast: () => {},
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const prompting = slot.prompt("run nested process");
+    await waitUntil(() => existsSync(pidPath));
+    const childPid = Number(await readFile(pidPath, "utf8"));
+    expect(() => process.kill(childPid, 0)).not.toThrow();
+    const operationId = slot.snapshot().operation?.id;
+    expect(operationId).toBeDefined();
+    await slot.abort("codemode", operationId);
+    await expect(prompting).resolves.toMatchObject({ operationId });
+    await waitUntil(() => {
+      try { process.kill(childPid, 0); return false; }
+      catch { return true; }
+    });
+    expect(slot.snapshot().toolExecutions).toEqual([]);
+  });
+
+  it("connects Pi MCP stdio and streamable HTTP fixtures and exposes resources through composed built-ins", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-pi-mcp-fixture-e2e-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
+    const stdioState = join(root, "stdio-state.json");
+    const stdioPidFile = join(root, "stdio.pid");
+    const stdioChildPidFile = join(root, "stdio-child.pid");
+    const httpState = join(root, "http-state.json");
+    const httpPortFile = join(root, "http.port");
+    const codeState = join(root, "code-state.json");
+    const deferredState = join(root, "deferred-state.json");
+    const codePidFile = join(root, "code.pid");
+    const deferredPidFile = join(root, "deferred.pid");
+    const tools = [{ name: "echo", description: "Echo searchable fixture input", inputSchema: { type: "object", properties: { value: { type: "string" } } } }];
+    await Promise.all([writeFile(stdioState, JSON.stringify({ tools })), writeFile(httpState, JSON.stringify({ tools })), writeFile(codeState, JSON.stringify({ tools })), writeFile(deferredState, JSON.stringify({ tools }))]);
+    const httpProcess = spawn(process.execPath, [fixtureScript, "http", httpState, httpPortFile], { stdio: "ignore" });
+    const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+      await waitUntil(() => existsSync(httpPortFile));
+      const port = Number(await readFile(httpPortFile, "utf8"));
+      await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
+        stdio: { command: process.execPath, args: [fixtureScript, "stdio", stdioState, stdioPidFile, stdioChildPidFile], exposure: "direct" },
+        http: { url: `http://127.0.0.1:${port}/mcp`, headers: { Authorization: "Bearer fixture" }, exposure: "direct" },
+        code: { command: process.execPath, args: [fixtureScript, "stdio", codeState, codePidFile], exposure: "codemode" },
+        search: { command: process.execPath, args: [fixtureScript, "stdio", deferredState, deferredPidFile], exposure: "deferred" },
+      } }));
+      process.env.PI_CODING_AGENT_DIR = agentDir;
+      const faux = fauxProvider({ provider: "tron-pi-mcp-fixture", tokensPerSecond: 10_000 });
+      faux.setResponses([
+        fauxAssistantMessage([
+          fauxToolCall("mcp__stdio__echo", { value: "stdio" }, { id: "mcp-stdio-call" }),
+          fauxToolCall("mcp__http__echo", { value: "http" }, { id: "mcp-http-call" }),
+          fauxToolCall("list_mcp_resources", { server: "stdio" }, { id: "mcp-resource-list" }),
+          fauxToolCall("read_mcp_resource", { server: "stdio", uri: "fixture://one" }, { id: "mcp-resource-read" }),
+          fauxToolCall("codemode", { code: 'return text(await tools.mcp__code__echo({ value: "codemode" }));' }, { id: "mcp-codemode-call" }),
+        ], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("tool_search", { query: "searchable fixture input" }, { id: "mcp-tool-search" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxToolCall("mcp__search__echo", { value: "deferred" }, { id: "mcp-deferred-call" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("fixture MCP tools completed"),
+        fauxAssistantMessage([fauxToolCall("mcp__stdio__added", { value: "changed" }, { id: "mcp-list-changed-call" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("fixture MCP list changed"),
+        fauxAssistantMessage([fauxToolCall("mcp__stdio__added", { value: "reconnected" }, { id: "mcp-lazy-reconnect-call" })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("fixture MCP reconnected"),
+      ]);
+      const modelRuntimeFactory = async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      };
+      const registry = new RuntimeRegistry({
+        agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory,
+        trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      });
+      registries.push(registry);
+      await initializeRegistry(registry);
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      await slot.prompt("call MCP fixtures and resource tools");
+      await waitUntil(() => !slot.isBusy);
+      const transcript = slot.snapshot().transcript;
+      for (const [id, text] of [
+        ["mcp-stdio-call", "fixture:echo:{\"value\":\"stdio\"}"],
+        ["mcp-http-call", "fixture:echo:{\"value\":\"http\"}"],
+        ["mcp-resource-list", "fixture://one"],
+        ["mcp-resource-read", "fixture resource body"],
+        ["mcp-codemode-call", "fixture:echo:"],
+        ["mcp-deferred-call", "fixture:echo:{\"value\":\"deferred\"}"],
+      ]) {
+        const result = transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === id);
+        expect(result?.content?.map((block) => block.type === "text" ? block.text : "").join("\\n")).toContain(text);
+      }
+      const stdioPid = Number(await readFile(stdioPidFile, "utf8"));
+      const stdioChildPid = Number(await readFile(stdioChildPidFile, "utf8"));
+      await writeFile(stdioState, JSON.stringify({ tools: [{ ...tools[0], name: "added", description: "Changed fixture tool" }] }));
+      await waitUntil(() => {
+        const tools = (slot as any).runtime.session.getAllTools() as Array<{ name: string; exposure?: string }>;
+        return tools.some((tool) => tool.name === "mcp__stdio__added" && tool.exposure === "direct")
+          && tools.some((tool) => tool.name === "mcp__stdio__echo" && tool.exposure === "hidden");
+      });
+      await slot.prompt("call the newly listed MCP tool");
+      await waitUntil(() => !slot.isBusy);
+      const addedResult = slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "mcp-list-changed-call");
+      expect(addedResult?.content?.map((block) => block.type === "text" ? block.text : "").join("\\n")).toContain("fixture:added");
+      process.kill(-stdioPid, "SIGKILL");
+      await waitUntil(() => {
+        try { process.kill(stdioPid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      });
+      await slot.prompt("retry after the MCP server crash");
+      await waitUntil(() => !slot.isBusy);
+      const reconnectedPid = Number(await readFile(stdioPidFile, "utf8"));
+      const reconnectedChildPid = Number(await readFile(stdioChildPidFile, "utf8"));
+      expect(reconnectedPid).not.toBe(stdioPid);
+      const codePid = Number(await readFile(codePidFile, "utf8"));
+      const deferredPid = Number(await readFile(deferredPidFile, "utf8"));
+      const allResults = slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "toolResult");
+      expect([stdioPid, codePid, deferredPid, stdioChildPid, reconnectedPid, reconnectedChildPid].every(Number.isInteger)).toBe(true);
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      await waitUntil(() => [stdioPid, codePid, deferredPid, stdioChildPid, reconnectedPid, reconnectedChildPid].every((pid) => {
+        try { process.kill(pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      }));
+      const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-mcp-fixtures.json");
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, `${JSON.stringify({ transport: ["stdio", "streamable-http"], exposure: ["direct", "codemode", "deferred"], transcript: allResults }, null, 2)}\n`);
+    } finally {
+      if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+      httpProcess.kill("SIGTERM");
+      await new Promise<void>((resolve) => httpProcess.once("exit", () => resolve()));
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loads project MCP config only after TrustService authorizes the workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-pi-mcp-project-trust-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(agentDir, "sessions", "workspace");
+    const cwd = join(root, "workspace");
+    const projectConfigDir = join(cwd, ".pi");
+    const pidFile = join(root, "project-server.pid");
+    const childPidFile = join(root, "project-server-child.pid");
+    const statePath = join(root, "project-state.json");
+    const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(projectConfigDir, { recursive: true }), writeFile(statePath, JSON.stringify({ tools: [{ name: "project_echo", description: "Trusted project fixture", inputSchema: { type: "object", properties: {} } }] }))]);
+    await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {} }));
+    await writeFile(join(projectConfigDir, "mcp.json"), JSON.stringify({ mcpServers: {
+      project_fixture: { command: process.execPath, args: [fixtureScript, "stdio", statePath, pidFile, childPidFile], exposure: "direct" },
+    } }));
+    const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, false);
+    const faux = fauxProvider({ provider: "tron-pi-mcp-project-trust", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage("untrusted project ignored"),
+      fauxAssistantMessage([fauxToolCall("mcp__project_fixture__project_echo", {}, { id: "trusted-project-call" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("trusted project tool completed"),
+    ]);
+    const modelRuntimeFactory = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const makeRegistry = () => new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, maximumLiveRuntimes: 1,
+      modelRuntimeFactory, trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    let registry = makeRegistry();
+    registries.push(registry);
+    try {
+      await initializeRegistry(registry);
+      let slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      await slot.prompt("load an untrusted project");
+      await waitUntil(() => !slot.isBusy);
+      expect(existsSync(pidFile)).toBe(false);
+      expect((slot as any).runtime.session.getAllTools().some((tool: { name: string }) => tool.name === "mcp__project_fixture__project_echo")).toBe(false);
+      const sessionId = slot.id;
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      await trust.set(cwd, true);
+      registry = makeRegistry();
+      registries.push(registry);
+      await initializeRegistry(registry);
+      slot = await registry.acquire(sessionId);
+      await slot.setModel(model.provider, model.id);
+      await slot.prompt("load trusted project MCP");
+      await waitUntil(() => !slot.isBusy && existsSync(pidFile));
+      const trustedResult = slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "trusted-project-call");
+      expect(trustedResult?.content?.map((block) => block.type === "text" ? block.text : "").join("\\n")).toContain("fixture:project_echo");
+      const processId = Number(await readFile(pidFile, "utf8"));
+      const childProcessId = Number(await readFile(childPidFile, "utf8"));
+      const secondCwd = join(root, "second-workspace");
+      await mkdir(secondCwd, { recursive: true });
+      await registry.create(secondCwd);
+      await waitUntil(() => {
+        try { process.kill(processId, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      });
+      await waitUntil(() => {
+        try { process.kill(childProcessId, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      });
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      await waitUntil(() => {
+        try { process.kill(processId, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+      });
+      const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-mcp-project-trust.json");
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, `${JSON.stringify({ untrustedProjectServerStarted: false, trustedProjectServerCalled: true, capacityEvictedProcessGroupTerminated: true }, null, 2)}\n`);
+    } finally {
+      await registry.dispose().catch(() => {});
+      const index = registries.indexOf(registry);
+      if (index >= 0) registries.splice(index, 1);
+      if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stops sleeping and tool-looping codemode scripts and drains active codemode work", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-pi-codemode-stop-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(extensionDir, { recursive: true })]);
+    const holdExtension = `export default function (pi) {
+      pi.registerTool({ name: "hold", label: "Hold", description: "Wait until cancelled or its deadline", parameters: { type: "object", properties: { ms: { type: "number" } }, required: ["ms"] }, execute: async (_id, args) => {
+        await new Promise((resolve) => setTimeout(resolve, args.ms));
+        return { content: [{ type: "text", text: "released" }] };
+      } });
+    }`;
+    const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
+    await Promise.all([
+      writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["+codemode"] })),
+      writeFile(join(extensionDir, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`),
+      writeFile(join(extensionDir, "hold.ts"), `${holdExtension}\n`),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-pi-codemode-stop", tokensPerSecond: 10_000 });
+    const call = (id: string, code: string) => fauxAssistantMessage([fauxToolCall("codemode", { code }, { id })], { stopReason: "toolUse" });
+    faux.setResponses([
+      call("codemode-sleep", 'await new Promise(resolve => setTimeout(resolve, 30_000)); return "late";'),
+      call("codemode-loop", 'while (true) await tools.hold({ ms: 250 });'),
+      call("codemode-drain", 'await tools.hold({ ms: 400 }); return "drained";'),
+      fauxAssistantMessage("drain completed"),
+    ]);
+    const modelRuntimeFactory = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    try {
+      await initializeRegistry(registry);
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      const sleepPrompt = slot.prompt("run sleeping codemode script");
+      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-sleep"));
+      await slot.abort("agent");
+      await sleepPrompt;
+      await waitUntil(() => !slot.isBusy);
+      expect(slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-sleep")).toMatchObject({ isError: true });
+      const loopPrompt = slot.prompt("run tool-looping codemode script");
+      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-loop" && (tool.nestedCalls?.calls.length ?? 0) > 0)).catch(() => { throw new Error(`codemode loop did not call tools: ${JSON.stringify(slot.snapshot().transcript.slice(-6))}`); });
+      await slot.abort("agent");
+      await loopPrompt;
+      await waitUntil(() => !slot.isBusy);
+      const stoppedLoop = slot.snapshot().transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "codemode-loop");
+      expect(stoppedLoop).toMatchObject({ isError: true, nestedCalls: { calls: [expect.objectContaining({ toolName: "hold" })] } });
+      const drainPrompt = slot.prompt("run codemode under administrative drain");
+      await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.toolCallId === "codemode-drain"));
+      let drained = false;
+      const drain = registry.waitUntilIdle().then(() => { drained = true; });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(drained).toBe(false);
+      await drainPrompt;
+      await drain;
+      expect(drained).toBe(true);
+      expect(faux.state.callCount).toBeGreaterThanOrEqual(3);
+      const artifactPath = join(process.cwd(), "test-results", "pi-sdk-099-codemode-stop-drain.json");
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, `${JSON.stringify({ stopped: ["sleeping-script", "tool-loop"], drainWaitedFor: true, settled: slot.snapshot().transcript.filter((item) => item.kind === "message" && item.role === "toolResult" && item.toolName === "codemode").map((item) => ({ toolCallId: item.toolCallId, isError: item.isError })) }, null, 2)}\n`);
+    } finally {
+      await registry.dispose();
+      const index = registries.indexOf(registry);
+      if (index >= 0) registries.splice(index, 1);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps one tool display segment across tool-only agent continuations", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-tool-segment-continuation-"));
     const agentDir = join(root, "agent");
@@ -10738,6 +11450,75 @@ export default function (pi) {
     expect(typeof resources.subagentDiagnostics).toBe("string");
   });
 
+  it("persists the first invocation receipt with the first user message across runtime teardown", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-first-message-receipt-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-first-message-receipt", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("first response")]);
+    const createRuntime = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const createRegistry = async () => {
+      const registry = new RuntimeRegistry({
+        agentDir,
+        tronHome: join(root, "tron"),
+        idleRuntimeMs: 60_000,
+        modelRuntimeFactory: createRuntime,
+        trust,
+        broadcast: () => {},
+        sessionSummaryChanged: () => {},
+        sessionListChanged: () => {},
+      });
+      registries.push(registry);
+      await initializeRegistry(registry);
+      return registry;
+    };
+    let registry: RuntimeRegistry | undefined;
+    try {
+      registry = await createRegistry();
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+      const admitted = await slot.prompt("persist the first turn");
+      await waitUntil(() => !slot.isBusy);
+      const sessionFile = slot.sessionFile!;
+      const entries = (await readFile(sessionFile, "utf8"))
+        .trimEnd().split("\n").map(line => JSON.parse(line) as Record<string, any>);
+      expect(entries.some(entry => entry.type === "message" && entry.message?.role === "user"
+        && entry.message.content?.some((part: { text?: string }) => part.text === "persist the first turn"))).toBe(true);
+      const firstReceipt = entries.find(entry => entry.type === "custom"
+        && entry.customType === INVOCATION_RECEIPT_TYPE
+        && entry.data?.operationId === admitted.operationId
+        && entry.data?.receiptKind === "start");
+      expect(firstReceipt).toBeDefined();
+
+      // Runtime teardown/reopen exercises the canonical persistence boundary,
+      // not just the old slot's in-memory SessionManager branch.
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      registry = await createRegistry();
+      expect((await registry.list()).map(session => session.id)).toContain(slot.id);
+      const reopened = await registry.acquire(slot.id);
+      const reopenedEntries = (await readFile(reopened.sessionFile!, "utf8"))
+        .trimEnd().split("\n").map(line => JSON.parse(line) as Record<string, any>);
+      expect(reopenedEntries).toContainEqual(firstReceipt);
+      expect(reopened.snapshot().transcript.some(item => item.role === "user"
+        && JSON.stringify(item).includes("persist the first turn"))).toBe(true);
+    } finally {
+      if (registry) {
+        await registry.dispose();
+        registries.splice(registries.indexOf(registry), 1);
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rekeys the owning slot when a completed session is forked", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-runtime-fork-"));
     const agentDir = join(root, "agent");
@@ -10823,11 +11604,13 @@ export default function (pi) {
     });
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
 
-    // This fork retains only the user entry, so Pi has reserved but not yet
-    // materialized its JSONL. The live canonical mutation owner must still
-    // project the parent identity; otherwise iOS cannot distinguish the fork
-    // until after its first assistant response.
-    expect(slot.persistedSessionFile).toBeUndefined();
+    // Pi 0.99 materializes a fork as soon as its retained first user entry is
+    // appended, so catalog identity now comes from the canonical file.
+    expect(slot.persistedSessionFile).toBeDefined();
+    const forkHeader = JSON.parse((await readFile(slot.persistedSessionFile!, "utf8")).split("\n", 1)[0]!) as {
+      parentSession?: string;
+    };
+    expect(forkHeader.parentSession).toBe(parentPath);
     expect(slot.snapshot().transcript.filter((item) => item.role === "user")).toEqual([
       expect.objectContaining({
         kind: "message",
@@ -10839,13 +11622,12 @@ export default function (pi) {
     expect(catalog.find((session) => session.id === original)).toMatchObject({ kind: "user" });
     expect(catalog.find((session) => session.id === fork.sessionId)).toMatchObject({
       kind: "user",
-      parentSessionId: original,
       firstMessage: "fork this",
       messageCount: 1,
     });
 
     // The retained prompt-only fork must carry one boundary through both
-    // snapshot/page seams before Pi materializes the first child response.
+    // snapshot/page seams after Pi materializes its first user entry.
     const prePromptBoundary = slot.snapshot().forkBoundary;
     expect(prePromptBoundary).toMatchObject({
       kind: "sessionFork", inheritedAnchorId: userEntry!.id, gapOrdinal: expect.any(Number),
@@ -10875,6 +11657,13 @@ export default function (pi) {
     });
     await slot.dispose();
     expect((await registry.list()).find((session) => session.id === fork.sessionId)).toMatchObject({
+      kind: "user",
+      parentSessionId: original,
+      firstMessage: "fork this",
+      messageCount: 3,
+    });
+    const reopenedCatalog = await registry.list();
+    expect(reopenedCatalog.find((session) => session.id === fork.sessionId)).toMatchObject({
       kind: "user",
       parentSessionId: original,
       firstMessage: "fork this",
@@ -11203,8 +11992,15 @@ export default function (pi) {
    * and leaves it on a complete line, as a written transcript is: the header
    * reader treats a file whose final byte is not a newline as an append still in
    * progress. */
+  async function resizeSyntheticTranscript(path: string, bytes: number): Promise<void> {
+    if (!syntheticTranscriptSizes.has(path)) {
+      syntheticTranscriptSizes.set(path, (await fsPromises.stat(path)).size);
+    }
+    await truncate(path, bytes);
+  }
+
   async function growTranscript(path: string, bytes: number): Promise<void> {
-    await truncate(path, bytes - 1);
+    await resizeSyntheticTranscript(path, bytes - 1);
     await appendFile(path, "\n");
   }
 
@@ -11374,7 +12170,7 @@ export default function (pi) {
     // Sparse, so the file is 600 MiB without writing it. The admission stops on
     // the append fence this tail trips, which is as far as a fixture can carry an
     // oversize session without a real 512 MiB+ parseable transcript.
-    await truncate(oversize.getSessionFile()!, 600 * mebibyte);
+    await resizeSyntheticTranscript(oversize.getSessionFile()!, 600 * mebibyte);
 
     await expect(fixture.registry.acquire(oversize.getSessionId())).rejects.toMatchObject({
       code: "busy",

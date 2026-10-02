@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE } from "./extension-adapters.js";
+import { adaptMcpAuthCommandHandler, adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE, withMcpAuthInteraction } from "./extension-adapters.js";
 import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js";
 
 const marker = "\0XYZ_ASK_USER";
@@ -97,6 +97,66 @@ const single = {
   multiSelect: false,
   allowOther: true,
 };
+
+describe("MCP auth command adapter", () => {
+  it("settles the auth command as failed when Pi reports an error notification", async () => {
+    const settled: unknown[] = [];
+    const notices: unknown[] = [];
+    const handler = adaptMcpAuthCommandHandler(async (_args: string, context: any) => {
+      context.ui.notify('Server "missing" does not use OAuth', "error");
+      return "normal return";
+    });
+    await withMcpAuthInteraction("operation-failed", { prompt: async () => undefined, notify: event => notices.push(event) },
+      () => handler("login missing", { ui: { notify: () => {} } }), error => { settled.push(error); });
+    expect(notices).toHaveLength(1);
+    expect(settled[0]).toBeInstanceOf(Error);
+    expect((settled[0] as Error).message).toContain("does not use OAuth");
+  });
+
+  it.each([
+    ["Pi cancellation", "Sign-in cancelled.", "info"],
+    ["non-OAuth server", "No enabled MCP server uses OAuth. Only HTTP servers without an Authorization header do.", "info"],
+  ] as const)("settles MCP auth failure for %s", async (_name, message, level) => {
+    const settled: unknown[] = [];
+    const handler = adaptMcpAuthCommandHandler(async (_args: string, context: any) => {
+      context.ui.notify(message, level);
+      return "normal return";
+    });
+    await withMcpAuthInteraction("operation-failed", { prompt: async () => undefined, notify: () => {} },
+      () => handler("login fixture", { ui: { notify: () => {} } }), error => { settled.push(error); });
+    expect(settled[0]).toBeInstanceOf(Error);
+    expect((settled[0] as Error).message).toBe(message);
+  });
+
+  it("routes operation-scoped input and notifications while preserving ordinary command UI", async () => {
+    const prompts: unknown[] = [];
+    const notices: unknown[] = [];
+    const handler = adaptMcpAuthCommandHandler(async (_args: string, context: any) => {
+      context.ui.notify("Waiting for redirect", "info");
+      return context.ui.input("Paste redirect URL", "http://127.0.0.1/callback");
+    });
+    const fallback: string[] = [];
+    const context = { ui: {
+      input: async () => { fallback.push("input"); return "desktop"; },
+      notify: () => { fallback.push("notify"); },
+    } };
+    expect(await handler("login fixture", context)).toBe("desktop");
+    expect(fallback).toEqual(["notify", "input"]);
+    const routed = await withMcpAuthInteraction("operation-1", {
+      signal: new AbortController().signal,
+      prompt: async (prompt) => { prompts.push(prompt); return "http://127.0.0.1/callback?code=abc"; },
+      notify: (event) => notices.push(event),
+    }, () => handler("login fixture", context));
+    expect(routed).toBe("http://127.0.0.1/callback?code=abc");
+    expect(prompts).toEqual([{
+      type: "manual_code",
+      message: "Paste redirect URL",
+      placeholder: "http://127.0.0.1/callback",
+      signal: expect.any(AbortSignal),
+    }]);
+    expect(notices).toEqual([{ type: "info", message: "[info] Waiting for redirect" }]);
+  });
+});
 
 describe("exact @zhushanwen/pi-ask-user semantic form adapter", () => {
   it("fails closed for wrong source, unpinned versions, paths, and incomplete schemas", () => {

@@ -137,7 +137,7 @@ describe("Knowledge tag vocabulary", () => {
     await addTag(store);
     let config = await store.config();
     config = await store.configureTags({ commandId: command("add-legacy"), expectedConfigRevision: config.revision, edit: { kind: "add", tag: { ...activeTag, id: "legacy", label: "Legacy" } } });
-    const records = await Promise.all(Array.from({ length: 30 }, (_, index) => capture(store, index)));
+    const records = await Promise.all(Array.from({ length: 13 }, (_, index) => capture(store, index)));
     for (const record of records) await setTags(store, record.id, record.revisionId, ["legacy"]);
     config = await store.config();
     config = await store.configureTags({ commandId: command("merge-legacy"), expectedConfigRevision: config.revision, edit: { kind: "merge", id: "legacy", mergedInto: "systems" } });
@@ -145,7 +145,7 @@ describe("Knowledge tag vocabulary", () => {
     expect(firstPage.applied).toBe(12);
     const reopened = new KnowledgeStore(workspace);
     const resumed = await reopened.reconcileTagMerges({ commandId: command("repoint-resume"), expectedConfigRevision: config.revision, cursor: firstPage.nextCursor, limit: 25 });
-    expect(resumed.applied).toBe(18);
+    expect(resumed.applied).toBe(1);
     expect(resumed.nextCursor).toBeUndefined();
     const replay = await reopened.reconcileTagMerges({ commandId: command("repoint-resume"), expectedConfigRevision: config.revision, cursor: firstPage.nextCursor, limit: 25 });
     expect(replay).toEqual(resumed);

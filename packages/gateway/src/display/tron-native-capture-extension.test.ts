@@ -11,7 +11,7 @@ function fixture() {
     start: vi.fn(async () => {}), pull: vi.fn(async () => undefined), suspend: vi.fn(async () => ({ status: "joined" as const })), close: vi.fn(async () => ({ status: "joined" as const })) };
   const views = new BrowserLiveViewRegistry(undefined, async () => client); registries.push(views); views.beginSessionLoad("session");
   const tools: Record<string, any> = {};
-  const api = { registerTool(tool: any) { tools[tool.name] = tool; } } as any;
+  const api = { on() { return () => {}; }, registerTool(tool: any) { tools[tool.name] = tool; } } as any;
   createTronNativeCaptureExtension({ sessionId: () => "session", views })(api);
   createTronDisplayExtension({ sessionId: () => "session", cwd: () => "/fixture", artifacts: {} as never, liveViews: views })(api);
   return { tools, views, client };

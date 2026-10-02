@@ -1,4 +1,5 @@
 import type { JsonValue } from "../protocol/types.js";
+import type { PaidBudgetLedger } from "./paid-budget-ledger.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 
 export const KNOWLEDGE_SCHEMA_VERSION = 1 as const;
@@ -100,7 +101,7 @@ export interface SourceAssessmentUsage {
   inputTokens: number;
   outputTokens: number;
   estimatedCostCents: number;
-  pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free";
+  pricing: "typesafe-jev-latest-input-0.042-usd-per-million-output-free-estimate";
 }
 
 export interface SourceAssessment {
@@ -751,6 +752,8 @@ export type KnowledgeCurationCode =
   | "decision-authority"
   | "budget-exhausted"
   | "model-not-configured"
+  | "model-error"
+  | "model-output-invalid"
   | "unavailable"
   | "cancelled";
 
@@ -838,10 +841,10 @@ export interface KnowledgeCurationJob {
   reason?: string;
 }
 
-/** `connectionId` names the Jev connection that pays; when omitted the single
- * enabled, approved Jev connection is used, and none or several is refused. */
+/** Tagging uses the single configured TypeSafe provider; the wire field is
+ * retained for the existing multi-connector Knowledge request envelope. */
 export interface KnowledgeTagRequest { commandId: string; sourceId: string; expectedRevision: string; connectionId?: string; }
-export interface KnowledgeTagRunRequest { commandId: string; connectionId: string; limit?: number; }
+export interface KnowledgeTagRunRequest { commandId: string; connectionId?: string; limit?: number; }
 export interface KnowledgeTagBudgetRequest { connectionId: string; }
 export interface KnowledgeTagBudgetReconcileRequest { connectionId: string; attemptId: string; }
 export interface KnowledgeTagCostEstimateRequest { connectionId: string; limit?: number; }
@@ -915,12 +918,13 @@ export interface KnowledgeConnectorConfigurationRequest {
   credentialRef?: string;
   allowWrites?: boolean;
   paidAccessApproved?: boolean;
-  /** Explicit maximum spend in cents; no connector currently spends when unset/zero. */
+  /** User-approved monthly paid-spend cap in cents; connector usage is tracked separately. */
   paidBudgetCents?: number;
   recurringApproved?: boolean;
 }
 
 export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; connectionId?: string; }
+export interface KnowledgeConnectorBudgetReconcileRequest { commandId: string; connector: "x"; connectionId: string; attemptId: string; }
 export interface KnowledgeXOAuthStartRequest { commandId: string; instanceId: string; clientId: string; redirectUri: string; policy: import("../integrations/connection-contract.js").ConnectionPolicy; }
 export interface KnowledgeXOAuthCompleteRequest { commandId: string; operationId: string; callbackUrl?: string; code?: string; state?: string; }
 export interface KnowledgeXCreditsRequest { connectionId: string; }
@@ -947,12 +951,7 @@ export interface KnowledgeRaindropRequest {
   read: KnowledgeRaindropReadRequest;
 }
 
-export interface KnowledgeTaggingLedger {
-  month: string;
-  spentCents: number;
-  reservedCents: number;
-  attempts: Record<string, { month: string; reservedCents: number; status: "reserved" | "settled" | "uncertain"; actualCostCents?: number; inputTokens?: number; outputTokens?: number }>;
-}
+export type KnowledgeTaggingLedger = PaidBudgetLedger;
 
 export interface KnowledgeConnectorState {
   connector: "raindrop" | "x" | "jev";
@@ -980,8 +979,10 @@ export interface KnowledgeConnectorState {
   assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
   /** Durable per-cohort/item paid-attempt fence; legacy item-only keys remain valid. */
   assessmentAttempts?: Record<string, { itemId?: string; cohortId?: string; status: "dispatched" | "settled"; chargeCents: number; inputTokens?: number; outputTokens?: number; estimatedCostCents?: number }>;
-  /** Durable tagger dispatch reservations; uncertain attempts are never blindly retried. */
+  /** Durable TypeSafe tagger reservations; uncertain attempts are never blindly retried. */
   taggingBudget?: KnowledgeTaggingLedger;
+  /** Durable X owned-read reservations, separate from the user's monthly cap. */
+  xDiscoveryBudget?: PaidBudgetLedger;
   health: "unconfigured" | "setup-required" | "ready" | "running" | "partial" | "rate-limited" | "auth-error" | "error";
   /** Adapter observations are bounded; unknown is the pre-admission state. */
   credentialAvailability?: "available" | "unavailable" | "unknown";
@@ -1018,7 +1019,12 @@ export interface KnowledgeConnectorStatus {
   lastError?: string;
   remaining: number;
   pending: number;
-  paidBudgetCents: number;
+  capCents: number;
+  spentCents?: number;
+  reservedCents?: number;
+  availableCents?: number;
+  month?: string;
+  uncertain?: Array<{ attemptId: string; month: string; reservedCents: number }>;
   allowWrites: boolean;
   recurringApproved: boolean;
   paidAccessApproved: boolean;
@@ -1091,6 +1097,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.connector.configure"; request: KnowledgeConnectorConfigurationRequest }
   | { operation: "knowledge.connector.assessment.approve"; request: KnowledgeAssessmentApprovalRequest }
   | { operation: "knowledge.connector.status"; request: KnowledgeConnectorStatusRequest }
+  | { operation: "knowledge.connector.budget.reconcile"; request: KnowledgeConnectorBudgetReconcileRequest }
   | { operation: "knowledge.x.oauth.begin"; request: KnowledgeXOAuthStartRequest }
   | { operation: "knowledge.x.oauth.complete"; request: KnowledgeXOAuthCompleteRequest }
   | { operation: "knowledge.x.credits"; request: KnowledgeXCreditsRequest }

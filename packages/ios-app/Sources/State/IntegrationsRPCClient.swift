@@ -2,9 +2,9 @@ import Foundation
 import TronMobileCore
 
 /// Typed client for the connection-instance owner. It only receives redacted
-/// projections; credential values remain in the Mac-owned secure store while
-/// non-secret MCP transport configuration is sent only to the connection owner. Reads are disposable, while accepted mutations use the
-/// shared receipt executor and continue after presentation dismissal.
+/// projections; credential values remain in the Mac-owned secure store. Reads
+/// are disposable; accepted mutations use the shared receipt executor and
+/// continue after presentation dismissal.
 @MainActor
 final class IntegrationsRPCClient {
     typealias Request = @MainActor @Sendable (String, JSONValue) async throws -> JSONValue
@@ -77,8 +77,7 @@ final class IntegrationsRPCClient {
         providerAccountID: String,
         scope: String?,
         credentialRef: String,
-        policy: IntegrationPolicy,
-        configuration: IntegrationSetupConfiguration?
+        policy: IntegrationPolicy
     ) async throws -> IntegrationSetupCompleted {
         struct Params: Encodable {
             let operationId: String
@@ -87,11 +86,10 @@ final class IntegrationsRPCClient {
             let scope: String?
             let credentialRef: String
             let policy: IntegrationPolicy
-            let configuration: IntegrationSetupConfiguration?
         }
         let value: IntegrationSetupCompleted = try await mutate(
             "connections.setup.complete",
-            parameters: Params(operationId: operationID, instanceId: instanceID, providerAccountId: providerAccountID, scope: scope, credentialRef: credentialRef, policy: policy, configuration: configuration)
+            parameters: Params(operationId: operationID, instanceId: instanceID, providerAccountId: providerAccountID, scope: scope, credentialRef: credentialRef, policy: policy)
         )
         guard value.id == instanceID, !value.definitionId.isEmpty, value.setupRevision >= 1 else { throw invalidResponse() }
         return value
