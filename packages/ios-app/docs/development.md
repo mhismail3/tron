@@ -1886,6 +1886,11 @@ checks that accepted success/failure settles while covered, publishes only when 
 and never replays the command. Global default trust retains the standard autosave error/retry notice.
 
 The #348 hosted journeys retain separate interaction and reconciliation evidence:
+`testLateSummaryStartAckKeepsNewerTakeOnSameConnection` and
+`testLateSummaryStartReceiptKeepsNewerTakeAfterReconnect` hold the pre-job acknowledgement,
+commit a newer take, then release the original response or original-ID receipt. They
+protect both the current draft and revision used by the next mutation, without a second
+summary dispatch; screenshots and fixture counters are retained in the result bundle.
 `testPresentedSummaryReconcilesAfterAppSwitchWithoutReplaying` taps the real summary
 button, observes its request, backgrounds the app, waits for observed connection readiness,
 and explicitly completes the remote job. `testSummaryCommittedWhileBackgroundedReconcilesOnOriginalSheet`

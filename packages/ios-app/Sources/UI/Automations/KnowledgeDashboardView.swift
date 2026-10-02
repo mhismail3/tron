@@ -2052,7 +2052,11 @@ struct KnowledgeDetailView: View {
                 summaryJob = started.job
                 jobsRequestGeneration &+= 1
                 if activity.allowsPresentationPublication {
-                    currentRecord = started.record
+                    // The start receipt carries the pre-job record. Intervening
+                    // edits can already have advanced this source, including
+                    // while its original acknowledgement was being recovered.
+                    await refreshSourceRow()
+                    guard model.knowledgeDestinationIdentity == identity else { return }
                     await onChanged()
                 }
             } catch {

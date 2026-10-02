@@ -73,6 +73,49 @@ final class TronKnowledgeDetailUITests: XCTestCase {
     }
 
     @MainActor
+    func testLateSummaryStartAckKeepsNewerTakeOnSameConnection() {
+        assertLateSummaryStartKeepsCurrentTake(reconnect: false)
+    }
+
+    @MainActor
+    func testLateSummaryStartReceiptKeepsNewerTakeAfterReconnect() {
+        assertLateSummaryStartKeepsCurrentTake(reconnect: true)
+    }
+
+    @MainActor
+    private func assertLateSummaryStartKeepsCurrentTake(reconnect: Bool) {
+        continueAfterFailure = false
+        let app = launch(scenario: "summary-start-held")
+        defer { app.terminate() }
+        let generate = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Generate AI summary")).firstMatch
+        XCTAssertTrue(generate.waitForExistence(timeout: 10)); generate.tap()
+        XCTAssertTrue(counters(app, contain: "summarize:1"))
+        let take = app.textViews["Your take"]
+        scrollTo(take, in: app)
+        app.buttons["fixture.type-take"].tap()
+        XCTAssertTrue(counters(app, contain: "take:1"))
+        let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved '")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 10), "The newer take is committed before the older start receipt is released")
+        if reconnect {
+            XCUIDevice.shared.press(.home); app.activate()
+            let connected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH 'connected' AND NOT label CONTAINS 'socket:none'"), object: app.staticTexts["fixture.connection"])
+            XCTAssertEqual(XCTWaiter.wait(for: [connected], timeout: 10), .completed)
+            XCTAssertTrue(saved.waitForExistence(timeout: 10))
+        }
+        app.buttons["fixture.release-summary-start"].tap()
+        XCTAssertTrue(counters(app, contain: "startAck:1"))
+        let reverted = app.staticTexts["Private note · used to guide tagging and retrieval"]
+        XCTAssertFalse(reverted.waitForExistence(timeout: 3), "An accepted job receipt is not the latest source record")
+        XCTAssertEqual(take.value as? String, "chunk1 ")
+        let archive = app.buttons["Archive"]; scrollTo(archive, in: app); archive.tap()
+        XCTAssertTrue(app.buttons["Unarchive"].waitForExistence(timeout: 10), "The next mutation must use the current revision, not the receipt snapshot")
+        XCTAssertTrue(counters(app, contain: "summarize:1"))
+        let trace = XCTAttachment(string: "\(app.staticTexts["fixture.counters"].value ?? "none")")
+        trace.name = "348-summary-start-current-row-\(reconnect)"; trace.lifetime = .keepAlways; add(trace)
+        keepScreenshot(named: "348-summary-start-current-take-\(reconnect)")
+    }
+
+    @MainActor
     func testCorrectionCompletesIntoOriginalDetailAfterReconnect() {
         continueAfterFailure = false
         let app = launch(scenario: "superseded")

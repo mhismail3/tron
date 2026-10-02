@@ -114,6 +114,7 @@ struct HostedKnowledgeDetailFixtureView: View {
                 control("Sum ✗", id: "fixture.fail-summary") { Task { await gateway.failSummary() } }
                 control("Tags ✓", id: "fixture.complete-tags") { Task { await gateway.completeTags() } }
                 control("Tags ✗", id: "fixture.fail-tags") { Task { await gateway.failTags() } }
+                control("Ack", id: "fixture.release-summary-start") { Task { await gateway.releaseSummaryStart() } }
             }
             HStack(spacing: 4) {
                 control("Take conflict", id: "fixture.next-take-conflict") { Task { await gateway.setNextTake(.conflict) } }
@@ -173,6 +174,19 @@ actor HostedKnowledgeGateway {
     func releaseRows() { heldRows?.resume(); heldRows = nil }
     private var correctionCount = 0
     private var jobsReadCount = 0
+    private var summaryStartReceipts: [String: JSONValue] = [:]
+    private var summaryStartReplies: [CheckedContinuation<Void, Never>] = []
+    private var summaryStartReleased = false
+    private var summaryStartAckCount = 0
+    func releaseSummaryStart() {
+        summaryStartReleased = true
+        let replies = summaryStartReplies; summaryStartReplies.removeAll()
+        replies.forEach { $0.resume() }
+    }
+    private func waitForSummaryStartRelease() async {
+        guard !summaryStartReleased else { return }
+        await withCheckedContinuation { summaryStartReplies.append($0) }
+    }
     private var summaryDoneCount = 0
     private var summarizeCount = 0
     private var takeCount = 0
@@ -200,7 +214,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount)"
+        let value = "summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount)"
         counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
@@ -274,6 +288,12 @@ actor HostedKnowledgeGateway {
     func handle(method: String, params: [String: JSONValue]) async -> (result: JSONValue?, error: JSONValue?) {
         trace("read:\(method) r\(revision) job:\(jobs.last?.objectValue?["status"]?.stringValue ?? "none") requested:\(params["revisionId"]?.stringValue ?? "latest")")
         switch method {
+        case "command.status":
+            guard params["method"]?.stringValue == "knowledge.source.summarize",
+                  let command = params["commandId"]?.stringValue,
+                  let result = summaryStartReceipts[command] else { return (.object(["status": .string("missing")]), nil) }
+            if scenario == "summary-start-held" { await waitForSummaryStartRelease() }
+            return (.object(["status": .string("completed"), "result": result]), nil)
         case "knowledge.status":
             return (status(), nil)
         case "knowledge.list":
@@ -311,7 +331,11 @@ actor HostedKnowledgeGateway {
             }
             summarizeCount += 1; publishCounters()
             pendingSummary = command
-            return (.object(["job": startJob(command, operation: "summary"), "record": record()]), nil)
+            let result: JSONValue = .object(["job": startJob(command, operation: "summary"), "record": record()])
+            summaryStartReceipts[command] = result
+            if scenario == "summary-start-held" { await waitForSummaryStartRelease() }
+            summaryStartAckCount += 1; publishCounters()
+            return (result, nil)
         case "knowledge.source.tag":
             let command = params["commandId"]?.stringValue ?? "tag"
             if let existing = jobs.first(where: { $0.objectValue?["commandId"]?.stringValue == command }) { return (.object(["job": existing]), nil) }

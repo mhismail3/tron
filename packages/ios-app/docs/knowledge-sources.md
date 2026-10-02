@@ -90,7 +90,9 @@ the Gateway-owned background job and returns immediately; progress belongs only
 to that action, and the durable job continues after sheet dismissal, app
 backgrounding, or reconnect. Reopening queries `knowledge.curation.jobs`; a
 completed revision is loaded and propagated through `knowledge.changed`. A
-repeated tap while the command is pending shares its command ID. Failure shows
+repeated tap while the command is pending shares its command ID. A start receipt
+retains the accepted job, not its pre-job record snapshot; the existing ticketed
+current-row reader reconciles intervening source edits before later actions. Failure shows
 Retry without clearing an existing summary or tags. Summary generation never
 fetches linked pages or implies complete thread/discussion coverage. The bounded
 result is persisted separately from the Jev intake assessment, with its source
