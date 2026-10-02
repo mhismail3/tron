@@ -5,7 +5,7 @@ import { knowledgeScopeEligible, type KnowledgeConfig, type KnowledgeRecordDraft
 import type { KnowledgeStore } from "./knowledge-store.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
-import { KnowledgeModelOutputError, knowledgeModelFailureSummary, knowledgeModelText } from "./knowledge-model-output.js";
+import { KnowledgeModelOutputError, knowledgeModelFailureSummary, knowledgeModelText, parseKnowledgeModelObject } from "./knowledge-model-output.js";
 
 const OBSERVER_PROMPT_VERSION = "tron-observer-v2";
 const OBSERVER_SYSTEM_PROMPT = [
@@ -249,10 +249,9 @@ async function inferBounded(model: ObservationModel, input: Omit<ObservationMode
   throw lastError instanceof Error ? lastError : new Error("Observer model failed");
 }
 
-function parseModelOutput(raw: string, range: ObservationRange, fallbackAt: string): Array<{ text: string; attribution: "user" | "assistant" | "tool" | "system" | "unknown"; observedAt: string; certainty: "certain" | "qualified" | "uncertain" }> {
+function parseModelOutput(raw: string, modelId: string, fallbackAt: string): Array<{ text: string; attribution: "user" | "assistant" | "tool" | "system" | "unknown"; observedAt: string; certainty: "certain" | "qualified" | "uncertain" }> {
   if (raw.length > MAX_OUTPUT_TEXT) throw new Error("Observer output exceeded its hard bound");
-  let value: unknown;
-  try { value = JSON.parse(raw); } catch { throw new Error("Observer returned non-JSON output"); }
+  const value = parseKnowledgeModelObject(raw, modelId);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Observer output must be an object");
   const observations = (value as Record<string, unknown>).observations;
   if (!Array.isArray(observations) || observations.length > 200) throw new Error("Observer observations are invalid or unbounded");
@@ -602,7 +601,7 @@ export class KnowledgeObservationService {
         admitRemaining([...chunk, ...remaining]);
         return true;
       }
-      const items = parseModelOutput(raw, range, fallbackAt);
+      const items = parseModelOutput(raw, config.observation.model ?? "observer", fallbackAt);
       if (items.length === 0) {
         if (operationSignal.aborted) return true;
         await this.store.setCoverage({ commandId: commandID("knowledge-empty", range, expectedRevision), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "empty", groupRevisionIds: [], reason: "no-substantive-observation" } }, operationSignal);
