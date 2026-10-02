@@ -10,10 +10,12 @@ struct HostedIntegrationsFixtureView: View {
     @State private var error: String?
     private let gateway: HostedIntegrationsGateway
     private let dark: Bool
+    private let recoveryScenario: String?
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         let scenario = arguments.drop(while: { $0 != "-integrations-scenario" }).dropFirst().first ?? "default"
+        recoveryScenario = scenario.hasPrefix("connection-") ? scenario : nil
         dark = arguments.contains("-ui-dark-mode")
         let gateway = HostedIntegrationsGateway(scenario: scenario)
         self.gateway = gateway
@@ -27,7 +29,9 @@ struct HostedIntegrationsFixtureView: View {
 
     var body: some View {
         Group {
-            if ready {
+            if let recoveryScenario {
+                HostedConnectionRetryFixture(scenario: recoveryScenario)
+            } else if ready {
                 NavigationStack {
                     VStack {
                         IntegrationsSettingsView()
@@ -45,6 +49,7 @@ struct HostedIntegrationsFixtureView: View {
         }
         .preferredColorScheme(dark ? .dark : .light)
         .task {
+            guard recoveryScenario == nil else { return }
             do { try await model.connectHostedGateway(profile: profile, token: "fixture-token"); ready = true }
             catch { self.error = error.localizedDescription }
         }
@@ -135,5 +140,62 @@ actor HostedIntegrationsSocket: GatewaySocketConnection {
     }
     func close() async { closed = true; let pending = receivers; receivers.removeAll(); pending.forEach { $0.resume(throwing: CancellationError()) } }
     private func deliver(_ data: Data) { if receivers.isEmpty { inbound.append(data) } else { receivers.removeFirst().resume(returning: data) } }
+}
+
+/// Real Mac details, with only the transport and recovery clock scripted.
+private struct HostedConnectionRetryFixture: View {
+    private let profile = GatewayProfile(id: "recovery-fixture", label: "Recovery server", host: "localhost", port: 9847, machineId: "fixture-integrations")
+    @State private var model: AppModel
+
+    init(scenario: String) {
+        let failures = scenario == "connection-unreachable" ? 2 : 1
+        let factory = HostedRecoverySocketFactory(failures: failures)
+        let origin = ContinuousClock().now
+        let clock = MonotonicClock(now: { ContinuousClock().now }, sleep: { duration in
+            // First unreachable attempt advances; the next delay is parked until Retry cancels it.
+            try await Task.sleep(for: duration >= .seconds(10) ? .seconds(3_600) : duration)
+        }, gridOrigin: origin)
+        let store = AutomationFixtureProfileStore()
+        let profiles = GatewayProfileStore(metadata: store, tokens: store)
+        try! profiles.save(profile, token: "fixture-token")
+        _model = State(initialValue: AppModel(
+            client: GatewayClient(socketFactory: GatewaySocketFactory { _ in factory.next() }),
+            profiles: profiles, clock: clock,
+            reconnectDelayPolicy: ReconnectDelayPolicy(initialSeconds: failures == 2 ? 0.1 : 100,
+                multiplier: 1_000, maximumSeconds: 100, jitterFraction: 0, nextUnitInterval: { 0.5 })
+        ))
+    }
+
+    var body: some View {
+        NavigationStack { GatewayConnectionDetailView(profile: profile) }
+            .environment(model)
+            .tronPresentation()
+            .tronSettingsLayout()
+            .tronSettingsVisualTheme(accent: .tronEmerald)
+            .task { await model.start() }
+    }
+}
+
+private final class HostedRecoverySocketFactory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failures: Int
+    init(failures: Int) { self.failures = failures }
+    func next() -> any GatewaySocketConnection {
+        lock.lock()
+        let shouldFail = failures > 0
+        failures -= 1
+        lock.unlock()
+        if shouldFail { return HostedRecoveryFailedSocket() }
+        return HostedIntegrationsSocket(gateway: HostedIntegrationsGateway(scenario: "default"))
+    }
+}
+
+private actor HostedRecoveryFailedSocket: GatewaySocketConnection {
+    func send(_ data: Data) async throws {
+        throw GatewayFailure(code: "timeout", message: "Scripted transport unavailable", retryable: true, details: nil)
+    }
+    func receive() async throws -> Data { throw CancellationError() }
+    func ping() async throws { throw CancellationError() }
+    func close() async {}
 }
 #endif

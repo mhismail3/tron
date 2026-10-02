@@ -2,26 +2,91 @@ import SwiftUI
 import Testing
 import UIKit
 @testable import TronMobile
+@testable import TronMobileCore
 
-/// Mounts the real `ChatStreamingInlineText` with every gate open, grows its
-/// source on the Gateway's 150 ms progress cadence at about 40 words/s, and
-/// samples rendered frames. Failure modes guarded here:
-/// - the reveal falls behind the stream and a catch-up shows many words at
-///   once with no fade (a jump in rendered ink);
-/// - words stop fading in (no partially inked glyphs while streaming);
-/// - the streaming view never converges to the full source.
-/// A reference pane renders the same source settled (not streaming); both
-/// panes share one layout, so glyph pixels compare one to one.
+/// Failure modes: pacing catches up ordinary progress in a burst, fades are
+/// bypassed, or mounted text never converges to its authoritative source.
+/// Virtual-time policy coverage owns admission and fractional fade progression.
+/// Native samples own rendered ink and convergence, not a promise that a loaded
+/// host catches every fade or that native bookkeeping matches the simulation.
 @MainActor
 struct StreamingTextRevealContinuityTests {
     private static let paneSize = CGSize(width: 340, height: 360)
-    private static let frameInterval: Duration = .milliseconds(150)
     private static let wordsPerFrame = 6
     private static let frameCount = 20
-    private static let sampleInterval: Duration = .milliseconds(33)
 
-    @Test("streaming text fades in continuously at 40 words/s on 150 ms frames")
+    @Test("streaming text fades continuously and the mounted source converges")
     func streamingRevealIsContinuous() async throws {
+        let arrivals = RevealCadence.gateway150.arrivals(wordsPerSecond: 40, durationMilliseconds: 3_000)
+        var fadeMeasurements: [[String: Double]] = []
+        defer {
+            if let data = try? JSONSerialization.data(withJSONObject: fadeMeasurements, options: [.sortedKeys]) {
+                Attachment.record(data, named: "virtual-reveal-opacity.json")
+            }
+        }
+        for tickDelay in [0.0, 90.0] {
+            let schedule = RevealSimulation.current(arrivals: arrivals, tickDelay: tickDelay)
+            #expect(schedule.poppedWords == 0, "ordinary progress must not skip fades")
+            #expect(schedule.starts.count == arrivals.count)
+            let fadeDuration = ChatStreamingTextRevealPolicy.fadeMilliseconds
+            try #require(fadeDuration > 4, "A fade needs intermediate opacity samples")
+            // Aggregate ink jumps can pass when every word is immediately
+            // opaque. Inspect fractional progression independently of admission.
+            let opacities = (-1...fadeDuration + 1).map {
+                ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: $0)
+            }
+            #expect(opacities.allSatisfy { $0.isFinite && (0...1).contains($0) })
+            #expect(opacities[0] == 0 && opacities[1] == 0, "A word is hidden until its scheduled start")
+            #expect(opacities.suffix(2).allSatisfy { $0 == 1 }, "A completed fade stays fully visible")
+            let interior = Array(opacities.dropFirst(2).dropLast(2))
+            #expect(interior.allSatisfy { $0 > 0 && $0 < 1 }, "An admitted word must actually fade, not pop")
+            #expect(zip(interior, interior.dropFirst()).allSatisfy { $0 < $1 }, "A fade must keep progressing")
+            // The protected fade is linear over fadeDuration, so one virtual
+            // millisecond advances at most 1/fadeDuration (plus Double rounding).
+            let maximumStep = 1 / Double(fadeDuration)
+            let roundingTolerance = 1e-12
+            let steps = zip(opacities, opacities.dropFirst()).map { $1 - $0 }
+            #expect(steps.allSatisfy { $0 >= 0 && $0 <= maximumStep + roundingTolerance })
+
+            let restartTimes = Array(Set(arrivals)).sorted()
+            let wakeTimes = schedule.tickTimes.filter { !restartTimes.contains($0) }
+            // Representative early/middle/late policy probes use simulation-
+            // assigned starts, not the mounted view's revealStarts. They prove
+            // fractional policy output at these elapsed times, not preservation
+            // of native startedAt across a task restart (see development.md).
+            for (times, isRestart) in [(restartTimes, true), (wakeTimes, false)] {
+                let candidates = times.filter { now in
+                    schedule.starts.contains { now - $0 >= 2 && now - $0 < Double(fadeDuration - 1) }
+                }
+                try #require(!candidates.isEmpty, "Both progress restarts and reveal wakes must intersect fades")
+                for index in Set([0, candidates.count / 2, candidates.count - 1]).sorted() {
+                    let now = candidates[index]
+                    let word = try #require(schedule.starts.enumerated().first {
+                        now - $0.element >= 2 && now - $0.element < Double(fadeDuration - 1)
+                    })
+                    let elapsed = Int(now - word.element)
+                    let before = ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: elapsed - 1)
+                    let after = ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: elapsed + 1)
+                    #expect(before > 0 && after < 1 && after > before)
+                    #expect(after - before <= 2 * maximumStep + roundingTolerance)
+                    fadeMeasurements.append(["tickDelay": tickDelay, "word": Double(word.offset), "start": word.element,
+                                             "boundary": now, "restart": isRestart ? 1 : 0,
+                                             "before": before, "after": after])
+                }
+            }
+            let samples = stride(from: 0.0, through: 4_200.0, by: 33.0).map { now in
+                schedule.starts.reduce(0.0) {
+                    $0 + ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: Int(now - $1))
+                }
+            }
+            let jumps = zip(samples, samples.dropFirst()).map { $1 - $0 }
+            #expect((jumps.max() ?? 0) <= 8, "paced opacity cannot publish a burst")
+            #expect(samples.last == Double(arrivals.count), "every scheduled fade converges")
+        }
+        // The existing pre-fix scheduler is a behavioral negative control,
+        // not an expected-value copy of the production policy.
+        #expect(RevealSimulation.restartDriven(arrivals: arrivals).poppedWords > 0)
+
         let words = Self.words(count: Self.wordsPerFrame * (Self.frameCount + 1))
         var admittedWords = Self.wordsPerFrame
         func fixture() -> RevealFixture {
@@ -32,7 +97,6 @@ struct StreamingTextRevealContinuityTests {
         let host = UIHostingController(rootView: fixture())
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(origin: .zero, size: CGSize(width: Self.paneSize.width, height: Self.paneSize.height * 2))
-        window.overrideUserInterfaceStyle = .light
         window.rootViewController = host
         window.makeKeyAndVisible()
         defer {
@@ -40,42 +104,51 @@ struct StreamingTextRevealContinuityTests {
             window.rootViewController = nil
             previousKeyWindow?.makeKeyAndVisible()
         }
-        try await Task.sleep(for: .milliseconds(500))
-
-        let clock = ContinuousClock()
-        let start = clock.now
-        var nextFrame = start + Self.frameInterval
-        var samples: [RevealSample] = [try Self.sample(window)]
-        while admittedWords < words.count || clock.now < nextFrame {
-            try await Task.sleep(for: Self.sampleInterval)
-            if clock.now >= nextFrame, admittedWords < words.count {
-                admittedWords += Self.wordsPerFrame
-                host.rootView = fixture()
-                nextFrame += Self.frameInterval
+        var measurements: [[String: Double]] = []
+        defer {
+            if let data = try? JSONSerialization.data(withJSONObject: measurements, options: [.sortedKeys]) {
+                Attachment.record(data, named: "mounted-reveal-ink.json")
             }
-            samples.append(try Self.sample(window))
         }
-        let streamingSamples = samples
-        let sampleMilliseconds = (clock.now - start) / Duration.milliseconds(1) / Double(samples.count - 1)
-        try await Task.sleep(for: .milliseconds(1_200))
+        func settleInk(referenceAfter priorReference: Double = 0) async throws {
+            var previousInk = 0.0
+            for frame in 0..<120 {
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+                let sample = try Self.sample(window)
+                if sample.referenceInk <= priorReference { continue }
+                #expect(sample.streamingInk <= sample.referenceInk * 1.01, "the render cannot duplicate source glyphs")
+                #expect(sample.streamingInk + sample.referenceInk * 0.01 >= previousInk, "revealed glyphs cannot disappear within one source revision")
+                previousInk = sample.streamingInk
+                measurements.append(["words": Double(admittedWords), "frame": Double(frame),
+                                     "inkRatio": sample.streamingInk / sample.referenceInk,
+                                     "fadingPixels": Double(sample.fadingPixels)])
+                if sample.referenceInk > 0, sample.isConverged { return }
+            }
+            try #require(Bool(false), "Mounted reveal did not converge within 120 display boundaries")
+        }
+        try await settleInk()
+        var previousSample = try Self.sample(window)
+        var finalPriorReference = 0.0
+        // Progress may restart a live reveal; never settle each revision before
+        // sending the next one. Slow hosts may still finish a fade between
+        // samples, so this scenario does not guarantee observation of a reset.
+        for frame in 0..<Self.frameCount {
+            finalPriorReference = try Self.sample(window).referenceInk
+            admittedWords += Self.wordsPerFrame
+            host.rootView = fixture()
+            try await DisplayFrameScheduler.displayLink.nextFrame()
+            let sample = try Self.sample(window)
+            #expect(sample.streamingInk <= sample.referenceInk * 1.01, "Progress cannot duplicate source glyphs")
+            let prefix = try sample.unchangedPrefixInk(comparedWith: previousSample)
+            #expect(prefix.current + prefix.reference * 0.01 >= prefix.previous, "Appending source cannot hide already rendered glyphs")
+            previousSample = sample
+            measurements.append(["words": Double(admittedWords), "frame": Double(frame), "progress": 1,
+                                 "inkRatio": sample.streamingInk / sample.referenceInk,
+                                 "fadingPixels": Double(sample.fadingPixels)])
+        }
+        try await settleInk(referenceAfter: finalPriorReference)
         let settled = try Self.sample(window)
-
-        let inkPerWord = settled.referenceInk / Double(words.count)
-        let jumps = zip(streamingSamples, streamingSamples.dropFirst()).map { ($1.streamingInk - $0.streamingInk) / inkPerWord }
-        let largestJump = jumps.max() ?? 0
-        let fadingShare = Double(streamingSamples.dropFirst().filter { $0.fadingPixels >= 8 }.count)
-            / Double(streamingSamples.count - 1)
-        print("""
-            reveal continuity: samples=\(streamingSamples.count) \
-            meanSampleMs=\(String(format: "%.1f", sampleMilliseconds)) largestJumpWords=\
-            \(String(format: "%.2f", largestJump)) fadingShare=\(String(format: "%.2f", fadingShare)) \
-            settledInkRatio=\(String(format: "%.4f", settled.streamingInk / settled.referenceInk))
-            """)
-        // Samples land about 60 ms apart, so steady pacing adds 2–5 words of
-        // ink per sample; the pre-fix catch-up showed 18 or more at once.
-        #expect(largestJump <= 8, "no sample may reveal more than a few words at once: \(largestJump) words")
-        #expect(fadingShare >= 0.8, "words must be fading in most samples: \(fadingShare)")
-        #expect(abs(settled.streamingInk / settled.referenceInk - 1) < 0.01, "the reveal converges to the source")
+        #expect(settled.isConverged)
     }
 
     private static func words(count: Int) -> [String] {
@@ -103,6 +176,8 @@ struct StreamingTextRevealContinuityTests {
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         let paneRows = height / 2
         var result = RevealSample()
+        result.streamingPixels = Array(pixels.prefix(paneRows * width))
+        result.referencePixels = Array(pixels.suffix(paneRows * width))
         for row in 0..<paneRows {
             for column in 0..<width {
                 let streaming = Double(255 - pixels[row * width + column])
@@ -122,6 +197,33 @@ private struct RevealSample {
     var streamingInk = 0.0
     var referenceInk = 0.0
     var fadingPixels = 0
+    var streamingPixels: [UInt8] = []
+    var referencePixels: [UInt8] = []
+
+    /// Appending complete words at a fixed width must preserve existing glyph
+    /// positions. Compare only the previous reference's dark cores so newly
+    /// appended glyphs cannot compensate for a disappearing prefix. Reject
+    /// reference/layout drift instead of silently selecting a different region.
+    func unchangedPrefixInk(comparedWith previous: RevealSample) throws -> (previous: Double, current: Double, reference: Double) {
+        try #require(referencePixels.count == previous.referencePixels.count)
+        var priorInk = 0.0
+        var currentInk = 0.0
+        var referenceInk = 0.0
+        var changedCores = 0
+        for index in referencePixels.indices where previous.referencePixels[index] < 127 {
+            // Two grayscale levels tolerate rasterization rounding, not motion.
+            if abs(Int(referencePixels[index]) - Int(previous.referencePixels[index])) > 2 { changedCores += 1 }
+            priorInk += Double(255 - previous.streamingPixels[index])
+            currentInk += Double(255 - streamingPixels[index])
+            referenceInk += Double(255 - previous.referencePixels[index])
+        }
+        try #require(referenceInk > 0, "Prefix comparison needs actual reference glyphs")
+        try #require(changedCores == 0, "Appending source changed \(changedCores) reference glyph cores; ink comparisons would hide layout/identity drift")
+        return (priorInk, currentInk, referenceInk)
+    }
+
+    /// Every admitted word renders at full ink, within 1% of the reference.
+    var isConverged: Bool { abs(streamingInk / referenceInk - 1) < 0.01 }
 }
 
 /// The streaming pane over a settled reference pane of the same source.

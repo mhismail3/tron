@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -107,6 +107,11 @@ const sourceFixture = (root, name, branch) => {
   git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "--allow-empty", "-m", "fixture");
   return worktree;
 };
+// Records a build of the worktree's current HEAD with the given pre-build
+// dirty flag, as `scripts/tron dev start` does after `build_candidate`.
+const recordSource = (state, epoch, worktree, dirtyBeforeBuild) => run(
+  state, "record-source", epoch, worktree, git(worktree, "rev-parse", "HEAD").trim(), dirtyBeforeBuild,
+);
 const epochFor = (index) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
 // Every candidate in these fixtures shares one payload fingerprint.
 const sharedFingerprint = "f".repeat(64);
@@ -126,8 +131,8 @@ test("Debug status names the worktree and branch of the running candidate, not t
     const state = join(root, "lifecycle.json");
     const first = sourceFixture(root, "first", "feat/first");
     const second = sourceFixture(root, "second", "feat/second");
-    run(state, "record-source", epochFor(1), first, "false");
-    run(state, "record-source", epochFor(2), second, "false");
+    recordSource(state, epochFor(1), first, "false");
+    recordSource(state, epochFor(2), second, "false");
     // Failure mode 1: the second build (same fingerprint) was recorded but never became ready.
     assert.deepEqual(runningSource(state, epochFor(1)), { worktree: first, branch: "feat/first" });
     assert.deepEqual(runningSource(state, epochFor(2)), { worktree: second, branch: "feat/second" });
@@ -145,7 +150,7 @@ test("Debug status reports a detached source worktree without inventing a branch
     const state = join(root, "lifecycle.json");
     const worktree = sourceFixture(root, "detached", "main");
     git(worktree, "checkout", "-q", "--detach");
-    run(state, "record-source", epochFor(1), worktree, "false");
+    recordSource(state, epochFor(1), worktree, "false");
     assert.deepEqual(runningSource(state, epochFor(1)), { worktree, branch: null });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -156,8 +161,8 @@ test("Debug source records stay bounded and keep the newest record per epoch", (
     const state = join(root, "lifecycle.json");
     const first = sourceFixture(root, "first", "feat/first");
     const second = sourceFixture(root, "second", "feat/second");
-    for (let index = 1; index <= 12; index += 1) run(state, "record-source", epochFor(index), first, "false");
-    run(state, "record-source", epochFor(12), second, "false");
+    for (let index = 1; index <= 12; index += 1) recordSource(state, epochFor(index), first, "false");
+    recordSource(state, epochFor(12), second, "false");
     const recorded = JSON.parse(run(state, "read")).candidateSources;
     assert.ok(recorded.length <= 8, `retained ${recorded.length} source records`);
     assert.equal(recorded.filter((entry) => entry.runtimeEpoch === epochFor(12)).length, 1);
@@ -172,9 +177,9 @@ test("Debug source records keep the running candidate while later builds never r
     const state = join(root, "lifecycle.json");
     const first = sourceFixture(root, "first", "feat/first");
     const second = sourceFixture(root, "second", "feat/second");
-    run(state, "record-source", epochFor(1), first, "false");
+    recordSource(state, epochFor(1), first, "false");
     markRunning(state, epochFor(1));
-    for (let index = 2; index <= 13; index += 1) run(state, "record-source", epochFor(index), second, "false");
+    for (let index = 2; index <= 13; index += 1) recordSource(state, epochFor(index), second, "false");
     const recorded = JSON.parse(run(state, "read")).candidateSources;
     assert.ok(recorded.length <= 8, `retained ${recorded.length} source records`);
     assert.deepEqual(runningSource(state, epochFor(1)), { worktree: first, branch: "feat/first" });
@@ -259,8 +264,8 @@ test("Debug status reports the dirtiness recorded for the running candidate", ()
       markRunning(state, epoch);
       return JSON.parse(execFileSync(process.execPath, [helper, "status", state, "127.0.0.1", "1"], { encoding: "utf8" })).sourceDirty;
     };
-    run(state, "record-source", epochFor(1), worktree, "true");
-    run(state, "record-source", epochFor(2), worktree, "false");
+    recordSource(state, epochFor(1), worktree, "true");
+    recordSource(state, epochFor(2), worktree, "false");
     // Failure mode 10: each epoch keeps its own flag; unknown is null, not clean.
     assert.equal(runningDirty(epochFor(1)), true);
     assert.equal(runningDirty(epochFor(2)), false);
@@ -268,11 +273,55 @@ test("Debug status reports the dirtiness recorded for the running candidate", ()
     const value = JSON.parse(run(state, "read"));
     writeFileSync(state, `${JSON.stringify({ ...value, candidateSources: [{ runtimeEpoch: epochFor(4), worktree, branch: "feat/source" }] })}\n`);
     assert.equal(runningDirty(epochFor(4)), null);
-    // Failure mode 11: only an explicit true/false is recorded.
-    for (const malformed of [[], ["yes"], [""]]) {
+    // Failure modes 11 and 21: only the full built revision and an explicit
+    // true/false pre-build flag are recorded.
+    const head = git(worktree, "rev-parse", "HEAD").trim();
+    for (const malformed of [[head], [head, "yes"], [head, ""], ["false"], [head.slice(0, 12), "false"], ["", "false"]]) {
       assert.throws(() => execFileSync(process.execPath, [helper, "record-source", state, epochFor(5), worktree, ...malformed], { stdio: "ignore" }));
     }
     assert.equal(JSON.parse(run(state, "read")).candidateSources.some((entry) => entry.runtimeEpoch === epochFor(5)), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Post-build dirtiness failure modes (#140): `start`/`restart` measure the
+// source before `build_candidate` and record it after, so the record must also
+// reflect what changed while the build ran.
+// 18. A tracked or untracked edit made during the build is recorded clean.
+// 19. A commit made during the build (clean before and after, HEAD moved) is
+//     recorded clean against the pre-build revision the payload carries.
+// 20. A tree dirty before the build and cleaned during it is recorded clean.
+// (21, a malformed pre-build measurement, is covered above.)
+test("Debug source record is dirty when the tree changed while the candidate built", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-source-"));
+  try {
+    const state = join(root, "lifecycle.json");
+    const worktree = sourceFixture(root, "source", "feat/source");
+    writeFileSync(join(worktree, "tracked.ts"), "export {};\n");
+    git(worktree, "add", ".");
+    git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "tracked");
+    const recordedDirty = (epoch) => JSON.parse(run(state, "read")).candidateSources.find((entry) => entry.runtimeEpoch === epoch)?.dirty;
+    // Each build: measure before (candidate-source), mutate the tree as an
+    // edit during the build would, then record as `scripts/tron dev` does.
+    const build = (epoch, duringBuild) => {
+      const before = candidateSource(worktree);
+      duringBuild();
+      run(state, "record-source", epoch, worktree, before.revision, before.dirty);
+      return recordedDirty(epoch);
+    };
+    assert.equal(build(epochFor(1), () => {}), false);
+    // Failure mode 18: a tracked edit, then an untracked file.
+    assert.equal(build(epochFor(2), () => writeFileSync(join(worktree, "tracked.ts"), "export const edited = true;\n")), true);
+    git(worktree, "checkout", "-q", "--", "tracked.ts");
+    assert.equal(build(epochFor(3), () => writeFileSync(join(worktree, "new-module.ts"), "export {};\n")), true);
+    // Failure mode 19: the edit is committed before the build finishes.
+    assert.equal(build(epochFor(4), () => {
+      git(worktree, "add", "new-module.ts");
+      git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "during build");
+    }), true);
+    // Failure mode 20: dirty when measured, reverted before the record.
+    writeFileSync(join(worktree, "tracked.ts"), "export const edited = true;\n");
+    assert.equal(build(epochFor(5), () => git(worktree, "checkout", "-q", "--", "tracked.ts")), true);
+    assert.equal(build(epochFor(6), () => {}), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -315,9 +364,9 @@ test("Debug handoff admits only a selected candidate recorded as built from a cl
     const state = join(root, "lifecycle.json");
     const home = join(root, "home");
     const worktree = sourceFixture(root, "source", "feat/source");
-    run(state, "record-source", epochFor(1), worktree, "false");
-    run(state, "record-source", epochFor(2), worktree, "true");
-    run(state, "record-source", epochFor(3), worktree, "false");
+    recordSource(state, epochFor(1), worktree, "false");
+    recordSource(state, epochFor(2), worktree, "true");
+    recordSource(state, epochFor(3), worktree, "false");
 
     const cleanVersion = selectDevPayload(home, epochFor(1));
     // Failure mode 17: stdout is exactly the admitted version and fingerprint.
@@ -356,7 +405,7 @@ test("Debug handoff refuses a candidate whose source dirtiness is unknown", () =
     assert.equal(missingState.admitted, false);
     assert.match(missingState.stderr, /scripts\/tron dev restart/u);
     // Failure mode 14: other epochs are recorded clean, the selected one is not.
-    run(state, "record-source", epochFor(2), worktree, "false");
+    recordSource(state, epochFor(2), worktree, "false");
     markRunning(state, epochFor(1));
     assert.equal(handoffAdmission(state, home).admitted, false);
     // Failure mode 14: a record written before dirtiness was recorded.
@@ -366,6 +415,95 @@ test("Debug handoff refuses a candidate whose source dirtiness is unknown", () =
     assert.equal(unrecorded.admitted, false);
     assert.match(unrecorded.stderr, /commit/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// `scripts/tron-dev handoff` wiring failure modes (#140). The real script runs
+// with a Node stand-in that passes every state-helper command to real Node
+// (host resolution, supervisor liveness against a real process, admission),
+// answers only `status` (it would probe port 9848) and records what the deploy
+// helper is asked to do. No signed launcher is involved: handoff never runs it.
+// 22. The admission output is not captured or `read` splits it wrongly, so
+//     handoff-debug gets an empty, swapped or different --version/--fingerprint.
+// 23. A refused admission (dirty candidate) still reaches handoff-debug.
+// 24. Handoff without a live, ready supervisor (none recorded, the recorded PID
+//     now has another start identity, or not ready) reaches admission or
+//     handoff-debug instead of refusing.
+// 25. handoff-debug gets the wrong Debug or Stable home, or a host other than
+//     the live supervisor's recorded one.
+const handoffWiring = ({ supervisorPid, supervisorIdentity, dirty = false, ready = true }) => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-handoff-wiring-"));
+  const home = join(root, "home");
+  const fakeBin = join(root, "bin");
+  const fakeNode = join(fakeBin, "node");
+  const calls = join(root, "calls.log");
+  const deployArgv = join(root, "deploy.argv");
+  try {
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(fakeNode, `#!/bin/sh
+case "${"$"}{1:-}" in
+  */gateway-payload-deploy.mjs) printf '%s\\n' "${"$"}@" > "${deployArgv}"; echo '{}'; exit 0 ;;
+  */tron-dev-state.mjs)
+    echo "${"$"}{2:-}" >> "${calls}"
+    if [ "${"$"}{2:-}" = status ]; then echo '{"lifecycle":"ready","health":{"readiness":"${ready ? "ready" : "starting"}"}}'; exit 0; fi ;;
+esac
+exec "${process.execPath}" "${"$"}@"
+`);
+    execFileSync("/bin/chmod", ["+x", fakeNode]);
+    writeFileSync(join(fakeBin, "npm"), "#!/bin/sh\nexit 0\n");
+    execFileSync("/bin/chmod", ["+x", join(fakeBin, "npm")]);
+    const devHome = join(home, ".tron-dev");
+    const version = selectDevPayload(devHome, epochFor(1));
+    mkdirSync(join(devHome, "gateway"), { recursive: true });
+    writeFileSync(join(devHome, "gateway", "lifecycle.json"), `${JSON.stringify({
+      lifecycle: "ready", expectedHost: "tailscale", epoch: epochFor(1),
+      ...(supervisorPid ? { supervisorPid, supervisorStartIdentity: supervisorIdentity } : {}),
+      candidateSources: [{ runtimeEpoch: epochFor(1), worktree: root, branch: "feat/source", dirty }],
+    })}\n`);
+    const result = spawnSync("bash", [new URL("./tron-dev", import.meta.url).pathname, "handoff"], {
+      env: { PATH: process.env.PATH, HOME: home, TRON_NODE_BIN: fakeNode }, encoding: "utf8",
+    });
+    const readLines = (path) => (existsSync(path) ? readFileSync(path, "utf8").trim().split("\n") : null);
+    return { home, version, status: result.status, stderr: result.stderr, calls: readLines(calls) ?? [], deploy: readLines(deployArgv) };
+  } finally { rmSync(root, { recursive: true, force: true }); }
+};
+
+test("Debug handoff passes exactly the admitted candidate to handoff-debug without the signed launcher", async () => {
+  const supervisor = spawn("/bin/sleep", ["30"], { detached: true, stdio: "ignore" });
+  const exited = once(supervisor, "exit");
+  try {
+    const supervisorPid = String(supervisor.pid);
+    const supervisorIdentity = execFileSync(process.execPath, [helper, "pid-start", supervisorPid], { encoding: "utf8" }).trim();
+    // Failure modes 22 and 25.
+    const admitted = handoffWiring({ supervisorPid, supervisorIdentity });
+    assert.equal(admitted.status, 0, admitted.stderr);
+    assert.deepEqual(admitted.deploy, [
+      new URL("./gateway-payload-deploy.mjs", import.meta.url).pathname, "handoff-debug",
+      "--host", "tailscale", "--dev-home", join(admitted.home, ".tron-dev"), "--stable-home", join(admitted.home, ".tron"),
+      "--stable-bundled-root", "/Applications/Tron.app/Contents/Resources/Gateway",
+      "--version", admitted.version, "--fingerprint", sharedFingerprint,
+    ]);
+    // Failure mode 23.
+    const dirty = handoffWiring({ supervisorPid, supervisorIdentity, dirty: true });
+    assert.notEqual(dirty.status, 0);
+    assert.match(dirty.stderr, /Debug handoff refused/u);
+    assert.equal(dirty.deploy, null);
+    // Failure mode 24: no recorded supervisor, a reused PID, and not ready.
+    for (const unsupervised of [{}, { supervisorPid, supervisorIdentity: "replaced" }]) {
+      const refused = handoffWiring(unsupervised);
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, /not supervised/u);
+      assert.equal(refused.calls.includes("handoff-admission"), false);
+      assert.equal(refused.deploy, null);
+    }
+    const notReady = handoffWiring({ supervisorPid, supervisorIdentity, ready: false });
+    assert.notEqual(notReady.status, 0);
+    assert.match(notReady.stderr, /not ready/u);
+    assert.equal(notReady.calls.includes("handoff-admission"), false);
+    assert.equal(notReady.deploy, null);
+  } finally {
+    supervisor.kill("SIGTERM");
+    await exited;
+  }
 });
 
 const stopFixture = ({ child, identity, childIsOwned }) => {

@@ -440,7 +440,7 @@ struct GatewayDiagnosticsServiceTests {
         classifier.failedAttempt(neverOpened, code: "timeout")
         #expect(classifier.noPath == nil)
         classifier.failedAttempt(neverOpened, code: "timeout")
-        #expect(classifier.noPath?.label == "No path to this Mac over Wi-Fi")
+        #expect(classifier.noPath?.label == "Mac unreachable over Wi-Fi")
 
         var negativeControl = GatewayConnectionFailureClassifier()
         let opened = connectionDiagnostic(
@@ -511,7 +511,7 @@ struct GatewayDiagnosticsServiceTests {
                 waitedForConnectivity: false, networkInterfaces: nil
             )
         ), code: "timeout")
-        #expect(negativeControl.noPath?.label == "No path to this Mac")
+        #expect(negativeControl.noPath?.label == "Mac unreachable")
     }
 
     private func connectionDiagnostic(

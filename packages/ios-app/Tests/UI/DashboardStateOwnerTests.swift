@@ -664,6 +664,11 @@ struct DashboardStateOwnerTests {
         }
     }
 
+    /// Failure mode: the pool stops retrying an unreachable profile after a
+    /// fixed attempt allowance, so the twelfth attempt never arrives. The walk
+    /// crosses about half an hour of escalated backoff, so it jumps the manual
+    /// clock from one registered timer to the next: a step per 1-second tick
+    /// cost a real millisecond each and outran the watchdog on a slow runner.
     @MainActor
     @Test("a dashboard connection retries transient failures past the removed attempt allowance")
     func secondaryReconnectHasNoAttemptBudget() async throws {
@@ -684,18 +689,24 @@ struct DashboardStateOwnerTests {
                     code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
                 ))
             }
-            pool.reconcile(profiles: [remote], selectedProfileID: nil, token: { _ in "fixture" })
-            // Twelve attempts, each served by the pump's clock: this profile is
-            // unreachable after three of them, so the waits escalate to the
-            // pool's five-minute cap, and the twelfth still connects. No attempt
-            // allowance stops the retries.
-            for attempt in 1...12 {
-                _ = try await Self.secondsUntilRequest(
-                    attempt, clock: clock, factory: factory, limit: 320
-                )
+            do {
+                pool.reconcile(profiles: [remote], selectedProfileID: nil, token: { _ in "fixture" })
+                // Twelve attempts, each served by the pump's clock: this profile is
+                // unreachable after three of them, so the waits escalate to the
+                // pool's five-minute cap, and the twelfth still connects. No attempt
+                // allowance stops the retries.
+                for attempt in 1...12 {
+                    try await Self.advanceTimersUntilRequest(
+                        attempt, clock: clock, factory: factory, limit: .seconds(320)
+                    )
+                }
+                try await sockets[11].waitUntilSent(count: 2)
+                #expect(factory.requests.count == 12)
+            } catch {
+                pool.retire()
+                await pool.waitForRetirement()
+                throw error
             }
-            try await sockets[11].waitUntilSent(count: 2)
-            #expect(factory.requests.count == 12)
             pool.retire()
             await pool.waitForRetirement()
         }
@@ -757,6 +768,41 @@ struct DashboardStateOwnerTests {
             _ = try await Self.secondsUntilRequest(3, clock: clock, factory: factory, limit: 40)
             #expect(factory.requests.count == 3)
 
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("manual secondary retry interrupts backoff and repeated taps keep its in-flight socket")
+    func manualSecondaryRetryWithoutCompetingSockets() async throws {
+        try await withTestWatchdog { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let clock = ManualClock()
+            let sockets = (0..<2).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            defer { pool.retire() }
+            await sockets[0].failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic transport failure", retryable: true, details: nil
+            ))
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            try await sockets[0].waitUntilClosed()
+            try await clock.waitUntilSleeping(count: 1)
+            pool.retry(profileID: "unknown")
+            #expect(factory.requests.count == 1)
+            pool.retry(profileID: profile.id)
+            try await sockets[1].waitUntilSent(count: 1)
+            for _ in 0..<10 { pool.retry(profileID: profile.id) }
+            for _ in 0..<20 { await Task.yield() }
+            #expect(factory.requests.count == 2)
+            #expect(await sockets[1].sentFrames().count == 1)
             pool.retire()
             await pool.waitForRetirement()
         }
@@ -856,7 +902,7 @@ struct DashboardStateOwnerTests {
 
             // The profile the user sees is unreachable, not merely reconnecting.
             let states = recorder.updates.filter { $0.profileID == profile.id }.map(\.state)
-            #expect(states.contains { $0.label.hasPrefix("No path to this Mac") })
+            #expect(states.contains { $0.label.hasPrefix("Mac unreachable") })
 
             pool.retire()
             await pool.waitForRetirement()
@@ -1679,6 +1725,32 @@ struct DashboardStateOwnerTests {
             try await Task.sleep(for: .milliseconds(1))
         }
         return elapsed
+    }
+
+    /// Wakes the pool's registered timers in deadline order until the factory
+    /// has served `target` connections. Each step waits for a timer to be
+    /// registered, so it costs no wall-clock time; `limit` bounds the simulated
+    /// wait, and a pool that stops retrying registers no timer and never
+    /// reaches `target`.
+    @MainActor
+    private static func advanceTimersUntilRequest(
+        _ target: Int,
+        clock: ManualClock,
+        factory: ScriptedGatewaySocketFactory,
+        limit: Duration
+    ) async throws {
+        var elapsed: Duration = .zero
+        while factory.requests.count < target {
+            try await clock.waitUntilSleeping(count: 1)
+            guard factory.requests.count < target else { return }
+            elapsed += clock.advanceToNextDeadline() ?? .zero
+            guard elapsed <= limit else {
+                throw GatewayFailure(
+                    code: "timeout", message: "attempt \(target) never arrived within \(limit) of simulated time",
+                    retryable: true, details: nil
+                )
+            }
+        }
     }
 
     private static func makeAppLog() -> (AppLog, () -> Void) {

@@ -1125,18 +1125,29 @@ than the default one whose creating worktree no longer exists - a deleted
 worktree's simulator would otherwise hold gigabytes for the whole idle period,
 and a later command in that lane simply provisions it again - so an abandoned
 lane costs nothing. Marker-less state (including the default lane's directory,
-which exists before its first provision) is never removed by the sweep, and a
+which exists before its first provision) is never expired, and a
 marker written before lanes recorded their last use is kept until a command
-dates it. `clean` in the runner or the Gateway E2E harness empties its lane down
-to the lease file, which the command itself cannot delete while its holder
+dates it. The one marker-less shape the sweep removes is an abandoned lane: a
+directory directly in the lane root named like a lane (`ios-test` or
+`ios-test-NAME`), not a symlink, that holds nothing but a regular lease file
+whose lease it can take - what an older `clean` or a refusal left behind. It
+rechecks that under the lease and removes the lease file and the directory, as
+`clean`'s holder does; a held lease, any other file, a nested lane or an empty
+directory (a command between creating its lane and taking its lease) keeps it.
+A sweep's lease take never creates a lane directory, so a lane another holder
+removed meanwhile counts as busy instead of coming back marker-less.
+`clean` in the runner or the Gateway E2E harness empties its lane down to the
+lease file, which the command itself cannot delete while its holder
 holds it; the holder removes the lane directory when the command ends, still
 under the lease, only if that lease file - the one it locked, not one a command
 starting in the lane has since created - is all the directory holds, so a file
-or a lane nested inside it keeps it. Because `clean` and `lane-remove` unlink a
-lease file they hold, every lease take checks that the file it locked is still
+or a lane nested inside it keeps it. Because `clean`, `lane-remove` and the
+sweep unlink a lease file they hold, every lease take checks that the file it locked is still
 the one the lane's path names; a command that locked an unlinked lease file
 fails as contended (73) rather than share the lane with the command that
-recreated it.
+recreated it. A command whose lane directory is removed between creating it and
+opening its lease file fails the same way, with the same message, and never
+runs.
 
 How many simulators the Mac runs is decided by its memory, not by a fixed count.
 Before `simctl boot` - never for a lane whose simulator is already booted, which
@@ -1275,7 +1286,33 @@ background/foreground convergence, and responsive-socket preservation. `Dashboar
 cached/stale/live activity, ID-index integrity, and retention of existing dashboard buckets
 when a background transport is retired. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
 waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
-wait or a clock that collapses liveness sleeps into a hot loop. Test-owned unstructured tasks
+wait or a clock that collapses liveness sleeps into a hot loop. The watchdog bounds a hang, never
+the test's own work: a test must not need a fast machine to finish inside it. Walk long backoff
+curves with `ManualClock.advanceToNextDeadline()` (one step per registered timer, as
+`DashboardStateOwnerTests.secondaryReconnectHasNoAttemptBudget` does), prove reuse or skipped work
+from work reports rather than elapsed time (`ChatTranscriptPresentationStoreTests.textStreamingReusesCanonicalProjection`),
+await the exact outcome a race owes instead of ending the test first (`AppModelReconnectTests.falseRestoreRejectsDeadEpochAfterRefresh`
+waits for the replacement attempt its dead epoch starts), and bound display-driven settling in
+finite display-frame phases (`ChatFloatingDisplayLayoutTests.keyboardAndAccessories`). The floating
+oracle checks every sampled native frame and each keyboard/accessory/draft/restored milestone;
+it does not assume the host samples a particular intermediate animation instant. Streaming
+continuity exercises the existing admission/opacity policies with virtual-time schedules (including
+restarts and late ticks). Aggregate jump/convergence bounds do not prove fading: the oracle also
+requires bounded fractional opacity throughout the policy's linear fade, strict progression, and a
+slope bounded by the fade duration. Representative early/middle/late samples around simulated
+restart/wake times use simulation-assigned starts; `virtual-reveal-opacity.json` records those probes.
+They do not observe the view's `revealStarts` and cannot reject a native start-time reset on restart.
+It then mounts the actual view, appends progress on display boundaries without waiting for each
+revision to settle, and records glyph ink in `mounted-reveal-ink.json`. Prefix monotonicity compares
+unchanged reference glyph cores, rejecting layout drift rather than letting added glyphs hide loss.
+The final authoritative source must converge; convergence alone cannot detect timestamp resets.
+Both attachments are retained in the runner's xcresult. The former native largest-jump threshold
+could detect reset-induced bursts on a fast host but also rejected valid rendering when the hosted
+runner missed fade frames. Sampled monotonicity does not guarantee native timestamp preservation
+or temporal smoothness: samples may miss intermediate fades on a loaded host. Policy simulation does
+not prove native bookkeeping. Native timing qualification requires a controlled host or device measurement. Each of the 31 maximum-page
+projection installs has the original ten-second hang bound, with fixture/reference work outside it;
+completed installs never spend a shared wall-time allowance. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
 the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
 bytes; they must not implement protocol decoding, session state, receipt policy,
