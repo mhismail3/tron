@@ -63,6 +63,107 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         keepScreenshot(app, name: "348-mcp-unsent-draft-same-mac")
     }
 
+    @MainActor
+    func testAuthInputRejoinsSameCanonicalChallengeWithoutSubmitting() {
+        continueAfterFailure = false
+        let app = launch("mcp-auth-draft"); defer { app.terminate() }
+        openAuth(app)
+        let code = app.textFields["Fixture code"]
+        code.tap(); code.typeText("fixture-only-code")
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(counters(app, owner: "original", contain: "authResumes:1"))
+        XCTAssertTrue(code.waitForExistence(timeout: 10))
+        XCTAssertEqual(code.value as? String, "fixture-only-code", "The exact unsent input rejoins only its same canonical challenge")
+        XCTAssertTrue(counters(app, owner: "original", contain: "answers:0"), "Rejoining never submits the draft")
+    }
+
+    @MainActor
+    func testConsumedPromptKeepsMCPCompletionPresentationUntilTerminal() {
+        continueAfterFailure = false
+        let app = launch("mcp-auth-consume"); defer { app.terminate() }
+        openAuth(app)
+        // Establish the prompt on the rejoined sheet, independently of the
+        // initial prompt/begin acknowledgement ordering.
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(counters(app, owner: "original", contain: "authResumes:1"))
+        let code = app.textFields["Fixture code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 10)); code.tap(); code.typeText("fixture-only-code")
+        app.buttons["Complete Login"].tap()
+        XCTAssertTrue(counters(app, owner: "original", contain: "answers:1"))
+        XCTAssertTrue(app.staticTexts["Completing provider login…"].waitForExistence(timeout: 10), "Prompt consumption is not operation completion")
+        XCTAssertTrue(app.buttons["Cancel"].exists, "The operation is still presented while its completion event remains active")
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(counters(app, owner: "original", contain: "authResumes:2"))
+        assertAuthDismissed(app)
+        XCTAssertFalse(code.exists)
+    }
+
+    @MainActor
+    func testReplacementChallengeDoesNotRestorePreviousInput() {
+        continueAfterFailure = false
+        let app = launch("mcp-auth-replaced-prompt"); defer { app.terminate() }
+        openAuth(app)
+        let code = app.textFields["Fixture code"]; code.tap(); code.typeText("fixture-only-code")
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(counters(app, owner: "original", contain: "authResumes:1"))
+        XCTAssertTrue(code.waitForExistence(timeout: 10))
+        XCTAssertEqual(code.value as? String, "Fixture code")
+        XCTAssertTrue(counters(app, owner: "original", contain: "answers:0"))
+    }
+
+    @MainActor
+    func testExpiredAuthOperationDropsUnsentChallengeInput() {
+        continueAfterFailure = false
+        let app = launch("mcp-auth-expired"); defer { app.terminate() }
+        openAuth(app)
+        let code = app.textFields["Fixture code"]; code.tap(); code.typeText("fixture-only-code")
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(counters(app, owner: "original", contain: "authResumes:1"))
+        assertAuthDismissed(app)
+        XCTAssertFalse(code.exists)
+        XCTAssertTrue(counters(app, owner: "original", contain: "answers:0"))
+    }
+
+    @MainActor
+    func testCancelledAuthOperationCannotRestoreItsOldInput() {
+        continueAfterFailure = false
+        let app = launch("mcp-auth-draft"); defer { app.terminate() }
+        openAuth(app)
+        let code = app.textFields["Fixture code"]; code.tap(); code.typeText("fixture-only-code")
+        app.buttons["Cancel"].tap(); assertAuthDismissed(app)
+        openAuth(app, expectedStarts: 2)
+        XCTAssertEqual(code.value as? String, "Fixture code")
+        XCTAssertTrue(counters(app, owner: "original", contain: "answers:0"))
+    }
+
+    @MainActor
+    func testAuthorityReplacementRevokesAuthInputAndPresentation() {
+        continueAfterFailure = false
+        let app = launch("mcp-auth-replaced-authority"); defer { app.terminate() }
+        openAuth(app)
+        let code = app.textFields["Fixture code"]; code.tap(); code.typeText("fixture-only-code")
+        XCUIDevice.shared.press(.home); app.activate()
+        let replacement = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'replacement-integration-fixture'"), object: app.staticTexts["fixture.destination"])
+        XCTAssertEqual(XCTWaiter.wait(for: [replacement], timeout: 15), .completed)
+        assertAuthDismissed(app)
+        XCTAssertFalse(code.exists)
+        XCTAssertTrue(counters(app, owner: "original", contain: "answers:0"))
+        XCTAssertTrue(counters(app, owner: "replacement", contain: "answers:0"))
+    }
+
+    @MainActor private func assertAuthDismissed(_ app: XCUIApplication) {
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["Cancel"])
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 10), .completed)
+        XCTAssertTrue(app.buttons["Add Server"].waitForExistence(timeout: 10))
+    }
+
+    @MainActor private func openAuth(_ app: XCUIApplication, expectedStarts: Int = 1) {
+        XCTAssertTrue(app.buttons["Manage"].waitForExistence(timeout: 10)); app.buttons["Manage"].tap()
+        XCTAssertTrue(app.buttons["Sign In"].waitForExistence(timeout: 5)); app.buttons["Sign In"].tap()
+        XCTAssertTrue(app.textFields["Fixture code"].waitForExistence(timeout: 10))
+        XCTAssertTrue(counters(app, owner: "original", contain: "authStarts:\(expectedStarts)"))
+    }
+
     @MainActor private func launch(_ scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-integrations-fixture", "-integrations-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]

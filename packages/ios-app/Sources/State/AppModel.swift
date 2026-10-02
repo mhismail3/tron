@@ -323,6 +323,10 @@ final class AppModel {
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
     var authEvent: AuthEventState? { providerAuth.event }
+    func authPromptInput(for prompt: AuthPromptState) -> String { providerAuth.promptInput(for: prompt) }
+    func setAuthPromptInput(_ value: String, for prompt: AuthPromptState) { providerAuth.setPromptInput(value, for: prompt) }
+    func isAuthOperationActive(_ operationID: String) -> Bool { providerAuth.isAuthOperationActive(operationID) }
+
 
     var recoveredAuthOperationID: String? { providerAuth.activeRecoveredOperationID }
 

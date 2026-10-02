@@ -318,7 +318,40 @@ final class ProviderAuthCoordinator {
     private var completionRefreshGeneration = 0
 
     private(set) var invalidationGeneration = 0
-    private(set) var prompt: ProviderAuthPromptState?
+    private struct PromptInputDraft {
+        let operationID: String
+        let promptID: String
+        let value: String
+    }
+    // One unsent value, confined to this authority's live auth operation. A
+    // retired socket hides it; only the broker's same challenge can re-admit
+    // it. Never persist, log, or automatically submit this sensitive memory.
+    private var promptInputDraft: PromptInputDraft?
+    private(set) var prompt: ProviderAuthPromptState? {
+        didSet {
+            if promptInputDraft?.operationID != prompt?.operationId || promptInputDraft?.promptID != prompt?.id {
+                promptInputDraft = nil
+            }
+        }
+    }
+
+    func promptInput(for presented: ProviderAuthPromptState) -> String {
+        guard activeAuthOperationID == presented.operationId, prompt == presented,
+              promptInputDraft?.operationID == presented.operationId,
+              promptInputDraft?.promptID == presented.id else { return "" }
+        return promptInputDraft?.value ?? ""
+    }
+
+    func setPromptInput(_ value: String, for presented: ProviderAuthPromptState) {
+        guard activeAuthOperationID == presented.operationId, prompt == presented else { return }
+        promptInputDraft = value.isEmpty ? nil : PromptInputDraft(operationID: presented.operationId, promptID: presented.id, value: value)
+    }
+
+    private func clearPromptInput(operationID: String) {
+        if promptInputDraft?.operationID == operationID { promptInputDraft = nil }
+    }
+
+    func isAuthOperationActive(_ operationID: String) -> Bool { activeAuthOperationID == operationID }
     private(set) var event: ProviderAuthEventState?
 
     init(
@@ -729,6 +762,7 @@ final class ProviderAuthCoordinator {
         }
         guard profileGeneration == admittedProfileGeneration else { return }
         if !acknowledged { recordPendingCancellation(id) }
+        clearPromptInput(operationID: id)
         if activeAuthOperationID == id {
             activeAuthOperationID = nil
             authPresentationGeneration &+= 1
@@ -894,7 +928,11 @@ final class ProviderAuthCoordinator {
     /// Revokes disposable transport work while retaining the stable-device-owned
     /// provider operation so a replacement socket can rebind with auth.resume.
     func retireConnection() {
+        let retainedInput = promptInputDraft
         revokeConnectionOwnership(clearCatalogs: false, preserveActiveAuth: true)
+        if let retainedInput, retainedInput.operationID == activeAuthOperationID {
+            promptInputDraft = retainedInput
+        }
     }
 
     /// Synchronously revokes suspended work and disposes all profile projections.
@@ -940,6 +978,7 @@ final class ProviderAuthCoordinator {
     }
 
     private func retireAuthPresentation(operationID: String) {
+        clearPromptInput(operationID: operationID)
         targetByAuthOperation[operationID] = nil
         providerByAuthOperation[operationID] = nil
         authTypeByAuthOperation[operationID] = nil
@@ -1045,6 +1084,7 @@ final class ProviderAuthCoordinator {
         let admittedProfileGeneration = profileGeneration
         let admittedPresentationGeneration = authPresentationGeneration
         let wasActiveOperation = activeAuthOperationID == completion.operationID
+        clearPromptInput(operationID: completion.operationID)
         if wasActiveOperation {
             activeAuthOperationID = nil
             if prompt?.operationId == completion.operationID { prompt = nil }
@@ -1196,6 +1236,7 @@ final class ProviderAuthCoordinator {
         event = nil
     }
 
+    var hostedHasPromptInputDraft: Bool { promptInputDraft != nil }
     var hostedActiveAuthOperationID: String? { activeAuthOperationID }
     var hostedPendingCancellationOperationIDs: [String] { pendingCancellationOperationIDs }
     var hostedQuarantinedOperationCount: Int { quarantinedPresentationByOperation.count }

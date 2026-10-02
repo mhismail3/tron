@@ -649,7 +649,15 @@ Because provider login can synchronously emit presentation or completion events 
 newest admitted operation and is synchronously revoked on failure, cancellation, or profile
 retirement. `auth.begin` carries a command ID, while the active operation belongs to the authenticated
 device identity rather than a disposable socket. Transient transport retirement clears prompt delivery
-but retains the operation/target/provider; foreground or active reconnect calls `auth.resume`, which replays the
+but retains the operation/target/provider. The existing coordinator also owns at most one unsent,
+memory-only input value keyed by that authority's exact operation and prompt IDs. Retirement hides
+it and leaves the prompt unadmitted; only canonical re-emission of the same challenge restores it.
+Stale UI bindings cannot read or change another challenge's draft, and rejoining never submits it.
+Consume, replacement, terminal completion/observed expiry, cancellation, and credential/profile
+retirement discard it; unresolved transport loss uses the existing operation lifetime/cancel owner,
+not a new timer or durable secret store. Sensitive input never enters logging or diagnostics.
+MCP Sign In likewise follows the coordinator's active operation: a consumed or temporarily hidden
+prompt does not dismiss its still-active completion event. Foreground or active reconnect calls `auth.resume`, which replays the
 Gateway's latest bounded state without restarting Pi login. The matching provider sheet can reattach only to that
 provider and target, preventing duplicate automatic OAuth starts after a presentation is recreated. When the app
 has lost that operation ID (process loss or a fresh coordinator), a new `auth.begin` recovers the Gateway's active

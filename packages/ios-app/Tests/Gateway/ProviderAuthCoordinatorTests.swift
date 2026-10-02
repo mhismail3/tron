@@ -8,6 +8,94 @@ import Testing
 @MainActor
 @Suite("Provider authentication coordinator")
 struct ProviderAuthCoordinatorTests {
+    // Failure modes not observable after the leaf is destroyed: hidden input
+    // must be unadmitted, stale callbacks must not overwrite a newer challenge,
+    // and terminal/revoked authority must release sensitive memory immediately.
+    @Test("retired prompt input is hidden and reattaches only to its exact canonical challenge")
+    func retiredPromptInputRequiresCanonicalReadmission() async throws {
+        let harness = try await makeHarness()
+        defer { harness.owner.clearProfile() }
+        harness.owner.installHostedAuthOperation("operation", target: .global)
+        let original = promptPayload(operation: "operation", prompt: "original")
+        harness.owner.handlePrompt(original)
+        let prompt = try #require(harness.owner.prompt)
+        harness.owner.setPromptInput("fixture-only-input", for: prompt)
+        harness.owner.retireConnection()
+        #expect(harness.owner.promptInput(for: prompt).isEmpty)
+        harness.owner.setPromptInput("stale-write", for: prompt)
+        try await harness.owner.answerAuth("must-not-send")
+        #expect(await harness.socket.sentFrames().count == 1)
+        harness.owner.handlePrompt(original)
+        #expect(harness.owner.promptInput(for: prompt) == "fixture-only-input")
+        harness.owner.handlePrompt(promptPayload(operation: "operation", prompt: "replacement"))
+        let replacement = try #require(harness.owner.prompt)
+        #expect(harness.owner.promptInput(for: replacement).isEmpty)
+        harness.owner.setPromptInput("newer-input", for: replacement)
+        harness.owner.setPromptInput("stale-write", for: prompt)
+        #expect(harness.owner.promptInput(for: replacement) == "newer-input")
+        await harness.client.close()
+    }
+
+    @Test("late answer acknowledgement cannot erase a replacement challenge draft")
+    func latePromptAnswerKeepsReplacementDraft() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            harness.owner.installHostedAuthOperation("operation", target: .global)
+            harness.owner.handlePrompt(promptPayload(operation: "operation", prompt: "original"))
+            let original = try #require(harness.owner.prompt)
+            harness.owner.setPromptInput("fixture-only-input", for: original)
+            let submission = Task { try await harness.owner.answerAuth("fixture-only-input") }
+            defer { submission.cancel(); harness.owner.clearProfile() }
+            try await harness.socket.waitUntilSent(count: 2)
+            let request = try request(await harness.socket.sentFrames()[1])
+            harness.owner.handlePrompt(promptPayload(operation: "operation", prompt: "replacement"))
+            let replacement = try #require(harness.owner.prompt)
+            harness.owner.setPromptInput("newer-input", for: replacement)
+            await harness.socket.enqueue(response(id: request.id, result: .object(["answered": .bool(true)])))
+            try await submission.value
+            #expect(harness.owner.prompt?.id == replacement.id)
+            #expect(harness.owner.promptInput(for: replacement) == "newer-input")
+            await harness.client.close()
+        }
+    }
+
+    @Test("terminal, expired, cancelled and authority-retired operations release hidden prompt input")
+    func hiddenPromptInputIsReleasedByOwningLifecycle() async throws {
+        try await runScenario {
+            for mode in ["terminal", "expired", "cancelled", "authority"] {
+                let harness = try await makeHarness()
+                harness.owner.installHostedAuthOperation("operation", target: .global)
+                let payload = promptPayload(operation: "operation", prompt: "original")
+                harness.owner.handlePrompt(payload)
+                let original = try #require(harness.owner.prompt)
+                harness.owner.setPromptInput("fixture-only-input", for: original)
+                harness.owner.retireConnection()
+                #expect(harness.owner.hostedHasPromptInputDraft)
+                switch mode {
+                case "terminal":
+                    harness.owner.dispatchCompletion(.object(["operationId": .string("operation"), "success": .bool(true)]))
+                case "expired":
+                    let resume = Task { await harness.owner.resumeAuthIfNeeded() }
+                    defer { resume.cancel() }
+                    try await harness.socket.waitUntilSent(count: 2)
+                    let request = try request(await harness.socket.sentFrames()[1])
+                    await harness.socket.enqueue(errorResponse(id: request.id, code: "not_found", message: "Fixture operation expired"))
+                    await resume.value
+                case "cancelled": harness.owner.finishMCPAuthOperation(operationID: "operation")
+                default: harness.owner.clearProfile()
+                }
+                #expect(!harness.owner.hostedHasPromptInputDraft)
+                // Even reused opaque challenge IDs on another authority cannot
+                // restore data from the retired owner.
+                harness.owner.installHostedAuthOperation("operation", target: .global)
+                harness.owner.handlePrompt(payload)
+                #expect(harness.owner.promptInput(for: original).isEmpty)
+                harness.owner.clearProfile()
+                await harness.client.close()
+            }
+        }
+    }
+
     @Test("MCP auth adoption routes events, prompts and terminal completion through the coordinator")
     func mcpAuthAdoptionOwnsFullEventFlow() async throws {
         let harness = try await makeHarness()

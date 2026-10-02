@@ -1540,6 +1540,16 @@ manual-prompt versus callback-relay routing, stale response/cancellation safety,
 refresh, recovered-begin presentation with exact `replaceOperationId` restart, bounded retry of
 unacknowledged cancellations on resume, receipt-backed forced refresh/logout, event-only invalidation,
 and nested façade observation.
+`TronMCPServerSheetsUITests` also drives the real shared auth input and MCP sheet through
+canonical same-challenge replay, replacement challenge, observed expiry, explicit cancel, and
+actual Mac replacement. It checks exact synthetic input retention without automatic submission,
+and distinguishes consumed-prompt progress from terminal dismissal. The fixture records counts,
+never input values. `ProviderAuthCoordinatorTests.retiredPromptInputRequiresCanonicalReadmission`,
+`.latePromptAnswerKeepsReplacementDraft`, and `.hiddenPromptInputIsReleasedByOwningLifecycle`
+protect hidden admission, stale callback cleanup, and sensitive-memory release that an absent UI
+cannot expose; the HOSTED_TEST probe reports only presence, not the input. Run both owning suites
+with the owned runner; its reported `TestResults.xcresult` is the repeatable artifact. Browser,
+physical-device, and remaining provider-sheet lifecycle coverage are separate acceptance work.
 `ProviderOAuthBrowserTests` owns callback policy and listener construction: HTTPS authorization
 admission, exact provider/Gateway loopback descriptor agreement, IPv4/IPv6 loopback limits, simultaneous
 fixed-port POSIX binding to explicit loopback addresses, bounded GET parsing, encoded query

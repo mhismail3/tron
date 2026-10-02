@@ -11,7 +11,6 @@ struct MCPAuthSheet: View {
     @State private var answeringPromptID: String?
     @State private var answeringOptionID: String?
     @State private var error: String?
-    @State private var hasPresentedOperation = false
 
     var body: some View {
         NavigationStack {
@@ -43,13 +42,10 @@ struct MCPAuthSheet: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }
-        .onChange(of: model.authEvent?.operationId) { oldValue, newValue in
-            if newValue == operationID { hasPresentedOperation = true }
-            if hasPresentedOperation, oldValue == operationID, newValue != operationID { finish() }
-        }
-        .onChange(of: model.authPrompt?.operationId) { oldValue, newValue in
-            if newValue == operationID { hasPresentedOperation = true }
-            if hasPresentedOperation, oldValue == operationID, newValue != operationID { finish() }
+        // Consuming a prompt only advances the operation to its completion
+        // event. Transport retirement also hides the prompt without ending it.
+        .onChange(of: model.isAuthOperationActive(operationID), initial: true) { _, isActive in
+            if !isActive { finish() }
         }
     }
 
@@ -71,7 +67,6 @@ struct MCPAuthSheet: View {
         do {
             _ = try await model.mutateMCPAdmin("mcp.auth.cancel", parameters: ["operationId": .string(operationID)])
             model.finishMCPAuthOperation(operationID: operationID)
-            finish()
         } catch { self.error = error.localizedDescription }
     }
 

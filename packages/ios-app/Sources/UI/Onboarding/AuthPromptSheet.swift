@@ -159,7 +159,7 @@ struct ProviderAuthFlowContent: View {
                         onSelect: { onChoose(prompt, $0) }
                     )
                 } else {
-                    AuthPromptContent(prompt: prompt)
+                    AuthPromptContent(prompt: prompt).id(prompt.id)
                 }
             }
         }
@@ -232,7 +232,9 @@ private struct RecoveredAuthControls: View {
 private struct AuthPromptContent: View {
     @Environment(AppModel.self) private var model
     let prompt: AppModel.AuthPromptState
-    @State private var value = ""
+    private var value: Binding<String> {
+        Binding(get: { model.authPromptInput(for: prompt) }, set: { model.setAuthPromptInput($0, for: prompt) })
+    }
     @State private var submitting = false
 
     var body: some View {
@@ -245,10 +247,10 @@ private struct AuthPromptContent: View {
 
             Group {
                 if prompt.kind == .secret {
-                    SecureField(prompt.placeholder ?? "Value", text: $value)
+                    SecureField(prompt.placeholder ?? "Value", text: value)
                         .textContentType(.password)
                 } else {
-                    TextField(prompt.placeholder ?? "Value", text: $value)
+                    TextField(prompt.placeholder ?? "Value", text: value)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
@@ -259,11 +261,10 @@ private struct AuthPromptContent: View {
                 title: submitting ? "Submitting…" : (prompt.kind == .manualCode ? "Complete Login" : "Save"),
                 systemImage: prompt.kind == .manualCode ? "checkmark.shield" : TronSaveActionPresentation.systemImage,
                 isBusy: submitting,
-                isEnabled: !value.isEmpty && !submitting
-            ) { submit(value) }
+                isEnabled: !value.wrappedValue.isEmpty && !submitting
+            ) { submit(value.wrappedValue) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: prompt.id) { _, _ in value = "" }
     }
 
     private func submit(_ response: String) {
@@ -271,6 +272,8 @@ private struct AuthPromptContent: View {
         submitting = true
         Task {
             defer { submitting = false }
+            // The button captured this challenge's value, not a successor's.
+            guard model.authPrompt == prompt else { return }
             do { try await model.answerAuth(response) }
             catch is CancellationError { }
             catch { model.presentError(error) }

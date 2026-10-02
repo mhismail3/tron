@@ -38,7 +38,7 @@ struct HostedIntegrationsFixtureView: View {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-token")
-        if scenario == "mcp-replace-mac" { try! profiles.save(replacementProfile, token: "replacement-fixture-token", selecting: false) }
+        if scenario == "mcp-replace-mac" || scenario == "mcp-auth-replaced-authority" { try! profiles.save(replacementProfile, token: "replacement-fixture-token", selecting: false) }
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "hosted-integrations-fixture"))))
     }
@@ -51,7 +51,7 @@ struct HostedIntegrationsFixtureView: View {
                 NavigationStack {
                     VStack {
                         if mcpScenario != nil {
-                            MCPServersSettingsView(projectCWD: nil)
+                            MCPServersSettingsView(projectCWD: nil, sessionID: mcpScenario?.hasPrefix("mcp-auth-") == true ? "fixture-auth-session" : nil)
                             Text(mcpOriginalCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-original")
                             Text(mcpReplacementCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-replacement")
                             Text(model.knowledgeDestinationIdentity.profileID ?? "none").font(.caption2).accessibilityIdentifier("fixture.destination")
@@ -76,7 +76,7 @@ struct HostedIntegrationsFixtureView: View {
             case .background:
                 model.enteredBackground()
                 Task {
-                    if mcpScenario == "mcp-replace-mac", !hasReplacedMCPAuthority {
+                    if (mcpScenario == "mcp-replace-mac" || mcpScenario == "mcp-auth-replaced-authority"), !hasReplacedMCPAuthority {
                         hasReplacedMCPAuthority = true
                         await model.switchGateway(replacementProfile)
                     }
@@ -112,6 +112,20 @@ actor HostedIntegrationsGateway {
     private let scenario: String
     private var sockets: [HostedIntegrationsSocket] = []
     private var receipts: [String: JSONValue] = [:]
+    private var authStarts = 0
+    private var authResumes = 0
+    private var authAnswers = 0
+    private var authConsumed = false
+    private var authPromptID = "fixture-auth-prompt"
+    private let authOperationID = "fixture-mcp-auth-operation"
+    private func emitAuth(_ name: String, payload: JSONValue) async {
+        for socket in sockets { await socket.emitAuth(name, payload: payload) }
+    }
+    private func emitAuthPrompt() async {
+        await emitAuth("auth.prompt", payload: .object([
+            "operationId": .string(authOperationID), "promptId": .string(authPromptID),
+            "prompt": .object(["type": .string("manual_code"), "message": .string("Fixture authorization challenge"), "placeholder": .string("Fixture code")])]))
+    }
     private var mcpAddCount = 0
     private var mcpTokenCount = 0
     private var mcpRetargets = 0
@@ -124,7 +138,7 @@ actor HostedIntegrationsGateway {
     }
     private func addMCPContinuation(_ value: AsyncStream<String>.Continuation) { mcpContinuations.append(value); publishMCPCounters() }
     private func publishMCPCounters() {
-        let value = "add:\(mcpAddCount) token:\(mcpTokenCount) retargets:\(mcpRetargets) released:\(mcpReleased)"
+        let value = "add:\(mcpAddCount) token:\(mcpTokenCount) retargets:\(mcpRetargets) released:\(mcpReleased) authStarts:\(authStarts) authResumes:\(authResumes) answers:\(authAnswers)"
         mcpContinuations.forEach { $0.yield(value) }
     }
     func releaseMCPReply() { mcpReply?.resume(); mcpReply = nil }
@@ -152,7 +166,41 @@ actor HostedIntegrationsGateway {
     func attach(_ socket: HostedIntegrationsSocket) { sockets.append(socket) }
 
     func handle(method: String, params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
-        if method == "mcp.list" { return (.object(["servers": .array([]), "errors": .number(0)]), nil) }
+        if method == "mcp.list" {
+            let servers: [JSONValue] = scenario.hasPrefix("mcp-auth-") ? [.object([
+                "name": .string("fixture-auth-server"), "scope": .string("global"), "enabled": .bool(true),
+                "exposure": .string("direct"), "transport": .string("https://mcp.example.test"),
+                "state": .string("needs-auth"), "tools": .array([])])] : []
+            return (.object(["servers": .array(servers), "errors": .number(0)]), nil)
+        }
+        if method == "mcp.auth.start" {
+            authStarts += 1; authConsumed = false; publishMCPCounters()
+            await emitAuthPrompt()
+            return (.object(["operationId": .string(authOperationID)]), nil)
+        }
+        if method == "auth.resume" {
+            authResumes += 1; publishMCPCounters()
+            if scenario == "mcp-auth-expired" {
+                return (nil, .object(["code": .string("not_found"), "message": .string("Fixture authorization expired"), "retryable": .bool(false)]))
+            }
+            if authConsumed {
+                await emitAuth("auth.completed", payload: .object(["operationId": .string(authOperationID), "success": .bool(true)]))
+                return (.object(["state": .string("completed"), "operationId": .string(authOperationID), "providerId": .string("mcp")]), nil)
+            }
+            if scenario == "mcp-auth-replaced-prompt" { authPromptID = "fixture-auth-replacement-prompt" }
+            await emitAuthPrompt()
+            return (.object(["state": .string("active"), "operationId": .string(authOperationID), "providerId": .string("mcp")]), nil)
+        }
+        if method == "auth.respond" {
+            authAnswers += 1; publishMCPCounters()
+            let accepted = !authConsumed && params["operationId"]?.stringValue == authOperationID
+                && params["promptId"]?.stringValue == authPromptID && params["value"]?.stringValue == "fixture-only-code"
+            if accepted { authConsumed = true }
+            return (.object(["answered": .bool(accepted)]), nil)
+        }
+        if method == "mcp.auth.cancel" { authConsumed = true; return (.object(["cancelled": .bool(true)]), nil) }
+        if method == "provider.list" { return (.object(["providers": .array([])]), nil) }
+        if method == "model.list" { return (.object(["models": .array([])]), nil) }
         if method == "mcp.add", let command = params["commandId"]?.stringValue {
             mcpAddCount += 1; mcpServerName = params["server"]?.stringValue ?? ""
             let result: JSONValue = .object(["added": .bool(true)])
@@ -288,6 +336,11 @@ actor HostedIntegrationsSocket: GatewaySocketConnection {
         if let value = result.0 { response["result"] = value }
         if let error = result.1 { response["error"] = error }
         guard let data = try? JSONEncoder.gateway.encode(JSONValue.object(response)) else { return }
+        deliver(data)
+    }
+    func emitAuth(_ name: String, payload: JSONValue) {
+        guard !closed, let data = try? JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("event"), "topic": .string(name), "payload": payload])) else { return }
         deliver(data)
     }
     func ping() async throws { if closed { throw CancellationError() } }
