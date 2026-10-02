@@ -701,11 +701,13 @@ For a worktree that is provably done, `cleanup`:
    A branch already gone is fine; a branch at any other commit is kept and
    reported.
 
-Anything else is listed with every reason and never touched: no release
-command runs for it. With `--all`, an error while checking or removing one
-worktree, such as a failed `gh` call, keeps that worktree with the error and
-goes on to the next. `--all` also counts the worktrees outside the root and
-leaves them to the repository's own housekeeping procedure. Local paths are
+Any other worktree is never touched and no release command runs for it.
+Without `--all`, `cleanup` refuses the current worktree with its reasons.
+With `--all`, each worktree under the root that is not provably done is listed
+with every reason, and an error while checking or removing one worktree, such
+as a failed `gh` call, keeps that worktree with the error and goes on to the
+next. `--all` never lists the primary checkout, and only counts the worktrees
+outside the root, leaving them to the repository's own housekeeping procedure. Local paths are
 printed relative to the checkout's parent directory.
 
 Exit status is 0 when the current worktree was removed (or would be), and with
@@ -745,7 +747,8 @@ worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
 56. **Something outside the managed set is touched.** The primary checkout,
     worktrees outside the root, detached heads and branches that are not claim
     branches are never touched, and blocked worktrees get no release command.
-    `--all` lists each with its reason.
+    `--all` lists each worktree under the root with its reason, never lists
+    the primary checkout, and only counts the worktrees outside the root.
 57. **A failing or hanging release command is ignored.** A non-zero exit keeps
     the worktree, and a command past its timeout has its process group killed
     and keeps it too.

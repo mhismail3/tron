@@ -381,7 +381,7 @@ class ScopeTests(CleanupFixture):
                 self.assertEqual(code, 1, out)
                 self.assertIn("primary checkout", out)
 
-    def test_all_removes_only_done_worktrees_under_the_root_and_names_every_other(self):
+    def test_all_removes_only_done_worktrees_under_the_root_and_names_every_other_one_there(self):
         done, done_branch, _ = self.task(7)
         busy, busy_branch, busy_head = self.task(8, merged=False)
         outside, outside_branch, outside_head = self.task(9, directory=self.tmp / "elsewhere")
