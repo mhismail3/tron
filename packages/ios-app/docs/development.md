@@ -1811,18 +1811,22 @@ checks the inherited session accent). `ChatViewScrollHarnessTests` retains
 installed row is visibly present at readiness with no blank frame. The
 estimate-era reveal-direction and recovery fixtures were deleted with the
 estimate compensations, and exact entrance motion stays a device check.
-`ChatFloatingDisplayLayoutTests` retains
-`fullChatReachability`; `DashboardChromeTests.testHeaderMotionIsSmallBoundedReversibleAndRespectsReduceMotion`
-retains the dashboard header-motion check.
-The browser suites retain `originalLeaseOwnsCleanup`,
-`sameProfileReconnectKeepsLease`, `retiredPreparationDoesNotOverlap`,
-`frameAdmissionAndDecode`, `nativeRetirementDoesNotSelectReplacement`, and
-`floatingFrameGeometryAdaptsWithoutRemounting`. Other cases remain registered
-in the same target and are skipped only by the default plan. Explicit
+`DashboardChromeTests.testHeaderMotionIsSmallBoundedReversibleAndRespectsReduceMotion`
+retains the dashboard header-motion check. `ChatFloatingDisplayLayoutTests`,
+`BrowserLiveViewingTests` and `BrowserLiveMountedViewingTests` run whole in the
+default plan.
+
+The default plan's `skippedTests` moves only XCTest methods out of the unit
+tier: Xcode does not honor that list for Swift Testing tests, which run in every
+unit run whatever it names. A Swift Testing case leaves the unit tier through the
+`UIValidationTier` gate instead, as `ChatTranscriptScaleMeasurementTests`,
+`ChatRowStabilityTests` and `ChatVisualParityTests` do; it then refuses to run
+unless the `UIValidation` plan is the one running.
+`packages/ios-app/scripts/test-build-matrix-policy.sh` fails when a
+`skippedTests` entry is not an existing XCTest method. Explicit
 `--only-testing` selectors are preserved by the ordinary runner; use the
-UI-validation tier for cases moved out of default, especially for a selector
-that names a whole suite. `ChatTranscriptScaleMeasurementTests` is the one
-exception: it refuses to run unless the `UIValidation` plan is the one running.
+UI-validation tier for XCTest cases moved out of default, especially for a
+selector that names a whole suite.
 
 Use `TRON_IOS_TEST_TIER=ui-validation` with an explicit
 `--only-testing` selector to run hosted or UI tests from `UIValidation`; this
