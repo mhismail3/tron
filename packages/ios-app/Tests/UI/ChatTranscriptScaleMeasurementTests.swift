@@ -32,9 +32,8 @@ import UIKit
 ///
 /// These are measurements, not gates: each shape prints `CT13-METRICS` and
 /// `CT13-PHASE` lines and asserts only that the journey ran. They live in the
-/// `ui-validation` tier: `UnitTests.xctestplan` lists them as skipped, but a
-/// plan's `skippedTests` is not honored for Swift Testing tests on this path and
-/// `-only-testing` overrides it in any case (measured: a unit-tier
+/// `ui-validation` tier. A plan's `skippedTests` is not honored for Swift
+/// Testing tests, and `-only-testing` overrides it in any case (measured: a unit-tier
 /// `--only-testing TronMobileTests/ChatTranscriptScaleMeasurementTests` ran all
 /// three shapes for 34.8 s), so the suite refuses to run unless xcodebuild is
 /// running the `UIValidation` plan, which it records in the test process's own

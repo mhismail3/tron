@@ -109,17 +109,46 @@ trap cleanup EXIT
 python3 - "$generated_root/TronMobile.xcodeproj/xcshareddata/xcschemes" "$ROOT" \
   "$generated_root/TronMobile.xcodeproj/project.pbxproj" <<'PY'
 from pathlib import Path
-import json, sys
+import json, re, sys
 import xml.etree.ElementTree as ET
 
 schemes = Path(sys.argv[1])
 source_root = Path(sys.argv[2])
 pbxproj = Path(sys.argv[3]).read_text()
+
+# A plan's skippedTests is honored only for XCTest methods: a Swift Testing ID
+# there still runs in every unit run, and a stale name skips nothing (#172).
+# Swift Testing cases leave the unit tier through `UIValidationTier` instead.
+superclass, test_methods = {}, set()
+for test_file in (source_root / "Tests").rglob("*.swift"):
+    owner = None
+    for line in test_file.read_text().splitlines():
+        declaration = re.match(r"(?:(?:final|private|fileprivate|internal|public) )*(class|struct|enum|actor|extension) (\w+)(?:: (\w+))?", line)
+        if declaration:
+            owner = declaration.group(2)
+            if declaration.group(1) == "class" and declaration.group(3):
+                superclass[owner] = declaration.group(3)
+        method = re.match(r"\s+(?:@\w+ )*func (test\w+)\(\)", line)
+        if method and owner:
+            test_methods.add(f"{owner}/{method.group(1)}()")
+def is_xctest_case(name):
+    seen = set()
+    while name in superclass and name not in seen:
+        seen.add(name)
+        name = superclass[name]
+        if name == "XCTestCase":
+            return True
+    return False
+
 for relative in ("TestPlans/UnitTests.xctestplan", "TestPlans/UIValidation.xctestplan"):
     plan = json.loads((source_root / relative).read_text())
     references = [plan["defaultOptions"]["targetForVariableExpansion"], *[entry["target"] for entry in plan["testTargets"]]]
     for reference in references:
         assert f'{reference["identifier"]} /* {reference["name"]} */' in pbxproj, (relative, reference)
+    for entry in plan["testTargets"]:
+        for skipped in entry.get("skippedTests", []):
+            assert skipped in test_methods and is_xctest_case(skipped.split("/")[0]), (
+                relative, f"skippedTests entry is not an existing XCTest method: {skipped}")
 
 expected_actions = {
     "Tron Development": ("Development", "Test", False),
