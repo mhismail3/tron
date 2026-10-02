@@ -27,6 +27,9 @@ struct GatewayLogsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
+    #if HOSTED_TEST
+    @Environment(\.hostedDiagnosticsPreparation) private var hostedDiagnosticsPreparation
+    #endif
     @State private var recordIndex = GatewayLogRecordIndex()
     @State private var selectedLog: GatewayProfileLogRecord?
     @State private var selectedLevel = "all"
@@ -217,22 +220,28 @@ struct GatewayLogsSettingsView: View {
         let activity = presentationActivity
         let records = recordIndex.records
         let metadata = captureMetadata
+        let destination = model.knowledgeDestinationIdentity
         exportInFlight = true
         Task { @MainActor in
             defer { if generation == exportGeneration { exportInFlight = false } }
             do {
                 let appRecords = await model.appLog.snapshot()
+                #if HOSTED_TEST
+                await hostedDiagnosticsPreparation?()
+                #endif
                 let text = GatewayLogExport.uploadText(GatewayLogExport.jsonLines(
                     records: records, metadata: metadata, appRecords: appRecords
                 ))
-                switch try await model.exportDiagnostics(text) {
+                switch try await model.exportDiagnostics(text, destination: destination) {
                 case .saved(let path):
-                    guard generation == exportGeneration, presentationActivity == activity,
+                    guard model.knowledgeDestinationIdentity == destination,
+                          generation == exportGeneration, presentationActivity == activity,
                           activity.allowsPresentationPublication else { return }
                     UIPasteboard.general.string = path
                     model.postNotice("Diagnostics saved on Mac · path copied", role: .success, lifetime: .standard, priority: .low)
                 case .share(let url):
-                    guard generation == exportGeneration, presentationActivity == activity,
+                    guard model.knowledgeDestinationIdentity == destination,
+                          generation == exportGeneration, presentationActivity == activity,
                           activity.allowsPresentationPublication else {
                         await model.discardExportArtifact(url)
                         return
@@ -241,7 +250,8 @@ struct GatewayLogsSettingsView: View {
                     shareURL = DiagnosticShareFile(url: url)
                 }
             } catch {
-                guard generation == exportGeneration, presentationActivity == activity,
+                guard model.knowledgeDestinationIdentity == destination,
+                      generation == exportGeneration, presentationActivity == activity,
                       activity.allowsPresentationPublication else { return }
                 model.postNotice("Diagnostics could not be exported. Try again.", role: .error, lifetime: .standard, priority: .normal)
             }

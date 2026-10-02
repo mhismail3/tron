@@ -224,7 +224,7 @@ struct GatewayLogExportTests {
             ),
             appRecords: []
         )
-        let result = try await model.exportDiagnostics(retained)
+        let result = try await model.exportDiagnostics(retained, destination: model.knowledgeDestinationIdentity)
         guard case .share(let logsURL) = result else { Issue.record("disconnected export uploaded"); return }
         let logs = try String(contentsOf: logsURL, encoding: .utf8)
         #expect(logs.contains("diagnostics.exported"))
@@ -262,7 +262,7 @@ struct GatewayLogExportTests {
         await model.start()
         await waitForDiagnosticsReadiness(model)
         #expect(model.diagnosticsAreReady)
-        let exporting = Task { try await model.exportDiagnostics("fixture-jsonl") }
+        let exporting = Task { try await model.exportDiagnostics("fixture-jsonl", destination: model.knowledgeDestinationIdentity) }
         let request = try #require(await responder.value)
         let result = try await exporting.value
         guard case .saved(let path) = result else { Issue.record("connected export did not return saved path"); return }
@@ -301,7 +301,7 @@ struct GatewayLogExportTests {
         await model.start()
         await waitForDiagnosticsReadiness(model)
         #expect(model.diagnosticsAreReady)
-        let exporting = Task { try await model.exportDiagnostics("fixture-jsonl") }
+        let exporting = Task { try await model.exportDiagnostics("fixture-jsonl", destination: model.knowledgeDestinationIdentity) }
         let request = try #require(await responder.value)
         let result = try await exporting.value
         guard case .share(let file) = result else { Issue.record("failed upload did not fall back to share"); return }

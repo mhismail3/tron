@@ -99,7 +99,9 @@ struct TronMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if ProcessInfo.processInfo.arguments.contains("-tron-project-trust-fixture") {
+            if ProcessInfo.processInfo.arguments.contains("-tron-diagnostics-export-fixture") {
+                HostedDiagnosticsExportFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-project-trust-fixture") {
                 HostedProjectTrustFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-subagent-sheet-fixture") {
                 HostedSubagentSheetFixture()
