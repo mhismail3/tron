@@ -103,7 +103,16 @@ interpretations; tags come from the canonical Knowledge vocabulary, not the
 summary object. Partial or bounded excerpts are
 labeled sampled; linked pages are never inferred as covered.
 Your take autosaves after a short idle pause and when the sheet is dismissed.
-A failed save keeps a process-local draft with Retry; a stale-revision conflict
+A failed save keeps the latest process-local draft with Retry, including text
+edited while an older save was settling; closing and reopening restores that
+newer text, not the failed command's captured input. Failure annotation reads
+only the still-owned registry entry: a replaced editor's draft or an entry
+cleared by successful settlement is never overwritten or resurrected by an
+older leaf. The hosted `testOlderFailedTakeKeepsNewerDraftAfterReopen` holds
+the dismissal flush too, so a canonical write cannot mask lost local input;
+`testOlderFailedTakeCannotResurrectSettledDraft` covers successful cleanup and
+`testRetiredTakeFailureCannotAttachToReplacementMac` covers authority retirement.
+A stale-revision conflict
 shows the Gateway's current take and keeps the draft available for deliberate
 retry against the latest revision. A successful take write leaves the row's
 canonical `tagsStale` projection intact. The **Updating tags** indicator is shown

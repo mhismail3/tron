@@ -12,8 +12,10 @@ import TronMobileCore
 struct HostedKnowledgeDetailFixtureView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedOrigin: KnowledgePresentationIdentity?
+    @State private var presentedRow: KnowledgeSourceRow?
     private let completesSummaryInBackground: Bool
     private let profile = GatewayProfile(id: "knowledge-fixture", label: "Studio server", host: "localhost", port: 9847, machineId: "fixture-knowledge")
+    private let replacement = GatewayProfile(id: "knowledge-replacement", label: "Replacement fixture", host: "replacement.example.test", port: 9847, machineId: "fixture-knowledge-replacement")
     @State private var model: AppModel
     @State private var gateway: HostedKnowledgeGateway
     @State private var ready = false
@@ -27,10 +29,18 @@ struct HostedKnowledgeDetailFixtureView: View {
         let scenario = ProcessInfo.processInfo.arguments.drop(while: { $0 != "-knowledge-detail-scenario" }).dropFirst().first ?? "default"
         completesSummaryInBackground = scenario == "summary-background"
         let gateway = HostedKnowledgeGateway(scenario: scenario)
-        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in HostedKnowledgeSocket(gateway: gateway) })
+        let replacementGateway = HostedKnowledgeGateway(scenario: "default")
+        let client = GatewayClient(socketFactory: GatewaySocketFactory { request in
+            let replacesAuthority = request.url?.host == "replacement.example.test"
+            return HostedKnowledgeSocket(gateway: replacesAuthority ? replacementGateway : gateway,
+                                         replacement: replacesAuthority)
+        })
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-token")
+        if scenario == "take-failure-held" {
+            try! profiles.save(replacement, token: "fixture-replacement-token", selecting: false)
+        }
         _gateway = State(initialValue: gateway)
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "hosted-knowledge-detail-fixture"))))
@@ -41,7 +51,7 @@ struct HostedKnowledgeDetailFixtureView: View {
             VStack(spacing: 0) {
                 if ready {
                     if detailMounted {
-                        KnowledgeDetailSheet(subject: .row(gateway.initialRow), origin: presentedOrigin ?? model.knowledgePresentationIdentity,
+                        KnowledgeDetailSheet(subject: .row(presentedRow ?? gateway.initialRow), origin: presentedOrigin ?? model.knowledgePresentationIdentity,
                                              onChanged: {}, onOpenDraft: { _ in }, onOpenSession: { _, _ in })
                             .id(detailGeneration)
 
@@ -97,13 +107,26 @@ struct HostedKnowledgeDetailFixtureView: View {
             Text(counters.components(separatedBy: " | trace ").first ?? counters).font(.caption2.monospaced())
                 .lineLimit(2).frame(height: 28)
                 .accessibilityValue(counters).accessibilityIdentifier("fixture.counters")
-            Text("\(model.connectionState) · socket:\(model.knowledgePresentationIdentity.connectionID.map(String.init) ?? "none") · generation:\(model.knowledgeDestinationIdentity.lifecycleGeneration)")
+            Text("\(model.connectionState) · socket:\(model.knowledgePresentationIdentity.connectionID.map(String.init) ?? "none") · generation:\(model.knowledgeDestinationIdentity.lifecycleGeneration) · profile:\(model.profiles.selected?.id ?? "none")")
                 .font(.caption2).lineLimit(2).frame(height: 32)
                 .accessibilityValue("phase:\(scenePhase) invalidation:\(model.knowledgeInvalidationRevision) jobs:\(model.knowledgeCurationJobRevision)")
                 .accessibilityIdentifier("fixture.connection")
             HStack(spacing: 4) {
                 control("Close", id: "fixture.close-detail") { detailMounted = false }
-                control("Open", id: "fixture.open-detail") { presentedOrigin = model.knowledgePresentationIdentity; detailGeneration += 1; detailMounted = true }
+                control("Open", id: "fixture.open-detail") {
+                    Task { @MainActor in
+                        let identity = model.knowledgePresentationIdentity
+                        // Reopening from the actual catalog uses its current
+                        // revision, not the fixture's initial selected row.
+                        let page = try await model.knowledge.sourceRows(ids: [gateway.initialRow.id])
+                        guard model.knowledgePresentationIdentity == identity,
+                              let row = page.rows.first else { return }
+                        presentedRow = row
+                        presentedOrigin = identity
+                        detailGeneration += 1
+                        detailMounted = true
+                    }
+                }
                 control("Drop", id: "fixture.drop-connection") { Task { await gateway.dropConnection() } }
                 control("Hold rows", id: "fixture.hold-rows") { Task { await gateway.holdRowsAndInvalidate() } }
                 control("New tags", id: "fixture.newer-tags") { Task { await gateway.publishNewerTags() } }
@@ -115,12 +138,15 @@ struct HostedKnowledgeDetailFixtureView: View {
                 control("Tags ✓", id: "fixture.complete-tags") { Task { await gateway.completeTags() } }
                 control("Tags ✗", id: "fixture.fail-tags") { Task { await gateway.failTags() } }
                 control("Ack", id: "fixture.release-summary-start") { Task { await gateway.releaseSummaryStart() } }
+                control("Replace Mac", id: "fixture.replace-profile") { Task { await model.switchGateway(replacement) } }
             }
             HStack(spacing: 4) {
                 control("Take conflict", id: "fixture.next-take-conflict") { Task { await gateway.setNextTake(.conflict) } }
                 control("Take fail", id: "fixture.next-take-failure") { Task { await gateway.setNextTake(.failure) } }
                 control("Curate conflict", id: "fixture.next-curation-conflict") { Task { await gateway.setNextCurationConflict() } }
                 control("Type", id: "fixture.type-take") { typedChunks += 1; Self.insertIntoTake("chunk\(typedChunks) ") }
+                control("Take reply", id: "fixture.release-take") { Task { await gateway.releaseTakeReply() } }
+                control("Latest take ✓", id: "fixture.complete-latest-take") { Task { await gateway.completeLatestTake() } }
             }
         }
         .padding(6)
@@ -158,6 +184,22 @@ actor HostedKnowledgeGateway {
     private var pendingSummary: String?
     private var pendingTags: String?
     private var nextTake = TakeMode.success
+    private var heldTakeReplies: [(number: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    private var successfulTakeReplies = Set<Int>()
+    private var takeSucceededCount = 0
+    private var takeCommands = Set<String>()
+    private var takeHeldCount = 0
+    private var takeReleasedCount = 0
+    private var latestTakeWasSubmitted = false
+    func releaseTakeReply() {
+        guard !heldTakeReplies.isEmpty else { return }
+        heldTakeReplies.removeFirst().continuation.resume()
+    }
+    func completeLatestTake() {
+        guard let reply = heldTakeReplies.popLast() else { return }
+        successfulTakeReplies.insert(reply.number)
+        reply.continuation.resume()
+    }
     private var nextCurationConflict = false
     private var timeline: [String] = []
     func trace(_ value: String) {
@@ -214,7 +256,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount)"
+        let value = "summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
         counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
@@ -343,9 +385,25 @@ actor HostedKnowledgeGateway {
             pendingTags = command
             return (.object(["job": startJob(command, operation: "tags")]), nil)
         case "knowledge.source.take":
-            takeCount += 1; publishCounters()
-            let mode = nextTake
+            takeCount += 1
+            takeCommands.insert(params["commandId"]?.stringValue ?? "missing")
+            latestTakeWasSubmitted = params["text"]?.stringValue == "chunk1 chunk2 "
+            let takeNumber = takeCount
+            var mode = scenario == "take-failure-held" ? TakeMode.failure : nextTake
             nextTake = .success
+            publishCounters()
+            if scenario == "take-failure-held" {
+                // Hold the dismissal flush too: its canonical write must not
+                // hide a lost process-local draft in the reopen oracle.
+                await withCheckedContinuation { continuation in
+                    heldTakeReplies.append((number: takeNumber, continuation: continuation))
+                    takeHeldCount += 1
+                    publishCounters()
+                }
+                takeReleasedCount += 1
+                if successfulTakeReplies.remove(takeNumber) != nil { mode = .success }
+                publishCounters()
+            }
             switch mode {
             case .conflict:
                 // Another device saved first: the server moves on and reports it.
@@ -361,6 +419,8 @@ actor HostedKnowledgeGateway {
                                           "details": .object(["currentRevision": .string(revisionID), "currentTake": .string(take ?? "")])]))
                 }
                 take = params["text"]?.stringValue
+                takeSucceededCount += 1
+                publishCounters()
                 revision += 1
                 // A saved take re-tags in the background, as the tagging owner does.
                 let tagCommand = "take-retag-\(revision)"
@@ -489,12 +549,14 @@ actor HostedKnowledgeGateway {
 
 actor HostedKnowledgeSocket: GatewaySocketConnection {
     private let gateway: HostedKnowledgeGateway
-    private var inbound = [Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":6,"minProtocolVersion":6,"machineId":"fixture-knowledge","machineName":"Studio server","gatewayChannel":"stable","capabilities":["knowledge.v1","knowledge-library-rows.v1","knowledge-curation.v1"]}"#.utf8)]
+    private var inbound: [Data]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
 
-    init(gateway: HostedKnowledgeGateway) {
+    init(gateway: HostedKnowledgeGateway, replacement: Bool = false) {
         self.gateway = gateway
+        let machineID = replacement ? "fixture-knowledge-replacement" : "fixture-knowledge"
+        inbound = [Data("{\"type\":\"hello\",\"gatewayVersion\":\"fixture\",\"piVersion\":\"fixture\",\"protocolVersion\":6,\"minProtocolVersion\":6,\"machineId\":\"\(machineID)\",\"machineName\":\"Studio server\",\"gatewayChannel\":\"stable\",\"capabilities\":[\"knowledge.v1\",\"knowledge-library-rows.v1\",\"knowledge-curation.v1\"]}".utf8)]
         Task { await gateway.attach(self) }
     }
 

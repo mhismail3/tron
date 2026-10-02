@@ -11,6 +11,7 @@ import XCTest
 /// - a job event the app cannot decode silently leaves the sheet stale;
 /// - autosave drops or rewrites the text being typed;
 /// - an edit conflict or save failure discards the draft or offers no retry;
+/// - an older failed save replaces newer typed text in the reopen draft;
 /// - a failed summary or re-tag clears existing summary/tags or offers no retry;
 /// - a curation conflict outcome leaves its saving indicator stuck or hides the current revision;
 /// - a linked replacement that is archived or pending is unreadable despite its row authority.
@@ -294,6 +295,103 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         XCTAssertTrue(counters(app, contain: "take:5"))
         XCTAssertFalse(app.buttons["Retry"].waitForExistence(timeout: 2))
         XCTAssertEqual(take.value as? String, "chunk1 chunk2 chunk3 ")
+    }
+
+    @MainActor
+    func testOlderFailedTakeKeepsNewerDraftAfterReopen() {
+        assertOlderFailureCannotReplaceRegistry(settleNewerSuccessfully: false)
+    }
+
+    @MainActor
+    func testOlderFailedTakeCannotResurrectSettledDraft() {
+        assertOlderFailureCannotReplaceRegistry(settleNewerSuccessfully: true)
+    }
+
+    @MainActor
+    func testRetiredTakeFailureCannotAttachToReplacementMac() {
+        continueAfterFailure = false
+        let app = launch(scenario: "take-failure-held")
+        defer { app.terminate() }
+        let take = app.textViews["Your take"]
+        XCTAssertTrue(take.waitForExistence(timeout: 10))
+        scrollTo(take, in: app)
+        app.buttons["fixture.type-take"].tap()
+        XCTAssertTrue(counters(app, contain: "takeHeld:1"))
+        app.buttons["fixture.replace-profile"].tap()
+        let replacementReady = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label BEGINSWITH 'connected' AND label CONTAINS 'profile:knowledge-replacement' AND NOT label CONTAINS 'socket:none'"),
+            object: app.staticTexts["fixture.connection"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [replacementReady], timeout: 15), .completed)
+        app.buttons["fixture.open-detail"].tap()
+        XCTAssertTrue(take.waitForExistence(timeout: 10))
+        XCTAssertEqual(take.value as? String, "", "The same record ID on another Mac cannot inherit the original draft")
+        app.buttons["fixture.type-take"].tap()
+        let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved '")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 10), "The replacement's own take settles canonically")
+        app.buttons["fixture.release-take"].tap()
+        XCTAssertTrue(counters(app, contain: "takeReleased:1"))
+        XCTAssertFalse(app.buttons["Retry"].exists, "The retired command's error cannot attach to replacement authority")
+        app.buttons["fixture.close-detail"].tap()
+        XCTAssertTrue(app.staticTexts["Entry Detail closed"].waitForExistence(timeout: 10))
+        app.buttons["fixture.open-detail"].tap()
+        XCTAssertTrue(take.waitForExistence(timeout: 10))
+        XCTAssertEqual(take.value as? String, "chunk2 ", "Replacement authority retains only its own successful text")
+        keepScreenshot(named: "354-retired-take-replacement-authority")
+    }
+
+    @MainActor
+    private func assertOlderFailureCannotReplaceRegistry(settleNewerSuccessfully: Bool) {
+        continueAfterFailure = false
+        let app = launch(scenario: "take-failure-held")
+        defer { app.terminate() }
+        let take = app.textViews["Your take"]
+        XCTAssertTrue(take.waitForExistence(timeout: 10), app.debugDescription)
+        scrollTo(take, in: app)
+        app.buttons["fixture.type-take"].tap()
+        XCTAssertTrue(counters(app, contain: "takeHeld:1"), "Observe the first real save held before editing again")
+        app.buttons["fixture.type-take"].tap()
+        XCTAssertEqual(take.value as? String, "chunk1 chunk2 ")
+        let parallelSave = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS 'take:2'"),
+            object: app.staticTexts["fixture.counters"]
+        )
+        parallelSave.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for: [parallelSave], timeout: 1), .completed,
+                       "The newer autosave cannot dispatch while the first save remains held")
+        app.buttons["fixture.release-take"].tap()
+        XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 10), "Observe the first failed save's settlement before closing")
+        XCTAssertEqual(take.value as? String, "chunk1 chunk2 ", "A failed earlier save must not rewrite the visible edit")
+        app.buttons["fixture.close-detail"].tap()
+        XCTAssertTrue(app.staticTexts["Entry Detail closed"].waitForExistence(timeout: 10))
+        XCTAssertTrue(counters(app, contain: "takeHeld:2"), "Hold the existing dismissal flush so canonical success cannot mask a lost registry draft")
+        XCTAssertTrue(counters(app, contain: "takeCommands:2"), "Dismissal submits a distinct newer command, not replay of the failed original")
+        XCTAssertTrue(counters(app, contain: "latestTake:true"), "The held dismissal flush captured the newer input")
+        app.buttons["fixture.open-detail"].tap()
+        XCTAssertTrue(take.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(take.value as? String, "chunk1 chunk2 ", "Reopening must restore the newer draft, not the older failed submission")
+
+        // The previous leaf still owns its held dismissal flush. A subsequent
+        // edit belongs to the reopened editor/registry, not that stale leaf.
+        app.buttons["fixture.type-take"].tap()
+        XCTAssertEqual(take.value as? String, "chunk1 chunk2 chunk3 ")
+        app.buttons["fixture.close-detail"].tap()
+        XCTAssertTrue(app.staticTexts["Entry Detail closed"].waitForExistence(timeout: 10))
+        XCTAssertTrue(counters(app, contain: "takeHeld:3"), "The newer editor's dismissal flush owns the latest registry draft")
+        XCTAssertTrue(counters(app, contain: "takeCommands:3"))
+        if settleNewerSuccessfully {
+            app.buttons["fixture.complete-latest-take"].tap()
+            XCTAssertTrue(counters(app, contain: "takeSucceeded:1"), "A newer accepted save settles before the old failure; its matching draft is cleared")
+        }
+        app.buttons["fixture.release-take"].tap()
+        XCTAssertTrue(counters(app, contain: settleNewerSuccessfully ? "takeReleased:3" : "takeReleased:2"), "The older dismissal flush fails after the newer draft acquired its own command")
+        app.buttons["fixture.open-detail"].tap()
+        XCTAssertTrue(take.waitForExistence(timeout: 10))
+        XCTAssertEqual(take.value as? String, "chunk1 chunk2 chunk3 ", "A late failure from the prior leaf must not overwrite the current registry draft")
+        let timeline = XCTAttachment(string: "\(app.staticTexts["fixture.counters"].value ?? "none")")
+        timeline.name = "354-older-failed-take-newer-draft-reopen-success-\(settleNewerSuccessfully)"; timeline.lifetime = .keepAlways
+        add(timeline)
+        keepScreenshot(named: "354-older-failed-take-newer-draft-reopen")
     }
 
     @MainActor
