@@ -1346,7 +1346,16 @@ presents native vertically scrolling pages, capped at 512 pages. Unsupported, in
 mount a concise unavailable state rather than conditional empty sheet content. Full-preview ImageIO decode applies
 orientation and downsamples before publication to at most 4,096 pixels on either axis and 64 MiB of decoded rows,
 preventing compressed dimensions from forcing an unbounded eager allocation. Each sheet owns an exact lease, and
-dismissal cancels the underlying flight only after its final lease retires, so full-preview lifetime remains sheet-owned. One gateway runtime is the sole mutable
+dismissal retires its presentation's current requests. Each image/file await has a unique request
+inside that presentation lease: task cancellation retires disposable preparation without closing
+the downloaded sheet or renderer. A synchronous cancellation mark is checked before joining
+shared work, so a delayed MainActor cleanup cannot lend a retired held payload to a foreground
+successor. Cleanup removes the exact flight/request token, never another await reusing the same
+presentation UUID; the last request retires only its own flight. Legitimate noncancelled readers
+still share one existing preparation slot, and authority/byte bounds remain unchanged.
+`ChatMediaLoaderTests.previewAttemptRetirement` covers image/file cleanup before successor
+admission and delayed until after successor settlement; concurrent-reader and cancel-before-
+registration cases protect sharing, idempotent cleanup and no orphan flight. One gateway runtime is the sole mutable
 owner of a canonical session; terminal and mobile chat clients must attach to
 that owner rather than opening the same JSONL in separate Pi processes. Its
 historical context ring remains mounted at zero from the first composer frame while a resumed chat opens. It is visibly muted, disabled, and exposes a loading accessibility value until the exact authoritative transcript is ready; it then springs from zero to the canonical context percentage (or updates without motion under Reduce Motion) and opens Manage Session at the composer's trailing edge. Attachment, context, and send/stop controls share one

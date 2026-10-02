@@ -1876,6 +1876,11 @@ Home/background and foreground reconnect. It waits for downloaded native viewpor
 sleep), changes zoom/scroll/text selection, and compares native instance plus viewport state.
 Separate held preparation and actual profile/session replacement journeys prove stale work
 cannot attach to the retained or replacement selection, including deliberately reused blob IDs.
+Image/file foreground-held journeys withhold the predecessor through replacement transport
+READY and successor request admission, then return a synthetic retired payload. Fresh valid
+preparation must rejoin the original sheet without displaying that candidate. The loader owner
+suite additionally gates cancellation cleanup before admission or after successor settlement;
+only `HOSTED_TEST` can hold those cleanup hops, with no production timer/retry controls.
 The fixture emits synthetic counters and native geometry/selection indices only, never file
 contents or user credentials. Screenshots and content-free viewport/counter attachments stay
 in the retained `.xcresult`; they are not physical-device qualification. Regenerate with:
@@ -1884,7 +1889,8 @@ in the retained `.xcresult`; they are not physical-device qualification. Regener
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronReadonlyAttachmentUITests \
-  --only-testing TronMobileTests/ChatSessionPresentationTests
+  --only-testing TronMobileTests/ChatSessionPresentationTests \
+  --only-testing TronMobileTests/ChatMediaLoaderTests
 ```
 
 Floating/browser/live/AV retirement is not a readonly-sheet replay mechanism. Remaining

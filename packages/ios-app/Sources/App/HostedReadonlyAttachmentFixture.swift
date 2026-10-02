@@ -12,6 +12,7 @@ struct HostedReadonlyAttachmentFixture: View {
     @State private var counters = "opens:0 fetches:0 released:0"
     @State private var native = "none"
     @State private var before = "none"
+    @State private var hasBackgrounded = false
     @State private var poisonPublished = false
     private let gateway: ReadonlyAttachmentGateway
     private let scenario: String
@@ -56,22 +57,30 @@ struct HostedReadonlyAttachmentFixture: View {
         .tronPresentation()
         .preferredColorScheme(.dark)
         .background(ReadonlyPreviewNativeRecorder { value in
-            if value.contains("height:640") { poisonPublished = true }
+            if value.contains("height:640") || value == "file retired:true" { poisonPublished = true }
             if native != value { native = value }
         }.frame(width: 0, height: 0))
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
                 before = native
+                hasBackgrounded = true
                 model.enteredBackground()
                 Task {
                     if scenario.contains("replace-profile") { await model.switchGateway(replacement) }
                     if scenario.contains("replace-session") { sessionID = "readonly-replacement-session" }
-                    await gateway.releaseHeldFetch()
+                    if !scenario.contains("foreground-held") { await gateway.releaseHeldFetch() }
                 }
             case .inactive: model.becameInactive()
             case .active: model.becameActive()
             @unknown default: break
+            }
+        }
+        .onChange(of: model.connectionState) { _, state in
+            guard scenario.contains("foreground-held"), state == .connected, hasBackgrounded else { return }
+            Task {
+                await model.chatMedia.hostedWaitForPreviewAdmissionCount(2)
+                await gateway.releaseHeldFetch()
             }
         }
         .task { for await value in gateway.updates() { counters = value } }
@@ -88,6 +97,7 @@ private actor ReadonlyAttachmentGateway {
     private var fetches = 0
     private var released = 0
     private var imageFetches = 0
+    private var fileFetches = 0
     private var held = 0
     private var heldFetch: CheckedContinuation<Void, Never>?
     private var continuations: [AsyncStream<String>.Continuation] = []
@@ -130,13 +140,16 @@ private actor ReadonlyAttachmentGateway {
     func fetch(_ identity: ChatMediaIdentity) async -> ChatMediaPayload {
         fetches += 1
         let isFile = identity.blobID == "readonly-file" || scenario.contains("display-file")
-        if !isFile { imageFetches += 1 }
+        if isFile { fileFetches += 1 } else { imageFetches += 1 }
         publish()
-        if scenario.contains("held"), !isFile, imageFetches == 2 {
+        let holdsThisPayload = isFile ? scenario.contains("file-held") && fileFetches == 2 : scenario.contains("held") && imageFetches == 2
+        if holdsThisPayload {
             held += 1; publish()
             await withCheckedContinuation { heldFetch = $0 }
             released += 1; publish()
-            return ChatMediaPayload(data: poison, mimeType: "image/png")
+            return isFile
+                ? ChatMediaPayload(data: Data("Retired fixture payload must not publish".utf8), mimeType: "text/plain")
+                : ChatMediaPayload(data: poison, mimeType: "image/png")
         }
         return isFile
             ? ChatMediaPayload(data: file, mimeType: "text/plain")
@@ -225,7 +238,8 @@ private struct ReadonlyPreviewNativeRecorder: UIViewRepresentable {
         @objc private func record() {
             guard let window else { return }
             let views = descendants(window)
-            if let text = views.compactMap({ $0 as? UITextView }).first(where: { !$0.isEditable && $0.text.hasPrefix("Readonly fixture row") }) {
+            if views.compactMap({ $0 as? UITextView }).contains(where: { $0.text.hasPrefix("Retired fixture payload") }) { update("file retired:true"); return }
+        if let text = views.compactMap({ $0 as? UITextView }).first(where: { !$0.isEditable && $0.text.hasPrefix("Readonly fixture row") }) {
                 update("file native:\(ObjectIdentifier(text)) offset:\(Int(text.contentOffset.y)) selection:\(text.selectedRange.location):\(text.selectedRange.length)")
             } else if let image = views.compactMap({ $0 as? UIImageView }).first(where: { $0.accessibilityLabel == "Preview photo" || $0.accessibilityLabel == "Red above blue, with the close badge at top right." }), let scroll = ancestors(image).compactMap({ $0 as? UIScrollView }).first {
                 update("image native:\(ObjectIdentifier(scroll)) zoom:\(String(format: "%.2f", scroll.zoomScale)) offset:\(Int(scroll.contentOffset.x)):\(Int(scroll.contentOffset.y)) height:\(image.image?.cgImage?.height ?? 0)")

@@ -82,6 +82,25 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepEvidence(app, name: "348-readonly-retired-preparation")
     }
 
+    @MainActor func testImageHeldThroughForegroundReadyRequiresFreshAttempt() {
+        assertForegroundHeldPreparation("image-foreground-held", file: false)
+    }
+    @MainActor func testFileHeldThroughForegroundReadyRequiresFreshAttempt() {
+        assertForegroundHeldPreparation("file-held-foreground-held", file: true)
+    }
+    @MainActor private func assertForegroundHeldPreparation(_ scenario: String, file: Bool) {
+        continueAfterFailure = false
+        let app = launch(scenario); defer { app.terminate() }
+        let button = file ? app.otherElements.matching(NSPredicate(format: "label BEGINSWITH 'File attachment, readonly.txt'")).firstMatch : app.buttons["Image attachment"]
+        XCTAssertTrue(button.waitForExistence(timeout: 15)); button.tap()
+        XCTAssertTrue(wait(app.staticTexts["fixture.preview-counts"], predicate: "label CONTAINS 'held:1'"))
+        XCUIDevice.shared.press(.home); app.activate(); waitConnected(app)
+        XCTAssertTrue(wait(app.staticTexts["fixture.preview-counts"], predicate: "label CONTAINS 'released:1'"), "Predecessor is withheld until successor read admission on foreground transport")
+        XCTAssertTrue(wait(app.staticTexts["fixture.preview-native"], predicate: file ? "label BEGINSWITH 'file native:'" : "label CONTAINS 'height:320'"), "Fresh valid preparation must rejoin the retained original sheet")
+        XCTAssertEqual(app.staticTexts["fixture.preview-poison"].label, "poison:false")
+        keepEvidence(app, name: "348-foreground-held-\(file ? "file" : "image")")
+    }
+
     @MainActor func testProfileReplacementRevokesDownloadedReadonlySelection() {
         assertReplacementClosesPreview("image-replace-profile", held: false)
     }
