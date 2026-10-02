@@ -99,7 +99,9 @@ struct TronMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if ProcessInfo.processInfo.arguments.contains("-tron-subagent-sheet-fixture") {
+            if ProcessInfo.processInfo.arguments.contains("-tron-project-trust-fixture") {
+                HostedProjectTrustFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-subagent-sheet-fixture") {
                 HostedSubagentSheetFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-new-session-fixture") {
                 HostedNewSessionFixture()

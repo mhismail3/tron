@@ -636,7 +636,17 @@ per-target read admission, settings and trust event revisions, settings request/
 construction, and trust inspection/mutation. Clearing a saved trust decision sends an explicit
 JSON `null`, while `true` and `false` remain distinct decisions. It uses the shared
 confirmed-mutation executor, and profile retirement synchronously revokes suspended work
-and clears settings projections. `ProviderAuthCoordinator` likewise solely owns typed-target
+and clears settings projections. Project Trust treats an accepted decision receipt as command
+outcome, not the latest visible inspection: under its original presentation namespace it rejoins a
+current canonical trust read. Event and post-command inspection reads share one leaf-owned latest
+request ticket, independent of global trust-default reads; values and errors require matching
+namespace, target, activity and uncancelled ticket. Target/destination retirement invalidates that
+lane, while same-authority foreground refresh uses the existing presentation task without resending
+decisions. `TronProjectTrustUITests` exercises the real controls against the `HOSTED_TEST`-only
+`HostedProjectTrustFixture`: an older accepted receipt and older inspection value/error cannot replace
+a later canonical Block, with ordered/single decisions, foreground receipt reconciliation and a
+replacement Mac with the same cwd as controls. The fixture changes no actual trust or resources.
+`ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,
 auth prompt/event parsing, browser-callback submission, and operation-to-target retention through
 completion or confirmed cancellation. Dashboard Providers uses the Gateway's canonical global
