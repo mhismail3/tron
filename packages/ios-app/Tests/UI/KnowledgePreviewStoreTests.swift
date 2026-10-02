@@ -88,7 +88,11 @@ struct KnowledgePreviewStoreTests {
         // One object is one batch item however many rows asked for it.
         #expect(await recorder.batches.count == 1)
         #expect(await recorder.batches.first?.count == 1)
-        #expect(await recorder.batches.first?.first?.recordID == "a")
+        // `async let` start order is unspecified and whichever row reaches the
+        // store first names the item, so only membership is the contract.
+        let item = try #require(await recorder.batches.first?.first)
+        #expect(item.hash == hash)
+        #expect(["a", "b"].contains(item.recordID))
 
         // A cached image is served without another request.
         _ = await store.load(request(hash: hash, record: "a", bytes: data.count))
