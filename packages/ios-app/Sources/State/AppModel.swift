@@ -923,6 +923,8 @@ final class AppModel {
 
     var hostedSessionOpenAdmissionOverride: Bool?
     var hostedAfterSessionCreateResult: (@MainActor () async -> Void)?
+    var hostedBeforeNewSessionSubmission: (@MainActor () async -> Void)?
+    var hostedAfterNewSessionTrustResult: (@MainActor () async -> Void)?
 
     func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
         try await lifecycle.connectHosted(profile: profile, token: token)

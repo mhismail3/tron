@@ -577,12 +577,28 @@ struct NewSessionSheet: View {
     ) async {
         defer { creationOwner.finish() }
         do {
+            #if HOSTED_TEST
+            await model.hostedBeforeNewSessionSubmission?()
+            #endif
+            // A gesture's Task can start after its Mac/foreground retired. Check
+            // the original submission before even the implicit trust command;
+            // the post-trust namespace fence is too late to prevent retargeting.
+            guard !Task.isCancelled, !creationOwner.isRetired,
+                  presentationActivity.allowsPresentationPublication,
+                  model.profiles.selected?.id == submittedScope.profileID,
+                  model.knowledgePresentationIdentity.destinationIdentity == KnowledgeDestinationIdentity(
+                    profileID: submittedScope.profileID,
+                    lifecycleGeneration: submittedScope.lifecycleGeneration
+                  ) else { return }
             if let trustDecision {
                 guard let target = TrustTarget(cwd: cwd) else {
                     model.presentError("The selected workspace cannot receive a project trust decision.")
                     return
                 }
                 _ = try await model.setTrust(target: target, decision: trustDecision)
+                #if HOSTED_TEST
+                await model.hostedAfterNewSessionTrustResult?()
+                #endif
             }
             guard model.profiles.selected?.id == submittedScope.profileID,
                   model.knowledgeDestinationIdentity.lifecycleGeneration == submittedScope.lifecycleGeneration else { return }

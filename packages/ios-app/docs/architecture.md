@@ -798,7 +798,11 @@ a genuine namespace/workspace change clears the prior choices and configuration 
 settings/trust/Git preparation carries managed activity, an exact transport identity and latest request
 fence; retired completions cannot install values, errors or readiness.
 One synchronous creation owner admits only one command per gesture. Submission captures the workspace,
-source-control selection, model override and unsent prompt before any await. The receipt executor owns
+source-control selection, model override and unsent prompt before any await. Before implicit trust or
+create dispatch, the Task rechecks original namespace, foreground submission admission and live surface
+ownership: a captured workspace/trust choice can never be sent to a replacement Mac. After an accepted
+trust response, the existing original-namespace fence still guards follow-up creation; background never
+automatically replays trust or creates a session. The receipt executor owns
 uncertain commands; reconnect never automatically creates a new session. Typed terminal success survives
 same-authority background/socket retirement at `AppModel.createSession`, but still requires cancellation
 and original profile/lifecycle ownership. `NewSessionCreationOwner` holds one completed navigation route

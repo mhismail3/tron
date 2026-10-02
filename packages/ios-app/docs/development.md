@@ -1688,6 +1688,12 @@ fixture holds the real typed `session.create` result at a `HOSTED_TEST`-only fac
 releasing it on background (or after actual profile replacement). It is not a held unknown receipt:
 background success returns to the original admitted caller once, while a newer workspace keeps its
 draft and receives no forced navigation. Actual user dismissal does not reopen or create a session.
+Unresolved-trust journeys also hold the actual submission Task before any command, select a different
+server through the real picker, and release only at replacement foreground READY. The successor must
+receive neither the original workspace's implicit trust fallback nor a create. A background-before-send
+control remains unsent, an original-server fallback sends the captured `false` decision once, and an
+already accepted trust response reconciles canonically after background without automatic creation or
+trust replay. A later explicit Create gesture uses the settled trust decision.
 Each journey retains a screenshot and synthetic command/callback counts in the runner's xcresult.
 `NewSessionConfigurationOwnerTests` additionally exercises single-result consumption, namespace/workspace
 rejection and retirement while creation is still pending; these controls protect local ownership rather
@@ -1700,7 +1706,7 @@ TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronNewSessionUITests
 ```
 
-This is not physical-device/weak-network qualification, held trust-mutation proof, or closure of the
+This is not physical-device/weak-network qualification, uncertain trust-receipt recovery proof, or closure of the
 remaining first-party sheet audit. The fixture result gate never ships in production.
 
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
