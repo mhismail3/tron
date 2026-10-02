@@ -1125,18 +1125,29 @@ than the default one whose creating worktree no longer exists - a deleted
 worktree's simulator would otherwise hold gigabytes for the whole idle period,
 and a later command in that lane simply provisions it again - so an abandoned
 lane costs nothing. Marker-less state (including the default lane's directory,
-which exists before its first provision) is never removed by the sweep, and a
+which exists before its first provision) is never expired, and a
 marker written before lanes recorded their last use is kept until a command
-dates it. `clean` in the runner or the Gateway E2E harness empties its lane down
-to the lease file, which the command itself cannot delete while its holder
+dates it. The one marker-less shape the sweep removes is an abandoned lane: a
+directory directly in the lane root named like a lane (`ios-test` or
+`ios-test-NAME`), not a symlink, that holds nothing but a regular lease file
+whose lease it can take - what an older `clean` or a refusal left behind. It
+rechecks that under the lease and removes the lease file and the directory, as
+`clean`'s holder does; a held lease, any other file, a nested lane or an empty
+directory (a command between creating its lane and taking its lease) keeps it.
+A sweep's lease take never creates a lane directory, so a lane another holder
+removed meanwhile counts as busy instead of coming back marker-less.
+`clean` in the runner or the Gateway E2E harness empties its lane down to the
+lease file, which the command itself cannot delete while its holder
 holds it; the holder removes the lane directory when the command ends, still
 under the lease, only if that lease file - the one it locked, not one a command
 starting in the lane has since created - is all the directory holds, so a file
-or a lane nested inside it keeps it. Because `clean` and `lane-remove` unlink a
-lease file they hold, every lease take checks that the file it locked is still
+or a lane nested inside it keeps it. Because `clean`, `lane-remove` and the
+sweep unlink a lease file they hold, every lease take checks that the file it locked is still
 the one the lane's path names; a command that locked an unlinked lease file
 fails as contended (73) rather than share the lane with the command that
-recreated it.
+recreated it. A command whose lane directory is removed between creating it and
+opening its lease file fails the same way, with the same message, and never
+runs.
 
 How many simulators the Mac runs is decided by its memory, not by a fixed count.
 Before `simctl boot` - never for a lane whose simulator is already booted, which

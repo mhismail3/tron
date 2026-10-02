@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -335,9 +336,17 @@ def lease_hold(path: Path) -> Iterator[bool]:
     A lock on a lease file another holder unlinked after this one opened it is
     no lease: a command that recreated the file may hold the lane. That take
     counts as busy, as in `ios-test-lock.py` (`locked_file_is_named`).
+
+    Every caller takes the lease of a lane that exists, so a directory that is
+    gone was just removed by another holder: that take is busy too, and it never
+    recreates the directory, which would leave a marker-less lane behind.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as handle:
+    try:
+        lease = path.open("a+", encoding="utf-8")
+    except FileNotFoundError:
+        yield False
+        return
+    with lease as handle:
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -1118,7 +1127,7 @@ def sweep_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
 
 
 def sweep(arguments: argparse.Namespace) -> int:
-    """Reclaim every orphaned lane, expired lane and stale artifact. Idempotent."""
+    """Reclaim every orphaned, expired and abandoned lane and stale artifact. Idempotent."""
     markers = marker_paths(arguments.discovery_root)
     deadline = time.monotonic() + arguments.sweep_deadline_seconds
     failures = 0
@@ -1133,6 +1142,7 @@ def sweep(arguments: argparse.Namespace) -> int:
             failures += 1
         if sweep_lane(arguments, marker_path) == "failed":
             failures += 1
+    reclaim_abandoned_lanes(arguments)
     # Disk is the other half of what a command leaves behind, so the sweep that
     # reclaims memory reclaims it too: every provisioning command and `reap`
     # pass the runner's roots and prune through the same paths as `prune`.
@@ -1140,12 +1150,58 @@ def sweep(arguments: argparse.Namespace) -> int:
     return DESTINATION_EXIT if failures else 0
 
 
+def abandoned_lane(directory: Path) -> bool:
+    """Whether a lane directory holds nothing but a regular lease file."""
+    try:
+        return os.listdir(directory) == [LEASE_NAME] and stat.S_ISREG(os.lstat(directory / LEASE_NAME).st_mode)
+    except OSError:
+        return False
+
+
+def reclaim_abandoned_lanes(arguments: argparse.Namespace) -> None:
+    """Remove marker-less lane directories that hold only an idle lease file.
+
+    An older `clean`, a refusal before the lease holder alone made the lane
+    directory, or a sweep that recreated a removed lane left these behind, and
+    no marker-owned removal reaches them. Only a direct child of the lane root
+    named like a lane qualifies, and only under its lease, rechecked there - the
+    rule `clean`'s holder applies (`ios-test-lock.py`, `remove_empty_lane`): a
+    file or a nested lane keeps the directory, a held lease is a command that
+    has not provisioned yet, and an empty directory is a command between its
+    mkdir and its lease take. A command that opened the lease file this unlinks
+    fails as contended (73) and one that recreates it keeps the directory,
+    because the rmdir then fails.
+    """
+    try:
+        children = sorted(arguments.discovery_root.iterdir())
+    except OSError:
+        return
+    for directory in children:
+        name = directory.name
+        if not (name == LANE_DIRECTORY_PREFIX or name.startswith(LANE_DIRECTORY_PREFIX + "-")):
+            continue
+        if directory.is_symlink() or not directory.is_dir() or not abandoned_lane(directory):
+            continue
+        with lease_hold(directory / LEASE_NAME) as held:
+            if not held or not abandoned_lane(directory):
+                continue
+            try:
+                (directory / LEASE_NAME).unlink()
+                directory.rmdir()
+            except OSError:
+                # Raced by a command starting in this lane: the lane is its now.
+                continue
+        print(f"removed abandoned lane {lane_label(directory, arguments.default_state_dir)} ({directory}): "
+              "no ownership marker and nothing but an idle lease file")
+
+
 def expiry_of(marker_path: Path, now: float, default_state_dir: Path) -> str:
     """Why a lane is or is not due for removal.
 
-    "no-marker" means there is nothing that proves this directory is ours:
-    marker-less state is never removed, and the default lane's directory exists
-    as soon as any command creates it, before it has a simulator.
+    "no-marker" means there is nothing that proves this directory is ours, so
+    expiry never removes it; the default lane's directory exists as soon as any
+    command creates it, before it has a simulator. A marker-less directory
+    holding only its idle lease file is reclaimed by `reclaim_abandoned_lanes`.
     "worktree-deleted" means the worktree that created the lane is gone: every
     linked worktree has a lane of its own, so its simulator would otherwise
     outlive it for the whole idle period. The default lane is exempt - its

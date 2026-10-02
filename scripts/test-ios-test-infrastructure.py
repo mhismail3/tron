@@ -2634,9 +2634,12 @@ class LaneFixture(LaneHarness, unittest.TestCase):
         held = self.owned_lane("ios-test-held", UDID_D, last_used=old)
         self.hold_lease(held)
         dead = self.owned_lane("ios-test-dead", UDID_E, present=False, last_used=old)
+        # Marker-less state: a lone idle lease file would be an abandoned lane
+        # the sweep reclaims (AbandonedLaneFixture), anything more is kept.
         marker_less = self.discovery_root / "ios-test-nomarker"
         marker_less.mkdir()
         (marker_less / "lease.lock").write_text("")
+        (marker_less / "notes.txt").write_text("not the tooling's\n")
 
         result = self.reap()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -3807,6 +3810,154 @@ runpy.run_path(script, run_name="__main__")
         self.assertEqual(result.returncode, 73, result.stderr)
         self.assertTrue((lane / "simulator.json").exists())
         self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+
+
+class AbandonedLaneFixture(LaneHarness, unittest.TestCase):
+    """Issue #141: marker-less lane directories, and a lane removed mid-take.
+
+    Failure modes these cases target, written on the issue before the code:
+
+    1. A lane directory removed (by `clean`'s holder or the sweep) between the
+       holder's mkdir and its chmod kills the holder with a traceback instead
+       of the contended exit (73) and its message.
+    2. The same, removed between the chmod and the lease file's open.
+    3. The holder runs its command anyway after that removal - recreating the
+       directory - so two commands could own one lane.
+    4. The sweep's own lease take on a lane another remover just deleted
+       raises, or recreates the directory and leaves a marker-less one behind.
+    5. A marker-less lane directory holding only its idle lease file is never
+       reclaimed.
+    6. Reclaiming removes what is not an abandoned lane: a directory holding
+       any other file or a nested lane, one not named like a lane, a symlinked
+       directory or lease file.
+    7. Reclaiming removes a lane a live command holds before its marker exists.
+    8. A reclaimed lane cannot be leased and used again.
+    """
+
+    # Removes the lane directory at one point of a real process's take, as
+    # `clean`'s holder or the sweep would; no timing of real processes can pin
+    # that interleaving down. `chmod` follows the holder's mkdir and precedes
+    # its open; a lease take's mkdir or open is the sweep's first touch.
+    DIRECTORY_RACE = """
+import os, pathlib, runpy, shutil, sys
+script, lane, point = sys.argv[1], sys.argv[2], sys.argv[3]
+done = []
+def remove():
+    if not done and os.path.isdir(lane):
+        done.append(True)
+        shutil.rmtree(lane)
+if point in ("before-chmod", "after-chmod"):
+    chmod = os.chmod
+    def raced_chmod(path, mode, *rest, **named):
+        if str(path) != lane:
+            return chmod(path, mode, *rest, **named)
+        if point == "before-chmod":
+            remove()
+        result = chmod(path, mode, *rest, **named)
+        remove()
+        return result
+    os.chmod = raced_chmod
+else:
+    mkdir, open_ = pathlib.Path.mkdir, pathlib.Path.open
+    def raced_mkdir(self, *rest, **named):
+        if str(self) == lane:
+            remove()
+        return mkdir(self, *rest, **named)
+    def raced_open(self, *rest, **named):
+        if str(self) == os.path.join(lane, "lease.lock"):
+            remove()
+        return open_(self, *rest, **named)
+    pathlib.Path.mkdir, pathlib.Path.open = raced_mkdir, raced_open
+sys.argv = [script, *sys.argv[4:]]
+runpy.run_path(script, run_name="__main__")
+"""
+
+    def raced(self, script: Path, lane: Path, point: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-c", self.DIRECTORY_RACE, str(script), str(lane), point, *arguments],
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+        )
+
+    def test_a_holder_whose_lane_directory_is_removed_mid_take_fails_as_contended(self) -> None:
+        """Failure modes 1, 2 and 3: 73 and the contended message, and nothing runs."""
+        for point in ("before-chmod", "after-chmod"):
+            with self.subTest(point=point):
+                lane = self.discovery_root / f"ios-test-{point}"
+                ran = self.root / f"ran-{point}"
+                result = self.raced(
+                    LOCK, lane, point, "--lock", str(lane / "lease.lock"), "--",
+                    "/bin/sh", "-c", 'echo ran >"$1"', "sh", str(ran),
+                )
+                self.assertEqual(result.returncode, 73, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertIn(
+                    f"error: iOS test simulator is already leased (its lease file {lane / 'lease.lock'} "
+                    "was removed or replaced while this command took it)",
+                    result.stderr,
+                )
+                self.assertFalse(ran.exists())
+                self.assertFalse(lane.exists())
+
+    def test_the_sweep_skips_a_lane_another_remover_deleted_and_leaves_no_directory(self) -> None:
+        """Failure mode 4: the sweep's lease take never recreates a removed lane."""
+        old = time.time() - 8 * 24 * 3600
+        lane = self.owned_lane("ios-test-gone", UDID_A, worktree=str(self.root / "gone-worktree"), last_used=old)
+        result = self.raced(
+            SIMULATOR, lane, "lease-take", "sweep", "--discovery-root", str(self.discovery_root),
+            "--default-state-dir", str(self.state), "--development-state", str(self.development_marker),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse(lane.exists())
+
+    def test_the_sweep_reclaims_only_marker_less_lanes_holding_nothing_but_an_idle_lease(self) -> None:
+        """Failure modes 5, 6, 7 and 8, through `reap`."""
+        def lane(name: str, lease: str = "") -> Path:
+            directory = self.discovery_root / name
+            directory.mkdir(parents=True)
+            (directory / "lease.lock").write_text(lease)
+            return directory
+
+        abandoned = lane("ios-test-abandoned")
+        # A holder killed outright leaves its metadata, naming a dead pid.
+        stale = lane("ios-test-stale", json.dumps({"schema": "tron.ios-test-lock.v1", "pid": 999999}))
+        held = lane("ios-test-held")
+        self.hold_lease(held, command="run")
+        notes = lane("ios-test-notes")
+        (notes / "notes.txt").write_text("not the tooling's\n")
+        inner = lane("ios-test-outer/ios-test-inner")
+        unnamed = lane("ios-e2e-other")
+        target = lane("elsewhere")
+        (self.discovery_root / "ios-test-directory-link").symlink_to(target)
+        lease_link = self.discovery_root / "ios-test-lease-link"
+        lease_link.mkdir()
+        (lease_link / "lease.lock").symlink_to(target / "lease.lock")
+        # A command that has made its lane directory but not yet opened its lease.
+        starting = self.discovery_root / "ios-test-starting"
+        starting.mkdir()
+
+        result = self.reap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(abandoned.exists())
+        self.assertFalse(stale.exists())
+        self.assertIn(f"removed abandoned lane abandoned ({abandoned})", result.stdout)
+        self.assertTrue(self.lock_holder(held / "lease.lock"))
+        self.assertIn('"command": "run"', (held / "lease.lock").read_text())
+        self.assertEqual(notes.joinpath("notes.txt").read_text(), "not the tooling's\n")
+        for kept in (inner / "lease.lock", unnamed / "lease.lock", target / "lease.lock", lease_link / "lease.lock", starting):
+            self.assertTrue(os.path.lexists(kept), kept)
+        self.assertTrue((self.discovery_root / "ios-test-directory-link").is_symlink())
+
+        again = self.reap()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn("removed abandoned lane", again.stdout)
+
+        reused = subprocess.run(
+            [sys.executable, str(LOCK), "--lock", str(abandoned / "lease.lock"), "--", "/bin/sh", "-c", "exit 0"],
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+        )
+        self.assertEqual(reused.returncode, 0, reused.stderr)
+        self.assertTrue((abandoned / "lease.lock").exists())
 
 
 class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
