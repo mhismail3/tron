@@ -245,8 +245,12 @@ build_candidate() {
 
 if supervisor_live; then SUPERVISOR_LIVE=yes; else SUPERVISOR_LIVE=no; fi
 HOST="$("$NODE_BIN" "$STATE_HELPER" resolve-command-host "$STATE_FILE" "$HOST" "$HOST_EXPLICIT" "$SUPERVISOR_LIVE")" || exit 64
+# Only commands that launch the Gateway need the signed launcher (__supervise
+# checks it again itself). Handoff never executes it: it requires a live
+# supervisor, which passed this check before launching, and handoff-debug
+# refuses without a validated Stable payload sharing the Debug Node runtime.
 case "$command" in
-  start|restart|handoff) require_installed_launcher ;;
+  start|restart) require_installed_launcher ;;
 esac
 case "$command" in
   start|restart|stop|handoff)
@@ -269,13 +273,14 @@ case "$command" in
     ;;
   start|restart)
     # Measure the source before building; a dirty tree still stages its full
-    # HEAD and records dirtiness against the candidate's epoch.
+    # HEAD. record-source re-measures after the build and records the epoch
+    # dirty if either measurement is, or if HEAD moved (#140).
     candidate_source="$("$NODE_BIN" "$STATE_HELPER" candidate-source "$ROOT")" || { echo "Debug candidate source revision is unavailable" >&2; exit 78; }
     read -r source_revision source_dirty candidate_version <<<"$candidate_source"
     identity_line="$(build_candidate "$source_revision" "$candidate_version")"
     identity_line="$("$NODE_BIN" "$STATE_HELPER" validate-build-identity "$identity_line")" || exit 78
     read -r version payload_fingerprint candidate_epoch <<<"$identity_line"
-    "$NODE_BIN" "$STATE_HELPER" record-source "$STATE_FILE" "$candidate_epoch" "$ROOT" "$source_dirty"
+    "$NODE_BIN" "$STATE_HELPER" record-source "$STATE_FILE" "$candidate_epoch" "$ROOT" "$source_revision" "$source_dirty"
     if supervisor_live; then
       token_args=(--channel dev --home "$HOME/.tron-dev" --version "$version" --fingerprint "$payload_fingerprint" --host "$HOST" --port 9848 --command-id "debug-update-$(date +%s)-$$")
       TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 "$NODE_BIN" "$DEPLOY" promote "${token_args[@]}" >&2

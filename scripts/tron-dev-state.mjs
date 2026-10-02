@@ -257,19 +257,25 @@ function currentBranch(worktree) {
   } catch { return null; }
 }
 
-// The stage arguments `scripts/tron dev` builds a candidate with. The payload
-// manifest requires the full commit (gateway-payload-deploy.mjs
+// The payload manifest requires the full commit (gateway-payload-deploy.mjs
 // `payloadManifest`), so uncommitted work never alters the revision: it is
-// measured apart, before the build, as any non-ignored change including
-// untracked files the build may compile in. The version label is free-form.
-// `--no-optional-locks` keeps `git status` from rewriting (and locking) the
-// index of a checkout other sessions may be using.
-function candidateSource(worktree) {
-  const root = text(worktree, "");
-  if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
+// measured apart, as any non-ignored change including untracked files the
+// build may compile in. `--no-optional-locks` keeps `git status` from
+// rewriting (and locking) the index of a checkout other sessions may be using.
+function measureSource(root) {
   const gitOutput = (...argumentsList) => execFileSync("git", ["-C", root, ...argumentsList], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 16 * 1024 * 1024 });
   const revision = gitOutput("rev-parse", "--verify", "HEAD").trim();
   const dirty = gitOutput("--no-optional-locks", "status", "--porcelain", "--untracked-files=normal").trim() !== "";
+  return { revision, dirty };
+}
+
+// The stage arguments `scripts/tron dev` builds a candidate with, measured
+// before the build. The version label is free-form and only reflects this
+// pre-build measurement; the recorded source flag is authoritative.
+function candidateSource(worktree) {
+  const root = text(worktree, "");
+  if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
+  const { revision, dirty } = measureSource(root);
   const stamp = new Date().toISOString().replace(/[-:T]/gu, "").slice(0, 14);
   return { revision, dirty, version: `debug-${revision.slice(0, 12)}${dirty ? "-dirty" : ""}-${stamp}` };
 }
@@ -280,12 +286,18 @@ function candidateSource(worktree) {
 // the payload fingerprint is shared by Gateway-identical checkouts); status
 // resolves it from the ready epoch, so a failed restart never relabels the
 // running Gateway. Trimming keeps the running record.
-async function recordCandidateSource(path, runtimeEpoch, worktree, dirtyArgument) {
+// Recording runs after the build, so it re-measures the tree here (#140): the
+// candidate is dirty if it was dirty before the build, is dirty now, or HEAD
+// moved away from the revision the payload was staged with, since the build may
+// have compiled any of those changes in.
+async function recordCandidateSource(path, runtimeEpoch, worktree, builtRevision, dirtyBeforeBuild) {
   if (typeof runtimeEpoch !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(runtimeEpoch)) throw new Error("candidate source requires a runtime epoch");
   const root = text(worktree, "");
   if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
-  if (dirtyArgument !== "true" && dirtyArgument !== "false") throw new Error("candidate source dirty flag must be true or false");
-  const dirty = dirtyArgument === "true";
+  if (typeof builtRevision !== "string" || !/^[0-9a-f]{40}$/u.test(builtRevision)) throw new Error("candidate source requires the full built revision");
+  if (dirtyBeforeBuild !== "true" && dirtyBeforeBuild !== "false") throw new Error("candidate source dirty flag must be true or false");
+  const afterBuild = measureSource(root);
+  const dirty = dirtyBeforeBuild === "true" || afterBuild.dirty || afterBuild.revision !== builtRevision;
   const branch = currentBranch(root);
   await withStateLock(path, async () => {
     const current = await readState(path);
@@ -353,7 +365,7 @@ if (command === "transition") {
   await writeFields(path, parseFields(args.slice(1)));
 } else if (command === "record-source") {
   if (!args[0]) throw new Error("record-source requires path");
-  await recordCandidateSource(args[0], args[1], args[2], args[3]);
+  await recordCandidateSource(args[0], args[1], args[2], args[3], args[4]);
 } else if (command === "candidate-source") {
   const { revision, dirty, version } = candidateSource(args[0]);
   process.stdout.write(`${revision} ${dirty} ${version}\n`);

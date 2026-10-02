@@ -128,8 +128,11 @@ worktree, branch and dirtiness (`sourceWorktree`, `sourceBranch`,
 `sourceDirty`) of the running candidate. `start`/`restart` build from a dirty
 tree too: the candidate's `sourceRevision` is always the full 40-hex `HEAD` the
 payload manifest requires, and uncommitted work (tracked edits or untracked,
-non-ignored files, measured before the build) is recorded only as `sourceDirty`
-and a `-dirty` marker in the free-form version label, never in the revision.
+non-ignored files) is recorded only as `sourceDirty` and a `-dirty` marker in
+the free-form version label, never in the revision. The tree is measured before
+the build (the label reflects only this) and again when the record is written
+after it; `sourceDirty` is true if either measurement is dirty or `HEAD` moved
+while the candidate built.
 `start`/`restart` record the worktree, branch and dirtiness they built from against the
 staged candidate's runtime epoch (eight records, always keeping the running
 one); status resolves them from the epoch that reached readiness, so a failed
@@ -153,10 +156,12 @@ supervisor or Gateway. The Debug Gateway is one shared resource: check
 candidate while its work may still be validating. A command without a host flag
 inherits a live supervisor's recorded host; an explicit conflicting flag fails
 closed and requires `scripts/tron dev stop` before changing exposure. A fresh
-start without a flag defaults to loopback. This sole Debug supervisor uses the signed launcher from
-`/Applications/Tron.app`, builds and stages an immutable candidate, preserves
-accepted-run shutdown draining, and waits for truthful exact health identity.
-It refuses an unknown owner already listening on 9848. After testing, only the
+start without a flag defaults to loopback. `start`, `restart` and this sole Debug
+supervisor require the signed launcher from
+`/Applications/Tron.app`; `stop`, `status` and `handoff` never execute it.
+`start`/`restart` build and stage an immutable candidate and refuse an unknown
+owner already listening on 9848; the supervisor preserves accepted-run shutdown
+draining and waits for truthful exact health identity. After testing, only the
 maintainer may run `scripts/tron dev handoff --tailscale`; it performs authenticated
 pre/post identity checks and copies the exact payload into Stable as an inactive
 candidate only after pre/post authenticated identity proof. Stable is always a
@@ -166,9 +171,7 @@ whose dirtiness is unknown (no record, or a record written before dirtiness was
 recorded) both fail closed; commit any changes, run `scripts/tron dev restart`,
 and hand off the resulting clean candidate. The copy pins the admitted version
 and fingerprint under the Debug payload lock, so a Debug apply or rollback that
-changes the selection after admission is refused rather than copied. The clean
-record reflects the tree when `start`/`restart` measured it, before the build;
-edits made while that build runs are not detected. Promotion still
+changes the selection after admission is refused rather than copied. Promotion still
 requires explicit user confirmation in iOS pinned to version plus fingerprint. Debug and Stable RPCs are
 channel-bound; neither runtime can mutate the other channel. Do not
 replace `/Applications/Tron.app`, invoke production
