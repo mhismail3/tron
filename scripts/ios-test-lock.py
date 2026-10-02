@@ -31,8 +31,10 @@ and one message, rather than run on a lane it does not hold (T-3).
 With --remove-empty-lane (`clean`), the holder removes the lane's directory
 when the command ends, if the lease file is all it still holds: only the holder
 can, because it holds the lease until the command tree has ended. Since a
-holder can unlink the lease file, a lease counts as taken only when the file
-locked is still the one --lock names; otherwise the take fails as contended.
+holder (or the sweep reclaiming an abandoned lane) can unlink the lease file and
+remove its directory, a lease counts as taken only when the file locked is
+still the one --lock names; otherwise - and when the directory goes before the
+lease file is opened - the take fails as contended.
 """
 
 from __future__ import annotations
@@ -211,11 +213,11 @@ def verify_inherited(lock: Path, lane: str) -> int:
 def locked_file_is_named(lock: Path, handle: IO[str]) -> bool:
     """Whether the file this holder locked is still the one `lock` names.
 
-    A holder that removes a lane (`--remove-empty-lane`, `lane-remove`) unlinks
-    the lease file while it holds it. A command that opened the file just
-    before that locks the unlinked file once the remover lets go, while a
-    command that recreated the file holds the lane's real lease: the lock is
-    then no lease at all. `ios-test-simulator.py` checks its own takes the same
+    A holder that removes a lane (`--remove-empty-lane`, `lane-remove`, the
+    sweep reclaiming an abandoned lane) unlinks the lease file while it holds
+    it. A command that opened the file just before that locks the unlinked
+    file once the remover lets go, while a command that recreated the file
+    holds the lane's real lease: the lock is then no lease at all. `ios-test-simulator.py` checks its own takes the same
     way.
     """
     try:
@@ -224,6 +226,16 @@ def locked_file_is_named(lock: Path, handle: IO[str]) -> bool:
         return False
     held = os.fstat(handle.fileno())
     return (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino)
+
+
+def lease_file_lost(resource: str, lock: Path) -> int:
+    """Refuse a take whose lease file another holder removed or replaced."""
+    print(
+        f"error: {resource} is already leased (its lease file {lock} "
+        "was removed or replaced while this command took it)",
+        file=sys.stderr,
+    )
+    return LOCKED_EXIT
 
 
 def remove_empty_lane(lock: Path, handle: IO[str]) -> None:
@@ -275,9 +287,16 @@ def main() -> int:
     if not arguments.command:
         parser.error("a command is required after --")
 
-    arguments.lock.parent.mkdir(parents=True, exist_ok=True)
-    os.chmod(arguments.lock.parent, 0o700)
-    with arguments.lock.open("a+", encoding="utf-8") as handle:
+    try:
+        arguments.lock.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(arguments.lock.parent, 0o700)
+        lease = arguments.lock.open("a+", encoding="utf-8")
+    except FileNotFoundError:
+        # Another holder's `clean` or the sweep removed this emptied lane between
+        # the mkdir and the open. Recreating it here would race that remover
+        # again, so the take fails as contended, never as a traceback.
+        return lease_file_lost(arguments.resource, arguments.lock)
+    with lease as handle:
         process: subprocess.Popen[bytes] | None = None
         interrupted: int | None = None
         held = False
@@ -310,12 +329,7 @@ def main() -> int:
                 print(f"error: {arguments.resource} is already leased ({owner})", file=sys.stderr)
                 return LOCKED_EXIT
             if not locked_file_is_named(arguments.lock, handle):
-                print(
-                    f"error: {arguments.resource} is already leased (its lease file {arguments.lock} "
-                    "was removed or replaced while this command took it)",
-                    file=sys.stderr,
-                )
-                return LOCKED_EXIT
+                return lease_file_lost(arguments.resource, arguments.lock)
             held = True
             if interrupted is not None:
                 return 128 + interrupted

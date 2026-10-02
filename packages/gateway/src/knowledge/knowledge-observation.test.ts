@@ -47,6 +47,17 @@ async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<voi
 }
 
 describe("KnowledgeObservationService", () => {
+  it("publishes observations from one prose-wrapped JSON object", async () => {
+    const { store, observer } = await fixture({ infer: async () => "Observations follow.\n" + output + "\nEnd." });
+    try {
+      observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
+      await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1);
+      const records = (await store.list({ kind: "observation" })).records;
+      const record = await store.read(records[0]!.id);
+      expect(record?.content).toMatchObject({ items: [{ text: "The release is planned for Friday." }] });
+    } finally { observer.dispose(); }
+  });
+
   it("supplies the configured model with the exact observation JSON contract", async () => {
     const completeSimple = vi.fn(async (_model: unknown, _context: Context, _options: unknown) => fauxAssistantMessage(output));
     const model = fauxProvider({ provider: "observer-output-contract" }).getModel();

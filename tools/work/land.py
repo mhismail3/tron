@@ -17,9 +17,10 @@ from gh import Gh, GhError
 # Issue forms prefix titles with "[Task]: "; claim.slugify drops it the same way.
 _FORM_PREFIX = re.compile(r"^\s*\[[^\]]*\]:?\s*")
 _SUMMARY = re.compile(r"^## Summary\n\n(.*?)\n\n## Verification\n", re.DOTALL | re.MULTILINE)
+_VALIDATION = "\n## Maintainer validation\n\n"
 # Git's markers for an operation that has stopped half way.
 _IN_PROGRESS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
-                ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"))
+                ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"))
 # How often land re-reads a pull request GitHub has just merged before giving up.
 _MERGE_CONFIRMATIONS = 5
 
@@ -76,7 +77,7 @@ def _is_ancestor(repo: Path, ancestor: str, head: str) -> bool:
     return _git(repo, "merge-base", "--is-ancestor", ancestor, head, check=False).returncode == 0
 
 
-def _operation_in_progress(root: Path) -> Optional[str]:
+def operation_in_progress(root: Path) -> Optional[str]:
     for marker, name in _IN_PROGRESS:
         path = Path(_out(root, "rev-parse", "--path-format=absolute", "--git-path", marker))
         if path.exists():
@@ -160,12 +161,17 @@ def _combine(states: List[str]) -> str:
     return "success" if all(state == "success" for state in states) else "pending"
 
 
-def _open_pull(gh: Gh, branch: str) -> Optional[dict]:
-    pulls = json.loads(gh.run("pr", "list", "--head", branch, "--state", "open",
-                              "--json", "number,title,body,url,isCrossRepository"))
+def merged_pulls(gh: Gh, branch: str) -> List[dict]:
+    """Merged pull requests from `branch` in this repository, into any base, oldest first."""
+    pulls = json.loads(gh.run("pr", "list", "--head", branch, "--state", "merged", "--limit", "100", "--json",
+                              "number,body,headRefOid,baseRefName,mergeCommit,isCrossRepository"))
     # Claim branch names are public; a fork can open a pull request with the same head name.
-    own = sorted((p for p in pulls if not p["isCrossRepository"]), key=lambda p: p["number"])
-    return own[0] if own else None
+    return sorted((p for p in pulls if not p["isCrossRepository"]), key=lambda p: p["number"])
+
+
+def _merged_pull(gh: Gh, branch: str, head: str, base: str) -> Optional[dict]:
+    """The pull request from `branch` in this repository that GitHub merged into `base` at exactly `head`."""
+    return next((p for p in merged_pulls(gh, branch) if p["baseRefName"] == base and p["headRefOid"] == head), None)
 
 
 def _view(gh: Gh, number: int) -> dict:
@@ -215,8 +221,30 @@ def pull_body(keyword: str, number: int, summary: str, receipt: dict, action: Op
     return body
 
 
-def _handoff(number: int, pull: int, merge_sha: str, action: str) -> str:
-    return (f"<!-- work:needs-you pull={pull} -->\n"
+def merge_intent(pull: int, body: str, number: int) -> Tuple[str, Optional[str]]:
+    """The keyword a body written by pull_body merges with, and its validation text (None for Closes)."""
+    text = (body or "").replace("\r\n", "\n")  # a body saved from the web editor has CRLF line ends
+    keyword = re.match(rf"(Closes|Refs) #{number}(?!\d)", text)
+    if keyword is None:
+        raise LandError(f"#{pull} neither closes nor refers to #{number}")
+    # Searched after the Verification heading: the summary may use the same heading.
+    summary = _SUMMARY.search(text)
+    rest = text[summary.end():] if summary else ""
+    at = rest.find(_VALIDATION)
+    action = rest[at + len(_VALIDATION):].strip() if at >= 0 else None
+    if keyword.group(1) == "Refs" and not action:
+        raise LandError(f"#{pull} refers to #{number} but has no Maintainer validation text to hand off")
+    if keyword.group(1) == "Closes" and action is not None:
+        raise LandError(f"#{pull} closes #{number} but also has a Maintainer validation section")
+    return keyword.group(1), action
+
+
+def _handoff_marker(pull: int) -> str:
+    return f"<!-- work:needs-you pull={pull} -->"
+
+
+def _handoff(pull: int, merge_sha: str, action: str) -> str:
+    return (f"{_handoff_marker(pull)}\n"
             f"Merged in #{pull} as `{merge_sha[:12]}`. Waiting for maintainer-only validation:\n\n"
             f"{action.strip()}\n")
 
@@ -255,11 +283,11 @@ def delete_branch(root: Path, remote: str, branch: str, head: str) -> str:
 
 
 def after_merge(gh: Gh, root: Path, config: dict, issue: dict, pull: int, merge_sha: str, head: str,
-                branch: str, action: Optional[str]) -> None:
+                branch: str, action: Optional[str], resumable: bool) -> None:
     try:
         _finish_issue(gh, root, config, issue, pull, merge_sha, head, branch, action)
     except (GhError, LandError, claims.ClaimError) as error:
-        # Nothing reruns these steps: the claim branch may be gone, so name them.
+        # Only land, rerun from the merged head's worktree, resumes these steps; name them for everyone else.
         number, rules, settings = issue["number"], config["claim"], config["land"]
         if action is not None:
             steps = (f"reopen #{number} if it is closed, comment the validation text below on it, add the "
@@ -267,8 +295,12 @@ def after_merge(gh: Gh, root: Path, config: dict, issue: dict, pull: int, merge_
                      f"{config['dashboard']['needsYouStatus']}")
         else:
             steps = f"close #{number} if it is open and set Status to {settings['doneStatus']}"
-        message = (f"#{pull} merged as {merge_sha[:12]}, then finishing stopped: {error}\n"
-                   f"Finish by hand: {steps}; delete {rules['remote']}/{branch} if it is still at {head[:12]}.")
+        message = f"#{pull} merged as {merge_sha[:12]}, then finishing stopped: {error}\n"
+        if resumable:
+            message += f"Run land again from this worktree at {head[:12]} to finish, or finish by hand: "
+        else:
+            message += "Finish by hand: "
+        message += f"{steps}; delete {rules['remote']}/{branch} if it is still at {head[:12]}."
         if action is not None:
             message += f"\nValidation text (also in #{pull}'s body):\n\n{action.strip()}"
         raise LandError(message) from None
@@ -276,25 +308,41 @@ def after_merge(gh: Gh, root: Path, config: dict, issue: dict, pull: int, merge_
 
 def _finish_issue(gh: Gh, root: Path, config: dict, issue: dict, pull: int, merge_sha: str, head: str,
                   branch: str, action: Optional[str]) -> None:
+    print(f"issue:    #{issue['number']} {_finish_issue_state(gh, config, issue, pull, merge_sha, action)}")
+    print(f"branch:   {config['claim']['remote']}/{branch} "
+          f"{delete_branch(root, config['claim']['remote'], branch, head)}")
+
+
+def _finish_issue_state(gh: Gh, config: dict, issue: dict, pull: int, merge_sha: str, action: Optional[str]) -> str:
+    """Close the issue or hand it off, unless a finished earlier run's outcome was since changed by hand."""
     rules, settings = config["claim"], config["land"]
     owner, name = _repository(gh)
     current = start.load_issue(gh, owner, name, issue["number"], rules, config["project"]["title"])
     number = str(issue["number"])
     if action is not None:
+        # The reopen comes before the handoff comment, so with the marker present an
+        # earlier run reopened the issue: closed now, it is the maintainer's close.
+        handed_off = any(_handoff_marker(pull) in comment for comment in current["comments"])
+        if handed_off and current["state"] != "OPEN":
+            return f"was handed off in #{pull} and closed since; left as it is"
         if current["state"] != "OPEN":
             gh.run("issue", "reopen", number)
-        gh.run("issue", "comment", number, "--body-file", "-", stdin=_handoff(issue["number"], pull, merge_sha, action))
+        if not handed_off:
+            gh.run("issue", "comment", number, "--body-file", "-", stdin=_handoff(pull, merge_sha, action))
         gh.run("issue", "edit", number, "--add-label", settings["userValidationLabel"])
-        target = config["dashboard"]["needsYouStatus"]
+        target, outcome = config["dashboard"]["needsYouStatus"], "open"
     else:
+        landed = f"Landed in #{pull} as"
+        # Only an earlier run closes with this comment: open now, it is the maintainer's reopen.
+        if current["state"] == "OPEN" and any(comment.startswith(landed) for comment in current["comments"]):
+            return f"was closed for #{pull} and reopened since; left as it is"
         # `Closes #N` did not always close the issue when this was done by hand.
         if current["state"] == "OPEN":
-            gh.run("issue", "close", number, "--comment", f"Landed in #{pull} as `{merge_sha[:12]}`.")
-        target = settings["doneStatus"]
+            gh.run("issue", "close", number, "--comment", f"{landed} `{merge_sha[:12]}`.")
+        target, outcome = settings["doneStatus"], "closed"
     if current["item"] is not None and current["status"] != target:
         start.set_status(gh, current["item"], target)
-    print(f"issue:    #{number} {'open, ' + target if action is not None else 'closed, ' + target}")
-    print(f"branch:   {rules['remote']}/{branch} {delete_branch(root, rules['remote'], branch, head)}")
+    return f"{outcome}, {target}"
 
 
 def _repository(gh: Gh) -> Tuple[str, str]:
@@ -345,13 +393,17 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
     number = claims.claimed_issue(branch)
     if number is None:
         raise LandError(f"{branch} is not a claim branch (<type>/<issue>-<slug>)")
-    operation = _operation_in_progress(root)
+    operation = operation_in_progress(root)
     if operation:
         raise LandError(f"a {operation} is in progress; finish or abort it first")
     dirty = _dirty(root)
     if dirty:
         raise LandError("commit or remove local changes first:\n  " + "\n  ".join(dirty[:20]))
     session = start.session_of(session_arg)
+    head = _out(root, "rev-parse", "HEAD")
+    merged = _merged_pull(gh, branch, head, base)
+    if merged is not None:
+        return _resume(gh, root, config, branch, number, session, head, merged, action)
     owned = [c for c in claims.existing_claims(root, remote, base, number) if c.branch == branch]
     if not owned:
         raise LandError(f"{remote}/{branch} does not exist; claim the issue with start first")
@@ -364,7 +416,7 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
         raise LandError(f"#{number} is closed")
     if issue["item"] is None:
         raise LandError(f"#{number} is not in the Project; add it back first")
-    pull = _open_pull(gh, branch)
+    pull = verify.open_pull(gh, branch)
     if summary_path is not None:
         summary = summary_path.read_text()
     elif pull is not None and _SUMMARY.search((pull["body"] or "").replace("\r\n", "\n")):
@@ -419,10 +471,37 @@ def land(gh: Gh, repo: Path, config: dict, session_arg: Optional[str], title_arg
         raise LandError(f"{remote}/{base} moved in each of {settings['maxRounds']} rounds; nothing was merged. "
                         "Run land again.")
 
-    after_merge(gh, root, config, issue, pull["number"], merge_sha, head, branch, action)
-    primary = start.primary_checkout(root)
-    removal = (f"git -C {primary} worktree remove {root} && " if root.resolve() != primary.resolve() else "")
-    print(f"cleanup:  {removal}git -C {primary} branch -D {branch}")
+    after_merge(gh, root, config, issue, pull["number"], merge_sha, head, branch, action, resumable=True)
+    print("cleanup:  run `work cleanup` from this worktree once you are done in it")
+    return 0
+
+
+def _resume(gh: Gh, root: Path, config: dict, branch: str, number: int, session: str, head: str, pull: dict,
+            action_arg: Optional[str]) -> int:
+    """Finish a land that stopped after GitHub merged `pull` at the local head."""
+    rules = config["claim"]
+    remote, base = rules["remote"], rules["baseBranch"]
+    # The remote branch may already be gone; the claim commit is still in the local history.
+    _fetch_base(root, remote, base)
+    owner = claims.claim_session(root, f"{remote}/{base}", "HEAD", number)
+    if owner != session:
+        raise LandError(f"{branch} is claimed by session {owner or 'unknown: no claim commit'}, not {session}")
+    # The merged body is what GitHub merged with; a different request cannot change it now.
+    keyword, action = merge_intent(pull["number"], pull["body"], number)
+    if action_arg is not None and action_arg.strip() != action:
+        raise LandError(f"#{pull['number']} merged with `{keyword} #{number}` and "
+                        + ("different validation text" if action else "no validation handoff")
+                        + "; run land again without --needs-user-validation to finish what it merged")
+    if action is not None:
+        _scrub(root, config, "validation text", action)
+    owner_name, name = _repository(gh)
+    issue = start.load_issue(gh, owner_name, name, number, rules, config["project"]["title"])
+    if issue["item"] is None:
+        raise LandError(f"#{number} is not in the Project; add it back first")
+    merge_sha = pull["mergeCommit"]["oid"]
+    print(f"resumed:  #{pull['number']} merged {head[:12]} as {merge_sha}")
+    after_merge(gh, root, config, issue, pull["number"], merge_sha, head, branch, action, resumable=True)
+    print("cleanup:  run `work cleanup` from this worktree once you are done in it")
     return 0
 
 
@@ -494,8 +573,10 @@ def steward(gh: Gh, repo: Path, config: dict, number: Optional[int]) -> int:
     state, details = head_state(row["contexts"], config)
     if state != "success":
         raise LandError(f"#{row['pr']} is not ready at {head[:12]}: " + "; ".join(details))
-    if not re.match(rf"Closes #{number}(?!\d)", row["body"] or ""):
-        raise LandError(f"#{row['pr']} does not close #{number}; a validation handoff is its owner's to land")
+    keyword, action = merge_intent(row["pr"], row["body"], number)
+    if action is not None:
+        # Checked before the merge, as land does, so a refusal cannot lose the handoff.
+        _scrub(root, config, "validation text", action)
     if _remote_head(root, remote, branch) != head:
         raise LandError(f"{remote}/{branch} is not at the pull request head {head[:12]}")
     _git(root, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}")
@@ -510,8 +591,8 @@ def steward(gh: Gh, repo: Path, config: dict, number: Optional[int]) -> int:
     issue = start.load_issue(gh, owner, name, number, rules, config["project"]["title"])
     if issue["state"] != "OPEN":
         raise LandError(f"#{number} is closed")
-    merge_sha = merge(gh, row["pr"], row["title"], number, head, "Closes", time.sleep,
+    merge_sha = merge(gh, row["pr"], row["title"], number, head, keyword, time.sleep,
                       config["land"]["pollSeconds"])
     print(f"merged:   #{row['pr']} as {merge_sha}")
-    after_merge(gh, root, config, issue, row["pr"], merge_sha, head, branch, None)
+    after_merge(gh, root, config, issue, row["pr"], merge_sha, head, branch, action, resumable=False)
     return 0

@@ -1,4 +1,4 @@
-"""Isolated checks for verify failure modes 12-19 in README.md.
+"""Isolated checks for verify failure modes 12-19 and 63 in README.md.
 
 Real temporary repositories with a local bare remote; GitHub is a fake `gh`
 (WORK_GH) that records every call so posting order can be asserted.
@@ -39,7 +39,8 @@ FAKE_GH = textwrap.dedent(
     if args[0] == "repo":
         print("acme/widget")
     elif args[0] == "pr":
-        print(os.environ.get("FAKE_GH_PR", ""))
+        # FAKE_GH_PR: the open pull requests for the head branch, as JSON.
+        print(os.environ.get("FAKE_GH_PR") or "[]")
     elif args[0] == "api":
         method, path = args[args.index("-X") + 1], args[3]
         if fail and fail in path:
@@ -269,13 +270,27 @@ class PostBindingTests(PostFixture):
     def test_open_pull_request_is_preferred_over_the_issue(self):
         self.commit(self.repo, "app/a.txt", "two\n")
         self.push()
-        os.environ["FAKE_GH_PR"] = "42"
+        os.environ["FAKE_GH_PR"] = json.dumps([{"number": 42, "isCrossRepository": False}])
         self.post(self.verify())
         comment_paths = [path for _, path, _ in self.api_calls() if path.endswith("/comments")]
         self.assertEqual(comment_paths, ["repos/acme/widget/issues/42/comments"])
         uploads = [path for method, path, _ in self.api_calls() if method == "PUT"]
         self.assertTrue(uploads)
         self.assertTrue(all(p.startswith("repos/acme/widget-evidence/contents/7/") for p in uploads), uploads)
+
+    # Failure mode 63: claim branch names are public, so a fork can open a pull
+    # request with the same head name; it never receives the evidence.
+    def test_fork_pull_request_with_the_branch_name_is_ignored(self):
+        fork, own = {"number": 41, "isCrossRepository": True}, {"number": 42, "isCrossRepository": False}
+        for pulls, target in (([fork], 7), ([fork, own], 42)):
+            with self.subTest(pulls=pulls):
+                self.gh_log.unlink(missing_ok=True)
+                self.commit(self.repo, "app/a.txt", f"to {target}\n")
+                self.push()
+                os.environ["FAKE_GH_PR"] = json.dumps(pulls)
+                self.post(self.verify())
+                comment_paths = [path for _, path, _ in self.api_calls() if path.endswith("/comments")]
+                self.assertEqual(comment_paths, [f"repos/acme/widget/issues/{target}/comments"])
 
 
 class PostStatusTests(PostFixture):

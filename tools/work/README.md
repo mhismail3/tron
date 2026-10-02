@@ -205,8 +205,10 @@ branch and writes a receipt for that exact commit.
    head.
 2. It sets the commit status `verify.statusContext` to `pending` on the head,
    replacing any earlier status there before any other lookup can fail.
-3. The target is the open pull request for the branch, otherwise the issue
-   whose number is in the branch name (`<type>/<issue>-<slug>`).
+3. The target is the open pull request for the branch whose head is in this
+   repository, otherwise the issue whose number is in the branch name
+   (`<type>/<issue>-<slug>`). A fork's pull request with the same head name
+   never counts.
 4. Full logs and the receipt go only to the evidence repository
    `<owner>/<repo><verify.evidenceRepositorySuffix>`, derived at run time,
    under `<issue>/<head>/`. They are not scrubbed and hold local paths, so
@@ -324,6 +326,10 @@ covers the GitHub side.
     an empty diff, an unclassified path, or an unresolved base run it. The
     workflow logs the decision. `scripts/test-ci-ios-infra-scope.py` covers the
     path classification.
+63. **A fork's pull request receives a branch's verify evidence.** Claim branch
+    names are public, so a fork can open a pull request with the same head
+    name. `--post` comments on the branch's own pull request, or on the issue
+    when only a fork's exists.
 
 ## `dashboard`
 
@@ -407,7 +413,9 @@ Sections, in order:
    authority; Status is its projection.
 9. **Orphans:** worktrees under `claim.worktreeRoot` that are not on the claim
    branch of an open issue, and remote claim branches whose issue is closed or
-   does not exist.
+   does not exist. A worktree on a claim branch whose issue is closed or whose
+   remote branch is gone says that `work cleanup --all` removes it once its
+   pull request merged at its head.
 10. **Regressions:** open issues labeled `regressionLabel`.
 
 The names it reads (statuses, labels, fields, the verify context) come from the
@@ -512,7 +520,7 @@ work is committed. The `land` section of `.github/work.json` configures it.
    - the current branch is not a claim branch on the remote, or its claim
      commit names another session (the session is resolved as in `start`);
    - the worktree has modified, staged or untracked files, HEAD is detached,
-     or a merge, rebase, cherry-pick or revert is in progress;
+     or a merge, rebase, cherry-pick, revert or bisect is in progress;
    - the issue is closed or not in the Project;
    - no pull request is open for the branch and `--summary-file` is missing;
    - the scrub command (`verify.scrubCommand`) finds anything in the title,
@@ -570,15 +578,36 @@ work is committed. The `land` section of `.github/work.json` configures it.
      that is already gone (the repository may delete merged branches) is fine;
      a branch at any other commit, including one pushed to just before the
      delete, is kept and reported.
-   - It prints the commands that remove the local worktree and branch.
-     Removing them is the cleanup command's job, not `land`'s.
+   - It prints `work cleanup`, which the owner runs from the worktree once
+     it is done there. Removing the worktree and the local branch is
+     `cleanup`'s job, not `land`'s.
 
 Running `land` again after a stop before the merge resumes: it reuses the open
-pull request and the carried checks. A stop after GitHub reports MERGED is not
-resumed, because the claim branch may already be gone. The error names the
-steps left to do by hand (close the issue or hand it off, set Status, delete
-the branch) and, with `--needs-user-validation`, repeats the text, which is
-also in the pull request body.
+pull request and the carried checks.
+
+Running `land` again after a stop once GitHub reported MERGED finishes step 8
+and nothing else. Before the claim check it looks for a pull request from the
+branch in this repository that GitHub merged into the base branch at exactly
+the local head. When there is one:
+
+- the claim commit is read from the local history, because the remote branch
+  may already be gone;
+- the merged pull request's body decides the outcome: `Closes #N` closes the
+  issue, and `Refs #N` hands it off with the text of its Maintainer validation
+  section. A `--needs-user-validation` text that differs from the body is
+  refused; `--title` and `--summary-file` are ignored;
+- nothing is verified, pushed, posted or merged again, and a handoff comment
+  already on the issue for that pull request is not posted twice;
+- an outcome an earlier run finished and the maintainer changed since is left
+  alone: a handed-off issue that has the handoff comment and is closed, or a
+  closed issue that has its `Landed in #<pull>` comment and is open again.
+  Only the branch is still deleted.
+
+The error of a stop after the merge says that running `land` again finishes
+it, and also names the steps left to do by hand (close the issue or hand it
+off, set Status, delete the branch). With `--needs-user-validation` it repeats
+the text, which is also in the pull request body. A stop after a
+`steward --land` merge names only the steps by hand.
 
 ## `steward`
 
@@ -596,15 +625,18 @@ branch in this repository, it lists:
 - whether a local worktree has the branch checked out.
 
 `--land <issue>` merges that issue's pull request as `land` would (steps 7 and
-8, without validation handoff), but only when all of these hold:
+8), but only when all of these hold:
 
 - the verify status and every required check succeed on the pull request's
   head;
 - the head contains the base branch tip;
 - the remote branch is at that head;
 - any local worktree on the branch is clean and at the same commit;
-- the body starts with `Closes #N`. A `Refs #N` body is a validation handoff,
-  which only `land` performs.
+- the body starts with `Closes #N` or `Refs #N`, as `land` writes it. A
+  `Refs #N` body is a validation handoff: it merges with `Refs #N` and hands
+  the issue off with the text of the body's Maintainer validation section,
+  which must be present and pass the scrub command before the merge. A
+  `Closes #N` body with that section is refused.
 
 The steward never runs checks, merges the base branch or pushes commits. That
 work belongs to the owner's worktree. A pull request that needs any of it has to be
@@ -619,8 +651,8 @@ Project state and records every call. The live E2E covers GitHub itself.
 32. **Another session's claim is landed.** `land` refuses unless the claim
     commit of the current remote branch names the caller's session.
 33. **A dirty or mid-merge tree is landed.** Uncommitted or untracked files, a
-    detached HEAD, or a merge, rebase, cherry-pick or revert in progress refuse
-    before any GitHub write.
+    detached HEAD, or a merge, rebase, cherry-pick, revert or bisect in
+    progress refuse before any GitHub write.
 34. **A failing or stale receipt is merged.** Nothing is pushed, posted or
     opened after a failing receipt. The merge names the verified and pushed
     head with `--match-head-commit`.
@@ -649,8 +681,129 @@ Project state and records every call. The live E2E covers GitHub itself.
 41. **The steward lands without a passing receipt.** `steward --land` merges
     only a head with a successful verify status and required checks, that
     contains the base tip, that no local worktree has moved past, and whose
-    body closes that issue and not one whose number starts with it. It never
-    runs checks.
+    body closes or refers to that issue and not one whose number starts with
+    it. It never runs checks.
 42. **A claimed status is misread.** An In review or Needs you claim is not a
     disagreement, a resumed `start` does not move it back to In progress, and
     `start` and the dashboard count the soft cap alike.
+64. **The steward loses, invents or skips a validation handoff.** A `Refs #N`
+    pull request merges with `Refs #N`, keeps the issue open and hands it off
+    with the exact text of its Maintainer validation section, not a summary
+    heading of the same name. A `Refs #N` body without that text, a `Closes #N`
+    body that has it, and text the scrub refuses stop before the merge.
+65. **A land stopped after the merge cannot finish, finishes twice or finishes
+    the wrong thing.** Run again, it finishes from the merged body even when
+    GitHub deleted the branch, without verifying, pushing, posting or merging
+    again, and posts the handoff comment once. It does not reopen a handed-off
+    issue the maintainer closed or close one the maintainer reopened after an
+    earlier run finished it. Another session's claim and a
+    validation text that contradicts the merged body are refused. A merge at
+    an older head or from a fork is not a resume.
+
+## `cleanup`
+
+`scripts/tron work cleanup [--all] [--dry-run]` removes a task worktree, its
+local branch and its remote branch once the work is provably done. The owner
+runs it from its task worktree after `land`; `--all` goes through every
+worktree under `claim.worktreeRoot`. `--dry-run` reports the same decisions
+and changes nothing. The `cleanup` section of `.github/work.json` configures
+it.
+
+A worktree is provably done when all of these hold:
+
+- it is a linked worktree under `claim.worktreeRoot`, never the primary
+  checkout, on a claim branch (`<type>/<issue>-<slug>`), and not locked;
+- GitHub reports a pull request from that branch in this repository MERGED
+  into `claim.baseBranch`, and that pull request's head is the local branch
+  head. Ancestry is not used, because a squash merge leaves the branch head
+  outside the base branch;
+- the worktree has no modified, staged or untracked files, and no merge,
+  rebase, cherry-pick, revert or bisect in progress;
+- every ignored file matches a `cleanup.regenerableIgnored` glob. These are
+  Git `glob` pathspecs: `*` stays within one path segment and `**` crosses
+  segments. Any other ignored file keeps the worktree and is named;
+- no process has its working directory inside the worktree (`lsof`), other
+  than `cleanup` and its ancestors when the worktree is the one `cleanup` was
+  started from. When `lsof` fails, nothing counts as proven.
+
+For a worktree that is provably done, `cleanup`:
+
+1. runs each `cleanup.releaseCommands` entry from inside the worktree, in its
+   own process group, bounded by its `timeoutSeconds`. These release what the
+   worktree's own tooling holds outside it. A non-zero exit or a timeout keeps
+   the worktree and prints the end of the command's output;
+2. checks every condition above again, since the commands take time;
+3. runs `git worktree remove` without `--force`. Git deletes the regenerable
+   ignored files with the worktree;
+4. deletes the local branch only if it is still at the merged head
+   (`git update-ref -d <ref> <head>`), then its `branch.<name>` settings in
+   the shared Git config. The head check guards the short window after step
+   2; while the branch is checked out, the recheck already covers it;
+5. deletes the remote branch with a lease on the merged head, as `land` does.
+   A branch already gone is fine; a branch at any other commit is kept and
+   reported.
+
+Any other worktree is never touched and no release command runs for it.
+Without `--all`, `cleanup` refuses the current worktree with its reasons.
+With `--all`, each worktree under the root that is not provably done is listed
+with every reason, and an error while checking or removing one worktree, such
+as a failed `gh` call, keeps that worktree with the error and goes on to the
+next. `--all` never lists the primary checkout, and only counts the worktrees
+outside the root, leaving them to the repository's own housekeeping procedure.
+Local paths are printed relative to the checkout's parent directory.
+
+Exit status is 0 when the current worktree was removed (or would be), and with
+`--all` when every provably done worktree was removed. A blocked current
+worktree, or a removal that stopped part way, exits 1.
+
+### Tron's release commands
+
+`scripts/ios-gateway-e2e-test clean` stops the worktree's Gateway E2E fixture
+and removes its fixture directory, focused DerivedData and simulator.
+`scripts/tron-ios-test clean` removes the worktree's test lane simulator, its
+runs and its products. Nothing else reclaims the E2E fixture once the
+worktree is gone. The regenerable globs cover dependency installs, build
+output, DerivedData, Python caches, the CI tool cache, test results and the
+generated iOS Xcode project. Other ignored files, such as agent state under
+`.pi/`, logs or the staged Mac Gateway payload, keep the worktree for a person
+to look at.
+
+### Failure modes
+
+`test_cleanup.py` checks these against real temporary repositories, linked
+worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
+
+53. **Unmerged work is removed.** Only a pull request from the branch in this
+    repository, MERGED into the base branch at exactly the local head, proves
+    the work landed. No pull request, an open or closed-unmerged one, one
+    merged at an earlier head, a local commit after the merge, a fork's pull
+    request with the same head name, or a merge into another base keeps the
+    worktree.
+54. **Local data is lost with the worktree.** Modified, staged or untracked
+    files, a non-regenerable ignored file, an operation in progress, or a lock
+    keeps it. Ignored files that match the regenerable globs do not.
+55. **A live process loses its working directory.** Another process with its
+    working directory inside keeps the worktree, and so does an `lsof` that
+    fails. The caller's own shell does not block its own cleanup, but an
+    ancestor working inside another worktree blocks that one under `--all`.
+56. **Something outside the managed set is touched.** The primary checkout,
+    worktrees outside the root, detached heads and branches that are not claim
+    branches are never touched, and blocked worktrees get no release command.
+    `--all` lists each worktree under the root with its reason, never lists
+    the primary checkout, and only counts the worktrees outside the root.
+57. **A failing or hanging release command is ignored.** A non-zero exit keeps
+    the worktree, and a command past its timeout has its process group killed
+    and keeps it too.
+58. **A branch that moved is deleted.** The remote branch is deleted only
+    with a lease on the merged head. A remote branch pushed to after the
+    merge is kept and reported.
+59. **The worktree changes between the check and the removal.** A commit or a
+    new file made while the release commands run keeps the worktree.
+60. **A dry run changes something.** `--dry-run` runs no release command and
+    removes nothing.
+61. **A deleted branch leaves its settings behind.** `start` creates task
+    branches with `--track`; removing one also removes its `branch.<name>`
+    section from the shared Git config.
+62. **One worktree's error hides the rest.** Under `--all`, a failure while
+    checking one worktree keeps it with the error, and every other worktree
+    is still decided and listed.

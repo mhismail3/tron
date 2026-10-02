@@ -516,6 +516,7 @@
       {
         "name": "dev-lifecycle-state",
         "paths": [
+          "scripts/tron-dev",
           "scripts/tron-dev-state.mjs",
           "scripts/tron-dev-state.test.mjs"
         ],
@@ -566,6 +567,36 @@
     "waitSeconds": 1800,
     "pollSeconds": 20,
     "maxRounds": 3
+  },
+  "cleanup": {
+    "regenerableIgnored": [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/build/**",
+      "**/.build/**",
+      "**/DerivedData/**",
+      "**/__pycache__/**",
+      "**/*.pyc",
+      "**/.pytest_cache/**",
+      "**/*.tsbuildinfo",
+      "**/test-results/**",
+      "**/.DS_Store",
+      ".ci-tools/**",
+      "packages/ios-app/TronMobile.xcodeproj/**",
+      "packages/mac-app/TronMac.xcodeproj/**"
+    ],
+    "releaseCommands": [
+      {
+        "name": "ios-gateway-e2e",
+        "command": "scripts/ios-gateway-e2e-test clean",
+        "timeoutSeconds": 300
+      },
+      {
+        "name": "ios-test",
+        "command": "scripts/tron-ios-test clean",
+        "timeoutSeconds": 300
+      }
+    ]
   },
   "dashboard": {
     "needsYouStatus": "Needs you",

@@ -296,6 +296,15 @@ def _upload(gh: Gh, repository: str, path: str, content: bytes, message: str) ->
     gh.rest("PUT", api, body)
 
 
+def open_pull(gh: Gh, branch: str) -> Optional[dict]:
+    """The open pull request from `branch` in this repository, if any."""
+    pulls = json.loads(gh.run("pr", "list", "--head", branch, "--state", "open",
+                              "--json", "number,title,body,url,isCrossRepository"))
+    # Claim branch names are public; a fork can open a pull request with the same head name.
+    own = sorted((p for p in pulls if not p["isCrossRepository"]), key=lambda p: p["number"])
+    return own[0] if own else None
+
+
 def post(gh: Gh, repo: Path, config: dict, receipt: dict) -> str:
     """Publish the receipt for the current head: evidence first, then the final status."""
     settings, claim = config["verify"], config["claim"]
@@ -322,12 +331,11 @@ def post(gh: Gh, repo: Path, config: dict, receipt: dict) -> str:
     # Pending replaces any earlier status on this head before a lookup can fail.
     set_status("pending", "posting verify evidence")
     try:
-        pulls = gh.run("pr", "list", "--head", branch, "--state", "open", "--json", "number",
-                       "--jq", ".[].number").split()
+        pull = open_pull(gh, branch)
         issue_match = _BRANCH_ISSUE.match(branch)
-        if not pulls and not issue_match:
+        if pull is None and not issue_match:
             raise VerifyError(f"no open pull request for {branch} and no issue number in the branch name")
-        target = int(pulls[0]) if pulls else int(issue_match.group(1))
+        target = pull["number"] if pull is not None else int(issue_match.group(1))
         evidence_issue = int(issue_match.group(1)) if issue_match else target
         evidence_repository = repository + settings["evidenceRepositorySuffix"]
         evidence_dir = f"{evidence_issue}/{head}"

@@ -478,6 +478,27 @@ bounded model chunks name only their exact entry
 IDs and digest, and any remaining suffix is admitted as a separate chunk.
 Model-bound text removes recognized machine paths and credential shapes without
 claiming complete secret scrubbing.
+
+Summary, source assessment, and Observer JSON replies share the
+`knowledge-model-output.ts` boundary: exactly one complete top-level JSON object,
+optionally surrounded by prose or whitespace. Structural delimiters (`{}`, `[]`)
+outside that object are rejected, including a second object, a truncated suffix,
+and array envelopes. The scanner respects JSON strings and escapes; `JSON.parse`
+validates the extracted object, then each consumer validates its existing schema
+and bounds. Prose alone is never evidence. Reflector and synthesis remain plain
+text. Provider errors/aborts and empty replies still fail before JSON parsing.
+
+The pinned Pi `ModelRuntime.completeSimple` has no typed JSON response-format
+contract; its constrained sampling is for tools, not text replies. Raw
+`samplingParams`/`onPayload` overrides are not a portable enforced contract across
+OpenAI API and subscription transports. Knowledge therefore uses the strict
+extractor, not provider-specific overrides or permissive repair. The retained
+`knowledge.model-failed` shape diagnostic identifies rejected replies without
+retaining source/model text; each field occurs once in the failure reason.
+Regression checks: `knowledge-model-output.test.ts` exercises the synthetic Luna
+leading-prose shape and rejection cases; `knowledge-observation.test.ts` checks
+publication through the durable observation owner.
+
 Prospective source retention is bounded by 64 cuts, 100,000 entries, and a
 conservative 32 MiB retained-data budget including the currently processed cut.
 A bounded traversal measures input before retaining it; repeated snapshots merge by exact
