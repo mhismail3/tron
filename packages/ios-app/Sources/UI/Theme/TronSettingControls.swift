@@ -100,14 +100,15 @@ extension EnvironmentValues {
     }
 }
 
-/// Stage numeric text until editing ends. Clearing a budget to type its
-/// replacement must not autosave a partial number or silently parse a prefix.
+/// Stage numeric text until editing ends. Form owners may instead keep the
+/// pending text externally until their explicit action captures a policy.
 struct TronNumberSettingRow: View {
     let icon: String
     let title: String
     var detail: String? = nil
     @Binding var value: Int
     var accent: Color = .tronEmerald
+    var stagedText: Binding<String?>? = nil
     @Environment(\.tronSettingsInputScope) private var inputScope
     @State private var text: String?
     @State private var acceptedBinding: Binding<Int>?
@@ -115,14 +116,28 @@ struct TronNumberSettingRow: View {
     @State private var invalid = false
     @FocusState private var focused: Bool
 
+    private var textBinding: Binding<String> {
+        Binding(
+            get: {
+                if let stagedText { return stagedText.wrappedValue ?? String(value) }
+                return text ?? String(value)
+            },
+            set: { next in
+                if let stagedText {
+                    stagedText.wrappedValue = next
+                } else {
+                    if text == nil { acceptedBinding = $value; admittedScope = inputScope }
+                    text = next
+                }
+                invalid = false
+            }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .trailing, spacing: 0) {
             TronSettingsRow(icon: icon, title: title, subtitle: detail, accent: accent) {
-                TextField(title, text: Binding(get: { text ?? String(value) }, set: { next in
-                    if text == nil { acceptedBinding = $value; admittedScope = inputScope }
-                    text = next
-                    invalid = false
-                }))
+                TextField(title, text: textBinding)
                     .keyboardType(.numberPad)
                     .tronInlineField(numeric: true)
                     .multilineTextAlignment(.trailing)
@@ -131,7 +146,7 @@ struct TronNumberSettingRow: View {
                     .focused($focused)
             }
             if invalid {
-                Text("Enter a whole number without separators.")
+                Text(Self.invalidInputMessage)
                     .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
                     .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
@@ -145,7 +160,7 @@ struct TronNumberSettingRow: View {
     }
 
     private func commit() {
-        guard let text else { return }
+        guard stagedText == nil, let text else { return }
         guard admittedScope == inputScope else { discard(); return }
         guard let number = Self.parse(text) else { invalid = true; return }
         if let acceptedBinding, acceptedBinding.wrappedValue != number { acceptedBinding.wrappedValue = number }
@@ -153,11 +168,14 @@ struct TronNumberSettingRow: View {
     }
 
     private func discard() {
+        guard stagedText == nil else { return }
         text = nil
         acceptedBinding = nil
         admittedScope = nil
         invalid = false
     }
+
+    static let invalidInputMessage = "Enter a whole number without separators."
 
     static func parse(_ text: String) -> Int? {
         Int(text.trimmingCharacters(in: .whitespacesAndNewlines))

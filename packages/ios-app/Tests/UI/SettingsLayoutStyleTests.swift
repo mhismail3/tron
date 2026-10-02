@@ -103,6 +103,45 @@ final class SettingsLayoutStyleTests: XCTestCase {
         XCTAssertNil(TronNumberSettingRow.parse("99999999999999999999999999999"))
     }
 
+    func testExternalNumericDraftHasOneOwnerAndRetiredRowsCannotClearSuccessorText() async throws {
+        let probe = SettingsNumericProbe()
+        try await withHost(SettingsExternalNumericFixture(probe: probe), size: CGSize(width: 404, height: 180)) { host in
+            let field = try XCTUnwrap(descendants(host.view).compactMap { $0 as? UITextField }.first)
+            field.becomeFirstResponder()
+            field.text = "18000"
+            field.sendActions(for: .editingChanged)
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertEqual(probe.stagedText, "18000")
+            XCTAssertEqual(probe.value, 16_384, "A form-owned raw draft is not an accepted integer policy value")
+            XCTAssertTrue(probe.writes.isEmpty, "External form staging must not autosave keystrokes")
+
+            // Simulate owner replacement in the same update that removes the old row.
+            probe.stagedText = "27000"
+            probe.showsRow = false
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertEqual(probe.stagedText, "27000", "Retiring row cleanup must not clear the successor owner's text")
+            XCTAssertEqual(probe.value, 16_384)
+            XCTAssertTrue(probe.writes.isEmpty)
+
+            probe.showsRow = true
+            try await Task.sleep(for: .milliseconds(30))
+            let successor = try XCTUnwrap(descendants(host.view).compactMap { $0 as? UITextField }.first)
+            XCTAssertEqual(successor.text, "27000")
+        }
+    }
+
+    func testIntegrationPolicySubmissionUsesStrictStagedBudgetWithoutChangingOtherFields() {
+        let policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: true,
+                                       paidBudgetCents: 1_000, recurringApproved: false)
+        var expected = policy
+        expected.paidBudgetCents = 7_250
+        XCTAssertEqual(IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: "7250"), expected)
+        XCTAssertEqual(IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: nil), policy)
+        XCTAssertNil(IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: ""))
+        XCTAssertNil(IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: "7,250"))
+        XCTAssertNil(IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: "99999999999999999999999999999"))
+    }
+
     func testVisiblePackagesRefreshAfterForegroundWithoutRetry() async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
@@ -432,6 +471,8 @@ private struct KnowledgeMutationFixture: View {
 private final class SettingsNumericProbe {
     var value = 16_384
     var writes: [Int] = []
+    var stagedText: String?
+    var showsRow = true
     var scope = TronSettingsInputScope()
 }
 
@@ -441,6 +482,22 @@ private struct SettingsNumericFixture: View {
         TronNumberSettingRow(icon: "number", title: "Budget", value: Binding(
             get: { probe.value }, set: { probe.value = $0; probe.writes.append($0) }
         ))
+        .tronSettingsLayout().environment(\.tronSettingsInputScope, probe.scope)
+    }
+}
+
+private struct SettingsExternalNumericFixture: View {
+    let probe: SettingsNumericProbe
+    var body: some View {
+        VStack {
+            if probe.showsRow {
+                TronNumberSettingRow(icon: "number", title: "Budget", value: Binding(
+                    get: { probe.value }, set: { probe.value = $0; probe.writes.append($0) }
+                ), stagedText: Binding(
+                    get: { probe.stagedText }, set: { probe.stagedText = $0 }
+                ))
+            }
+        }
         .tronSettingsLayout().environment(\.tronSettingsInputScope, probe.scope)
     }
 }
