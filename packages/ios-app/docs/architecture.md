@@ -652,7 +652,11 @@ device identity rather than a disposable socket. Transient transport retirement 
 but retains the operation/target/provider. The existing coordinator also owns at most one unsent,
 memory-only input value keyed by that authority's exact operation and prompt IDs. Retirement hides
 it and leaves the prompt unadmitted; only canonical re-emission of the same challenge restores it.
-Stale UI bindings cannot read or change another challenge's draft, and rejoining never submits it.
+The input leaf and its UI bindings capture the existing destination/lifecycle identity; its native
+field identity also includes that lifecycle generation. Stale getters, setters, and submit tasks
+cannot read or change a successor authority's draft even if operation/prompt IDs repeat. The broker
+generates those IDs with `randomUUID`, but their entropy is not an authority fence. Rejoining never
+submits the draft.
 Consume, replacement, terminal completion/observed expiry, cancellation, and credential/profile
 retirement discard it; unresolved transport loss uses the existing operation lifetime/cancel owner,
 not a new timer or durable secret store. Sensitive input never enters logging or diagnostics.

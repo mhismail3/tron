@@ -177,7 +177,13 @@ final class ConfirmedMutationExecutor {
                                 throw CancellationError()
                             }
                             let resolved = try await send()
-                            try lifecycle.require(admission)
+                            // Definite success is no longer a disposable read:
+                            // same-authority suspension can retire its socket,
+                            // but cancellation or authority replacement cannot
+                            // publish it into a successor command namespace.
+                            try Task.checkCancellation()
+                            guard lifecycle.currentLifecycleGeneration == admission.generation,
+                                  lifecycle.selectedProfileID == profileID else { throw CancellationError() }
                             result = .success
                             return resolved
                         } catch let retry as GatewayPossiblySentError {

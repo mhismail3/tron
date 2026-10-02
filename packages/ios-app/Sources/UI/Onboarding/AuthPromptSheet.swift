@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import TronMobileCore
 
 /// Answered provider choice prompts stay visible so the user can change an
 /// earlier answer. The SDK login is a sequential prompt stream, so changing a
@@ -159,7 +160,8 @@ struct ProviderAuthFlowContent: View {
                         onSelect: { onChoose(prompt, $0) }
                     )
                 } else {
-                    AuthPromptContent(prompt: prompt).id(prompt.id)
+                    AuthPromptContent(prompt: prompt, destination: model.knowledgeDestinationIdentity)
+                        .id("\(model.knowledgeDestinationIdentity.lifecycleGeneration):\(prompt.id)")
                 }
             }
         }
@@ -232,8 +234,10 @@ private struct RecoveredAuthControls: View {
 private struct AuthPromptContent: View {
     @Environment(AppModel.self) private var model
     let prompt: AppModel.AuthPromptState
+    let destination: KnowledgeDestinationIdentity
     private var value: Binding<String> {
-        Binding(get: { model.authPromptInput(for: prompt) }, set: { model.setAuthPromptInput($0, for: prompt) })
+        Binding(get: { model.authPromptInput(for: prompt, destination: destination) },
+                set: { model.setAuthPromptInput($0, for: prompt, destination: destination) })
     }
     @State private var submitting = false
 
@@ -273,7 +277,7 @@ private struct AuthPromptContent: View {
         Task {
             defer { submitting = false }
             // The button captured this challenge's value, not a successor's.
-            guard model.authPrompt == prompt else { return }
+            guard model.knowledgeDestinationIdentity == destination, model.authPrompt == prompt else { return }
             do { try await model.answerAuth(response) }
             catch is CancellationError { }
             catch { model.presentError(error) }

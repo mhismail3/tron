@@ -842,6 +842,39 @@ struct AppModelEventTests {
         #expect(model.commands.isEmpty)
     }
 
+    @Test("held auth input binding cannot cross authority even when challenge IDs repeat", arguments: [false, true])
+    func authInputBindingCannotCrossAuthority(reuseProfileID: Bool) async throws {
+        let store = AutomationFixtureProfileStore()
+        let profiles = GatewayProfileStore(metadata: store, tokens: store)
+        let originalProfile = GatewayProfile(id: "auth-original", label: "Original fixture", host: "original.example.test", port: 9847, machineId: "auth-original")
+        let replacementProfile = GatewayProfile(id: reuseProfileID ? "auth-original" : "auth-replacement", label: "Replacement fixture", host: "replacement.example.test", port: 9847, machineId: "auth-replacement")
+        try profiles.save(originalProfile, token: "fixture-only-token")
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = AppModel(profiles: profiles, cache: SnapshotCache(root: root))
+        let payload: JSONValue = .object(["operationId": .string("reused-operation"), "promptId": .string("reused-prompt"),
+                                         "prompt": .object(["type": .string("secret"), "message": .string("Fixture credential")])])
+        model.installHostedProviderAuthOperation("reused-operation")
+        await model.handle(GatewayEvent(type: "event", topic: "auth.prompt", sessionId: nil, payload: payload))
+        let original = try #require(model.authPrompt)
+        let origin = model.knowledgeDestinationIdentity
+        // Hold the actual leaf's getter/setter contract across its retirement.
+        let heldGetter = { model.authPromptInput(for: original, destination: origin) }
+        let heldSetter = { (value: String) in model.setAuthPromptInput(value, for: original, destination: origin) }
+        heldSetter("fixture-original-input")
+        await model.forgetCurrentGateway()
+        try profiles.save(replacementProfile, token: "fixture-only-replacement-token")
+        #expect(model.knowledgeDestinationIdentity != origin)
+        model.installHostedProviderAuthOperation("reused-operation")
+        await model.handle(GatewayEvent(type: "event", topic: "auth.prompt", sessionId: nil, payload: payload))
+        let replacement = try #require(model.authPrompt)
+        model.setAuthPromptInput("fixture-successor-input", for: replacement, destination: model.knowledgeDestinationIdentity)
+        #expect(heldGetter().isEmpty, "A retired binding cannot read another authority's sensitive draft")
+        heldSetter("fixture-original-input")
+        #expect(model.authPromptInput(for: replacement, destination: model.knowledgeDestinationIdentity) == "fixture-successor-input", "A delayed setter cannot attach old input to another authority")
+        await model.teardown()
+        try? FileManager.default.removeItem(at: root)
+    }
+
     @Test("transport loss detaches provider prompt presentation before resumable reconnect")
     func authPresentationDetachesOnDisconnect() async {
         let model = AppModel()

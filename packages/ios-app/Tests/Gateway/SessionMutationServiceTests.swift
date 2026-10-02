@@ -642,6 +642,65 @@ struct SessionMutationServiceTests {
         }
     }
 
+    @Test("definite terminal send success survives same-authority background equally for initial send and permitted replay", arguments: [false, true])
+    func terminalSendSuccessAcrossBackground(replay: Bool) async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            if replay { await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "Fixture loss", retryable: true, details: nil)) }
+            let command = "terminal-background-command"
+            let mutation = Task {
+                try await harness.executor.performValue(method: "session.setModel", commandID: command) {
+                    let terminal: JSONValue = try await harness.client.request("session.setModel", JSONValue.object(["commandId": .string(command)]))
+                    // The typed terminal result is already owned before the
+                    // scene transition retires transport publication admission.
+                    await harness.lifecycle.enteredBackground()
+                    return terminal
+                }
+            }
+            defer { mutation.cancel() }
+            let socket: ScriptedGatewaySocket
+            let index: Int
+            if replay {
+                try await reconnect(harness)
+                let status = try await request(in: harness.replacement, frameIndex: 1)
+                #expect(status.params?["commandId"] == .string(command))
+                await harness.replacement.enqueue(successResponse(id: status.id, result: .object(["status": .string("missing")])))
+                socket = harness.replacement; index = 2
+            } else { socket = harness.socket; index = 1 }
+            let sent = try await request(in: socket, frameIndex: index)
+            #expect(sent.params?["commandId"] == .string(command))
+            await socket.enqueue(successResponse(id: sent.id, result: .object(["updated": .bool(true)])))
+            #expect(try await valueOfOwnedTask(mutation) == .object(["updated": .bool(true)]))
+            #expect(await socket.sentFrames().count == index + 1)
+            await harness.lifecycle.teardown()
+        }
+    }
+
+    @Test("authority retirement while original receipt read is held cannot replay or publish the old command")
+    func retiredAuthorityCannotReplayHeldReceipt() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "Fixture loss", retryable: true, details: nil))
+            let mutation = Task { try await harness.service.setModel(ModelRef(provider: "fixture", id: "fixture"), sessionID: "original-session") }
+            defer { mutation.cancel() }
+            try await reconnect(harness)
+            let status = try await request(in: harness.replacement, frameIndex: 1)
+            let command = try #require(status.params?["commandId"]?.stringValue)
+            // Real lifecycle replacement revokes the command namespace even
+            // when the replacement lacks a token and cannot connect.
+            await harness.lifecycle.switchGateway(GatewayProfile(id: "replacement-authority", label: "Replacement", host: "replacement.example.test", port: 9847, machineId: "replacement-authority"))
+            await harness.replacement.enqueue(successResponse(id: status.id, result: .object(["status": .string("missing")])))
+            do { try await valueOfOwnedTask(mutation); Issue.record("retired authority published the old command") }
+            catch let failure as GatewayFailure {
+                #expect(failure.code == "outcome_unknown")
+                #expect(failure.details?.objectValue?["commandId"] == .string(command))
+            }
+            #expect(await harness.replacement.sentFrames().count == 2)
+            #expect(await harness.successor.sentFrames().isEmpty)
+            await harness.lifecycle.teardown()
+        }
+    }
+
     @Test("confirmed missing replays the exact command ID once")
     func stableCommandIDReplay() async throws {
         try await withTestWatchdog {
