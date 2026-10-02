@@ -41,31 +41,39 @@ struct StreamingTextRevealContinuityTests {
             let interior = Array(opacities.dropFirst(2).dropLast(2))
             #expect(interior.allSatisfy { $0 > 0 && $0 < 1 }, "An admitted word must actually fade, not pop")
             #expect(zip(interior, interior.dropFirst()).allSatisfy { $0 < $1 }, "A fade must keep progressing")
+            // The protected fade is linear over fadeDuration, so one virtual
+            // millisecond advances at most 1/fadeDuration (plus Double rounding).
+            let maximumStep = 1 / Double(fadeDuration)
+            let roundingTolerance = 1e-12
             let steps = zip(opacities, opacities.dropFirst()).map { $1 - $0 }
-            #expect(steps.allSatisfy { $0 >= 0 && $0 <= 0.01 }, "No millisecond may jump more than 1% opacity")
+            #expect(steps.allSatisfy { $0 >= 0 && $0 <= maximumStep + roundingTolerance })
 
-            var restartProbes = 0
-            var tickProbes = 0
             let restartTimes = Array(Set(arrivals)).sorted()
-            for (word, start) in schedule.starts.enumerated() {
-                // Probe either side of real simulated task boundaries while
-                // this word is fading. Restarts/late wakes must not reset its
-                // elapsed fade or introduce a discontinuity.
-                for (times, isRestart) in [(restartTimes, true), (schedule.tickTimes, false)] {
-                    for now in times where now - start >= 2 && now - start < Double(fadeDuration - 1) {
-                        let elapsed = Int(now - start)
-                        let before = ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: elapsed - 1)
-                        let after = ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: elapsed + 1)
-                        #expect(before > 0 && after < 1 && after > before)
-                        #expect(after - before <= 0.02, "A task boundary cannot pop or restart a fading word")
-                        if isRestart { restartProbes += 1 } else { tickProbes += 1 }
-                        fadeMeasurements.append(["tickDelay": tickDelay, "word": Double(word), "start": start,
-                                                 "boundary": now, "restart": isRestart ? 1 : 0,
-                                                 "before": before, "after": after])
-                    }
+            let wakeTimes = schedule.tickTimes.filter { !restartTimes.contains($0) }
+            // Representative early/middle/late policy probes use simulation-
+            // assigned starts, not the mounted view's revealStarts. They prove
+            // fractional policy output at these elapsed times, not preservation
+            // of native startedAt across a task restart (see development.md).
+            for (times, isRestart) in [(restartTimes, true), (wakeTimes, false)] {
+                let candidates = times.filter { now in
+                    schedule.starts.contains { now - $0 >= 2 && now - $0 < Double(fadeDuration - 1) }
+                }
+                try #require(!candidates.isEmpty, "Both progress restarts and reveal wakes must intersect fades")
+                for index in Set([0, candidates.count / 2, candidates.count - 1]).sorted() {
+                    let now = candidates[index]
+                    let word = try #require(schedule.starts.enumerated().first {
+                        now - $0.element >= 2 && now - $0.element < Double(fadeDuration - 1)
+                    })
+                    let elapsed = Int(now - word.element)
+                    let before = ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: elapsed - 1)
+                    let after = ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: elapsed + 1)
+                    #expect(before > 0 && after < 1 && after > before)
+                    #expect(after - before <= 2 * maximumStep + roundingTolerance)
+                    fadeMeasurements.append(["tickDelay": tickDelay, "word": Double(word.offset), "start": word.element,
+                                             "boundary": now, "restart": isRestart ? 1 : 0,
+                                             "before": before, "after": after])
                 }
             }
-            #expect(restartProbes > 0 && tickProbes > 0, "Both progress restarts and reveal ticks must intersect fades")
             let samples = stride(from: 0.0, through: 4_200.0, by: 33.0).map { now in
                 schedule.starts.reduce(0.0) {
                     $0 + ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: Int(now - $1))

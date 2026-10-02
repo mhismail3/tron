@@ -1298,8 +1298,10 @@ oracle checks every sampled native frame and each keyboard/accessory/draft/resto
 it does not assume the host samples a particular intermediate animation instant. Streaming
 continuity exercises the existing admission/opacity policies with virtual-time schedules (including
 restarts and late ticks). Aggregate jump/convergence bounds do not prove fading: the oracle also
-requires bounded fractional opacity throughout every fade, strict progression, and no discontinuity
-around simulated restart/tick boundaries. `virtual-reveal-opacity.json` records those probes.
+requires bounded fractional opacity throughout the policy's linear fade, strict progression, and a
+slope bounded by the fade duration. Representative early/middle/late samples around simulated
+restart/wake times use simulation-assigned starts; `virtual-reveal-opacity.json` records those probes.
+They do not observe the view's `revealStarts` and cannot reject a native start-time reset on restart.
 It then mounts the actual view and records glyph ink through each source revision until convergence
 in `mounted-reveal-ink.json`. Both attachments are retained in the runner's xcresult. Policy simulation
 does not prove native bookkeeping or frame-by-frame throughput; native samples may miss intermediate
