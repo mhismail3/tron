@@ -1,4 +1,4 @@
-"""Isolated checks for cleanup failure modes 43-50 in README.md.
+"""Isolated checks for cleanup failure modes 53-62 in README.md.
 
 Real temporary repositories: a local bare remote, a primary clone, and linked
 task worktrees under the configured root. GitHub is a fake `gh` (WORK_GH) that
@@ -39,6 +39,9 @@ FAKE_GH = textwrap.dedent(
     def arg(name):
         return args[args.index(name) + 1] if name in args else None
     if args[:2] == ["pr", "list"]:
+        if arg("--head") in state.get("failing", []):
+            print("fake gh: HTTP 502", file=sys.stderr)
+            sys.exit(1)
         wanted = (arg("--state") or "open").upper()
         pulls = [p for p in state["pulls"] if p["headRefName"] == arg("--head")
                  and (wanted == "ALL" or p["state"] == wanted)]
@@ -124,14 +127,21 @@ class CleanupFixture(unittest.TestCase):
 
     # --------------------------------------------------------------- tasks
 
-    def task(self, number: int, merged: bool = True, directory=None, **pull) -> tuple:
-        """A claimed, committed and pushed task worktree; with merged, GitHub reports its PR merged at its head."""
+    def task(self, number: int, merged: bool = True, directory=None, with_config: bool = False, **pull) -> tuple:
+        """A claimed, committed and pushed task worktree; with merged, GitHub reports its PR merged at its head.
+
+        with_config commits the fixture's work.json, so the CLI can run from inside the worktree.
+        """
         branch = f"feat/{number}-task"
         claims.create_claim(self.repo, REMOTE, BASE, branch, number, "session-a")
         git(self.repo, "fetch", "-q", REMOTE)
         path = directory or self.root / f"{number}-task"
+        # As `work start` does: the branch tracks its remote claim branch.
         git(self.repo, "worktree", "add", "-q", "--track", "-b", branch, str(path), f"{REMOTE}/{branch}")
-        head = self.commit(path, f"src/{number}.txt", "work\n")
+        if with_config:
+            head = self.commit(path, ".github/work.json", json.dumps(self.config))
+        else:
+            head = self.commit(path, f"src/{number}.txt", "work\n")
         git(path, "push", "-q", REMOTE, f"HEAD:refs/heads/{branch}")
         if merged:
             self.add_pull(branch, head, **pull)
@@ -144,8 +154,9 @@ class CleanupFixture(unittest.TestCase):
         self.pulls.append(pull)
         self.save_pulls()
 
-    def save_pulls(self) -> None:
-        self.state_path.write_text(json.dumps({"pulls": self.pulls}))
+    def save_pulls(self, failing=()) -> None:
+        """failing: branches whose `gh pr list` exits non-zero."""
+        self.state_path.write_text(json.dumps({"pulls": self.pulls, "failing": list(failing)}))
 
     # ------------------------------------------------------------- observe
 
@@ -179,6 +190,17 @@ class CleanupFixture(unittest.TestCase):
         self.assertNotIn(str(path), self.registered())
         self.assertEqual(self.local_branch(branch), "")
         self.assertEqual(self.remote_branch(branch), "")
+        self.assertEqual(self.branch_settings(branch), "")
+
+    def branch_settings(self, branch: str) -> str:
+        return subprocess.run(["git", "config", "--get-regexp", f"^branch\\.{branch}\\."], cwd=self.repo,
+                              capture_output=True, text=True).stdout.strip()
+
+    def run_cli(self, script: str, cwd: Path) -> subprocess.CompletedProcess:
+        """Run a bash script with $CLI set to the real `work` entry point."""
+        cli = Path(__file__).resolve().parent / "cli.py"
+        return subprocess.run(["bash", "-c", f"CLI='{sys.executable} {cli}'\n{script}"], cwd=cwd,
+                              capture_output=True, text=True, timeout=120)
 
     def assert_kept(self, path: Path, branch: str, head: str, remote=None) -> None:
         """Untouched: registered, both branches where they were, and no release command ran there."""
@@ -190,8 +212,10 @@ class CleanupFixture(unittest.TestCase):
 
 
 class MergedRemovalTests(CleanupFixture):
+    # Failure mode 61: assert_removed also checks the branch's tracking settings are gone.
     def test_a_squash_merged_task_is_released_and_removed_with_both_branches(self):
         path, branch, head = self.task(7)
+        self.assertNotEqual(self.branch_settings(branch), "")
         self.write(path, "node_modules/pkg/index.js", "x\n")  # regenerable, ignored
         self.write(path, "app/build/out.o", "x\n")
         # A squash merge: the base branch never contains the task head.
@@ -204,20 +228,11 @@ class MergedRemovalTests(CleanupFixture):
         self.assertEqual(git(self.repo, "rev-parse", "--abbrev-ref", "HEAD"), BASE)
         self.assertTrue((self.repo / "README.md").exists())
 
-    # Failure mode 45: the owner's shell sits in the worktree it cleans up and
+    # Failure mode 55: the owner's shell sits in the worktree it cleans up and
     # stays its parent, as when an agent runs `work cleanup` after `land`.
     def test_the_owner_runs_it_from_inside_the_worktree(self):
-        branch = "feat/7-task"
-        claims.create_claim(self.repo, REMOTE, BASE, branch, 7, "session-a")
-        git(self.repo, "fetch", "-q", REMOTE)
-        path = self.root / "7-task"
-        git(self.repo, "worktree", "add", "-q", "--track", "-b", branch, str(path), f"{REMOTE}/{branch}")
-        head = self.commit(path, ".github/work.json", json.dumps(self.config))
-        git(path, "push", "-q", REMOTE, f"HEAD:refs/heads/{branch}")
-        self.add_pull(branch, head)
-        cli = Path(__file__).resolve().parent / "cli.py"
-        shell = subprocess.run(["bash", "-c", f"{sys.executable} {cli} cleanup; echo shell-cwd=$PWD"], cwd=path,
-                               capture_output=True, text=True, timeout=120)
+        path, branch, _ = self.task(7, with_config=True)
+        shell = self.run_cli("$CLI cleanup; echo shell-cwd=$PWD", path)
         self.assertEqual(shell.returncode, 0, shell.stdout + shell.stderr)
         self.assertIn(f"shell-cwd={path}", shell.stdout)
         self.assertIn("removed:", shell.stdout)
@@ -225,7 +240,7 @@ class MergedRemovalTests(CleanupFixture):
 
 
 class UnmergedTests(CleanupFixture):
-    # Failure mode 43.
+    # Failure mode 53.
     def test_work_that_github_does_not_report_merged_at_the_local_head_is_kept(self):
         cases = {
             "no pull request": {"merged": False},
@@ -259,7 +274,7 @@ class UnmergedTests(CleanupFixture):
 
 
 class LocalDataTests(CleanupFixture):
-    # Failure mode 44.
+    # Failure mode 54.
     def test_uncommitted_untracked_or_valuable_ignored_files_keep_the_worktree(self):
         cases = {
             "modified": lambda p: self.write(p, "src/10.txt", "edited\n"),
@@ -307,7 +322,7 @@ class LocalDataTests(CleanupFixture):
 
 
 class ProcessTests(CleanupFixture):
-    # Failure mode 45.
+    # Failure mode 55.
     def test_another_process_working_inside_keeps_the_worktree(self):
         path, branch, head = self.task(7)
         sleeper = subprocess.Popen(["sleep", "60"], cwd=path)
@@ -316,6 +331,18 @@ class ProcessTests(CleanupFixture):
         code, out = self.cleanup(self.repo, all_worktrees=True)
         self.assertIn(str(sleeper.pid), out)
         self.assert_kept(path, branch, head)
+
+    def test_an_ancestor_working_inside_another_worktree_keeps_it_under_all(self):
+        # The shell sits in `held` and starts `--all` from `started`: only `started` exempts its ancestors.
+        held, held_branch, held_head = self.task(7)
+        started, started_branch, _ = self.task(8, with_config=True)
+        shell = self.run_cli(f"(cd '{started}' && exec $CLI cleanup --all); echo shell-pid=$$", held)
+        out = shell.stdout + shell.stderr
+        self.assertEqual(shell.returncode, 0, out)
+        shell_pid = out.rsplit("shell-pid=", 1)[1].strip()
+        self.assertIn(f"pid {shell_pid} (bash)", out)
+        self.assert_kept(held, held_branch, held_head)
+        self.assert_removed(started, started_branch)
 
     def test_a_failing_lsof_proves_nothing(self):
         path, branch, head = self.task(7)
@@ -331,7 +358,7 @@ class ProcessTests(CleanupFixture):
 
 
 class ScopeTests(CleanupFixture):
-    # Failure mode 46.
+    # Failure mode 56.
     def test_the_primary_checkout_is_never_cleaned_up(self):
         branch = "feat/7-task"
         claims.create_claim(self.repo, REMOTE, BASE, branch, 7, "session-a")
@@ -385,8 +412,24 @@ class ScopeTests(CleanupFixture):
         self.assert_kept(path, branch, head)
 
 
+class ErrorTests(CleanupFixture):
+    # Failure mode 62.
+    def test_an_error_on_one_worktree_keeps_it_and_the_rest_are_still_decided(self):
+        broken, broken_branch, broken_head = self.task(7)
+        done, done_branch, _ = self.task(8)
+        busy, busy_branch, busy_head = self.task(9, merged=False)
+        self.save_pulls(failing=[broken_branch])
+        code, out = self.cleanup(self.repo, all_worktrees=True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("HTTP 502", out)
+        self.assert_kept(broken, broken_branch, broken_head)
+        self.assert_removed(done, done_branch)
+        self.assert_kept(busy, busy_branch, busy_head)
+        self.assertIn("worktrees/9-task", out)
+
+
 class ReleaseTests(CleanupFixture):
-    # Failure mode 47.
+    # Failure mode 57.
     def test_a_failing_release_command_keeps_the_worktree(self):
         path, branch, head = self.task(7)
         self.config["cleanup"]["releaseCommands"].append(
@@ -425,7 +468,7 @@ class ReleaseTests(CleanupFixture):
 
 
 class MovedBranchTests(CleanupFixture):
-    # Failure mode 48.
+    # Failure mode 58.
     def test_a_remote_branch_pushed_to_after_the_merge_is_kept(self):
         path, branch, head = self.task(7)
         other = self.tmp / "other"
@@ -443,7 +486,7 @@ class MovedBranchTests(CleanupFixture):
 
 
 class RecheckTests(CleanupFixture):
-    # Failure mode 49.
+    # Failure mode 59.
     def test_work_done_while_release_commands_run_keeps_the_worktree(self):
         cases = {
             "commit": "git commit -q --allow-empty -m late",
@@ -462,7 +505,7 @@ class RecheckTests(CleanupFixture):
 
 
 class DryRunTests(CleanupFixture):
-    # Failure mode 50.
+    # Failure mode 60.
     def test_a_dry_run_reports_and_changes_nothing(self):
         path, branch, head = self.task(7)
         busy, busy_branch, busy_head = self.task(8, merged=False)

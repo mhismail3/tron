@@ -117,9 +117,11 @@ took. If they ask for options, list the top three and wait.
    - The Debug Gateway may be restarted by agents (AGENTS.md rule 8); Stable
      may not.
 8. **Clean up and sync.**
-   - Run the cleanup commands `land` prints, after releasing simulator lanes
-     (`scripts/tron-ios-test clean`, `scripts/ios-gateway-e2e-test clean`) for
-     iOS work.
+   - Run `scripts/tron work cleanup` from the task worktree. It runs the
+     configured release commands (the iOS lane and Gateway E2E `clean`) itself,
+     then removes the worktree and both branches only if they are provably
+     done ([its contract](../../../tools/work/README.md#cleanup)). Resolve any
+     reason it names for keeping them; never delete around it.
    - Fast-forward the primary checkout's `main` when it is clean.
    - Stop every process you started.
 9. **Report.** Give the user the PR, the merge commit, what was verified, and

@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 import claim as claims
 import land
 import start
-from gh import Gh
+from gh import Gh, GhError
 
 # Enough of a long list to act on; the rest is counted.
 _SHOWN = 20
@@ -42,6 +42,7 @@ class Settings:
     base: str
     regenerable: List[str]  # git glob pathspecs
     releases: List[dict]
+    started: Path  # the worktree (or checkout) cleanup was started from
 
 
 # ---------------------------------------------------------------------- git
@@ -164,13 +165,14 @@ def _process_cwds() -> Tuple[Dict[int, int], List[Tuple[int, str, str]]]:
     return parents, rows
 
 
-def _process_blockers(path: Path) -> List[str]:
+def _process_blockers(path: Path, settings: Settings) -> List[str]:
     try:
         parents, rows = _process_cwds()
     except CleanupError as error:
         return [f"cannot prove no process works inside: {error}"]
-    # The caller's shell (and whatever launched it) may sit in the worktree it cleans up.
-    exempt, pid = set(), os.getpid()
+    # The caller's shell (and whatever launched it) may sit in the worktree it was started from.
+    # Only there: an ancestor inside any other worktree is live work that `--all` must keep.
+    exempt, pid = set(), (os.getpid() if path == settings.started else 0)
     while pid and pid not in exempt:
         exempt.add(pid)
         pid = parents.get(pid, 0)
@@ -182,7 +184,7 @@ def _process_blockers(path: Path) -> List[str]:
 def _blockers(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[str], List[str]]:
     """(the pull request that merged the head, every reason the worktree must stay)."""
     pull, why = _merged_head(gh, tree.branch, tree.head, settings.base)
-    return pull, ([why] if why else []) + _local_blockers(tree, settings) + _process_blockers(tree.path)
+    return pull, ([why] if why else []) + _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
 
 
 # ------------------------------------------------------------------ removal
@@ -220,6 +222,16 @@ def _release(path: Path, entry: dict) -> Optional[str]:
     return None
 
 
+def _drop_branch_settings(primary: Path, branch: str) -> str:
+    """Remove the `branch.<name>` section `start --track` wrote; '' when none is left, else what was kept."""
+    # update-ref, unlike `git branch -d`, leaves the section behind; names are compared exactly, not as a regex.
+    names = _git(primary, "config", "--name-only", "--list").stdout.splitlines()
+    if not any(n.startswith(f"branch.{branch}.") for n in names):
+        return ""
+    dropped = _git(primary, "config", "--remove-section", f"branch.{branch}", check=False)
+    return "" if dropped.returncode == 0 else f", its settings kept ({dropped.stderr.strip()})"
+
+
 def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
     """Release, recheck, then remove the worktree, the local branch and the remote branch."""
     for entry in settings.releases:
@@ -227,7 +239,7 @@ def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
         if failure:
             return False, f"release command {failure}"
     # The release commands take time; everything local is proven again right before removing.
-    reasons = _local_blockers(tree, settings) + _process_blockers(tree.path)
+    reasons = _local_blockers(tree, settings) + _process_blockers(tree.path, settings)
     if reasons:
         return False, "; ".join(reasons)
     removed = _git(settings.primary, "worktree", "remove", str(tree.path), check=False)
@@ -235,7 +247,10 @@ def _remove(tree: Worktree, settings: Settings) -> Tuple[bool, str]:
         return False, f"git worktree remove refused: {removed.stderr.strip()}"
     # Only at the merged head: a branch moved since the check keeps its commits.
     deleted = _git(settings.primary, "update-ref", "-d", f"refs/heads/{tree.branch}", tree.head, check=False)
-    local = "deleted" if deleted.returncode == 0 else f"kept ({deleted.stderr.strip()})"
+    if deleted.returncode == 0:
+        local = "deleted" + _drop_branch_settings(settings.primary, tree.branch)
+    else:
+        local = f"kept ({deleted.stderr.strip()})"
     try:
         remote = land.delete_branch(settings.primary, settings.remote, tree.branch, tree.head)
     except land.LandError as error:
@@ -257,6 +272,7 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
         base=rules["baseBranch"],
         regenerable=section["regenerableIgnored"],
         releases=section["releaseCommands"],
+        started=Path(_git(cwd, "rev-parse", "--show-toplevel").stdout.strip()).resolve(),
     )
     trees = list_worktrees(primary)
     shown = primary.parent
@@ -269,16 +285,18 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
         outside = [t for t in others if not _under_root(t, settings)]
         candidates = sorted((t for t in others if _under_root(t, settings)), key=lambda t: t.path)
     else:
-        here = Path(_git(cwd, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
-        candidates = [t for t in trees if t.path == here]
+        candidates = [t for t in trees if t.path == settings.started]
         if not candidates:
-            raise CleanupError(f"{here} is not a registered worktree")
+            raise CleanupError(f"{settings.started} is not a registered worktree")
         reason = _scope(candidates[0], settings)
         if reason:
             raise CleanupError(f"{name(candidates[0])}: {reason}; nothing was touched")
 
     # Out of the way of the worktree being removed; every git call names its own directory.
     os.chdir(primary)
+    # Under --all, one worktree's error (a failed gh call, a git failure) keeps that worktree
+    # and the rest are still decided; for the current worktree alone it fails the command.
+    errors = (CleanupError, GhError, land.LandError, json.JSONDecodeError, OSError) if all_worktrees else ()
     blocked = failed = done = 0
     for tree in candidates:
         label = name(tree)
@@ -287,7 +305,10 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
             print(f"kept:     {label}: {reason}")
             blocked += 1
             continue
-        pull, reasons = _blockers(gh, tree, settings)
+        try:
+            pull, reasons = _blockers(gh, tree, settings)
+        except errors as error:
+            pull, reasons = None, [f"cannot decide: {error}"]
         if reasons:
             print(f"kept:     {label} ({tree.branch}): " + "; ".join(reasons))
             blocked += 1
@@ -298,7 +319,10 @@ def run(gh: Gh, cwd: Path, config: dict, all_worktrees: bool, dry_run: bool) -> 
                   f"release commands: {releases}")
             done += 1
             continue
-        ok, detail = _remove(tree, settings)
+        try:
+            ok, detail = _remove(tree, settings)
+        except errors as error:
+            ok, detail = False, f"error: {error}"
         if ok:
             print(f"removed:  {label} ({tree.branch} at {tree.head[:12]}, {pull} merged); {detail}")
             done += 1

@@ -680,9 +680,9 @@ A worktree is provably done when all of these hold:
 - every ignored file matches a `cleanup.regenerableIgnored` glob. These are
   Git `glob` pathspecs: `*` stays within one path segment and `**` crosses
   segments. Any other ignored file keeps the worktree and is named;
-- no process other than `cleanup` and its ancestors has its working
-  directory inside the worktree (`lsof`). When `lsof` fails, nothing counts as
-  proven.
+- no process has its working directory inside the worktree (`lsof`), other
+  than `cleanup` and its ancestors when the worktree is the one `cleanup` was
+  started from. When `lsof` fails, nothing counts as proven.
 
 For a worktree that is provably done, `cleanup`:
 
@@ -694,13 +694,17 @@ For a worktree that is provably done, `cleanup`:
 3. runs `git worktree remove` without `--force`. Git deletes the regenerable
    ignored files with the worktree;
 4. deletes the local branch only if it is still at the merged head
-   (`git update-ref -d <ref> <head>`);
+   (`git update-ref -d <ref> <head>`), then its `branch.<name>` settings in
+   the shared Git config. The head check guards the short window after step
+   2; while the branch is checked out, the recheck already covers it;
 5. deletes the remote branch with a lease on the merged head, as `land` does.
    A branch already gone is fine; a branch at any other commit is kept and
    reported.
 
 Anything else is listed with every reason and never touched: no release
-command runs for it. `--all` also counts the worktrees outside the root and
+command runs for it. With `--all`, an error while checking or removing one
+worktree, such as a failed `gh` call, keeps that worktree with the error and
+goes on to the next. `--all` also counts the worktrees outside the root and
 leaves them to the repository's own housekeeping procedure. Local paths are
 printed relative to the checkout's parent directory.
 
@@ -725,29 +729,36 @@ to look at.
 `test_cleanup.py` checks these against real temporary repositories, linked
 worktrees, a local bare remote and a fake `gh` (`WORK_GH`).
 
-43. **Unmerged work is removed.** Only a pull request from the branch in this
+53. **Unmerged work is removed.** Only a pull request from the branch in this
     repository, MERGED into the base branch at exactly the local head, proves
     the work landed. No pull request, an open or closed-unmerged one, one
     merged at an earlier head, a local commit after the merge, a fork's pull
     request with the same head name, or a merge into another base keeps the
     worktree.
-44. **Local data is lost with the worktree.** Modified, staged or untracked
+54. **Local data is lost with the worktree.** Modified, staged or untracked
     files, a non-regenerable ignored file, an operation in progress, or a lock
     keeps it. Ignored files that match the regenerable globs do not.
-45. **A live process loses its working directory.** Another process with its
+55. **A live process loses its working directory.** Another process with its
     working directory inside keeps the worktree, and so does an `lsof` that
-    fails. The caller's own shell does not block its own cleanup.
-46. **Something outside the managed set is touched.** The primary checkout,
+    fails. The caller's own shell does not block its own cleanup, but an
+    ancestor working inside another worktree blocks that one under `--all`.
+56. **Something outside the managed set is touched.** The primary checkout,
     worktrees outside the root, detached heads and branches that are not claim
     branches are never touched, and blocked worktrees get no release command.
     `--all` lists each with its reason.
-47. **A failing or hanging release command is ignored.** A non-zero exit keeps
+57. **A failing or hanging release command is ignored.** A non-zero exit keeps
     the worktree, and a command past its timeout has its process group killed
     and keeps it too.
-48. **A branch that moved is deleted.** The local branch is deleted only at
-    the merged head, and the remote branch only with a lease on it. A remote
-    branch pushed to after the merge is kept and reported.
-49. **The worktree changes between the check and the removal.** A commit or a
+58. **A branch that moved is deleted.** The remote branch is deleted only
+    with a lease on the merged head. A remote branch pushed to after the
+    merge is kept and reported.
+59. **The worktree changes between the check and the removal.** A commit or a
     new file made while the release commands run keeps the worktree.
-50. **A dry run changes something.** `--dry-run` runs no release command and
+60. **A dry run changes something.** `--dry-run` runs no release command and
     removes nothing.
+61. **A deleted branch leaves its settings behind.** `start` creates task
+    branches with `--track`; removing one also removes its `branch.<name>`
+    section from the shared Git config.
+62. **One worktree's error hides the rest.** Under `--all`, a failure while
+    checking one worktree keeps it with the error, and every other worktree
+    is still decided and listed.
