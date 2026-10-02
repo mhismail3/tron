@@ -63,6 +63,21 @@ final class IntegrationsRPCClient {
         return value
     }
 
+    func resumeXOAuthBegin(commandID: String) async throws -> IntegrationXOAuthStarted {
+        guard let mutationExecutor else { throw needsSelectedGateway() }
+        let value = try await mutationExecutor.resolveValue(method: "knowledge.x.oauth.begin", commandID: commandID).decode(IntegrationXOAuthStarted.self)
+        guard !value.instanceId.isEmpty, !value.operationId.isEmpty, !value.state.isEmpty,
+              let url = URL(string: value.authorizationUrl), url.scheme == "https", url.host == "twitter.com", url.path == "/i/oauth2/authorize" else { throw invalidResponse() }
+        return value
+    }
+
+    func resumeXOAuthComplete(commandID: String) async throws -> IntegrationSetupCompleted {
+        guard let mutationExecutor else { throw needsSelectedGateway() }
+        let value = try await mutationExecutor.resolveValue(method: "knowledge.x.oauth.complete", commandID: commandID).decode(IntegrationSetupCompleted.self)
+        guard !value.id.isEmpty, value.definitionId == "knowledge.x", value.setupRevision >= 1 else { throw invalidResponse() }
+        return value
+    }
+
     func completeXOAuth(operationID: String, callbackURL: String? = nil, code: String? = nil, state: String? = nil) async throws -> IntegrationSetupCompleted {
         struct Params: Encodable { let operationId: String; let callbackUrl: String?; let code: String?; let state: String? }
         guard callbackURL != nil || (code != nil && state != nil) else { throw invalidResponse() }
@@ -118,10 +133,18 @@ final class IntegrationsRPCClient {
         let commandID = uuidSource.next().uuidString.lowercased()
         var object = try JSONValue.encode(parameters).objectValue ?? [:]
         object["commandId"] = .string(commandID)
-        let value = try await mutationExecutor.performValue(method: method, commandID: commandID) { [requestValue] in
-            try await requestValue(method, .object(object))
+        let isOAuth = method == "knowledge.x.oauth.begin" || method == "knowledge.x.oauth.complete"
+        do {
+            let value = try await mutationExecutor.performValue(method: method, commandID: commandID,
+                replayAdmission: { !isOAuth }) { [requestValue] in
+                try await requestValue(method, .object(object))
+            }
+            return try value.decode(Response.self)
+        } catch is CancellationError where isOAuth {
+            // A missing OAuth receipt cannot recreate the lost PKCE operation.
+            throw GatewayFailure(code: "outcome_unknown", message: "Check the original X setup status before starting another authorization.", retryable: false,
+                details: .object(["method": .string(method), "commandId": .string(commandID)]))
         }
-        return try value.decode(Response.self)
     }
 
     private func needsSelectedGateway() -> GatewayFailure {

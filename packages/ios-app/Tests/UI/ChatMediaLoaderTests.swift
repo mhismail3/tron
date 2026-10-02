@@ -489,6 +489,88 @@ struct ChatMediaLoaderTests {
         #expect(!loader.metrics().hasFullPreviewFlight)
     }
 
+    @Test("cancelled attempt cannot lend a retired held payload to its same-presentation successor", arguments: [false, true], [false, true])
+    func previewAttemptRetirement(file: Bool, delayedCleanup: Bool) async throws {
+        let retired = try SessionScenarioBuilder(seed: 6_316).generatedImageFixture(format: .png, pixelWidth: 16, pixelHeight: 32, orientation: .up)
+        let current = try SessionScenarioBuilder(seed: 6_317).generatedImageFixture(format: .png, pixelWidth: 16, pixelHeight: 64, orientation: .up)
+        let gate = MediaAttemptFetchGate(payloads: file
+            ? [.init(data: Data("retired".utf8), mimeType: "text/plain"), .init(data: Data("current".utf8), mimeType: "text/plain")]
+            : [.init(data: retired.encodedData, mimeType: "image/png"), .init(data: current.encodedData, mimeType: "image/png")])
+        let loader = ChatMediaLoader(fetch: { identity in await gate.fetch(identity) }, admits: { _ in true })
+        let identity = mediaIdentity(blobID: "same-presentation-reconnect")
+        let presentation = UUID()
+        let cleanupEntered = MediaSignal(), cleanupRelease = MediaSignal(), cleanupDone = MediaSignal()
+        defer { Task { await cleanupRelease.signal() } }
+        loader.hostedAfterPreviewCancellationCleanup = { await cleanupDone.signal() }
+        if delayedCleanup {
+            loader.hostedBeforePreviewCancellationCleanup = {
+                await cleanupEntered.signal(); await cleanupRelease.wait()
+            }
+        }
+        func read() async throws -> Int {
+            if file { return try await loader.filePreviewPayload(for: identity, leaseID: presentation).data == Data("current".utf8) ? 64 : 32 }
+            return try await loader.fullPreview(for: identity, leaseID: presentation).cgImage!.height
+        }
+        let predecessor = Task { try await read() }
+        await gate.waitForStarts(1)
+        predecessor.cancel(); predecessor.cancel()
+        if !delayedCleanup { await cleanupDone.wait() }
+        let successor = Task { try await read() }
+        await loader.hostedWaitForPreviewAdmissionCount(2)
+        // Returning old work after successor admission must not count as a new
+        // read, even when its cancellation cleanup is still queued on the actor.
+        await gate.release(1)
+        let successorValue = try await successor.value
+        try #require(successorValue == 64, "The successor must obtain current, not retired payload")
+        #expect(await gate.startCount == 2)
+        if delayedCleanup {
+            await cleanupEntered.wait(); await cleanupRelease.signal(); await cleanupDone.wait()
+        }
+        await #expect(throws: CancellationError.self) { try await predecessor.value }
+        #expect(!loader.metrics().hasFullPreviewFlight)
+    }
+
+    @Test("one cancelled request does not revoke legitimate concurrent readers, even sharing a presentation UUID", arguments: [false, true])
+    func previewConcurrentRequestCancellation(file: Bool) async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_318).generatedImageFixture(format: .png, pixelWidth: 16, pixelHeight: 64, orientation: .up)
+        let gate = MediaAttemptFetchGate(payloads: [.init(data: file ? Data("current".utf8) : fixture.encodedData, mimeType: file ? "text/plain" : "image/png")])
+        let loader = ChatMediaLoader(fetch: { identity in await gate.fetch(identity) }, admits: { _ in true })
+        let identity = mediaIdentity(blobID: "legitimate-shared-preview"), presentation = UUID()
+        func read() async throws -> Int {
+            if file { return try await loader.filePreviewPayload(for: identity, leaseID: presentation).data.count }
+            return try await loader.fullPreview(for: identity, leaseID: presentation).cgImage!.height
+        }
+        let predecessor = Task { try await read() }; await gate.waitForStarts(1)
+        let legitimate = Task { try await read() }; await loader.hostedWaitForPreviewAdmissionCount(2)
+        predecessor.cancel(); predecessor.cancel()
+        let survivor = Task { try await read() }; await loader.hostedWaitForPreviewAdmissionCount(3)
+        await gate.release(1)
+        await #expect(throws: CancellationError.self) { try await predecessor.value }
+        #expect(try await legitimate.value == (file ? 7 : 64))
+        #expect(try await survivor.value == (file ? 7 : 64))
+        #expect(await gate.startCount == 1)
+        #expect(!loader.metrics().hasFullPreviewFlight)
+    }
+
+    @Test("cancel before preview registration leaves no flight and permits a later real read", arguments: [false, true])
+    func previewCancellationBeforeRegistration(file: Bool) async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_319).generatedImageFixture(format: .png, pixelWidth: 16, pixelHeight: 64, orientation: .up)
+        let gate = MediaAttemptFetchGate(payloads: [.init(data: file ? Data("current".utf8) : fixture.encodedData, mimeType: file ? "text/plain" : "image/png")], holdFirst: false)
+        let loader = ChatMediaLoader(fetch: { identity in await gate.fetch(identity) }, admits: { _ in true })
+        let identity = mediaIdentity(blobID: "cancel-before-preview"), presentation = UUID(), start = MediaSignal()
+        func read() async throws {
+            if file { _ = try await loader.filePreviewPayload(for: identity, leaseID: presentation) }
+            else { _ = try await loader.fullPreview(for: identity, leaseID: presentation) }
+        }
+        let cancelled = Task { await start.wait(); try await read() }
+        cancelled.cancel(); cancelled.cancel(); await start.signal()
+        await #expect(throws: CancellationError.self) { try await cancelled.value }
+        #expect(await gate.startCount == 0)
+        #expect(!loader.metrics().hasFullPreviewFlight)
+        let next = Task { try await read() }; await gate.waitForStarts(1); await gate.release(1); try await next.value
+        #expect(!loader.metrics().hasFullPreviewFlight)
+    }
+
     @Test("file preview leases share the exact uncached preview flight")
     func filePreviewLeaseCancellation() async throws {
         let gate = MediaFetchGate(payload: .init(
@@ -902,4 +984,25 @@ private actor MediaFailingFetchGate {
     func admitNextFetch() {
         admitting = true
     }
+}
+
+private actor MediaAttemptFetchGate {
+    let payloads: [ChatMediaPayload]
+    let holdFirst: Bool
+    private(set) var startCount = 0
+    private var firstFetch: CheckedContinuation<Void, Never>?
+    private var starts: [(Int, CheckedContinuation<Void, Never>)] = []
+    init(payloads: [ChatMediaPayload], holdFirst: Bool = true) { self.payloads = payloads; self.holdFirst = holdFirst }
+    func fetch(_ identity: ChatMediaIdentity) async -> ChatMediaPayload {
+        startCount += 1
+        let index = startCount - 1
+        let ready = starts.filter { startCount >= $0.0 }; starts.removeAll { startCount >= $0.0 }; ready.forEach { $0.1.resume() }
+        if index == 0, holdFirst { await withCheckedContinuation { firstFetch = $0 } }
+        return payloads[min(index, payloads.count - 1)]
+    }
+    func waitForStarts(_ count: Int) async {
+        if startCount >= count { return }
+        await withCheckedContinuation { starts.append((count, $0)) }
+    }
+    func release(_ count: Int) { if count == 1 { firstFetch?.resume(); firstFetch = nil } }
 }

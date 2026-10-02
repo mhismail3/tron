@@ -59,6 +59,7 @@ final class ConfirmedMutationExecutor {
         send: () async throws -> JSONValue
     ) async throws -> JSONValue {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
+        let profileID = lifecycle.selectedProfileID
         try lifecycle.require(admission)
         guard await lifecycle.waitForConnected(
             until: clock.now() + ConfirmedMutationConnectionPolicy.initialConnectionDeadline,
@@ -94,7 +95,7 @@ final class ConfirmedMutationExecutor {
                 throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: failure)
             } catch let uncertain as GatewayPossiblySentError {
             let original = uncertain.failure
-            if Task.isCancelled || !lifecycle.admits(admission) {
+            if Task.isCancelled || lifecycle.currentLifecycleGeneration != admission.generation || lifecycle.selectedProfileID != profileID {
                 throw Self.uncertainMutationOutcome(
                     method: method,
                     commandID: commandID,
@@ -110,7 +111,7 @@ final class ConfirmedMutationExecutor {
             let deadline = clock.now() + Self.receiptResolutionDeadline
             var lastFailure: GatewayFailure = original
             while clock.now() < deadline {
-                if Task.isCancelled || !lifecycle.admits(admission) {
+                if Task.isCancelled || lifecycle.currentLifecycleGeneration != admission.generation || lifecycle.selectedProfileID != profileID {
                     result = .cancelled
                     throw Self.uncertainMutationOutcome(
                         method: method,
@@ -118,16 +119,37 @@ final class ConfirmedMutationExecutor {
                         lastFailure: lastFailure
                     )
                 }
-                guard await lifecycle.waitForConnected(
-                    until: deadline,
-                    admission: admission
-                ) else { break }
+                // Suspension retires the socket, not an accepted receipt. Wait
+                // inside this owner's existing bound; never transmit in background.
+                guard lifecycle.admits(admission) else {
+                    do { try await clock.sleep(Self.receiptStatusPollInterval) }
+                    catch { break }
+                    continue
+                }
+                guard await lifecycle.waitForConnected(until: deadline, admission: admission) else {
+                    // A background handoff may resume in this same destination;
+                    // an active unauthorized/unpaired stop cannot make progress.
+                    if !Task.isCancelled, !lifecycle.admits(admission),
+                       lifecycle.currentLifecycleGeneration == admission.generation,
+                       lifecycle.selectedProfileID == profileID { continue }
+                    break
+                }
+                guard let statusAdmission = lifecycle.admission else { continue }
                 do {
-                    let status: CommandStatusResponse = try await client.request(
-                        "command.status",
-                        CommandStatusParams(method: method, commandId: commandID)
-                    )
-                    try lifecycle.require(admission)
+                    let status: CommandStatusResponse
+                    do {
+                        status = try await client.request("command.status", CommandStatusParams(method: method, commandId: commandID))
+                        try lifecycle.require(statusAdmission)
+                    } catch is CancellationError {
+                        // Only the exact receipt read is disposable. Cancellation
+                        // from replay refusal below must retain its terminal meaning.
+                        guard !Task.isCancelled,
+                              lifecycle.currentLifecycleGeneration == admission.generation,
+                              lifecycle.selectedProfileID == profileID else {
+                            throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: lastFailure)
+                        }
+                        continue
+                    }
                     switch status.status {
                     case "completed":
                         guard let resolved = status.result else {
@@ -155,7 +177,13 @@ final class ConfirmedMutationExecutor {
                                 throw CancellationError()
                             }
                             let resolved = try await send()
-                            try lifecycle.require(admission)
+                            // Definite success is no longer a disposable read:
+                            // same-authority suspension can retire its socket,
+                            // but cancellation or authority replacement cannot
+                            // publish it into a successor command namespace.
+                            try Task.checkCancellation()
+                            guard lifecycle.currentLifecycleGeneration == admission.generation,
+                                  lifecycle.selectedProfileID == profileID else { throw CancellationError() }
                             result = .success
                             return resolved
                         } catch let retry as GatewayPossiblySentError {
@@ -173,6 +201,10 @@ final class ConfirmedMutationExecutor {
                     }
                 } catch let failure as GatewayPossiblySentError {
                     lastFailure = failure.failure
+                } catch let failure as GatewayDefinitelyNotSentError {
+                    // Socket retirement can also win before this disposable read
+                    // is emitted. It says nothing about the accepted command.
+                    lastFailure = failure.failure
                 } catch let failure as GatewayFailure where failure.code == "response_too_large" {
                     throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: failure)
                 }
@@ -186,6 +218,30 @@ final class ConfirmedMutationExecutor {
                     lastFailure: lastFailure
                 )
             }
+        }
+    }
+
+    /// Explicit reconciliation of an already dispatched command. This path
+    /// only queries its receipt; missing/pending never authorizes a new send.
+    func resolveValue(method: String, commandID: String) async throws -> JSONValue {
+        let unavailable = GatewayFailure(code: "disconnected", message: "Reconnect to the original Mac to check this command.", retryable: true, details: nil)
+        guard let admission = lifecycle.generationAdmission,
+              await lifecycle.waitForConnected(until: clock.now() + ConfirmedMutationConnectionPolicy.initialConnectionDeadline, admission: admission),
+              let statusAdmission = lifecycle.admission else {
+            throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: unavailable)
+        }
+        do {
+            let status: CommandStatusResponse = try await client.request("command.status", CommandStatusParams(method: method, commandId: commandID))
+            try lifecycle.require(statusAdmission)
+            guard status.status == "completed", let result = status.result else {
+                throw Self.uncertainMutationOutcome(method: method, commandID: commandID,
+                    lastFailure: GatewayFailure(code: "receipt_unavailable", message: "The original command has no completed receipt. Do not submit a replacement.", retryable: false, details: nil))
+            }
+            return result
+        } catch let failure as GatewayPossiblySentError {
+            throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: failure.failure)
+        } catch is CancellationError {
+            throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: unavailable)
         }
     }
 

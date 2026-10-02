@@ -1,6 +1,7 @@
 import Foundation
 import PDFKit
 import SwiftUI
+import TronMobileCore
 
 struct AttachmentImageFilePreview: @unchecked Sendable {
     let image: UIImage
@@ -208,7 +209,7 @@ enum AttachmentFilePreviewSource: Sendable {
         switch self {
         case .local(let id, _): "local:\(id)"
         case .remote(let identity, let leaseID):
-            "remote:\(identity.profileID):\(identity.lifecycleGeneration):\(identity.blobID):\(leaseID.uuidString)"
+            "remote:\(identity.profileID):\(identity.lifecycleGeneration):\(identity.blobID):\(identity.sessionID ?? "none"):\(leaseID.uuidString)"
         case .unavailable: "unavailable"
         }
     }
@@ -222,6 +223,7 @@ struct AttachmentFilePreviewSheet: View {
     var fallbackText: String? = nil
 
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var phase: Phase = .loading
     @State private var loadGeneration = 0
@@ -236,9 +238,13 @@ struct AttachmentFilePreviewSheet: View {
     var body: some View {
         TronDocumentSheet(title: title ?? name) { content }
         .task(id: PresentationActivityTaskID(
-            source: source.loadID,
+            source: "\(source.loadID)-\(model.knowledgePresentationIdentity)-ready:\(model.connectionState == .connected)",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) { await load() }
+        .onChange(of: model.knowledgeDestinationIdentity) { _, _ in
+            if case .remote(let identity, _) = source,
+               model.chatMediaDestinationIdentity(blobID: identity.blobID, sessionID: identity.sessionID) != identity { dismiss() }
+        }
         .onDisappear { cancelRemoteLoad() }
     }
 
@@ -316,6 +322,12 @@ struct AttachmentFilePreviewSheet: View {
     private func load() async {
         // Covered or retired surfaces neither start nor publish this work.
         guard presentationActivity.allowsPresentationPublication else { return }
+        let admission: KnowledgePresentationIdentity?
+        if case .remote(let identity, _) = source {
+            guard model.connectionState == .connected, model.knowledgePresentationIdentity.connectionID != nil,
+                  model.chatMediaDestinationIdentity(blobID: identity.blobID, sessionID: identity.sessionID) == identity else { return }
+            admission = model.knowledgePresentationIdentity
+        } else { admission = nil }
         // A completed attempt for this exact source stays mounted: the sheet is
         // the one bounded surface for the file and reopening the route retries.
         if loadedSourceID == source.loadID {
@@ -354,7 +366,7 @@ struct AttachmentFilePreviewSheet: View {
                 name: name,
                 mimeType: effectiveMIME
             )
-            guard admitsLoad(generation),
+            guard admitsLoad(generation, admission: admission),
                   presentationActivity.allowsPresentationPublication else { return }
             phase = .prepared(prepared)
             loadedSourceID = sourceID
@@ -362,25 +374,26 @@ struct AttachmentFilePreviewSheet: View {
             // Interrupted work publishes nothing, so the next activation retries.
             return
         } catch AttachmentFilePreviewError.unsupported {
-            guard admitsLoad(generation),
+            guard admitsLoad(generation, admission: admission),
                   presentationActivity.allowsPresentationPublication else { return }
             phase = .unavailable("This file type does not have an in-app preview.")
             loadedSourceID = sourceID
         } catch AttachmentFilePreviewError.tooManyPDFPages {
-            guard admitsLoad(generation),
+            guard admitsLoad(generation, admission: admission),
                   presentationActivity.allowsPresentationPublication else { return }
             phase = .unavailable("This PDF has too many pages to preview safely.")
             loadedSourceID = sourceID
         } catch {
-            guard admitsLoad(generation),
+            guard admitsLoad(generation, admission: admission),
                   presentationActivity.allowsPresentationPublication else { return }
             phase = .unavailable("The file could not be prepared for preview.")
             loadedSourceID = sourceID
         }
     }
 
-    private func admitsLoad(_ generation: Int) -> Bool {
+    private func admitsLoad(_ generation: Int, admission: KnowledgePresentationIdentity?) -> Bool {
         generation == loadGeneration && !Task.isCancelled
+            && (admission == nil || admission == model.knowledgePresentationIdentity)
     }
 
     private func cancelRemoteLoad() {

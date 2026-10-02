@@ -199,6 +199,12 @@ final class AppModel {
     let performanceSignposts: any PerformanceSignposting
     let appLog: AppLog
     var diagnosticConnectionID: Int? { gatewayConnectionID }
+    /// Backgrounding and socket replacement retire reads, not the form's Mac.
+    var knowledgeDestinationIdentity: KnowledgeDestinationIdentity {
+        KnowledgeDestinationIdentity(profileID: lifecycle.selectedProfileID,
+                                     lifecycleGeneration: lifecycle.currentLifecycleGeneration)
+    }
+
     var knowledgePresentationIdentity: KnowledgePresentationIdentity {
         KnowledgePresentationIdentity(profileID: lifecycle.selectedProfileID, lifecycleGeneration: lifecycle.generationAdmission?.generation, connectionID: gatewayConnectionID)
     }
@@ -317,6 +323,16 @@ final class AppModel {
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
     var authEvent: AuthEventState? { providerAuth.event }
+    func authPromptInput(for prompt: AuthPromptState, destination: KnowledgeDestinationIdentity) -> String {
+        guard knowledgeDestinationIdentity == destination else { return "" }
+        return providerAuth.promptInput(for: prompt)
+    }
+    func setAuthPromptInput(_ value: String, for prompt: AuthPromptState, destination: KnowledgeDestinationIdentity) {
+        guard knowledgeDestinationIdentity == destination else { return }
+        providerAuth.setPromptInput(value, for: prompt)
+    }
+    func isAuthOperationActive(_ operationID: String) -> Bool { providerAuth.isAuthOperationActive(operationID) }
+
 
     var recoveredAuthOperationID: String? { providerAuth.activeRecoveredOperationID }
 
@@ -824,6 +840,14 @@ final class AppModel {
         try await client.openLiveView(kind: kind, viewId: viewId, generation: generation, sessionID: sessionID, profileID: profileID)
     }
 
+    /// Readonly selection belongs to the destination, not foreground read
+    /// admission. Fetch/preparation still uses chatMediaIdentity and its loader.
+    func chatMediaDestinationIdentity(blobID: String, sessionID: String? = nil) -> ChatMediaIdentity? {
+        guard let profileID = lifecycle.selectedProfileID else { return nil }
+        return ChatMediaIdentity(profileID: profileID, lifecycleGeneration: lifecycle.currentLifecycleGeneration,
+                                 blobID: blobID, sessionID: sessionID)
+    }
+
     func chatMediaIdentity(blobID: String, sessionID: String? = nil) -> ChatMediaIdentity? {
         guard let admission = lifecycle.generationAdmission,
               let profileID = lifecycle.selectedProfileID else { return nil }
@@ -898,6 +922,9 @@ final class AppModel {
     }
 
     var hostedSessionOpenAdmissionOverride: Bool?
+    var hostedAfterSessionCreateResult: (@MainActor () async -> Void)?
+    var hostedBeforeNewSessionSubmission: (@MainActor () async -> Void)?
+    var hostedAfterNewSessionTrustResult: (@MainActor () async -> Void)?
 
     func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
         try await lifecycle.connectHosted(profile: profile, token: token)
@@ -3532,7 +3559,14 @@ final class AppModel {
         guard let admission = lifecycle.generationAdmission,
               let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
         let sessionID = try await sessionMutations.createSession(cwd: cwd, sourceControl: sourceControl)
-        try requireLifecycle(admission)
+        #if HOSTED_TEST
+        await hostedAfterSessionCreateResult?()
+        #endif
+        // The receipt owner returned typed success. Background/socket retirement
+        // suspends navigation, not the original profile's accepted create result.
+        try Task.checkCancellation()
+        guard lifecycle.currentLifecycleGeneration == admission.generation,
+              profiles.selected?.id == profileID else { throw CancellationError() }
         guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
         defaultWorkspace = cwd
         UserDefaults.standard.set(cwd, forKey: "defaultWorkspace.v1")

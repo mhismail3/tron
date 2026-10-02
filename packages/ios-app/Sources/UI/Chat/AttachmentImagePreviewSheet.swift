@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import TronMobileCore
 
 /// The historical chat photo preview: one medium-height, edge-to-edge media
 /// sheet with native pinch/double-tap zoom and concentric sheet corners.
@@ -20,7 +21,8 @@ struct AttachmentImagePreviewSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
-    @State private var remoteImage: UIImage?
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @State private var remoteImage: (identity: ChatMediaIdentity, image: UIImage)?
     @State private var failed = false
     @State private var isZoomed = false
 
@@ -36,10 +38,11 @@ struct AttachmentImagePreviewSheet: View {
         remote identity: ChatMediaIdentity,
         leaseID: UUID,
         title: String,
-        accessibilityLabel: String
+        accessibilityLabel: String,
+        initialImage: UIImage?
     ) {
         source = .remote(identity: identity, leaseID: leaseID)
-        localImage = nil
+        localImage = initialImage
         self.accessibilityLabel = accessibilityLabel
         self.title = title
         _remoteImage = State(initialValue: nil)
@@ -61,7 +64,13 @@ struct AttachmentImagePreviewSheet: View {
         // fixed app radius that can diverge on different phones.
         .presentationCornerRadius(nil)
         .presentationContentInteraction(.scrolls)
-        .task(id: remoteIdentity) { await loadRemoteImage() }
+        .task(id: PresentationActivityTaskID(
+            source: "\(String(describing: remoteIdentity))-\(model.knowledgePresentationIdentity)-ready:\(model.connectionState == .connected)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) { await loadRemoteImage() }
+        .onChange(of: model.knowledgeDestinationIdentity) { _, _ in
+            if let remoteIdentity, model.chatMediaDestinationIdentity(blobID: remoteIdentity.blobID, sessionID: remoteIdentity.sessionID) != remoteIdentity { dismiss() }
+        }
         .onDisappear { cancelRemoteLoad() }
     }
 
@@ -97,7 +106,7 @@ struct AttachmentImagePreviewSheet: View {
     private var resolvedImage: UIImage? {
         switch source {
         case .local: localImage
-        case .remote: remoteImage
+        case .remote: remoteImage?.identity == remoteIdentity ? remoteImage?.image : localImage
         }
     }
 
@@ -107,15 +116,24 @@ struct AttachmentImagePreviewSheet: View {
     }
 
     private func loadRemoteImage() async {
-        guard case .remote(let identity, let leaseID) = source else { return }
-        remoteImage = nil
+        guard case .remote(let identity, let leaseID) = source,
+              presentationActivity.allowsPresentationPublication,
+              model.connectionState == .connected, model.knowledgePresentationIdentity.connectionID != nil,
+              model.chatMediaDestinationIdentity(blobID: identity.blobID, sessionID: identity.sessionID) == identity else { return }
+        // Keeping the decoded image keeps the native zoom/viewport instance.
+        guard remoteImage?.identity != identity else { return }
+        let admission = model.knowledgePresentationIdentity
         failed = false
         do {
-            remoteImage = try await model.chatMedia.fullPreview(for: identity, leaseID: leaseID)
+            let image = try await model.chatMedia.fullPreview(for: identity, leaseID: leaseID)
+            guard !Task.isCancelled, presentationActivity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == admission else { return }
+            remoteImage = (identity, image)
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, presentationActivity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == admission else { return }
             failed = true
         }
     }

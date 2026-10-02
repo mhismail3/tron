@@ -17,6 +17,9 @@ struct NewSessionSheet: View {
     /// The scope the currently admitted configuration belongs to.
     @State private var configuredScope: NewSessionModelScope?
     @State private var sourceControl = SessionSourceControlSelection.existing
+    @State private var sourceControlScope: NewSessionModelScope?
+    @State private var configurationRequestID = UUID()
+    @State private var creationNotice: String?
     @State private var gitInspection: GitInspection?
     @State private var gitInspectionFailed = false
     @State private var showBrowser = false
@@ -41,6 +44,10 @@ struct NewSessionSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
+                    if let creationNotice {
+                        Text(creationNotice).font(TronTypography.bodySM)
+                            .accessibilityIdentifier("new-session-created-elsewhere")
+                    }
                     if !quickSelections.isEmpty {
                         TronCardRail(
                             items: quickSelections,
@@ -224,12 +231,33 @@ struct NewSessionSheet: View {
                 .tronContentFitDetents()
                 .presentationDragIndicator(.hidden)
             }
+            .onChange(of: model.knowledgePresentationIdentity) { _, _ in publishCreatedRouteIfAdmitted() }
+            .onChange(of: presentationActivity) { _, _ in publishCreatedRouteIfAdmitted() }
+            .onChange(of: currentModelScope) { _, scope in
+                creationNotice = nil
+                if sourceControlScope != scope {
+                    sourceControl = .existing
+                    sourceControlScope = scope
+                    selectedModel = modelChoice.retain(in: scope)
+                    configuredModel = nil
+                    configuredScope = nil
+                    trustInspection = nil
+                    gitInspection = nil
+                    gitInspectionFailed = false
+                    configurationOwner.begin(profileID: scope.profileID, workspace: scope.workspace)
+                }
+                publishCreatedRouteIfAdmitted()
+            }
+            .onDisappear { creationOwner.retire() }
             .task(id: PresentationActivityTaskID(
-                source: NewSessionConfigurationLoadID(
-                    profileID: activeProfileID,
-                    workspace: workspace,
-                    trustInvalidationGeneration: model.trustRevision,
-                    profileRevision: model.profileRevision
+                source: NewSessionConfigurationReadID(
+                    configuration: NewSessionConfigurationLoadID(
+                        profileID: activeProfileID,
+                        workspace: workspace,
+                        trustInvalidationGeneration: model.trustRevision,
+                        profileRevision: model.profileRevision
+                    ),
+                    transport: model.knowledgePresentationIdentity
                 ),
                 presentationActive: presentationActivity.allowsPresentationPublication
             )) {
@@ -250,18 +278,25 @@ struct NewSessionSheet: View {
                 gitInspectionFailed = false
                 configuredModel = nil
                 configuredScope = nil
-                sourceControl = .existing
+                publishCreatedRouteIfAdmitted()
                 if workspace.isEmpty, useDefaultWorkspace,
                    let defaultWorkspace = model.defaultWorkspace, !defaultWorkspace.isEmpty {
                     workspace = defaultWorkspace
                     return
                 }
                 let requestedWorkspace = workspace
+                let requestID = UUID()
+                configurationRequestID = requestID
+                let readIdentity = model.knowledgePresentationIdentity
                 // A revision-only re-run (profile revision, trust invalidation, or
                 // presentation activity) re-derives the scope default but must not
                 // discard a model the user just chose. Only a real scope change
                 // clears explicit intent; see NewSessionModelChoice.
-                let modelScope = NewSessionModelScope(profileID: profileID, workspace: requestedWorkspace)
+                let modelScope = NewSessionModelScope(profileID: profileID, workspace: requestedWorkspace, lifecycleGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration)
+                if sourceControlScope != modelScope {
+                    sourceControl = .existing
+                    sourceControlScope = modelScope
+                }
                 selectedModel = modelChoice.retain(in: modelScope)
                 let settingsTarget = requestedWorkspace.isEmpty
                     ? SettingsTarget.global
@@ -271,7 +306,7 @@ struct NewSessionSheet: View {
                 if requestedWorkspace.isEmpty {
                     trustReady = true
                 } else {
-                    trustReady = await inspectTrust(cwd: requestedWorkspace, profileID: profileID)
+                    trustReady = await inspectTrust(cwd: requestedWorkspace, profileID: profileID, requestID: requestID, readIdentity: readIdentity)
                 }
                 let inspectedGit: GitInspection?
                 let gitFailed: Bool
@@ -290,15 +325,11 @@ struct NewSessionSheet: View {
                         gitFailed = true
                     }
                 }
-                guard model.profiles.selected?.id == profileID,
-                      selectedServerID == profileID,
-                      workspace == requestedWorkspace else { return }
+                guard admitsConfigurationRequest(requestID, readIdentity: readIdentity, profileID: profileID, cwd: requestedWorkspace) else { return }
                 gitInspection = inspectedGit
                 gitInspectionFailed = gitFailed
                 let loadedSettings = await settingsReady
-                guard model.profiles.selected?.id == profileID,
-                      selectedServerID == profileID,
-                      workspace == requestedWorkspace,
+                guard admitsConfigurationRequest(requestID, readIdentity: readIdentity, profileID: profileID, cwd: requestedWorkspace),
                       configurationOwner.admit(
                         profileID: profileID,
                         workspace: requestedWorkspace,
@@ -403,7 +434,8 @@ struct NewSessionSheet: View {
                 // live scope if a pick somehow precedes configuration admission.
                 modelChoice.choose(selection, scope: configuredScope ?? NewSessionModelScope(
                     profileID: activeProfileID,
-                    workspace: workspace
+                    workspace: workspace,
+                    lifecycleGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration
                 ))
             }
         )
@@ -458,21 +490,17 @@ struct NewSessionSheet: View {
         Task { await model.switchGateway(profile) }
     }
 
-    private func inspectTrust(cwd: String, profileID: String) async -> Bool {
+    private func inspectTrust(cwd: String, profileID: String, requestID: UUID, readIdentity: KnowledgePresentationIdentity) async -> Bool {
         guard let target = TrustTarget(cwd: cwd) else { return false }
         do {
             let inspection = try await model.inspectTrust(target: target)
-            guard workspace == cwd,
-                  selectedServerID == profileID,
-                  model.profiles.selected?.id == profileID else { return false }
+            guard admitsConfigurationRequest(requestID, readIdentity: readIdentity, profileID: profileID, cwd: cwd) else { return false }
             trustInspection = inspection
             return true
         } catch is CancellationError {
             return false
         } catch {
-            guard workspace == cwd,
-                  selectedServerID == profileID,
-                  model.profiles.selected?.id == profileID else { return false }
+            guard admitsConfigurationRequest(requestID, readIdentity: readIdentity, profileID: profileID, cwd: cwd) else { return false }
             model.presentError(error)
             return false
         }
@@ -492,10 +520,12 @@ struct NewSessionSheet: View {
     }
 
     private var configurationReady: Bool {
-        configurationOwner.permitsCreation(
-            profileID: activeProfileID,
-            workspace: workspace
-        ) && sourceControl.isAdmissible(for: gitInspection)
+        model.profiles.selected?.id == activeProfileID
+            && configuredScope == currentModelScope
+            && configurationOwner.permitsCreation(
+                profileID: activeProfileID,
+                workspace: workspace
+            ) && sourceControl.isAdmissible(for: gitInspection)
     }
 
     private var configurationLoading: Bool {
@@ -517,6 +547,8 @@ struct NewSessionSheet: View {
         guard pinnedProfileID == nil || model.profiles.selected?.id == pinnedProfileID else { return }
         guard creationOwner.begin(configurationReady: configurationReady) else { return }
         let cwd = workspace
+        let submittedScope = currentModelScope
+        let submittedPrompt = initialDraftText
         let modelOverride = creationOwner.modelOverride(
             selected: selectedModel,
             configured: configuredModel
@@ -528,7 +560,9 @@ struct NewSessionSheet: View {
                 cwd: cwd,
                 sourceControl: requestedSourceControl,
                 modelOverride: modelOverride,
-                trustDecision: trustDecision
+                trustDecision: trustDecision,
+                submittedScope: submittedScope,
+                submittedPrompt: submittedPrompt
             )
         }
     }
@@ -537,30 +571,79 @@ struct NewSessionSheet: View {
         cwd: String,
         sourceControl: SessionSourceControlSelection,
         modelOverride: ModelRef?,
-        trustDecision: Bool?
+        trustDecision: Bool?,
+        submittedScope: NewSessionModelScope,
+        submittedPrompt: String?
     ) async {
         defer { creationOwner.finish() }
         do {
+            #if HOSTED_TEST
+            await model.hostedBeforeNewSessionSubmission?()
+            #endif
+            // A gesture's Task can start after its Mac/foreground retired. Check
+            // the original submission before even the implicit trust command;
+            // the post-trust namespace fence is too late to prevent retargeting.
+            guard !Task.isCancelled, !creationOwner.isRetired,
+                  presentationActivity.allowsPresentationPublication,
+                  model.profiles.selected?.id == submittedScope.profileID,
+                  model.knowledgePresentationIdentity.destinationIdentity == KnowledgeDestinationIdentity(
+                    profileID: submittedScope.profileID,
+                    lifecycleGeneration: submittedScope.lifecycleGeneration
+                  ) else { return }
             if let trustDecision {
                 guard let target = TrustTarget(cwd: cwd) else {
                     model.presentError("The selected workspace cannot receive a project trust decision.")
                     return
                 }
                 _ = try await model.setTrust(target: target, decision: trustDecision)
+                #if HOSTED_TEST
+                await model.hostedAfterNewSessionTrustResult?()
+                #endif
             }
+            guard model.profiles.selected?.id == submittedScope.profileID,
+                  model.knowledgeDestinationIdentity.lifecycleGeneration == submittedScope.lifecycleGeneration else { return }
             let route = try await model.createSession(cwd: cwd, sourceControl: sourceControl)
-            guard model.ownsNavigationRoute(route) else {
-                model.presentError("The new session was created, but this navigation request is no longer current.")
-                dismiss()
-                return
-            }
-            onCreated(route.withInitialModel(modelOverride).withEditorText(initialDraftText))
-            dismiss()
+            guard creationOwner.retain(
+                route: route.withEditorText(submittedPrompt).withInitialModel(modelOverride),
+                scope: submittedScope
+            ) else { return }
+            publishCreatedRouteIfAdmitted()
         } catch is CancellationError {
-            return
+            // The original receipt/namespace owns any accepted command.
         } catch {
+            guard !creationOwner.isRetired, currentModelScope == submittedScope else { return }
             model.presentError(error)
         }
+    }
+
+    private var currentModelScope: NewSessionModelScope {
+        NewSessionModelScope(profileID: activeProfileID, workspace: workspace, lifecycleGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration)
+    }
+
+    private func admitsConfigurationRequest(_ requestID: UUID, readIdentity: KnowledgePresentationIdentity, profileID: String, cwd: String) -> Bool {
+        !Task.isCancelled && configurationRequestID == requestID
+            && presentationActivity.allowsPresentationPublication
+            && model.knowledgePresentationIdentity == readIdentity
+            && model.profiles.selected?.id == profileID && selectedServerID == profileID
+            && workspace == cwd
+    }
+
+    private func publishCreatedRouteIfAdmitted() {
+        if let pendingScope = creationOwner.pendingScope,
+           creationOwner.discardResultOutside(currentModelScope) {
+            // A newer workspace on this Mac can report the canonical creation,
+            // but a successor namespace must not receive the old outcome.
+            guard pendingScope.profileID == model.knowledgeDestinationIdentity.profileID,
+                  pendingScope.lifecycleGeneration == model.knowledgeDestinationIdentity.lifecycleGeneration,
+                  pendingScope.profileID == currentModelScope.profileID else { return }
+            creationNotice = "Session created in the original workspace. Open it from Chats."
+            return
+        }
+        guard presentationActivity.allowsPresentationPublication,
+              let pending = creationOwner.pendingRoute,
+              let route = creationOwner.takeRoute(in: currentModelScope, navigationAdmitted: model.ownsNavigationRoute(pending)) else { return }
+        onCreated(route)
+        dismiss()
     }
 
     private func abbreviated(_ path: String) -> String {

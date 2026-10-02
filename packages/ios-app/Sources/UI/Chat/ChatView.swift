@@ -817,7 +817,7 @@ struct ChatView: View {
             model.setSessionPresentationVisible(target, visible: false)
             model.revokePresentationIntake(target)
         }
-        sessionPresentation.suspendForBackground()
+        sessionPresentation.retirePresentation()
         scrollCoordinator.cancel()
         abandonLayoutTransaction()
         _ = composerResponder.resignFirstResponder()

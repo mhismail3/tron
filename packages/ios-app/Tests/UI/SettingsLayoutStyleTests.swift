@@ -6,14 +6,14 @@ import XCTest
 @MainActor
 final class SettingsLayoutStyleTests: XCTestCase {
 
-    func testIntegrationMutationSettlementRejoinsAfterPresentationSuspension() async throws {
+    func testKnowledgeMutationSettlementRejoinsAfterPresentationSuspension() async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let model = AppModel(client: client, cache: SnapshotCache(root: root))
         do {
             for fails in [false, true] {
-                let probe = IntegrationMutationProbe()
+                let probe = KnowledgeMutationProbe()
                 let started = expectation(description: "Accepted command started")
                 var release: CheckedContinuation<Void, Error>?
                 defer { release?.resume(throwing: CancellationError()) }
@@ -25,10 +25,11 @@ final class SettingsLayoutStyleTests: XCTestCase {
                         started.fulfill()
                     }
                 }
-                probe.pending = IntegrationMutation(identity: model.knowledgePresentationIdentity, task: accepted)
-                try await withHost(IntegrationMutationFixture(probe: probe).environment(model), size: CGSize(width: 320, height: 120)) { _ in
+                probe.pending = KnowledgeMutation(identity: model.knowledgeDestinationIdentity, task: accepted)
+                try await withHost(KnowledgeMutationFixture(probe: probe).environment(model), size: CGSize(width: 320, height: 120)) { _ in
                     await fulfillment(of: [started], timeout: 2)
                     probe.active = false
+                    await model.enteredBackground().value
                     try await Task.sleep(for: .milliseconds(40))
                     let continuation = try XCTUnwrap(release)
                     release = nil
@@ -39,6 +40,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
                     XCTAssertNotNil(probe.pending, "Inactive observers cannot publish completion")
                     XCTAssertNil(probe.error)
                     XCTAssertEqual(probe.completions, 0)
+                    model.becameActive()
                     probe.active = true
                     try await Task.sleep(for: .milliseconds(60))
                     XCTAssertNil(probe.pending)
@@ -410,18 +412,18 @@ final class SettingsLayoutStyleTests: XCTestCase {
 }
 
 @MainActor @Observable
-private final class IntegrationMutationProbe {
-    var pending: IntegrationMutation?
+private final class KnowledgeMutationProbe {
+    var pending: KnowledgeMutation?
     var error: String?
     var active = true
     var completions = 0
 }
 
-private struct IntegrationMutationFixture: View {
-    @Bindable var probe: IntegrationMutationProbe
+private struct KnowledgeMutationFixture: View {
+    @Bindable var probe: KnowledgeMutationProbe
     var body: some View {
         Text("Accepted integration command")
-            .modifier(IntegrationMutationObserver(mutation: $probe.pending, error: $probe.error) { probe.completions += 1 })
+            .modifier(KnowledgeMutationObserver(mutation: $probe.pending, error: $probe.error) { probe.completions += 1 })
             .environment(\.tronPresentationActivity, probe.active ? .active : .covered)
     }
 }

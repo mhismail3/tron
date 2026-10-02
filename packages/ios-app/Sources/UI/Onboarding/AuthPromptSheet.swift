@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import TronMobileCore
 
 /// Answered provider choice prompts stay visible so the user can change an
 /// earlier answer. The SDK login is a sequential prompt stream, so changing a
@@ -159,7 +160,8 @@ struct ProviderAuthFlowContent: View {
                         onSelect: { onChoose(prompt, $0) }
                     )
                 } else {
-                    AuthPromptContent(prompt: prompt)
+                    AuthPromptContent(prompt: prompt, destination: model.knowledgeDestinationIdentity)
+                        .id("\(model.knowledgeDestinationIdentity.lifecycleGeneration):\(prompt.id)")
                 }
             }
         }
@@ -232,7 +234,11 @@ private struct RecoveredAuthControls: View {
 private struct AuthPromptContent: View {
     @Environment(AppModel.self) private var model
     let prompt: AppModel.AuthPromptState
-    @State private var value = ""
+    let destination: KnowledgeDestinationIdentity
+    private var value: Binding<String> {
+        Binding(get: { model.authPromptInput(for: prompt, destination: destination) },
+                set: { model.setAuthPromptInput($0, for: prompt, destination: destination) })
+    }
     @State private var submitting = false
 
     var body: some View {
@@ -245,10 +251,10 @@ private struct AuthPromptContent: View {
 
             Group {
                 if prompt.kind == .secret {
-                    SecureField(prompt.placeholder ?? "Value", text: $value)
+                    SecureField(prompt.placeholder ?? "Value", text: value)
                         .textContentType(.password)
                 } else {
-                    TextField(prompt.placeholder ?? "Value", text: $value)
+                    TextField(prompt.placeholder ?? "Value", text: value)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
@@ -259,11 +265,10 @@ private struct AuthPromptContent: View {
                 title: submitting ? "Submitting…" : (prompt.kind == .manualCode ? "Complete Login" : "Save"),
                 systemImage: prompt.kind == .manualCode ? "checkmark.shield" : TronSaveActionPresentation.systemImage,
                 isBusy: submitting,
-                isEnabled: !value.isEmpty && !submitting
-            ) { submit(value) }
+                isEnabled: !value.wrappedValue.isEmpty && !submitting
+            ) { submit(value.wrappedValue) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: prompt.id) { _, _ in value = "" }
     }
 
     private func submit(_ response: String) {
@@ -271,6 +276,8 @@ private struct AuthPromptContent: View {
         submitting = true
         Task {
             defer { submitting = false }
+            // The button captured this challenge's value, not a successor's.
+            guard model.knowledgeDestinationIdentity == destination, model.authPrompt == prompt else { return }
             do { try await model.answerAuth(response) }
             catch is CancellationError { }
             catch { model.presentError(error) }

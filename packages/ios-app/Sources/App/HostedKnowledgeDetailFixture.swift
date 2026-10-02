@@ -10,6 +10,9 @@ import TronMobileCore
 /// machine rather than injected view state. Events use the Gateway's exact job
 /// shape, and a dropped connection exercises the real reconnect owner.
 struct HostedKnowledgeDetailFixtureView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var presentedOrigin: KnowledgePresentationIdentity?
+    private let completesSummaryInBackground: Bool
     private let profile = GatewayProfile(id: "knowledge-fixture", label: "Studio server", host: "localhost", port: 9847, machineId: "fixture-knowledge")
     @State private var model: AppModel
     @State private var gateway: HostedKnowledgeGateway
@@ -22,6 +25,7 @@ struct HostedKnowledgeDetailFixtureView: View {
 
     init() {
         let scenario = ProcessInfo.processInfo.arguments.drop(while: { $0 != "-knowledge-detail-scenario" }).dropFirst().first ?? "default"
+        completesSummaryInBackground = scenario == "summary-background"
         let gateway = HostedKnowledgeGateway(scenario: scenario)
         let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in HostedKnowledgeSocket(gateway: gateway) })
         let store = AutomationFixtureProfileStore()
@@ -37,7 +41,7 @@ struct HostedKnowledgeDetailFixtureView: View {
             VStack(spacing: 0) {
                 if ready {
                     if detailMounted {
-                        KnowledgeDetailSheet(subject: .row(gateway.initialRow), origin: model.knowledgePresentationIdentity,
+                        KnowledgeDetailSheet(subject: .row(gateway.initialRow), origin: presentedOrigin ?? model.knowledgePresentationIdentity,
                                              onChanged: {}, onOpenDraft: { _ in }, onOpenSession: { _, _ in })
                             .id(detailGeneration)
 
@@ -55,9 +59,20 @@ struct HostedKnowledgeDetailFixtureView: View {
         .environment(model)
         .tronPresentation()
         .preferredColorScheme(.dark)
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                model.enteredBackground()
+                if completesSummaryInBackground { Task { await gateway.completeSummary() } }
+            case .inactive: model.becameInactive()
+            case .active: model.becameActive()
+            @unknown default: break
+            }
+        }
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
+                presentedOrigin = model.knowledgePresentationIdentity
                 ready = true
             } catch { self.error = error.localizedDescription }
         }
@@ -79,17 +94,27 @@ struct HostedKnowledgeDetailFixtureView: View {
 
     private var fixtureBar: some View {
         VStack(spacing: 4) {
-            Text(counters).font(.caption2.monospaced()).accessibilityIdentifier("fixture.counters")
+            Text(counters.components(separatedBy: " | trace ").first ?? counters).font(.caption2.monospaced())
+                .lineLimit(2).frame(height: 28)
+                .accessibilityValue(counters).accessibilityIdentifier("fixture.counters")
+            Text("\(model.connectionState) · socket:\(model.knowledgePresentationIdentity.connectionID.map(String.init) ?? "none") · generation:\(model.knowledgeDestinationIdentity.lifecycleGeneration)")
+                .font(.caption2).lineLimit(2).frame(height: 32)
+                .accessibilityValue("phase:\(scenePhase) invalidation:\(model.knowledgeInvalidationRevision) jobs:\(model.knowledgeCurationJobRevision)")
+                .accessibilityIdentifier("fixture.connection")
             HStack(spacing: 4) {
                 control("Close", id: "fixture.close-detail") { detailMounted = false }
-                control("Open", id: "fixture.open-detail") { detailGeneration += 1; detailMounted = true }
+                control("Open", id: "fixture.open-detail") { presentedOrigin = model.knowledgePresentationIdentity; detailGeneration += 1; detailMounted = true }
                 control("Drop", id: "fixture.drop-connection") { Task { await gateway.dropConnection() } }
+                control("Hold rows", id: "fixture.hold-rows") { Task { await gateway.holdRowsAndInvalidate() } }
+                control("New tags", id: "fixture.newer-tags") { Task { await gateway.publishNewerTags() } }
+                control("Release", id: "fixture.release-rows") { Task { await gateway.releaseRows() } }
             }
             HStack(spacing: 4) {
                 control("Sum ✓", id: "fixture.complete-summary") { Task { await gateway.completeSummary() } }
                 control("Sum ✗", id: "fixture.fail-summary") { Task { await gateway.failSummary() } }
                 control("Tags ✓", id: "fixture.complete-tags") { Task { await gateway.completeTags() } }
                 control("Tags ✗", id: "fixture.fail-tags") { Task { await gateway.failTags() } }
+                control("Ack", id: "fixture.release-summary-start") { Task { await gateway.releaseSummaryStart() } }
             }
             HStack(spacing: 4) {
                 control("Take conflict", id: "fixture.next-take-conflict") { Task { await gateway.setNextTake(.conflict) } }
@@ -134,6 +159,35 @@ actor HostedKnowledgeGateway {
     private var pendingTags: String?
     private var nextTake = TakeMode.success
     private var nextCurationConflict = false
+    private var timeline: [String] = []
+    func trace(_ value: String) {
+        timeline.append(value)
+        if timeline.count > 32 { timeline.removeFirst() }
+        publishCounters()
+    }
+    private var holdNextRows = false
+    private var heldRows: CheckedContinuation<Void, Never>?
+    private var rowsHeld = 0
+    private var rowsReleased = 0
+    func holdRowsAndInvalidate() async { holdNextRows = true; await publishChange() }
+    func publishNewerTags() async { tagIDs = ["evaluation"]; revision += 1; await publishChange() }
+    func releaseRows() { heldRows?.resume(); heldRows = nil }
+    private var correctionCount = 0
+    private var jobsReadCount = 0
+    private var summaryStartReceipts: [String: JSONValue] = [:]
+    private var summaryStartReplies: [CheckedContinuation<Void, Never>] = []
+    private var summaryStartReleased = false
+    private var summaryStartAckCount = 0
+    func releaseSummaryStart() {
+        summaryStartReleased = true
+        let replies = summaryStartReplies; summaryStartReplies.removeAll()
+        replies.forEach { $0.resume() }
+    }
+    private func waitForSummaryStartRelease() async {
+        guard !summaryStartReleased else { return }
+        await withCheckedContinuation { summaryStartReplies.append($0) }
+    }
+    private var summaryDoneCount = 0
     private var summarizeCount = 0
     private var takeCount = 0
     private var tagCount = 0
@@ -160,8 +214,8 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount)"
-        counterContinuations.forEach { $0.yield(value) }
+        let value = "summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount)"
+        counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
     func attach(_ socket: HostedKnowledgeSocket) { sockets.append(socket) }
@@ -173,7 +227,9 @@ actor HostedKnowledgeGateway {
     func setNextCurationConflict() { nextCurationConflict = true }
 
     func completeSummary() async {
+        trace("control:completeSummary pending:\(pendingSummary != nil)")
         guard let command = pendingSummary else { return }
+        summaryDoneCount += 1
         pendingSummary = nil
         summary = "A repository describing how to turn a product goal into an explicit loss function an agent can optimize against."
         revision += 1
@@ -223,13 +279,21 @@ actor HostedKnowledgeGateway {
     }
 
     private func broadcast(topic: String, payload: JSONValue) async {
+        trace("event:\(topic) r\(revision) jobs:\(jobs.compactMap { $0.objectValue?["status"]?.stringValue }.joined(separator: ",")) sockets:\(sockets.count)")
         guard let frame = try? JSONEncoder.gateway.encode(JSONValue.object(["type": .string("event"), "topic": .string(topic), "payload": payload])) else { return }
         for socket in sockets { await socket.deliver(frame) }
     }
 
     /// Returns a result, or an error object `{code, message, retryable, details?}`.
     func handle(method: String, params: [String: JSONValue]) async -> (result: JSONValue?, error: JSONValue?) {
+        trace("read:\(method) r\(revision) job:\(jobs.last?.objectValue?["status"]?.stringValue ?? "none") requested:\(params["revisionId"]?.stringValue ?? "latest")")
         switch method {
+        case "command.status":
+            guard params["method"]?.stringValue == "knowledge.source.summarize",
+                  let command = params["commandId"]?.stringValue,
+                  let result = summaryStartReceipts[command] else { return (.object(["status": .string("missing")]), nil) }
+            if scenario == "summary-start-held" { await waitForSummaryStartRelease() }
+            return (.object(["status": .string("completed"), "result": result]), nil)
         case "knowledge.status":
             return (status(), nil)
         case "knowledge.list":
@@ -239,15 +303,27 @@ actor HostedKnowledgeGateway {
                 if id == Self.replacementID { return Self.row(id: id, revision: 1, title: "Harness design, revised", scope: "research", verdict: "evergreen", supersededBy: nil, hasTake: false, tags: ["agent-harness"], summary: nil) }
                 return nil
             }
-            return (.object(["rows": .array(rows), "stateRevision": .number(Double(stateRevision))]), nil)
+            let result: JSONValue = .object(["rows": .array(rows), "stateRevision": .number(Double(stateRevision))])
+            if holdNextRows {
+                holdNextRows = false; rowsHeld += 1; publishCounters()
+                await withCheckedContinuation { heldRows = $0 }
+                rowsReleased += 1; publishCounters()
+            }
+            return (result, nil)
         case "knowledge.search":
             return (.object(["rows": .array([]), "stateRevision": .number(Double(stateRevision))]), nil)
         case "knowledge.read":
             return (record(), nil)
         case "knowledge.curation.jobs":
+            jobsReadCount += 1; publishCounters()
             let running = jobs.filter { $0.objectValue?["status"]?.stringValue == "running" }.count
             let failed = jobs.filter { $0.objectValue?["status"]?.stringValue == "failed" }.count
             return (.object(["jobs": .array(Array(jobs.prefix(25))), "running": .number(Double(running)), "failed": .number(Double(failed))]), nil)
+        case "knowledge.correction":
+            correctionCount += 1; publishCounters()
+            revision += 1
+            summary = "Corrected summary from the accepted correction."
+            return (.object(["record": record(), "stateRevision": .number(Double(stateRevision))]), nil)
         case "knowledge.source.summarize":
             let command = params["commandId"]?.stringValue ?? "summary"
             if let existing = jobs.first(where: { $0.objectValue?["commandId"]?.stringValue == command }) {
@@ -255,7 +331,11 @@ actor HostedKnowledgeGateway {
             }
             summarizeCount += 1; publishCounters()
             pendingSummary = command
-            return (.object(["job": startJob(command, operation: "summary"), "record": record()]), nil)
+            let result: JSONValue = .object(["job": startJob(command, operation: "summary"), "record": record()])
+            summaryStartReceipts[command] = result
+            if scenario == "summary-start-held" { await waitForSummaryStartRelease() }
+            summaryStartAckCount += 1; publishCounters()
+            return (result, nil)
         case "knowledge.source.tag":
             let command = params["commandId"]?.stringValue ?? "tag"
             if let existing = jobs.first(where: { $0.objectValue?["commandId"]?.stringValue == command }) { return (.object(["job": existing]), nil) }
@@ -422,11 +502,18 @@ actor HostedKnowledgeSocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
         guard frame["type"]?.stringValue == "request", let id = frame["id"]?.stringValue, let method = frame["method"]?.stringValue else { return }
-        let reply = await gateway.handle(method: method, params: frame["params"]?.objectValue ?? [:])
+        Task {
+            let reply = await gateway.handle(method: method, params: frame["params"]?.objectValue ?? [:])
+            await gateway.trace("reply:\(method) record:\(reply.result?.objectValue?["revisionId"]?.stringValue ?? "none")")
+            await sendReply(id: id, reply: reply)
+        }
+    }
+    private func sendReply(id: String, reply: (result: JSONValue?, error: JSONValue?)) {
         var response: [String: JSONValue] = ["type": .string("response"), "id": .string(id), "ok": .bool(reply.error == nil)]
         if let result = reply.result { response["result"] = result }
         if let error = reply.error { response["error"] = error }
-        deliver(try JSONEncoder.gateway.encode(JSONValue.object(response)))
+        guard let data = try? JSONEncoder.gateway.encode(JSONValue.object(response)) else { return }
+        deliver(data)
     }
 
     func ping() async throws { if closed { throw CancellationError() } }

@@ -757,7 +757,7 @@ The WebSocket hello attempt has one monotonic deadline covering both the hello s
 
 Automatic recovery is owned by each connection lifecycle and continues indefinitely for retryable transport failures while the app is foregrounded on a satisfied network path. Both the primary lifecycle and dashboard pool use `GatewayReconnectSchedule`: the primary lifecycle's nominal delays progress from 2 seconds by ×1.7 to a 15-second cap, each independently jittered within 80–120%; a dashboard pool entry follows the same progression without jitter, and once three of its consecutive attempts have failed it escalates by ×4 from the delay it reached to a five-minute cap, so an unreachable profile is retried once every five minutes. The pool counts its own failed attempts and only a successful attempt clears the count, so a Mac that dropped after connecting, a handshake that is never answered and a 503 all keep backing off. Foreground activation, a real path change, and explicit Retry cancel a single pending delay; a path change — the interfaces the monitored route uses changing, or an unsatisfied path becoming satisfied — also restarts the curve, and an attempt already on the wire consumes that change when it ends rather than waiting the interval the closed route had grown; background retirement and an unsatisfied path pause retry admission, including when the path drops while a socket is active and that socket later retires. Authentication, permission, protocol, and identity failures stop automatic attempts until explicit Retry. A protocol mismatch is classified from the Gateway's own close: the Gateway refuses an unspeakable hello with application close code 4006 and a JSON reason carrying its protocol and minimum, so the stop's message names the build to update (an older app or an older Mac) instead of reading as a retryable transport failure, and the same rule keeps a background pool entry stopped while its own entry, not the selected profile, holds that message for the device detail. A Gateway built before that close answers the same hello with 1008 and no range, which stays a retryable transport failure: a Mac must run a Gateway that sends the typed close before its phone stops retrying it. A failed `session.list` read follows the same capped jitter curve while its exact connection remains current, without needing another catalog invalidation; read failures marked nonretryable stop, while the unavailable notice appears once after the third failure. Revision movement remains bounded to its existing immediate traversal attempts. Retryable failures remain Reconnecting, while Offline denotes stopped recovery. Each handshake bounds its socket open with the monotonic five-second transport-open deadline and its hello exchange with the fifteen-second hello deadline; the maintenance restart watchdog changes a stalled restart to Reconnecting and resumes retry rather than exhausting an allowance. Initial connect and profile switches still claim one admission before cache I/O and retain it through hello; exact lifecycle/connection generations fence stale completion, and canceled cache reads cannot replace the resumed authoritative catalog. Accepted domain mutations keep their receipt/possibly-sent ownership and never re-arm transport recovery. Recovery presentation retains the mounted Chat rows, route, draft, keyboard, and scroll identity, and cannot enable Send while `admitsLiveSessionCommands` is false. Optional provider/settings/device/catalog refreshes run through their existing owners after mounted authority and transport readiness.
 
-`GatewayClientTransportTests` cover the shared ping grid across sockets activated at different phases, a slow pong that must not move the next tick, a pong queued behind a large inbound frame that must not retire a busy link, the eighteen-second retirement bound after data stops, a late clock wake that probes once, cancellation before ping continuation installation, late/duplicate callback settlement, RPC rejection before hello/event activation, the split transport-open and hello bounds, missing-pong retirement, genuine send-failure provenance, overflow diagnostics, and frame decode-limit diagnostics. `GatewayDiagnosticsServiceTests` additionally retain a first fault under saturation while redacting transport content. `GatewayReconnectScheduleTests` and `GatewayRecoveryPolicyTests` cover one-shot delay acceleration, capped jittered progression, and nonretryable classification. `AppModelReconnectTests` covers transient retries past the former attempt ceiling, independent jittered delays, foreground acceleration, path pause/resume (including path loss on an active socket), authentication stop plus explicit Retry, maintenance restart watchdog recovery, and startup/profile-switch admission fencing. Cold-start inbox coverage waits for both the catalog and the one initial inbox request on the scripted socket while holding the inbox response, so asynchronous admission cannot look like a missing read. Dashboard owner tests cover retries past the removed attempt allowance and path pause/resume; socket retirement barriers remain keyed by profile and exact entry generation so a predecessor cannot erase its successor's pending close. `DashboardStateOwnerTests.chainedRetirementKeepsLatestBarrier` holds two retirement boundaries independently; `SettingsLayoutStyleTests.testVisiblePackagesRefreshAfterForegroundWithoutRetry` checks visible-page refresh without imposing an order on independent catalog reads. `AppModelInboxDrainTests.stalledOptionalRead` likewise withholds both replacement catalog/inbox responses until foreground readiness and correlates each request by method/ID. `AppModelReconnectTests` also leave the disconnect event queued while a failed mounted restore finishes, proving readiness consults the client rather than stale UI identity. Auth completion consumes exact terminal ownership synchronously; one auth-owned worker and one replaceable pending completion perform optional refresh, with canceled/profile-stale publication fenced. The mounted event owner reduces admitted events synchronously into the bounded `SessionSynchronizationCoordinator`; only a claimed synchronization lease enters its single network task, and exact processing-generation fencing prevents retired tasks from clearing successor work. During automatic recovery the last canonical snapshot remains available for rendering, but its old subscription is not a live command grant. A failed bounded recovery transaction stops repeated resync invalidations on that presentation/connection and supplies a persistent, scoped **Retry Conversation** action; a new connection or explicit retry can obtain fresh authority without replaying a prompt. `SessionMutationServiceTests` reconcile uncertain sends on a replacement socket with the same command ID; the signpost and configuration/import/terminal/control-plane receipt tests use responsive-socket RPC timeouts, which must not force reconnect. Their manual clock advances only after the original request is sent and the exact request deadline and between-probe timer are registered. `GatewayDiagnosticsServiceTests` open Logs during a stalled hello and verify immediate local evidence without a remote RPC.
+`GatewayClientTransportTests` cover the shared ping grid across sockets activated at different phases, a slow pong that must not move the next tick, a pong queued behind a large inbound frame that must not retire a busy link, the eighteen-second retirement bound after data stops, a late clock wake that probes once, cancellation before ping continuation installation, late/duplicate callback settlement, RPC rejection before hello/event activation, the split transport-open and hello bounds, missing-pong retirement, genuine send-failure provenance, overflow diagnostics, and frame decode-limit diagnostics. `GatewayDiagnosticsServiceTests` additionally retain a first fault under saturation while redacting transport content. `GatewayReconnectScheduleTests` and `GatewayRecoveryPolicyTests` cover one-shot delay acceleration, capped jittered progression, and nonretryable classification. `AppModelReconnectTests` covers transient retries past the former attempt ceiling, independent jittered delays, foreground acceleration, path pause/resume (including path loss on an active socket), authentication stop plus explicit Retry, maintenance restart watchdog recovery, and startup/profile-switch admission fencing. Cold-start inbox coverage waits for both the catalog and the one initial inbox request on the scripted socket while holding the inbox response, so asynchronous admission cannot look like a missing read. Dashboard owner tests cover retries past the removed attempt allowance and path pause/resume; socket retirement barriers remain keyed by profile and exact entry generation so a predecessor cannot erase its successor's pending close. `DashboardStateOwnerTests.chainedRetirementKeepsLatestBarrier` holds two retirement boundaries independently; `SettingsLayoutStyleTests.testVisiblePackagesRefreshAfterForegroundWithoutRetry` checks visible-page refresh without imposing an order on independent catalog reads. `AppModelInboxDrainTests.stalledOptionalRead` likewise withholds both replacement catalog/inbox responses until foreground readiness and correlates each request by method/ID. `AppModelReconnectTests` also leave the disconnect event queued while a failed mounted restore finishes, proving readiness consults the client rather than stale UI identity. Auth completion consumes exact terminal ownership synchronously; one auth-owned worker and one replaceable pending completion perform optional refresh, with canceled/profile-stale publication fenced. The mounted event owner reduces admitted events synchronously into the bounded `SessionSynchronizationCoordinator`; only a claimed synchronization lease enters its single network task, and exact processing-generation fencing prevents retired tasks from clearing successor work. During automatic recovery the last canonical snapshot remains available for rendering, but its old subscription is not a live command grant. A failed bounded recovery transaction stops repeated resync invalidations on that presentation/connection and supplies a persistent, scoped **Retry Conversation** action; a new connection or explicit retry can obtain fresh authority without replaying a prompt. `SessionMutationServiceTests` reconcile uncertain sends on a replacement socket with the same command ID; the signpost and configuration/import/terminal/control-plane receipt tests use responsive-socket RPC timeouts, which must not force reconnect. Their manual clock advances only after the original request is sent and the exact request deadline and between-probe timer are registered. `terminalSendSuccessAcrossBackground` compares an initial definite send result with a permitted original-ID replay result across the same scene transition: accepted terminal success uses stable destination admission, not disposable foreground/socket admission. `retiredAuthorityCannotReplayHeldReceipt` and `cancellationBeforeReplayEmission` retain the true namespace-revocation/cancellation controls; replay policy and status-read fencing are unchanged. `GatewayDiagnosticsServiceTests` open Logs during a stalled hello and verify immediate local evidence without a remote RPC.
 
 ## Efficient focused tests
 
@@ -1582,6 +1582,19 @@ manual-prompt versus callback-relay routing, stale response/cancellation safety,
 refresh, recovered-begin presentation with exact `replaceOperationId` restart, bounded retry of
 unacknowledged cancellations on resume, receipt-backed forced refresh/logout, event-only invalidation,
 and nested façade observation.
+`TronMCPServerSheetsUITests` also drives the real shared auth input and MCP sheet through
+canonical same-challenge replay, replacement challenge, observed expiry, explicit cancel, and
+actual Mac replacement. It checks exact synthetic input retention without automatic submission,
+and distinguishes consumed-prompt progress from terminal dismissal. The fixture records counts,
+never input values. `ProviderAuthCoordinatorTests.retiredPromptInputRequiresCanonicalReadmission`,
+`.latePromptAnswerKeepsReplacementDraft`, and `.hiddenPromptInputIsReleasedByOwningLifecycle`
+protect hidden admission, stale callback cleanup, and sensitive-memory release that an absent UI
+cannot expose. `AppModelEventTests.authInputBindingCannotCrossAuthority` holds the leaf getter/setter
+contract through real profile retirement, then deliberately reissues the same operation/prompt IDs
+on a replacement profile or a new lifecycle of the same profile. Removed destination guards reproduce
+both cross-authority reads and stale-input attachment; the HOSTED_TEST probe reports only presence, not the input. Run both owning suites
+with the owned runner; its reported `TestResults.xcresult` is the repeatable artifact. Browser,
+physical-device, and remaining provider-sheet lifecycle coverage are separate acceptance work.
 `ProviderOAuthBrowserTests` owns callback policy and listener construction: HTTPS authorization
 admission, exact provider/Gateway loopback descriptor agreement, IPv4/IPv6 loopback limits, simultaneous
 fixed-port POSIX binding to explicit loopback addresses, bounded GET parsing, encoded query
@@ -1665,6 +1678,36 @@ scripts/tron-ios-test run \
   --only-testing TronMobileTests/SettingsRouteIdentityTests \
   --only-testing TronMobileTests/SettingsDraftStoreTests
 ```
+
+### New Session draft and accepted-create boundary
+
+`TronNewSessionUITests` mounts the real managed New Session/Source Control/Workspace sheets over a
+scripted Gateway. Child Done and a real app switch retain the chosen worktree mode, branch and base;
+actual workspace/profile replacement invalidates the original checkout intent. The accepted-create
+fixture holds the real typed `session.create` result at a `HOSTED_TEST`-only facade boundary before
+releasing it on background (or after actual profile replacement). It is not a held unknown receipt:
+background success returns to the original admitted caller once, while a newer workspace keeps its
+draft and receives no forced navigation. Actual user dismissal does not reopen or create a session.
+Unresolved-trust journeys also hold the actual submission Task before any command, select a different
+server through the real picker, and release only at replacement foreground READY. The successor must
+receive neither the original workspace's implicit trust fallback nor a create. A background-before-send
+control remains unsent, an original-server fallback sends the captured `false` decision once, and an
+already accepted trust response reconciles canonically after background without automatic creation or
+trust replay. A later explicit Create gesture uses the settled trust decision.
+Each journey retains a screenshot and synthetic command/callback counts in the runner's xcresult.
+`NewSessionConfigurationOwnerTests` additionally exercises single-result consumption, namespace/workspace
+rejection and retirement while creation is still pending; these controls protect local ownership rather
+than simulating transport. Run the bounded owner and hosted journeys together:
+
+```bash
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileTests/NewSessionConfigurationOwnerTests \
+  --only-testing TronMobileUITests/TronNewSessionUITests
+```
+
+This is not physical-device/weak-network qualification, uncertain trust-receipt recovery proof, or closure of the
+remaining first-party sheet audit. The fixture result gate never ships in production.
 
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
 feed raw HTTP response bytes and inspect the exact `/v1/pair` request.
@@ -1899,6 +1942,34 @@ configuration `Test`, and plan `UIValidation`, under `scripts/ios-test-lock.py` 
 `scripts/ios-test-simulator.py validate`. Use `-only-testing:TronMobileUITests/TronSmokeUITests/<test>`
 for focused interaction checks rather than running every journey during diagnosis.
 
+`TronReadonlyAttachmentUITests` launches `-tron-readonly-attachment-fixture` against a
+`HOSTED_TEST` scripted Gateway/media owner, then drives real `ChatView`, sheet controls,
+Home/background and foreground reconnect. It waits for downloaded native viewports (not a
+sleep), changes zoom/scroll/text selection, and compares native instance plus viewport state.
+Separate held preparation and actual profile/session replacement journeys prove stale work
+cannot attach to the retained or replacement selection, including deliberately reused blob IDs.
+Image/file foreground-held journeys withhold the predecessor through replacement transport
+READY and successor request admission, then return a synthetic retired payload. Fresh valid
+preparation must rejoin the original sheet without displaying that candidate. The loader owner
+suite additionally gates cancellation cleanup before admission or after successor settlement;
+only `HOSTED_TEST` can hold those cleanup hops, with no production timer/retry controls.
+The fixture emits synthetic counters and native geometry/selection indices only, never file
+contents or user credentials. Screenshots and content-free viewport/counter attachments stay
+in the retained `.xcresult`; they are not physical-device qualification. Regenerate with:
+
+```bash
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests \
+  --only-testing TronMobileTests/ChatSessionPresentationTests \
+  --only-testing TronMobileTests/ChatMediaLoaderTests
+```
+
+Floating/browser/live/AV retirement is not a readonly-sheet replay mechanism. Remaining
+queued/pending/workspace preview admission, PDF pagination, source replacement during file
+preparation and other sheet owners require their own behavioral qualification; this suite is
+not the ALL-sheet acceptance gate.
+
 `TronKnowledgeDetailUITests` drives Entry Detail against the hosted scripted
 Gateway (`-tron-knowledge-detail-fixture`): summary jobs across a double tap,
 close/reopen and reconnect; take autosave, conflict and failure retry; re-tag
@@ -1923,9 +1994,45 @@ balance reads and confirms MCP servers never show X credit state. Light/dark cap
 are retained in the UI-validation `.xcresult`; export them with
 `xcrun xcresulttool export attachments --path <TestResults.xcresult> --output-path <temporary-directory>`
 and inspect the exported captures. This fixture never calls the selected live Gateway or a provider.
-`SettingsLayoutStyleTests.testIntegrationMutationSettlementRejoinsAfterPresentationSuspension`
+`SettingsLayoutStyleTests.testKnowledgeMutationSettlementRejoinsAfterPresentationSuspension`
 checks that accepted success/failure settles while covered, publishes only when active again,
 and never replays the command. Global default trust retains the standard autosave error/retry notice.
+
+The #348 hosted journeys retain separate interaction and reconciliation evidence:
+`testLateSummaryStartAckKeepsNewerTakeOnSameConnection` and
+`testLateSummaryStartReceiptKeepsNewerTakeAfterReconnect` hold the pre-job acknowledgement,
+commit a newer take, then release the original response or original-ID receipt. They
+protect both the current draft and revision used by the next mutation, without a second
+summary dispatch; screenshots and fixture counters are retained in the result bundle.
+`testPresentedSummaryReconcilesAfterAppSwitchWithoutReplaying` taps the real summary
+button, observes its request, backgrounds the app, waits for observed connection readiness,
+and explicitly completes the remote job. `testSummaryCommittedWhileBackgroundedReconcilesOnOriginalSheet`
+commits that accepted job on the fixture's actual background callback and rejoins the
+production sheet/read owner; it does not replace the button journey. These controls and
+bounded request/event traces exist only under `HOSTED_TEST`. Fixture metrics have stable
+geometry, and each completion asserts a server commit before testing publication: an
+unadmitted post-activation tap is not evidence of a lost response. No readiness sleeps are
+used. Both journeys retain screenshots; the background case also retains its request trace.
+`testCorrectionCompletesIntoOriginalDetailAfterReconnect` and
+`testLateSourceRowsCannotOverwriteNewerTagsOnSameConnection` protect parent settlement
+and exact latest-request admission, with guard-removal negative controls.
+The OAuth journeys cover missing receipts (original status queries only), late completion,
+and the original expiry refusal without redispatch. The focused receipt-owner deadline
+case uses an injected clock to prove bounded exhaustion and subsequent original-ID
+status-only reconciliation, which a short UI journey cannot prove.
+
+`TronMCPServerSheetsUITests` drives the production MCP add form and the existing
+MCP administration/receipt owner with held replies. It edits fields while an
+original add settles, then verifies the token follow-up uses the submitted name,
+token and Mac rather than live bindings, and that newer unsent input survives
+cleanup. A separate scenario changes the real selected profile/lifecycle to a
+second scripted Mac: the old credential form is revoked, no follow-up reaches
+either authority, and its late response cannot alter the new form. An unsubmitted
+draft remains open across same-Mac background/reconnect. Both failing boundaries
+were reproduced before their fix; all three journeys retain screenshots. Fixture
+profile switching, counters and held replies are strictly `HOSTED_TEST`, not
+production hooks or a second command owner. Add and token storage remain separate
+accepted commands, not a new atomic configuration transaction.
 
 `TronSmokeUITests.testSessionArchiveConfirmationAndArchivedContainerJourney` drives the
 hosted archive fixture. It swipes the row, taps Archive, and confirms; the row must stay

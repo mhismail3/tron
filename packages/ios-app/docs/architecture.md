@@ -649,7 +649,19 @@ Because provider login can synchronously emit presentation or completion events 
 newest admitted operation and is synchronously revoked on failure, cancellation, or profile
 retirement. `auth.begin` carries a command ID, while the active operation belongs to the authenticated
 device identity rather than a disposable socket. Transient transport retirement clears prompt delivery
-but retains the operation/target/provider; foreground or active reconnect calls `auth.resume`, which replays the
+but retains the operation/target/provider. The existing coordinator also owns at most one unsent,
+memory-only input value keyed by that authority's exact operation and prompt IDs. Retirement hides
+it and leaves the prompt unadmitted; only canonical re-emission of the same challenge restores it.
+The input leaf and its UI bindings capture the existing destination/lifecycle identity; its native
+field identity also includes that lifecycle generation. Stale getters, setters, and submit tasks
+cannot read or change a successor authority's draft even if operation/prompt IDs repeat. The broker
+generates those IDs with `randomUUID`, but their entropy is not an authority fence. Rejoining never
+submits the draft.
+Consume, replacement, terminal completion/observed expiry, cancellation, and credential/profile
+retirement discard it; unresolved transport loss uses the existing operation lifetime/cancel owner,
+not a new timer or durable secret store. Sensitive input never enters logging or diagnostics.
+MCP Sign In likewise follows the coordinator's active operation: a consumed or temporarily hidden
+prompt does not dismiss its still-active completion event. Foreground or active reconnect calls `auth.resume`, which replays the
 Gateway's latest bounded state without restarting Pi login. The matching provider sheet can reattach only to that
 provider and target, preventing duplicate automatic OAuth starts after a presentation is recreated. When the app
 has lost that operation ID (process loss or a fresh coordinator), a new `auth.begin` recovers the Gateway's active
@@ -780,9 +792,27 @@ for the workspace being created rather than the previously selected session. Cha
 workspace or gateway profile clears the prior trust/model projection and closes creation admission
 until matching settings and trust reads complete; stale workspace/profile completions cannot reopen
 it. The toolbar identifies that preparation instead of presenting a silently inert Create action.
-One synchronous creation owner admits only one command per gesture. A confirmed create returns its
-profile/lifecycle-bound navigation route immediately; the `session.listChanged`-driven dashboard
-projection converges independently and never blocks opening canonical state. A known configured
+The New Session model and source-control choices belong to the original profile, existing lifecycle
+generation and workspace. Closing a child picker or reconnecting does not reset initialized intent;
+a genuine namespace/workspace change clears the prior choices and configuration admission. Disposable
+settings/trust/Git preparation carries managed activity, an exact transport identity and latest request
+fence; retired completions cannot install values, errors or readiness.
+One synchronous creation owner admits only one command per gesture. Submission captures the workspace,
+source-control selection, model override and unsent prompt before any await. Before implicit trust or
+create dispatch, the Task rechecks original namespace, foreground submission admission and live surface
+ownership: a captured workspace/trust choice can never be sent to a replacement Mac. After an accepted
+trust response, the existing original-namespace fence still guards follow-up creation; background never
+automatically replays trust or creates a session. The receipt executor owns
+uncertain commands; reconnect never automatically creates a new session. Typed terminal success survives
+same-authority background/socket retirement at `AppModel.createSession`, but still requires cancellation
+and original profile/lifecycle ownership. `NewSessionCreationOwner` holds one completed navigation route
+until the original foreground caller is admitted, then consumes it once. The global navigation/read
+fences are unchanged. Actual sheet dismissal retires that local result without reopening the sheet;
+namespace replacement never navigates or publishes the old outcome into a replacement Mac. If the user
+has changed workspace on the same Mac, the newer draft remains open with a creation notice, and the
+canonical session can be opened from Chats instead of forcing the old route over it. The
+`session.listChanged`-driven dashboard projection converges independently and never blocks opening
+canonical state. A known configured
 model default avoids a redundant follow-up mutation. If an explicit model override fails after
 canonical creation, the error remains visible but the existing route opens, so retry cannot create a
 duplicate session. Provider and model catalogs likewise use typed `.global` or `.session(id:)`
@@ -1334,7 +1364,16 @@ presents native vertically scrolling pages, capped at 512 pages. Unsupported, in
 mount a concise unavailable state rather than conditional empty sheet content. Full-preview ImageIO decode applies
 orientation and downsamples before publication to at most 4,096 pixels on either axis and 64 MiB of decoded rows,
 preventing compressed dimensions from forcing an unbounded eager allocation. Each sheet owns an exact lease, and
-dismissal cancels the underlying flight only after its final lease retires, so full-preview lifetime remains sheet-owned. One gateway runtime is the sole mutable
+dismissal retires its presentation's current requests. Each image/file await has a unique request
+inside that presentation lease: task cancellation retires disposable preparation without closing
+the downloaded sheet or renderer. A synchronous cancellation mark is checked before joining
+shared work, so a delayed MainActor cleanup cannot lend a retired held payload to a foreground
+successor. Cleanup removes the exact flight/request token, never another await reusing the same
+presentation UUID; the last request retires only its own flight. Legitimate noncancelled readers
+still share one existing preparation slot, and authority/byte bounds remain unchanged.
+`ChatMediaLoaderTests.previewAttemptRetirement` covers image/file cleanup before successor
+admission and delayed until after successor settlement; concurrent-reader and cancel-before-
+registration cases protect sharing, idempotent cleanup and no orphan flight. One gateway runtime is the sole mutable
 owner of a canonical session; terminal and mobile chat clients must attach to
 that owner rather than opening the same JSONL in separate Pi processes. Its
 historical context ring remains mounted at zero from the first composer frame while a resumed chat opens. It is visibly muted, disabled, and exposes a loading accessibility value until the exact authoritative transcript is ready; it then springs from zero to the canonical context percentage (or updates without motion under Reduce Motion) and opens Manage Session at the composer's trailing edge. Attachment, context, and send/stop controls share one
@@ -2201,6 +2240,22 @@ square previews with dedicated image sheets. A pending photo is a stable,
 non-morphing preview target; its separate remove control has a 22-point visible circle
 inside a 30-point target centered on the 64-point preview's top-trailing corner. The
 preview alone owns rounded glass clipping, leaving the half-offset remove control visible.
+Downloaded readonly attachment **sheet** selection belongs to the original profile/lifecycle
+and chat presentation, not socket/foreground admission. Transcript image/file routes and
+artifact-backed static display sheets retain their decoded image/document and mounted native
+viewport across same-Mac background/reconnect; an already prepared image is not replaced
+merely to rejoin transport. `chatMediaDestinationIdentity` derives that selection namespace
+without changing `chatMediaIdentity` or loader read admission. Unfinished preparation follows
+managed activity, exact transport identity, readiness and latest-source/load fences; retirement
+cannot publish a stale result/error or mark the source complete. Actual profile/lifecycle or
+chat-presentation replacement closes the original selection. Camera/photo/file pickers,
+imports, browser/AV/live routes and floating displays still retire; suspension does not restore
+security references or reactivate leases. Floating readonly renderer continuity is separate,
+unproved coverage, not implied by the sheet contract.
+`TronReadonlyAttachmentUITests` exercises downloaded transcript/display sheets through real
+scene/lifecycle transitions and native zoom, offset and text selection, plus held preparation
+and actual profile/session replacement. `ChatSessionPresentationTests` protects picker/import
+cancellation, readonly sheet suspension versus actual retirement, and browser retirement.
 Sent prompt attachment strips add three points of vertical breathing room without
 changing the 64-point image/file chip geometry. Pending and sent photo chips share the historical medium-detent,
 concentrically rounded preview with native pinch and double-tap zoom. Earlier-history loading, context summaries, and unread-response navigation share one

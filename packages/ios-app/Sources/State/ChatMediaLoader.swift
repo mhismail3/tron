@@ -274,6 +274,20 @@ final class ChatMediaLoader {
         case file(ChatMediaPayload)
     }
 
+    /// Cancellation is observed synchronously before its MainActor cleanup hop.
+    /// A replacement read must not join a retired waiter while that hop queues.
+    private final class PreviewRequestCancellation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+        var isCancelled: Bool { lock.withLock { cancelled } }
+        func cancel() { lock.withLock { cancelled = true } }
+    }
+
+    private struct PreviewRequest {
+        let presentationLeaseID: UUID
+        let cancellation: PreviewRequestCancellation
+    }
+
     private struct PreviewFlight {
         let identity: ChatMediaIdentity
         let kind: PreviewKind
@@ -281,7 +295,7 @@ final class ChatMediaLoader {
         let invalidationGeneration: UInt64
         let previewGeneration: UInt64
         let task: Task<PreviewValue, Error>
-        var leases: Set<UUID>
+        var requests: [UInt64: PreviewRequest]
     }
 
     private let fetch: ChatMediaFetch
@@ -312,6 +326,10 @@ final class ChatMediaLoader {
     private var previewGeneration: UInt64 = 0
     #if HOSTED_TEST
     private var hostedThumbnailFlightWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private var hostedPreviewAdmissionCount = 0
+    private var hostedPreviewAdmissionWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    var hostedBeforePreviewCancellationCleanup: (@MainActor () async -> Void)?
+    var hostedAfterPreviewCancellationCleanup: (@MainActor () async -> Void)?
     private var hostedPreviewLeaseWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     private var hostedFilePreviewWaiters: [CheckedContinuation<Void, Never>] = []
     private var hostedInlineArtifactFlightWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
@@ -718,63 +736,94 @@ final class ChatMediaLoader {
         kind: PreviewKind,
         leaseID: UUID
     ) async throws -> PreviewValue {
-        guard admits(identity) else { throw ChatMediaLoadError.staleIdentity }
-        let flight: PreviewFlight
-        if var current = previewFlight,
-           current.identity == identity,
-           current.kind == kind {
-            current.leases.insert(leaseID)
-            previewFlight = current
-            hostedNotifyMediaCounts()
-            flight = current
-        } else {
-            previewFlight?.task.cancel()
-            previewGeneration &+= 1
-            ordinal &+= 1
-            let token = ordinal
-            let invalidationGeneration = self.invalidationGeneration
-            let previewGeneration = self.previewGeneration
-            let fetch = self.fetch
-            let fullPreviewDecode = self.fullPreviewDecode
-            let workLimiter = self.workLimiter
-            let task = Task<PreviewValue, Error> {
-                try await workLimiter.run(priority: true) {
-                    let payload = try await fetch(identity)
-                    guard ChatMediaPolicy.admitsEncodedByteCount(payload.data.count) else {
-                        throw ChatMediaLoadError.encodedPayloadTooLarge
-                    }
-                    switch kind {
-                    case .image:
-                        return .image(try await fullPreviewDecode(payload.data))
-                    case .file:
-                        return .file(payload)
+        ordinal &+= 1
+        let requestToken = ordinal
+        let cancellation = PreviewRequestCancellation()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            guard admits(identity) else { throw ChatMediaLoadError.staleIdentity }
+            pruneCancelledPreviewRequests()
+            let flight: PreviewFlight
+            let request = PreviewRequest(presentationLeaseID: leaseID, cancellation: cancellation)
+            if var current = previewFlight,
+               current.identity == identity, current.kind == kind {
+                current.requests[requestToken] = request
+                previewFlight = current
+                flight = current
+            } else {
+                previewFlight?.task.cancel()
+                previewGeneration &+= 1
+                ordinal &+= 1
+                let token = ordinal
+                let invalidationGeneration = self.invalidationGeneration
+                let previewGeneration = self.previewGeneration
+                let fetch = self.fetch
+                let fullPreviewDecode = self.fullPreviewDecode
+                let workLimiter = self.workLimiter
+                let task = Task<PreviewValue, Error> {
+                    try await workLimiter.run(priority: true) {
+                        let payload = try await fetch(identity)
+                        guard ChatMediaPolicy.admitsEncodedByteCount(payload.data.count) else {
+                            throw ChatMediaLoadError.encodedPayloadTooLarge
+                        }
+                        switch kind {
+                        case .image: return .image(try await fullPreviewDecode(payload.data))
+                        case .file: return .file(payload)
+                        }
                     }
                 }
+                flight = PreviewFlight(identity: identity, kind: kind, token: token,
+                    invalidationGeneration: invalidationGeneration, previewGeneration: previewGeneration,
+                    task: task, requests: [requestToken: request])
+                previewFlight = flight
             }
-            flight = PreviewFlight(
-                identity: identity,
-                kind: kind,
-                token: token,
-                invalidationGeneration: invalidationGeneration,
-                previewGeneration: previewGeneration,
-                task: task,
-                leases: [leaseID]
-            )
-            previewFlight = flight
             hostedNotifyMediaCounts()
+            #if HOSTED_TEST
+            hostedPreviewAdmissionCount += 1
+            let ready = hostedPreviewAdmissionWaiters.filter { hostedPreviewAdmissionCount >= $0.0 }
+            hostedPreviewAdmissionWaiters.removeAll { hostedPreviewAdmissionCount >= $0.0 }
+            ready.forEach { $0.1.resume() }
+            #endif
+            defer { releasePreviewRequest(flightToken: flight.token, requestToken: requestToken) }
+            // Cancellation can race registration on another executor. Its flag
+            // fences admission immediately; the queued cleanup remains exact.
+            guard !cancellation.isCancelled else { throw CancellationError() }
+            let value = try await flight.task.value
+            try Task.checkCancellation()
+            guard flight.invalidationGeneration == invalidationGeneration,
+                  flight.previewGeneration == previewGeneration,
+                  admits(identity), previewFlight?.token == flight.token,
+                  previewFlight?.requests[requestToken] != nil else {
+                throw ChatMediaLoadError.staleIdentity
+            }
+            return value
+        } onCancel: {
+            cancellation.cancel()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                #if HOSTED_TEST
+                await self.hostedBeforePreviewCancellationCleanup?()
+                #endif
+                // Tokens belong to this loader's existing monotonic ordinal;
+                // a late hop cannot name a successor attempt, even on one sheet.
+                if let flight = self.previewFlight, flight.requests[requestToken] != nil {
+                    self.releasePreviewRequest(flightToken: flight.token, requestToken: requestToken)
+                }
+                #if HOSTED_TEST
+                await self.hostedAfterPreviewCancellationCleanup?()
+                #endif
+            }
         }
+    }
 
-        defer { releasePreviewLease(token: flight.token, leaseID: leaseID) }
-        let value = try await flight.task.value
-        guard !Task.isCancelled else { throw CancellationError() }
-        guard flight.invalidationGeneration == invalidationGeneration,
-              flight.previewGeneration == previewGeneration,
-              admits(identity),
-              previewFlight?.token == flight.token,
-              previewFlight?.leases.contains(leaseID) == true else {
-            throw ChatMediaLoadError.staleIdentity
-        }
-        return value
+    private func pruneCancelledPreviewRequests() {
+        guard var flight = previewFlight else { return }
+        flight.requests = flight.requests.filter { !$0.value.cancellation.isCancelled }
+        if flight.requests.isEmpty {
+            previewGeneration &+= 1
+            flight.task.cancel()
+            previewFlight = nil
+        } else { previewFlight = flight }
     }
 
     private func cancelPreview(
@@ -782,17 +831,13 @@ final class ChatMediaLoader {
         kind: PreviewKind,
         leaseID: UUID
     ) {
-        guard var flight = previewFlight,
-              flight.identity == identity,
-              flight.kind == kind,
-              flight.leases.remove(leaseID) != nil else { return }
-        if flight.leases.isEmpty {
+        guard var flight = previewFlight, flight.identity == identity, flight.kind == kind else { return }
+        flight.requests = flight.requests.filter { $0.value.presentationLeaseID != leaseID }
+        if flight.requests.isEmpty {
             previewGeneration &+= 1
             flight.task.cancel()
             previewFlight = nil
-        } else {
-            previewFlight = flight
-        }
+        } else { previewFlight = flight }
         hostedNotifyMediaCounts()
     }
 
@@ -891,8 +936,13 @@ final class ChatMediaLoader {
         await withCheckedContinuation { hostedThumbnailFlightWaiters.append((count, $0)) }
     }
 
+    func hostedWaitForPreviewAdmissionCount(_ count: Int) async {
+        if hostedPreviewAdmissionCount >= count { return }
+        await withCheckedContinuation { hostedPreviewAdmissionWaiters.append((count, $0)) }
+    }
+
     func hostedWaitForPreviewLeaseCount(_ count: Int) async {
-        if (previewFlight?.leases.count ?? 0) >= count { return }
+        if (previewFlight?.requests.count ?? 0) >= count { return }
         await withCheckedContinuation { hostedPreviewLeaseWaiters.append((count, $0)) }
     }
 
@@ -915,7 +965,7 @@ final class ChatMediaLoader {
         let readyInline = hostedInlineArtifactFlightWaiters.filter { inlineArtifactFlights.count >= $0.0 }
         hostedInlineArtifactFlightWaiters.removeAll { inlineArtifactFlights.count >= $0.0 }
         readyInline.forEach { $0.1.resume() }
-        let previewCount = previewFlight?.leases.count ?? 0
+        let previewCount = previewFlight?.requests.count ?? 0
         let readyPreview = hostedPreviewLeaseWaiters.filter { previewCount >= $0.0 }
         hostedPreviewLeaseWaiters.removeAll { previewCount >= $0.0 }
         readyPreview.forEach { $0.1.resume() }
@@ -927,11 +977,13 @@ final class ChatMediaLoader {
         #endif
     }
 
-    private func releasePreviewLease(token: UInt64, leaseID: UUID) {
-        guard var flight = previewFlight, flight.token == token else { return }
-        flight.leases.remove(leaseID)
-        if flight.leases.isEmpty { previewFlight = nil }
-        else { previewFlight = flight }
+    private func releasePreviewRequest(flightToken: UInt64, requestToken: UInt64) {
+        guard var flight = previewFlight, flight.token == flightToken,
+              flight.requests.removeValue(forKey: requestToken) != nil else { return }
+        if flight.requests.isEmpty {
+            flight.task.cancel()
+            previewFlight = nil
+        } else { previewFlight = flight }
         hostedNotifyMediaCounts()
     }
 
