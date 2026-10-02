@@ -3,6 +3,13 @@ import TronMobileCore
 import UniformTypeIdentifiers
 
 private extension DashboardServerConnectionState {
+    var offersConnectionRetry: Bool {
+        switch self {
+        case .offline, .identityMismatch, .reconnecting, .noPath: true
+        default: false
+        }
+    }
+
     var color: Color {
         switch self {
         case .connected: .tronEmerald
@@ -576,7 +583,7 @@ struct GatewayConnectionDetailView: View {
                             )
                             .textSelection(.enabled)
                         }
-                        if status == .offline || status == .identityMismatch {
+                        if status.offersConnectionRetry {
                             TronSettingsDivider(accent: statusColor)
                             Button {
                                 model.retryGatewayConnection(for: currentProfile)
@@ -585,7 +592,7 @@ struct GatewayConnectionDetailView: View {
                                 TronValueRow(
                                     icon: "arrow.clockwise",
                                     title: "Retry Connection",
-                                    detail: "Start a new bounded recovery attempt",
+                                    detail: "Retry now without restarting the Mac",
                                     accent: statusColor
                                 )
                             }
