@@ -1903,6 +1903,19 @@ and the original expiry refusal without redispatch. The focused receipt-owner de
 case uses an injected clock to prove bounded exhaustion and subsequent original-ID
 status-only reconciliation, which a short UI journey cannot prove.
 
+`TronMCPServerSheetsUITests` drives the production MCP add form and the existing
+MCP administration/receipt owner with held replies. It edits fields while an
+original add settles, then verifies the token follow-up uses the submitted name,
+token and Mac rather than live bindings, and that newer unsent input survives
+cleanup. A separate scenario changes the real selected profile/lifecycle to a
+second scripted Mac: the old credential form is revoked, no follow-up reaches
+either authority, and its late response cannot alter the new form. An unsubmitted
+draft remains open across same-Mac background/reconnect. Both failing boundaries
+were reproduced before their fix; all three journeys retain screenshots. Fixture
+profile switching, counters and held replies are strictly `HOSTED_TEST`, not
+production hooks or a second command owner. Add and token storage remain separate
+accepted commands, not a new atomic configuration transaction.
+
 `TronSmokeUITests.testSessionArchiveConfirmationAndArchivedContainerJourney` drives the
 hosted archive fixture. It swipes the row, taps Archive, and confirms; the row must stay
 put until the confirmation. The real `ArchivedSessionsContainerSection` then appears with

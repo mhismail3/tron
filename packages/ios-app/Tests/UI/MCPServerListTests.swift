@@ -26,8 +26,6 @@ struct MCPServerListTests {
         #expect(failed.error == "fetch failed")
         #expect(MCPServerPresentationPolicy.stateTitle("needs-auth") == "Needs sign-in")
         #expect(MCPServerPresentationPolicy.isNeedsAuth("needs-auth"))
-        #expect(!MCPServerPresentationPolicy.shouldDismissTokenSheet(afterError: "Keychain unavailable"))
-        #expect(MCPServerPresentationPolicy.shouldDismissTokenSheet(afterError: nil))
 
         let disabled = try #require(report.servers.first { $0.name == "disabled" })
         #expect(disabled.scope == "global")

@@ -42,7 +42,16 @@ enum MCPServerPresentationPolicy {
     static func exposureTitle(_ value: String) -> String {
         exposures.first { $0.value == value }?.title ?? value
     }
-    static func shouldDismissTokenSheet(afterError error: String?) -> Bool { error == nil }
+}
+
+/// Raw user input is an immutable submission snapshot, not live form bindings.
+private struct MCPAddServerDraft: Equatable {
+    let serverName: String
+    let transport: String
+    let url: String
+    let command: String
+    let args: String
+    let bearerToken: String
 }
 
 /// MCP configuration is owned by Pi's mcp.json; this screen is only an
@@ -82,9 +91,14 @@ struct MCPServersSettingsView: View {
     private var visibleServers: [MCPServerList.Server] {
         servers.filter { MCPServerPresentationPolicy.includes($0, selectedScope: selectedScope) }
     }
-    private var requestID: String { "\(model.profileRevision):\(model.foregroundReconciliationGeneration):\(generation):\(selectedScope):\(projectCWD ?? "")" }
+    private var requestID: String { "\(model.knowledgePresentationIdentity):\(model.foregroundReconciliationGeneration):\(generation):\(selectedScope):\(projectCWD ?? "")" }
+    private var addDraft: MCPAddServerDraft {
+        MCPAddServerDraft(serverName: serverName, transport: transport, url: url, command: command, args: args, bearerToken: token)
+    }
 
     var body: some View {
+        let destination = model.knowledgeDestinationIdentity
+        let submittedScope = selectedScope, submittedCWD = cwd
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
                 if projectCWD != nil {
@@ -139,7 +153,13 @@ struct MCPServersSettingsView: View {
         }
         .tronScrollEdgeChrome().tronNavigationTitle("MCP Servers").tronSettingsLayout()
         .task(id: PresentationActivityTaskID(source: requestID, presentationActive: activity.allowsPresentationPublication)) { await load() }
-        .onChange(of: model.profileRevision) { _, _ in generation &+= 1; servers = []; error = nil }
+        .onChange(of: model.knowledgeDestinationIdentity) { _, _ in
+            // Socket replacement is not a new destination. Actual authority
+            // replacement revokes credential input instead of retargeting it.
+            generation &+= 1; servers = []; error = nil; working = false
+            showingAdd = false; tokenServer = nil; authOperationID = nil
+            clearAddDraft(); transport = "http"
+        }
         .onChange(of: activity.allowsPresentationPublication) { _, active in if !active { generation &+= 1; loading = false } }
         .tronSettingsVisualTheme(accent: .tronCyan)
         .tronManagedSheet(isPresented: $showingAdd, identity: "settings.mcp.add") {
@@ -152,7 +172,10 @@ struct MCPServersSettingsView: View {
                 bearerToken: $token,
                 error: error,
                 working: working,
-                onAdd: { Task { await addServer() } }
+                onAdd: {
+                    let submitted = addDraft
+                    Task { await addServer(submitted, destination: destination, scope: submittedScope, cwd: submittedCWD) }
+                }
             )
         }
         .tronManagedSheet(isPresented: Binding(get: { authOperationID != nil }, set: { if !$0 { authOperationID = nil } }), identity: "settings.mcp.auth") {
@@ -168,7 +191,10 @@ struct MCPServersSettingsView: View {
                     TronSettingsGroup("Bearer Token", accent: .tronCyan) {
                         SecureField("Token", text: $token).textContentType(.password).padding(12)
                     }
-                    Button("Store in Keychain") { Task { await setToken() } }.buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || token.isEmpty)
+                    Button("Store in Keychain") {
+                        let submittedToken = token, submittedServer = tokenServer
+                        Task { await setToken(submittedToken, server: submittedServer, destination: destination, scope: submittedScope, cwd: submittedCWD) }
+                    }.buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || token.isEmpty)
                     Spacer(minLength: 0)
                 }.padding(18).tronNavigationTitle("MCP Token").tronPresentation().presentationDetents([.medium]).presentationDragIndicator(.hidden)
             }.tronSettingsVisualTheme(accent: .tronCyan)
@@ -176,6 +202,8 @@ struct MCPServersSettingsView: View {
     }
 
     private func serverRow(_ server: MCPServerList.Server) -> some View {
+        let destination = model.knowledgeDestinationIdentity
+        let submittedScope = selectedScope, submittedCWD = cwd
         let summary = "\(MCPServerPresentationPolicy.stateTitle(server.state)) · \(server.tools.count) tool\(server.tools.count == 1 ? "" : "s") · \(MCPServerPresentationPolicy.exposureTitle(server.exposure))"
         return TronSettingsRow(
             icon: statusIcon(server),
@@ -188,24 +216,24 @@ struct MCPServersSettingsView: View {
         ) {
             TronInlineMenu("Manage", accent: .tronCyan) {
                 if MCPServerPresentationPolicy.isNeedsAuth(server.state) {
-                    Button("Sign In", systemImage: "person.badge.key") { Task { await startAuth(server.name) } }
+                    Button("Sign In", systemImage: "person.badge.key") { Task { await startAuth(server.name, destination: destination) } }
                 }
                 Button(server.enabled ? "Turn Off" : "Turn On", systemImage: "power") {
-                    Task { await update(server.name, enabled: !server.enabled) }
+                    Task { await update(server.name, enabled: !server.enabled, destination: destination, scope: submittedScope, cwd: submittedCWD) }
                 }
                 Picker("Exposure", selection: Binding(
                     get: { server.exposure },
-                    set: { value in Task { await update(server.name, exposure: value) } }
+                    set: { value in Task { await update(server.name, exposure: value, destination: destination, scope: submittedScope, cwd: submittedCWD) } }
                 )) {
                     ForEach(MCPServerPresentationPolicy.exposures, id: \.value) { Text($0.title).tag($0.value) }
                 }
                 .pickerStyle(.menu)
                 Button("Set Bearer Token", systemImage: "key") { tokenServer = server.name }
                 if !MCPServerPresentationPolicy.isNeedsAuth(server.state) {
-                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") { Task { await mutate("mcp.logout", ["server": .string(server.name)]) } }
+                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") { Task { await mutate("mcp.logout", ["server": .string(server.name)], destination: destination, scope: submittedScope, cwd: submittedCWD) } }
                 }
                 Divider()
-                Button("Remove", systemImage: "trash", role: .destructive) { Task { await mutate("mcp.remove", ["server": .string(server.name)]) } }
+                Button("Remove", systemImage: "trash", role: .destructive) { Task { await mutate("mcp.remove", ["server": .string(server.name)], destination: destination, scope: submittedScope, cwd: submittedCWD) } }
             }
             .disabled(working)
         }
@@ -244,43 +272,59 @@ struct MCPServersSettingsView: View {
     private func current(_ ticket: Int, _ identity: KnowledgePresentationIdentity) -> Bool {
         !Task.isCancelled && activity.allowsPresentationPublication && generation == ticket && identity == model.knowledgePresentationIdentity
     }
-    private func mutate(_ method: String, _ fields: [String: JSONValue]) async {
-        guard !working else { return }; working = true; error = nil; defer { working = false }
+    @discardableResult
+    private func mutate(_ method: String, _ fields: [String: JSONValue], destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async -> Bool {
+        guard !working, model.knowledgeDestinationIdentity == destination else { return false }
+        working = true; error = nil
+        defer { if model.knowledgeDestinationIdentity == destination { working = false } }
         do {
             var params = fields
             if method != "mcp.auth.start" {
-                params["scope"] = .string(selectedScope)
+                params["scope"] = .string(scope)
                 if let cwd { params["cwd"] = .string(cwd) }
             }
             let _: JSONValue = try await model.mutateMCPAdmin(method, parameters: params)
+            guard model.knowledgeDestinationIdentity == destination else { return false }
             generation &+= 1
-        } catch { self.error = error.localizedDescription }
+            return true
+        } catch {
+            guard model.knowledgeDestinationIdentity == destination else { return false }
+            self.error = error.localizedDescription
+            return false
+        }
     }
-    private func update(_ server: String, enabled: Bool? = nil, exposure: String? = nil) async {
+    private func update(_ server: String, enabled: Bool? = nil, exposure: String? = nil, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
         var fields: [String: JSONValue] = ["server": .string(server)]
         if let enabled { fields["enabled"] = .bool(enabled) }; if let exposure { fields["exposure"] = .string(exposure) }
-        await mutate("mcp.update", fields)
+        await mutate("mcp.update", fields, destination: destination, scope: scope, cwd: cwd)
     }
-    private func addServer() async {
-        var fields: [String: JSONValue] = ["server": .string(serverName.trimmingCharacters(in: .whitespacesAndNewlines)), "transport": .string(transport)]
-        if transport == "http" { fields["url"] = .string(url.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        else { fields["command"] = .string(command.trimmingCharacters(in: .whitespacesAndNewlines)); fields["args"] = .array(args.split(whereSeparator: \.isWhitespace).map { .string(String($0)) }) }
-        await mutate("mcp.add", fields)
-        guard error == nil else { return }
-        let name = serverName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !token.isEmpty {
-            await mutate("mcp.token.set", ["server": .string(name), "token": .string(token)])
-            guard error == nil else { return }
+    private func addServer(_ submitted: MCPAddServerDraft, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
+        guard model.knowledgeDestinationIdentity == destination else { return }
+        let name = submitted.serverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        var fields: [String: JSONValue] = ["server": .string(name), "transport": .string(submitted.transport)]
+        if submitted.transport == "http" { fields["url"] = .string(submitted.url.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        else { fields["command"] = .string(submitted.command.trimmingCharacters(in: .whitespacesAndNewlines)); fields["args"] = .array(submitted.args.split(whereSeparator: \.isWhitespace).map { .string(String($0)) }) }
+        guard await mutate("mcp.add", fields, destination: destination, scope: scope, cwd: cwd),
+              model.knowledgeDestinationIdentity == destination else { return }
+        if !submitted.bearerToken.isEmpty {
+            guard await mutate("mcp.token.set", ["server": .string(name), "token": .string(submitted.bearerToken)], destination: destination, scope: scope, cwd: cwd),
+                  model.knowledgeDestinationIdentity == destination else { return }
         }
-        serverName = ""; url = ""; command = ""; args = ""; token = ""; showingAdd = false
+        // A newer draft entered while this receipt settled is still unsent.
+        // Successful cleanup belongs only to the exact submitted values.
+        guard addDraft == submitted, selectedScope == scope, self.cwd == cwd else { return }
+        clearAddDraft(); showingAdd = false
     }
-    private func setToken() async {
-        guard let name = tokenServer else { return }
-        await mutate("mcp.token.set", ["server": .string(name), "token": .string(token)])
-        guard MCPServerPresentationPolicy.shouldDismissTokenSheet(afterError: error) else { return }
+    private func clearAddDraft() { serverName = ""; url = ""; command = ""; args = ""; token = "" }
+    private func setToken(_ submittedToken: String, server: String?, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
+        guard let server, model.knowledgeDestinationIdentity == destination else { return }
+        guard await mutate("mcp.token.set", ["server": .string(server), "token": .string(submittedToken)], destination: destination, scope: scope, cwd: cwd),
+              model.knowledgeDestinationIdentity == destination,
+              tokenServer == server, token == submittedToken else { return }
         tokenServer = nil; token = ""
     }
-    private func startAuth(_ server: String) async {
+    private func startAuth(_ server: String, destination: KnowledgeDestinationIdentity) async {
+        guard model.knowledgeDestinationIdentity == destination else { return }
         do {
             // MCP OAuth is owned by a live Pi session; this screen deliberately
             // reports the missing session rather than inventing a parallel flow.
@@ -288,6 +332,7 @@ struct MCPServersSettingsView: View {
             let admission = model.beginMCPAuthAdmission()
             do {
                 let response = try await model.mutateMCPAdmin("mcp.auth.start", parameters: ["sessionId": .string(session), "server": .string(server)])
+                guard model.knowledgeDestinationIdentity == destination else { return }
                 guard let operationID = response.objectValue?["operationId"]?.stringValue else {
                     throw GatewayFailure(code: "invalid_response", message: "The MCP sign-in operation could not be started.", retryable: true, details: nil)
                 }
@@ -297,7 +342,10 @@ struct MCPServersSettingsView: View {
                 model.finishMCPAuthAdmission(admission)
                 throw error
             }
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            guard model.knowledgeDestinationIdentity == destination else { return }
+            self.error = error.localizedDescription
+        }
     }
 }
 

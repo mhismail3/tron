@@ -174,3 +174,12 @@ setup status**, which only queries `command.status`; another authorization is
 blocked while that outcome remains unknown. OAuth inputs and consent state stay
 in the presented form, not a second credential or receipt store. Tokens remain
 in the Mac's owned credential store.
+
+MCP retains its existing administration/receipt owner. Add, token storage and
+sign-in capture the originating destination; add's token follow-up uses the
+immutable submitted fields, scope and project path. Same-Mac reconnect retains
+unsent inputs. Real profile or credential-generation replacement closes the old
+credential form, clears its input and prevents its follow-up or late result from
+altering the replacement form. Successful cleanup clears only the exact submitted
+draft, not input edited while that receipt was settling. Add and token storage
+remain separate commands; a failure of the second does not undo the first.

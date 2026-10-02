@@ -11,6 +11,12 @@ struct HostedIntegrationsFixtureView: View {
     @State private var error: String?
     @State private var gateway: HostedIntegrationsGateway
     @State private var oauthCounters = "begins:0 completes:0 queries:0 mismatches:0"
+    @State private var mcpOriginalCounters = "add:0 token:0 retargets:0 released:0"
+    @State private var mcpReplacementCounters = "add:0 token:0 retargets:0 released:0"
+    @State private var hasReplacedMCPAuthority = false
+    @State private var replacementGateway: HostedIntegrationsGateway
+    private let mcpScenario: String?
+    private let replacementProfile = GatewayProfile(id: "replacement-integration-fixture", label: "Replacement Mac", host: "replacement.example.test", port: 9847, machineId: "fixture-integrations-replacement")
     private let dark: Bool
     private let recoveryScenario: String?
 
@@ -18,13 +24,21 @@ struct HostedIntegrationsFixtureView: View {
         let arguments = ProcessInfo.processInfo.arguments
         let scenario = arguments.drop(while: { $0 != "-integrations-scenario" }).dropFirst().first ?? "default"
         recoveryScenario = scenario.hasPrefix("connection-") ? scenario : nil
+        mcpScenario = scenario.hasPrefix("mcp-") ? scenario : nil
         dark = arguments.contains("-ui-dark-mode")
         let gateway = HostedIntegrationsGateway(scenario: scenario)
         _gateway = State(initialValue: gateway)
-        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in HostedIntegrationsSocket(gateway: gateway) })
+        let replacementGateway = HostedIntegrationsGateway(scenario: "mcp-replacement")
+        _replacementGateway = State(initialValue: replacementGateway)
+        let client = GatewayClient(socketFactory: GatewaySocketFactory { request in
+            let replacement = request.url?.host == "replacement.example.test"
+            return HostedIntegrationsSocket(gateway: replacement ? replacementGateway : gateway,
+                machineID: replacement ? "fixture-integrations-replacement" : "fixture-integrations")
+        })
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-token")
+        if scenario == "mcp-replace-mac" { try! profiles.save(replacementProfile, token: "replacement-fixture-token", selecting: false) }
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "hosted-integrations-fixture"))))
     }
@@ -36,7 +50,12 @@ struct HostedIntegrationsFixtureView: View {
             } else if ready {
                 NavigationStack {
                     VStack {
-                        IntegrationsSettingsView()
+                        if mcpScenario != nil {
+                            MCPServersSettingsView(projectCWD: nil)
+                            Text(mcpOriginalCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-original")
+                            Text(mcpReplacementCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-replacement")
+                            Text(model.knowledgeDestinationIdentity.profileID ?? "none").font(.caption2).accessibilityIdentifier("fixture.destination")
+                        } else { IntegrationsSettingsView() }
                         Text(oauthCounters).font(.caption2).lineLimit(2).frame(height: 32)
                             .accessibilityIdentifier("fixture.oauth-counters")
                     }
@@ -56,7 +75,14 @@ struct HostedIntegrationsFixtureView: View {
             switch phase {
             case .background:
                 model.enteredBackground()
-                Task { await gateway.releaseOAuthReply() }
+                Task {
+                    if mcpScenario == "mcp-replace-mac", !hasReplacedMCPAuthority {
+                        hasReplacedMCPAuthority = true
+                        await model.switchGateway(replacementProfile)
+                    }
+                    await gateway.releaseMCPReply()
+                    await gateway.releaseOAuthReply()
+                }
             case .inactive: model.becameInactive()
             case .active: model.becameActive()
             @unknown default: break
@@ -65,6 +91,14 @@ struct HostedIntegrationsFixtureView: View {
         .task {
             guard recoveryScenario == nil else { return }
             for await value in gateway.counterUpdates() { oauthCounters = value }
+        }
+        .task {
+            guard mcpScenario != nil else { return }
+            for await value in gateway.mcpCounterUpdates() { mcpOriginalCounters = value }
+        }
+        .task {
+            guard mcpScenario != nil else { return }
+            for await value in replacementGateway.mcpCounterUpdates() { mcpReplacementCounters = value }
         }
         .task {
             guard recoveryScenario == nil else { return }
@@ -78,6 +112,22 @@ actor HostedIntegrationsGateway {
     private let scenario: String
     private var sockets: [HostedIntegrationsSocket] = []
     private var receipts: [String: JSONValue] = [:]
+    private var mcpAddCount = 0
+    private var mcpTokenCount = 0
+    private var mcpRetargets = 0
+    private var mcpReleased = 0
+    private var mcpServerName = ""
+    private var mcpReply: CheckedContinuation<Void, Never>?
+    private var mcpContinuations: [AsyncStream<String>.Continuation] = []
+    nonisolated func mcpCounterUpdates() -> AsyncStream<String> {
+        AsyncStream { value in Task { await self.addMCPContinuation(value) } }
+    }
+    private func addMCPContinuation(_ value: AsyncStream<String>.Continuation) { mcpContinuations.append(value); publishMCPCounters() }
+    private func publishMCPCounters() {
+        let value = "add:\(mcpAddCount) token:\(mcpTokenCount) retargets:\(mcpRetargets) released:\(mcpReleased)"
+        mcpContinuations.forEach { $0.yield(value) }
+    }
+    func releaseMCPReply() { mcpReply?.resume(); mcpReply = nil }
     private var oauthBegins = 0
     private var oauthCompletes = 0
     private var receiptQueries = 0
@@ -102,6 +152,23 @@ actor HostedIntegrationsGateway {
     func attach(_ socket: HostedIntegrationsSocket) { sockets.append(socket) }
 
     func handle(method: String, params: [String: JSONValue]) async -> (JSONValue?, JSONValue?) {
+        if method == "mcp.list" { return (.object(["servers": .array([]), "errors": .number(0)]), nil) }
+        if method == "mcp.add", let command = params["commandId"]?.stringValue {
+            mcpAddCount += 1; mcpServerName = params["server"]?.stringValue ?? ""
+            let result: JSONValue = .object(["added": .bool(true)])
+            commands[command] = method; receipts[command] = result; publishMCPCounters()
+            if scenario == "mcp-held-add" || scenario == "mcp-replace-mac" {
+                await withCheckedContinuation { mcpReply = $0 }
+                mcpReleased += 1; publishMCPCounters()
+            }
+            return (result, nil)
+        }
+        if method == "mcp.token.set" {
+            mcpTokenCount += 1
+            if params["server"]?.stringValue != mcpServerName || params["token"]?.stringValue != "fixture-original-token" { mcpRetargets += 1 }
+            publishMCPCounters()
+            return (.object(["stored": .bool(true)]), nil)
+        }
         if method == "connections.list" { return (snapshot(), nil) }
         if method == "command.status", let command = params["commandId"]?.stringValue {
             receiptQueries += 1
@@ -195,10 +262,17 @@ actor HostedIntegrationsGateway {
 
 actor HostedIntegrationsSocket: GatewaySocketConnection {
     private let gateway: HostedIntegrationsGateway
-    private var inbound = [Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":6,"minProtocolVersion":6,"machineId":"fixture-integrations","machineName":"Studio server","gatewayChannel":"stable","capabilities":["connections.v1"]}"#.utf8)]
+    private var inbound: [Data]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
-    init(gateway: HostedIntegrationsGateway) { self.gateway = gateway; Task { await gateway.attach(self) } }
+    init(gateway: HostedIntegrationsGateway, machineID: String = "fixture-integrations") {
+        self.gateway = gateway
+        inbound = [try! JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("hello"), "gatewayVersion": .string("fixture"), "piVersion": .string("fixture"),
+            "protocolVersion": .number(6), "minProtocolVersion": .number(6), "machineId": .string(machineID),
+            "machineName": .string("Studio server"), "gatewayChannel": .string("stable"), "capabilities": .array([.string("connections.v1")])]))]
+        Task { await gateway.attach(self) }
+    }
     func send(_ data: Data) async throws {
         guard !closed else { throw CancellationError() }
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
