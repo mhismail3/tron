@@ -72,6 +72,7 @@ struct TrustSettingsView: View {
     @State private var defaultDraft = TrustDefaultDraft()
     @State private var defaultDrafts = ScopedSettingsDraftStore<TrustDefaultDraft>()
     @State private var defaultLoadGeneration = 0
+    @State private var trustLoadGeneration = 0
 
     init(target: TrustTarget?, allowsGlobalDefault: Bool = false) {
         self.target = target
@@ -116,6 +117,18 @@ struct TrustSettingsView: View {
         .tronScrollEdgeChrome()
         .tronSettingsAutosave(draft: $defaultDraft, store: $defaultDrafts, initial: TrustDefaultDraft())
         .tronNavigationTitle("Project Trust")
+        .onChange(of: target) { _, _ in
+            trustLoadGeneration &+= 1
+            inspection = nil
+        }
+        .onChange(of: model.knowledgeDestinationIdentity) { _, _ in
+            trustLoadGeneration &+= 1
+            inspection = nil
+        }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            if !active { trustLoadGeneration &+= 1 }
+        }
+        .onDisappear { trustLoadGeneration &+= 1 }
         .task(id: PresentationActivityTaskID(
             source: TrustLoadID(target: target, invalidationGeneration: model.trustRevision,
                                 foregroundGeneration: model.foregroundReconciliationGeneration),
@@ -300,19 +313,29 @@ struct TrustSettingsView: View {
 
     private func load() async {
         let foreground = model.foregroundReconciliationGeneration
-        guard presentationActivity.allowsPresentationPublication,
+        let requestIdentity = model.knowledgePresentationIdentity
+        let activity = presentationActivity
+        guard activity.allowsPresentationPublication, !Task.isCancelled,
               let target else { return }
+        // Event reads and accepted-command reconciliation share this exact
+        // leaf lane; cancelling a presentation task cannot cancel the latter.
+        trustLoadGeneration &+= 1
+        let ticket = trustLoadGeneration
         do {
             let value = try await model.inspectTrust(target: target)
-            guard !Task.isCancelled, foreground == model.foregroundReconciliationGeneration,
-                  presentationActivity.allowsPresentationPublication,
+            guard ticket == trustLoadGeneration, !Task.isCancelled,
+                  requestIdentity == model.knowledgePresentationIdentity,
+                  foreground == model.foregroundReconciliationGeneration,
+                  activity == presentationActivity, activity.allowsPresentationPublication,
                   target == self.target else { return }
             inspection = value
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled, foreground == model.foregroundReconciliationGeneration,
-                  presentationActivity.allowsPresentationPublication,
+            guard ticket == trustLoadGeneration, !Task.isCancelled,
+                  requestIdentity == model.knowledgePresentationIdentity,
+                  foreground == model.foregroundReconciliationGeneration,
+                  activity == presentationActivity, activity.allowsPresentationPublication,
                   target == self.target else { return }
             model.presentError(error)
         }
@@ -323,11 +346,13 @@ struct TrustSettingsView: View {
         let requestIdentity = model.knowledgePresentationIdentity
         Task { @MainActor in
             do {
-                let value = try await model.setTrust(target: target, decision: decision)
+                _ = try await model.setTrust(target: target, decision: decision)
                 guard presentationActivity.allowsPresentationPublication,
                       model.knowledgePresentationIdentity == requestIdentity,
                       target == self.target else { return }
-                inspection = value
+                // The receipt confirms this decision, not the latest trust
+                // record after another accepted decision or change event.
+                await load()
             } catch is CancellationError {
                 return
             } catch {
