@@ -2128,8 +2128,10 @@ struct KnowledgeDetailView: View {
         let submittedGeneration = takeEditGeneration
         let commandID = takeCommandID
         let revision = takeExpectedRevision
+        let sourceID = currentRecord.id
+        let profileID = origin.profileID
         do {
-            let result = try await model.knowledge.saveTake(sourceID: currentRecord.id, expectedRevision: revision, text: submitted, commandID: commandID)
+            let result = try await model.knowledge.saveTake(sourceID: sourceID, expectedRevision: revision, text: submitted, commandID: commandID)
             guard admitsDestination else { return }
             if case .source(let saved) = result.record.content {
                 currentRecord = result.record
@@ -2158,6 +2160,10 @@ struct KnowledgeDetailView: View {
             await refreshSourceRow()
         } catch {
             guard admitsDestination else { return }
+            // The current draft may be newer than this failed submission. A
+            // conflict can rotate its retry command while reading a revision.
+            let failedDraftCommandID = takeCommandID
+            let failedDraftGeneration = takeEditGeneration
             takeSaving = false
             if let failure = error as? GatewayFailure, failure.code == "conflict" {
                 let details = failure.details?.objectValue ?? [:]
@@ -2170,7 +2176,13 @@ struct KnowledgeDetailView: View {
                 }
                 takeError = "Your take changed elsewhere. Your draft is kept; the current saved text is shown above. Retry to save your draft over it."
             } else { takeError = error.localizedDescription }
-            KnowledgeTakeDraftRegistry.shared.set(.init(text: submitted, commandID: takeCommandID, expectedRevision: takeExpectedRevision, error: takeError, currentText: takeCurrentText), profileID: origin.profileID, recordID: currentRecord.id)
+            // Read the registry, not this leaf's text: a reopened editor can
+            // own a newer draft, or a successful save can have cleared it.
+            guard admitsDestination, currentRecord.id == sourceID,
+                  takeEditGeneration == failedDraftGeneration,
+                  let draft = KnowledgeTakeDraftRegistry.shared.draft(profileID: profileID, recordID: sourceID),
+                  draft.commandID == failedDraftCommandID else { return }
+            KnowledgeTakeDraftRegistry.shared.set(.init(text: draft.text, commandID: takeCommandID, expectedRevision: takeExpectedRevision, error: takeError, currentText: takeCurrentText), profileID: profileID, recordID: sourceID)
         }
     }
 
