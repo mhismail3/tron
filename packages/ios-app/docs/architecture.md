@@ -1699,8 +1699,9 @@ or a word waiting over a second) catches up without a fade. An admitted word's o
 from zero to one over the policy fade duration (220 ms). `StreamingTextRevealPacingTests` replays
 150 ms, 75 ms, and bursty cadences at 10–80 words/s; `StreamingTextRevealContinuityTests` checks
 fractional policy opacity bounds, strict progression and duration-bounded slope, with representative
-samples around simulated progress restarts and late wakes, separately from admission and convergence. It then records native glyph ink until the mounted source converges.
-The policy simulation does not prove native bookkeeping; sampled native frames may miss fades.
+samples around simulated progress restarts and late wakes, separately from admission and convergence. It then appends mounted progress without per-revision settlement, checks sampled prefix ink against
+unchanged reference glyph cores, and requires final source convergence. Neither policy simulation
+nor final convergence proves native timestamp preservation; sampled native frames may miss fades.
 Native frame throughput is a controlled-host/device qualification, not a wall-clock test assertion.
 Rendered text is concatenated once per
 token revision; a reveal tick reuses the memoized fully revealed prefix and rebuilds only the pending or fading tail.

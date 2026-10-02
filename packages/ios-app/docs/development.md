@@ -1302,10 +1302,15 @@ requires bounded fractional opacity throughout the policy's linear fade, strict 
 slope bounded by the fade duration. Representative early/middle/late samples around simulated
 restart/wake times use simulation-assigned starts; `virtual-reveal-opacity.json` records those probes.
 They do not observe the view's `revealStarts` and cannot reject a native start-time reset on restart.
-It then mounts the actual view and records glyph ink through each source revision until convergence
-in `mounted-reveal-ink.json`. Both attachments are retained in the runner's xcresult. Policy simulation
-does not prove native bookkeeping or frame-by-frame throughput; native samples may miss intermediate
-fades on a loaded host. Temporal/performance qualification requires a controlled host or device measurement. Each of the 31 maximum-page
+It then mounts the actual view, appends progress on display boundaries without waiting for each
+revision to settle, and records glyph ink in `mounted-reveal-ink.json`. Prefix monotonicity compares
+unchanged reference glyph cores, rejecting layout drift rather than letting added glyphs hide loss.
+The final authoritative source must converge; convergence alone cannot detect timestamp resets.
+Both attachments are retained in the runner's xcresult. The former native largest-jump threshold
+could detect reset-induced bursts on a fast host but also rejected valid rendering when the hosted
+runner missed fade frames. Sampled monotonicity does not guarantee native timestamp preservation
+or temporal smoothness: samples may miss intermediate fades on a loaded host. Policy simulation does
+not prove native bookkeeping. Native timing qualification requires a controlled host or device measurement. Each of the 31 maximum-page
 projection installs has the original ten-second hang bound, with fixture/reference work outside it;
 completed installs never spend a shared wall-time allowance. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so

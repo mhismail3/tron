@@ -127,12 +127,26 @@ struct StreamingTextRevealContinuityTests {
             try #require(Bool(false), "Mounted reveal did not converge within 120 display boundaries")
         }
         try await settleInk()
-        for _ in 0..<Self.frameCount {
-            let priorReference = try Self.sample(window).referenceInk
+        var previousSample = try Self.sample(window)
+        var finalPriorReference = 0.0
+        // Progress may restart a live reveal; never settle each revision before
+        // sending the next one. Slow hosts may still finish a fade between
+        // samples, so this scenario does not guarantee observation of a reset.
+        for frame in 0..<Self.frameCount {
+            finalPriorReference = try Self.sample(window).referenceInk
             admittedWords += Self.wordsPerFrame
             host.rootView = fixture()
-            try await settleInk(referenceAfter: priorReference)
+            try await DisplayFrameScheduler.displayLink.nextFrame()
+            let sample = try Self.sample(window)
+            #expect(sample.streamingInk <= sample.referenceInk * 1.01, "Progress cannot duplicate source glyphs")
+            let prefix = try sample.unchangedPrefixInk(comparedWith: previousSample)
+            #expect(prefix.current + prefix.reference * 0.01 >= prefix.previous, "Appending source cannot hide already rendered glyphs")
+            previousSample = sample
+            measurements.append(["words": Double(admittedWords), "frame": Double(frame), "progress": 1,
+                                 "inkRatio": sample.streamingInk / sample.referenceInk,
+                                 "fadingPixels": Double(sample.fadingPixels)])
         }
+        try await settleInk(referenceAfter: finalPriorReference)
         let settled = try Self.sample(window)
         #expect(settled.isConverged)
     }
@@ -162,6 +176,8 @@ struct StreamingTextRevealContinuityTests {
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         let paneRows = height / 2
         var result = RevealSample()
+        result.streamingPixels = Array(pixels.prefix(paneRows * width))
+        result.referencePixels = Array(pixels.suffix(paneRows * width))
         for row in 0..<paneRows {
             for column in 0..<width {
                 let streaming = Double(255 - pixels[row * width + column])
@@ -181,6 +197,30 @@ private struct RevealSample {
     var streamingInk = 0.0
     var referenceInk = 0.0
     var fadingPixels = 0
+    var streamingPixels: [UInt8] = []
+    var referencePixels: [UInt8] = []
+
+    /// Appending complete words at a fixed width must preserve existing glyph
+    /// positions. Compare only the previous reference's dark cores so newly
+    /// appended glyphs cannot compensate for a disappearing prefix. Reject
+    /// reference/layout drift instead of silently selecting a different region.
+    func unchangedPrefixInk(comparedWith previous: RevealSample) throws -> (previous: Double, current: Double, reference: Double) {
+        try #require(referencePixels.count == previous.referencePixels.count)
+        var priorInk = 0.0
+        var currentInk = 0.0
+        var referenceInk = 0.0
+        var changedCores = 0
+        for index in referencePixels.indices where previous.referencePixels[index] < 127 {
+            // Two grayscale levels tolerate rasterization rounding, not motion.
+            if abs(Int(referencePixels[index]) - Int(previous.referencePixels[index])) > 2 { changedCores += 1 }
+            priorInk += Double(255 - previous.streamingPixels[index])
+            currentInk += Double(255 - streamingPixels[index])
+            referenceInk += Double(255 - previous.referencePixels[index])
+        }
+        try #require(referenceInk > 0, "Prefix comparison needs actual reference glyphs")
+        try #require(changedCores == 0, "Appending source changed \(changedCores) reference glyph cores; ink comparisons would hide layout/identity drift")
+        return (priorInk, currentInk, referenceInk)
+    }
 
     /// Every admitted word renders at full ink, within 1% of the reference.
     var isConverged: Bool { abs(streamingInk / referenceInk - 1) < 0.01 }
