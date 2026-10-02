@@ -727,6 +727,22 @@ class ResumeTests(LandFixture):
         self.assertEqual(self.issue()["status"], "Needs you")
         self.assert_nothing_redone()
 
+    def test_rerun_after_a_finished_handoff_keeps_the_maintainers_close(self):
+        self.assertEqual(self.land(validation=self.ACTION), 0)
+        self.set_state(issues={str(NUMBER): dict(self.issue(), state="CLOSED", status="Done")})
+        before = len(self.calls())
+        self.assertEqual(self.land(summary=False), 0)
+        self.assertEqual(self.writes(since=before), [])
+        self.assertEqual((self.issue()["state"], self.issue()["status"]), ("CLOSED", "Done"))
+
+    def test_rerun_after_a_finished_land_keeps_the_maintainers_reopen(self):
+        self.assertEqual(self.land(), 0)
+        self.set_state(issues={str(NUMBER): dict(self.issue(), state="OPEN", status="Ready")})
+        before = len(self.calls())
+        self.assertEqual(self.land(summary=False), 0)
+        self.assertEqual(self.writes(since=before), [])
+        self.assertEqual((self.issue()["state"], self.issue()["status"]), ("OPEN", "Ready"))
+
     def test_rerun_refusals(self):
         self.stopped_after_merge(["close"])
         cases = {
