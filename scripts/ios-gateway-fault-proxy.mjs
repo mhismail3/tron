@@ -41,6 +41,48 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
   let policy = { mode: "pass" };
   let intercepted = false;
   let closing = false;
+  // One fixture-wide FIFO carries both parsed HTTP streams and WebSocket
+  // messages/control frames. This is an application-payload schedule, not a
+  // claim about OS/TCP or compressed WebSocket wire-byte accounting.
+  let shaper;
+  let scheduleTail = Promise.resolve();
+  const proxyStartedAt = process.hrtime.bigint();
+  const elapsedMilliseconds = () => Math.round(Number(process.hrtime.bigint() - proxyStartedAt) / 1_000_000);
+  const linkStats = {
+    forwardedWebSocketPings: 0, forwardedWebSocketPongs: 0, uploadBodyBytes: 0,
+    uploadBodyTransfers: [], clientHeartbeatTimeline: [],
+    scheduledBytes: 0, scheduledHTTPBytes: 0, scheduledWebSocketBytes: 0,
+    queuedPayloadBytes: 0, queueHighWaterBytes: 0,
+    scheduleOverflows: 0, dispatchedRPCs: 0, settledRPCs: 0,
+    originalAuthority: null, heartbeatRoundTripMilliseconds: [],
+    logsExportRequestBytes: null, logsExportResponseBytes: null,
+  };
+  const logsExportRequestIDs = new Set();
+  const outstandingClientPings = [];
+  let clientPingSequence = 0;
+  let heldHTTP = false;
+  let releaseHTTP;
+  let httpHoldTimer;
+  let httpHeldWaiter;
+  const schedule = (kind, bytes, forward) => {
+    if (!shaper) return Promise.resolve().then(forward);
+    const amount = Math.max(0, bytes);
+    if (linkStats.queuedPayloadBytes + amount > shaper.maximumQueuedBytes) {
+      linkStats.scheduleOverflows++;
+      return Promise.reject(new Error("shared link schedule queue exceeded its bound"));
+    }
+    linkStats.queuedPayloadBytes += amount;
+    linkStats.queueHighWaterBytes = Math.max(linkStats.queueHighWaterBytes, linkStats.queuedPayloadBytes);
+    linkStats.scheduledBytes += amount;
+    if (kind.startsWith("http-")) linkStats.scheduledHTTPBytes += amount;
+    else if (kind.startsWith("websocket-")) linkStats.scheduledWebSocketBytes += amount;
+    const job = scheduleTail.then(async () => {
+      await new Promise(resolve => setTimeout(resolve, shaper.latencyMilliseconds + amount / shaper.rateBytesPerSecond * 1_000));
+      await forward();
+    }).finally(() => { linkStats.queuedPayloadBytes -= amount; });
+    scheduleTail = job.catch(() => {});
+    return job;
+  };
   const answer = (response, status, value) => {
     if (response.destroyed) return;
     response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
@@ -72,6 +114,40 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           }
           return;
         }
+        if (next.mode === "shape") {
+          if (![12_288, 65_536].includes(next.rateBytesPerSecond) || next.latencyMilliseconds !== 30
+              || next.maximumQueuedBytes !== 1_048_576 || shaper || policy.mode !== "pass") throw new Error("invalid shared-link schedule");
+          shaper = { rateBytesPerSecond: next.rateBytesPerSecond, latencyMilliseconds: next.latencyMilliseconds, maximumQueuedBytes: next.maximumQueuedBytes };
+          answer(response, 200, { mode: "shape", schedule: "shared-fifo" });
+          return;
+        }
+        if (next.mode === "link-stats") {
+          answer(response, 200, { ...linkStats, queuedPayloadBytes: linkStats.queuedPayloadBytes, schedule: shaper ? "shared-fifo" : "unshaped" });
+          return;
+        }
+        if (next.mode === "unshape") {
+          if (linkStats.queuedPayloadBytes !== 0 || policy.mode !== "pass") throw new Error("shared-link schedule is not idle");
+          shaper = undefined;
+          answer(response, 200, { mode: "unshaped" });
+          return;
+        }
+        if (next.mode === "await-http-held") {
+          if (heldHTTP) answer(response, 200, { held: true });
+          else if (httpHeldWaiter) answer(response, 409, {});
+          else {
+            httpHeldWaiter = response;
+            const timeout = setTimeout(() => { httpHeldWaiter = undefined; answer(response, 408, {}); }, 5_000);
+            timeout.unref();
+            response.once("close", () => { clearTimeout(timeout); if (httpHeldWaiter === response) httpHeldWaiter = undefined; });
+          }
+          return;
+        }
+        if (next.mode === "hold-http-response") {
+          if (policy.mode !== "pass" || heldHTTP) throw new Error("HTTP response hold is already active");
+          policy = { mode: "hold-http-response" };
+          answer(response, 200, { mode: policy.mode });
+          return;
+        }
         if (next.mode === "close") {
           if (![1000, 1001, 1008, 1012, 1013].includes(next.code)) throw new Error("invalid close code");
           for (const bridge of bridges) bridge.close(next.code);
@@ -95,7 +171,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           answer(response, 200, { mode: next.mode, pid });
           return;
         }
-        if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
+        if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "hold-http-response", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
         if (next.http !== undefined && (next.mode !== "blackhole" || typeof next.http !== "boolean")) throw new Error("invalid http blackhole");
         if (next.mode === "reject-upgrade" && ![401, 403, 503].includes(next.status)) throw new Error("invalid rejection status");
         if (next.mode === "drop-prompt-response" && (typeof next.commandId !== "string" || !/^[A-Za-z0-9._:-]{8,160}$/.test(next.commandId))) throw new Error("invalid command identity");
@@ -111,6 +187,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         if (next.mode === "pass") {
           intercepted = false;
           for (const bridge of bridges) bridge.release();
+          const resume = releaseHTTP;
+          releaseHTTP = undefined;
+          clearTimeout(httpHoldTimer);
+          httpHoldTimer = undefined;
+          resume?.();
         }
         answer(response, 200, { mode: policy.mode });
       } catch { answer(response, 400, { error: "invalid fixture control" }); }
@@ -121,16 +202,69 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     if (policy.mode === "blackhole" && policy.http) { request.destroy(); return; }
     try { await checkTarget(); } catch { answer(response, 503, { error: "owned fixture unavailable" }); return; }
     if (closing || response.destroyed || request.aborted) return;
-    const upstream = upstreamRequest({ host: "127.0.0.1", port: targetPort, method: request.method,
-      path: request.url, headers: { ...request.headers, host: `127.0.0.1:${targetPort}` } }, incoming => {
-      response.writeHead(incoming.statusCode ?? 502, incoming.headers);
-      incoming.pipe(response);
-      incoming.once("error", () => response.destroy());
-    });
-    upstream.once("error", () => response.destroy());
-    request.once("aborted", () => upstream.destroy());
-    response.once("close", () => upstream.destroy());
-    request.pipe(upstream);
+    const requestHeaderBytes = Buffer.byteLength(`${request.method} ${request.url} HTTP/${request.httpVersion}\r\n${request.rawHeaders.join("\r\n")}\r\n\r\n`);
+    const authority = request.headers.host;
+    if (authority && !linkStats.originalAuthority) linkStats.originalAuthority = authority;
+    void schedule("http-request-headers", requestHeaderBytes, () => {
+      const upstream = upstreamRequest({ host: "127.0.0.1", port: targetPort, method: request.method,
+        path: request.url, headers: { ...request.headers, host: `127.0.0.1:${targetPort}` } }, incoming => {
+        void (async () => {
+          if (policy.mode === "hold-http-response") {
+            heldHTTP = true;
+            if (httpHeldWaiter) { answer(httpHeldWaiter, 200, { held: true }); httpHeldWaiter = undefined; }
+            await new Promise(resolve => {
+              releaseHTTP = resolve;
+              httpHoldTimer = setTimeout(() => {
+                policy = { mode: "pass" };
+                const resume = releaseHTTP;
+                releaseHTTP = undefined;
+                resume?.();
+              }, 5_000);
+              httpHoldTimer.unref();
+            });
+            clearTimeout(httpHoldTimer);
+            httpHoldTimer = undefined;
+            heldHTTP = false;
+          }
+          const responseHeaderBytes = Buffer.byteLength(`HTTP/${incoming.httpVersion} ${incoming.statusCode} ${incoming.statusMessage ?? ""}\r\n${incoming.rawHeaders.join("\r\n")}\r\n\r\n`);
+          await schedule("http-response-headers", responseHeaderBytes, () => response.writeHead(incoming.statusCode ?? 502, incoming.headers));
+          for await (const chunk of incoming) {
+            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            for (let offset = 0; offset < bytes.length; offset += 16_384) {
+              const part = bytes.subarray(offset, Math.min(offset + 16_384, bytes.length));
+              await schedule("http-response-body", part.length, () => response.write(part));
+            }
+          }
+          response.end();
+        })().catch(() => response.destroy());
+        incoming.once("error", () => response.destroy());
+      });
+      upstream.once("error", () => response.destroy());
+      request.once("aborted", () => upstream.destroy());
+      response.once("close", () => upstream.destroy());
+      void (async () => {
+        const isUploadBody = request.url?.startsWith("/v1/uploads?") ?? false;
+        const uploadTransfer = isUploadBody ? { startMs: null, endMs: null, bytes: 0 } : undefined;
+        for await (const chunk of request) {
+          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          if (isUploadBody) {
+            uploadTransfer.startMs ??= elapsedMilliseconds();
+            uploadTransfer.bytes += bytes.length;
+            linkStats.uploadBodyBytes += bytes.length;
+          }
+          for (let offset = 0; offset < bytes.length; offset += 16_384) {
+            const part = bytes.subarray(offset, Math.min(offset + 16_384, bytes.length));
+            await schedule("http-request-body", part.length, () => upstream.write(part));
+          }
+        }
+        if (uploadTransfer?.startMs !== null && uploadTransfer?.startMs !== undefined) {
+          uploadTransfer.endMs = elapsedMilliseconds();
+          linkStats.uploadBodyTransfers.push(uploadTransfer);
+          if (linkStats.uploadBodyTransfers.length > 8) linkStats.uploadBodyTransfers.shift();
+        }
+        upstream.end();
+      })().catch(() => { upstream.destroy(); response.destroy(); });
+    }).catch(() => { response.destroy(); });
   });
   server.timeout = 10_000;
   server.on("connection", socket => {
@@ -210,22 +344,34 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
       });
       front.on("message", (data, binary) => {
         if (policy.mode === "blackhole") { signalInterception(); return; }
+        let frame;
         try {
-          const frame = JSON.parse(data.toString());
+          frame = JSON.parse(data.toString());
+          if (frame.type === "request" && typeof frame.method === "string") linkStats.dispatchedRPCs++;
+          if (frame.type === "request" && frame.method === "system.logs.export") {
+            linkStats.logsExportRequestBytes = data.length;
+            if (logsExportRequestIDs.size >= 16) logsExportRequestIDs.delete(logsExportRequestIDs.values().next().value);
+            logsExportRequestIDs.add(frame.id);
+          }
           if ((policy.mode === "hold-open" && frame.method === "session.open")
             || (policy.mode === "hold-sync" && frame.method === "session.sync")
             || (policy.mode === "drop-prompt-response" && frame.method === "session.prompt" && frame.params?.commandId === policy.commandId)) targetID = frame.id;
         } catch { terminate(); return; }
-        if (back.readyState === WebSocket.OPEN) send(back, data, binary);
-        else if (pending.length < maximumFrames && pendingBytes + data.length <= maximumBytes) {
-          pending.push([data, binary]); pendingBytes += data.length;
-        } else terminate();
+        const bytes = data.length + 2 + (data.length < 126 ? 0 : data.length <= 65_535 ? 2 : 8) + 4;
+        void schedule("websocket-client-frame", bytes, () => {
+          if (back.readyState === WebSocket.OPEN) send(back, data, binary);
+          else if (pending.length < maximumFrames && pendingBytes + data.length <= maximumBytes) {
+            pending.push([data, binary]); pendingBytes += data.length;
+          } else terminate();
+        }).catch(terminate);
       });
       back.on("message", (data, binary) => {
         if (front.readyState !== WebSocket.OPEN) return;
         if (policy.mode === "blackhole") { signalInterception(); return; }
         let frame;
         try { frame = JSON.parse(data.toString()); } catch { terminate(); return; }
+        if (frame.type === "response") linkStats.settledRPCs++;
+        if (frame.type === "response" && logsExportRequestIDs.delete(frame.id)) linkStats.logsExportResponseBytes = data.length;
         if (policy.mode === "drop-prompt-response" && frame.type === "response" && frame.id === targetID) {
           policy = { mode: "pass" };
           // This fault specifically loses an accepted result. A definitive
@@ -238,18 +384,58 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           if (heldFrames.length >= maximumFrames || heldBytes + data.length > maximumBytes) { terminate(); return; }
           heldFrames.push([data, binary]); heldBytes += data.length;
           signalInterception();
-        } else send(front, data, binary);
+        } else void schedule("websocket-server-frame", data.length + 2 + (data.length < 126 ? 0 : data.length <= 65_535 ? 2 : 8), () => send(front, data, binary)).catch(terminate);
       });
       // Auto-pong is disabled at both ends: a blackhole must not fabricate
       // liveness. Other faults preserve ping/pong and ordered server data.
-      for (const [source, destination] of [[front, back], [back, front]]) {
+      for (const [source, destination, direction] of [[front, back, "client"], [back, front, "gateway"]]) {
         source.on("ping", data => {
           if (policy.mode === "blackhole") { signalInterception(); return; }
-          if (destination.readyState === WebSocket.OPEN) destination.ping(data);
+          const heartbeat = direction === "client" ? {
+            payload: data.toString("hex"),
+            timeline: {
+              sequence: ++clientPingSequence,
+              enqueuedMs: elapsedMilliseconds(),
+              forwardedMs: null,
+              gatewayPongMs: null,
+              appPongForwardedMs: null,
+            },
+          } : undefined;
+          if (heartbeat) {
+            outstandingClientPings.push(heartbeat);
+            linkStats.clientHeartbeatTimeline.push(heartbeat.timeline);
+            if (linkStats.clientHeartbeatTimeline.length > 16) linkStats.clientHeartbeatTimeline.shift();
+            if (outstandingClientPings.length > 16) outstandingClientPings.shift();
+          }
+          void schedule("websocket-ping", data.length + (direction === "client" ? 6 : 2), () => {
+            if (destination.readyState === WebSocket.OPEN) {
+              destination.ping(data);
+              if (heartbeat) heartbeat.timeline.forwardedMs = elapsedMilliseconds();
+              if (direction === "client") linkStats.forwardedWebSocketPings++;
+            }
+          }).catch(terminate);
         });
         source.on("pong", data => {
           if (policy.mode === "blackhole") { signalInterception(); return; }
-          if (destination.readyState === WebSocket.OPEN) destination.pong(data);
+          const heartbeat = direction === "gateway"
+            ? outstandingClientPings.find(ping => ping.payload === data.toString("hex") && ping.timeline.gatewayPongMs === null)
+            : undefined;
+          if (heartbeat) {
+            heartbeat.timeline.gatewayPongMs = elapsedMilliseconds();
+            linkStats.heartbeatRoundTripMilliseconds.push(heartbeat.timeline.gatewayPongMs - heartbeat.timeline.enqueuedMs);
+            if (linkStats.heartbeatRoundTripMilliseconds.length > 32) linkStats.heartbeatRoundTripMilliseconds.shift();
+          }
+          void schedule("websocket-pong", data.length + (direction === "gateway" ? 6 : 2), () => {
+            if (destination.readyState === WebSocket.OPEN) {
+              destination.pong(data);
+              if (heartbeat) heartbeat.timeline.appPongForwardedMs = elapsedMilliseconds();
+              if (direction === "gateway") linkStats.forwardedWebSocketPongs++;
+              if (heartbeat) {
+                const index = outstandingClientPings.indexOf(heartbeat);
+                if (index >= 0) outstandingClientPings.splice(index, 1);
+              }
+            }
+          }).catch(terminate);
         });
       }
     });

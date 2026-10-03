@@ -508,6 +508,7 @@ package actor GatewayClient {
         let profileLabel: String?
         let connectionID: Int
         let timeout: Task<Void, Never>
+        let requestBytes: Int
         var send: Task<Void, Never>?
         var transmission: GatewayRequestTransmissionState
     }
@@ -839,6 +840,25 @@ package actor GatewayClient {
     ) {
         let duration = diagnosticMilliseconds(request.startedAt.duration(to: clock.now()))
         let code = error.map(Self.diagnosticCode)
+        if request.method == "system.logs.export", let appLog {
+            let outcomeName = outcome.rawValue
+            let requestBytes = request.requestBytes
+            let connectionID = request.connectionID
+            let requestID = request.requestID
+            let terminalLevel = outcome == .success ? "info" : "warning"
+            Task {
+                await appLog.recordCausal(
+                    name: "logs.export.terminal",
+                    outcome: outcomeName,
+                    durationMilliseconds: duration,
+                    count: requestBytes,
+                    connectionID: connectionID,
+                    requestID: requestID,
+                    level: terminalLevel,
+                    details: "bytes=rpc-json"
+                )
+            }
+        }
         if let appLog {
             Task {
                 await appLog.recordRPC(
@@ -1911,6 +1931,20 @@ package actor GatewayClient {
         if let correlation { latestRequestIDByCorrelation[correlation] = id }
         let frame = GatewayRequest(id: id, method: method, params: try JSONValue.encode(params))
         let data = try JSONEncoder.gateway.encode(frame)
+        if method == "system.logs.export", let appLog {
+            let requestBytes = data.count
+            Task {
+                await appLog.recordCausal(
+                    name: "logs.export.requested",
+                    outcome: "queued",
+                    count: requestBytes,
+                    connectionID: epochID,
+                    requestID: id,
+                    level: "info",
+                    details: "bytes=rpc-json"
+                )
+            }
+        }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 guard var current = connection, current.id == epochID else {
@@ -1935,6 +1969,7 @@ package actor GatewayClient {
                     profileLabel: current.profileLabel,
                     connectionID: epochID,
                     timeout: timeoutTask,
+                    requestBytes: data.count,
                     send: nil,
                     transmission: .queued
                 )
@@ -2014,18 +2049,29 @@ package actor GatewayClient {
     package func upload(name: String, mimeType: String, data: Data) async throws -> String {
         try requireUploadSize(data.count)
         let context = try uploadContext(name: name, mimeType: mimeType)
+        let requestID = uuidSource.next().uuidString.lowercased()
+        let startedAt = clock.now()
+        let connectionID = connection?.id
         var request = context.request
         request.setValue(String(data.count), forHTTPHeaderField: "Content-Length")
+        request.setValue(requestID, forHTTPHeaderField: "X-Tron-Request-ID")
         request.httpBody = data
-        let (responseData, http) = try await boundedHTTPDataTransport.data(
-            for: request,
-            maximumBytes: GatewayUploadPolicy.maximumResponseBytes,
-            pin: context.pin
-        )
-        // The upload is an independently staged HTTP resource. A WebSocket
-        // reconnect while the bytes are in flight must not discard a
-        // successful photo upload or turn it into a misleading failure.
-        return try admitUploadResponse(responseData, http: http, context: context)
+        recordUploadDiagnostic(event: "http.upload.requested", requestID: requestID, bytes: data.count, connectionID: connectionID, routeClass: context.routeClass, outcome: "started")
+        do {
+            let (responseData, http) = try await boundedHTTPDataTransport.data(
+                for: request,
+                maximumBytes: GatewayUploadPolicy.maximumResponseBytes,
+                pin: context.pin
+            )
+            // HTTP staging has its own receipt; a concurrent WebSocket
+            // retirement cannot erase a successful upload.
+            let uploadID = try admitUploadResponse(responseData, http: http, context: context)
+            recordUploadTerminal(requestID: requestID, bytes: data.count, connectionID: connectionID, routeClass: context.routeClass, startedAt: startedAt)
+            return uploadID
+        } catch {
+            recordUploadTerminal(requestID: requestID, bytes: data.count, connectionID: connectionID, routeClass: context.routeClass, startedAt: startedAt, error: error)
+            throw error
+        }
     }
 
     package func discardUpload(_ id: String) async throws {
@@ -2078,20 +2124,82 @@ package actor GatewayClient {
     ) async throws -> String {
         try requireUploadSize(byteCount)
         let context = try uploadContext(name: name, mimeType: mimeType)
+        let requestID = uuidSource.next().uuidString.lowercased()
+        let startedAt = clock.now()
+        let connectionID = connection?.id
         var request = context.request
         request.setValue(String(byteCount), forHTTPHeaderField: "Content-Length")
-        let (responseData, http) = try await boundedHTTPUploadTransport.data(
-            for: request,
-            fileURL: fileURL,
-            maximumBytes: GatewayUploadPolicy.maximumResponseBytes,
-            pin: context.pin
+        request.setValue(requestID, forHTTPHeaderField: "X-Tron-Request-ID")
+        recordUploadDiagnostic(event: "http.upload.requested", requestID: requestID, bytes: byteCount, connectionID: connectionID, routeClass: context.routeClass, outcome: "started")
+        do {
+            let (responseData, http) = try await boundedHTTPUploadTransport.data(
+                for: request,
+                fileURL: fileURL,
+                maximumBytes: GatewayUploadPolicy.maximumResponseBytes,
+                pin: context.pin
+            )
+            let uploadID = try admitUploadResponse(responseData, http: http, context: context)
+            recordUploadTerminal(requestID: requestID, bytes: byteCount, connectionID: connectionID, routeClass: context.routeClass, startedAt: startedAt)
+            return uploadID
+        } catch {
+            recordUploadTerminal(requestID: requestID, bytes: byteCount, connectionID: connectionID, routeClass: context.routeClass, startedAt: startedAt, error: error)
+            throw error
+        }
+    }
+
+    private func recordUploadDiagnostic(
+        event: String,
+        requestID: String,
+        bytes: Int,
+        connectionID: Int?,
+        routeClass: String,
+        startedAt: ContinuousClock.Instant? = nil,
+        outcome: String? = nil,
+        error: Error? = nil
+    ) {
+        guard let appLog else { return }
+        let terminalOutcome = outcome ?? (error == nil ? "success" : (error is CancellationError ? "cancelled" : "failure"))
+        let code = error.map(Self.diagnosticCode)
+        let duration = startedAt.map { diagnosticMilliseconds($0.duration(to: clock.now())) }
+        let level = error == nil ? "info" : "warning"
+        let details = ["route=\(routeClass)", code.map { "code=\($0)" }].compactMap { $0 }.joined(separator: " ")
+        Task {
+            await appLog.recordCausal(
+                name: event,
+                outcome: terminalOutcome,
+                durationMilliseconds: duration,
+                count: bytes,
+                connectionID: connectionID,
+                requestID: requestID,
+                level: level,
+                details: details
+            )
+        }
+    }
+
+    private func recordUploadTerminal(
+        requestID: String,
+        bytes: Int,
+        connectionID: Int?,
+        routeClass: String,
+        startedAt: ContinuousClock.Instant,
+        error: Error? = nil
+    ) {
+        recordUploadDiagnostic(
+            event: "http.upload.terminal",
+            requestID: requestID,
+            bytes: bytes,
+            connectionID: connectionID,
+            routeClass: routeClass,
+            startedAt: startedAt,
+            error: error
         )
-        return try admitUploadResponse(responseData, http: http, context: context)
     }
 
     private struct UploadContext {
         let profileID: String
         package let request: URLRequest
+        let routeClass: String
         /// The pin this route's transport must evaluate (E-3c): the LAN lane
         /// that carries the epoch while it wins.
         let pin: String?
@@ -2113,7 +2221,7 @@ package actor GatewayClient {
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
-        return UploadContext(profileID: profile.id, request: request, pin: route.pin)
+        return UploadContext(profileID: profile.id, request: request, routeClass: route.pin == nil ? "saved" : "lan-pinned", pin: route.pin)
     }
 
     private func requireUploadSize(_ byteCount: Int) throws {

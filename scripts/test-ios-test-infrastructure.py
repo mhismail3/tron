@@ -7,6 +7,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import signal
@@ -1838,6 +1839,8 @@ from pathlib import Path
 inventory_path = Path(os.environ['FAKE_SIMCTL_INVENTORY'])
 arguments = sys.argv[1:]
 if arguments[:2] == ['xcresulttool', 'get']:
+    if arguments[2:4] == ['test-results', 'tests'] and os.environ.get('FAKE_TESTS_RESULT'):
+        print(Path(os.environ['FAKE_TESTS_RESULT']).read_text()); raise SystemExit(0)
     # The runner's summary of a focused run: one executed, passing test.
     print('{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'); raise SystemExit(0)
 assert arguments[0] == 'simctl', arguments
@@ -3183,6 +3186,16 @@ if "build-for-testing" in arguments:
     if os.environ.get("FAKE_BUILD_GATE"):
         wait_for_fixture_gate(Path(os.environ["FAKE_BUILD_GATE"]))
 if "test-without-building" in arguments and "-resultBundlePath" in arguments:
+    calls = os.environ.get("FAKE_XCODEBUILD_CALLS")
+    if calls:
+        test_filter = next((value.split(":", 1)[1] for value in arguments if value.startswith("-only-testing:")), "unknown")
+        with open(calls, "a", encoding="utf-8") as handle: handle.write(test_filter + "\\n")
+    invocation = Path(calls).read_text().splitlines() if calls and Path(calls).exists() else []
+    failure = int(os.environ.get("FAKE_XCODEBUILD_FIRST_TEST_EXIT") or 0)
+    if failure and len(invocation) == 1:
+        if os.environ.get("FAKE_XCODEBUILD_FIRST_TEST_BUNDLE") == "1":
+            Path(arguments[arguments.index("-resultBundlePath") + 1]).mkdir(parents=True, exist_ok=True)
+        raise SystemExit(failure)
     Path(arguments[arguments.index("-resultBundlePath") + 1]).mkdir(parents=True, exist_ok=True)
 ''')
 
@@ -3325,6 +3338,17 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         DerivedData.
     12. The harness finds its products with a BSD-only tool, so its build fails
         silently on the Linux CI runner that runs these cases (#113).
+    13. The first focused XCTest case fails before creating an `.xcresult`, but a
+        later case passes and overwrites the status to green. Failure-report
+        extraction is optional evidence and must never decide whether the case
+        sequence stops.
+    14. A fixture or xctestrun setup command fails while the case callback runs
+        in conditional context; errexit is disabled and successful XCTest work
+        can mask the failed setup.
+    15. A nested result-node list is recursively passed to itself instead of
+        iterating its children, suppressing optional failure details.
+    16. Shared-link ping/pong counts increment both at FIFO admission and actual
+        forwarding, so reported frames do not match the observed event timeline.
     """
 
     def setUp(self) -> None:
@@ -3345,6 +3369,68 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             [str(harness), *arguments], env=environment or self.environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
         )
+
+    def readiness_node_environment(self, environment: dict[str, str]) -> dict[str, str]:
+        """Use test-owned readiness processes instead of requiring built Gateway dist.
+
+        These actual-runner regressions stop before XCTest. Their only fixture
+        contract is the enrollment/health and proxy-ready signals consumed while
+        setting up a fresh case, so a clean checkout need not build production
+        Gateway artifacts merely to test runner failure propagation.
+        """
+        real_node = shutil.which("node", path=environment["PATH"])
+        self.assertIsNotNone(real_node, "the pinned Node runtime is required by the E2E runner")
+        binary = self.root / "fixture-node"
+        binary.mkdir(exist_ok=True)
+        node = binary / "node"
+        node.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  */packages/gateway/dist/index.js)
+    export FAKE_E2E_NODE_ENTRY="$1"
+    exec "$FAKE_E2E_REAL_NODE" -e "$FAKE_E2E_GATEWAY_SOURCE"
+    ;;
+  */ios-gateway-fault-proxy.mjs)
+    export FAKE_E2E_NODE_ENTRY="$1"
+    exec "$FAKE_E2E_REAL_NODE" -e "$FAKE_E2E_PROXY_SOURCE"
+    ;;
+  */packages/gateway/*|*/ios-gateway-*.mjs|*.js|*.mjs|*.cjs)
+    echo "unexpected Node fixture command: $*" >&2
+    exit 70
+    ;;
+esac
+exec "$FAKE_E2E_REAL_NODE" "$@"
+""")
+        node.chmod(0o755)
+        result = dict(environment)
+        result["PATH"] = f"{binary}:{environment['PATH']}"
+        result.update({
+            "FAKE_E2E_REAL_NODE": str(real_node),
+            "FAKE_E2E_GATEWAY_SOURCE": '''const fs = require("node:fs");
+const http = require("node:http");
+process.title = `node ${process.env.FAKE_E2E_NODE_ENTRY}`;
+const enrollment = `${process.env.TRON_DATA_DIR}/gateway/enrollment.json`;
+fs.writeFileSync(enrollment, JSON.stringify({ code: "fixture-pairing-code" }), { mode: 0o600 });
+const server = http.createServer((request, response) => {
+  response.writeHead(request.url === "/health" ? 200 : 404);
+  response.end();
+});
+server.listen(Number(process.env.TRON_GATEWAY_PORT), "127.0.0.1");
+process.once("SIGTERM", () => server.close(() => process.exit(0)));
+process.once("SIGINT", () => server.close(() => process.exit(0)));
+''',
+            "FAKE_E2E_PROXY_SOURCE": '''const fs = require("node:fs");
+const http = require("node:http");
+process.title = `node ${process.env.FAKE_E2E_NODE_ENTRY}`;
+const server = http.createServer((request, response) => { response.writeHead(404); response.end(); });
+server.listen(0, "127.0.0.1", () => {
+  fs.writeFileSync(process.env.TRON_E2E_PROXY_READY, JSON.stringify({ port: server.address().port, pid: process.pid }), { mode: 0o600 });
+});
+process.once("SIGTERM", () => server.close(() => process.exit(0)));
+process.once("SIGINT", () => server.close(() => process.exit(0)));
+''',
+        })
+        return result
 
     def default_roots_environment(self) -> dict[str, str]:
         """The harness's own defaults: no overrides, TMPDIR inside the fixture."""
@@ -3373,9 +3459,10 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             env=self.environment, check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
 
-    def source_identity(self) -> dict[str, object]:
+    def source_identity(self, worktree: Path = ROOT) -> dict[str, object]:
+        identity_owner = worktree / "scripts/ios-test-build-identity.py"
         return json.loads(subprocess.run(
-            [sys.executable, str(IDENTITY), "show", "--worktree", str(ROOT)],
+            [sys.executable, str(identity_owner), "show", "--worktree", str(worktree)],
             env=self.environment, check=True, text=True, stdout=subprocess.PIPE,
         ).stdout)
 
@@ -3399,6 +3486,19 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         (products / "Tron Development_UnitTests_iOS.xctestrun").write_text("xctestrun\n")
         if identity is not None:
             (derived / "build-identity.json").write_text(json.dumps(identity))
+        return derived
+
+    def runnable_products(self, worktree: Path = ROOT) -> Path:
+        """One valid test target for exercising the actual E2E run path."""
+        derived = self.built_products(self.source_identity(worktree))
+        xctestrun = derived / "Build/Products/Tron Development_UnitTests_iOS.xctestrun"
+        with xctestrun.open("wb") as handle:
+            plistlib.dump({
+                "TestConfigurations": [{
+                    "IsEnabled": True,
+                    "TestTargets": [{"BlueprintName": "TronMobileTests", "IsUITestBundle": False}],
+                }],
+            }, handle)
         return derived
 
     def assert_no_fixture_renewed(self) -> None:
@@ -3466,6 +3566,133 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         stamp = json.loads((self.root / "e2e-derived/build-identity.json").read_text())
         self.assertEqual(stamp, self.source_identity())
+
+    def clean_runner_checkout(self) -> Path:
+        """A minimal committed checkout with scripts/config/manifest but no Gateway build."""
+        worktree = self.root / "clean-worktree"
+        ignore = shutil.ignore_patterns("__pycache__")
+        shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
+        shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
+        gateway = worktree / "packages/gateway"
+        gateway.mkdir(parents=True)
+        for name in ("package.json", "package-lock.json"):
+            shutil.copy2(ROOT / "packages/gateway" / name, gateway / name)
+
+        subprocess.run(["git", "init", "--quiet"], cwd=worktree, env=self.environment, check=True)
+        subprocess.run(["git", "add", "scripts", "config", "packages/gateway"], cwd=worktree, env=self.environment, check=True)
+        subprocess.run([
+            "git", "-c", "user.name=E2E fixture", "-c", "user.email=e2e-fixture@invalid",
+            "commit", "--quiet", "-m", "runner fixture",
+        ], cwd=worktree, env=self.environment, check=True)
+        self.assertFalse((gateway / "dist").exists())
+        self.assertFalse((gateway / "node_modules").exists())
+        return worktree
+
+    def test_case_setup_failure_stops_actual_e2e_path_and_cleans_fixture(self) -> None:
+        """Failure mode 14: a setup failure cannot be masked by later passing XCTest cases.
+
+        The first actual runner patch invocation fails once; the second would
+        succeed, so a conditional-context callback would continue to Xcode and
+        turn the setup failure green. The run path must preserve 37, invoke no
+        test case, and clean the fixture and its owned simulator lane.
+        """
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        derived = self.runnable_products(worktree)
+        calls = self.root / "actual-xcodebuild-calls.txt"
+        patch_calls = self.root / "patch-calls.txt"
+        failed_once = self.root / "patch-failed-once"
+        fake_bin = self.root / "fake-python-bin"
+        fake_bin.mkdir()
+        fake_python = fake_bin / "python3"
+        fake_python.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+for argument in "$@"; do
+  if [[ "$argument" == *patch-ios-gateway-e2e-xctestrun.py ]]; then
+    printf '%s\\n' "$argument" >>"$FAKE_PATCH_CALLS"
+    if [[ ! -e "$FAKE_PATCH_FAILED_ONCE" ]]; then
+      : >"$FAKE_PATCH_FAILED_ONCE"
+      exit 37
+    fi
+  fi
+done
+exec "$FAKE_SYSTEM_PYTHON" "$@"
+""")
+        fake_python.chmod(0o755)
+        environment = dict(self.environment)
+        environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+        environment.update({
+            "FAKE_SYSTEM_PYTHON": sys.executable,
+            "FAKE_PATCH_CALLS": str(patch_calls),
+            "FAKE_PATCH_FAILED_ONCE": str(failed_once),
+            "FAKE_XCODEBUILD_CALLS": str(calls),
+        })
+        environment = self.readiness_node_environment(environment)
+
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 37, result.stdout + result.stderr)
+            self.assertEqual(len(patch_calls.read_text().splitlines()), 1)
+            self.assertFalse(calls.exists(), result.stdout + result.stderr)
+            status = self.e2e("status", harness=harness, environment=environment)
+            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertIn("Gateway: stopped", status.stdout)
+            self.assertIn("Fault proxy: stopped", status.stdout)
+            lane_states = [device["state"] for devices in self.inventory().get("devices", {}).values() for device in devices]
+            self.assertEqual(lane_states, ["Shutdown"])
+            self.assertTrue((derived / "Build/Products/Tron Development_UnitTests_iOS.xctestrun").is_file())
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+    def test_first_failed_actual_case_without_bundle_stops_before_later_case(self) -> None:
+        """Failure mode 13: an absent `.xcresult` cannot let a later pass mask failure."""
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        calls = self.root / "actual-xcodebuild-calls.txt"
+        environment = self.readiness_node_environment(self.environment)
+        environment.update({
+            "FAKE_XCODEBUILD_CALLS": str(calls),
+            "FAKE_XCODEBUILD_FIRST_TEST_EXIT": "37",
+        })
+
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+            self.assertEqual(calls.read_text().splitlines(), [
+                "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
+            ])
+            latest = self.root / "e2e-state/results/latest"
+            self.assertTrue(latest.is_symlink())
+            self.assertFalse((latest / "FocusedE2E.xcresult").exists())
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
+
+    def test_nested_failure_messages_are_extracted_without_changing_status(self) -> None:
+        """Failure mode 15: list children are visited and extraction preserves XCTest status."""
+        worktree = self.clean_runner_checkout()
+        harness = worktree / "scripts/ios-gateway-e2e-test"
+        self.runnable_products(worktree)
+        calls = self.root / "actual-xcodebuild-calls.txt"
+        failures = self.root / "nested-test-results.json"
+        failures.write_text(json.dumps({"testNodes": [{"children": [{"nodeType": "Failure Message", "name": "nested assertion detail"}]}]}))
+        environment = self.readiness_node_environment(self.environment)
+        environment.update({
+            "FAKE_XCODEBUILD_CALLS": str(calls),
+            "FAKE_XCODEBUILD_FIRST_TEST_EXIT": "37",
+            "FAKE_XCODEBUILD_FIRST_TEST_BUNDLE": "1",
+            "FAKE_TESTS_RESULT": str(failures),
+        })
+
+        try:
+            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+            self.assertIn("failure: nested assertion detail", result.stdout)
+            self.assertEqual(calls.read_text().splitlines(), [
+                "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
+            ])
+        finally:
+            self.e2e("stop", harness=harness, environment=environment)
 
     def test_run_refuses_products_not_built_from_this_worktree(self) -> None:
         """Failure mode 10: every unproven product set is refused before the
