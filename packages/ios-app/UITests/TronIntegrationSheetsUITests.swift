@@ -28,6 +28,56 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         keepScreenshot(app, name: "348-x-draft-after-background-reconnect")
     }
 
+    /// Reproduces the reported journey from the mounted chat's project Settings,
+    /// the second Settings parent that is not covered by the dashboard fixture.
+    @MainActor
+    func testEmptyXSetupSurvivesBackgroundReconnectFromChatSettings() {
+        continueAfterFailure = false
+        let app = launch(scenario: "parent-oauth-chat-reconnect")
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["Settings"].tap()
+        let connectedServices = app.buttons["Connected Services"]
+        XCTAssertTrue(connectedServices.waitForExistence(timeout: 10), app.debugDescription)
+        connectedServices.tap()
+        XCTAssertTrue(app.buttons["Details for X"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Details for X"].tap()
+        app.buttons["Add another account for X"].tap()
+        XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 5), app.debugDescription)
+
+        let setupViewID = xSetupStateID(app)
+        XCTAssertFalse(setupViewID.isEmpty, presentationTrace(app))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+
+        XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 10), presentationTrace(app))
+        XCTAssertEqual(xSetupStateID(app), setupViewID, presentationTrace(app))
+        XCTAssertTrue(app.textFields.element(boundBy: 0).exists, app.debugDescription)
+        XCTAssertTrue(app.textFields.element(boundBy: 1).exists, app.debugDescription)
+        XCTAssertTrue(oauthCounters(app, contain: "begins:0 uniqueBeginCommands:0 completes:0"), oauthCountersLabel(app))
+        keepScreenshot(app, name: "366-empty-x-setup-after-chat-settings-background-reconnect")
+    }
+
+    /// The dashboard Settings route is a separate parent and remains covered.
+    @MainActor
+    func testEmptyXSetupSurvivesBackgroundReconnectThroughRealSettingsParents() {
+        continueAfterFailure = false
+        let app = launch(scenario: "parent-oauth-reconnect")
+        defer { app.terminate() }
+        openXSetupThroughDashboardSettings(app)
+
+        let setupViewID = xSetupStateID(app)
+        XCTAssertFalse(setupViewID.isEmpty, presentationTrace(app))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+
+        XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 10), presentationTrace(app))
+        XCTAssertEqual(xSetupStateID(app), setupViewID, presentationTrace(app))
+        XCTAssertTrue(app.textFields.element(boundBy: 0).exists, app.debugDescription)
+        XCTAssertTrue(app.textFields.element(boundBy: 1).exists, app.debugDescription)
+        XCTAssertTrue(oauthCounters(app, contain: "begins:0 uniqueBeginCommands:0 completes:0"), oauthCountersLabel(app))
+    }
+
     @MainActor
     func testXSetupAndAcceptedBeginSurviveBackgroundThroughRealSettingsParents() {
         continueAfterFailure = false
@@ -397,6 +447,25 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
+    func testFullXOAuthRedirectSubmitsWithoutSeparateState() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        openXSetup(app)
+        app.buttons["Authorize X"].tap()
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10))
+        keepScreenshot(app, name: "366-x-consent-action-row-before-callback")
+
+        let redirect = app.textFields.element(boundBy: 2)
+        redirect.tap()
+        redirect.typeText("https://example.test/callback?code=fixture-code&state=fixture")
+        app.buttons["Complete setup"].tap()
+
+        XCTAssertTrue(oauthCounters(app, contain: "completeMode=callback"), oauthCountersLabel(app))
+        XCTAssertTrue(app.staticTexts["Connected test X"].waitForExistence(timeout: 10), app.debugDescription)
+    }
+
+    @MainActor
     func testAcceptedOAuthCompleteSettlesOriginalReceiptAfterBackground() {
         continueAfterFailure = false
         let app = launch(scenario: "parent-oauth-complete-delayed")
@@ -409,6 +478,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         code.tap(); code.typeText("fixture-one-time-code")
         app.buttons["Complete setup"].tap()
         XCTAssertTrue(oauthCounters(app, contain: "completes:1"))
+        XCTAssertTrue(oauthCounters(app, contain: "completeMode=code"), oauthCountersLabel(app))
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(app.staticTexts["Connected test X"].waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertFalse(app.staticTexts["Set up X"].exists)

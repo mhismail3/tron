@@ -182,9 +182,11 @@ original destination. Receipt lookup requires a fresh admitted connection.
 X OAuth never recreates a PKCE operation because its receipt is missing. An
 unresolved begin or completion keeps its original command ID and offers **Check
 setup status**, which only queries `command.status`; another authorization is
-blocked while that outcome remains unknown. OAuth inputs and consent state stay
-in the presented form, not a second credential or receipt store. Tokens remain
-in the Mac's owned credential store.
+blocked while that outcome remains unknown. Completion submits either the full
+redirect URL by itself or the authorization code with its saved state; if both
+input fields contain values, the full redirect URL takes precedence. OAuth inputs
+and consent state stay in the presented form, not a second credential or receipt
+store. Tokens remain in the Mac's owned credential store.
 
 MCP retains its existing administration/receipt owner. Add, token storage and
 sign-in capture the originating destination; add's token follow-up uses the
