@@ -48,17 +48,17 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertEqual(xSetupStateID(app), draftViewID, presentationTrace(app))
 
         app.buttons["Authorize X"].tap()
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), oauthCountersLabel(app))
         XCTAssertTrue(oauthCounters(app, contain: "client=true redirect=true"), presentationTrace(app))
         XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), presentationTrace(app))
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), "Consent/code must not be auto-submitted")
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), "Consent/code must not be auto-submitted")
         let acceptedViewID = xSetupStateID(app)
         XCUIDevice.shared.press(.home)
         app.activate()
         XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(client.value as? String, "fixture-public-client")
         XCTAssertEqual(xSetupStateID(app), acceptedViewID, presentationTrace(app))
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), oauthCountersLabel(app))
         XCTAssertTrue(presentationTrace(app).contains("settings.root.appear"), presentationTrace(app))
         keepScreenshot(app, name: "366-x-oauth-survives-real-settings-parent-background")
     }
@@ -151,11 +151,11 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         // Focus loss and the accepted begin happen in the same native interaction.
         app.buttons["Authorize X"].tap()
 
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), oauthCountersLabel(app))
         XCTAssertTrue(oauthCounters(app, contain: "client=true redirect=true"), oauthCountersLabel(app))
         XCTAssertTrue(oauthCounters(app, contain: "policy:enabled=true paid=true budget=7250 recurring=false"), oauthCountersLabel(app))
         XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), presentationTrace(app))
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), oauthCountersLabel(app))
     }
 
     @MainActor
@@ -227,7 +227,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertEqual(budget.value as? String, "7250")
         app.buttons["Authorize X"].tap()
 
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), oauthCountersLabel(app))
         XCTAssertTrue(oauthCounters(app, contain: "policy:enabled=true paid=true budget=7250 recurring=false"), oauthCountersLabel(app))
         XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), oauthCountersLabel(app))
     }
@@ -246,7 +246,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Enter a whole number without separators."].waitForExistence(timeout: 5), oauthCountersLabel(app))
         XCTAssertTrue(app.textFields["Paid budget"].exists)
         XCTAssertEqual(budget.value as? String, "Paid budget", "Rejected input remains empty for correction.")
-        XCTAssertTrue(oauthCounters(app, contain: "begins:0 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:0 uniqueBeginCommands:0 completes:0"), oauthCountersLabel(app))
     }
 
     @MainActor
@@ -390,7 +390,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertEqual(app.textFields.element(boundBy: 0).value as? String, "fixture-public-client")
         check.tap()
         XCTAssertTrue(oauthCounters(app, contain: "queries:2"))
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"))
         XCTAssertTrue(oauthCounters(app, contain: "mismatches:0"))
         XCTAssertTrue(check.exists)
         keepScreenshot(app, name: "348-oauth-missing-original-status-only")
@@ -436,7 +436,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(app.staticTexts["X OAuth setup expired; start authorization again"].waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertEqual(code.value as? String, "fixture-one-time-code")
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:1"))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:1"))
         XCTAssertFalse(app.staticTexts["Connected test X"].exists)
         keepScreenshot(app, name: "348-oauth-expired-no-redispatch")
     }
