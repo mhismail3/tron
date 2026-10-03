@@ -2440,6 +2440,17 @@ replacing newer approvals or budgets. Accepted mutation tasks remain with the re
 activity-scoped observers rejoin on foreground return without replaying a command or publishing into
 retired sheets. Setup checks the exact Gateway identity between begin and complete, because completion
 is a separate command; a profile replacement leaves the original pending operation with its original owner.
+
+X setup adds a bounded `xsetup.*` timeline through the existing iOS `AppLog`: view visibility, unknown-origin
+binding writes, explicit finish, destination retirement, begin admission/typed return/state assignment or
+finite rejection, and the X begin observer's not-observing, suppression, or publication boundary. The view,
+action, and observer-attempt UUIDs are observational only; existing destination, presentation, mutation,
+and receipt fences remain authoritative. `begin-executor-return` identifies the UI call site and can include
+a value recovered from the executor's stored receipt; it does not identify the underlying transport response.
+`connectionID` and lifecycle generation are adjacent context, not an RPC join. These rows contain only finite
+facts and omit client/callback values, OAuth URLs/state/code, operation/account identifiers, policies, and
+raw errors. `onDisappear` records visibility, never form retirement.
+
 Account technical details expose credential availability and account verification, never credential references. `IntegrationsRPCClient.xCredits(connectionID:)` is an exact-connection Gateway read; it validates free, prepaid, and total USD balances for native presentation without authorizing spend. MCP rows never request or display provider balances. Gateway definition display names are plain service names (Jev and X), not implementation descriptions.
 
 Package/resource installation, trust, provider-model authentication, and Gateway pairing remain their existing owner routes rather than generic integration actions.
