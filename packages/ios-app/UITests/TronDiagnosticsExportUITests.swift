@@ -68,6 +68,91 @@ final class TronDiagnosticsExportUITests: XCTestCase {
     }
 
     @MainActor
+    func testOlderRemoteFallbackCannotReplaceOrLeakLocalShareArtifact() {
+        let app = launch("held-failure")
+        defer { app.terminate() }
+        app.buttons["Export Diagnostics"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:1 released:0"))
+        app.buttons["Capture on iPhone"].tap()
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "local:true"))
+        evidence(app, "371-stale-remote-fallback-before-local-share-dismissal")
+        close.tap()
+        let remoteExport = app.buttons["Export Diagnostics"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: remoteExport)], timeout: 5), .completed)
+        XCTAssertFalse(remoteExport.isEnabled, "Dismissing local share must not release the older remote export's busy admission")
+        XCTAssertTrue(observe(app, "fixture.export-original", "exports:0"))
+        app.buttons["fixture.release-export-preparation"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:0 released:1"))
+        XCTAssertTrue(observe(app, "fixture.export-original", "exports:1 commands:1 repeats:0"))
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "fallback-settled files:0"))
+        XCTAssertFalse(app.buttons["Close"].exists, "The dismissed local share cannot be resurrected by the older fallback")
+        app.buttons["fixture.inspect-export-artifacts"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "files:0"))
+    }
+
+    @MainActor
+    func testLocalArtifactReportsActualBoundedRowsAndWindow() {
+        let app = launch("overflow")
+        defer { app.terminate() }
+        app.buttons["Capture on iPhone"].tap()
+        XCTAssertTrue(app.buttons["Close"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "local:true"))
+        let artifactEvidence = app.staticTexts["fixture.export-artifacts"].label
+        let fields = Dictionary(uniqueKeysWithValues: artifactEvidence.split(separator: " ").compactMap { item -> (String, String)? in
+            let pair = item.split(separator: ":", maxSplits: 1).map(String.init)
+            return pair.count == 2 ? (pair[0], pair[1]) : nil
+        })
+        let selected = Int(fields["selected"] ?? "0") ?? 0
+        let dropped = Int(fields["dropped"] ?? "0") ?? 0
+        let rows = Int(fields["rows"] ?? "-1") ?? -1
+        XCTAssertGreaterThan(selected, 0, artifactEvidence)
+        XCTAssertGreaterThan(dropped, 0, artifactEvidence)
+        XCTAssertEqual(selected, rows, artifactEvidence)
+        XCTAssertEqual(fields["windowMatches"], "true", artifactEvidence)
+        self.evidence(app, "371-local-artifact-actual-bounds")
+    }
+
+    @MainActor
+    func testCaptureIgnoresVisibleFilterAndUnrelatedExportPreparation() {
+        let app = launch("held")
+        defer { app.terminate() }
+        app.buttons["Export Diagnostics"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:1 released:0"))
+        app.buttons["Error"].tap()
+        XCTAssertTrue(app.buttons["Capture on iPhone"].isEnabled)
+        app.buttons["Capture on iPhone"].tap()
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "local:true"))
+        XCTAssertTrue(observe(app, "fixture.export-original", "exports:0"))
+        evidence(app, "371-local-capture-independent-of-remote-export")
+        close.tap()
+    }
+
+    @MainActor
+    func testCaptureOnIPhoneDoesNotWaitForReadyGatewayLogRead() {
+        let app = launch("logs-held")
+        defer { app.terminate() }
+        XCTAssertTrue(observe(app, "fixture.export-connection", "selected:export-original ready:true"))
+        XCTAssertTrue(observe(app, "fixture.export-original", "logs:1 exports:0"))
+        app.buttons["Capture on iPhone"].tap()
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(observe(app, "fixture.export-original", "logs:1 exports:0"))
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "local:true"))
+        evidence(app, "371-local-capture-during-held-gateway-read")
+        close.tap()
+        app.buttons["fixture.inspect-export-artifacts"].tap()
+        app.buttons["Capture on iPhone"].tap()
+        XCTAssertTrue(app.buttons["Close"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["Close"].tap()
+        app.buttons["fixture.inspect-export-artifacts"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "files:0 local:false"))
+    }
+
+    @MainActor
     func testOfflineExportSharesOnceAndCancelDiscardsArtifact() {
         assertNativeShareAndCancel("offline", expectsRemoteFailure: false)
     }
@@ -118,7 +203,9 @@ final class TronDiagnosticsExportUITests: XCTestCase {
         app.launch()
         if scenario != "offline" {
             XCTAssertTrue(observe(app, "fixture.export-connection", "selected:export-original ready:true"))
-            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "synthetic-original-evidence")).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+            if scenario != "logs-held" {
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "synthetic-original-evidence")).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+            }
         }
         XCTAssertTrue(app.buttons["Export Diagnostics"].waitForExistence(timeout: 15), app.debugDescription)
         return app

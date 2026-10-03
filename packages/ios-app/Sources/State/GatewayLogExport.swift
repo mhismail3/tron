@@ -15,13 +15,14 @@ enum GatewayLogExport {
 
     static func jsonLines(
         records: [GatewayProfileLogRecord], metadata: GatewayLogCaptureMetadata,
-        appRecords: [AppLogRecord]
+        appRecords: [AppLogRecord], captureKind: String? = nil
     ) -> String {
         // The Logs surface hands `records` newest-first. Re-derive that order so
         // every bound below keeps the newest evidence whatever order a caller
         // supplies.
         let newestFirst = records.sorted { gatewayLogRecordIsNewer($0, than: $1) }
         let loadedComposition = Array(newestFirst.prefix(maximumExportLines))
+        let truncatedInputRecords = max(0, newestFirst.count - loadedComposition.count)
         // Retained phone diagnostics are keyed `<profile>:ios-client`; the chat
         // interaction trace is keyed `ios-client:chat-trace`. Both are phone
         // records.
@@ -72,7 +73,10 @@ enum GatewayLogExport {
                 "representedFrom=\(metadata.representedFrom ?? "unknown")",
                 "representedThrough=\(metadata.representedThrough ?? "unknown")",
                 "appBuild=\(IOSClientDiagnosticBuffer.redactedMessage(metadata.appBuildIdentity))",
-                "appSourceRevision=\(safeToken(metadata.appSourceRevision) ?? "unknown")",
+                "appSourceRevision=\(safeToken(metadata.appSourceRevision) ?? "unknown")"
+            ] + (captureKind.map { kind in
+                ["captureKind=\(kind)", "source=local-only", "recordLimit=\(maximumExportLines)", "loadedRecords=\(loadedComposition.count)", "truncatedInputRecords=\(truncatedInputRecords)"]
+            } ?? []) + [
                 "os=\(ProcessInfo.processInfo.operatingSystemVersionString)"
             ] + metadataLines).joined(separator: " "),
             process: "ios", requestID: nil, durationMs: nil, outcome: nil, code: nil,
@@ -96,9 +100,12 @@ enum GatewayLogExport {
             guard let data = try? encoder.encode(record) else { return nil }
             return (record, String(decoding: data, as: UTF8.self), data.count + 1)
         }
-        let header = encoded(appStarted)
+        var header = encoded(appStarted)
         let trace = chatTrace.map(gatewayRecord).compactMap(encoded)
-        var byteBudget = maximumUploadBytes - (header?.bytes ?? 0) - trace.reduce(0) { $0 + $1.bytes }
+        // Local-capture window/count fields are added after selecting rows; reserve
+        // their bounded header space now so they cannot evict rows unexpectedly.
+        let captureSummaryReserve = captureKind == nil ? 0 : 256
+        var byteBudget = maximumUploadBytes - (header?.bytes ?? 0) - captureSummaryReserve - trace.reduce(0) { $0 + $1.bytes }
         var lineBudget = maximumExportLines - (header == nil ? 0 : 1) - trace.count
         // The newest remaining records win the leftover budget. `AppLog` is
         // oldest-first, so it reverses into a newest-first candidate list; the
@@ -117,13 +124,30 @@ enum GatewayLogExport {
             lineBudget -= 1
             retained.append(value)
         }
+        let selectedRows = (trace + retained).sorted {
+            GatewayTimestamp.isNewer($1.record.timestamp, than: $0.record.timestamp)
+        }
+        if captureKind != nil {
+            let timestamps = selectedRows.compactMap { GatewayTimestamp.parse($0.record.timestamp) }.sorted()
+            let summary = AppLogRecord(
+                timestamp: appStarted.timestamp, level: appStarted.level,
+                event: appStarted.event, source: appStarted.source,
+                message: appStarted.message
+                    + " selectedRecords=\(selectedRows.count) droppedRecords=\(truncatedInputRecords + max(0, candidates.count - retained.count))"
+                    + " exportedWindowFrom=\(timestamps.first.map(GatewayTimestamp.preciseString(from:)) ?? "none")"
+                    + " exportedWindowThrough=\(timestamps.last.map(GatewayTimestamp.preciseString(from:)) ?? "none")",
+                process: "ios", requestID: appStarted.requestID,
+                durationMs: appStarted.durationMs, outcome: appStarted.outcome,
+                code: appStarted.code, profileID: appStarted.profileID,
+                connectionID: appStarted.connectionID, lifecycleGeneration: appStarted.lifecycleGeneration
+            )
+            header = encoded(summary)
+        }
         // `isNewer` is a total order, so its inverse lists the retained evidence
         // oldest to newest behind the header.
         var lines: [String] = []
         if let header { lines.append(header.text) }
-        lines.append(contentsOf: (trace + retained).sorted {
-            GatewayTimestamp.isNewer($1.record.timestamp, than: $0.record.timestamp)
-        }.map { $0.text })
+        lines.append(contentsOf: selectedRows.map(\.text))
         return lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
     }
 
