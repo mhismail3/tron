@@ -77,11 +77,17 @@ final class TronDiagnosticsExportUITests: XCTestCase {
         let close = app.buttons["Close"].firstMatch
         XCTAssertTrue(close.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(observe(app, "fixture.export-artifacts", "local:true"))
-        XCTAssertTrue(observe(app, "fixture.export-original", "exports:1"))
-        XCTAssertTrue(observe(app, "fixture.export-artifacts", "fallback-settled files:1"))
-        XCTAssertTrue(close.exists, "The local share remains the current presentation after the older export settles")
-        evidence(app, "371-stale-remote-fallback-cannot-replace-local-share")
+        evidence(app, "371-stale-remote-fallback-before-local-share-dismissal")
         close.tap()
+        let remoteExport = app.buttons["Export Diagnostics"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: remoteExport)], timeout: 5), .completed)
+        XCTAssertFalse(remoteExport.isEnabled, "Dismissing local share must not release the older remote export's busy admission")
+        XCTAssertTrue(observe(app, "fixture.export-original", "exports:0"))
+        app.buttons["fixture.release-export-preparation"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:0 released:1"))
+        XCTAssertTrue(observe(app, "fixture.export-original", "exports:1 commands:1 repeats:0"))
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "fallback-settled files:0"))
+        XCTAssertFalse(app.buttons["Close"].exists, "The dismissed local share cannot be resurrected by the older fallback")
         app.buttons["fixture.inspect-export-artifacts"].tap()
         XCTAssertTrue(observe(app, "fixture.export-artifacts", "files:0"))
     }

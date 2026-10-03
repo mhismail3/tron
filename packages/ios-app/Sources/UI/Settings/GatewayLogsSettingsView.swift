@@ -157,7 +157,6 @@ struct GatewayLogsSettingsView: View {
             loadCoordinator.cancel()
             loading = false
             exportGeneration &+= 1
-            exportInFlight = false
             localCaptureGeneration &+= 1
             localCaptureInFlight = false
         }
@@ -166,7 +165,6 @@ struct GatewayLogsSettingsView: View {
             loadCoordinator.cancel()
             loading = false
             exportGeneration &+= 1
-            exportInFlight = false
             localCaptureGeneration &+= 1
             localCaptureInFlight = false
         }
@@ -298,7 +296,9 @@ struct GatewayLogsSettingsView: View {
         let destination = model.knowledgeDestinationIdentity
         exportInFlight = true
         Task { @MainActor in
-            defer { if generation == exportGeneration { exportInFlight = false } }
+            // The generation fences publication, not the accepted export's busy
+            // ownership. Presentation retirement cannot admit a second write.
+            defer { exportInFlight = false }
             do {
                 let appRecords = await model.appLog.snapshot()
                 #if HOSTED_TEST

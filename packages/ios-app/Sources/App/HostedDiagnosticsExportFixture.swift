@@ -105,12 +105,6 @@ struct HostedDiagnosticsExportFixture: View {
             let actualThrough = dates.last.map(GatewayTimestamp.preciseString(from:)) ?? "none"
             let windowMatches = fields["exportedWindowFrom"] == actualFrom && fields["exportedWindowThrough"] == actualThrough
             artifactEvidence = "local:\(text.contains("captureKind=iphone-local") && text.contains("source=local-only")) selected:\(fields["selectedRecords"] ?? "unknown") dropped:\(fields["droppedRecords"] ?? "unknown") rows:\(rows.count) windowMatches:\(windowMatches) bytes:\(text.utf8.count)"
-            if scenario == "held-failure" {
-                Task {
-                    try? await Task.sleep(for: .milliseconds(500))
-                    await gate.release()
-                }
-            }
         })
         .tronPresentation().preferredColorScheme(.dark)
         .task {
