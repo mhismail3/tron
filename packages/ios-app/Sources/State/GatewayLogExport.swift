@@ -15,13 +15,14 @@ enum GatewayLogExport {
 
     static func jsonLines(
         records: [GatewayProfileLogRecord], metadata: GatewayLogCaptureMetadata,
-        appRecords: [AppLogRecord]
+        appRecords: [AppLogRecord], captureKind: String? = nil
     ) -> String {
         // The Logs surface hands `records` newest-first. Re-derive that order so
         // every bound below keeps the newest evidence whatever order a caller
         // supplies.
         let newestFirst = records.sorted { gatewayLogRecordIsNewer($0, than: $1) }
         let loadedComposition = Array(newestFirst.prefix(maximumExportLines))
+        let truncatedInputRecords = max(0, newestFirst.count - loadedComposition.count)
         // Retained phone diagnostics are keyed `<profile>:ios-client`; the chat
         // interaction trace is keyed `ios-client:chat-trace`. Both are phone
         // records.
@@ -72,7 +73,10 @@ enum GatewayLogExport {
                 "representedFrom=\(metadata.representedFrom ?? "unknown")",
                 "representedThrough=\(metadata.representedThrough ?? "unknown")",
                 "appBuild=\(IOSClientDiagnosticBuffer.redactedMessage(metadata.appBuildIdentity))",
-                "appSourceRevision=\(safeToken(metadata.appSourceRevision) ?? "unknown")",
+                "appSourceRevision=\(safeToken(metadata.appSourceRevision) ?? "unknown")"
+            ] + (captureKind.map { kind in
+                ["captureKind=\(kind)", "source=local-only", "recordLimit=\(maximumExportLines)", "loadedRecords=\(loadedComposition.count)", "truncatedInputRecords=\(truncatedInputRecords)"]
+            } ?? []) + [
                 "os=\(ProcessInfo.processInfo.operatingSystemVersionString)"
             ] + metadataLines).joined(separator: " "),
             process: "ios", requestID: nil, durationMs: nil, outcome: nil, code: nil,

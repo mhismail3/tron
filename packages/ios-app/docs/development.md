@@ -717,7 +717,12 @@ A connected original Gateway advertising `diagnostic-export.v1` receives the bou
 it in its device-export store; Tron copies the returned path and
 shows confirmation. If disconnected or upload fails, the same action opens the
 native share sheet with a bounded local JSONL bundle; upload failures are
-recorded as warning events. The first JSON record carries capture time, Gateway
+recorded as warning events. **Capture on iPhone** always writes and shares a
+fresh local-only snapshot without a Gateway request, including while connected;
+its metadata labels that source, capture time, app build, represented window,
+and 1,000-record export bound. The existing byte-bound truncation marker is
+retained. Neither action implies that the bounded evidence is complete history
+or freshly read Mac logs. The first JSON record carries capture time, Gateway
 runtime identities, per-source statuses, and the represented log window. Attachment
 uploads add `http.upload.requested` / `http.upload.terminal` records with one
 opaque UUID also sent in the optional `X-Tron-Request-ID` header. They record

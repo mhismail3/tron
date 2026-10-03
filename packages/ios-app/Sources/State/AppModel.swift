@@ -2873,6 +2873,10 @@ final class AppModel {
         return .share(try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-diagnostics.jsonl"))
     }
 
+    func writeLocalDiagnosticArtifact(_ text: String) async throws -> URL {
+        try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-iphone-diagnostics.jsonl")
+    }
+
     private func exportLocalDiagnosticArtifact(_ text: String, suggestedName: String) async throws -> URL {
         try await exportArtifacts.writeText(text, suggestedName: suggestedName)
     }

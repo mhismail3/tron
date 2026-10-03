@@ -68,6 +68,44 @@ final class TronDiagnosticsExportUITests: XCTestCase {
     }
 
     @MainActor
+    func testCaptureIgnoresVisibleFilterAndUnrelatedExportPreparation() {
+        let app = launch("held")
+        defer { app.terminate() }
+        app.buttons["Export Diagnostics"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:1 released:0"))
+        app.buttons["Error"].tap()
+        XCTAssertTrue(app.buttons["Capture on iPhone"].isEnabled)
+        app.buttons["Capture on iPhone"].tap()
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "local:true"))
+        XCTAssertTrue(observe(app, "fixture.export-original", "exports:0"))
+        evidence(app, "371-local-capture-independent-of-remote-export")
+        close.tap()
+    }
+
+    @MainActor
+    func testCaptureOnIPhoneDoesNotWaitForReadyGatewayLogRead() {
+        let app = launch("logs-held")
+        defer { app.terminate() }
+        XCTAssertTrue(observe(app, "fixture.export-connection", "selected:export-original ready:true"))
+        XCTAssertTrue(observe(app, "fixture.export-original", "logs:1 exports:0"))
+        app.buttons["Capture on iPhone"].tap()
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(observe(app, "fixture.export-original", "logs:1 exports:0"))
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "local:true"))
+        evidence(app, "371-local-capture-during-held-gateway-read")
+        close.tap()
+        app.buttons["fixture.inspect-export-artifacts"].tap()
+        app.buttons["Capture on iPhone"].tap()
+        XCTAssertTrue(app.buttons["Close"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        app.buttons["Close"].tap()
+        app.buttons["fixture.inspect-export-artifacts"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "files:0 local:false"))
+    }
+
+    @MainActor
     func testOfflineExportSharesOnceAndCancelDiscardsArtifact() {
         assertNativeShareAndCancel("offline", expectsRemoteFailure: false)
     }
@@ -118,7 +156,9 @@ final class TronDiagnosticsExportUITests: XCTestCase {
         app.launch()
         if scenario != "offline" {
             XCTAssertTrue(observe(app, "fixture.export-connection", "selected:export-original ready:true"))
-            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "synthetic-original-evidence")).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+            if scenario != "logs-held" {
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "synthetic-original-evidence")).firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+            }
         }
         XCTAssertTrue(app.buttons["Export Diagnostics"].waitForExistence(timeout: 15), app.debugDescription)
         return app

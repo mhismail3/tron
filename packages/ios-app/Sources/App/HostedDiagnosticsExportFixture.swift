@@ -4,6 +4,7 @@ import SwiftUI
 
 extension EnvironmentValues {
     @Entry var hostedDiagnosticsPreparation: (@MainActor @Sendable () async -> Void)? = nil
+    @Entry var hostedDiagnosticsCapture: (@MainActor @Sendable (URL) async -> Void)? = nil
 }
 
 /// Real Logs, preparation, export and native share consumers. Only synthetic
@@ -27,7 +28,7 @@ struct HostedDiagnosticsExportFixture: View {
 
     init() {
         scenario = ProcessInfo.processInfo.arguments.drop(while: { $0 != "-diagnostics-export-scenario" }).dropFirst().first ?? "held"
-        let first = DiagnosticsExportFixtureGateway(name: "original", fails: scenario == "failure")
+        let first = DiagnosticsExportFixtureGateway(name: "original", fails: scenario == "failure", holdsLogs: scenario == "logs-held")
         let second = DiagnosticsExportFixtureGateway(name: "replacement", fails: false)
         originalGateway = first; replacementGateway = second
         gate = DiagnosticsExportPreparationGate(held: scenario == "held")
@@ -88,6 +89,10 @@ struct HostedDiagnosticsExportFixture: View {
         }
         .environment(model)
         .environment(\.hostedDiagnosticsPreparation, { await gate.prepare() })
+        .environment(\.hostedDiagnosticsCapture, { url in
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            artifactEvidence = "local:\(text.contains("captureKind=iphone-local") && text.contains("source=local-only")) bytes:\(text.utf8.count)"
+        })
         .tronPresentation().preferredColorScheme(.dark)
         .task {
             await model.appLog.recordCausal(name: "fixture.local.record", details: "synthetic-local-evidence")
@@ -111,7 +116,8 @@ struct HostedDiagnosticsExportFixture: View {
         let directory = root.appending(path: "artifacts")
         let files = (FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? [])
             .filter { $0.pathExtension == "jsonl" }
-        let local = files.contains { (try? String(contentsOf: $0, encoding: .utf8).contains("fixture.local.record")) == true }
+        let captures = files.compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+        let local = captures.contains { $0.contains("captureKind=iphone-local") && $0.contains("source=local-only") }
         Task {
             let warnings = await model.appLog.snapshot().filter { $0.event == "diagnostics.upload-failed" && $0.level == "warning" }.count
             artifactEvidence = "files:\(files.count) local:\(local) warnings:\(warnings)"
@@ -141,19 +147,25 @@ private actor DiagnosticsExportPreparationGate {
 private actor DiagnosticsExportFixtureGateway {
     private let name: String
     private let fails: Bool
+    private let holdsLogs: Bool
+    private var logs = 0
+    private var logWaiter: CheckedContinuation<Void, Never>?
     private var exports = 0, repeats = 0
     private var commands: Set<String> = []
     private var originalEvidence = false
     private var streams: [AsyncStream<String>.Continuation] = []
-    init(name: String, fails: Bool) { self.name = name; self.fails = fails }
+    init(name: String, fails: Bool, holdsLogs: Bool = false) { self.name = name; self.fails = fails; self.holdsLogs = holdsLogs }
     nonisolated func updates() -> AsyncStream<String> { AsyncStream { c in Task { await self.add(c) } } }
     private func add(_ c: AsyncStream<String>.Continuation) { streams.append(c); publish() }
     private func publish() {
-        streams.forEach { $0.yield("exports:\(exports) commands:\(commands.count) repeats:\(repeats) originalEvidence:\(originalEvidence)") }
+        streams.forEach { $0.yield("logs:\(logs) exports:\(exports) commands:\(commands.count) repeats:\(repeats) originalEvidence:\(originalEvidence)") }
     }
-    func handle(_ method: String, params: [String: JSONValue]) -> (result: JSONValue?, error: JSONValue?) {
+    func handle(_ method: String, params: [String: JSONValue]) async -> (result: JSONValue?, error: JSONValue?) {
         switch method {
         case "system.logs":
+            logs += 1
+            publish()
+            if holdsLogs { await withCheckedContinuation { logWaiter = $0 } }
             return (.object(["records": .array([.object(["timestamp": .string("2026-10-02T18:00:00Z"), "level": .string("info"), "event": .string("fixture.\(name).record"), "message": .string("synthetic-\(name)-evidence")])])]), nil)
         case "system.logs.export":
             exports += 1

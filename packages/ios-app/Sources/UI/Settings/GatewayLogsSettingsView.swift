@@ -29,6 +29,7 @@ struct GatewayLogsSettingsView: View {
     @Environment(\.scenePhase) private var scenePhase
     #if HOSTED_TEST
     @Environment(\.hostedDiagnosticsPreparation) private var hostedDiagnosticsPreparation
+    @Environment(\.hostedDiagnosticsCapture) private var hostedDiagnosticsCapture
     #endif
     @State private var recordIndex = GatewayLogRecordIndex()
     @State private var selectedLog: GatewayProfileLogRecord?
@@ -39,6 +40,8 @@ struct GatewayLogsSettingsView: View {
     @State private var copySucceeded = false
     @State private var exportInFlight = false
     @State private var exportGeneration = 0
+    @State private var localCaptureInFlight = false
+    @State private var localCaptureGeneration = 0
     @State private var shareURL: DiagnosticShareFile?
     @State private var exportArtifactURL: URL?
     @State private var captureMetadata = GatewayLogCaptureMetadata.empty
@@ -114,6 +117,17 @@ struct GatewayLogsSettingsView: View {
                 .disabled(visibleItems.isEmpty)
                 .accessibilityLabel("Copy visible logs")
 
+                Button { captureOnIPhone() } label: {
+                    Group {
+                        if localCaptureInFlight { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "iphone.and.arrow.forward") }
+                    }
+                    .font(TronTypography.buttonSM)
+                    .tronSettingsAccent()
+                }
+                .disabled(localCaptureInFlight || shareURL != nil)
+                .accessibilityLabel("Capture on iPhone")
+
                 Button { exportDiagnostics() } label: {
                     Group {
                         if exportInFlight { ProgressView().controlSize(.small) }
@@ -140,6 +154,8 @@ struct GatewayLogsSettingsView: View {
             loading = false
             exportGeneration &+= 1
             exportInFlight = false
+            localCaptureGeneration &+= 1
+            localCaptureInFlight = false
         }
         .onDisappear {
             loadGeneration &+= 1
@@ -147,6 +163,8 @@ struct GatewayLogsSettingsView: View {
             loading = false
             exportGeneration &+= 1
             exportInFlight = false
+            localCaptureGeneration &+= 1
+            localCaptureInFlight = false
         }
         .task(id: PresentationActivityTaskID(
             source: automaticLoadID,
@@ -210,6 +228,54 @@ struct GatewayLogsSettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
+    }
+
+    private func captureOnIPhone() {
+        guard !localCaptureInFlight, shareURL == nil,
+              presentationActivity.allowsPresentationPublication else { return }
+        localCaptureGeneration &+= 1
+        let generation = localCaptureGeneration
+        let activity = presentationActivity
+        localCaptureInFlight = true
+        Task { @MainActor in
+            defer {
+                if generation == localCaptureGeneration { localCaptureInFlight = false }
+            }
+            let loaded = await model.loadGatewayLogsResult(limit: 1_000, includeRemote: false)
+            guard generation == localCaptureGeneration,
+                  presentationActivity == activity,
+                  activity.allowsPresentationPublication,
+                  !Task.isCancelled else { return }
+            let appRecords = await model.appLog.snapshot()
+            guard generation == localCaptureGeneration,
+                  presentationActivity == activity,
+                  activity.allowsPresentationPublication,
+                  !Task.isCancelled else { return }
+            let text = GatewayLogExport.jsonLines(
+                records: loaded.records, metadata: loaded.metadata,
+                appRecords: appRecords, captureKind: "iphone-local"
+            )
+            do {
+                let url = try await model.writeLocalDiagnosticArtifact(text)
+                #if HOSTED_TEST
+                await hostedDiagnosticsCapture?(url)
+                #endif
+                guard generation == localCaptureGeneration,
+                      presentationActivity == activity,
+                      activity.allowsPresentationPublication,
+                      !Task.isCancelled else {
+                    await model.discardExportArtifact(url)
+                    return
+                }
+                exportArtifactURL = url
+                shareURL = DiagnosticShareFile(url: url)
+            } catch {
+                guard generation == localCaptureGeneration,
+                      presentationActivity == activity,
+                      activity.allowsPresentationPublication else { return }
+                model.postNotice("Local diagnostics could not be captured. Try again.", role: .error, lifetime: .standard, priority: .normal)
+            }
+        }
     }
 
     private func exportDiagnostics() {
