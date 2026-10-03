@@ -180,6 +180,144 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
+    func testXSetupExplicitCommitSubmitsSamePaidBudgetOnce() {
+        continueAfterFailure = false
+        let app = launch(scenario: "parent-oauth-policy")
+        defer { app.terminate() }
+        openXSetupThroughDashboardSettings(app)
+        enterXClientAndCallback(app)
+        let budget = enableAndEditXBudget(app, digits: "7250")
+        // Focus another text field before submitting; this is the explicit-commit control.
+        app.textFields.element(boundBy: 1).tap()
+        XCTAssertEqual(budget.value as? String, "7250")
+        app.buttons["Authorize X"].tap()
+
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "policy:enabled=true paid=true budget=7250 recurring=false"), oauthCountersLabel(app))
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), oauthCountersLabel(app))
+    }
+
+    @MainActor
+    func testXSetupEmptyStagedBudgetBlocksBeginAndRetainsInput() {
+        continueAfterFailure = false
+        let app = launch(scenario: "parent-oauth-policy")
+        defer { app.terminate() }
+        openXSetupThroughDashboardSettings(app)
+        enterXClientAndCallback(app)
+        let budget = enableAndEditXBudget(app, digits: "")
+        XCTAssertEqual(budget.value as? String, "Paid budget", "The label is the field's empty-string placeholder.")
+        app.buttons["Authorize X"].tap()
+
+        XCTAssertTrue(app.staticTexts["Enter a whole number without separators."].waitForExistence(timeout: 5), oauthCountersLabel(app))
+        XCTAssertTrue(app.textFields["Paid budget"].exists)
+        XCTAssertEqual(budget.value as? String, "Paid budget", "Rejected input remains empty for correction.")
+        XCTAssertTrue(oauthCounters(app, contain: "begins:0 completes:0"), oauthCountersLabel(app))
+    }
+
+    @MainActor
+    func testConnectionDetailsSaveUsesStagedBudgetAsOnlyChange() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        app.buttons["Details for X"].tap()
+        let budget = app.textFields["Paid budget"]
+        XCTAssertTrue(budget.waitForExistence(timeout: 5))
+        replaceNumeric(budget, with: "7500")
+        XCTAssertEqual(budget.value as? String, "7500")
+        app.buttons["Save"].tap()
+
+        XCTAssertTrue(oauthCounters(app, contain: "policyUpdates:1 policyBudget=7500"), oauthCountersLabel(app))
+        XCTAssertFalse(app.buttons["Save"].exists)
+    }
+
+    @MainActor
+    func testConnectionDetailsSaveMergesStagedBudgetWithPolicyToggle() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Details for X"].waitForExistence(timeout: 10))
+        app.buttons["Details for X"].tap()
+        app.switches["Enabled"].tap()
+        let budget = app.textFields["Paid budget"]
+        XCTAssertTrue(budget.waitForExistence(timeout: 5))
+        replaceNumeric(budget, with: "6400")
+        app.buttons["Save"].tap()
+
+        XCTAssertTrue(oauthCounters(app, contain: "policyUpdates:1 policyBudget=6400 policyEnabled=false"), oauthCountersLabel(app))
+    }
+
+    @MainActor
+    func testConnectionDetailsNoOpSaveDoesNotMutate() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        app.buttons["Details for X"].tap()
+        XCTAssertTrue(app.textFields["Paid budget"].waitForExistence(timeout: 5))
+        app.buttons["Save"].tap()
+        XCTAssertTrue(oauthCounters(app, contain: "policyUpdates:0"), oauthCountersLabel(app))
+        XCTAssertFalse(app.buttons["Save"].exists)
+    }
+
+    @MainActor
+    func testNonXSetupUsesStagedPolicyForAcceptedCompletion() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        app.buttons.matching(identifier: "Details for Raindrop").firstMatch.tap()
+        app.buttons["Add another account for Raindrop"].tap()
+        XCTAssertTrue(app.staticTexts["Set up Raindrop"].waitForExistence(timeout: 5))
+        let account = app.textFields.element(boundBy: 1)
+        account.tap(); account.typeText("fixture-account")
+        let credential = app.textFields.element(boundBy: 3)
+        credential.tap(); credential.typeText("fixture-credential-ref")
+        let paidAccess = app.switches["Paid access approved"]
+        paidAccess.tap()
+        app.swipeUp()
+        let budget = app.textFields["Paid budget"]
+        XCTAssertTrue(budget.waitForExistence(timeout: 5))
+        replaceNumeric(budget, with: "6400")
+        XCTAssertEqual(budget.value as? String, "6400")
+        app.buttons["Save"].tap()
+
+        XCTAssertTrue(oauthCounters(app, contain: "setupBegins:1 setupCompletes:1 setupBudget=6400"), oauthCountersLabel(app))
+    }
+
+    @MainActor
+    private func enterXClientAndCallback(_ app: XCUIApplication) {
+        let client = app.textFields.element(boundBy: 0)
+        client.tap(); client.typeText("fixture-public-client")
+        let callback = app.textFields.element(boundBy: 1)
+        callback.tap(); callback.typeText("https://example.test/callback")
+    }
+
+    @MainActor
+    private func enableAndEditXBudget(_ app: XCUIApplication, digits: String) -> XCUIElement {
+        let paidAccess = app.switches["Paid access approved"]
+        XCTAssertTrue(paidAccess.waitForExistence(timeout: 5), oauthCountersLabel(app))
+        paidAccess.tap()
+        app.swipeUp()
+        let budget = app.textFields["Paid budget"]
+        XCTAssertTrue(budget.waitForExistence(timeout: 5), oauthCountersLabel(app))
+        replaceNumeric(budget, with: digits)
+        return budget
+    }
+
+    @MainActor
+    private func replaceNumeric(_ field: XCUIElement, with text: String) {
+        field.tap()
+        field.press(forDuration: 0.8)
+        let selectAll = XCUIApplication().menuItems["Select All"]
+        if selectAll.waitForExistence(timeout: 1) {
+            selectAll.tap()
+        } else {
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        }
+        let deleteCount = text.isEmpty ? 1 : 80
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: deleteCount))
+        if !text.isEmpty { field.typeText(text) }
+    }
+
+    @MainActor
     func testAcceptedXBeginResolvesOriginalReceiptAfterBackground() {
         continueAfterFailure = false
         let app = launch(scenario: "oauth-delayed")

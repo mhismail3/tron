@@ -1,6 +1,16 @@
 import SwiftUI
 import TronMobileCore
 
+enum IntegrationPolicySubmission {
+    static func candidate(policy: IntegrationPolicy, paidBudgetDraft: String?) -> IntegrationPolicy? {
+        guard let paidBudgetDraft else { return policy }
+        guard let paidBudget = TronNumberSettingRow.parse(paidBudgetDraft) else { return nil }
+        var candidate = policy
+        candidate.paidBudgetCents = paidBudget
+        return candidate
+    }
+}
+
 /// Unified presentation over the Gateway connection owner. This view never
 /// stores an authority or credential: every instance action carries its opaque
 /// connection ID to the owner and every read is fenced to the current Gateway
@@ -203,6 +213,7 @@ private struct IntegrationInstanceView: View {
     let addAccount: () -> Void
     let onChanged: () -> Void
     @State private var policy: IntegrationPolicy
+    @State private var paidBudgetDraft: String?
     @State private var mutation: KnowledgeMutation?
     @State private var error: String?
 
@@ -247,7 +258,7 @@ private struct IntegrationInstanceView: View {
                 TronToggleRow(icon: "creditcard", title: "Paid access approved", isOn: $policy.paidAccessApproved)
                 if policy.paidAccessApproved {
                     TronSettingsDivider(accent: .tronPurple)
-                    TronNumberSettingRow(icon: "creditcard", title: "Paid budget", detail: "Cents; a positive budget is required", value: $policy.paidBudgetCents, accent: .tronPurple)
+                    TronNumberSettingRow(icon: "creditcard", title: "Paid budget", detail: "Cents; a positive budget is required", value: $policy.paidBudgetCents, accent: .tronPurple, stagedText: $paidBudgetDraft)
                 }
                 TronSettingsDivider(accent: .tronPurple)
                 TronToggleRow(icon: "repeat", title: "Recurring runs approved", isOn: $policy.recurringApproved)
@@ -314,10 +325,13 @@ private struct IntegrationInstanceView: View {
 
     private func save() {
         guard mutation == nil, activity.allowsPresentationPublication else { return }
-        guard policy != instance.policy else { dismiss(); return }
+        guard let submitted = IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: paidBudgetDraft) else {
+            error = TronNumberSettingRow.invalidInputMessage
+            return
+        }
+        guard submitted != instance.policy else { dismiss(); return }
         error = nil
         let identity = model.knowledgeDestinationIdentity
-        let submitted = policy
         mutation = KnowledgeMutation(identity: identity, task: Task { @MainActor in
             guard model.knowledgeDestinationIdentity == identity else { throw CancellationError() }
             _ = try await model.integrations.updatePolicy(instanceID: instance.id, expectedSetupRevision: instance.setupRevision, policy: submitted)
@@ -358,6 +372,7 @@ private struct IntegrationSetupView: View {
     @State private var xAuthorizationURL: URL?
     @State private var xOAuthCompleted = false
     @State private var unresolvedOAuth: GatewayFailure?
+    @State private var paidBudgetDraft: String?
     #if HOSTED_TEST
     @State private var hostedPresentationID = UUID().uuidString
     #endif
@@ -453,7 +468,7 @@ private struct IntegrationSetupView: View {
             TronToggleRow(icon: "creditcard", title: "Paid access approved", isOn: $policy.paidAccessApproved)
             if policy.paidAccessApproved {
                 TronSettingsDivider(accent: .tronPurple)
-                TronNumberSettingRow(icon: "creditcard", title: "Paid budget", detail: "Cents; a positive budget is required", value: $policy.paidBudgetCents, accent: .tronPurple)
+                TronNumberSettingRow(icon: "creditcard", title: "Paid budget", detail: "Cents; a positive budget is required", value: $policy.paidBudgetCents, accent: .tronPurple, stagedText: $paidBudgetDraft)
             }
             TronSettingsDivider(accent: .tronPurple)
             TronToggleRow(icon: "repeat", title: "Recurring runs approved", isOn: $policy.recurringApproved)
@@ -501,9 +516,13 @@ private struct IntegrationSetupView: View {
                 })
             } else {
                 guard !instanceID.isEmpty, !xClientID.isEmpty, !xRedirectURI.isEmpty else { error = "Instance ID, public X client ID, and registered callback URL are required."; return }
+                guard let submittedPolicy = IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: paidBudgetDraft) else {
+                    error = TronNumberSettingRow.invalidInputMessage
+                    return
+                }
                 error = nil
                 let requestIdentity = model.knowledgeDestinationIdentity
-                let instanceID = instanceID, clientID = xClientID, redirectURI = xRedirectURI, policy = policy
+                let instanceID = instanceID, clientID = xClientID, redirectURI = xRedirectURI, policy = submittedPolicy
                 mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
                     guard model.knowledgeDestinationIdentity == requestIdentity,
                           model.knowledgePresentationIdentity.lifecycleGeneration != nil,
@@ -521,10 +540,14 @@ private struct IntegrationSetupView: View {
             return
         }
         guard !instanceID.isEmpty, !accountID.isEmpty, !credentialRef.isEmpty else { error = "Instance ID, account/server identity, and an opaque credential reference are required."; return }
+        guard let submittedPolicy = IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: paidBudgetDraft) else {
+            error = TronNumberSettingRow.invalidInputMessage
+            return
+        }
         error = nil
         let requestIdentity = model.knowledgeDestinationIdentity
         let instanceID = instanceID, accountID = accountID, scope = scope, credentialRef = credentialRef
-        let method = method, policy = policy
+        let method = method, policy = submittedPolicy
         mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
                 guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
                 let begun = try await model.integrations.beginSetup(instanceID: instanceID, definitionID: definition.id, method: method)

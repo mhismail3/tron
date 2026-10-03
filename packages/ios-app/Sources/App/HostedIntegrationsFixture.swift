@@ -29,7 +29,7 @@ struct HostedIntegrationsFixtureView: View {
     @State private var ready = false
     @State private var error: String?
     @State private var gateway: HostedIntegrationsGateway
-    @State private var oauthCounters = "begins:0 completes:0 queries:0 mismatches:0"
+    @State private var oauthCounters = "begins:0 completes:0 queries:0 mismatches:0 policyUpdates:0 policyBudget=1000 setupBegins:0 setupCompletes:0 setupBudget=0"
     @State private var mcpOriginalCounters = "add:0 token:0 retargets:0 released:0"
     @State private var mcpReplacementCounters = "add:0 token:0 retargets:0 released:0"
     @State private var hasReplacedMCPAuthority = false
@@ -103,11 +103,11 @@ struct HostedIntegrationsFixtureView: View {
                                 .accessibilityIdentifier("fixture.oauth-counters")
                         }
                     }
-                        .environment(model)
-                        .environment(\.hostedIntegrationPresentationTrace, presentationTrace)
-                        .tronPresentation()
-                        .tronSettingsLayout()
-                        .tronSettingsVisualTheme(accent: .tronCyan)
+                    .environment(model)
+                    .environment(\.hostedIntegrationPresentationTrace, presentationTrace)
+                    .tronPresentation()
+                    .tronSettingsLayout()
+                    .tronSettingsVisualTheme(accent: .tronCyan)
                 }
             } else if let error {
                 Text(error)
@@ -208,6 +208,14 @@ actor HostedIntegrationsGateway {
     private var lastCatalogRevision = 0
     private var lastPendingSetupCount = 0
     private var lastCatalogInstanceCount = 0
+    private var policyUpdates = 0
+    private var setupBegins = 0
+    private var setupCompletes = 0
+    private var lastPolicyBudget = 1_000
+    private var lastPolicyEnabled = true
+    private var lastSetupBudget = 0
+    private var setupInstanceID = ""
+    private var setupDefinitionID = ""
     private var oauthInstanceID = ""
     private let oauthOperationID = "fixture-oauth-operation"
     private var oauthBeginAccepted = false
@@ -221,7 +229,7 @@ actor HostedIntegrationsGateway {
     private var oauthReply: CheckedContinuation<Void, Never>?
     private var oauthReplyReleaseScheduled = false
     private func publishCounters() {
-        let value = "begins:\(oauthBegins) completes:\(oauthCompletes) queries:\(receiptQueries) mismatches:\(queryMismatches) catalog:lists=\(connectionsListCount) revision=\(lastCatalogRevision) pending=\(lastPendingSetupCount) instances=\(lastCatalogInstanceCount) client=\(oauthClientIDProvided) redirect=\(oauthRedirectURIProvided) policy:enabled=\(oauthPolicyEnabled) paid=\(oauthPaidAccessApproved) budget=\(oauthPaidBudgetCents) recurring=\(oauthRecurringApproved)"
+        let value = "begins:\(oauthBegins) completes:\(oauthCompletes) queries:\(receiptQueries) mismatches:\(queryMismatches) catalog:lists=\(connectionsListCount) revision=\(lastCatalogRevision) pending=\(lastPendingSetupCount) instances=\(lastCatalogInstanceCount) client=\(oauthClientIDProvided) redirect=\(oauthRedirectURIProvided) policy:enabled=\(oauthPolicyEnabled) paid=\(oauthPaidAccessApproved) budget=\(oauthPaidBudgetCents) recurring=\(oauthRecurringApproved) policyUpdates:\(policyUpdates) policyBudget=\(lastPolicyBudget) policyEnabled=\(lastPolicyEnabled) setupBegins:\(setupBegins) setupCompletes:\(setupCompletes) setupBudget=\(lastSetupBudget)"
         counterContinuations.forEach { $0.yield(value) }
     }
     func releaseOAuthReply() { oauthReply?.resume(); oauthReply = nil }
@@ -295,6 +303,34 @@ actor HostedIntegrationsGateway {
             }
             return (value, nil)
         }
+        if method == "connections.policy.update" {
+            policyUpdates += 1
+            let policy = params["policy"] ?? .object([:])
+            lastPolicyBudget = paidBudget(policy)
+            if case .object(let fields) = policy, case .bool(let enabled)? = fields["enabled"] { lastPolicyEnabled = enabled }
+            publishCounters()
+            var fields = instance(params["instanceId"]?.stringValue ?? "x-1", "knowledge.x", "knowledge-connector", "x-account", "ready", "@luna").objectValue ?? [:]
+            fields["policy"] = policy
+            fields["setupRevision"] = .number(2)
+            return (.object(fields), nil)
+        }
+        if method == "connections.setup.begin" {
+            setupBegins += 1
+            setupInstanceID = params["instanceId"]?.stringValue ?? "fixture-setup"
+            setupDefinitionID = params["definitionId"]?.stringValue ?? "knowledge.raindrop"
+            publishCounters()
+            return (.object(["operationId": .string("fixture-setup-operation"), "instanceId": .string(setupInstanceID),
+                "definitionId": .string(setupDefinitionID), "method": params["method"] ?? .string("token"), "status": .string("pending")]), nil)
+        }
+        if method == "connections.setup.complete" {
+            setupCompletes += 1
+            let policy = params["policy"] ?? .object([:])
+            lastSetupBudget = paidBudget(policy)
+            publishCounters()
+            var fields = instance(setupInstanceID, setupDefinitionID, "knowledge-connector", params["providerAccountId"]?.stringValue ?? "fixture-account", "ready", "Fixture account").objectValue ?? [:]
+            fields["policy"] = policy
+            return (.object(fields), nil)
+        }
         if method == "command.status", let command = params["commandId"]?.stringValue {
             receiptQueries += 1
             if commands[command] != params["method"]?.stringValue { queryMismatches += 1 }
@@ -354,6 +390,11 @@ actor HostedIntegrationsGateway {
             return (.object(["freeBalance": .number(0), "prepaidBalance": .number(4.2), "totalBalance": .number(4.2)]), nil)
         }
         return (nil, .object(["code": .string("unsupported"), "message": .string("Not used by this fixture"), "retryable": .bool(false)]))
+    }
+
+    private func paidBudget(_ policy: JSONValue) -> Int {
+        guard case .object(let values) = policy, case .number(let budget)? = values["paidBudgetCents"] else { return 0 }
+        return Int(budget)
     }
 
     private func snapshot() -> JSONValue {

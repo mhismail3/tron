@@ -1414,7 +1414,10 @@ cross a profile replacement. Errors retain Retry, and `outcome_unknown` cannot r
 Executable resource locations and proxy URLs are accepted on editor dismissal rather than persisting
 partial strings. Shared numeric fields stage plain integer text until focus/submit/dismissal, rejecting
 partial/overflowing strings; changing the input scope discards the old draft without saving into a
-same-valued successor. Input fences use synchronous configuration retirement, not delayed facade
+same-valued successor. Explicit connection setup and policy-save forms bind the row to their own optional
+raw-text draft and synchronously parse it into the submitted policy before dispatch or no-op comparison;
+empty or malformed drafts block the action without being cleared. Ordinary settings retain their row-local
+commit-on-focus behavior. Input fences use synchronous configuration retirement, not delayed facade
 profile notifications. Custom Models coalesces complete snapshots, validates before put, and never restarts
 the Gateway automatically; registry activation is a manual maintenance action. Incomplete identifiers
 and invalid advanced JSON retain the previous valid configuration. Reset/inheritance intents clear
