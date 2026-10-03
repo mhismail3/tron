@@ -11,6 +11,9 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    #if HOSTED_TEST
+    @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
+    #endif
     @State private var showsNotifications = false
     @State private var hasRefreshedNotificationBadge = false
 
@@ -165,6 +168,10 @@ struct SettingsView: View {
         }
         .tronPresentation()
         .tronSettingsLayout()
+        #if HOSTED_TEST
+        .onAppear { hostedTrace?.record("settings.root.appear") }
+        .onDisappear { hostedTrace?.record("settings.root.disappear") }
+        #endif
     }
 
     private func settingsLink<Destination: View>(

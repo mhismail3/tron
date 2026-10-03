@@ -29,6 +29,157 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     }
 
     @MainActor
+    func testXSetupAndAcceptedBeginSurviveBackgroundThroughRealSettingsParents() {
+        continueAfterFailure = false
+        let app = launch(scenario: "parent-oauth-reconnect")
+        defer { app.terminate() }
+        openXSetupThroughDashboardSettings(app)
+
+        let client = app.textFields.element(boundBy: 0)
+        client.tap(); client.typeText("fixture-public-client")
+        let callback = app.textFields.element(boundBy: 1)
+        callback.tap(); callback.typeText("https://example.test/callback")
+        let draftViewID = xSetupStateID(app)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 10), presentationTrace(app))
+        XCTAssertTrue(client.value as? String == "fixture-public-client")
+        XCTAssertTrue(callback.value as? String == "https://example.test/callback")
+        XCTAssertEqual(xSetupStateID(app), draftViewID, presentationTrace(app))
+
+        app.buttons["Authorize X"].tap()
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "client=true redirect=true"), presentationTrace(app))
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), presentationTrace(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), "Consent/code must not be auto-submitted")
+        let acceptedViewID = xSetupStateID(app)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(client.value as? String, "fixture-public-client")
+        XCTAssertEqual(xSetupStateID(app), acceptedViewID, presentationTrace(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(presentationTrace(app).contains("settings.root.appear"), presentationTrace(app))
+        keepScreenshot(app, name: "366-x-oauth-survives-real-settings-parent-background")
+    }
+
+    @MainActor
+    func testXSetupImmediateAuthorizeAndPendingCatalogReloadThroughRealSettingsParents() {
+        continueAfterFailure = false
+        let app = launch(scenario: "parent-oauth-pending-reconnect")
+        defer { app.terminate() }
+        openXSetupThroughDashboardSettings(app)
+
+        let client = app.textFields.element(boundBy: 0)
+        client.tap(); client.typeText("fixture-public-client")
+        let callback = app.textFields.element(boundBy: 1)
+        callback.tap(); callback.typeText("https://example.test/callback")
+        let setupViewID = xSetupStateID(app)
+        let destination = app.staticTexts["fixture.destination"].label
+
+        // This is the treatment: submit immediately while the callback field is focused.
+        app.buttons["Authorize X"].tap()
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "client=true redirect=true"), oauthCountersLabel(app))
+        XCTAssertTrue(app.staticTexts["Completing setup…"].waitForExistence(timeout: 5), presentationTrace(app))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+
+        XCTAssertTrue(oauthCounters(app, contain: "revision=2 pending=1 instances=3"), oauthCountersLabel(app))
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), presentationTrace(app))
+        XCTAssertEqual(xSetupStateID(app), setupViewID, presentationTrace(app))
+        XCTAssertEqual(app.staticTexts["fixture.destination"].label, destination)
+        XCTAssertTrue(client.value as? String == "fixture-public-client")
+        XCTAssertTrue(callback.value as? String == "https://example.test/callback")
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(presentationTrace(app).contains("settings.root.appear"), presentationTrace(app))
+    }
+
+    @MainActor
+    func testXSetupImmediateAuthorizeSubmitsCommittedPaidBudget() {
+        continueAfterFailure = false
+        let app = launch(scenario: "parent-oauth-policy")
+        defer { app.terminate() }
+        openXSetupThroughDashboardSettings(app)
+
+        let client = app.textFields.element(boundBy: 0)
+        client.tap(); client.typeText("fixture-public-client")
+        let callback = app.textFields.element(boundBy: 1)
+        callback.tap(); callback.typeText("https://example.test/callback")
+        let paidAccess = app.switches["Paid access approved"]
+        XCTAssertTrue(paidAccess.waitForExistence(timeout: 5), presentationTrace(app))
+        paidAccess.tap()
+        app.swipeUp()
+        let budget = app.textFields["Paid budget"]
+        XCTAssertTrue(budget.waitForExistence(timeout: 5), presentationTrace(app))
+        budget.tap(); budget.typeText("725")
+        XCTAssertEqual(budget.value as? String, "7250")
+        // The initial zero is retained by the field; the visible valid value is 7250.
+        // Focus loss and the accepted begin happen in the same native interaction.
+        app.buttons["Authorize X"].tap()
+
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "client=true redirect=true"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "policy:enabled=true paid=true budget=7250 recurring=false"), oauthCountersLabel(app))
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), presentationTrace(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+    }
+
+    @MainActor
+    func testXSetupRevokesOnlyAfterActualGatewayDestinationReplacement() {
+        continueAfterFailure = false
+        let app = launch(scenario: "parent-oauth-replace")
+        defer { app.terminate() }
+        openXSetupThroughDashboardSettings(app)
+        app.textFields.element(boundBy: 0).tap(); app.textFields.element(boundBy: 0).typeText("fixture-public-client")
+        app.textFields.element(boundBy: 1).tap(); app.textFields.element(boundBy: 1).typeText("https://example.test/callback")
+        app.buttons["Authorize X"].tap()
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), app.debugDescription)
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        let destination = app.staticTexts["fixture.destination"]
+        let replacement = NSPredicate(format: "label CONTAINS %@", "destination=replacement-integration-fixture:")
+        expectation(for: replacement, evaluatedWith: destination)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(app.staticTexts["Set up X"].exists, "A replacement Gateway must not inherit the old PKCE form")
+        let trace = presentationTrace(app)
+        XCTAssertTrue(trace.contains("integrations.destination old=integration-fixture:g0 new=integration-fixture:g1 setupOpen=true"), trace)
+        XCTAssertTrue(trace.contains("integrations.destination old=integration-fixture:g1 new=replacement-integration-fixture:g1 setupOpen=false"), trace)
+        XCTAssertTrue(trace.contains("xsetup.disappear dest=integration-fixture:g1"), trace)
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), app.debugDescription)
+        keepScreenshot(app, name: "366-x-form-revoked-on-original-gateway-replacement")
+    }
+
+    @MainActor
+    private func openXSetupThroughDashboardSettings(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["dashboard.menu"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["dashboard.menu"].tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["Settings"].tap()
+        let connectedServices = app.buttons["Connected Services"]
+        XCTAssertTrue(connectedServices.waitForExistence(timeout: 10), app.debugDescription)
+        connectedServices.tap()
+        XCTAssertTrue(app.buttons["Details for X"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Details for X"].tap()
+        app.buttons["Add another account for X"].tap()
+        XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    @MainActor
+    private func presentationTrace(_ app: XCUIApplication) -> String {
+        app.staticTexts["fixture.integration-presentation-trace"].label
+    }
+
+    @MainActor
+    private func xSetupStateID(_ app: XCUIApplication) -> String {
+        let events = presentationTrace(app).split(separator: "|").map(String.init)
+        return events.last(where: { $0.hasPrefix("xsetup.appear") })?
+            .components(separatedBy: " view=").last ?? ""
+    }
+
+    @MainActor
     func testAcceptedXBeginResolvesOriginalReceiptAfterBackground() {
         continueAfterFailure = false
         let app = launch(scenario: "oauth-delayed")
@@ -119,6 +270,11 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 5))
         app.textFields.element(boundBy: 0).tap(); app.textFields.element(boundBy: 0).typeText("fixture-public-client")
         app.textFields.element(boundBy: 1).tap(); app.textFields.element(boundBy: 1).typeText("https://example.test/callback")
+    }
+
+    @MainActor
+    private func oauthCountersLabel(_ app: XCUIApplication) -> String {
+        app.staticTexts["fixture.oauth-counters"].label
     }
 
     @MainActor

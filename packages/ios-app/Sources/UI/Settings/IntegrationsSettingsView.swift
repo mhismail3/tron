@@ -8,6 +8,9 @@ import TronMobileCore
 struct IntegrationsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
+    #if HOSTED_TEST
+    @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
+    #endif
     @State private var snapshot: IntegrationSnapshot?
     @State private var loadGeneration = 0
     @State private var isLoading = false
@@ -72,11 +75,17 @@ struct IntegrationsSettingsView: View {
             guard activity.allowsPresentationPublication else { return }
             load()
         }
-        .onChange(of: model.knowledgePresentationIdentity) { _, _ in
+        .onChange(of: model.knowledgePresentationIdentity) { oldIdentity, newIdentity in
+            #if HOSTED_TEST
+            hostedTrace?.record("integrations.transport old=\(presentationToken(oldIdentity)) new=\(presentationToken(newIdentity)) setupOpen=\(setupDefinition != nil)")
+            #endif
             loadGeneration &+= 1; isLoading = false
             credits.begin(clear: true); load()
         }
-        .onChange(of: model.knowledgeDestinationIdentity) { _, _ in
+        .onChange(of: model.knowledgeDestinationIdentity) { oldIdentity, newIdentity in
+            #if HOSTED_TEST
+            hostedTrace?.record("integrations.destination old=\(destinationToken(oldIdentity)) new=\(destinationToken(newIdentity)) setupOpen=\(setupDefinition != nil)")
+            #endif
             selectedInstance = nil; setupDefinition = nil; snapshot = nil
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
@@ -97,6 +106,10 @@ struct IntegrationsSettingsView: View {
                 ) { self.selectedInstance = nil; load() }.environment(model)
             }
         }
+        #if HOSTED_TEST
+        .onAppear { hostedTrace?.record("integrations.appear dest=\(destinationToken(model.knowledgeDestinationIdentity))") }
+        .onDisappear { hostedTrace?.record("integrations.disappear dest=\(destinationToken(model.knowledgeDestinationIdentity))") }
+        #endif
     }
 
     @ViewBuilder
@@ -169,6 +182,15 @@ struct IntegrationsSettingsView: View {
 
     private var emptySurfaceDetail: String { "No supported account-based services are advertised by this Gateway." }
 
+    #if HOSTED_TEST
+    private func destinationToken(_ identity: KnowledgeDestinationIdentity) -> String {
+        "\(identity.profileID ?? "none"):g\(identity.lifecycleGeneration)"
+    }
+
+    private func presentationToken(_ identity: KnowledgePresentationIdentity) -> String {
+        "\(identity.profileID ?? "none"):g\(identity.lifecycleGeneration.map(String.init) ?? "none"):c\(identity.connectionID.map(String.init) ?? "none")"
+    }
+    #endif
 }
 
 private struct IntegrationInstanceView: View {
@@ -317,6 +339,9 @@ private struct IntegrationSetupView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var activity
+    #if HOSTED_TEST
+    @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
+    #endif
     let definition: IntegrationDefinition
     let onFinished: () -> Void
     @State private var method: String
@@ -333,6 +358,9 @@ private struct IntegrationSetupView: View {
     @State private var xAuthorizationURL: URL?
     @State private var xOAuthCompleted = false
     @State private var unresolvedOAuth: GatewayFailure?
+    #if HOSTED_TEST
+    @State private var hostedPresentationID = UUID().uuidString
+    #endif
     @State private var policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
     @State private var mutation: KnowledgeMutation?
     @State private var error: String?
@@ -400,7 +428,17 @@ private struct IntegrationSetupView: View {
         }) {
             if !usesXOAuth || xOAuthCompleted { onFinished(); dismiss() }
         })
+        #if HOSTED_TEST
+        .onAppear { hostedTrace?.record("xsetup.appear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(hostedPresentationID)") }
+        .onDisappear { hostedTrace?.record("xsetup.disappear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(hostedPresentationID)") }
+        #endif
     }
+
+    #if HOSTED_TEST
+    private func destinationToken(_ identity: KnowledgeDestinationIdentity) -> String {
+        "\(identity.profileID ?? "none"):g\(identity.lifecycleGeneration)"
+    }
+    #endif
 
     private var usesXOAuth: Bool { definition.id == "knowledge.x" && method == "oauth" }
 
@@ -472,6 +510,9 @@ private struct IntegrationSetupView: View {
                           model.knowledgePresentationIdentity.connectionID != nil else { throw CancellationError() }
                     let started = try await model.integrations.beginXOAuth(instanceID: instanceID, clientID: clientID, redirectURI: redirectURI, policy: policy)
                     guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
+                    #if HOSTED_TEST
+                    hostedTrace?.record("xsetup.begin-accepted dest=\(destinationToken(requestIdentity)) view=\(hostedPresentationID)")
+                    #endif
                     xOAuthOperationID = started.operationId
                     xOAuthState = started.state
                     xAuthorizationURL = URL(string: started.authorizationUrl)
