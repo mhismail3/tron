@@ -177,7 +177,7 @@ struct TronNumberSettingRow: View {
 
     static let invalidInputMessage = "Enter a whole number without separators."
 
-    static func parse(_ text: String) -> Int? {
+    nonisolated static func parse(_ text: String) -> Int? {
         Int(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
