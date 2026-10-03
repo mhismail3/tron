@@ -201,6 +201,205 @@ struct GatewayClientTransportTests {
         await client.close()
     }
 
+    @Test("diagnostic export records only its own send boundary and bounded frame size")
+    func diagnosticExportSendBoundary() async throws {
+        let socket = ScriptedGatewaySocket()
+        let appLogURL = FileManager.default.temporaryDirectory.appending(path: "logs-export-app-log-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: appLogURL)
+            try? FileManager.default.removeItem(at: appLogURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: appLogURL)
+        let client = GatewayClient(
+            socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+            uuidSource: SequenceUUIDSource([
+                UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
+                UUID(uuidString: "00000000-0000-0000-0000-000000000012")!,
+                UUID(uuidString: "00000000-0000-0000-0000-000000000013")!,
+            ]).source,
+            appLog: appLog
+        )
+        await socket.enqueue(helloFrame())
+        _ = try await client.connect(profile: profile, token: "do-not-record-token")
+
+        let normal = Task { try await client.requestValue("system.info", EmptyParams()) }
+        try await socket.waitUntilSent(count: 2)
+        await socket.enqueue(responseFrame(id: "00000000-0000-0000-0000-000000000012", result: .object(["protocolVersion": .number(6)])))
+        _ = try await valueOfOwnedTask(normal)
+
+        let privatePayload = String(repeating: "synthetic-export-private", count: 8_192)
+        let exported = Task {
+            try await client.requestValue("system.logs.export", JSONValue.object([
+                "commandId": .string("synthetic-command-id"), "content": .string(privatePayload),
+            ]))
+        }
+        try await socket.waitUntilSent(count: 3)
+        let sent = try #require(await socket.sentFrames().last)
+        let object = try #require(try JSONSerialization.jsonObject(with: sent) as? [String: Any])
+        let requestID = try #require(object["id"] as? String)
+        var heldRecords: [AppLogRecord] = []
+        for _ in 0..<100 {
+            heldRecords = await appLog.snapshot().filter { $0.event.hasPrefix("logs.export.") }
+            if heldRecords.contains(where: { $0.event == "logs.export.requested" }) { break }
+            await Task.yield()
+        }
+        #expect(heldRecords.map(\.event) == ["logs.export.requested"])
+        await socket.enqueue(responseFrame(id: requestID, result: .object(["exportedAt": .string("fixture"), "path": .string("synthetic-path")])))
+        _ = try await valueOfOwnedTask(exported)
+
+        var records: [AppLogRecord] = []
+        for _ in 0..<100 {
+            records = await appLog.snapshot().filter { $0.event.hasPrefix("logs.export.") }
+            if records.contains(where: { $0.event == "logs.export.terminal" }) { break }
+            await Task.yield()
+        }
+        #expect(records.map(\.event).sorted() == ["logs.export.requested", "logs.export.terminal"])
+        #expect(records.allSatisfy { $0.requestID == requestID && $0.connectionID != nil && $0.profileID == nil })
+        #expect(records.first(where: { $0.event == "logs.export.requested" })?.message.contains("count=\(sent.count)") == true)
+        #expect(records.first(where: { $0.event == "logs.export.terminal" })?.outcome == "success")
+        let diagnosticText = String(decoding: try JSONEncoder().encode(await appLog.snapshot()), as: UTF8.self)
+        #expect(!diagnosticText.contains(privatePayload))
+        #expect(!diagnosticText.contains("do-not-record-token"))
+        await client.close()
+    }
+
+    @Test("a diagnostic export socket-send failure records size without changing its result")
+    func diagnosticExportSendFailure() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(
+            socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+            uuidSource: SequenceUUIDSource([
+                UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
+                UUID(uuidString: "00000000-0000-0000-0000-000000000012")!,
+            ]).source
+        )
+        let appLogURL = FileManager.default.temporaryDirectory.appending(path: "logs-export-fail-app-log-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: appLogURL)
+            try? FileManager.default.removeItem(at: appLogURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: appLogURL)
+        await client.installAppLog(appLog)
+        await socket.enqueue(helloFrame())
+        _ = try await client.connect(profile: profile, token: "token")
+        await socket.failNextSend(URLError(.networkConnectionLost))
+        do {
+            _ = try await client.requestValue("system.logs.export", JSONValue.object(["content": .string("synthetic")] ))
+            Issue.record("The failed socket send unexpectedly returned a diagnostic export")
+        } catch is GatewayPossiblySentError { }
+
+        var records: [AppLogRecord] = []
+        for _ in 0..<100 {
+            records = await appLog.snapshot().filter { $0.event.hasPrefix("logs.export.") }
+            if records.contains(where: { $0.event == "logs.export.terminal" }) { break }
+            await Task.yield()
+        }
+        #expect(records.map(\.event).sorted() == ["logs.export.requested", "logs.export.terminal"])
+        #expect(records.allSatisfy { $0.requestID == "00000000-0000-0000-0000-000000000012" })
+        #expect(records.first(where: { $0.event == "logs.export.requested" })?.message.contains("count=") == true)
+        #expect(records.first(where: { $0.event == "logs.export.terminal" })?.outcome == "transportFailure")
+        await client.close()
+    }
+
+    @Test("a cancelled held Logs Export records one terminal without cancelling or replaying it")
+    func diagnosticExportCancellationObservesHeldResponse() async throws {
+        let socket = ScriptedGatewaySocket()
+        let appLog = AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "logs-export-cancel-app-log-\(UUID().uuidString).jsonl"))
+        let client = GatewayClient(
+            socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+            uuidSource: SequenceUUIDSource([
+                UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
+                UUID(uuidString: "00000000-0000-0000-0000-000000000012")!,
+            ]).source,
+            appLog: appLog
+        )
+        await socket.enqueue(helloFrame())
+        _ = try await client.connect(profile: profile, token: "token")
+        let export = Task {
+            try await client.requestValue("system.logs.export", JSONValue.object(["content": .string("synthetic")]))
+        }
+        try await socket.waitUntilSent(count: 2)
+        let request = try #require(await socket.sentFrames().last)
+        let envelope = try #require(try JSONSerialization.jsonObject(with: request) as? [String: Any])
+        let requestID = try #require(envelope["id"] as? String)
+        var beforeCancellation = await appLog.snapshot().filter { $0.event.hasPrefix("logs.export.") }
+        for _ in 0..<100 where !beforeCancellation.contains(where: { $0.event == "logs.export.requested" }) {
+            await Task.yield()
+            beforeCancellation = await appLog.snapshot().filter { $0.event.hasPrefix("logs.export.") }
+        }
+        #expect(beforeCancellation.map(\.event) == ["logs.export.requested"])
+
+        export.cancel()
+        do {
+            _ = try await valueOfOwnedTask(export)
+            Issue.record("The cancelled Logs Export unexpectedly returned a response")
+        } catch let failure as GatewayPossiblySentError {
+            #expect(failure.failure.code == "possibly_sent")
+        }
+        #expect(await socket.sentFrames().count == 2)
+        let heldResponse = responseFrame(id: requestID, result: .object(["path": .string("synthetic-path")]))
+        await socket.enqueue(heldResponse)
+        await Task.yield()
+        let records = await appLog.snapshot().filter { $0.event.hasPrefix("logs.export.") }
+        #expect(records.map(\.event).sorted() == ["logs.export.requested", "logs.export.terminal"])
+        #expect(records.filter { $0.event == "logs.export.terminal" }.count == 1)
+        #expect(records.first(where: { $0.event == "logs.export.terminal" })?.outcome == "cancelled")
+        #expect(await socket.sentFrames().count == 2)
+        await client.close()
+    }
+
+    @Test("attachment HTTP correlation is bounded and transport failure preserves its result")
+    func attachmentHTTPDiagnosticCorrelation() async throws {
+        let socket = ScriptedGatewaySocket()
+        let appLogURL = FileManager.default.temporaryDirectory.appending(path: "upload-app-log-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: appLogURL)
+            try? FileManager.default.removeItem(at: appLogURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: appLogURL)
+        let requestIDs = HTTPRequestIDCapture()
+        let client = GatewayClient(
+            socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+            uuidSource: SequenceUUIDSource([
+                UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
+                UUID(uuidString: "00000000-0000-0000-0000-000000000012")!,
+            ]).source,
+            boundedHTTPDataTransport: BoundedHTTPDataTransport { request, _, _ in
+                await requestIDs.record(request)
+                throw URLError(.networkConnectionLost)
+            },
+            appLog: appLog
+        )
+        await socket.enqueue(helloFrame())
+        _ = try await client.connect(profile: profile, token: "do-not-record-token")
+        let fileName = "private-upload-name.pdf"
+        do {
+            _ = try await client.upload(name: fileName, mimeType: "application/private", data: Data(repeating: 42, count: 128))
+            Issue.record("The failed attachment upload unexpectedly returned a staged ID")
+        } catch let error as URLError {
+            #expect(error.code == .networkConnectionLost)
+        }
+
+        let requestID = try #require(await requestIDs.value())
+        #expect(UUID(uuidString: requestID) != nil)
+        var records: [AppLogRecord] = []
+        for _ in 0..<100 {
+            records = await appLog.snapshot().filter { $0.event.hasPrefix("http.upload.") }
+            if records.contains(where: { $0.event == "http.upload.terminal" }) { break }
+            await Task.yield()
+        }
+        #expect(records.map(\.event).sorted() == ["http.upload.requested", "http.upload.terminal"])
+        #expect(records.allSatisfy { $0.requestID == requestID && $0.profileID == nil })
+        #expect(records.first(where: { $0.event == "http.upload.requested" })?.message.contains("count=128") == true)
+        #expect(records.allSatisfy { $0.message.contains("route=saved") })
+        #expect(records.first(where: { $0.event == "http.upload.terminal" })?.outcome == "failure")
+        let diagnosticText = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
+        #expect(!diagnosticText.contains(fileName))
+        #expect(!diagnosticText.contains("application/private"))
+        #expect(!diagnosticText.contains("do-not-record-token"))
+        await client.close()
+    }
+
     @Test("a timed-out disposable read sends a cancel frame, a mutation does not")
     func timedOutReadSendsCancelFrame() async throws {
         try await withTestWatchdog {
@@ -2223,17 +2422,27 @@ private final class HostRoutedGatewaySocketFactory: @unchecked Sendable {
     }
 }
 
+private actor HTTPRequestIDCapture {
+    private var requestID: String?
+
+    func record(_ request: URLRequest) {
+        requestID = request.value(forHTTPHeaderField: "X-Tron-Request-ID")
+    }
+
+    func value() -> String? { requestID }
+}
+
 /// The routes one test's injected HTTP transports were asked to carry, so a
 /// case can say where an epoch's live view, media and uploads went (E-3c).
 private actor RecordedHTTPCalls {
-    private var calls: [(url: URL, pin: String?)] = []
+    private var calls: [(url: URL, pin: String?, requestID: String?)] = []
 
     func record(_ request: URLRequest, pin: String?) {
         guard let url = request.url else { return }
-        calls.append((url, pin))
+        calls.append((url, pin, request.value(forHTTPHeaderField: "X-Tron-Request-ID")))
     }
 
-    func recorded() -> [(url: URL, pin: String?)] { calls }
+    func recorded() -> [(url: URL, pin: String?, requestID: String?)] { calls }
 }
 
 @Suite("Gateway client LAN lane race (E-3c)")
@@ -2265,6 +2474,12 @@ struct GatewayClientLanLaneTests {
     @Test("an epoch the LAN lane carries routes HTTP and its pin to that lane")
     func httpRoutesFollowTheWinningLane() async throws {
         let calls = RecordedHTTPCalls()
+        let appLogURL = FileManager.default.temporaryDirectory.appending(path: "lan-upload-app-log-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: appLogURL)
+            try? FileManager.default.removeItem(at: appLogURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: appLogURL)
         let uploadID = UUID().uuidString
         let payload = Data("media".utf8)
         let lan = ScriptedGatewaySocket()
@@ -2288,6 +2503,7 @@ struct GatewayClientLanLaneTests {
                     byteCount: Int64(payload.count)
                 )
             },
+            appLog: appLog,
             networkPath: wifiOnlyPath()
         )
         let profile = lanProfile()
@@ -2308,6 +2524,18 @@ struct GatewayClientLanLaneTests {
         #expect(recorded.count == 3)
         #expect(recorded.allSatisfy { $0.url.host == Self.lanHost && $0.url.scheme == "https" })
         #expect(recorded.allSatisfy { $0.pin == Self.pin })
+        let uploadRequestID = try #require(recorded.last?.requestID)
+        #expect(UUID(uuidString: uploadRequestID) != nil)
+        var uploadRecords: [AppLogRecord] = []
+        for _ in 0..<100 {
+            uploadRecords = await appLog.snapshot().filter { $0.event.hasPrefix("http.upload.") }
+            if uploadRecords.contains(where: { $0.event == "http.upload.terminal" }) { break }
+            await Task.yield()
+        }
+        #expect(uploadRecords.map(\.event).sorted() == ["http.upload.requested", "http.upload.terminal"])
+        #expect(uploadRecords.allSatisfy { $0.requestID == uploadRequestID && $0.profileID == nil })
+        #expect(uploadRecords.allSatisfy { $0.message.contains("route=lan-pinned") })
+        #expect(uploadRecords.first(where: { $0.event == "http.upload.terminal" })?.outcome == "success")
         #expect(Set(recorded.map(\.url.path)) == [
             "/v1/blobs/\(blobID)", "/v1/blobs/\(exportID)", "/v1/uploads",
         ])

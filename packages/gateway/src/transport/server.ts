@@ -51,6 +51,22 @@ function diagnosticRequestID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, 160);
 }
 
+function uploadDiagnosticRequestID(request: IncomingMessage): string | undefined {
+  const value = request.headers["x-tron-request-id"];
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value)
+    ? value.toLowerCase()
+    : undefined;
+}
+
+function uploadDiagnosticCode(error: unknown): string {
+  if (error instanceof GatewayError) {
+    return ["busy", "unauthenticated", "not_found", "invalid_request"].includes(error.code)
+      ? error.code
+      : "gateway_failure";
+  }
+  return error instanceof Error ? "exception" : "unknown";
+}
+
 // A caller mistake or expected backpressure is handled (warning); only an
 // unexpected fault or an internal error means someone should look (error).
 function rpcFailureLevel(error: unknown): "warning" | "error" {
@@ -1670,29 +1686,70 @@ export class GatewayServer {
     signal: AbortSignal,
   ): Promise<void> {
     if (request.method === "POST" && url.pathname === "/v1/uploads") {
-      await this.options.uploads.withBodyAdmission(async () => {
-        const name = url.searchParams.get("name") ?? "attachment";
-        const mimeType = request.headers["content-type"] ?? "application/octet-stream";
-        const rawDeclared = request.headers["content-length"];
-        const declaredBytes = rawDeclared === undefined ? undefined : Number(rawDeclared);
-        const upload = await this.options.uploads.saveStream(name, mimeType, completeRequestBody(request), declaredBytes);
-        try {
-          if (response.destroyed) throw new GatewayError("busy", "Upload response was retired", true);
-          sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
-          await finished(response, { readable: false, cleanup: true });
-        } catch (error) {
-          // Body completion is not receipt publication. Drop only abandoned
-          // staging; discard's serialized claim check protects an attachment
-          // already owned by an accepted prompt, even in a close/claim race.
-          try { await this.options.uploads.discard(upload.id); }
-          catch (cleanupError) {
-            if (!(cleanupError instanceof GatewayError && ["conflict", "not_found"].includes(cleanupError.code))) {
-              this.options.logger.log("warning", "Abandoned upload cleanup failed", { event: "http.upload-cleanup", source: "transport" });
+      const requestID = uploadDiagnosticRequestID(request);
+      const startedAt = performance.now();
+      let bodyBytesConsumed: number | undefined;
+      let stagedBytes: number | undefined;
+      if (requestID !== undefined) {
+        this.options.logger.log("info", "Authenticated attachment upload received", {
+          event: "http.upload.phase", source: "transport", requestID, step: "received",
+        });
+      }
+      try {
+        await this.options.uploads.withBodyAdmission(async () => {
+          const name = url.searchParams.get("name") ?? "attachment";
+          const mimeType = request.headers["content-type"] ?? "application/octet-stream";
+          const rawDeclared = request.headers["content-length"];
+          const declaredBytes = rawDeclared === undefined ? undefined : Number(rawDeclared);
+          const observedBody = async function* (): AsyncGenerator<Uint8Array> {
+            for await (const chunk of completeRequestBody(request)) {
+              bodyBytesConsumed = (bodyBytesConsumed ?? 0) + chunk.byteLength;
+              yield chunk;
             }
+          };
+          const upload = await this.options.uploads.saveStream(name, mimeType, observedBody(), declaredBytes);
+          stagedBytes = upload.size;
+          if (requestID !== undefined) {
+            this.options.logger.log("info", "Attachment body staged", {
+              event: "http.upload.phase", source: "transport", requestID, step: "staged",
+              durationMs: Math.max(0, Math.round(performance.now() - startedAt)), counts: { bytes: upload.size },
+            });
           }
-          throw error;
+          try {
+            if (response.destroyed) throw new GatewayError("busy", "Upload response was retired", true);
+            sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
+            await finished(response, { readable: false, cleanup: true });
+          } catch (error) {
+            // Body completion is not receipt publication. Drop only abandoned
+            // staging; discard's serialized claim check protects an attachment
+            // already owned by an accepted prompt, even in a close/claim race.
+            try { await this.options.uploads.discard(upload.id); }
+            catch (cleanupError) {
+              if (!(cleanupError instanceof GatewayError && ["conflict", "not_found"].includes(cleanupError.code))) {
+                this.options.logger.log("warning", "Abandoned upload cleanup failed", { event: "http.upload-cleanup", source: "transport" });
+              }
+            }
+            throw error;
+          }
+        });
+        if (requestID !== undefined) {
+          this.options.logger.log("info", "HTTP attachment upload response finished", {
+            event: "http.upload", source: "transport", requestID,
+            outcome: "response-finished", durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+            ...(stagedBytes === undefined ? {} : { counts: { bytes: stagedBytes } }),
+          });
         }
-      });
+      } catch (error) {
+        if (requestID !== undefined) {
+          this.options.logger.log("warning", "HTTP attachment upload failed", {
+            event: "http.upload", source: "transport", requestID,
+            outcome: "failure", code: uploadDiagnosticCode(error),
+            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+            ...(bodyBytesConsumed === undefined ? {} : { counts: { bodyBytesConsumed } }),
+          });
+        }
+        throw error;
+      }
       return;
     }
     if (request.method === "DELETE" && url.pathname.startsWith("/v1/uploads/")) {
@@ -2290,6 +2347,12 @@ export class GatewayServer {
     const requestId = frame.id;
     const diagnosticID = diagnosticRequestID(requestId);
     const rpcStartedAt = performance.now();
+    if (frame.method === "system.logs.export") {
+      this.options.logger.log("info", "Logs Export RPC admitted", {
+        event: "rpc.received", source: "transport", method: frame.method,
+        requestID: diagnosticID, connectionId: connection.id, outcome: "admitted",
+      });
+    }
     // One span per admitted request. Its breakdown rides on the rpc.completed
     // record below, so a slow request names the work that held it.
     const requestSpan = new RequestSpan();

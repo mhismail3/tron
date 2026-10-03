@@ -718,8 +718,20 @@ it in its device-export store; Tron copies the returned path and
 shows confirmation. If disconnected or upload fails, the same action opens the
 native share sheet with a bounded local JSONL bundle; upload failures are
 recorded as warning events. The first JSON record carries capture time, Gateway
-runtime identities, per-source statuses, and the represented log window. Use
-timestamps and request IDs to rank the slow boundary, inspect that boundary in Instruments
+runtime identities, per-source statuses, and the represented log window. Attachment
+uploads add `http.upload.requested` / `http.upload.terminal` records with one
+opaque UUID also sent in the optional `X-Tron-Request-ID` header. They record
+only the request-body byte count, route class (`saved` / `lan-pinned`), the
+connection ID captured at admission, elapsed time, and a bounded outcome. Logs
+Export request records count encoded RPC JSON bytes, not compressed/on-wire
+frame bytes; the Gateway joins that request ID through its `rpc.received` and
+`rpc.completed` records without recording the export content. Gateway
+`http.upload.phase` records distinguish authenticated route receipt from
+completed body staging; its `http.upload`
+terminal record means the response stream finished or the request failed, not
+that the phone received a receipt. No filename, MIME type, URL, token, profile
+ID, or body content is recorded, and these events add no retry or receipt
+behavior. Use timestamps and request IDs to rank the slow boundary, inspect that boundary in Instruments
 when needed, make one causal fix, and repeat the
 same interaction under matched conditions. An export is evidence for diagnosis,
 not proof of a physical-device speedup; retain the focused regression and
@@ -2073,7 +2085,7 @@ active-form screenshots support visual inspection of these details.
 `HOSTED_TEST` is absent from Release
 configuration and the fixture source is guarded accordingly.
 
-The hosted real-Gateway boundary test owns one narrow integration contract: the
+The hosted real-Gateway boundary tests own one narrow integration contract: the
 iOS pairing and transport clients connect to the selected Pi runtime, accepted
 work survives transport retirement, a new connection decodes canonical
 completion, extension interactions round-trip, a parallel tool group settles
@@ -2082,12 +2094,39 @@ once, and the Agent Instructions projection decodes with the fixture workspace
 `agent-instructions-outline` attachment). Its foreground-reconnect case restarts the private Gateway while the
 session is active, then verifies lifecycle auto-reconnect, one canonical copy of
 the accepted prompt, the session snapshot, and exactly one settled catalog row.
-It deliberately excludes SwiftUI, visual, settings, picker, navigation, and
-general accessibility coverage.
+The shared-link case sends synthetic 298,013-byte HTTP upload traffic and actual
+RPC/ping/pong frames through the same bounded FIFO proxy schedule (12 KiB/s
+test-only application-payload capacity, 30 ms per scheduled item, 1 MiB queue
+bound). With that schedule active, it measures complete client ping/pong cycles
+and their actual enqueue interval while the body is being transferred; the body
+must span over two observed intervals. The retained attachment records upload-body
+start/end, ping enqueue and FIFO-forward times, Gateway-pong observation and
+forward time, and asserts that a forwarded ping and its returned pong overlap
+the body-active interval. Proxy heartbeat delay starts at ping enqueue, so it
+includes outbound FIFO wait; the value ends when the Gateway pong reaches the
+proxy and does not claim phone receipt. The unchanged 8-second GatewayClient
+pong deadline remains. HTTP header lengths come from Node's parsed
+request/response headers; WebSocket message sizes are decoded payload lengths
+plus estimated uncompressed frame overhead because `ws` hides compressed wire
+lengths. Thus this synthetic schedule is a reproducible shared application
+payload control, not a cellular capacity guarantee. A separate common-proxy
+blackhole is only the expected-outage/recovery control; a synthetic 256 KiB
+`system.logs.export` JSON RPC runs without the shaper or an HTTP upload. The
+fixture counters increment once at the proxy forwarding transition, rather
+than at both queue admission and forwarding. The fixture reports counts/bytes
+but never stores or prints authorization values, file bytes, filenames, or
+log-export content. These tests deliberately exclude
+SwiftUI, visual, settings, picker, navigation, and general accessibility
+coverage.
 
-Preparation and the first build happen once; `run` renews the one-use Gateway
-fixture, then executes the focused hosted test without reinstalling dependencies
-or rebuilding:
+Preparation and the first build happen once; `run` renews an independent one-use
+Gateway fixture for each registered boundary case while retaining one owned
+simulator lease and separate `.xcresult` artifacts. Tests therefore do not depend
+on XCTest order or reuse a consumed pairing invitation. Any nonzero setup or
+case result stops the sequence; a failed run cleans its owned fixture and
+releases the lane. Optional `.xcresult` failure extraction cannot change that
+status. It runs the focused hosted tests without reinstalling dependencies or
+rebuilding:
 
 ```bash
 scripts/ios-gateway-e2e-test prepare
@@ -2110,6 +2149,19 @@ the app's own path fact, so it runs on this Mac's wired path as a Wi-Fi phone:
 # After `build`: the LAN lane is on for this fixture only.
 scripts/ios-gateway-e2e-test run-lan
 ```
+
+`RealGatewayPiBoundaryTests` declares three cases. The ordinary `run` registers
+and proves the reconnect case plus the shared-link case; the third
+`testRacesLanAndTailscaleLanes` is registered only by `run-lan`, requires the
+private-address fixture above, and is not implied by a green `run`. iOS work
+verification detects this fixture-only test owner and dispatches it through the
+canonical `ios-gateway-e2e-test all` (prepare/build/run) owner instead of the
+ordinary XCTest runner, where every case would correctly skip. Verification
+then calls that same owner to stop the fixture while preserving its result
+bundles. The default verified selection runs the two standard cases only; when
+the E-3c LAN-lane case itself is changed or claimed, run `run-lan` separately
+and record its matching private-address result. This routing does not claim all
+three cases were qualified by the shared-link run.
 
 The Gateway uses a fixture-owned home, state directory, agent directory,
 delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly

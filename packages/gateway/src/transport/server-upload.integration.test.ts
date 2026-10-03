@@ -9,10 +9,12 @@ import { GatewayServer } from "./server.js";
 
 const roots: string[] = [];
 const servers: GatewayServer[] = [];
+const loggerRecords: Array<{ level: string; message: string; metadata: Record<string, unknown> }> = [];
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  loggerRecords.splice(0);
 });
 
 class ObservableUploadStore extends UploadStore {
@@ -69,7 +71,7 @@ async function fixture(maximumBytes = 8): Promise<{
     sessions: {} as never,
     auth: {} as never,
     service: {} as never,
-    logger: { log: () => {} } as never,
+    logger: { log: (level: string, message: string, metadata: Record<string, unknown> = {}) => loggerRecords.push({ level, message, metadata }) } as never,
   });
   servers.push(gateway);
   await gateway.listen();
@@ -112,6 +114,7 @@ function uploadRequest(
   port: number,
   declaredBytes: number | undefined,
   write: (request: ReturnType<typeof request>) => void,
+  requestID?: string,
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const outgoing = request({
@@ -123,6 +126,7 @@ function uploadRequest(
         authorization: "Bearer paired",
         "content-type": "text/plain",
         ...(declaredBytes === undefined ? {} : { "content-length": String(declaredBytes) }),
+        ...(requestID === undefined ? {} : { "x-tron-request-id": requestID }),
       },
     }, (response) => {
       const chunks: Buffer[] = [];
@@ -247,16 +251,55 @@ describe("Gateway upload HTTP streaming", () => {
     await expect(firstResponse).resolves.toMatchObject({ status: 201 });
   });
 
-  it("cleans an interrupted request and releases admission for an immediate retry", async () => {
+  it("records only correlated completed bytes or an interrupted upload outcome", async () => {
     const { home, port, uploads } = await fixture();
+    const successID = "67a2c7ad-bef8-4336-8988-4b972cd4b82f";
+    let outgoing!: ReturnType<typeof request>;
+    const successTask = uploadRequest(port, 8, (request) => {
+      outgoing = request;
+      request.write("1234");
+    }, successID);
+    await uploads.waitForFirstChunk();
+    expect(loggerRecords.filter(({ metadata }) => metadata.event === "http.upload.phase").map(({ metadata }) => metadata.step)).toEqual(["received"]);
+    expect(loggerRecords.filter(({ metadata }) => metadata.event === "http.upload")).toHaveLength(0);
+    outgoing.end("5678");
+    const success = await successTask;
+    expect(success.status).toBe(201);
+    const successfulRecords = loggerRecords.filter(({ metadata }) => metadata.event === "http.upload");
+    expect(successfulRecords).toHaveLength(1);
+    const successfulRecord = successfulRecords[0];
+    expect(successfulRecord).toMatchObject({
+      message: "HTTP attachment upload response finished",
+      metadata: { requestID: successID, outcome: "response-finished", counts: { bytes: 8 } },
+    });
+    expect(loggerRecords.filter(({ metadata }) => metadata.event === "http.upload.phase").map(({ metadata }) => metadata.step)).toEqual(["received", "staged"]);
+    expect(successfulRecord?.message).not.toContain("stream.txt");
+    expect(successfulRecord?.message).not.toContain("text/plain");
+
+    loggerRecords.splice(0);
+    const invalidCorrelation = await uploadRequest(port, 4, (request) => request.end("safe"), "private-header-value");
+    expect(invalidCorrelation.status).toBe(201);
+    expect(loggerRecords.filter(({ metadata }) => metadata.event === "http.upload" || metadata.event === "http.upload.phase")).toHaveLength(0);
+
+    loggerRecords.splice(0);
+    const failedID = "72f73074-529d-4f40-9274-6b0c50389373";
     const interrupted = uploadRequest(port, 8, (outgoing) => {
       outgoing.write("1234", () => outgoing.destroy());
-    });
+    }, failedID);
     await expect(interrupted).rejects.toBeDefined();
     await uploads.waitForCompletion();
+    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
-
-    const retry = await uploadRequest(port, 8, (outgoing) => outgoing.end("12345678"));
-    expect(retry.status).toBe(201);
+    const failedRecords = loggerRecords.filter(({ metadata }) => metadata.event === "http.upload");
+    expect(failedRecords).toHaveLength(1);
+    const failedRecord = failedRecords[0];
+    expect(failedRecord).toMatchObject({
+      message: "HTTP attachment upload failed",
+      metadata: { requestID: failedID, outcome: "failure", code: expect.any(String) },
+    });
+    // The async body iterator did not yield a partial chunk before abort, so
+    // no observed-byte count is available to report.
+    expect(failedRecord?.metadata.counts).toBeUndefined();
+    expect(failedRecord?.message).not.toContain("stream.txt");
   });
 });
