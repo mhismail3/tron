@@ -28,10 +28,10 @@ struct HostedDiagnosticsExportFixture: View {
 
     init() {
         scenario = ProcessInfo.processInfo.arguments.drop(while: { $0 != "-diagnostics-export-scenario" }).dropFirst().first ?? "held"
-        let first = DiagnosticsExportFixtureGateway(name: "original", fails: scenario == "failure", holdsLogs: scenario == "logs-held")
+        let first = DiagnosticsExportFixtureGateway(name: "original", fails: scenario == "failure" || scenario == "held-failure", holdsLogs: scenario == "logs-held")
         let second = DiagnosticsExportFixtureGateway(name: "replacement", fails: false)
         originalGateway = first; replacementGateway = second
-        gate = DiagnosticsExportPreparationGate(held: scenario == "held")
+        gate = DiagnosticsExportPreparationGate(held: scenario == "held" || scenario == "held-failure")
         let memory = AutomationFixtureProfileStore(); store = memory
         let profiles = GatewayProfileStore(metadata: memory, tokens: memory)
         try! profiles.save(original, token: "fixture-only-token")
@@ -43,7 +43,7 @@ struct HostedDiagnosticsExportFixture: View {
         root = FileManager.default.temporaryDirectory.appending(path: "diagnostics-export-fixture-\(UUID().uuidString)")
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
             cache: SnapshotCache(root: root.appending(path: "cache")),
-            exportArtifacts: SessionExportArtifactStore(root: root.appending(path: "artifacts"), maximumBytes: 524_288, maximumTotalBytes: 1_048_576, maximumArtifacts: 1),
+            exportArtifacts: SessionExportArtifactStore(root: root.appending(path: "artifacts"), maximumBytes: 524_288, maximumTotalBytes: 1_048_576, maximumArtifacts: 2),
             appLog: AppLog(fileURL: root.appending(path: "app.jsonl"))))
     }
 
@@ -91,17 +91,60 @@ struct HostedDiagnosticsExportFixture: View {
         .environment(\.hostedDiagnosticsPreparation, { await gate.prepare() })
         .environment(\.hostedDiagnosticsCapture, { url in
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-            artifactEvidence = "local:\(text.contains("captureKind=iphone-local") && text.contains("source=local-only")) bytes:\(text.utf8.count)"
+            let header = text.split(separator: "\n").first
+                .flatMap { try? JSONDecoder().decode(AppLogRecord.self, from: Data($0.utf8)) }
+            let fields = Dictionary(uniqueKeysWithValues: (header?.message.split(separator: " ") ?? []).compactMap { item -> (String, String)? in
+                let pair = item.split(separator: "=", maxSplits: 1).map(String.init)
+                return pair.count == 2 ? (pair[0], pair[1]) : nil
+            })
+            let rows = text.split(separator: "\n").dropFirst().compactMap {
+                try? JSONDecoder().decode(AppLogRecord.self, from: Data($0.utf8))
+            }
+            let dates = rows.compactMap { GatewayTimestamp.parse($0.timestamp) }.sorted()
+            let actualFrom = dates.first.map(GatewayTimestamp.preciseString(from:)) ?? "none"
+            let actualThrough = dates.last.map(GatewayTimestamp.preciseString(from:)) ?? "none"
+            let windowMatches = fields["exportedWindowFrom"] == actualFrom && fields["exportedWindowThrough"] == actualThrough
+            artifactEvidence = "local:\(text.contains("captureKind=iphone-local") && text.contains("source=local-only")) selected:\(fields["selectedRecords"] ?? "unknown") dropped:\(fields["droppedRecords"] ?? "unknown") rows:\(rows.count) windowMatches:\(windowMatches) bytes:\(text.utf8.count)"
+            if scenario == "held-failure" {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    await gate.release()
+                }
+            }
         })
         .tronPresentation().preferredColorScheme(.dark)
         .task {
             await model.appLog.recordCausal(name: "fixture.local.record", details: "synthetic-local-evidence")
+            if scenario == "overflow" {
+                for index in 0..<1_200 {
+                    await model.appLog.recordCausal(
+                        name: "fixture.overflow.\(index)",
+                        details: String(repeating: "\n", count: 420)
+                    )
+                }
+            }
             if scenario != "offline" { await model.start() }
             ready = true
         }
         .task { for await value in originalGateway.updates() { originalCounts = value } }
         .task { for await value in replacementGateway.updates() { replacementCounts = value } }
         .task { for await value in gate.updates() { preparation = value } }
+        .task {
+            guard scenario == "held-failure" else { return }
+            while !Task.isCancelled {
+                let warnings = await model.appLog.snapshot().filter { $0.event == "diagnostics.upload-failed" }
+                guard !warnings.isEmpty else {
+                    try? await Task.sleep(for: .milliseconds(25))
+                    continue
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+                let directory = root.appending(path: "artifacts")
+                let files = (FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? [])
+                    .filter { $0.pathExtension == "jsonl" }
+                artifactEvidence += " fallback-settled files:\(files.count)"
+                return
+            }
+        }
         .onChange(of: phase) { _, value in
             switch value {
             case .background: model.enteredBackground()
@@ -166,7 +209,7 @@ private actor DiagnosticsExportFixtureGateway {
             logs += 1
             publish()
             if holdsLogs { await withCheckedContinuation { logWaiter = $0 } }
-            return (.object(["records": .array([.object(["timestamp": .string("2026-10-02T18:00:00Z"), "level": .string("info"), "event": .string("fixture.\(name).record"), "message": .string("synthetic-\(name)-evidence")])])]), nil)
+            return (.object(["records": .array([.object(["timestamp": .string(ISO8601DateFormatter().string(from: .now)), "level": .string("info"), "event": .string("fixture.\(name).record"), "message": .string("synthetic-\(name)-evidence")])])]), nil)
         case "system.logs.export":
             exports += 1
             let commandID = params["commandId"]?.stringValue ?? "missing"

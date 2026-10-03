@@ -40,6 +40,9 @@ struct GatewayLogsSettingsView: View {
     @State private var copySucceeded = false
     @State private var exportInFlight = false
     @State private var exportGeneration = 0
+    // Local capture and remote-export fallback may finish out of order; dismissals
+    // also retire pending share output, without cancelling an accepted Gateway write.
+    @State private var shareIntentGeneration = 0
     @State private var localCaptureInFlight = false
     @State private var localCaptureGeneration = 0
     @State private var shareURL: DiagnosticShareFile?
@@ -142,6 +145,7 @@ struct GatewayLogsSettingsView: View {
         }
         .sensoryFeedback(.success, trigger: copySucceeded)
         .tronManagedSheet(item: $shareURL, identity: { _ in "settings.gateway-logs-share" }, onDismiss: {
+            shareIntentGeneration &+= 1
             if let url = exportArtifactURL {
                 exportArtifactURL = nil
                 Task { await model.discardExportArtifact(url) }
@@ -234,6 +238,8 @@ struct GatewayLogsSettingsView: View {
         guard !localCaptureInFlight, shareURL == nil,
               presentationActivity.allowsPresentationPublication else { return }
         localCaptureGeneration &+= 1
+        shareIntentGeneration &+= 1
+        let shareIntent = shareIntentGeneration
         let generation = localCaptureGeneration
         let activity = presentationActivity
         localCaptureInFlight = true
@@ -261,6 +267,7 @@ struct GatewayLogsSettingsView: View {
                 await hostedDiagnosticsCapture?(url)
                 #endif
                 guard generation == localCaptureGeneration,
+                      shareIntent == shareIntentGeneration,
                       presentationActivity == activity,
                       activity.allowsPresentationPublication,
                       !Task.isCancelled else {
@@ -282,6 +289,8 @@ struct GatewayLogsSettingsView: View {
         guard !exportInFlight, presentationActivity.allowsPresentationPublication,
               !visibleItems.isEmpty else { return }
         exportGeneration &+= 1
+        shareIntentGeneration &+= 1
+        let shareIntent = shareIntentGeneration
         let generation = exportGeneration
         let activity = presentationActivity
         let records = recordIndex.records
@@ -307,7 +316,9 @@ struct GatewayLogsSettingsView: View {
                     model.postNotice("Diagnostics saved on Mac · path copied", role: .success, lifetime: .standard, priority: .low)
                 case .share(let url):
                     guard model.knowledgeDestinationIdentity == destination,
-                          generation == exportGeneration, presentationActivity == activity,
+                          generation == exportGeneration,
+                          shareIntent == shareIntentGeneration,
+                          presentationActivity == activity,
                           activity.allowsPresentationPublication else {
                         await model.discardExportArtifact(url)
                         return
@@ -317,7 +328,9 @@ struct GatewayLogsSettingsView: View {
                 }
             } catch {
                 guard model.knowledgeDestinationIdentity == destination,
-                      generation == exportGeneration, presentationActivity == activity,
+                      generation == exportGeneration,
+                      shareIntent == shareIntentGeneration,
+                      presentationActivity == activity,
                       activity.allowsPresentationPublication else { return }
                 model.postNotice("Diagnostics could not be exported. Try again.", role: .error, lifetime: .standard, priority: .normal)
             }

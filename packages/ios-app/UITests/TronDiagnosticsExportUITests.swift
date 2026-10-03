@@ -68,6 +68,47 @@ final class TronDiagnosticsExportUITests: XCTestCase {
     }
 
     @MainActor
+    func testOlderRemoteFallbackCannotReplaceOrLeakLocalShareArtifact() {
+        let app = launch("held-failure")
+        defer { app.terminate() }
+        app.buttons["Export Diagnostics"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-preparation", "waiting:1 released:0"))
+        app.buttons["Capture on iPhone"].tap()
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "local:true"))
+        XCTAssertTrue(observe(app, "fixture.export-original", "exports:1"))
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "fallback-settled files:1"))
+        XCTAssertTrue(close.exists, "The local share remains the current presentation after the older export settles")
+        evidence(app, "371-stale-remote-fallback-cannot-replace-local-share")
+        close.tap()
+        app.buttons["fixture.inspect-export-artifacts"].tap()
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "files:0"))
+    }
+
+    @MainActor
+    func testLocalArtifactReportsActualBoundedRowsAndWindow() {
+        let app = launch("overflow")
+        defer { app.terminate() }
+        app.buttons["Capture on iPhone"].tap()
+        XCTAssertTrue(app.buttons["Close"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(observe(app, "fixture.export-artifacts", "local:true"))
+        let artifactEvidence = app.staticTexts["fixture.export-artifacts"].label
+        let fields = Dictionary(uniqueKeysWithValues: artifactEvidence.split(separator: " ").compactMap { item -> (String, String)? in
+            let pair = item.split(separator: ":", maxSplits: 1).map(String.init)
+            return pair.count == 2 ? (pair[0], pair[1]) : nil
+        })
+        let selected = Int(fields["selected"] ?? "0") ?? 0
+        let dropped = Int(fields["dropped"] ?? "0") ?? 0
+        let rows = Int(fields["rows"] ?? "-1") ?? -1
+        XCTAssertGreaterThan(selected, 0, artifactEvidence)
+        XCTAssertGreaterThan(dropped, 0, artifactEvidence)
+        XCTAssertEqual(selected, rows, artifactEvidence)
+        XCTAssertEqual(fields["windowMatches"], "true", artifactEvidence)
+        self.evidence(app, "371-local-artifact-actual-bounds")
+    }
+
+    @MainActor
     func testCaptureIgnoresVisibleFilterAndUnrelatedExportPreparation() {
         let app = launch("held")
         defer { app.terminate() }
