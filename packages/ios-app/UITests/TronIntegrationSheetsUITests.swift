@@ -79,7 +79,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
 
         // This is the treatment: submit immediately while the callback field is focused.
         app.buttons["Authorize X"].tap()
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), oauthCountersLabel(app))
         XCTAssertTrue(oauthCounters(app, contain: "client=true redirect=true"), oauthCountersLabel(app))
         XCTAssertTrue(app.staticTexts["Completing setup…"].waitForExistence(timeout: 5), presentationTrace(app))
         XCUIDevice.shared.press(.home)
@@ -91,8 +91,41 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["fixture.destination"].label, destination)
         XCTAssertTrue(client.value as? String == "fixture-public-client")
         XCTAssertTrue(callback.value as? String == "https://example.test/callback")
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), oauthCountersLabel(app))
         XCTAssertTrue(presentationTrace(app).contains("settings.root.appear"), presentationTrace(app))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.begin.admitted"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.begin.returned"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogEventContains(app, event: "xsetup.begin.returned", fact: "returnOrigin=begin-executor-return"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.begin.state-assigned"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.observer.published"), productionXLogs(app))
+    }
+
+    @MainActor
+    func testXSetupAcceptedBeginReturnsFromStoredReceiptAfterOriginalReplyIsHeld() {
+        continueAfterFailure = false
+        let app = launch(scenario: "parent-oauth-receipt-return")
+        defer { app.terminate() }
+        openXSetupThroughDashboardSettings(app)
+        enterXClientAndCallback(app)
+        app.buttons["Authorize X"].tap()
+        XCTAssertTrue(app.staticTexts["Completing setup…"].waitForExistence(timeout: 5), presentationTrace(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1"), oauthCountersLabel(app))
+
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 20), presentationTrace(app))
+        XCTAssertTrue(oauthCounters(app, contain: "queries:1 receiptReturns:1 replyReleases:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), oauthCountersLabel(app))
+        XCTAssertTrue(oauthCounters(app, contain: "mismatches:0"), oauthCountersLabel(app))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.begin.admitted"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.begin.returned"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogEventContains(app, event: "xsetup.begin.returned", fact: "returnOrigin=begin-executor-return"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.begin.state-assigned"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.observer.published"), productionXLogs(app))
+        let captured = productionXLogs(app)
+        XCTAssertFalse(captured.contains("fixture-public-client"), captured)
+        XCTAssertFalse(captured.contains("https://example.test/callback"), captured)
+        XCTAssertFalse(captured.contains("authorizationUrl"), captured)
+        keepScreenshot(app, name: "366-x-begin-typed-result-from-status-receipt")
     }
 
     @MainActor
@@ -135,7 +168,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         app.textFields.element(boundBy: 1).tap(); app.textFields.element(boundBy: 1).typeText("https://example.test/callback")
         app.buttons["Authorize X"].tap()
         XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), app.debugDescription)
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), app.debugDescription)
 
         XCUIDevice.shared.press(.home)
         app.activate()
@@ -148,7 +181,9 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertTrue(trace.contains("integrations.destination old=integration-fixture:g0 new=integration-fixture:g1 setupOpen=true"), trace)
         XCTAssertTrue(trace.contains("integrations.destination old=integration-fixture:g1 new=replacement-integration-fixture:g1 setupOpen=false"), trace)
         XCTAssertTrue(trace.contains("xsetup.disappear dest=integration-fixture:g1"), trace)
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:0"), app.debugDescription)
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:0"), app.debugDescription)
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.destination-retired"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogContains(app, "reason=destination-changed"), productionXLogs(app))
         keepScreenshot(app, name: "366-x-form-revoked-on-original-gateway-replacement")
     }
 
@@ -364,9 +399,10 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     @MainActor
     func testAcceptedOAuthCompleteSettlesOriginalReceiptAfterBackground() {
         continueAfterFailure = false
-        let app = launch(scenario: "oauth-complete-delayed")
+        let app = launch(scenario: "parent-oauth-complete-delayed")
         defer { app.terminate() }
-        openXSetup(app)
+        openXSetupThroughDashboardSettings(app)
+        enterXClientAndCallback(app)
         app.buttons["Authorize X"].tap()
         XCTAssertTrue(app.buttons["Open X consent"].waitForExistence(timeout: 10))
         let code = app.textFields.element(boundBy: 3)
@@ -376,8 +412,12 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(app.staticTexts["Connected test X"].waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertFalse(app.staticTexts["Set up X"].exists)
-        XCTAssertTrue(oauthCounters(app, contain: "begins:1 completes:1"))
+        XCTAssertTrue(oauthCounters(app, contain: "begins:1 uniqueBeginCommands:1 completes:1"))
         XCTAssertTrue(oauthCounters(app, contain: "mismatches:0"))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.explicit-finish"), productionXLogs(app))
+        XCTAssertTrue(xSetupLogContains(app, "xsetup.binding.set-false"), productionXLogs(app))
+        XCTAssertFalse(productionXLogs(app).contains("fixture-one-time-code"), productionXLogs(app))
+        XCTAssertFalse(productionXLogs(app).contains("https://example.test/callback"), productionXLogs(app))
         keepScreenshot(app, name: "348-oauth-complete-original-receipt")
     }
 
@@ -408,6 +448,25 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Set up X"].waitForExistence(timeout: 5))
         app.textFields.element(boundBy: 0).tap(); app.textFields.element(boundBy: 0).typeText("fixture-public-client")
         app.textFields.element(boundBy: 1).tap(); app.textFields.element(boundBy: 1).typeText("https://example.test/callback")
+    }
+
+    @MainActor
+    private func productionXLogs(_ app: XCUIApplication) -> String {
+        app.staticTexts["fixture.production-x-logs"].label
+    }
+
+    @MainActor
+    private func xSetupLogContains(_ app: XCUIApplication, _ expected: String) -> Bool {
+        let condition = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", expected),
+            object: app.staticTexts["fixture.production-x-logs"]
+        )
+        return XCTWaiter.wait(for: [condition], timeout: 10) == .completed
+    }
+
+    @MainActor
+    private func xSetupLogEventContains(_ app: XCUIApplication, event: String, fact: String) -> Bool {
+        productionXLogs(app).split(separator: "|").contains { $0.contains(event) && $0.contains(fact) }
     }
 
     @MainActor

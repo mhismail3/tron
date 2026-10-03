@@ -26,6 +26,7 @@ struct IntegrationsSettingsView: View {
     @State private var isLoading = false
     @State private var error: String?
     @State private var setupDefinition: IntegrationDefinition?
+    @State private var setupDiagnosticContext: XSetupDiagnosticContext?
     @State private var selectedInstance: IntegrationInstance?
     @State private var credits = IntegrationCreditsReadController()
 
@@ -55,6 +56,7 @@ struct IntegrationsSettingsView: View {
                                 IntegrationConfiguredRow(title: definition.displayName, account: "", status: "Not configured", usage: nil,
                                                          isLoadingUsage: false, configured: false, actionTitle: action,
                                                          accessibilityAction: "\(action) for \(definition.displayName)", accent: .tronCyan) {
+                                    setupDiagnosticContext = nil
                                     setupDefinition = definition
                                 }
                                 if index < available.count - 1 { TronSettingsDivider(accent: .tronCyan) }
@@ -96,14 +98,33 @@ struct IntegrationsSettingsView: View {
             #if HOSTED_TEST
             hostedTrace?.record("integrations.destination old=\(destinationToken(oldIdentity)) new=\(destinationToken(newIdentity)) setupOpen=\(setupDefinition != nil)")
             #endif
+            if setupDefinition != nil, let context = setupDiagnosticContext {
+                XSetupDiagnostic.record(
+                    .destinationRetired, context: context, appLog: model.appLog,
+                    outcome: .rejected, reason: .destinationChanged,
+                    currentGeneration: newIdentity.lifecycleGeneration,
+                    currentConnectionID: model.knowledgePresentationIdentity.connectionID
+                )
+            }
             selectedInstance = nil; setupDefinition = nil; snapshot = nil
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
             if !active { loadGeneration &+= 1; isLoading = false; credits.begin(clear: true) }
         }
-        .tronManagedSheet(isPresented: Binding(get: { setupDefinition != nil }, set: { if !$0 { setupDefinition = nil } }), identity: "integrations.setup") {
+        .tronManagedSheet(isPresented: Binding(get: { setupDefinition != nil }, set: { isPresented in
+            guard !isPresented else { return }
+            if let context = setupDiagnosticContext {
+                XSetupDiagnostic.record(
+                    .bindingSetFalse, context: context, appLog: model.appLog,
+                    reason: .unknownOrigin
+                )
+            }
+            setupDefinition = nil; setupDiagnosticContext = nil
+        }), identity: "integrations.setup") {
             if let definition = setupDefinition {
-                IntegrationSetupView(definition: definition) { self.setupDefinition = nil; load() }.environment(model)
+                IntegrationSetupView(definition: definition, diagnosticContext: $setupDiagnosticContext) {
+                    self.setupDefinition = nil; load()
+                }.environment(model)
             }
         }
         .tronManagedSheet(isPresented: Binding(get: { selectedInstance != nil }, set: { if !$0 { selectedInstance = nil } }), identity: "integrations.instance") {
@@ -144,6 +165,7 @@ struct IntegrationsSettingsView: View {
             guard activity.allowsPresentationPublication,
                   model.knowledgePresentationIdentity == identity,
                   loadGeneration == ticket else { return }
+            setupDiagnosticContext = nil
             setupDefinition = definition
         }
     }
@@ -357,6 +379,7 @@ private struct IntegrationSetupView: View {
     @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
     #endif
     let definition: IntegrationDefinition
+    @Binding var diagnosticContext: XSetupDiagnosticContext?
     let onFinished: () -> Void
     @State private var method: String
     @State private var instanceID = "ios-\(UUID().uuidString.lowercased())"
@@ -373,15 +396,14 @@ private struct IntegrationSetupView: View {
     @State private var xOAuthCompleted = false
     @State private var unresolvedOAuth: GatewayFailure?
     @State private var paidBudgetDraft: String?
-    #if HOSTED_TEST
-    @State private var hostedPresentationID = UUID().uuidString
-    #endif
+    @State private var setupViewID = UUID().uuidString
     @State private var policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
     @State private var mutation: KnowledgeMutation?
     @State private var error: String?
 
-    init(definition: IntegrationDefinition, onFinished: @escaping () -> Void) {
-        self.definition = definition; self.onFinished = onFinished
+    init(definition: IntegrationDefinition, diagnosticContext: Binding<XSetupDiagnosticContext?>,
+         onFinished: @escaping () -> Void) {
+        self.definition = definition; self._diagnosticContext = diagnosticContext; self.onFinished = onFinished
         _method = State(initialValue: definition.setupMethods.first ?? "token")
     }
 
@@ -441,12 +463,36 @@ private struct IntegrationSetupView: View {
                 unresolvedOAuth = failure
             }
         }) {
-            if !usesXOAuth || xOAuthCompleted { onFinished(); dismiss() }
+            if !usesXOAuth || xOAuthCompleted {
+                if usesXOAuth, let context = diagnosticContext {
+                    XSetupDiagnostic.record(.explicitFinish, context: context, appLog: model.appLog, outcome: .success)
+                }
+                onFinished(); dismiss()
+            }
         })
-        #if HOSTED_TEST
-        .onAppear { hostedTrace?.record("xsetup.appear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(hostedPresentationID)") }
-        .onDisappear { hostedTrace?.record("xsetup.disappear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(hostedPresentationID)") }
-        #endif
+        .onAppear {
+            if usesXOAuth {
+                let context: XSetupDiagnosticContext
+                if let existing = diagnosticContext, existing.viewID == setupViewID {
+                    context = existing
+                } else {
+                    context = currentDiagnosticContext()
+                }
+                diagnosticContext = context
+                XSetupDiagnostic.record(.viewAppeared, context: context, appLog: model.appLog, outcome: .appeared)
+            }
+            #if HOSTED_TEST
+            hostedTrace?.record("xsetup.appear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(setupViewID)")
+            #endif
+        }
+        .onDisappear {
+            if usesXOAuth, let context = diagnosticContext {
+                XSetupDiagnostic.record(.viewDisappeared, context: context, appLog: model.appLog, outcome: .disappeared)
+            }
+            #if HOSTED_TEST
+            hostedTrace?.record("xsetup.disappear dest=\(destinationToken(model.knowledgeDestinationIdentity)) view=\(setupViewID)")
+            #endif
+        }
     }
 
     #if HOSTED_TEST
@@ -454,6 +500,25 @@ private struct IntegrationSetupView: View {
         "\(identity.profileID ?? "none"):g\(identity.lifecycleGeneration)"
     }
     #endif
+
+    private func currentDiagnosticContext() -> XSetupDiagnosticContext {
+        XSetupDiagnosticContext(
+            viewID: setupViewID, actionID: nil,
+            lifecycleGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration,
+            connectionID: model.knowledgePresentationIdentity.connectionID
+        )
+    }
+
+    private func newBeginDiagnosticContext() -> XSetupDiagnosticContext {
+        let viewContext = currentDiagnosticContext()
+        let action = viewContext.action(
+            UUID().uuidString,
+            lifecycleGeneration: viewContext.lifecycleGeneration,
+            connectionID: viewContext.connectionID
+        )
+        diagnosticContext = action
+        return action
+    }
 
     private var usesXOAuth: Bool { definition.id == "knowledge.x" && method == "oauth" }
 
@@ -485,20 +550,60 @@ private struct IntegrationSetupView: View {
                     return
                 }
                 let destination = model.knowledgeDestinationIdentity
+                let diagnostic = method == "knowledge.x.oauth.begin" ? newBeginDiagnosticContext() : nil
+                if let diagnostic {
+                    XSetupDiagnostic.record(.beginAdmitted, context: diagnostic, appLog: model.appLog,
+                                            outcome: .admitted)
+                }
                 mutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
-                    guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
+                    guard model.knowledgeDestinationIdentity == destination else {
+                        if let diagnostic {
+                            XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
+                                                    outcome: .rejected, reason: .destinationUnavailable,
+                                                    currentGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration,
+                                                    currentConnectionID: model.knowledgePresentationIdentity.connectionID)
+                        }
+                        throw CancellationError()
+                    }
                     if method == "knowledge.x.oauth.begin" {
-                        let started = try await model.integrations.resumeXOAuthBegin(commandID: commandID)
-                        guard model.knowledgeDestinationIdentity == destination, started.instanceId == self.instanceID else { throw CancellationError() }
-                        xOAuthOperationID = started.operationId; xOAuthState = started.state
-                        xAuthorizationURL = URL(string: started.authorizationUrl)
+                        do {
+                            let started = try await model.integrations.resumeXOAuthBegin(commandID: commandID)
+                            if let diagnostic {
+                                XSetupDiagnostic.record(.beginReturned, context: diagnostic, appLog: model.appLog,
+                                                        outcome: .success, origin: .explicitStatusRecoveryReturn)
+                            }
+                            guard model.knowledgeDestinationIdentity == destination, started.instanceId == self.instanceID else {
+                                if let diagnostic {
+                                    XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
+                                                            outcome: .rejected,
+                                                            reason: model.knowledgeDestinationIdentity == destination ? .requestFailed : .destinationChanged,
+                                                            currentGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration,
+                                                            currentConnectionID: model.knowledgePresentationIdentity.connectionID)
+                                }
+                                throw CancellationError()
+                            }
+                            xOAuthOperationID = started.operationId; xOAuthState = started.state
+                            xAuthorizationURL = URL(string: started.authorizationUrl)
+                            if let diagnostic {
+                                XSetupDiagnostic.record(.beginStateAssigned, context: diagnostic, appLog: model.appLog,
+                                                        outcome: .assigned)
+                            }
+                        } catch {
+                            if let diagnostic, !(error is CancellationError) {
+                                XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
+                                                        outcome: .rejected, reason: .requestFailed,
+                                                        currentGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration,
+                                                        currentConnectionID: model.knowledgePresentationIdentity.connectionID)
+                            }
+                            throw error
+                        }
                     } else if method == "knowledge.x.oauth.complete" {
                         _ = try await model.integrations.resumeXOAuthComplete(commandID: commandID)
                         guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
                         xOAuthCompleted = true
                     } else { throw CancellationError() }
                     self.unresolvedOAuth = nil
-                })
+                }, xSetupDiagnostic: diagnostic)
                 return
             }
             if let operationID = xOAuthOperationID {
@@ -515,27 +620,64 @@ private struct IntegrationSetupView: View {
                     xOAuthCompleted = true
                 })
             } else {
-                guard !instanceID.isEmpty, !xClientID.isEmpty, !xRedirectURI.isEmpty else { error = "Instance ID, public X client ID, and registered callback URL are required."; return }
+                let diagnostic = newBeginDiagnosticContext()
+                guard !instanceID.isEmpty, !xClientID.isEmpty, !xRedirectURI.isEmpty else {
+                    XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
+                                            outcome: .rejected, reason: .invalidInput)
+                    error = "Instance ID, public X client ID, and registered callback URL are required."
+                    return
+                }
                 guard let submittedPolicy = IntegrationPolicySubmission.candidate(policy: policy, paidBudgetDraft: paidBudgetDraft) else {
+                    XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
+                                            outcome: .rejected, reason: .invalidInput)
                     error = TronNumberSettingRow.invalidInputMessage
                     return
                 }
                 error = nil
                 let requestIdentity = model.knowledgeDestinationIdentity
                 let instanceID = instanceID, clientID = xClientID, redirectURI = xRedirectURI, policy = submittedPolicy
+                XSetupDiagnostic.record(.beginAdmitted, context: diagnostic, appLog: model.appLog, outcome: .admitted)
                 mutation = KnowledgeMutation(identity: requestIdentity, task: Task { @MainActor in
                     guard model.knowledgeDestinationIdentity == requestIdentity,
                           model.knowledgePresentationIdentity.lifecycleGeneration != nil,
-                          model.knowledgePresentationIdentity.connectionID != nil else { throw CancellationError() }
-                    let started = try await model.integrations.beginXOAuth(instanceID: instanceID, clientID: clientID, redirectURI: redirectURI, policy: policy)
-                    guard model.knowledgeDestinationIdentity == requestIdentity else { throw CancellationError() }
+                          model.knowledgePresentationIdentity.connectionID != nil else {
+                        XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
+                                                outcome: .rejected, reason: .destinationUnavailable,
+                                                currentGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration,
+                                                currentConnectionID: model.knowledgePresentationIdentity.connectionID)
+                        throw CancellationError()
+                    }
+                    let started: IntegrationXOAuthStarted
+                    do {
+                        started = try await model.integrations.beginXOAuth(instanceID: instanceID, clientID: clientID,
+                                                                           redirectURI: redirectURI, policy: policy)
+                    } catch {
+                        if !(error is CancellationError) {
+                            XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
+                                                    outcome: .rejected, reason: .requestFailed,
+                                                    currentGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration,
+                                                    currentConnectionID: model.knowledgePresentationIdentity.connectionID)
+                        }
+                        throw error
+                    }
+                    XSetupDiagnostic.record(.beginReturned, context: diagnostic, appLog: model.appLog,
+                                            outcome: .success, origin: .beginExecutorReturn)
+                    guard model.knowledgeDestinationIdentity == requestIdentity else {
+                        XSetupDiagnostic.record(.beginRejected, context: diagnostic, appLog: model.appLog,
+                                                outcome: .rejected, reason: .destinationChanged,
+                                                currentGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration,
+                                                currentConnectionID: model.knowledgePresentationIdentity.connectionID)
+                        throw CancellationError()
+                    }
                     #if HOSTED_TEST
-                    hostedTrace?.record("xsetup.begin-accepted dest=\(destinationToken(requestIdentity)) view=\(hostedPresentationID)")
+                    hostedTrace?.record("xsetup.begin-accepted dest=\(destinationToken(requestIdentity)) view=\(setupViewID)")
                     #endif
                     xOAuthOperationID = started.operationId
                     xOAuthState = started.state
                     xAuthorizationURL = URL(string: started.authorizationUrl)
-                })
+                    XSetupDiagnostic.record(.beginStateAssigned, context: diagnostic, appLog: model.appLog,
+                                            outcome: .assigned)
+                }, xSetupDiagnostic: diagnostic)
             }
             return
         }
