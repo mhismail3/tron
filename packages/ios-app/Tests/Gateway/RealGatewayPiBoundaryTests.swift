@@ -586,8 +586,16 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let observedHeartbeatIntervalMs = completedHeartbeats[completedHeartbeats.count - 1].enqueuedMs
             - completedHeartbeats[completedHeartbeats.count - 2].enqueuedMs
         XCTAssertGreaterThan(observedHeartbeatIntervalMs, 0)
-        XCTAssertGreaterThanOrEqual(shaped.objectValue?["forwardedWebSocketPings"]?.intValue ?? 0, 2)
-        XCTAssertGreaterThanOrEqual(shaped.objectValue?["forwardedWebSocketPongs"]?.intValue ?? 0, 2)
+        let observedForwardedPings = heartbeatTimeline.filter { item in
+            item.objectValue?["forwardedMs"]?.intValue != nil
+        }.count
+        let observedForwardedPongs = heartbeatTimeline.filter { item in
+            item.objectValue?["appPongForwardedMs"]?.intValue != nil
+        }.count
+        XCTAssertEqual(shaped.objectValue?["forwardedWebSocketPings"]?.intValue, observedForwardedPings)
+        XCTAssertEqual(shaped.objectValue?["forwardedWebSocketPongs"]?.intValue, observedForwardedPongs)
+        XCTAssertGreaterThanOrEqual(observedForwardedPings, 2)
+        XCTAssertGreaterThanOrEqual(observedForwardedPongs, 2)
         let heartbeatRTTs = shaped.objectValue?["heartbeatRoundTripMilliseconds"]?.arrayValue?.compactMap(\.intValue) ?? []
         XCTAssertGreaterThanOrEqual(heartbeatRTTs.count, 2)
         XCTAssertTrue(heartbeatRTTs.allSatisfy { $0 < 8_000 }, "Enqueue-to-Gateway-pong delay, including FIFO wait, must meet the unchanged 8 s client bound")

@@ -7,6 +7,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import signal
@@ -1838,6 +1839,8 @@ from pathlib import Path
 inventory_path = Path(os.environ['FAKE_SIMCTL_INVENTORY'])
 arguments = sys.argv[1:]
 if arguments[:2] == ['xcresulttool', 'get']:
+    if arguments[2:4] == ['test-results', 'tests'] and os.environ.get('FAKE_TESTS_RESULT'):
+        print(Path(os.environ['FAKE_TESTS_RESULT']).read_text()); raise SystemExit(0)
     # The runner's summary of a focused run: one executed, passing test.
     print('{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'); raise SystemExit(0)
 assert arguments[0] == 'simctl', arguments
@@ -3183,6 +3186,16 @@ if "build-for-testing" in arguments:
     if os.environ.get("FAKE_BUILD_GATE"):
         wait_for_fixture_gate(Path(os.environ["FAKE_BUILD_GATE"]))
 if "test-without-building" in arguments and "-resultBundlePath" in arguments:
+    calls = os.environ.get("FAKE_XCODEBUILD_CALLS")
+    if calls:
+        test_filter = next((value.split(":", 1)[1] for value in arguments if value.startswith("-only-testing:")), "unknown")
+        with open(calls, "a", encoding="utf-8") as handle: handle.write(test_filter + "\\n")
+    invocation = Path(calls).read_text().splitlines() if calls and Path(calls).exists() else []
+    failure = int(os.environ.get("FAKE_XCODEBUILD_FIRST_TEST_EXIT") or 0)
+    if failure and len(invocation) == 1:
+        if os.environ.get("FAKE_XCODEBUILD_FIRST_TEST_BUNDLE") == "1":
+            Path(arguments[arguments.index("-resultBundlePath") + 1]).mkdir(parents=True, exist_ok=True)
+        raise SystemExit(failure)
     Path(arguments[arguments.index("-resultBundlePath") + 1]).mkdir(parents=True, exist_ok=True)
 ''')
 
@@ -3329,6 +3342,13 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         later case passes and overwrites the status to green. Failure-report
         extraction is optional evidence and must never decide whether the case
         sequence stops.
+    14. A fixture or xctestrun setup command fails while the case callback runs
+        in conditional context; errexit is disabled and successful XCTest work
+        can mask the failed setup.
+    15. A nested result-node list is recursively passed to itself instead of
+        iterating its children, suppressing optional failure details.
+    16. Shared-link ping/pong counts increment both at FIFO admission and actual
+        forwarding, so reported frames do not match the observed event timeline.
     """
 
     def setUp(self) -> None:
@@ -3405,6 +3425,19 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             (derived / "build-identity.json").write_text(json.dumps(identity))
         return derived
 
+    def runnable_products(self) -> Path:
+        """One valid test target for exercising the actual E2E run path."""
+        derived = self.built_products(self.source_identity())
+        xctestrun = derived / "Build/Products/Tron Development_UnitTests_iOS.xctestrun"
+        with xctestrun.open("wb") as handle:
+            plistlib.dump({
+                "TestConfigurations": [{
+                    "IsEnabled": True,
+                    "TestTargets": [{"BlueprintName": "TronMobileTests", "IsUITestBundle": False}],
+                }],
+            }, handle)
+        return derived
+
     def assert_no_fixture_renewed(self) -> None:
         state = self.root / "e2e-state"
         for name in ("state.env", "gateway.pid", "proxy.pid", "gateway.log", "tron", "home"):
@@ -3471,70 +3504,104 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         stamp = json.loads((self.root / "e2e-derived/build-identity.json").read_text())
         self.assertEqual(stamp, self.source_identity())
 
-    def test_first_failed_case_without_result_bundle_stops_e2e_sequence(self) -> None:
-        """Failure mode 13: absent `.xcresult` cannot let the next case mask failure.
+    def test_case_setup_failure_stops_actual_e2e_path_and_cleans_fixture(self) -> None:
+        """Failure mode 14: a setup failure cannot be masked by later passing XCTest cases.
 
-        Run the exact sequence helper used by the E2E runner with a fake xcodebuild:
-        case one exits 37 without creating a result bundle; case two would pass and
-        create a valid bundle if the runner incorrectly continued.
+        The first actual runner patch invocation fails once; the second would
+        succeed, so a conditional-context callback would continue to Xcode and
+        turn the setup failure green. The run path must preserve 37, invoke no
+        test case, and clean the fixture and its owned simulator lane.
         """
-        helper = ROOT / "scripts/ios-gateway-e2e-case-sequence.sh"
-        calls = self.root / "fake-xcodebuild-calls.txt"
-        binary = self.root / "fake-bin"
-        binary.mkdir()
-        fake_xcodebuild = binary / "xcodebuild"
-        fake_xcodebuild.write_text("""#!/usr/bin/env bash
+        derived = self.runnable_products()
+        calls = self.root / "actual-xcodebuild-calls.txt"
+        patch_calls = self.root / "patch-calls.txt"
+        failed_once = self.root / "patch-failed-once"
+        fake_bin = self.root / "fake-python-bin"
+        fake_bin.mkdir()
+        fake_python = fake_bin / "python3"
+        fake_python.write_text("""#!/usr/bin/env bash
 set -euo pipefail
-filter="$1"; shift
-result_bundle=""
-while (($#)); do
-  if [[ "$1" == "-resultBundlePath" ]]; then result_bundle="$2"; shift 2; else shift; fi
-done
-printf '%s\\n' "$filter" >>"$FAKE_XCODEBUILD_CALLS"
-if [[ "$filter" == FirstFailsWithoutBundle ]]; then exit 37; fi
-mkdir -p "$result_bundle"
-exit 0
-""")
-        fake_xcodebuild.chmod(0o755)
-        fake_xcrun = binary / "xcrun"
-        fake_xcrun.write_text("""#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == xcresulttool && "${2:-}" == get && "${3:-}" == test-results && "${4:-}" == summary ]]; then
-  printf '%s\\n' '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}'
-  exit 0
-fi
-exit 0
-""")
-        fake_xcrun.chmod(0o755)
-        environment = dict(self.environment)
-        environment["PATH"] = f"{binary}:{environment['PATH']}"
-        environment["FAKE_XCODEBUILD_CALLS"] = str(calls)
-        driver = self.root / "run-e2e-case-sequence.sh"
-        driver.write_text("""#!/usr/bin/env bash
-set -euo pipefail
-source "$1"
-shift
-result_root="$1"
-shift
-run_one_case() {
-  local filter="$1" result_bundle="$result_root/$1.xcresult" status
-  if xcodebuild "$filter" -resultBundlePath "$result_bundle"; then status=0; else status=$?; fi
-  if ((status == 0)); then
-    if ! xcrun xcresulttool get test-results summary --path "$result_bundle" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert r.get("passedTests")==1 and r.get("failedTests")==0 and r.get("skippedTests")==0 and r.get("totalTestCount")==1'; then status=65; fi
-  elif [[ -d "$result_bundle" ]]; then
-    xcrun xcresulttool get test-results tests --path "$result_bundle" >/dev/null 2>&1 || true
+for argument in "$@"; do
+  if [[ "$argument" == *patch-ios-gateway-e2e-xctestrun.py ]]; then
+    printf '%s\\n' "$argument" >>"$FAKE_PATCH_CALLS"
+    if [[ ! -e "$FAKE_PATCH_FAILED_ONCE" ]]; then
+      : >"$FAKE_PATCH_FAILED_ONCE"
+      exit 37
+    fi
   fi
-  return "$status"
-}
-run_e2e_case_sequence run_one_case "$@"
+done
+exec "$FAKE_SYSTEM_PYTHON" "$@"
 """)
-        driver.chmod(0o755)
-        result = subprocess.run(
-            [str(driver), str(helper), str(self.root / "results"), "FirstFailsWithoutBundle", "SecondWouldPass"],
-            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15,
-        )
-        self.assertEqual(result.returncode, 37, result.stderr)
-        self.assertEqual(calls.read_text().splitlines(), ["FirstFailsWithoutBundle"])
+        fake_python.chmod(0o755)
+        environment = dict(self.environment)
+        environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+        environment.update({
+            "FAKE_SYSTEM_PYTHON": sys.executable,
+            "FAKE_PATCH_CALLS": str(patch_calls),
+            "FAKE_PATCH_FAILED_ONCE": str(failed_once),
+            "FAKE_XCODEBUILD_CALLS": str(calls),
+        })
+
+        try:
+            result = self.e2e("run", environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 37, result.stdout + result.stderr)
+            self.assertEqual(len(patch_calls.read_text().splitlines()), 1)
+            self.assertFalse(calls.exists(), result.stdout + result.stderr)
+            status = self.e2e("status", environment=environment)
+            self.assertEqual(status.returncode, 0, status.stderr)
+            self.assertIn("Gateway: stopped", status.stdout)
+            self.assertIn("Fault proxy: stopped", status.stdout)
+            lane_states = [device["state"] for devices in self.inventory().get("devices", {}).values() for device in devices]
+            self.assertEqual(lane_states, ["Shutdown"])
+            self.assertTrue((derived / "Build/Products/Tron Development_UnitTests_iOS.xctestrun").is_file())
+        finally:
+            self.e2e("stop", environment=environment)
+
+    def test_first_failed_actual_case_without_bundle_stops_before_later_case(self) -> None:
+        """Failure mode 13: an absent `.xcresult` cannot let a later pass mask failure."""
+        self.runnable_products()
+        calls = self.root / "actual-xcodebuild-calls.txt"
+        environment = dict(self.environment)
+        environment.update({
+            "FAKE_XCODEBUILD_CALLS": str(calls),
+            "FAKE_XCODEBUILD_FIRST_TEST_EXIT": "37",
+        })
+
+        try:
+            result = self.e2e("run", environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+            self.assertEqual(calls.read_text().splitlines(), [
+                "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
+            ])
+            latest = self.root / "e2e-state/results/latest"
+            self.assertTrue(latest.is_symlink())
+            self.assertFalse((latest / "FocusedE2E.xcresult").exists())
+        finally:
+            self.e2e("stop", environment=environment)
+
+    def test_nested_failure_messages_are_extracted_without_changing_status(self) -> None:
+        """Failure mode 15: list children are visited and extraction preserves XCTest status."""
+        self.runnable_products()
+        calls = self.root / "actual-xcodebuild-calls.txt"
+        failures = self.root / "nested-test-results.json"
+        failures.write_text(json.dumps({"testNodes": [{"children": [{"nodeType": "Failure Message", "name": "nested assertion detail"}]}]}))
+        environment = dict(self.environment)
+        environment.update({
+            "FAKE_XCODEBUILD_CALLS": str(calls),
+            "FAKE_XCODEBUILD_FIRST_TEST_EXIT": "37",
+            "FAKE_XCODEBUILD_FIRST_TEST_BUNDLE": "1",
+            "FAKE_TESTS_RESULT": str(failures),
+        })
+
+        try:
+            result = self.e2e("run", environment=environment, timeout=120)
+            self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+            self.assertIn("failure: nested assertion detail", result.stdout)
+            self.assertEqual(calls.read_text().splitlines(), [
+                "TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
+            ])
+        finally:
+            self.e2e("stop", environment=environment)
 
     def test_run_refuses_products_not_built_from_this_worktree(self) -> None:
         """Failure mode 10: every unproven product set is refused before the

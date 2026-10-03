@@ -78,8 +78,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     else if (kind.startsWith("websocket-")) linkStats.scheduledWebSocketBytes += amount;
     const job = scheduleTail.then(async () => {
       await new Promise(resolve => setTimeout(resolve, shaper.latencyMilliseconds + amount / shaper.rateBytesPerSecond * 1_000));
-      if (kind === "websocket-ping") linkStats.forwardedWebSocketPings++;
-      if (kind === "websocket-pong") linkStats.forwardedWebSocketPongs++;
       await forward();
     }).finally(() => { linkStats.queuedPayloadBytes -= amount; });
     scheduleTail = job.catch(() => {});
@@ -411,9 +409,9 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           }
           void schedule("websocket-ping", data.length + (direction === "client" ? 6 : 2), () => {
             if (destination.readyState === WebSocket.OPEN) {
+              destination.ping(data);
               if (heartbeat) heartbeat.timeline.forwardedMs = elapsedMilliseconds();
               if (direction === "client") linkStats.forwardedWebSocketPings++;
-              destination.ping(data);
             }
           }).catch(terminate);
         });
@@ -429,8 +427,8 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           }
           void schedule("websocket-pong", data.length + (direction === "gateway" ? 6 : 2), () => {
             if (destination.readyState === WebSocket.OPEN) {
-              if (heartbeat) heartbeat.timeline.appPongForwardedMs = elapsedMilliseconds();
               destination.pong(data);
+              if (heartbeat) heartbeat.timeline.appPongForwardedMs = elapsedMilliseconds();
               if (direction === "gateway") linkStats.forwardedWebSocketPongs++;
               if (heartbeat) {
                 const index = outstandingClientPings.indexOf(heartbeat);

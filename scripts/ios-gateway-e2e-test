@@ -8,8 +8,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-# shellcheck disable=SC1091
-source "$repo_root/scripts/ios-gateway-e2e-case-sequence.sh"
 gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
@@ -546,7 +544,8 @@ def walk(value):
         if value.get("nodeType") == "Failure Message":
             print("failure: {}".format(value.get("name", "assertion failed")))
         for child in value.values(): walk(child)
-    elif isinstance(value, list): walk(value)
+    elif isinstance(value, list):
+        for child in value: walk(child)
 walk(document)' 2>/dev/null || true
   fi
   return "$status"
@@ -557,7 +556,7 @@ run_test() {
   # and canonical session state without rebuilding test products.
   # Prove the products before renewing anything: only products this worktree
   # built from its current source state may run against its Gateway.
-  local started=$SECONDS status=0 simulator_id xctestrun destination
+  local started=$SECONDS simulator_id xctestrun destination test_filter
   xctestrun="$(find_xctestrun)"
   [[ -f "$xctestrun" ]] || die "test products are not built; run '$0 build'"
   python3 "$identity_owner" verify --worktree "$repo_root" --derived-data "$derived_data" \
@@ -565,13 +564,21 @@ run_test() {
   simulator_id="$(provision_test_simulator)"
   destination="platform=iOS Simulator,id=$simulator_id"
   mkdir -p "$run_root/results"
-  if run_e2e_case_sequence run_one_test_case "${e2e_test_filters[@]}"; then
-    status=0
-  else
-    status=$?
+  trap cleanup_failed_e2e_run EXIT
+  for test_filter in "${e2e_test_filters[@]}"; do
+    run_one_test_case "$test_filter"
+  done
+  trap - EXIT
+  echo "Focused E2E run completed in $((SECONDS - started))s (status 0); artifacts: $run_root/results"
+}
+
+cleanup_failed_e2e_run() {
+  local status=$?
+  trap - EXIT
+  if ((status != 0)); then
+    stop_gateway
   fi
-  echo "Focused E2E run completed in $((SECONDS - started))s (status $status); artifacts: $run_root/results"
-  return "$status"
+  exit "$status"
 }
 
 show_status() {

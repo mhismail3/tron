@@ -2112,16 +2112,21 @@ lengths. Thus this synthetic schedule is a reproducible shared application
 payload control, not a cellular capacity guarantee. A separate common-proxy
 blackhole is only the expected-outage/recovery control; a synthetic 256 KiB
 `system.logs.export` JSON RPC runs without the shaper or an HTTP upload. The
-fixture reports counts/bytes but never stores or prints authorization values,
-file bytes, filenames, or log-export content. These tests deliberately exclude
+fixture counters increment once at the proxy forwarding transition, rather
+than at both queue admission and forwarding. The fixture reports counts/bytes
+but never stores or prints authorization values, file bytes, filenames, or
+log-export content. These tests deliberately exclude
 SwiftUI, visual, settings, picker, navigation, and general accessibility
 coverage.
 
 Preparation and the first build happen once; `run` renews an independent one-use
 Gateway fixture for each registered boundary case while retaining one owned
 simulator lease and separate `.xcresult` artifacts. Tests therefore do not depend
-on XCTest order or reuse a consumed pairing invitation. It runs the focused
-hosted tests without reinstalling dependencies or rebuilding:
+on XCTest order or reuse a consumed pairing invitation. Any nonzero setup or
+case result stops the sequence; a failed run cleans its owned fixture and
+releases the lane. Optional `.xcresult` failure extraction cannot change that
+status. It runs the focused hosted tests without reinstalling dependencies or
+rebuilding:
 
 ```bash
 scripts/ios-gateway-e2e-test prepare
